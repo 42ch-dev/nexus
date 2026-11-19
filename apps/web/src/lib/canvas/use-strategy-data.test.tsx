@@ -17,7 +17,12 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 
-import { usePresetSchedules, useSteerStrategy } from '@/lib/canvas/use-strategy-data';
+import {
+  useDerivedCreatorId,
+  usePresetSchedules,
+  usePresetSessions,
+  useSteerStrategy,
+} from '@/lib/canvas/use-strategy-data';
 import { i18n } from '@/lib/i18n/config';
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
@@ -76,6 +81,84 @@ function SteerHarness() {
 
 beforeEach(async () => {
   await i18n.changeLanguage('en');
+});
+
+function CreatorHarness() {
+  const creatorId = useDerivedCreatorId('preset-1');
+  const sessions = usePresetSessions('preset-1');
+  const schedules = usePresetSchedules('preset-1');
+  return (
+    <>
+      <span data-testid="creator">{creatorId ?? 'none'}</span>
+      <span data-testid="history">{sessions.status}/{schedules.status}</span>
+    </>
+  );
+}
+
+describe('useDerivedCreatorId', () => {
+  beforeEach(() => {
+    useHandlers(
+      http.get('/v1/daemon/runtime/status', () => HttpResponse.json({})),
+    );
+  });
+
+  it('uses the active creator without any preset history', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json({ items: [] })),
+    );
+    renderInApp(<CreatorHarness />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'active-creator',
+    });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
+    await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('active-creator'));
+  });
+
+  it('prefers the active creator over history belonging to another creator', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json(listResponse(0))),
+    );
+    renderInApp(<CreatorHarness />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'active-creator',
+    });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
+    await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('active-creator'));
+  });
+
+  it('falls back to preset history when no creator is active', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json(listResponse(0))),
+    );
+    renderInApp(<CreatorHarness />, { client: new BrowserClient(), activeCreatorId: null });
+    await waitFor(() => expect(screen.getByTestId('creator')).toHaveTextContent('creator-1'));
+  });
+
+  it('leaves the creator unresolved when no selection or history exists', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => HttpResponse.json({ items: [] })),
+      http.get(SCHEDULES_PATH, () => HttpResponse.json({ items: [] })),
+    );
+    renderInApp(<CreatorHarness />, { client: new BrowserClient(), activeCreatorId: null });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('success/success'));
+    expect(screen.getByTestId('creator')).toHaveTextContent('none');
+  });
+
+  it('keeps the active creator usable when history requests fail', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => new HttpResponse(null, { status: 500 })),
+      http.get(SCHEDULES_PATH, () => new HttpResponse(null, { status: 500 })),
+    );
+    renderInApp(<CreatorHarness />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'active-creator',
+    });
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('error/error'));
+    expect(screen.getByTestId('creator')).toHaveTextContent('active-creator');
+  });
 });
 
 describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
