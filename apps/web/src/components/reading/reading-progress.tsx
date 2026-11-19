@@ -1,7 +1,7 @@
 /**
  * ReadingProgress — V1.79 Author Reflection (Track A / P0).
  *
- * Session-only scroll/position indicator. Tracks document scroll progress
+ * Session-only scroll/position indicator. Tracks main scroll progress
  * through the reading surface and renders a thin progress bar. Per the P-1
  * clarify gate 3 decision, progress is NEVER persisted — no localStorage,
  * no session DB, no write route. The component is keyed on chapter by the
@@ -11,7 +11,7 @@
  * blue / gray primitives (track, fill, label). The bar is a progressbar role
  * with text + value (status is never color-only).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -38,8 +38,12 @@ const RAF_GUARD_MS = 16;
 export function ReadingProgress() {
   const { t } = useTranslation('reading');
   const [pct, setPct] = useState(0);
+  const progressRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const scrollContainer = progressRef.current?.closest('main');
+    if (!scrollContainer) return;
+
     let frame = 0;
     let last = 0;
 
@@ -53,28 +57,29 @@ export function ReadingProgress() {
       flush();
     }
 
-    function flush() {
+    const flush = () => {
       frame = 0;
-      const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+      const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
       // A page shorter than the viewport has nothing to track; keep the bar at
       // zero rather than dividing by zero.
-      const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+      const ratio = scrollable > 0 ? scrollContainer.scrollTop / scrollable : 0;
       setPct(Math.max(0, Math.min(100, Math.round(ratio * 100))));
-    }
+    };
 
-    window.addEventListener('scroll', onScroll, { passive: true });
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
     flush();
 
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', onScroll);
+      scrollContainer.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
   }, []);
 
   return (
     <div
+      ref={progressRef}
       className="flex items-center gap-2"
       role="progressbar"
       aria-label={t('progress.ariaLabel')}
