@@ -13,6 +13,7 @@ export interface ReadingAnnotation {
    */
   annotation_id: string;
   work_id: string;
+  volume: number;
   chapter: number;
   /**
    * Character offset where the highlight begins (inclusive).

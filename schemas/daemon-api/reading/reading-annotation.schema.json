@@ -5,13 +5,14 @@
   "title": "Nexus ReadingAnnotation",
   "description": "Shared annotation detail object returned by POST, PATCH, and as list items in GET /v1/daemon/reading/annotations. Represents a single persistent highlight with optional note, anchored by character offsets into the chapter body plain text.",
   "type": "object",
-  "required": ["annotation_id", "work_id", "chapter", "start_offset", "end_offset", "selected_text", "color", "created_at", "updated_at"],
+  "required": ["annotation_id", "work_id", "volume", "chapter", "start_offset", "end_offset", "selected_text", "color", "created_at", "updated_at"],
   "properties": {
     "annotation_id": {
       "type": "string",
       "description": "Stable, server-generated annotation identifier (e.g. ULID)."
     },
     "work_id": { "type": "string" },
+    "volume": { "type": "integer", "minimum": 1 },
     "chapter": { "type": "integer", "minimum": 1 },
     "start_offset": {
       "type": "integer",

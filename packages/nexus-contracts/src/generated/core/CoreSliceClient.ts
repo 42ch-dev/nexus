@@ -69,10 +69,10 @@ export interface CoreSliceClient {
   batchUpdateFindings(request: BatchUpdateFindingsRequest): Promise<BatchUpdateFindingsResponse>;
   pruneFindings(query?: { older_than_days?: number; dry_run?: boolean }): Promise<FindingsPruneResponse>;
   getFinding(findingId: string): Promise<FindingDetailResponse>;
-  getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse>;
+  getReadingProgress(workId: string, chapter: number, volume?: number): Promise<ReadingProgressResponse>;
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse>;
-  deleteReadingProgress(workId: string, chapter: number): Promise<void>;
-  listReadingAnnotations(workId: string, chapter: number): Promise<ReadingAnnotationListResponse>;
+  deleteReadingProgress(workId: string, chapter: number, volume?: number): Promise<void>;
+  listReadingAnnotations(workId: string, chapter: number, volume?: number): Promise<ReadingAnnotationListResponse>;
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation>;
   patchReadingAnnotation(annotationId: string, request: ReadingAnnotationPatchRequest): Promise<ReadingAnnotation>;
   deleteReadingAnnotation(annotationId: string): Promise<void>;

@@ -98,6 +98,11 @@ fn to_annotation_dto(row: &AnnotationRow) -> Result<ReadingAnnotation, CoreError
     Ok(ReadingAnnotation {
         annotation_id: row.annotation_id.clone(),
         work_id: row.work_id.clone(),
+        volume: NonZeroU64::new(u64::try_from(row.volume).unwrap_or_default()).ok_or_else(
+            || CoreError::Internal {
+                category: "invalid stored volume".into(),
+            },
+        )?,
         chapter: NonZeroU64::new(u64::try_from(row.chapter).unwrap_or(1))
             .unwrap_or(NonZeroU64::MIN),
         start_offset: u64::try_from(row.start_offset).unwrap_or_default(),
@@ -131,7 +136,7 @@ async fn load_annotation_for_creator(
 }
 
 impl CoreService {
-    /// Persisted scroll progress for a (work, chapter); zero with a fresh
+    /// Persisted scroll progress for a (work, volume, chapter); zero with a fresh
     /// timestamp when nothing was ever saved.
     ///
     /// # Errors
@@ -145,10 +150,12 @@ impl CoreService {
     ) -> CoreResult<ReadingProgressResponse> {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &query.work_id).await?;
+        let volume = query.volume.unwrap_or(NonZeroU64::MIN);
         let (scroll_progress, updated_at) = reading::get_reading_progress(
             &self.inner.pool,
             principal.creator_id(),
             &query.work_id,
+            u64_to_i64(volume.get(), "volume")?,
             chapter_i64(query.chapter),
         )
         .await
@@ -156,13 +163,14 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(ReadingProgressResponse {
             work_id: query.work_id,
+            volume,
             chapter: query.chapter,
             scroll_progress,
             updated_at: updated_at.unwrap_or_else(chrono::Utc::now).to_rfc3339(),
         })
     }
 
-    /// Upsert scroll progress for a (work, chapter).
+    /// Upsert scroll progress for a (work, volume, chapter).
     ///
     /// `work_id` is the authoritative Work reference; it is repeated inside
     /// `request` only for wire compatibility with the legacy body shape.
@@ -180,10 +188,12 @@ impl CoreService {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
+        let volume = request.volume.unwrap_or(NonZeroU64::MIN);
         let updated_at = reading::upsert_reading_progress(
             &self.inner.pool,
             principal.creator_id(),
             &work_id,
+            u64_to_i64(volume.get(), "volume")?,
             chapter_i64(request.chapter),
             request.scroll_progress,
         )
@@ -192,13 +202,14 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(ReadingProgressResponse {
             work_id,
+            volume,
             chapter: request.chapter,
             scroll_progress: request.scroll_progress,
             updated_at: updated_at.to_rfc3339(),
         })
     }
 
-    /// Delete persisted scroll progress for a (work, chapter).
+    /// Delete persisted scroll progress for a (work, volume, chapter).
     ///
     /// # Errors
     /// As [`CoreService::put_reading_progress`] minus the progress validation.
@@ -214,6 +225,7 @@ impl CoreService {
             &self.inner.pool,
             principal.creator_id(),
             &query.work_id,
+            u64_to_i64(query.volume.unwrap_or(NonZeroU64::MIN).get(), "volume")?,
             chapter_i64(query.chapter),
         )
         .await
@@ -236,6 +248,7 @@ impl CoreService {
             &self.inner.pool,
             principal.creator_id(),
             &query.work_id,
+            u64_to_i64(query.volume.unwrap_or(NonZeroU64::MIN).get(), "volume")?,
             chapter_i64(query.chapter),
         )
         .await
@@ -275,6 +288,7 @@ impl CoreService {
             &self.inner.pool,
             principal.creator_id(),
             &request.work_id,
+            u64_to_i64(request.volume.unwrap_or(NonZeroU64::MIN).get(), "volume")?,
             chapter_i64(request.chapter),
             &annotation_id,
             start_offset,

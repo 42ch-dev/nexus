@@ -35,7 +35,8 @@
 // V1.241 P3.5 T1: 35 → 36 — append-only strategy_applies history (plan v241-p35-applied-identity §Architecture) + its writer-protocol guard/outbox family and approval-pin triggers (migration 20261114000001_strategy_applies.sql).
 // V1.242 P4/P5 T1: 36 → 37 — strategy_applies current-row indexes (plan ride-along-apply-ir-hardening §Task 1, I-000439): the strategy+total-order index and the supersede-link index its anti-join reads (migration 20261115000001_strategy_applies_current_index.sql).
 // V1.242 P4/P5 T2: 37 → 38 — strategy_applies immutability and same-strategy supersede triggers (plan ride-along-apply-ir-hardening §Task 2, I-000444): committed rows refuse UPDATE/DELETE/REPLACE and a supersede link may not name another strategy's row (migration 20261116000001_strategy_applies_append_only.sql).
-pub const DB_SCHEMA_VERSION: u32 = 38;
+// 38 → 39 — volume-scoped reading progress and annotations (migration 20261119000001_reading_volume.sql).
+pub const DB_SCHEMA_VERSION: u32 = 39;
 
 /// Contract schema version from generated wire types
 ///

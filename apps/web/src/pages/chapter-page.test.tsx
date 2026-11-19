@@ -10,7 +10,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Route, Routes } from 'react-router';
+import { Link, Route, Routes } from 'react-router';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -21,9 +21,12 @@ import userEvent from '@testing-library/user-event';
 
 const client = () => new BrowserClient();
 
-function renderChapter(workId = 'w-123', chapter = 1) {
+function renderChapter(workId = 'w-123', chapter = 1, nextVolume?: number) {
   return renderInApp(
     <main ref={setUpScrollContainer}>
+      {nextVolume !== undefined && (
+        <Link to={`/works/${workId}/chapters/${chapter}?volume=${nextVolume}`}>Switch volume</Link>
+      )}
       <Routes>
         <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
       </Routes>
@@ -36,12 +39,16 @@ function renderChapter(workId = 'w-123', chapter = 1) {
   );
 }
 
+function requestVolume(request: Request) {
+  return Number(new URL(request.url).searchParams.get('volume') ?? 1);
+}
+
 function chapterDetail(status: string) {
-  return http.get('/v1/daemon/works/:workId/chapters/:n', ({ params }) =>
+  return http.get('/v1/daemon/works/:workId/chapters/:n', ({ params, request }) =>
     HttpResponse.json({
       work_id: params.workId,
       chapter: Number(params.n),
-      volume: 1,
+      volume: requestVolume(request),
       slug: 'ch01',
       planned_word_count: 4000,
       status,
@@ -151,9 +158,10 @@ function worldKbGraphHandler(worldId = 'world-1', entityCount = 5) {
 }
 
 function readingProgressHandler(scrollProgress = 0) {
-  return http.get('/v1/daemon/reading/progress', () =>
+  return http.get('/v1/daemon/reading/progress', ({ request }) =>
     HttpResponse.json({
       work_id: 'w-123',
+      volume: requestVolume(request),
       chapter: 1,
       scroll_progress: scrollProgress,
       updated_at: '2026-07-04T00:00:00Z',
@@ -574,6 +582,39 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
 });
 
 describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
+  it('switches saved progress and annotations when only the volume changes', async () => {
+    useHandlers(
+      http.get('/v1/daemon/reading/progress', ({ request }) => {
+        const volume = requestVolume(request);
+        return HttpResponse.json({
+          work_id: 'w-123', volume, chapter: 1, scroll_progress: volume === 1 ? 3_500 : 0,
+        });
+      }),
+      http.get('/v1/daemon/reading/annotations', ({ request }) => {
+        const volume = requestVolume(request);
+        return HttpResponse.json({
+          items: [{
+            annotation_id: `annotation-${volume}`,
+            work_id: 'w-123', volume, chapter: 1,
+            start_offset: 0, end_offset: 4, selected_text: 'Body',
+            color: 'yellow', note: `Note from volume ${volume}`,
+          }],
+        });
+      }),
+      ...readingHandlers(),
+    );
+
+    renderChapter('w-123', 1, 2);
+    const main = screen.getByRole('main');
+    expect(await screen.findByText('Note from volume 1')).toBeInTheDocument();
+    await waitFor(() => expect(main.scrollTop).toBe(350));
+
+    await userEvent.click(screen.getByRole('link', { name: 'Switch volume' }));
+    expect(await screen.findByText('Note from volume 2')).toBeInTheDocument();
+    expect(screen.queryByText('Note from volume 1')).not.toBeInTheDocument();
+    await waitFor(() => expect(main.scrollTop).toBe(0));
+  });
+
   it('restores persisted scroll progress on load', async () => {
     useHandlers(...readingHandlers({ scrollProgress: 5_000 }));
 
@@ -714,6 +755,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
     });
     expect(requests[0]).toMatchObject({
       work_id: 'w-123',
+      volume: 1,
       chapter: 1,
       start_offset: 5,
       end_offset: 9,

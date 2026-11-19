@@ -1566,12 +1566,16 @@ function ratioToScrollProgress(ratio: number): number {
   return Math.max(0, Math.min(SCROLL_PROGRESS_UNIT, Math.round(ratio * SCROLL_PROGRESS_UNIT)));
 }
 
-export function useReadingProgress(workId: string | undefined, chapter: number | undefined) {
+export function useReadingProgress(
+  workId: string | undefined,
+  chapter: number | undefined,
+  volume: number | undefined,
+) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.reading.progress(workId ?? '', chapter ?? 0),
-    queryFn: (): Promise<ReadingProgressResponse> => client.getReadingProgress(workId!, chapter!),
-    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+    queryKey: queryKeys.reading.progress(workId ?? '', chapter ?? 0, volume ?? 0),
+    queryFn: (): Promise<ReadingProgressResponse> => client.getReadingProgress(workId!, chapter!, volume!),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0 && volume !== undefined,
   });
 }
 
@@ -1582,14 +1586,15 @@ export function useSaveReadingProgress(options?: { showToast?: boolean }) {
   const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (vars: { workId: string; chapter: number; scrollProgress: number }) =>
+    mutationFn: (vars: { workId: string; chapter: number; volume: number; scrollProgress: number }) =>
       client.putReadingProgress({
         work_id: vars.workId,
         chapter: vars.chapter,
+        volume: vars.volume,
         scroll_progress: vars.scrollProgress,
       }),
     onSuccess: (_data, vars) => {
-      qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter), _data);
+      qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter, vars.volume), _data);
       if (options?.showToast) {
         toast({ variant: 'success', title: t('toast.progressSaved') });
       }
@@ -1598,15 +1603,19 @@ export function useSaveReadingProgress(options?: { showToast?: boolean }) {
   });
 }
 
-export function useAnnotations(workId: string | undefined, chapter: number | undefined) {
+export function useAnnotations(
+  workId: string | undefined,
+  chapter: number | undefined,
+  volume: number | undefined,
+) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.reading.annotations(workId ?? '', chapter ?? 0),
+    queryKey: queryKeys.reading.annotations(workId ?? '', chapter ?? 0, volume ?? 0),
     queryFn: async (): Promise<ReadingAnnotation[]> => {
-      const res: ReadingAnnotationListResponse = await client.listReadingAnnotations(workId!, chapter!);
+      const res: ReadingAnnotationListResponse = await client.listReadingAnnotations(workId!, chapter!, volume!);
       return res.items;
     },
-    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0 && volume !== undefined,
   });
 }
 
@@ -1617,7 +1626,7 @@ export function useCreateAnnotation() {
   return useMutation({
     mutationFn: (request: ReadingAnnotationCreateRequest) => client.createReadingAnnotation(request),
     onSuccess: (data: ReadingAnnotation) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter) });
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter, data.volume) });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateHighlight'),
   });
@@ -1630,12 +1639,10 @@ export function useUpdateAnnotation() {
   return useMutation({
     mutationFn: (vars: {
       annotationId: string;
-      workId: string;
-      chapter: number;
       patch: ReadingAnnotationPatchRequest;
     }) => client.patchReadingAnnotation(vars.annotationId, vars.patch),
-    onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter, data.volume) });
     },
     onError: (error) => errorToast(error, 'error.couldNotUpdateHighlight'),
   });
@@ -1648,11 +1655,11 @@ export function useDeleteAnnotation() {
   const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (vars: { annotationId: string; workId: string; chapter: number }) =>
+    mutationFn: (vars: { annotationId: string; workId: string; chapter: number; volume: number }) =>
       client.deleteReadingAnnotation(vars.annotationId),
     onSuccess: (_data, vars) => {
       toast({ variant: 'success', title: t('toast.highlightDeleted') });
-      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter, vars.volume) });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteHighlight'),
   });
@@ -2176,9 +2183,10 @@ export function useImportPack() {
 export function useReadingProgressSync(
   workId: string | undefined,
   chapter: number | undefined,
+  volume: number | undefined,
   options?: { enabled?: boolean; showSavedToast?: boolean },
 ) {
-  const progress = useReadingProgress(workId, chapter);
+  const progress = useReadingProgress(workId, chapter, volume);
   const save = useSaveReadingProgress({ showToast: options?.showSavedToast });
   const enabled = options?.enabled ?? true;
   const restoredRef = useRef(false);
@@ -2187,17 +2195,17 @@ export function useReadingProgressSync(
   // different chapter restores its own position.
   useEffect(() => {
     restoredRef.current = false;
-  }, [workId, chapter]);
+  }, [workId, chapter, volume]);
 
   const saveMutate = save.mutate;
   const flushSave = useCallback(() => {
-    if (!workId || chapter === undefined || chapter <= 0) return;
+    if (!workId || chapter === undefined || chapter <= 0 || volume === undefined) return;
     const scrollContainer = document.querySelector('main');
     if (!scrollContainer) return;
     const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
     const ratio = scrollable > 0 ? scrollContainer.scrollTop / scrollable : 0;
-    saveMutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
-  }, [workId, chapter, saveMutate]);
+    saveMutate({ workId, chapter, volume, scrollProgress: ratioToScrollProgress(ratio) });
+  }, [workId, chapter, volume, saveMutate]);
 
   // Restore once when the persisted value first resolves. The guard prevents
   // re-scrolling when the save mutation updates the cached scroll_progress.
@@ -2205,19 +2213,17 @@ export function useReadingProgressSync(
     if (!enabled || !progress.isSuccess || restoredRef.current) return;
     const scrollContainer = document.querySelector('main');
     if (!scrollContainer) return;
-    if (!progress.data || progress.data.scroll_progress <= 0) {
-      restoredRef.current = true;
-      return;
-    }
+    if (!progress.data) return;
     const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
     if (scrollable <= 0) {
       restoredRef.current = true;
       return;
     }
     const ratio = progress.data.scroll_progress / SCROLL_PROGRESS_UNIT;
-    scrollContainer.scrollTo({ top: ratio * scrollable });
+    const top = ratio * scrollable;
+    if (scrollContainer.scrollTop !== top) scrollContainer.scrollTo({ top });
     restoredRef.current = true;
-  }, [enabled, progress.isSuccess, progress.data, workId, chapter]);
+  }, [enabled, progress.isSuccess, progress.data, workId, chapter, volume]);
 
   // Debounced scroll save.
   useEffect(() => {

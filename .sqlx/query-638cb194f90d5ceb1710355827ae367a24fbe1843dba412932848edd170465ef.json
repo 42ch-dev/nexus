@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO reading_progress (creator_id, work_id, volume, chapter, scroll_progress, updated_at)\n        VALUES (?1, ?2, ?3, ?4, ?5, ?6)\n        ON CONFLICT(creator_id, work_id, volume, chapter)\n        DO UPDATE SET scroll_progress = excluded.scroll_progress, updated_at = excluded.updated_at\n        RETURNING updated_at as \"updated_at: DateTime<Utc>\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "updated_at: DateTime<Utc>",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reading_progress",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "638cb194f90d5ceb1710355827ae367a24fbe1843dba412932848edd170465ef"
+}

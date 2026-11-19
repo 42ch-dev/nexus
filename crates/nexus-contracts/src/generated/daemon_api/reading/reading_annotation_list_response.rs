@@ -24,6 +24,7 @@ pub struct NexusReadingAnnotation {
     pub start_offset: u64,
     ///ISO 8601 last-update timestamp.
     pub updated_at: ::std::string::String,
+    pub volume: ::std::num::NonZeroU64,
     pub work_id: ::std::string::String,
 }
 impl NexusReadingAnnotation {
@@ -149,7 +150,7 @@ impl<'de> ::serde::Deserialize<'de> for NexusReadingAnnotationSelectedText {
             })
     }
 }
-///Response for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on the requested (work, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).
+///Response for GET /v1/daemon/reading/annotations. Returns all annotations for the current creator on the requested (work, volume, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ReadingAnnotationListResponse {
@@ -185,6 +186,7 @@ pub mod builder {
         >,
         start_offset: ::std::result::Result<u64, ::std::string::String>,
         updated_at: ::std::result::Result<::std::string::String, ::std::string::String>,
+        volume: ::std::result::Result<::std::num::NonZeroU64, ::std::string::String>,
         work_id: ::std::result::Result<::std::string::String, ::std::string::String>,
     }
     impl ::std::default::Default for NexusReadingAnnotation {
@@ -199,6 +201,7 @@ pub mod builder {
                 selected_text: Err("no value supplied for selected_text".to_string()),
                 start_offset: Err("no value supplied for start_offset".to_string()),
                 updated_at: Err("no value supplied for updated_at".to_string()),
+                volume: Err("no value supplied for volume".to_string()),
                 work_id: Err("no value supplied for work_id".to_string()),
             }
         }
@@ -308,6 +311,16 @@ pub mod builder {
                 });
             self
         }
+        pub fn volume<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::num::NonZeroU64>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.volume = value
+                .try_into()
+                .map_err(|e| format!("error converting supplied value for volume: {e}"));
+            self
+        }
         pub fn work_id<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<::std::string::String>,
@@ -337,6 +350,7 @@ pub mod builder {
                 selected_text: value.selected_text?,
                 start_offset: value.start_offset?,
                 updated_at: value.updated_at?,
+                volume: value.volume?,
                 work_id: value.work_id?,
             })
         }
@@ -353,6 +367,7 @@ pub mod builder {
                 selected_text: Ok(value.selected_text),
                 start_offset: Ok(value.start_offset),
                 updated_at: Ok(value.updated_at),
+                volume: Ok(value.volume),
                 work_id: Ok(value.work_id),
             }
         }

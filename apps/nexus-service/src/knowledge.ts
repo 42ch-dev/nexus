@@ -458,6 +458,7 @@ function requireInteger(raw: string, field: string): number {
 function readingQuery(searchParams: URLSearchParams): ReadingProgressQuery {
   const work_id = searchParams.get('work_id');
   const chapter = searchParams.get('chapter');
+  const volume = searchParams.get('volume');
   if (work_id === null || chapter === null) {
     throw new HttpError(
       400,
@@ -465,7 +466,11 @@ function readingQuery(searchParams: URLSearchParams): ReadingProgressQuery {
       'work_id and chapter are required',
     );
   }
-  return { work_id, chapter: requireInteger(chapter, 'chapter') };
+  return {
+    work_id,
+    chapter: requireInteger(chapter, 'chapter'),
+    ...(volume === null ? {} : { volume: requireInteger(volume, 'volume') }),
+  };
 }
 
 /** Retained daemon default for the stale banner (96h in seconds). */

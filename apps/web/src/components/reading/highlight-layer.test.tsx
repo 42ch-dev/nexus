@@ -16,6 +16,7 @@ function annotation(overrides: Partial<ReadingAnnotation> = {}): ReadingAnnotati
   return {
     annotation_id: 'a-1',
     work_id: 'w-1',
+    volume: 1,
     chapter: 1,
     start_offset: 0,
     end_offset: 5,

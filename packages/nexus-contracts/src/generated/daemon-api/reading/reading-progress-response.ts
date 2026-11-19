@@ -9,6 +9,7 @@
  */
 export interface ReadingProgressResponse {
   work_id: string;
+  volume: number;
   chapter: number;
   scroll_progress: number;
   /**

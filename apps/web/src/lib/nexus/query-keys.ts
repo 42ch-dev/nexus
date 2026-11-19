@@ -217,10 +217,10 @@ export const queryKeys = {
   // V1.89 — Deeper Manuscript Reading (BL-11 MVP slice).
   reading: {
     all: ['reading'] as const,
-    progress: (workId: string, chapter: number) =>
-      [...queryKeys.reading.all, 'progress', workId, chapter] as const,
-    annotations: (workId: string, chapter: number) =>
-      [...queryKeys.reading.all, 'annotations', workId, chapter] as const,
+    progress: (workId: string, chapter: number, volume: number) =>
+      [...queryKeys.reading.all, 'progress', workId, volume, chapter] as const,
+    annotations: (workId: string, chapter: number, volume: number) =>
+      [...queryKeys.reading.all, 'annotations', workId, volume, chapter] as const,
   },
   // V1.114 — Compute modules registry visibility.
   compute: {

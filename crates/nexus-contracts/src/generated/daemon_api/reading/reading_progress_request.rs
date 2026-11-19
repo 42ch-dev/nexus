@@ -9,6 +9,9 @@ pub struct ReadingProgressRequest {
     pub chapter: ::std::num::NonZeroU64,
     ///Current scroll position in thousandths (0–10000). Must be stored as-is; clients interpret the unit.
     pub scroll_progress: i64,
+    ///Volume number. Omit to use volume 1.
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub volume: ::std::option::Option<::std::num::NonZeroU64>,
     pub work_id: ::std::string::String,
 }
 impl ReadingProgressRequest {
@@ -22,6 +25,10 @@ pub mod builder {
     pub struct ReadingProgressRequest {
         chapter: ::std::result::Result<::std::num::NonZeroU64, ::std::string::String>,
         scroll_progress: ::std::result::Result<i64, ::std::string::String>,
+        volume: ::std::result::Result<
+            ::std::option::Option<::std::num::NonZeroU64>,
+            ::std::string::String,
+        >,
         work_id: ::std::result::Result<::std::string::String, ::std::string::String>,
     }
     impl ::std::default::Default for ReadingProgressRequest {
@@ -31,6 +38,7 @@ pub mod builder {
                 scroll_progress: Err(
                     "no value supplied for scroll_progress".to_string(),
                 ),
+                volume: Ok(Default::default()),
                 work_id: Err("no value supplied for work_id".to_string()),
             }
         }
@@ -60,6 +68,16 @@ pub mod builder {
                 });
             self
         }
+        pub fn volume<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::option::Option<::std::num::NonZeroU64>>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.volume = value
+                .try_into()
+                .map_err(|e| format!("error converting supplied value for volume: {e}"));
+            self
+        }
         pub fn work_id<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<::std::string::String>,
@@ -82,6 +100,7 @@ pub mod builder {
             Ok(Self {
                 chapter: value.chapter?,
                 scroll_progress: value.scroll_progress?,
+                volume: value.volume?,
                 work_id: value.work_id?,
             })
         }
@@ -91,6 +110,7 @@ pub mod builder {
             Self {
                 chapter: Ok(value.chapter),
                 scroll_progress: Ok(value.scroll_progress),
+                volume: Ok(value.volume),
                 work_id: Ok(value.work_id),
             }
         }

@@ -9,6 +9,10 @@
  */
 export interface ReadingAnnotationCreateRequest {
   work_id: string;
+  /**
+   * Volume number. Omit to use volume 1.
+   */
+  volume?: number;
   chapter: number;
   /**
    * Character offset into the current body plain text where the highlight begins (inclusive).

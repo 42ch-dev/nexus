@@ -68,6 +68,9 @@ pub enum ProgressCommand {
         /// Chapter number (1-based).
         #[arg(long)]
         chapter: u64,
+        /// Volume number (1-based; defaults to 1).
+        #[arg(long)]
+        volume: Option<NonZeroU64>,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -79,6 +82,9 @@ pub enum ProgressCommand {
         /// Chapter number (1-based).
         #[arg(long)]
         chapter: u64,
+        /// Volume number (1-based; defaults to 1).
+        #[arg(long)]
+        volume: Option<NonZeroU64>,
         /// Scroll position in thousandths (0–10000).
         #[arg(long)]
         scroll: i64,
@@ -93,6 +99,9 @@ pub enum ProgressCommand {
         /// Chapter number (1-based).
         #[arg(long)]
         chapter: u64,
+        /// Volume number (1-based; defaults to 1).
+        #[arg(long)]
+        volume: Option<NonZeroU64>,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -109,6 +118,9 @@ pub enum AnnotationCommand {
         /// Chapter number (1-based).
         #[arg(long)]
         chapter: u64,
+        /// Volume number (1-based; defaults to 1).
+        #[arg(long)]
+        volume: Option<NonZeroU64>,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -121,6 +133,9 @@ pub enum AnnotationCommand {
         /// Chapter number (1-based).
         #[arg(long)]
         chapter: u64,
+        /// Volume number (1-based; defaults to 1).
+        #[arg(long)]
+        volume: Option<NonZeroU64>,
         /// Start character offset (inclusive) into the chapter body text.
         #[arg(long)]
         start: u64,
@@ -208,19 +223,22 @@ async fn run_progress(
         ProgressCommand::Get {
             work_id,
             chapter,
+            volume,
             json,
-        } => progress_get(core, principal, &work_id, chapter, json).await,
+        } => progress_get(core, principal, &work_id, chapter, volume, json).await,
         ProgressCommand::Set {
             work_id,
             chapter,
+            volume,
             scroll,
             json,
-        } => progress_set(core, principal, &work_id, chapter, scroll, json).await,
+        } => progress_set(core, principal, &work_id, chapter, volume, scroll, json).await,
         ProgressCommand::Clear {
             work_id,
             chapter,
+            volume,
             json,
-        } => progress_clear(core, principal, &work_id, chapter, json).await,
+        } => progress_clear(core, principal, &work_id, chapter, volume, json).await,
     }
 }
 
@@ -233,11 +251,13 @@ async fn run_annotation(
         AnnotationCommand::List {
             work_id,
             chapter,
+            volume,
             json,
-        } => annotation_list(core, principal, &work_id, chapter, json).await,
+        } => annotation_list(core, principal, &work_id, chapter, volume, json).await,
         AnnotationCommand::Add {
             work_id,
             chapter,
+            volume,
             start,
             end,
             selected_text,
@@ -250,6 +270,7 @@ async fn run_annotation(
                 principal,
                 &work_id,
                 chapter,
+                volume,
                 start,
                 end,
                 &selected_text,
@@ -353,8 +374,8 @@ fn render_progress(resp: &ReadingProgressResponse) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Reading progress — {} chapter {}",
-        resp.work_id, resp.chapter
+        "Reading progress — {} volume {} chapter {}",
+        resp.work_id, resp.volume, resp.chapter
     );
     let _ = writeln!(
         out,
@@ -378,6 +399,7 @@ async fn progress_get(
     principal: &Principal,
     work_id: &str,
     chapter: u64,
+    volume: Option<NonZeroU64>,
     json: bool,
 ) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
@@ -387,6 +409,7 @@ async fn progress_get(
             ReadingProgressQuery {
                 work_id: work_id.to_string(),
                 chapter,
+                volume,
             },
         )
         .await
@@ -410,6 +433,7 @@ async fn progress_set(
     principal: &Principal,
     work_id: &str,
     chapter: u64,
+    volume: Option<NonZeroU64>,
     scroll: i64,
     json: bool,
 ) -> Result<Option<String>> {
@@ -422,6 +446,7 @@ async fn progress_set(
             ReadingProgressRequest {
                 work_id: work_id.to_string(),
                 chapter,
+                volume,
                 scroll_progress: scroll,
             },
         )
@@ -447,6 +472,7 @@ async fn progress_clear(
     principal: &Principal,
     work_id: &str,
     chapter: u64,
+    volume: Option<NonZeroU64>,
     json: bool,
 ) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
@@ -455,6 +481,7 @@ async fn progress_clear(
         ReadingProgressQuery {
             work_id: work_id.to_string(),
             chapter,
+            volume,
         },
     )
     .await
@@ -462,8 +489,9 @@ async fn progress_clear(
     if json {
         return Ok(None);
     }
+    let volume = volume.unwrap_or(NonZeroU64::MIN);
     Ok(Some(format!(
-        "Cleared reading progress for {work_id} chapter {chapter}."
+        "Cleared reading progress for {work_id} volume {volume} chapter {chapter}."
     )))
 }
 
@@ -479,6 +507,7 @@ async fn annotation_list(
     principal: &Principal,
     work_id: &str,
     chapter: u64,
+    volume: Option<NonZeroU64>,
     json: bool,
 ) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
@@ -488,6 +517,7 @@ async fn annotation_list(
             ReadingAnnotationListQuery {
                 work_id: work_id.to_string(),
                 chapter,
+                volume,
             },
         )
         .await
@@ -495,13 +525,17 @@ async fn annotation_list(
     if json {
         return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
+    let volume = volume.unwrap_or(NonZeroU64::MIN);
     if resp.items.is_empty() {
         return Ok(Some(format!(
-            "No annotations for {work_id} chapter {chapter}."
+            "No annotations for {work_id} volume {volume} chapter {chapter}."
         )));
     }
     let mut out = String::new();
-    let _ = writeln!(out, "Annotations for {work_id} chapter {chapter}:");
+    let _ = writeln!(
+        out,
+        "Annotations for {work_id} volume {volume} chapter {chapter}:"
+    );
     let _ = writeln!(
         out,
         "{:<38} {:<7} {:>6} {:>6}  SELECTED",
@@ -532,6 +566,7 @@ async fn annotation_add(
     principal: &Principal,
     work_id: &str,
     chapter: u64,
+    volume: Option<NonZeroU64>,
     start: u64,
     end: u64,
     selected_text: &str,
@@ -555,6 +590,7 @@ async fn annotation_add(
             ReadingAnnotationCreateRequest {
                 work_id: work_id.to_string(),
                 chapter,
+                volume,
                 color,
                 start_offset: start,
                 end_offset: end,

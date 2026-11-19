@@ -8,6 +8,7 @@
   "required": ["work_id", "chapter", "scroll_progress"],
   "properties": {
     "work_id": { "type": "string" },
+    "volume": { "type": "integer", "minimum": 1, "description": "Volume number. Omit to use volume 1." },
     "chapter": { "type": "integer", "minimum": 1 },
     "scroll_progress": {
       "type": "integer",

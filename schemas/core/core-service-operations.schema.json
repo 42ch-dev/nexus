@@ -450,7 +450,8 @@
           "name": "getReadingProgress",
           "args": [
             { "name": "workId", "type": "string" },
-            { "name": "chapter", "type": "number" }
+            { "name": "chapter", "type": "number" },
+            { "name": "volume", "type": "number", "optional": true }
           ],
           "returns": "ReadingProgressResponse"
         },
@@ -463,7 +464,8 @@
           "name": "deleteReadingProgress",
           "args": [
             { "name": "workId", "type": "string" },
-            { "name": "chapter", "type": "number" }
+            { "name": "chapter", "type": "number" },
+            { "name": "volume", "type": "number", "optional": true }
           ],
           "returns": "void"
         },
@@ -471,7 +473,8 @@
           "name": "listReadingAnnotations",
           "args": [
             { "name": "workId", "type": "string" },
-            { "name": "chapter", "type": "number" }
+            { "name": "chapter", "type": "number" },
+            { "name": "volume", "type": "number", "optional": true }
           ],
           "returns": "ReadingAnnotationListResponse"
         },
