@@ -86,7 +86,7 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineVolumeNodeData;
-  const label = d.label || t('chapter.volume', { volume: d.volumeId });
+  const label = d.label.trim() || t('chapter.volume', { volume: d.volumeId });
   return (
     <NodeChromeShell
       selected={!!selected}
