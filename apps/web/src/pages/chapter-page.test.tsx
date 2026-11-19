@@ -667,6 +667,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
     Object.defineProperty(screen.getByRole('main'), 'scrollHeight', { value: 1000 });
     await screen.findByText('Body prose.');
     expect(screen.getByRole('main').scrollTop).toBe(0);
+    expect(screen.getByRole('main').scrollTo).not.toHaveBeenCalled();
   });
 
   it('does not restore when the body request fails', async () => {
