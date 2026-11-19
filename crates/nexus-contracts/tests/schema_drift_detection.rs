@@ -1874,6 +1874,15 @@ fn make_dummy_string(prop_def: &Value) -> Value {
             return Value::String("1.0.0".to_string());
         }
         let inner = pattern.trim_start_matches('^').trim_end_matches('$');
+        let first_alternative = inner
+            .strip_suffix(')')
+            .and_then(|inner| inner.split_once("(?:"))
+            .and_then(|(prefix, group)| {
+                group
+                    .split_once('|')
+                    .map(|(first, _)| format!("{prefix}{first}"))
+            });
+        let inner = first_alternative.as_deref().unwrap_or(inner);
         if !inner.is_empty()
             && !inner.chars().any(|c| {
                 matches!(
@@ -1884,17 +1893,11 @@ fn make_dummy_string(prop_def: &Value) -> Value {
         {
             return Value::String(inner.to_string());
         }
-        // Extract the literal prefix: characters between `^` and the first `[` or `\\`.
-        let prefix = pattern
-            .strip_prefix('^')
-            .unwrap_or(pattern)
-            .split(['[', '\\', '.'])
-            .next()
-            .unwrap_or("");
+        let prefix = inner.split(['[', '\\', '.']).next().unwrap_or("");
         if !prefix.is_empty() {
             // Exact-length hex ids (`chr_<32hex>`, `awb_<32hex>`) use `{N}` after
             // a character class. Pad with `a` so dummy values satisfy the pattern.
-            if let Some(n) = pattern
+            if let Some(n) = inner
                 .rsplit_once('{')
                 .and_then(|(_, rest)| rest.split('}').next())
                 .and_then(|digits| digits.parse::<usize>().ok())

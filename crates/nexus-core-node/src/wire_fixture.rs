@@ -92,6 +92,27 @@ pub async fn seed_wire_home(user_home: &Path) {
     let pool = guarded.clone_pool();
     seed_world(&pool, OWNED_WORLD, CREATOR).await;
     seed_world(&pool, FOREIGN_WORLD, "other_creator").await;
+    let timeline_world = nexus_local_db::create_world(
+        &pool,
+        CREATOR,
+        "Root Timeline World",
+        "root-timeline-world",
+        "private",
+        "manual",
+    )
+    .await
+    .expect("seed timeline world");
+    nexus_local_db::narrative_write::append_event_canon_with_extensions(
+        &pool,
+        &timeline_world.world_id,
+        &timeline_world.root_fork_branch_id,
+        "compute_result",
+        Some("Root Timeline Event"),
+        None,
+        "{}",
+    )
+    .await
+    .expect("seed root timeline event");
     seed_kb(&pool, "kb_mod", OWNED_WORLD, "Mod", "confirmed", Some(0)).await;
     seed_kb(&pool, "kb_cas", OWNED_WORLD, "Cas", "confirmed", Some(2)).await;
     seed_pending(

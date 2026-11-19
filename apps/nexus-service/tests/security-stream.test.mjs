@@ -1216,6 +1216,30 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(creator.payload.error.code, 'not_found');
   });
 
+  test('generated root branch viewpoints reach the core authority', async () => {
+    const worlds = await jsonFetch(`${baseUrl}/v1/daemon/narrative/worlds`);
+    assert.equal(worlds.status, 200, worlds.text);
+    const world = worlds.payload.worlds.find(({ title }) => title === 'Root Timeline World');
+    assert.ok(world, worlds.text);
+    const events = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${world.world_id}/timeline/events?event_type=compute_result&status=canon`);
+    assert.equal(events.status, 200, events.text);
+    const root = events.payload.items.find(({ title }) => title === 'Root Timeline Event');
+    assert.ok(root, events.text);
+
+    const res = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: {
+        provider_id: 'mock-acp',
+        cwd: homeCtx.creativeRoot,
+        actor_ref: { actor_kind: 'creator', creator_id: 'ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+        viewpoint: { world_id: world.world_id, branch_id: root.branch_id },
+      },
+    });
+    assert.equal(res.status, 404, res.text);
+    assert.equal(res.payload.error.code, 'not_found');
+  });
+
   test('malformed create/execute bodies are typed invalid_input before any provider effect', async () => {
     await stopSharedService();
     const home = seedHome();

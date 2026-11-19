@@ -9,7 +9,7 @@
   "properties": {
     "branch_id": {
       "type": "string",
-      "pattern": "^fbk_[a-zA-Z0-9]+$",
+      "pattern": "^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$",
       "description": "Fork branch filter; defaults to the World's current branch (fbk_root fallback)."
     },
     "status": {

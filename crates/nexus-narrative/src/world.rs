@@ -264,6 +264,24 @@ mod tests {
     }
 
     #[test]
+    fn fork_contract_preserves_generated_root_parent() {
+        let mut world = World::new(
+            "wld_parent",
+            "ctr_owner",
+            "Parent World",
+            "parent-world",
+            Visibility::Public,
+            TimePolicy::OwnerDriven,
+        );
+        let root = "fbk_root_0123abcd";
+        world.root_fork_branch_id = Some(root.to_string());
+
+        let (_, fork) = world.fork("ctr_forker", "evt_100").unwrap();
+        let wire = nexus_contracts::ForkBranch::from(fork);
+        assert_eq!(wire.parent_branch_id.as_str(), root);
+    }
+
+    #[test]
     fn test_set_visibility() {
         let mut world = World::new(
             "wld_test",

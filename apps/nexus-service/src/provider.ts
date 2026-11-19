@@ -105,7 +105,7 @@ function validateViewpoint(value: unknown): SessionViewpoint {
     viewpoint.binding_id = vp.binding_id as string;
   }
   if (hasOwn(vp, 'branch_id')) {
-    expectPattern(expectString(vp.branch_id, 'viewpoint.branch_id'), /^fbk_[a-zA-Z0-9]+$/, 'viewpoint.branch_id');
+    expectPattern(expectString(vp.branch_id, 'viewpoint.branch_id'), /^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$/, 'viewpoint.branch_id');
     viewpoint.branch_id = vp.branch_id as string;
   }
   if (hasOwn(vp, 'event_id')) {
