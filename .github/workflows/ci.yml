@@ -481,6 +481,11 @@ jobs:
           node packages/nexus-native/scripts/build.mjs
           test -s packages/nexus-native-linux-x64-gnu/native/nexus_core_node.node
           test -s packages/nexus-native-linux-x64-gnu/native/compatibility.json
+      - name: Build the CLI used by the one-kernel test
+        # The native addon and CLI select different feature graphs. Building
+        # the addon does not prebuild `cargo run -p nexus42 --bin nexus42`;
+        # keep that cold compile/link outside Node's per-file test timeout.
+        run: cargo build --locked -p nexus42 --bin nexus42
       - name: Test nexus-service boot and bind gate
         run: pnpm --filter @42ch/nexus-service run test
       - name: Test native config publication
