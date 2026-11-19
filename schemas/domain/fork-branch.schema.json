@@ -25,7 +25,7 @@
     },
     "parent_branch_id": {
       "type": "string",
-      "pattern": "^fbk_[a-zA-Z0-9]+$",
+      "pattern": "^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$",
       "description": "Parent fork branch ID"
     },
     "forked_from_event_id": {

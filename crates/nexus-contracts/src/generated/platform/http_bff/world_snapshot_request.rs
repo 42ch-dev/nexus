@@ -105,9 +105,12 @@ impl ::std::str::FromStr for WorldSnapshotRequestBranchId {
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^fbk_[a-zA-Z0-9]+$").unwrap() });
+        { ::regress::Regex::new("^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$").unwrap() });
         if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^fbk_[a-zA-Z0-9]+$\"".into());
+            return Err(
+                "doesn't match pattern \"^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$\""
+                    .into(),
+            );
         }
         Ok(Self(value.to_string()))
     }

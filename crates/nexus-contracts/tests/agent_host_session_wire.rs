@@ -31,6 +31,18 @@ fn both_present_is_actor_mode_payload() {
 }
 
 #[test]
+fn session_create_viewpoint_accepts_generated_root_branch_id() {
+    let root = "fbk_root_0123abcd";
+    let req: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+        "provider_id": "claude-native",
+        "actor_ref": {"actor_kind":"creator","creator_id":"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "viewpoint": {"world_id":"wld_worldA","branch_id":root}
+    }))
+    .expect("generated root branch viewpoint");
+    assert_eq!(req.viewpoint.unwrap().branch_id.unwrap().as_str(), root);
+}
+
+#[test]
 fn session_response_omits_optional_pair_when_absent() {
     let resp = SessionResponse {
         session_id: "s".into(),

@@ -17,7 +17,7 @@
     },
     "branch_id": {
       "type": "string",
-      "pattern": "^fbk_[a-zA-Z0-9]+$",
+      "pattern": "^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$",
       "description": "Optional ForkBranch id participating in session isolation."
     },
     "event_id": {

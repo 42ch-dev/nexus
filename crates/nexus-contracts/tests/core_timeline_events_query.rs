@@ -1,4 +1,4 @@
-use nexus_contracts::CoreTimelineEventsQuery;
+use nexus_contracts::{CoreTimelineEventsQuery, WorldSnapshotRequest};
 use serde_json::json;
 
 #[test]
@@ -10,6 +10,18 @@ fn accepts_generated_root_branch_id() {
         query.branch_id.as_deref().map(String::as_str),
         Some(branch_id)
     );
+}
+
+#[test]
+fn snapshot_request_accepts_a_generated_root_branch_scope() {
+    let root = "fbk_root_0123abcd";
+    let query: WorldSnapshotRequest = serde_json::from_value(json!({
+        "schema_version": 1,
+        "world_id": "wld_worldA",
+        "branch_id": root,
+    }))
+    .expect("a generated root branch is a valid snapshot scope");
+    assert_eq!(query.branch_id.as_deref().map(String::as_str), Some(root));
 }
 
 #[test]
