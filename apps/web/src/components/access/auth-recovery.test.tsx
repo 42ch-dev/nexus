@@ -76,11 +76,9 @@ describe('AuthRecoveryGate', () => {
     signalUnauthorized();
 
     fireEvent.change(screen.getByLabelText('输入 API Key…'), { target: { value: 'good-key' } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '授权' }));
-    });
+    fireEvent.click(screen.getByRole('button', { name: '授权' }));
 
-    expect(screen.getByText('intended destination')).toBeInTheDocument();
+    expect(await screen.findByText('intended destination')).toBeInTheDocument();
     expect(window.localStorage.getItem('nexus-api-key')).toBe('good-key');
     expect(authorized).toHaveBeenCalledTimes(1);
     window.removeEventListener(AUTHORIZED_EVENT, authorized);
@@ -91,11 +89,9 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
-    });
+    fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
 
-    expect(screen.getByText('intended destination')).toBeInTheDocument();
+    expect(await screen.findByText('intended destination')).toBeInTheDocument();
   });
 
   it('drops a stale stored key when the cookie-only probe succeeds', async () => {
@@ -110,9 +106,9 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
-    });
+    fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
+
+    expect(await screen.findByText('intended destination')).toBeInTheDocument();
 
     // The probe is cookie-only, and the stale key is gone, so the client that
     // ClientProvider rebuilds (which reads this store) sends no X-API-Key and
@@ -120,6 +116,5 @@ describe('AuthRecoveryGate', () => {
     expect(sentKeys).toEqual([null]);
     expect(window.localStorage.getItem('nexus-api-key')).toBeNull();
     expect(readStoredApiKey()).toBeNull();
-    expect(screen.getByText('intended destination')).toBeInTheDocument();
   });
 });
