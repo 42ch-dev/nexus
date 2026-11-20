@@ -76,7 +76,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 # Reverse-invoke/operator bridge (`connect-client`) and the embedded Model B
 # server shell (`embedded-mcp`).
-rmcp = { version = "=3.9.0", default-features = false, features = ["server", "client"], optional = true }
+rmcp = { version = "=3.10.0", default-features = false, features = ["server", "client"], optional = true }
 futures-channel = { version = "0.3", optional = true }
 
 [dev-dependencies]
