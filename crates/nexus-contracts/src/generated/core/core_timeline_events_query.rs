@@ -47,8 +47,19 @@ impl ::std::str::FromStr for CoreTimelineEventsQueryBranchId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for CoreTimelineEventsQueryBranchId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$").unwrap() });
+        {
+            ::regress::Regex::with_flags("^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$", "u")
+                .unwrap()
+        });
         if PATTERN.find(value).is_none() {
             return Err(
                 "doesn't match pattern \"^fbk_(?:[a-zA-Z0-9]+|root_[a-f0-9]{8})$\""
@@ -58,20 +69,12 @@ impl ::std::str::FromStr for CoreTimelineEventsQueryBranchId {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for CoreTimelineEventsQueryBranchId {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String> for CoreTimelineEventsQueryBranchId {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreTimelineEventsQueryBranchId {
@@ -79,8 +82,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreTimelineEventsQueryBranchId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -106,10 +110,7 @@ impl ::std::str::FromStr for CoreTimelineEventsQueryCursor {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 512usize {
-            return Err("longer than 512 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreTimelineEventsQueryCursor {
@@ -117,7 +118,10 @@ impl ::std::convert::TryFrom<&str> for CoreTimelineEventsQueryCursor {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 512usize {
+            return Err("longer than 512 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for CoreTimelineEventsQueryCursor {
@@ -125,7 +129,7 @@ impl ::std::convert::TryFrom<::std::string::String> for CoreTimelineEventsQueryC
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreTimelineEventsQueryCursor {
@@ -133,8 +137,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreTimelineEventsQueryCursor {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

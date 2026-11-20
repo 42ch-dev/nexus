@@ -61,12 +61,7 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoBindingId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^awb_[0-9a-f]{32}$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^awb_[0-9a-f]{32}$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoBindingId {
@@ -74,7 +69,12 @@ impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoBindingId 
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^awb_[0-9a-f]{32}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^awb_[0-9a-f]{32}$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -83,7 +83,7 @@ for NexusCharacterPendingReviewInfoBindingId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoBindingId {
@@ -91,8 +91,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoBindingId
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -119,12 +120,7 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoCharacterId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^chr_[0-9a-f]{32}$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^chr_[0-9a-f]{32}$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoCharacterId {
@@ -132,7 +128,12 @@ impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoCharacterI
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^chr_[0-9a-f]{32}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^chr_[0-9a-f]{32}$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -141,7 +142,7 @@ for NexusCharacterPendingReviewInfoCharacterId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoCharacterId {
@@ -149,8 +150,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoCharacter
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -177,6 +179,14 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoPendingId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoPendingId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         if value.chars().count() > 128usize {
             return Err("longer than 128 characters".into());
         }
@@ -186,21 +196,13 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoPendingId {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoPendingId {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String>
 for NexusCharacterPendingReviewInfoPendingId {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoPendingId {
@@ -208,8 +210,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoPendingId
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -236,6 +239,14 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoRawDigest {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoRawDigest {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         if value.chars().count() > 65536usize {
             return Err("longer than 65536 characters".into());
         }
@@ -245,21 +256,13 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoRawDigest {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoRawDigest {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String>
 for NexusCharacterPendingReviewInfoRawDigest {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoRawDigest {
@@ -267,8 +270,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoRawDigest
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -295,6 +299,14 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoSessionId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoSessionId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         if value.chars().count() > 128usize {
             return Err("longer than 128 characters".into());
         }
@@ -304,21 +316,13 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoSessionId {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoSessionId {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String>
 for NexusCharacterPendingReviewInfoSessionId {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoSessionId {
@@ -326,8 +330,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoSessionId
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -354,6 +359,14 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoSourceOperationId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoSourceOperationId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         if value.chars().count() > 128usize {
             return Err("longer than 128 characters".into());
         }
@@ -363,21 +376,13 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoSourceOperationId {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoSourceOperationId {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String>
 for NexusCharacterPendingReviewInfoSourceOperationId {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de>
@@ -386,8 +391,9 @@ for NexusCharacterPendingReviewInfoSourceOperationId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -414,10 +420,7 @@ impl ::std::str::FromStr for NexusCharacterPendingReviewInfoTaskKind {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 64usize {
-            return Err("longer than 64 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoTaskKind {
@@ -425,7 +428,10 @@ impl ::std::convert::TryFrom<&str> for NexusCharacterPendingReviewInfoTaskKind {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 64usize {
+            return Err("longer than 64 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -434,7 +440,7 @@ for NexusCharacterPendingReviewInfoTaskKind {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoTaskKind {
@@ -442,8 +448,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusCharacterPendingReviewInfoTaskKind 
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

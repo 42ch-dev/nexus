@@ -42,6 +42,14 @@ impl ::std::str::FromStr for ExploreSearchRequestQuery {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for ExploreSearchRequestQuery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         if value.chars().count() > 512usize {
             return Err("longer than 512 characters".into());
         }
@@ -51,20 +59,12 @@ impl ::std::str::FromStr for ExploreSearchRequestQuery {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for ExploreSearchRequestQuery {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String> for ExploreSearchRequestQuery {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ExploreSearchRequestQuery {
@@ -72,8 +72,9 @@ impl<'de> ::serde::Deserialize<'de> for ExploreSearchRequestQuery {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

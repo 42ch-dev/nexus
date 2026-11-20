@@ -61,10 +61,7 @@ impl ::std::str::FromStr for NotificationsListResponseItemsItemBody {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 8192usize {
-            return Err("longer than 8192 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemBody {
@@ -72,7 +69,10 @@ impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemBody {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 8192usize {
+            return Err("longer than 8192 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -81,7 +81,7 @@ for NotificationsListResponseItemsItemBody {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NotificationsListResponseItemsItemBody {
@@ -89,8 +89,9 @@ impl<'de> ::serde::Deserialize<'de> for NotificationsListResponseItemsItemBody {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -185,10 +186,7 @@ impl ::std::str::FromStr for NotificationsListResponseItemsItemLinkUrl {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 2048usize {
-            return Err("longer than 2048 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemLinkUrl {
@@ -196,7 +194,10 @@ impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemLinkUrl
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 2048usize {
+            return Err("longer than 2048 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -205,7 +206,7 @@ for NotificationsListResponseItemsItemLinkUrl {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NotificationsListResponseItemsItemLinkUrl {
@@ -213,8 +214,9 @@ impl<'de> ::serde::Deserialize<'de> for NotificationsListResponseItemsItemLinkUr
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -241,12 +243,7 @@ impl ::std::str::FromStr for NotificationsListResponseItemsItemNotificationId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^ntf_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^ntf_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemNotificationId {
@@ -254,7 +251,12 @@ impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemNotific
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^ntf_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^ntf_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -263,7 +265,7 @@ for NotificationsListResponseItemsItemNotificationId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de>
@@ -272,8 +274,9 @@ for NotificationsListResponseItemsItemNotificationId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -300,10 +303,7 @@ impl ::std::str::FromStr for NotificationsListResponseItemsItemTitle {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 512usize {
-            return Err("longer than 512 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemTitle {
@@ -311,7 +311,10 @@ impl ::std::convert::TryFrom<&str> for NotificationsListResponseItemsItemTitle {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 512usize {
+            return Err("longer than 512 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -320,7 +323,7 @@ for NotificationsListResponseItemsItemTitle {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NotificationsListResponseItemsItemTitle {
@@ -328,8 +331,9 @@ impl<'de> ::serde::Deserialize<'de> for NotificationsListResponseItemsItemTitle 
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

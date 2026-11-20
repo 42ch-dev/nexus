@@ -59,10 +59,7 @@ impl ::std::str::FromStr for CoreOutboxStatusEntriesItemBundleId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemBundleId {
@@ -70,7 +67,10 @@ impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemBundleId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -79,7 +79,7 @@ for CoreOutboxStatusEntriesItemBundleId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemBundleId {
@@ -87,8 +87,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemBundleId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -115,10 +116,7 @@ impl ::std::str::FromStr for CoreOutboxStatusEntriesItemCreatedAt {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemCreatedAt {
@@ -126,7 +124,10 @@ impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemCreatedAt {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -135,7 +136,7 @@ for CoreOutboxStatusEntriesItemCreatedAt {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemCreatedAt {
@@ -143,8 +144,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemCreatedAt {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -243,10 +245,7 @@ impl ::std::str::FromStr for CoreOutboxStatusEntriesItemIdempotencyKey {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemIdempotencyKey {
@@ -254,7 +253,10 @@ impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemIdempotencyKey
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -263,7 +265,7 @@ for CoreOutboxStatusEntriesItemIdempotencyKey {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemIdempotencyKey {
@@ -271,8 +273,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemIdempotencyKe
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -299,10 +302,7 @@ impl ::std::str::FromStr for CoreOutboxStatusEntriesItemOutboxEntryId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemOutboxEntryId {
@@ -310,7 +310,10 @@ impl ::std::convert::TryFrom<&str> for CoreOutboxStatusEntriesItemOutboxEntryId 
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -319,7 +322,7 @@ for CoreOutboxStatusEntriesItemOutboxEntryId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemOutboxEntryId {
@@ -327,8 +330,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreOutboxStatusEntriesItemOutboxEntryId
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

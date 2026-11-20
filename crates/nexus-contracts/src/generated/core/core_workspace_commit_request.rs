@@ -124,10 +124,7 @@ impl ::std::str::FromStr for CoreWorkspaceCommitRequestChangesItemPath {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreWorkspaceCommitRequestChangesItemPath {
@@ -135,7 +132,10 @@ impl ::std::convert::TryFrom<&str> for CoreWorkspaceCommitRequestChangesItemPath
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -144,7 +144,7 @@ for CoreWorkspaceCommitRequestChangesItemPath {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreWorkspaceCommitRequestChangesItemPath {
@@ -152,8 +152,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreWorkspaceCommitRequestChangesItemPat
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -180,10 +181,7 @@ impl ::std::str::FromStr for CoreWorkspaceCommitRequestSessionId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for CoreWorkspaceCommitRequestSessionId {
@@ -191,7 +189,10 @@ impl ::std::convert::TryFrom<&str> for CoreWorkspaceCommitRequestSessionId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -200,7 +201,7 @@ for CoreWorkspaceCommitRequestSessionId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CoreWorkspaceCommitRequestSessionId {
@@ -208,8 +209,9 @@ impl<'de> ::serde::Deserialize<'de> for CoreWorkspaceCommitRequestSessionId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

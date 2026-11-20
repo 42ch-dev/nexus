@@ -53,10 +53,7 @@ impl ::std::str::FromStr for OutlinePatchChapterSetContent {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 10485760usize {
-            return Err("longer than 10485760 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for OutlinePatchChapterSetContent {
@@ -64,7 +61,10 @@ impl ::std::convert::TryFrom<&str> for OutlinePatchChapterSetContent {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 10485760usize {
+            return Err("longer than 10485760 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for OutlinePatchChapterSetContent {
@@ -72,7 +72,7 @@ impl ::std::convert::TryFrom<::std::string::String> for OutlinePatchChapterSetCo
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for OutlinePatchChapterSetContent {
@@ -80,8 +80,9 @@ impl<'de> ::serde::Deserialize<'de> for OutlinePatchChapterSetContent {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

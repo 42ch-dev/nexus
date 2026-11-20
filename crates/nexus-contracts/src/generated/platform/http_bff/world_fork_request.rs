@@ -49,12 +49,7 @@ impl ::std::str::FromStr for WorldForkRequestChildWorldId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^wld_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for WorldForkRequestChildWorldId {
@@ -62,7 +57,12 @@ impl ::std::convert::TryFrom<&str> for WorldForkRequestChildWorldId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^wld_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for WorldForkRequestChildWorldId {
@@ -70,7 +70,7 @@ impl ::std::convert::TryFrom<::std::string::String> for WorldForkRequestChildWor
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for WorldForkRequestChildWorldId {
@@ -78,8 +78,9 @@ impl<'de> ::serde::Deserialize<'de> for WorldForkRequestChildWorldId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -105,12 +106,7 @@ impl ::std::str::FromStr for WorldForkRequestCreatedByCreatorId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^ctr_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^ctr_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for WorldForkRequestCreatedByCreatorId {
@@ -118,7 +114,12 @@ impl ::std::convert::TryFrom<&str> for WorldForkRequestCreatedByCreatorId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^ctr_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^ctr_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -127,7 +128,7 @@ for WorldForkRequestCreatedByCreatorId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for WorldForkRequestCreatedByCreatorId {
@@ -135,8 +136,9 @@ impl<'de> ::serde::Deserialize<'de> for WorldForkRequestCreatedByCreatorId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -162,10 +164,7 @@ impl ::std::str::FromStr for WorldForkRequestForkTitle {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 256usize {
-            return Err("longer than 256 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for WorldForkRequestForkTitle {
@@ -173,7 +172,10 @@ impl ::std::convert::TryFrom<&str> for WorldForkRequestForkTitle {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 256usize {
+            return Err("longer than 256 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for WorldForkRequestForkTitle {
@@ -181,7 +183,7 @@ impl ::std::convert::TryFrom<::std::string::String> for WorldForkRequestForkTitl
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for WorldForkRequestForkTitle {
@@ -189,8 +191,9 @@ impl<'de> ::serde::Deserialize<'de> for WorldForkRequestForkTitle {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -216,12 +219,7 @@ impl ::std::str::FromStr for WorldForkRequestForkedFromEventId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^evt_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^evt_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for WorldForkRequestForkedFromEventId {
@@ -229,7 +227,12 @@ impl ::std::convert::TryFrom<&str> for WorldForkRequestForkedFromEventId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^evt_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^evt_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -238,7 +241,7 @@ for WorldForkRequestForkedFromEventId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for WorldForkRequestForkedFromEventId {
@@ -246,8 +249,9 @@ impl<'de> ::serde::Deserialize<'de> for WorldForkRequestForkedFromEventId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -273,12 +277,7 @@ impl ::std::str::FromStr for WorldForkRequestParentWorldId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^wld_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for WorldForkRequestParentWorldId {
@@ -286,7 +285,12 @@ impl ::std::convert::TryFrom<&str> for WorldForkRequestParentWorldId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^wld_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for WorldForkRequestParentWorldId {
@@ -294,7 +298,7 @@ impl ::std::convert::TryFrom<::std::string::String> for WorldForkRequestParentWo
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for WorldForkRequestParentWorldId {
@@ -302,8 +306,9 @@ impl<'de> ::serde::Deserialize<'de> for WorldForkRequestParentWorldId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

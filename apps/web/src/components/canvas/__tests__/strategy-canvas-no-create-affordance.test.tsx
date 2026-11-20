@@ -10,7 +10,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import type { NodeChange } from '@xyflow/react';
+import { NodeChangeset } from '@xyflow/react';
 import type { MutableRefObject } from 'react';
 import type { WorkflowDocument } from '@42ch/nexus-contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -105,9 +105,9 @@ function expectCanvasOffersNoCreateRoute(container: HTMLElement) {
   // Inspector save: selecting the entry state and opening its editor reveals
   // no save control anywhere in the canvas.
   act(() => {
-    (shellProps.current.onNodesChange as (changes: NodeChange[]) => void)([
-      { id: 'draft', type: 'select', selected: true },
-    ]);
+    (shellProps.current.onNodesChange as (changes: NodeChangeset) => void)(
+      new NodeChangeset([{ id: 'draft', type: 'select', selected: true }]),
+    );
   });
   fireEvent.click(canvas.getByRole('button', { name: 'Edit' }));
   expect(canvas.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();

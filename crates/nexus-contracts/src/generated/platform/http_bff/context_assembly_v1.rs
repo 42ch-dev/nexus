@@ -73,12 +73,7 @@ impl ::std::str::FromStr for ContextAssembleRequestV1CreatorId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^ctr_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^ctr_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1CreatorId {
@@ -86,7 +81,12 @@ impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1CreatorId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^ctr_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^ctr_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -95,7 +95,7 @@ for ContextAssembleRequestV1CreatorId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1CreatorId {
@@ -103,8 +103,9 @@ impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1CreatorId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -227,10 +228,7 @@ impl ::std::str::FromStr for ContextAssembleRequestV1MemoryQuery {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 1000usize {
-            return Err("longer than 1000 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1MemoryQuery {
@@ -238,7 +236,10 @@ impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1MemoryQuery {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 1000usize {
+            return Err("longer than 1000 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -247,7 +248,7 @@ for ContextAssembleRequestV1MemoryQuery {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1MemoryQuery {
@@ -255,8 +256,9 @@ impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1MemoryQuery {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -282,10 +284,7 @@ impl ::std::str::FromStr for ContextAssembleRequestV1RequestId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1RequestId {
@@ -293,7 +292,10 @@ impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1RequestId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -302,7 +304,7 @@ for ContextAssembleRequestV1RequestId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1RequestId {
@@ -310,8 +312,9 @@ impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1RequestId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -338,12 +341,7 @@ impl ::std::str::FromStr for ContextAssembleRequestV1WorkspaceId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^wrk_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^wrk_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1WorkspaceId {
@@ -351,7 +349,12 @@ impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1WorkspaceId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^wrk_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^wrk_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -360,7 +363,7 @@ for ContextAssembleRequestV1WorkspaceId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1WorkspaceId {
@@ -368,8 +371,9 @@ impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1WorkspaceId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -395,12 +399,7 @@ impl ::std::str::FromStr for ContextAssembleRequestV1WorldId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^wld_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1WorldId {
@@ -408,7 +407,12 @@ impl ::std::convert::TryFrom<&str> for ContextAssembleRequestV1WorldId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^wld_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for ContextAssembleRequestV1WorldId {
@@ -416,7 +420,7 @@ impl ::std::convert::TryFrom<::std::string::String> for ContextAssembleRequestV1
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1WorldId {
@@ -424,8 +428,9 @@ impl<'de> ::serde::Deserialize<'de> for ContextAssembleRequestV1WorldId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -545,12 +550,7 @@ impl ::std::str::FromStr for ContextAssembleResponseV1WorldId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^wld_[a-zA-Z0-9]+$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for ContextAssembleResponseV1WorldId {
@@ -558,7 +558,12 @@ impl ::std::convert::TryFrom<&str> for ContextAssembleResponseV1WorldId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^wld_[a-zA-Z0-9]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^wld_[a-zA-Z0-9]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -567,7 +572,7 @@ for ContextAssembleResponseV1WorldId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ContextAssembleResponseV1WorldId {
@@ -575,8 +580,9 @@ impl<'de> ::serde::Deserialize<'de> for ContextAssembleResponseV1WorldId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

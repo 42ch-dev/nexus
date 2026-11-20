@@ -98,12 +98,12 @@ pub struct ModuleDetailSchemas {
     pub battle_report: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
     pub invocation: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
-    #[serde(default, skip_serializing_if = ":: std :: collections :: HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub key_block_attributes: ::std::collections::HashMap<
         ::std::string::String,
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
-    #[serde(default, skip_serializing_if = ":: std :: collections :: HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub key_block_state: ::std::collections::HashMap<
         ::std::string::String,
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,

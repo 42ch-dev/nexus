@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { Node, OnNodesChange } from '@xyflow/react';
+import { NodeChangeset, type Node, type OnNodesChange } from '@xyflow/react';
 
 /**
  * The slice of `useCanvasSurface`'s result the inbound focus reads.
@@ -55,11 +55,13 @@ export function useInboundEventFocus<TNodeData extends Record<string, unknown>>(
     );
     if (!exists) return; // unknown / non-target id — no fabricated selection
     onNodesChange(
-      nodes.map((n) => ({
-        type: 'select' as const,
-        id: n.id,
-        selected: n.id === targetNodeId,
-      })),
+      new NodeChangeset(
+        nodes.map((n) => ({
+          type: 'select' as const,
+          id: n.id,
+          selected: n.id === targetNodeId,
+        })),
+      ),
     );
     appliedRef.current = targetNodeId;
   }, [targetNodeId, nodes, selectedNodeId, onNodesChange, isFocusTarget]);

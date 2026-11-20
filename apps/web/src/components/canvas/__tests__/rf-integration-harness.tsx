@@ -38,10 +38,9 @@ import { useCallback, type ReactNode } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
-  applyNodeChanges,
   type Edge,
   type Node,
-  type NodeChange,
+  type NodeChangeset,
   type NodeTypes,
   type OnNodesChange,
 } from '@xyflow/react';
@@ -132,7 +131,7 @@ export function RFIntegrationHarness(props: RFIntegrationHarnessProps) {
 
 /**
  * Test-friendly `useNodeChangeHandler` — identical RF state plumbing to the
- * real CanvasShell helper (`applyNodeChanges` over `setNodes`). Install this as
+ * real CanvasShell helper (`NodeChangeset.applyTo` over `setNodes`). Install this as
  * the mock for `useNodeChangeHandler` so the real `useOutlineCanvasGraph` hook
  * gets a working `onNodesChange` that applies RF selection / drag changes to
  * its node state. Without it, RF's selection change events would be dropped
@@ -142,8 +141,8 @@ export function testUseNodeChangeHandler(
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
 ): OnNodesChange {
   return useCallback(
-    (changes: NodeChange[]) => {
-      setNodes((nds) => applyNodeChanges(changes, nds));
+    (changes: NodeChangeset) => {
+      setNodes((nds) => changes.applyTo(nds));
     },
     [setNodes],
   );

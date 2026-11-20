@@ -219,41 +219,62 @@ fn is_character_display_name_type(type_name: &str) -> bool {
     type_name.contains("Character") && type_name.ends_with("DisplayName")
 }
 
-fn inject_character_display_name_trim(rust: &str) -> String {
-    const IMPL: &str = "impl :: std :: str :: FromStr for ";
-    const FROM_STR_OPEN: &str =
-        "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { ";
-    const TRIM_GUARD: &str =
-        "if value . trim () != value { return Err (\"must be trimmed\" . into ()) ; } ";
-
-    let mut out = String::with_capacity(rust.len() + 256);
-    let mut cursor = 0;
-    while let Some(rel) = rust[cursor..].find(IMPL) {
-        let impl_at = cursor + rel;
-        out.push_str(&rust[cursor..impl_at]);
-        let name_start = impl_at + IMPL.len();
-        let Some(name_len) = rust[name_start..].find(' ') else {
-            out.push_str(&rust[impl_at..]);
-            return out;
+/// typify 0.10 validates in `TryFrom<&str>`: `FromStr` delegates to it and
+/// serde's `Deserialize` calls `TryFrom<String>` (which forwards to the `&str`
+/// impl), so the trim guard belongs on `TryFrom<&str>` only — one authoritative
+/// check covering parse, serde and direct conversion. Matching is AST-based, so
+/// an equivalent `::core::convert::TryFrom` path still qualifies; a qualifying
+/// struct with no such impl fails the codegen lane instead of silently losing
+/// the trim contract.
+fn inject_character_display_name_trim(file: &mut syn::File) -> Result<(), String> {
+    let targets: BTreeSet<String> = file
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Struct(strukt)
+                if is_character_display_name_type(&strukt.ident.to_string()) =>
+            {
+                Some(strukt.ident.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    let mut guarded: BTreeSet<String> = BTreeSet::new();
+    for item in &mut file.items {
+        let syn::Item::Impl(block) = item else {
+            continue;
         };
-        let name_end = name_start + name_len;
-        let type_name = &rust[name_start..name_end];
-        out.push_str(&rust[impl_at..name_end]);
-        cursor = name_end;
-        if !is_character_display_name_type(type_name) {
+        if !try_from_str_impl(block) {
             continue;
         }
-        if let Some(open_rel) = rust[cursor..].find(FROM_STR_OPEN) {
-            let insert_at = cursor + open_rel + FROM_STR_OPEN.len();
-            out.push_str(&rust[cursor..insert_at]);
-            if !rust[insert_at..].starts_with(TRIM_GUARD) {
-                out.push_str(TRIM_GUARD);
-            }
-            cursor = insert_at;
+        let Some(name) = local_self_type(&block.self_ty) else {
+            continue;
+        };
+        if !targets.contains(&name) {
+            continue;
         }
+        let Some(syn::ImplItem::Fn(function)) = block
+            .items
+            .iter_mut()
+            .find(|item| matches!(item, syn::ImplItem::Fn(f) if f.sig.ident == "try_from"))
+        else {
+            continue;
+        };
+        if !function.block.stmts.first().is_some_and(is_trim_guard) {
+            let guard = syn::parse_str::<syn::Stmt>(
+                "if value.trim() != value { return Err(\"must be trimmed\".into()); }",
+            )
+            .map_err(|err| format!("build trim guard for {name}: {err}"))?;
+            function.block.stmts.insert(0, guard);
+        }
+        guarded.insert(name);
     }
-    out.push_str(&rust[cursor..]);
-    out
+    match targets.difference(&guarded).next() {
+        Some(missing) => Err(format!(
+            "no `TryFrom<&str>` impl for Character display-name type {missing}"
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Schema extension marker (`x-nexus-tri-state: true`) for nullable PATCH
@@ -426,9 +447,7 @@ fn inject_literal_true_serde_attributes(rust: &str, type_name: &str, fields: &[S
 }
 
 fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
-    inject_character_display_name_trim(
-        &rust.replace("value . len ()", "value . chars () . count ()"),
-    )
+    rust.replace("value . len ()", "value . chars () . count ()")
 }
 
 /// A path relative to the schemas dir, rendered with POSIX separators, for
@@ -829,6 +848,239 @@ fn dedupe_ref_targets(
     Ok(())
 }
 
+/// True when `path` ends in the given trait/type segment.
+fn path_ends_with(path: &syn::Path, segment: &str) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|last| last.ident == segment)
+}
+
+/// The local type name a generated impl targets: a single-segment path (`Pid`)
+/// or an explicit `self::` prefix (`self::Pid`). Any other multi-segment path
+/// names a different type and is rejected — never matched by suffix.
+fn local_self_type(ty: &syn::Type) -> Option<String> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.leading_colon.is_some() {
+        return None;
+    }
+    let segments: Vec<_> = path.path.segments.iter().collect();
+    match segments.as_slice() {
+        [only] => Some(only.ident.to_string()),
+        [prefix, only] if prefix.ident == "self" => Some(only.ident.to_string()),
+        _ => None,
+    }
+}
+
+/// True when `ty` is `&str`.
+fn is_str_ref(ty: &syn::Type) -> bool {
+    matches!(
+        ty,
+        syn::Type::Reference(reference)
+            if matches!(&*reference.elem, syn::Type::Path(path) if path.path.is_ident("str"))
+    )
+}
+
+/// True when `block` is `impl TryFrom<&str> for _` (any path spelling of the
+/// trait, e.g. `::core::convert::TryFrom`).
+fn try_from_str_impl(block: &syn::ItemImpl) -> bool {
+    let Some((trait_path, _)) = block.trait_.as_ref() else {
+        return false;
+    };
+    if !path_ends_with(trait_path, "TryFrom") {
+        return false;
+    }
+    let Some(last) = trait_path.segments.last() else {
+        return false;
+    };
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    matches!(args.args.first(), Some(syn::GenericArgument::Type(arg)) if is_str_ref(arg))
+}
+
+/// True when `stmt` is the injected `if value.trim() != value { return Err(..) }`
+/// guard, so a second pass cannot stack a duplicate.
+fn is_trim_guard(stmt: &syn::Stmt) -> bool {
+    let syn::Stmt::Expr(syn::Expr::If(if_expr), _) = stmt else {
+        return false;
+    };
+    let syn::Expr::Binary(binary) = &*if_expr.cond else {
+        return false;
+    };
+    if !matches!(binary.op, syn::BinOp::Ne(_)) {
+        return false;
+    }
+    let syn::Expr::MethodCall(call) = &*binary.left else {
+        return false;
+    };
+    call.method == "trim"
+        && matches!(&*binary.right, syn::Expr::Path(path) if path.path.is_ident("value"))
+}
+
+/// Primitive integers a generated newtype may wrap.
+const PRIMITIVE_INTS: &[&str] = &[
+    "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
+];
+
+/// `Some(primitive)` when `ty` is exactly one of [`PRIMITIVE_INTS`].
+fn primitive_int(ty: &syn::Type) -> Option<&'static str> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    if path.qself.is_some() {
+        return None;
+    }
+    PRIMITIVE_INTS
+        .iter()
+        .copied()
+        .find(|primitive| path.path.is_ident(primitive))
+}
+
+/// Local single-field tuple structs over a primitive integer: name → primitive.
+fn primitive_tuple_newtypes(items: &[syn::Item]) -> BTreeMap<String, &'static str> {
+    let mut newtypes = BTreeMap::new();
+    for item in items {
+        let syn::Item::Struct(strukt) = item else {
+            continue;
+        };
+        let syn::Fields::Unnamed(fields) = &strukt.fields else {
+            continue;
+        };
+        if fields.unnamed.len() != 1 {
+            continue;
+        }
+        let Some(primitive) = fields.unnamed.first().and_then(|field| primitive_int(&field.ty))
+        else {
+            continue;
+        };
+        newtypes.insert(strukt.ident.to_string(), primitive);
+    }
+    newtypes
+}
+
+/// The primitive an integer-shaped newtype parses into, read from its
+/// `type Err = <u64 as ::std::str::FromStr>::Err;` associated type. Requires the
+/// qself trait to be `FromStr` and the qself type to be a primitive integer.
+fn from_str_err_primitive(items: &[syn::ImplItem]) -> Option<&'static str> {
+    items.iter().find_map(|item| {
+        let syn::ImplItem::Type(assoc) = item else {
+            return None;
+        };
+        if assoc.ident != "Err" {
+            return None;
+        }
+        let syn::Type::Path(err_ty) = &assoc.ty else {
+            return None;
+        };
+        if !path_ends_with(&err_ty.path, "Err") {
+            return None;
+        }
+        let qself = err_ty.qself.as_ref()?;
+        let trait_segment = err_ty
+            .path
+            .segments
+            .iter()
+            .take(qself.position)
+            .next_back()?;
+        if trait_segment.ident != "FromStr" {
+            return None;
+        }
+        primitive_int(&qself.ty)
+    })
+}
+
+/// `Some((name, borrowed))` for `impl TryFrom<&str> for <name>` (`borrowed`) and
+/// `impl TryFrom<String> for <name>` (`owned`).
+fn try_from_target(item: &syn::Item) -> Option<(String, bool)> {
+    let syn::Item::Impl(block) = item else {
+        return None;
+    };
+    let (trait_path, _) = block.trait_.as_ref()?;
+    if !path_ends_with(trait_path, "TryFrom") {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &trait_path.segments.last()?.arguments else {
+        return None;
+    };
+    let syn::GenericArgument::Type(arg) = args.args.first()? else {
+        return None;
+    };
+    let borrowed = match arg {
+        syn::Type::Reference(reference)
+            if matches!(&*reference.elem, syn::Type::Path(path) if path.path.is_ident("str")) =>
+        {
+            true
+        }
+        syn::Type::Path(path) if path_ends_with(&path.path, "String") => false,
+        _ => return None,
+    };
+    Some((local_self_type(&block.self_ty)?, borrowed))
+}
+
+/// typify 0.10 only emits `TryFrom<&str>` / `TryFrom<String>` for string
+/// newtypes, which drops two public conversions from primitive newtypes (e.g.
+/// `Pid(pub u64)`); restore whichever of the two is missing (borrowed and owned
+/// checked independently) as delegations to the generated `FromStr` so the 0.8
+/// conversion surface stays available to out-of-repo consumers.
+fn restore_primitive_newtype_try_from(file: &mut syn::File) -> Result<(), String> {
+    let newtypes = primitive_tuple_newtypes(&file.items);
+    let mut insertions: Vec<(usize, Vec<syn::Item>)> = Vec::new();
+    for (index, item) in file.items.iter().enumerate() {
+        let syn::Item::Impl(block) = item else {
+            continue;
+        };
+        let Some((trait_path, _)) = block.trait_.as_ref() else {
+            continue;
+        };
+        if !path_ends_with(trait_path, "FromStr") {
+            continue;
+        }
+        let Some(name) = local_self_type(&block.self_ty) else {
+            continue;
+        };
+        // Only a local tuple newtype whose field is the same primitive the
+        // `FromStr` impl parses into qualifies; everything else is skipped.
+        let Some(inner) = from_str_err_primitive(&block.items) else {
+            continue;
+        };
+        if newtypes.get(&name) != Some(&inner) {
+            continue;
+        }
+        let (has_borrowed, has_owned) = file
+            .items
+            .iter()
+            .filter_map(try_from_target)
+            .filter(|(target, _)| target == &name)
+            .fold((false, false), |(borrowed, owned), (_, is_borrowed)| {
+                (borrowed || is_borrowed, owned || !is_borrowed)
+            });
+        let missing: Vec<&str> = match (has_borrowed, has_owned) {
+            (false, false) => vec!["&str", "String"],
+            (false, true) => vec!["&str"],
+            (true, false) => vec!["String"],
+            (true, true) => continue,
+        };
+        let restored: Vec<syn::Item> = missing
+            .into_iter()
+            .map(|arg| {
+                syn::parse_str(&format!(
+                    "impl ::std::convert::TryFrom<{arg}> for {name} {{ \
+                     type Error = <{inner} as ::std::str::FromStr>::Err; \
+                     fn try_from(value: {arg}) -> ::std::result::Result<Self, Self::Error> {{ value.parse() }} }}"
+                ))
+                .map_err(|err| format!("restore TryFrom<{arg}> for {name}: {err}"))
+            })
+            .collect::<Result<_, _>>()?;
+        insertions.push((index, restored));
+    }
+    for (index, items) in insertions.into_iter().rev() {
+        file.items.splice(index + 1..index + 1, items);
+    }
+    Ok(())
+}
+
 /// Formatting pass: render a module as pretty Rust after removing any
 /// `$ref`-target duplicate.
 fn render_module_body(
@@ -836,6 +1088,8 @@ fn render_module_body(
     self_module: &str,
     index: &RefTargetIndex,
 ) -> Result<String, String> {
+    inject_character_display_name_trim(file)?;
+    restore_primitive_newtype_try_from(file)?;
     dedupe_ref_targets(file, self_module, index)?;
     Ok(prettyplease::unparse(file))
 }
@@ -891,20 +1145,23 @@ fn generate_schema_rust(
         .and_then(|title| title.as_str())
         .map(title_to_type_name);
 
-    let mut settings = TypeSpaceSettings::default();
-    // Mirror the proven spoke setting; T4 may tune derives if clippy requires.
-    settings.with_struct_builder(true);
-
-    // typify 0.7 owns a schemars 0.8 `RootSchema` input; cross through JSON,
-    // rather than importing or recreating its schema representation in Nexus.
+    // Cross the schemars schema through JSON rather than coupling to typify's
+    // own schema representation.
     let typify_schema = serde_json::from_value(schema.to_value())
         .map_err(|err| format!("invalid typify input in {}: {err}", schema_path.display()))?;
-    let mut type_space = TypeSpace::new(&settings);
+    let mut type_space = TypeSpace::new(
+        TypeSpaceSettings::default().map_typespace_settings(|s| s.with_struct_builder(true)),
+    );
     type_space
         .add_root_schema(typify_schema)
         .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?;
 
-    let mut rust = rewrite_unicode_scalar_length_checks(&type_space.to_stream().to_string());
+    let mut rust = rewrite_unicode_scalar_length_checks(
+        &type_space
+            .to_stream()
+            .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?
+            .to_string(),
+    );
     if rust.trim().is_empty() {
         return Err(format!(
             "typify produced empty output for {}",

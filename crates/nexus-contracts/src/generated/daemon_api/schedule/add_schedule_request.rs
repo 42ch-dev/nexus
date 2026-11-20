@@ -7,7 +7,7 @@
 #[serde(deny_unknown_fields)]
 pub struct AddScheduleRequest {
     ///Role to provider binding map (A1). Frozen at admission into the run descriptor.
-    #[serde(default, skip_serializing_if = ":: std :: collections :: HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub agent_bindings: ::std::collections::HashMap<
         ::std::string::String,
         AddScheduleRequestAgentBindingsValue,
