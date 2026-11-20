@@ -55,7 +55,7 @@ futures-util = { workspace = true, optional = true }
 [target.'cfg(unix)'.dependencies]
 # Descriptor-relative atomic mutation (openat/renameat/linkat/unlinkat) and the
 # advisory workspace-authority lease. Every use site is `cfg(unix)`-gated.
-nix = { version = "0.31.3", features = ["fs"] }
+nix = { version = "0.32.0", features = ["fs"] }
 
 [dev-dependencies]
 serial_test = "4"
