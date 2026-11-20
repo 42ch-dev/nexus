@@ -194,7 +194,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           # Distinct suffix avoids concurrent cache writers racing with the
           # sqlx, connect-host, and test jobs.
@@ -243,7 +243,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
           workspaces: .
@@ -300,7 +300,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-sqlx
           workspaces: .
@@ -356,7 +356,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-connect-host
           workspaces: .
@@ -392,7 +392,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-provider-conformance
           workspaces: .
@@ -466,7 +466,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-service-native
           workspaces: .
@@ -738,7 +738,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-module-dx
           workspaces: .
@@ -885,7 +885,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-${{ matrix.group }}
           workspaces: .
@@ -971,7 +971,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           # Distinct suffix: this cohort's feature unification differs from
           # rust-tests' groups and rust-clippy-connect-host (same-key
@@ -1032,7 +1032,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           # Distinct suffix: this cohort's feature unification differs from
           # rust-tests' groups, rust-connect-host and rust-clippy-connect-host
@@ -1113,7 +1113,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           # Per-job suffix: this job runs multiple feature graphs; keep its cache
           # separate from concurrent Rust legs that may write under another key.
@@ -1164,7 +1164,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-domain-owners
           workspaces: .
@@ -1210,7 +1210,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-host-execution
           workspaces: .
@@ -1263,7 +1263,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-host-state
           workspaces: .
