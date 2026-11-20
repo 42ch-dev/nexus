@@ -440,7 +440,7 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
 /// - the **persist path** (`build_spoke_upsert_request` in `nexus-daemon-runtime`,
 ///   so the orchestrator's `put_update` recovers the body).
 ///
-/// The **spoke orchestrator read path** (`ScopeQueryPort::list_knowledge_entries`)
+/// The **spoke orchestrator read path** (`KnowledgeQueryPort::list_knowledge_entries`)
 /// must NEVER carry this carrier: it returns spoke entries straight to the
 /// orchestrator, so a leaked carrier would persist into the `extensions` DB
 /// column. [`has_nexus_body`] backs the `debug_assert!` guard at that boundary.
@@ -464,7 +464,7 @@ pub fn set_nexus_body(entry: &mut KnowledgeEntry, body: Option<&Value>) {
 /// Read-only check: does `entry` carry the reserved `_nexus_body` carrier?
 ///
 /// Backs the carrier-boundary guard (see [`NEXUS_BODY_KEY`]): the spoke
-/// orchestrator read path (`ScopeQueryPort::list_knowledge_entries`) asserts
+/// orchestrator read path (`KnowledgeQueryPort::list_knowledge_entries`) asserts
 /// none of its returned entries carry the carrier, so a future caller that
 /// accidentally stashes one on a non-MCA path is caught at test time. Unlike
 /// [`take_nexus_body`], this does not mutate.

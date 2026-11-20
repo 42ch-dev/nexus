@@ -1964,7 +1964,7 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
 /// `scope.entry_types` / `scope.timeline_event_ids`) count for BOTH
 /// `check` and `assemble` (P1 QC fix wave FW-1): the spoke Scope schema
 /// places no `maxItems` on them and the adapter consumes them as IN-list
-/// filters (`ScopeQueryPort::list_knowledge_entries` /
+/// filters (`KnowledgeQueryPort::list_knowledge_entries` /
 /// `list_timeline_events`), so a payload could otherwise carry far more
 /// than 500 logical collection entries under the byte cap.
 fn payload_collection_entries(route: Route, payload: &Value) -> usize {

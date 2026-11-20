@@ -31,8 +31,8 @@ use nexus_spoke_adapter::{
     orchestrate_assemble, orchestrate_check, orchestrate_project, orchestrate_promote,
     orchestrate_upsert, AssembleResponse, CheckRequest, CheckResponse, ComputablePort,
     ComputablePorts, FindingPort, HostManifestPort, KnowledgeEntry, KnowledgeEntryPort,
-    ProjectRequest, PromoteResponse, RelationPort, RuleQueryPort, ScopeQueryPort, SpokeReject,
-    SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
+    KnowledgeQueryPort, ProjectRequest, PromoteResponse, RelationPort, RuleQueryPort,
+    ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde_json::{json, Value};
 use spoke_operations::spoke_ok;
@@ -306,7 +306,7 @@ async fn orchestrate_check_happy_path() {
 // ── 10. (stretch) orchestrate_project — capability-missing reject ──────
 //
 // Constructs a `BaselineOnlyPorts` wrapper around `NexusBaselineMock` that
-// implements the six baseline port families (delegating to the mock) and
+// implements the seven baseline port families (delegating to the mock) and
 // manually implements `ComputablePorts` returning `None` — i.e. it claims
 // the computable capability boundary without backing it with a
 // `ComputablePort` impl. `orchestrate_project` probes
@@ -348,13 +348,17 @@ impl nexus_spoke_adapter::RelationPort for BaselineOnlyPorts {
 }
 
 #[async_trait]
-impl ScopeQueryPort for BaselineOnlyPorts {
+impl KnowledgeQueryPort for BaselineOnlyPorts {
     async fn list_knowledge_entries(
         &self,
         scope: &nexus_spoke_adapter::Scope,
     ) -> SpokeResult<Vec<KnowledgeEntry>> {
         self.0.list_knowledge_entries(scope).await
     }
+}
+
+#[async_trait]
+impl ScopeQueryPort for BaselineOnlyPorts {
     async fn list_timeline_events(
         &self,
         scope: &nexus_spoke_adapter::Scope,

@@ -16,7 +16,8 @@
 #
 # SPOKE lockstep: `spoke-schemas` / `spoke-operations` / `spoke-connect` (cargo)
 # and `@42ch/spoke-schemas` / `@42ch/spoke-operations` (npm) are exact-pinned and
-# must move together with SPOKE_PIN in tooling/check-wire-drift.sh. Dependabot
+# must move together; `tooling/check-wire-drift.sh` derives its pin from the
+# workspace `Cargo.toml`, so no gate edit is needed. Dependabot
 # cannot group across ecosystems, so each ecosystem keeps its own `spoke-*` group
 # and those PRs MUST be reviewed and merged as one coordinated lockstep set
 # (see .agents/knowledge/conventions/spoke-lockstep-upgrade-procedure.md). Never

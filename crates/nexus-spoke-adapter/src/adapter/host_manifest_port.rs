@@ -4,7 +4,7 @@
 //! The self-manifest declares the full capability set proven by the
 //! adapter's port implementations (built by the single shared builder
 //! [`crate::manifest::build_local_host_manifest`], DF-72 N-C0 lock):
-//! - `spoke-baseline` — all six baseline ports (T1).
+//! - `spoke-baseline` — all seven baseline ports (T1).
 //! - `l2-computable` — production `ComputablePort` (T2, 10 tests incl.
 //!   orchestrate round-trip).
 //! - `l5-fork` — production `ForkTimelineQueryPort` (T3, 9 tests;

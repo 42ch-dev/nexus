@@ -167,17 +167,17 @@ nexus42 creator world create --title "E2 demo world"       # creates a world; no
 This guide never writes the SPOKE version as a literal — the lockstep release is
 recorded once, in this repository's manifests: `Cargo.toml` (`spoke-schemas` /
 `spoke-operations` / `spoke-connect`, exact pins) and `package.json`
-(`@42ch/spoke-schemas` / `@42ch/spoke-operations`), mirrored by
-`tooling/check-wire-drift.sh::SPOKE_PIN`. Resolve it rather than copying it:
+(`@42ch/spoke-schemas` / `@42ch/spoke-operations`), and the drift gate reads
+the pin from `Cargo.toml` rather than a copy. Resolve it rather than copying it:
 
 ```bash
 PIN="$(grep -E '^[[:space:]]*spoke-connect[[:space:]]*=' Cargo.toml | sed -E 's/.*"=?([^"]*)".*/\1/')"
 npm install "@42ch/spoke-connect@${PIN}"
 ```
 
-The drift gate (`tooling/check-wire-drift.sh`, gate 1c) still fails if any file
-under `strategy-samples/` carries a `@42ch/spoke-connect@<semver>` literal that
-disagrees with the pinned release.
+These docs carry only the `${PIN}` placeholder resolved above, so the drift
+gate no longer greps this tree; `Cargo.toml` / `package.json` stay the single
+source of the pin and gates 1a/1b check them against each other.
 
 The TypeScript SDK is published as **`@42ch/spoke-connect`** (this is the
 canonical name — not `spoke-connect-ts`), pinned exactly to **that same pinned

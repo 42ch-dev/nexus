@@ -26,6 +26,7 @@ jobs:
       codegen: ${{ steps.filter.outputs.codegen }}
       module-dx: ${{ steps.filter.outputs['module-dx'] }}
       service-native: ${{ steps.filter.outputs['service-native'] }}
+      cohort-fixture: ${{ steps.filter.outputs['cohort-fixture'] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -93,6 +94,12 @@ jobs:
               - 'tooling/check-codegen-callsite-coverage.sh'
               - '.github/workflows/ci.yml'
               - '!**/*.md'
+            # The authoring cohort's own manifest: a PR that changes it must ship
+            # the matching fixture lock (see the bounded lock guard below). This
+            # is an event-range filter, not a worktree diff, because the checkout
+            # already contains the committed manifest.
+            cohort-fixture:
+              - 'tooling/fixtures/authoring-cohorts/Cargo.toml'
             module-dx:
               - 'modules/**'
               - 'schemas/daemon-api/compute/**'
@@ -620,9 +627,26 @@ jobs:
       # the offline runs read. This is also the only CI compile of
       # `nexus-core[execution]` WITHOUT `strategy-authoring`, so skipping the
       # consumer would hide a cfg regression.
+      # The cohort owns an independent lockfile that Dependabot never refreshes,
+      # so a workspace transitive bump must not fail this gate: the unlocked
+      # fetch reconciles that lock against the current graph, and the two
+      # `cargo run --locked --offline` steps then prove the resolved set is used
+      # reproducibly. A change to the cohort's OWN manifest still has to carry
+      # its lock; the cleanliness check below enforces exactly that, and
+      # nothing else.
       - name: Fetch the authoring consumer closure
         timeout-minutes: 15
-        run: cargo fetch --locked --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+        run: cargo fetch --manifest-path tooling/fixtures/authoring-cohorts/Cargo.toml
+      # Bounded guard: only a PR that changes the cohort's OWN manifest must
+      # ship the matching lock. The check runs over the fetch result, which is
+      # the only place the resolved graph is visible — comparing the event range
+      # (the `changes` filter) rather than the worktree, because the checkout
+      # already contains the committed manifest. A workspace transitive bump
+      # rewrites the lock here by design and does not fail this job.
+      - name: Authoring cohort lock follows its own manifest
+        if: ${{ needs.changes.outputs['cohort-fixture'] == 'true' }}
+        timeout-minutes: 2
+        run: git diff --exit-code -- tooling/fixtures/authoring-cohorts/Cargo.lock
       - name: Check graph pins (authoring cohort)
         timeout-minutes: 10
         run: bash tooling/check-graph-pins.sh --cohort authoring

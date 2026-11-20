@@ -89,7 +89,7 @@ export function PatternPickerDialog({
             disabled={!chosen || isComposing}
             className="rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => {
-              if (!chosen || !chosen.id || !chosen.version) return;
+              if (!chosen?.id || !chosen.version) return;
               void onNest({
                 attachNodeId,
                 package: { id: chosen.id, version: chosen.version },

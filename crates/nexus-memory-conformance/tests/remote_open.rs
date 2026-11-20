@@ -81,8 +81,8 @@ use spoke_operations::spoke_schemas::{
     MemoryReflectionsStateRequest, Principal, Relation, Rule, Scope, TimelineEvent,
 };
 use spoke_operations::{
-    FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
-    ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
+    FindingPort, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort, MemoryPort, RelationPort,
+    RuleQueryPort, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
 /// The host's Connect identity (the provider side of the signed session).
@@ -149,11 +149,14 @@ impl RelationPort for MemoryOnlyHost {
 }
 
 #[async_trait]
-impl ScopeQueryPort for MemoryOnlyHost {
+impl KnowledgeQueryPort for MemoryOnlyHost {
     async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         no_baseline()
     }
+}
 
+#[async_trait]
+impl ScopeQueryPort for MemoryOnlyHost {
     async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         no_baseline()
     }

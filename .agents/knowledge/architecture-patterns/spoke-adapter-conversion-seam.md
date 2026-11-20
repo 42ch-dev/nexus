@@ -90,7 +90,7 @@ record.confirm(&membership, base_revision, &conflict_check, &visible_manifests)?
 ### Version bump considerations
 
 When spoke publishes a new version (e.g. 0.11.1 → 0.13.0) that adds typed body fields:
-1. Bump the pin (lockstep the `spoke-schemas` / `spoke-operations` (and `spoke-connect`) dependencies plus the root npm packages and `tooling/check-wire-drift.sh::SPOKE_PIN`)
+1. Bump the pin (lockstep the `spoke-schemas` / `spoke-operations` (and `spoke-connect`) dependencies plus the root npm packages; the drift gate derives its pin from the workspace manifest)
 2. If the new body fields break the conversion functions, adapt them (`..` in a destructuring pattern, or an explicit mapping) — never skip the seam
 3. The two conversion functions are the only extension point — update them when ready to align body content
 

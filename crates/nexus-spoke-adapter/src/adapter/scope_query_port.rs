@@ -1,9 +1,10 @@
-//! `ScopeQueryPort` impl — production for both knowledge entries and
-//! timeline events (spec §7.4 production-vs-stub matrix).
+//! Knowledge/timeline query ports — production for both knowledge entries
+//! (via `KnowledgeQueryPort`) and timeline events (via `ScopeQueryPort`);
+//! spec §7.4 production-vs-stub matrix.
 //!
 //! # Knowledge entries (production)
 //!
-//! [`ScopeQueryPort::list_knowledge_entries`] uses the admitted
+//! [`KnowledgeQueryPort::list_knowledge_entries`] uses the admitted
 //! [`SqliteKbStore::list_by_owner_keyset`] reader for unfiltered scopes
 //! (cap-checked: more than `LIST_BY_WORLD_LIMIT` eligible rows rejects, so
 //! orchestrators never receive a silently incomplete scope). Filtered scopes
@@ -38,7 +39,8 @@ use crate::conversion::knowledge_entry::block_type_to_entry_type;
 use crate::conversion::knowledge_record_to_spoke;
 use crate::extensions::has_nexus_body;
 use crate::{
-    KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
+    KnowledgeEntry, KnowledgeQueryPort, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode,
+    SpokeResult, TimelineEvent,
 };
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
@@ -47,7 +49,7 @@ use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
 use spoke_schemas::ExtensionKey;
 #[async_trait]
-impl ScopeQueryPort for NexusAdapter<'_> {
+impl KnowledgeQueryPort for NexusAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
     ///
     /// v1.191 P1 T8 (durable §4.1/§4.2): the listing is served from the
@@ -162,13 +164,16 @@ impl ScopeQueryPort for NexusAdapter<'_> {
         // assertion catches a future caller that accidentally stashes one.
         debug_assert!(
             !wire.iter().any(has_nexus_body),
-            "ScopeQueryPort::list_knowledge_entries must not carry the _nexus_body carrier \
+            "KnowledgeQueryPort::list_knowledge_entries must not carry the _nexus_body carrier \
              (MCA/persist-only); a leaked carrier would reach the extensions DB column"
         );
 
         SpokeResult::Ok(wire)
     }
+}
 
+#[async_trait]
+impl ScopeQueryPort for NexusAdapter<'_> {
     /// List the timeline events matching the scope (production — V1.145 P3).
     ///
     /// Queries `narrative_timeline_events` via [`list_timeline_events_scoped`]
@@ -261,7 +266,7 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ScopeQueryPort;
+    use crate::{KnowledgeQueryPort, ScopeQueryPort};
     use nexus_contracts::BlockType;
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE};
     use nexus_knowledge::world_kb::store::KbStore;

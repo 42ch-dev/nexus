@@ -271,8 +271,15 @@ regress = "0.12"
 # consumption, codegen bundled-ref resolution, and CI byte-identity gates
 # replaced by verified codegen output. No wire schema, operation or connect API
 # change; libp2p stays =0.57.1.
-spoke-schemas = "=0.16.1"
-spoke-operations = "=0.16.1"
+# 0.16.1 → 0.17.0: upstream splits Knowledge into its own capability — the
+# `port.knowledge.*` / `port.scope.list_knowledge_entries` ops now require the
+# `spoke-knowledge` capability (baseline alone answers `op_unsupported`), and
+# knowledge listing moves from `ScopeQueryPort` to a new `KnowledgeQueryPort`
+# that `BaselinePorts` composes. nexus keeps the remote knowledge face
+# unserved (`LOCAL_CAPABILITIES` unchanged); consumers implement both traits.
+# libp2p stays =0.57.1.
+spoke-schemas = "=0.17.0"
+spoke-operations = "=0.17.0"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
@@ -296,7 +303,7 @@ spoke-operations = "=0.16.1"
 # of every connect build; new normal deps (base64, chrono, getrandom, uuid,
 # serde_jcs); uniffi now optional (nexus enables neither ffi nor bindgen-cli);
 # remote_adapter public API and CapabilityTokenProof/Claims byte-identical.
-spoke-connect = "=0.16.1"
+spoke-connect = "=0.17.0"
 # V1.148 P3 N-C0: libp2p — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # V1.195 P4: 0.56.0 → 0.57.0 — lockstep with spoke-connect 0.14.1 (see the
