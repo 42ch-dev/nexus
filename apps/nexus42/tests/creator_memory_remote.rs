@@ -311,8 +311,8 @@ mod remote {
         Finding, HostCapabilityManifest, KnowledgeEntry, Relation, Rule, Scope, TimelineEvent,
     };
     use spoke_operations::{
-        FindingPort, HostManifestPort, KnowledgeEntryPort, RelationPort, RuleQueryPort,
-        ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
+        FindingPort, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort, RelationPort,
+        RuleQueryPort, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
     };
     use tokio::net::TcpListener;
 
@@ -420,11 +420,14 @@ mod remote {
     }
 
     #[async_trait]
-    impl ScopeQueryPort for MemoryOnlyHost {
+    impl KnowledgeQueryPort for MemoryOnlyHost {
         async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
             no_baseline()
         }
+    }
 
+    #[async_trait]
+    impl ScopeQueryPort for MemoryOnlyHost {
         async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
             no_baseline()
         }

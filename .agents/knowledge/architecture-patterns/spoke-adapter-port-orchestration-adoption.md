@@ -24,7 +24,7 @@ Companion to [`spoke-adapter-conversion-seam.md`](spoke-adapter-conversion-seam.
 
 ## Context
 
-The spoke crate exposes **capability-sliced adapter port traits** (`KnowledgeEntryPort`, `RelationPort`, `ScopeQueryPort`, `FindingPort`, `RuleQueryPort`, `HostManifestPort`; optional `ComputablePort` + `ForkTimelineQueryPort`) and **injection orchestration entrypoints** (`orchestrate_upsert` / `_promote` / `_relate` / `_check` / `_assemble` / `_project` / `_compute` / `_fork_check` / `_fork_assemble`). Orchestrators compose the pure helpers with port I/O — they sequence validate → load stored → apply → put-with-CAS in one call, with the adapter (product) owning persistence behind the port traits.
+The spoke crate exposes **capability-sliced adapter port traits** (`KnowledgeEntryPort`, `KnowledgeQueryPort`, `RelationPort`, `ScopeQueryPort`, `FindingPort`, `RuleQueryPort`, `HostManifestPort`; optional `ComputablePort` + `ForkTimelineQueryPort`) and **injection orchestration entrypoints** (`orchestrate_upsert` / `_promote` / `_relate` / `_check` / `_assemble` / `_project` / `_compute` / `_fork_check` / `_fork_assemble`). Orchestrators compose the pure helpers with port I/O — they sequence validate → load stored → apply → put-with-CAS in one call, with the adapter (product) owning persistence behind the port traits.
 
 This creates a **dual public surface** at the adapter boundary (spec `spoke-adapter-architecture.md` §7.3):
 
@@ -79,7 +79,7 @@ The mock's own CAS branches are adapter-owned (spec: "adapters own transport, pe
 
 ### Mock-test pattern for orchestrator adoption
 
-A reference `BaselinePorts` mock that satisfies all 6 baseline port families lives in `crates/nexus-spoke-adapter/examples/baseline_adapter.rs` (runnable via `cargo run --example baseline_adapter`). The programmatic test twin lives in `tests/orchestration_adoption.rs`. Both reuse the same mock via `#[path = "../examples/baseline_adapter.rs"] mod baseline_adapter;` (compact) or by duplicating (decoupled, more verbose).
+A reference `BaselinePorts` mock that satisfies all 7 baseline port families lives in `crates/nexus-spoke-adapter/examples/baseline_adapter.rs` (runnable via `cargo run --example baseline_adapter`). The programmatic test twin lives in `tests/orchestration_adoption.rs`. Both reuse the same mock via `#[path = "../examples/baseline_adapter.rs"] mod baseline_adapter;` (compact) or by duplicating (decoupled, more verbose).
 
 The mock is **deliberately thin**: `HashMap`/`Vec`-backed storage; CAS is the only non-trivial logic; each port method body is a few lines. No ranking, retrieval, scoring, or product logic. The mock calls `nexus_spoke_adapter::orchestrate_*` — it does NOT reimplement any spoke invariant (the call-boundary invariant §7 applies to the mock too).
 
@@ -140,14 +140,14 @@ A common mistake: collapse both mismatches into `STORED_REVISION_STALE`. They ar
 
 ## Production boundary
 
-The production adapter (`NexusAdapter`) lives in `nexus-spoke-adapter/src/adapter/` and implements all 6 baseline port families against SQLite storage:
+The production adapter (`NexusAdapter`) lives in `nexus-spoke-adapter/src/adapter/` and implements all 7 baseline port families against SQLite storage:
 
 | Family | Status | Backing |
 |--------|--------|---------|
 | `KnowledgeEntryPort` | **Production (CAS)** | `kb_key_blocks` via the CAS path; both `STORED_REVISION_STALE` + `REVISION_CONFLICT` directions |
 | `RelationPort` | **Production (OCC)** | `kb_relationships` (revision column) |
 | `FindingPort` | **Production (batch tx)** | `findings` (batch wrapped in an explicit transaction) |
-| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` by `world_id` |
+| `KnowledgeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` by `world_id` |
 | `ScopeQueryPort.list_timeline_events` | **Production** | `narrative_timeline_events` by world/branch/event ids |
 | `RuleQueryPort` | **Stub (empty)** | no persisted spoke `Rule`; rules come from works config |
 | `HostManifestPort.list_peer_host_capability_manifests` | **Production** | `peer_hosts` (workspace DB); outbound-observation recording — dialer records the dialed peer at `connect()` return; `connect dial` / `connect peers list` CLI |

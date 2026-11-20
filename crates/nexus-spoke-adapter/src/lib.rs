@@ -166,8 +166,8 @@ pub use spoke_operations::{
     orchestrate_fork_check, orchestrate_project, orchestrate_promote, orchestrate_relate,
     orchestrate_upsert, BaselineAdapter, BaselinePorts, CheckRunInput, ComputableAdapter,
     ComputablePort, ComputablePorts, FindingPort, ForkAdapter, ForkPorts, ForkTimelineQueryPort,
-    FullAdapter, FullPorts, HostManifestPort, KnowledgeEntryPort, RelationPort, RuleQueryPort,
-    ScopeQueryPort,
+    FullAdapter, FullPorts, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort, RelationPort,
+    RuleQueryPort, ScopeQueryPort,
 };
 
 // v1.190 P3-T3 — the peer-tool spine's spoke primitives. The peer registry

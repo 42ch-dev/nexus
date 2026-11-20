@@ -13,6 +13,15 @@ publish = false
 # `tooling/check-graph-pins.sh --cohort authoring` asserts both resolved core
 # feature sets, and `src/main.rs` asserts the runtime behaviour each one must
 # produce.
+#
+# Standalone prerequisite: this workspace owns its own lockfile, which is not
+# refreshed by Dependabot. Run `cargo fetch --manifest-path
+# tooling/fixtures/authoring-cohorts/Cargo.toml` (NO `--locked`) first: it
+# reconciles the lock against the current graph, and the following
+# `--locked --offline` runs then use that resolved set. A workspace transitive
+# bump may therefore rewrite this lock locally without being an error; a change
+# to THIS manifest still has to ship its regenerated lock. CI enforces exactly
+# that split.
 [workspace]
 
 [features]

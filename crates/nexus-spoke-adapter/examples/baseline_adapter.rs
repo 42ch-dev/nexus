@@ -37,9 +37,9 @@ use async_trait::async_trait;
 use nexus_spoke_adapter::{
     orchestrate_assemble, orchestrate_promote, orchestrate_relate, AssembleRequest,
     AssembleResponse, Finding, FindingPort, HostCapabilityManifest, HostManifestPort,
-    KnowledgeEntry, KnowledgeEntryPort, PromoteRequest, PromoteResponse, RelateRequest,
-    RelateResponse, Relation, RelationPort, Rule, RuleQueryPort, Scope, ScopeQueryPort,
-    SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
+    KnowledgeEntry, KnowledgeEntryPort, KnowledgeQueryPort, PromoteRequest, PromoteResponse,
+    RelateRequest, RelateResponse, Relation, RelationPort, Rule, RuleQueryPort, Scope,
+    ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
 use serde_json::{json, Map, Value};
 // simplify: `spoke_ok` / `spoke_reject` are convenience constructors for
@@ -61,7 +61,7 @@ use spoke_operations::{spoke_ok, spoke_reject};
 // `#[async_trait] async fn` (Send futures), so the mock must be `Sync`.
 // A production adapter backs these ports with real storage.
 
-/// In-memory store implementing spoke's six baseline port families.
+/// In-memory store implementing spoke's seven baseline port families.
 ///
 /// Visibility note: items here are `pub` so the programmatic test twin at
 /// `tests/orchestration_adoption.rs` can `#[path]`-import this file as a
@@ -359,7 +359,7 @@ impl RelationPort for NexusBaselineMock {
 }
 
 #[async_trait]
-impl ScopeQueryPort for NexusBaselineMock {
+impl KnowledgeQueryPort for NexusBaselineMock {
     async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         // The mock returns all stored entries; spoke's orchestrator applies
         // scope filtering via `filter_knowledge_entries_by_scope`. Re-
@@ -374,7 +374,10 @@ impl ScopeQueryPort for NexusBaselineMock {
                 .collect(),
         )
     }
+}
 
+#[async_trait]
+impl ScopeQueryPort for NexusBaselineMock {
     async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         spoke_ok(self.events.lock().expect("mock events mutex").clone())
     }

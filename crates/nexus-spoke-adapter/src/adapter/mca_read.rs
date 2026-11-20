@@ -25,7 +25,7 @@
 //! filters from `scope.extensions["nexus"]`, reconstructs the equivalent
 //! [`KbQuery`], and delegates to [`SqliteKbStore::query`] — same silent
 //! 500-row window, same in-memory filter + pagination, **no**
-//! reject-on-overflow (the spoke `ScopeQueryPort::list_knowledge_entries`
+//! reject-on-overflow (the spoke `KnowledgeQueryPort::list_knowledge_entries`
 //! reject serves spoke orchestrators, not MCA).
 //!
 //! [`conversion`]: crate::conversion
@@ -78,8 +78,8 @@ impl NexusAdapter<'_> {
     ///
     /// # Limit-semantics decision (HARD)
     ///
-    /// This is an async **inherent** method (not the sync spoke
-    /// [`ScopeQueryPort::list_knowledge_entries`] trait method). MCA must NOT
+    /// This is an async **inherent** method (not the spoke
+    /// [`KnowledgeQueryPort::list_knowledge_entries`] trait method). MCA must NOT
     /// inherit the spoke port's reject-on-overflow contract: that reject
     /// serves spoke orchestrators, while MCA needs the silent-truncate-at-500
     /// window that [`SqliteKbStore::query`] provides. Unifying the two paths
@@ -120,7 +120,7 @@ impl NexusAdapter<'_> {
         // Preserve the pre-T8 MCA window: a wire scope that carries no explicit
         // `limit` reads at most `LIST_BY_WORLD_LIMIT` matching rows and never
         // rejects on overflow (the MCA contract — distinct from the orchestrator
-        // ScopeQueryPort reject). The window is applied AFTER the admitted
+        // KnowledgeQueryPort reject). The window is applied AFTER the admitted
         // selection, so only eligible rows ever occupy it.
         if query.limit.is_none() {
             query.limit = Some(

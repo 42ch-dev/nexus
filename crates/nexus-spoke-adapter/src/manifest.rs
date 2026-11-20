@@ -200,9 +200,9 @@ pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
 ///
 /// `ke-ownership` is a **capability, not an op**: it declares that this host
 /// enforces holder governance on its KE surface — every `KnowledgeEntryPort`
-/// / `ScopeQueryPort` / `RelationPort` / `FindingPort` / `ComputablePort`
-/// call runs inside an admitted request-bound selection and a Scope-bearing
-/// request's declared `viewpoint` can only *narrow* it (the same
+/// / `KnowledgeQueryPort` / `ScopeQueryPort` / `RelationPort` / `FindingPort` /
+/// `ComputablePort` call runs inside an admitted request-bound selection and a
+/// Scope-bearing request's declared `viewpoint` can only *narrow* it (the same
 /// `ke-ownership` conditional requirement `spoke-connect` evaluates for its
 /// scope-bearing remote ops).
 ///
@@ -547,10 +547,11 @@ mod tests {
     /// a capability whose port regressed to a stub stops compiling here.
     fn assert_capability_maps_to_production_port(adapter: &NexusAdapter<'_>, capability: &str) {
         match capability {
-            // spoke-baseline — the six baseline ports (T1/T2-era) are production.
+            // spoke-baseline — the seven baseline ports (T1/T2-era) are production.
             "spoke-baseline" => {
                 let _: &dyn crate::BaselinePorts = adapter;
                 let _: &dyn crate::KnowledgeEntryPort = adapter;
+                let _: &dyn crate::KnowledgeQueryPort = adapter;
                 let _: &dyn crate::RelationPort = adapter;
                 let _: &dyn crate::FindingPort = adapter;
                 let _: &dyn crate::ScopeQueryPort = adapter;
@@ -576,6 +577,7 @@ mod tests {
             // request-bound selection is what enforces the governance axis.
             crate::manifest::CAPABILITY_KE_OWNERSHIP => {
                 let _: &dyn crate::KnowledgeEntryPort = adapter;
+                let _: &dyn crate::KnowledgeQueryPort = adapter;
                 let _: &dyn crate::ScopeQueryPort = adapter;
                 let _: &dyn crate::RelationPort = adapter;
                 let _: &dyn crate::FindingPort = adapter;

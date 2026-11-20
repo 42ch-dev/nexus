@@ -7,7 +7,7 @@
 //!
 //! # What this proves
 //!
-//! 1. The production `NexusAdapter` (six baseline port families backing
+//! 1. The production `NexusAdapter` (seven baseline port families backing
 //!    real `SQLite` storage in `kb_key_blocks`) is genuinely consumable by
 //!    spoke's Surface B orchestrators.
 //! 2. The CAS revision lifecycle works through both orchestrators end-to-end
@@ -40,8 +40,9 @@ use nexus_local_db::{open_pool, run_migrations};
 use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_relate, orchestrate_upsert, FindingPort, HostManifestPort,
-    KnowledgeEntryPort, PromoteRequest, PromoteResponse, RelateRequest, RelationPort,
-    RuleQueryPort, ScopeQueryPort, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
+    KnowledgeEntryPort, KnowledgeQueryPort, PromoteRequest, PromoteResponse, RelateRequest,
+    RelationPort, RuleQueryPort, ScopeQueryPort, SpokeRejectCode, SpokeResult, UpsertRequest,
+    UpsertResponse,
 };
 use serde_json::json;
 use sqlx::Row;
@@ -811,14 +812,17 @@ impl RelationPort for SecondWriterBarrier<'_> {
 }
 
 #[async_trait]
-impl ScopeQueryPort for SecondWriterBarrier<'_> {
+impl KnowledgeQueryPort for SecondWriterBarrier<'_> {
     async fn list_knowledge_entries(
         &self,
         scope: &nexus_spoke_adapter::Scope,
     ) -> SpokeResult<Vec<nexus_spoke_adapter::KnowledgeEntry>> {
         self.adapter.list_knowledge_entries(scope).await
     }
+}
 
+#[async_trait]
+impl ScopeQueryPort for SecondWriterBarrier<'_> {
     async fn list_timeline_events(
         &self,
         scope: &nexus_spoke_adapter::Scope,

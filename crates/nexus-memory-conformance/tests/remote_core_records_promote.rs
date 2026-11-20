@@ -104,8 +104,8 @@ use spoke_operations::spoke_schemas::{
     Rule, Scope, TimelineEvent,
 };
 use spoke_operations::{
-    FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
-    ScopeQueryPort, SpokeRejectCode, SpokeResult,
+    FindingPort, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort, MemoryPort,
+    RelationPort, RuleQueryPort, ScopeQueryPort, SpokeRejectCode, SpokeResult,
 };
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
@@ -200,11 +200,14 @@ impl RelationPort for MemoryOnlyHost {
 }
 
 #[async_trait]
-impl ScopeQueryPort for MemoryOnlyHost {
+impl KnowledgeQueryPort for MemoryOnlyHost {
     async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         no_baseline()
     }
+}
 
+#[async_trait]
+impl ScopeQueryPort for MemoryOnlyHost {
     async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         no_baseline()
     }

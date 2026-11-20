@@ -28,7 +28,7 @@ nexus depends on spoke's published packages directly:
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
 - **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep exact pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
 
-**Lockstep cutover:** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references move together in one custodian checkpoint. The `libp2p` companion pin sits at `=0.57.1`, moving with the `spoke-connect` 0.16.1 lockstep and verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
+**Lockstep cutover:** all three Rust and both root npm pins move together in one custodian checkpoint (`tooling/check-wire-drift.sh` derives its pin from `Cargo.toml`, so it needs no edit). The `libp2p` companion pin stays at `=0.57.1` through the `spoke-connect` 0.17.0 lockstep (upstream's workspace pin is unchanged) and is verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
 `schemas/domain/key-block.schema.json` does not exist, and no nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -442,7 +442,7 @@ Consumers that manage their own storage and only need spoke lifecycle validation
 
 ##### Surface B — Injection orchestration (new)
 
-Consumers **implement** spoke port traits (at minimum the six `BaselinePorts` families) and **call** `orchestrate_*` entrypoints. The orchestration composes pure helpers with port I/O — consumers supply the ports; spoke supplies the lifecycle sequencing.
+Consumers **implement** spoke port traits (at minimum the seven `BaselinePorts` families) and **call** `orchestrate_*` entrypoints. The orchestration composes pure helpers with port I/O — consumers supply the ports; spoke supplies the lifecycle sequencing.
 
 **Port traits (capability-sliced):**
 
@@ -450,14 +450,15 @@ Consumers **implement** spoke port traits (at minimum the six `BaselinePorts` fa
 |---|---|---|---|
 | Knowledge entry persistence | `KnowledgeEntryPort` | Baseline (all) | `put_knowledge_entry(entry, expected_base_revision: Option<u64>)` → `SpokeResult<KnowledgeEntry>` |
 | Relation persistence | `RelationPort` | Baseline (all) | `put_relation(relation)` → `SpokeResult<Relation>` |
-| Scope query | `ScopeQueryPort` | Baseline (all) | `list_knowledge_entries(scope)`, `list_timeline_events(scope)` |
+| Knowledge query | `KnowledgeQueryPort` | Baseline (all) | `list_knowledge_entries(scope)` |
+| Scope query | `ScopeQueryPort` | Baseline (all) | `list_timeline_events(scope)` |
 | Finding persistence | `FindingPort` | Baseline (all) | `put_findings(findings)` → `SpokeResult<Vec<Finding>>` |
 | Rule query | `RuleQueryPort` | Baseline (all) | `list_rules(rule_refs)` → `SpokeResult<Vec<Rule>>` |
 | Host manifest | `HostManifestPort` | Baseline (all) | `get_host_capability_manifest()`, `list_peer_host_capability_manifests()` |
 | Computable session | `ComputablePort` | Optional (`l2-computable`) | `project(request)`, `compute(request)` |
 | Fork timeline query | `ForkTimelineQueryPort` | Optional (`l5-fork`) | `list_fork_timeline_events(scope)` |
 
-**Composition traits:** `BaselinePorts` (blanket over all six baseline families), `ComputablePorts` (baseline + computable), `ForkPorts` (baseline + fork), `FullPorts` (all three).
+**Composition traits:** `BaselinePorts` (blanket over all seven baseline families), `ComputablePorts` (baseline + computable), `ForkPorts` (baseline + fork), `FullPorts` (all three).
 
 **Orchestration entrypoints:**
 
@@ -466,8 +467,8 @@ Consumers **implement** spoke port traits (at minimum the six `BaselinePorts` fa
 | `orchestrate_upsert` | `KnowledgeEntryPort` | Load update context → `validateUpsertKnowledgeEntry` → status/uniqueness helpers → `putKnowledgeEntry(entry, expectedBaseRevision)` |
 | `orchestrate_promote` | `KnowledgeEntryPort` | Load stored entry → terminal/revision gates → `validatePromoteRequest` → `applyPromoteAcceptance` → `putKnowledgeEntry(promoted, expectedBaseRevision)` |
 | `orchestrate_relate` | `RelationPort` | `validateRelateRequest` → `putRelation` |
-| `orchestrate_check` | `ScopeQueryPort`, `RuleQueryPort`, `FindingPort` | Resolve refs → query scoped entries/events → caller-supplied `runChecker` callback → `putFindings` |
-| `orchestrate_assemble` | `ScopeQueryPort` | Query scoped entries/events → `buildAssemblePacket` |
+| `orchestrate_check` | `KnowledgeQueryPort`, `ScopeQueryPort`, `RuleQueryPort`, `FindingPort` | Resolve refs → query scoped entries/events → caller-supplied `runChecker` callback → `putFindings` |
+| `orchestrate_assemble` | `KnowledgeQueryPort`, `ScopeQueryPort` | Query scoped entries/events → `buildAssemblePacket` |
 | `orchestrate_project` | `ComputablePort` | `validateProjectRequest` → `project` |
 | `orchestrate_compute` | `ComputablePort` | `validateComputeRequest` → `compute` |
 | `orchestrate_fork_check` | `ForkTimelineQueryPort` + baseline check | Validate `scope.fork_id` → fork-aware queries → `runChecker` → `putFindings` |
@@ -496,11 +497,11 @@ When a consumer calls an optional orchestrator (`orchestrate_project`, `orchestr
 | Surface | When to use | What consumer does |
 |---|---|---|
 | **A — Pure delegates** | Consumer manages its own storage transactions and only needs spoke lifecycle validation or extension accessors. Examples: `nexus-knowledge` V1.139 confirm() path (status transition only); pact CLI `kb entry list` (extension reads only). | Call `ops::transition_status(entry, to)`, `extensions::get_world_id(entry)`, etc. directly. Consumer owns the transaction, the DB row locking, and the before/after invariants. |
-| **B — Injection orchestration** | Consumer wants spoke to compose the full OCC lifecycle — load, validate, apply, persist — in one call. The consumer implements port traits that map to its persistence layer, and spoke executes the sequencing. Examples: future `nexus-knowledge` write path adopters (compass Roadmap item 1–2); multi-host collaboration scenarios where a single OCC authority per `entry_id` is required. | Implement `BaselinePorts` (six families) on a struct that wraps nexus storage. Call `orchestrate_promote(ports, request)` and the orchestrator handles loading, validation, revision bump, and persistence through your ports. |
+| **B — Injection orchestration** | Consumer wants spoke to compose the full OCC lifecycle — load, validate, apply, persist — in one call. The consumer implements port traits that map to its persistence layer, and spoke executes the sequencing. Examples: future `nexus-knowledge` write path adopters (compass Roadmap item 1–2); multi-host collaboration scenarios where a single OCC authority per `entry_id` is required. | Implement `BaselinePorts` (seven families) on a struct that wraps nexus storage. Call `orchestrate_promote(ports, request)` and the orchestrator handles loading, validation, revision bump, and persistence through your ports. |
 
 **General rule:** if the consumer already has a transaction open and the mutation is a single helper call, Surface A is simpler. If the mutation composes multiple helpers across port families and OCC is required, Surface B encapsulates the sequencing.
 
-**Surface B production storage boundary:** wiring nexus SQLite tables behind the six `BaselinePorts` families is roadmap (compass Roadmap items 1–2). The adapter ships the port traits, orchestration re-exports, a reference in-memory mock, and adoption tests — sufficient to prove the boundary works; production `KnowledgeEntryPort` implementations against `nexus-local-db` ship with the write-path cutover. See iteration compass "Roadmap Position" for the staged cutover plan.
+**Surface B production storage boundary:** wiring nexus SQLite tables behind the seven `BaselinePorts` families is roadmap (compass Roadmap items 1–2). The adapter ships the port traits, orchestration re-exports, a reference in-memory mock, and adoption tests — sufficient to prove the boundary works; production `KnowledgeEntryPort` implementations against `nexus-local-db` ship with the write-path cutover. See iteration compass "Roadmap Position" for the staged cutover plan.
 
 **Production adapter:** the production `BaselinePorts` implementation (`NexusAdapter`) replaces the reference in-memory mock for the four storage-backed families; the mock remains the reference shape for tests. See §7.4 for the production adapter home, family matrix, and CAS contract reuse.
 
@@ -531,7 +532,7 @@ nexus-spoke-adapter/src/
     ── Spoke port trait impls ──
     knowledge_entry_port.rs         ← impl KnowledgeEntryPort for NexusAdapter (CAS + modules_json serialization)
     relation_port.rs                ← impl RelationPort for NexusAdapter (OCC-aware + extensions_nexus_json round-trip)
-    scope_query_port.rs             ← impl ScopeQueryPort for NexusAdapter (list_knowledge_entries + list_timeline_events, both production)
+    scope_query_port.rs             ← impl KnowledgeQueryPort + ScopeQueryPort for NexusAdapter (list_knowledge_entries + list_timeline_events, both production)
     finding_port.rs                 ← impl FindingPort for NexusAdapter
     rule_query_port.rs              ← impl RuleQueryPort for NexusAdapter (production, V1.148 P1)
     host_manifest_port.rs           ← impl HostManifestPort for NexusAdapter (self manifest + list_peer, both production; V1.155 P0 N-C3 closes the last stub)
@@ -622,7 +623,7 @@ Source authorities are `hygiene.rs`, `moment.rs::render_gated_slots`, and
 | `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via `SqliteKbStore` primitives + V1.73 CAS + `modules_json` serialization (spoke `KnowledgeEntry.modules`) | Existing storage with OCC; adapter in spoke-adapter, storage primitives in local-db |
 | `RelationPort` | **Production** (OCC-aware) | `kb_relationships` via `SqliteKbStore` primitives + CAS (`WHERE revision = ?`) + `extensions_nexus_json` round-trip (V1.146 P3) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
 | `FindingPort` | **Production** | `findings` table | Existing storage |
-| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; unfiltered full-world listings reject on >`LIST_BY_WORLD_LIMIT` overflow (no silent truncation for orchestrators). The MCA read path does NOT use this trait method — it uses `SpokeBackedKbStore` → `NexusAdapter::list_knowledge_entries_scoped` reading `scope.extensions["nexus"]` (see §7.4 scope-pushdown contract) | Existing storage; P2 production read via `SpokeBackedKbStore` (MCA only) |
+| `KnowledgeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; unfiltered full-world listings reject on >`LIST_BY_WORLD_LIMIT` overflow (no silent truncation for orchestrators). The MCA read path does NOT use this trait method — it uses `SpokeBackedKbStore` → `NexusAdapter::list_knowledge_entries_scoped` reading `scope.extensions["nexus"]` (see §7.4 scope-pushdown contract) | Existing storage; P2 production read via `SpokeBackedKbStore` (MCA only) |
 | `ScopeQueryPort.list_timeline_events` | **Production** | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | Timeline IS persisted in `narrative_timeline_events` (V1.26 migration); the V1.142 stub was incorrect — data exists, the port just didn't query it |
 | `RuleQueryPort` | **Production** | New `spoke_rules` table (`nexus-local-db`); `list_rules(rule_refs)` maps `rule_id` → spoke `Rule`; unknown refs omitted (not error); empty ref-set → empty | Closes `R-V1142P1-001`. Substrate for Daemon HTTP `POST /v1/daemon/check` (P2). Does **not** imply Connect `check` dispatch (N-C0 refuses all ops). |
 | `HostManifestPort.get_host_capability_manifest` | **Production** (self) | Shared builder: installation `host_id` from `~/.nexus42/device-id`; roles `["data-store"]`; capabilities `spoke-baseline` + `l2-computable` + `l5-fork`; namespaces `["nexus"]` | Honest self-description for adapter + Connect Host hello (`ConnectConfig.local_manifest`) |
@@ -705,11 +706,11 @@ spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `time
 | `offset` | `scope.extensions["nexus"].offset` | in-memory pagination (matches `KbStore::query`) |
 | `computable` | `scope.extensions["nexus"].computable` | in-memory filter (matches `KbStore::query`) |
 
-**Behavior preservation (HARD):** `SpokeBackedKbStore::query` builds a spoke `Scope` (native `entry_types` + `extensions["nexus"]`), then `NexusAdapter::list_knowledge_entries_scoped` extracts the nexus filters from the scope, reconstructs the equivalent `KbQuery`, and delegates to `SqliteKbStore::query` — so it produces a byte-identical `KbQueryResult` to the direct `query` path (same silent 500-row window, same in-memory filter + pagination, **no** reject-on-overflow). The MCA inherent method and the spoke `ScopeQueryPort::list_knowledge_entries` (whose reject-on-overflow serves orchestrators) stay **separate** — unifying them would break one limit contract or the other. The body round-trips losslessly: the adapter stashes the `_nexus_body` carrier on the read path so `spoke_to_world_kb` recovers the exact body (V1.143 body-fidelity mechanism).
+**Behavior preservation (HARD):** `SpokeBackedKbStore::query` builds a spoke `Scope` (native `entry_types` + `extensions["nexus"]`), then `NexusAdapter::list_knowledge_entries_scoped` extracts the nexus filters from the scope, reconstructs the equivalent `KbQuery`, and delegates to `SqliteKbStore::query` — so it produces a byte-identical `KbQueryResult` to the direct `query` path (same silent 500-row window, same in-memory filter + pagination, **no** reject-on-overflow). The MCA inherent method and the spoke `KnowledgeQueryPort::list_knowledge_entries` (whose reject-on-overflow serves orchestrators) stay **separate** — unifying them would break one limit contract or the other. The body round-trips losslessly: the adapter stashes the `_nexus_body` carrier on the read path so `spoke_to_world_kb` recovers the exact body (V1.143 body-fidelity mechanism).
 
 ##### Read-path ScopeQuery adoption
 
-**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `KnowledgeEntryRecord` via the free function `spoke_to_knowledge_record` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
+**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the spoke `KnowledgeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `KnowledgeEntryRecord` via the free function `spoke_to_knowledge_record` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
 
 **P2 scope boundary (explicit):** MCA is the only production consumer cut over. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. **Durable roadmap:** DR-43 (MCA read-path cutover evaluation).
 
@@ -1041,7 +1042,7 @@ nexus depends on spoke's published packages directly:
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
 - **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep exact pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
 
-**Lockstep cutover:** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references move together in one custodian checkpoint. The `libp2p` companion pin sits at `=0.57.1`, moving with the `spoke-connect` 0.16.1 lockstep and verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
+**Lockstep cutover:** all three Rust and both root npm pins move together in one custodian checkpoint (`tooling/check-wire-drift.sh` derives its pin from `Cargo.toml`, so it needs no edit). The `libp2p` companion pin stays at `=0.57.1` through the `spoke-connect` 0.17.0 lockstep (upstream's workspace pin is unchanged) and is verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
 `schemas/domain/key-block.schema.json` does not exist, and no nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -1078,7 +1079,7 @@ All standard lifecycle invariants (promote gate, status transitions, AssemblePac
 ## Where it lives
 
 - `apps/nexus42`
-- `tooling/check-wire-drift.sh::SPOKE_PIN`
+- `Cargo.toml` workspace pins (checked by `tooling/check-wire-drift.sh`)
 - `crates/nexus-spoke-adapter/`
 - `crates/nexus-knowledge/`
 - `tooling/codegen/src/schema-prep.ts`
