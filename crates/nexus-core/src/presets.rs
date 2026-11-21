@@ -893,7 +893,11 @@ fn atomic_write_with_dir_fsync(
             match e.stage {
                 Stage::Write => Err(internal(
                     "FILE_WRITE_ERROR",
-                    format!("cannot write temp file {}: {}", tmp_path.display(), e.source),
+                    format!(
+                        "cannot write temp file {}: {}",
+                        tmp_path.display(),
+                        e.source
+                    ),
                 )),
                 Stage::TempOpen => Err(internal(
                     "FILE_SYNC_ERROR",

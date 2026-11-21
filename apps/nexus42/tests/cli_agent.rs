@@ -70,7 +70,9 @@ fn acp_registry_list_json_format() {
         serde_json::from_str(&stdout).expect("registry list --format json emits JSON");
 
     assert_eq!(json["registry_version"], REGISTRY_VERSION);
-    let agents = json["agents"].as_array().expect("agents should be an array");
+    let agents = json["agents"]
+        .as_array()
+        .expect("agents should be an array");
     let agent = agents
         .iter()
         .find(|agent| agent["id"] == CACHED_AGENT_ID)

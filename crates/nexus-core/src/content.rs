@@ -1038,12 +1038,9 @@ mod tests {
         let temp_path = dir.path().join("chapter.md.tmp.1.1");
         std::fs::write(&temp_path, "staged bytes").expect("seed temp file");
 
-        let err = cleanup_temp_on_failure(
-            Err(std::io::Error::other("join failure")),
-            &temp_path,
-        )
-        .await
-        .expect_err("error propagates");
+        let err = cleanup_temp_on_failure(Err(std::io::Error::other("join failure")), &temp_path)
+            .await
+            .expect_err("error propagates");
         assert_eq!(err.kind(), std::io::ErrorKind::Other);
         assert!(!temp_path.exists(), "failed write leaves no temp file");
 

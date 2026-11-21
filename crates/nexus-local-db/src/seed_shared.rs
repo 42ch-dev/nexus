@@ -104,7 +104,10 @@ impl<'a> WorldSeed<'a> {
 
     /// The world's current timeline head.
     #[must_use]
-    pub const fn with_current_timeline_head_id(mut self, current_timeline_head_id: &'a str) -> Self {
+    pub const fn with_current_timeline_head_id(
+        mut self,
+        current_timeline_head_id: &'a str,
+    ) -> Self {
         self.current_timeline_head_id = Some(current_timeline_head_id);
         self
     }
