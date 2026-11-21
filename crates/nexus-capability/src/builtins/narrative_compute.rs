@@ -562,9 +562,9 @@ async fn handle_compute_error(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::state_delta;
     #[cfg(feature = "wasm")]
     use crate::pool_test_support::fresh_pool;
+    use crate::state_delta;
     #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     #[cfg(feature = "wasm")]

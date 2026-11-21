@@ -38,12 +38,8 @@ use spoke_connect::remote::{
     RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
-use spoke_operations::spoke_schemas::{
-    HostCapabilityManifest, MemoryCaptureRequest, Principal,
-};
-use spoke_operations::{
-    jcs_sha256_hex, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
-};
+use spoke_operations::spoke_schemas::{HostCapabilityManifest, MemoryCaptureRequest, Principal};
+use spoke_operations::{jcs_sha256_hex, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;

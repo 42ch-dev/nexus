@@ -798,7 +798,7 @@ pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::V
 fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     crate::atomic_write::atomic_write(path, &tmp, contents.as_bytes(), false)
-        .map_err(|e| e.into_io())
+        .map_err(crate::atomic_write::AtomicWriteError::into_io)
 }
 
 /// Write the identity cache to disk with an atomic temp-file + rename.

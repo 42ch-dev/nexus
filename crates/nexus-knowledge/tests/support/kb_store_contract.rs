@@ -63,10 +63,8 @@ pub async fn uniqueness_rejects_duplicate<S: KbStore + Sync>(store: &S) {
         .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Hero"))
         .await
         .unwrap_err();
-    assert!(
-        matches!(&err, KbStoreError::Duplicate { owner, name, .. }
-            if owner == &KnowledgeOwnerRef::world("wld_1") && name == "Hero")
-    );
+    assert!(matches!(&err, KbStoreError::Duplicate { owner, name, .. }
+            if owner == &KnowledgeOwnerRef::world("wld_1") && name == "Hero"));
 }
 
 /// Delete is soft: the row stays readable as `deleted` and leaves `list_by_world`.

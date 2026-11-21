@@ -25,8 +25,8 @@ use sqlx::Connection as _;
 use nexus_memory_conformance::{FaultHold, FaultPoint, FixtureFaults};
 
 use support::{
-    bootstrap, context_scope, dto, error_code, error_details, grant_body, is_committed, record_body,
-    result, retry_class, shared_scope, wire, Matrix, OTHER_SUBJECT, SUBJECT,
+    bootstrap, context_scope, dto, error_code, error_details, grant_body, is_committed,
+    record_body, result, retry_class, shared_scope, wire, Matrix, OTHER_SUBJECT, SUBJECT,
 };
 
 /// 64 hex characters: the CAS token shape `state` publishes.
