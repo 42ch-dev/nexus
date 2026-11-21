@@ -13,15 +13,17 @@
 #      rejected;
 #   3. no parallel `KnowledgePort` trait or impl beside `KnowledgeEntryPort`.
 #
-# Each file is read whole and declarations are matched with whitespace
-# (newlines included) between tokens, so `pub(crate)` on one line with
-# `fn name(` on the next is still one declaration, and a string literal
-# containing `//` or `/*` cannot hide the code that follows it.
-#
-# Trade accepted: matching is textual, not a Rust parser, so declaration-looking
-# text inside a comment or a string literal is reported as a definition (a
-# commented-out `pub(crate) fn` fails the gate). That direction is deliberate —
-# a silent pass is the failure this guard exists to prevent.
+# A single lexer pass per file tracks code, `//` line comments, `/* … */` block
+# comments (nested), `"` / raw strings and char literals, and emits a code
+# projection of the same length (non-code characters become spaces, newlines
+# kept). Declarations are matched on that projection with whitespace — newlines
+# included — between tokens, so:
+#   - a declaration-looking comment or string literal is neither counted nor
+#     reported;
+#   - `pub(crate)` on one line with `fn name(` on the next is still one
+#     declaration;
+#   - a comment or string cannot hide the code after it, because no code
+#     character is ever removed from the projection.
 #
 # This guard used to live in `tests/knowledge_entry_port_stub.rs`, which walked
 # the checkout from `cargo test`: not deterministic outside the checkout,
@@ -36,16 +38,21 @@
 # fixtures); the allowed owner path stays relative to that root.
 #
 # `--selftest` asserts these fixture verdicts, all under a `mktemp -d`:
-#   valid              → PASS
-#   missing            → reject (one mapper has no definition)
-#   duplicate          → reject (two definitions of one mapper)
-#   url-string         → reject (`"http://…"` line, then `pub(crate) fn`)
-#   block-string       → reject (`/*` inside a string, then `pub(crate) fn`)
-#   split-visibility   → reject (`pub(crate)` and `fn mapper(` on separate lines)
-#   commented-out      → reject (documented false-positive trade; must not crash)
+#   valid              → PASS (a comment and a string name a mapper; ignored)
+#   missing            → reject, `found 0` (one mapper has no definition)
+#   duplicate          → reject, `found 2` (two definitions of one mapper)
+#   line-comment       → reject, visibility (a `//` line, then a genuine
+#                        `pub(crate) fn` on the following line)
+#   block-string       → reject, visibility (`/*` inside a string, then a
+#                        `pub(crate) fn`)
+#   split-visibility   → reject, visibility (`pub(crate)` and `fn mapper(` on
+#                        separate lines)
+#   comment-only       → reject, `found 0` (real declaration deleted; a comment
+#                        holds the only declaration-shaped text)
+#   string-only        → reject, `found 0` (same, text inside a string literal)
 #   parallel           → reject (parallel `KnowledgePort` trait + impl)
 #
-# Requires bash and perl (perl is used for whole-file matching).
+# Requires bash and perl (perl runs the lexer and whole-file matching).
 #
 # Exit codes:
 #   0 — surface matches: one owner per mapper, no parallel port
@@ -82,6 +89,102 @@ scan() {
 use strict;
 use warnings;
 
+# Returns the source with every non-code character replaced by a space, keeping
+# newlines so byte offsets and line numbers survive. Code characters are copied
+# verbatim, so this can never hide a declaration that is real code.
+sub project_code {
+  my ($src) = @_;
+  my $n = length $src;
+  my $out = '';
+  my $i = 0;
+
+  while ($i < $n) {
+    pos($src) = $i;
+    if ($src =~ /\G([^\/"']+)/gc) {
+      $out .= $1;
+      $i = pos($src);
+      next;
+    }
+
+    my $c = substr($src, $i, 1);
+    my $two = substr($src, $i, 2);
+
+    # `//` to end of line; the newline itself stays code-handled next.
+    if ($two eq '//') {
+      my $end = index($src, "\n", $i);
+      $end = $n if $end < 0;
+      $out .= ' ' x ($end - $i);
+      $i = $end;
+      next;
+    }
+
+    # `/* ... */` with nesting depth, as Rust allows.
+    if ($two eq '/*') {
+      my ($depth, $j) = (0, $i);
+      while ($j < $n) {
+        my $d = substr($src, $j, 2);
+        if ($d eq '/*') { $depth++; $j += 2; next; }
+        if ($d eq '*/') { $depth--; $j += 2; last if $depth == 0; next; }
+        $j++;
+      }
+      my $chunk = substr($src, $i, $j - $i);
+      $chunk =~ tr/\n/ /c;
+      $out .= $chunk;
+      $i = $j;
+      next;
+    }
+
+    # `"..."` or `r"..."` / `r#"..."#` (also `br#"…"#`, `cr#"…"#`).
+    if ($c eq '"') {
+      my $hashes = 0;
+      $hashes++ while $i - $hashes - 1 >= 0 && substr($src, $i - $hashes - 1, 1) eq '#';
+      my $raw = $i - $hashes - 1 >= 0 && substr($src, $i - $hashes - 1, 1) eq 'r';
+      my $j = $i + 1;
+      if ($raw) {
+        my $term = '"' . ('#' x $hashes);
+        my $k = index($src, $term, $j);
+        $j = $k < 0 ? $n : $k + length($term);
+      } else {
+        while ($j < $n) {
+          my $ch = substr($src, $j, 1);
+          if ($ch eq '\\') { $j += 2; next; }
+          $j++;
+          last if $ch eq '"';
+        }
+        $j = $n if $j > $n;
+      }
+      my $chunk = substr($src, $i, $j - $i);
+      $chunk =~ tr/\n/ /c;
+      $out .= $chunk;
+      $i = $j;
+      next;
+    }
+
+    # `'x'`, `'\n'`, `'\u{…}'` are literals; `'a` is a lifetime and stays code.
+    if ($c eq "'") {
+      my $next = substr($src, $i + 1, 1);
+      my $j;
+      if ($next eq '\\') {
+        my $k = index($src, "'", $i + 2);
+        $j = $k < 0 ? $i + 1 : $k + 1;
+      } elsif ($next ne '' && substr($src, $i + 2, 1) eq "'") {
+        $j = $i + 3;
+      }
+      if (defined $j) {
+        my $chunk = substr($src, $i, $j - $i);
+        $chunk =~ tr/\n/ /c;
+        $out .= $chunk;
+        $i = $j;
+        next;
+      }
+    }
+
+    $out .= $c;
+    $i++;
+  }
+  return $out;
+}
+
 my ($listfile, @names) = @ARGV;
 open my $list, '<', $listfile or die "open $listfile: $!";
 while (my $path = <$list>) {
@@ -89,12 +192,13 @@ while (my $path = <$list>) {
   open my $fh, '<', $path or next;
   my $src = do { local $/; <$fh> };
   close $fh;
+  my $code = project_code($src);
 
   for my $name (@names) {
     my $decl = qr/\b((?:pub(?:\s*\([^)]*\))?\s+)?
                     (?:(?:async|unsafe|const|extern(?:\s+"[^"]*")?)\s+)*)
                  fn\s+\Q$name\E\s*\(/x;
-    while ($src =~ /$decl/g) {
+    while ($code =~ /$decl/g) {
       my $line = 1 + (substr($src, 0, $-[0]) =~ tr/\n//);
       my $prefix = $1;
       $prefix =~ s/\s+/ /g;
@@ -105,7 +209,7 @@ while (my $path = <$list>) {
   }
 
   my $port = qr/\b(?:trait\s+KnowledgePort|impl(?:<[^>]*>)?\s+KnowledgePort\s+for)\b/;
-  while ($src =~ /$port/g) {
+  while ($code =~ /$port/g) {
     my $line = 1 + (substr($src, 0, $-[0]) =~ tr/\n//);
     print "PORT\t$path\t$line\n";
   }
@@ -116,7 +220,7 @@ PERL
 
 check() {
   local hits rows count name path line pre failed=0
-  command -v perl >/dev/null 2>&1 || fail "perl is required for whole-file matching"
+  command -v perl >/dev/null 2>&1 || fail "perl is required for the code-state lexer"
   [ -d "$SCAN_ROOT/crates" ] || fail "no crates/ directory under $SCAN_ROOT"
   SCRATCH="$(mktemp "${TMPDIR:-/tmp}/kb-stub-surface.XXXXXX")"
   trap 'rm -f "$SCRATCH"' EXIT
@@ -159,15 +263,17 @@ check() {
 }
 
 # Writes a minimal valid fixture tree: both mappers in the allowed owner, an
-# unrelated `KnowledgeEntryPort` impl, and string literals that carry `//` and
-# `/*` so a naive comment stripper would fail the clean case.
+# unrelated `KnowledgeEntryPort` impl, and a comment plus string literals that
+# name a mapper, so a scan that counts non-code text fails the clean case.
 make_valid_fixture() {
   local dir="$1"
   mkdir -p "$dir/crates/nexus-spoke-adapter/src/conversion" "$dir/crates/consumer/src"
   cat > "$dir/$OWNER" <<'RS'
 const DOC_URL: &str = "http://example";
 const GLOB: &str = "crates/*/*.rs";
+const DOC: &str = "pub fn knowledge_record_to_spoke(entry) -> Wire";
 
+/// The seam is `pub fn knowledge_record_to_spoke(` plus its reverse.
 pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {
     Wire::from(entry)
 }
@@ -207,7 +313,7 @@ selftest() {
     fi
   }
 
-  for case_dir in valid missing duplicate url-string block-string split-visibility commented-out parallel; do
+  for case_dir in valid missing duplicate line-comment block-string split-visibility comment-only string-only parallel; do
     make_valid_fixture "$work/$case_dir"
   done
 
@@ -223,16 +329,16 @@ pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {
 }
 RS
 
-  # url-string: a `//` inside a string must not hide the `pub(crate)` violation
-  # that follows it.
-  { echo 'const ENDPOINT: &str = "http://example/v1";'
-    cat "$work/url-string/$OWNER"
+  # line-comment: a `//` line must not swallow the genuine `pub(crate)`
+  # declaration on the following line.
+  { echo '// The mapper lives on the next line; this comment must not hide it.'
+    cat "$work/line-comment/$OWNER"
   } | sed 's/^pub fn knowledge_record_to_spoke/pub(crate) fn knowledge_record_to_spoke/' \
-    > "$work/url-string/$OWNER.tmp"
-  mv "$work/url-string/$OWNER.tmp" "$work/url-string/$OWNER"
+    > "$work/line-comment/$OWNER.tmp"
+  mv "$work/line-comment/$OWNER.tmp" "$work/line-comment/$OWNER"
 
   # block-string: a `/*` inside a string must not open a comment that swallows
-  # the `pub(crate)` violation after it.
+  # the `pub(crate)` declaration after it.
   { echo 'const PATTERN: &str = "crates/*/*.rs";'
     cat "$work/block-string/$OWNER"
   } | sed 's/^pub fn knowledge_record_to_spoke/pub(crate) fn knowledge_record_to_spoke/' \
@@ -251,11 +357,23 @@ pub fn spoke_to_knowledge_record(entry: Wire) -> Record {
 }
 RS
 
-  # commented-out: reported as a definition (documented trade), never a crash.
-  cat > "$work/commented-out/crates/consumer/src/extra.rs" <<'RS'
-// pub(crate) fn knowledge_record_to_spoke(entry: &Record) -> Wire {
+  # comment-only: the real declaration is gone; a comment holds the only
+  # declaration-shaped text, which must not count as the mapper.
+  sed '/^\/\/\/ The seam/,/^}/d' \
+    "$work/comment-only/$OWNER" > "$work/comment-only/$OWNER.tmp"
+  mv "$work/comment-only/$OWNER.tmp" "$work/comment-only/$OWNER"
+  cat > "$work/comment-only/crates/consumer/src/extra.rs" <<'RS'
+// pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {
 //     Wire::from(entry)
 // }
+RS
+
+  # string-only: same, but the declaration-shaped text sits in a string.
+  sed '/^\/\/\/ The seam/,/^}/d' \
+    "$work/string-only/$OWNER" > "$work/string-only/$OWNER.tmp"
+  mv "$work/string-only/$OWNER.tmp" "$work/string-only/$OWNER"
+  cat > "$work/string-only/crates/consumer/src/extra.rs" <<'RS'
+const SIGNATURE: &str = "pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {";
 RS
 
   # parallel: a second knowledge port trait and its impl.
@@ -270,12 +388,13 @@ impl KnowledgePort for Consumer {
 RS
 
   expect valid 0 "PASS: knowledge-entry seam surface is intact"
-  expect missing 1 "expected exactly one definition of \`fn spoke_to_knowledge_record\`"
+  expect missing 1 "found 0"
   expect duplicate 1 "found 2"
-  expect url-string 1 "must be declared exactly \`pub fn\`"
+  expect line-comment 1 "must be declared exactly \`pub fn\`"
   expect block-string 1 "must be declared exactly \`pub fn\`"
   expect split-visibility 1 "must be declared exactly \`pub fn\`"
-  expect commented-out 1 "found 2"
+  expect comment-only 1 "found 0"
+  expect string-only 1 "found 0"
   expect parallel 1 "parallel \`KnowledgePort\` trait/impl must not exist"
 
   if [ "$failures" -ne 0 ]; then
@@ -284,7 +403,7 @@ RS
     exit 1
   fi
   rm -rf "$work"
-  echo "PASS: self-test — clean tree accepted; missing, duplicate, string-masked, split-visibility, commented-out and parallel-trait fixtures rejected"
+  echo "PASS: self-test — clean tree accepted; missing, duplicate, visibility, comment-only, string-only and parallel-trait fixtures rejected"
 }
 
 case "${1:-}" in
