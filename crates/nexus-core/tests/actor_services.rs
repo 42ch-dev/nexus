@@ -72,14 +72,7 @@ fn assert_invalid_input(err: &CoreError) {
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
     world_with(
         pool,
-        WorldSeed {
-            world_id,
-            owner_creator_id: owner,
-            title: world_id,
-            slug: world_id,
-            workspace_id: "wrk",
-            ..WorldSeed::default()
-        },
+        WorldSeed::new(world_id, owner, world_id, world_id).with_workspace_id("wrk"),
     )
     .await;
 }

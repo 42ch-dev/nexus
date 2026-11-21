@@ -69,19 +69,9 @@ async fn fixture() -> Fixture {
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str, root_branch: Option<&str>) {
     let title = format!("Title {world_id}");
     let slug = format!("slug-{world_id}");
-    world_with(
-        pool,
-        WorldSeed {
-            world_id,
-            owner_creator_id: owner,
-            title: &title,
-            slug: &slug,
-            workspace_id: "ws",
-            root_fork_branch_id: root_branch,
-            ..WorldSeed::default()
-        },
-    )
-    .await;
+    let mut seed = WorldSeed::new(world_id, owner, &title, &slug).with_workspace_id("ws");
+    seed.root_fork_branch_id = root_branch;
+    world_with(pool, seed).await;
 }
 
 #[allow(clippy::too_many_arguments)]

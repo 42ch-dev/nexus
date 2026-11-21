@@ -90,14 +90,7 @@ fn seed_env() -> Env {
 async fn seed_world(pool: &SqlitePool, world_id: &str) {
     world_with(
         pool,
-        WorldSeed {
-            world_id,
-            owner_creator_id: CREATOR,
-            title: world_id,
-            slug: world_id,
-            workspace_id: "wrk",
-            ..WorldSeed::default()
-        },
+        WorldSeed::new(world_id, CREATOR, world_id, world_id).with_workspace_id("wrk"),
     )
     .await;
 }

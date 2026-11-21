@@ -37,14 +37,7 @@ async fn seed(pool: &SqlitePool) {
     ] {
         world_with(
             pool,
-            WorldSeed {
-                world_id: world,
-                owner_creator_id: owner,
-                title: "Pack World",
-                slug: "pack-world",
-                workspace_id: "ws",
-                ..WorldSeed::default()
-            },
+            WorldSeed::new(world, owner, "Pack World", "pack-world").with_workspace_id("ws"),
         )
         .await;
     }

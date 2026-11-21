@@ -90,14 +90,7 @@ async fn seed_env_as(creator: &str) -> Env {
         ensure_creator_row(&pool, creator, "Owner").await.unwrap();
         world_with(
             &pool,
-            WorldSeed {
-                world_id: WORLD,
-                owner_creator_id: creator,
-                title: WORLD,
-                slug: WORLD,
-                workspace_id: "wrk",
-                ..WorldSeed::default()
-            },
+            WorldSeed::new(WORLD, creator, WORLD, WORLD).with_workspace_id("wrk"),
         )
         .await;
         let created = nexus_local_db::create_character_with_initial_binding(

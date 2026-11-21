@@ -593,14 +593,7 @@ mod compute_seam {
     async fn seed_compute_world(pool: &sqlx::SqlitePool) {
         world_with(
             pool,
-            WorldSeed {
-                world_id: WORLD,
-                owner_creator_id: CREATOR,
-                title: "Combat World",
-                slug: "combat-world",
-                workspace_id: "ws",
-                ..WorldSeed::default()
-            },
+            WorldSeed::new(WORLD, CREATOR, "Combat World", "combat-world").with_workspace_id("ws"),
         )
         .await;
         seed_character(pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
