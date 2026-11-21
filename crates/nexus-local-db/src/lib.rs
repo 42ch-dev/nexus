@@ -48,7 +48,6 @@ pub mod prompt_injection;
 pub mod read_scope;
 pub mod reading;
 pub mod runtime_lock;
-pub mod soul_meta;
 pub mod soul_narrative;
 pub mod spoke_rules;
 pub mod work_chapters;
@@ -129,12 +128,6 @@ pub use holders::{
     HolderSubject, KnowledgeHolder, HOLDER_ENTRY_ID_PREFIX, HOLDER_MIGRATION_VERSION,
     HOLDER_STATE_INVALID_CODE,
 };
-
-// Re-export soul_meta types
-pub use soul_meta::{
-    delete as delete_soul_meta, get as get_soul_meta, upsert as upsert_soul_meta, SoulMeta,
-};
-
 // Re-export pending_review types
 pub use pending_review::{
     count_pending_reviews, create_pending_review, delete_pending_review,
