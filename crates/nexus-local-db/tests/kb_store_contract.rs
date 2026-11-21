@@ -22,8 +22,10 @@ async fn fresh_store() -> (tempfile::TempDir, SqliteKbStore) {
         ("wld_1", "Test World", "test-world"),
         ("wld_2", "Second World", "second-world"),
     ] {
-        nexus_local_db::kb_store::seed::world(
-            &pool, world_id, "ctr_test", title, slug, "private", "manual",
+        // The deleted source-unit cases seeded the creator row through
+        // `world_with_display_name`, so `ctr_test` carries display name `Test`.
+        nexus_local_db::kb_store::seed::world_with_display_name(
+            &pool, world_id, "ctr_test", "Test", title, slug, "private", "manual",
         )
         .await;
     }
