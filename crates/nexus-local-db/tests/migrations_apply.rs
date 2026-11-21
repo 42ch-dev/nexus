@@ -42,7 +42,51 @@ async fn migrations_are_idempotent() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap(); // second call is a no-op
+
+    // SAFETY: test-only — snapshot of applied-migration bookkeeping.
+    let migrations_before: Vec<(i64, String, bool, Vec<u8>)> = sqlx::query_as(
+        "SELECT version, description, success, checksum FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    // SAFETY: test-only — read-back of the version row the dispatcher seeds.
+    let version_before: (String,) =
+        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'db_schema_version'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // A second dispatcher call must be a no-op: no migration row is applied
+    // again and no version is rewritten.
+    nexus_local_db::run_migrations(&pool).await.unwrap();
+
+    // SAFETY: test-only — post-call snapshot of the same bookkeeping.
+    let migrations_after: Vec<(i64, String, bool, Vec<u8>)> = sqlx::query_as(
+        "SELECT version, description, success, checksum FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    // SAFETY: test-only — post-call read-back of the version row.
+    let version_after: (String,) =
+        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'db_schema_version'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert!(
+        !migrations_before.is_empty(),
+        "expected applied migration rows before the second run"
+    );
+    assert_eq!(
+        migrations_before, migrations_after,
+        "migration bookkeeping changed on a no-op re-run"
+    );
+    assert_eq!(
+        version_before, version_after,
+        "db_schema_version changed on a no-op re-run"
+    );
 }
 
 /// ADR K1 §3.1–§3.2: the User `KnowledgeStore` and reference registry are
