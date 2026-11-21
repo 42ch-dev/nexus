@@ -152,8 +152,10 @@ host.
 | Memory cap | 64 MiB | `max_memory_mib` | `MemoryCapExceeded` | `StoreLimitsBuilder::memory_size()` resource limiter |
 | Wall-time | 30 seconds | `max_wall_time_ms` | `WallTimeExceeded` | Epoch-interruption watchdog (see §5) |
 
-The defaults are defined as constants in `nexus_compute_policy::SandboxConfig`
-(`crates/nexus-compute-policy/src/lib.rs`); the engine applies them via
+The defaults are defined as module-scope constants `DEFAULT_FUEL`,
+`DEFAULT_MEMORY_MIB`, and `DEFAULT_WALL_TIME` in `nexus_compute_policy`
+(`crates/nexus-compute-policy/src/lib.rs`); `SandboxConfig::default()` derives
+its limits from them, and the engine applies them via
 `crates/nexus-wasm-host/src/engine.rs`:
 
 ```rust
