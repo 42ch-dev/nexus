@@ -42,7 +42,7 @@ const WORK_REF: &str = "test-novel";
 /// Build a fresh migrated pool + seed a world owned by [`OWNER`] and a minimal
 /// `works` row so the reject audit-log path can resolve `WORK_REF` from
 /// `WORK_ID` (R-V150KBED-05).
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
+async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -60,7 +60,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     )
     .await;
     seed_work_for_log(&pool).await;
-    (pool, dir)
+    (dir, pool)
 }
 
 /// Seed a minimal `works` row (`work_id=WORK_ID`, `story_ref=WORK_REF`) so the
@@ -116,7 +116,7 @@ async fn seed_pending(
 
 #[tokio::test]
 async fn pending_lists_candidates_for_owner() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     seed_pending(&pool, "Lin Xia").await;
     seed_pending(&pool, "Marcus Vale").await;
 
@@ -129,7 +129,7 @@ async fn pending_lists_candidates_for_owner() {
 
 #[tokio::test]
 async fn pending_cross_author_returns_403() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     seed_pending(&pool, "Lin Xia").await;
 
     let err = kb_pending(&pool, OTHER, WORLD, None, false, false, None)
@@ -151,7 +151,7 @@ async fn pending_cross_author_returns_403() {
 
 #[tokio::test]
 async fn adopt_creates_confirmed_key_block() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Aria Stormblade").await;
 
     // Adopt.
@@ -178,7 +178,7 @@ async fn adopt_creates_confirmed_key_block() {
 
 #[tokio::test]
 async fn adopt_cross_author_returns_403() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Lin Xia").await;
 
     let err = kb_adopt(&pool, OTHER, &candidate.job_id, None, false)
@@ -204,7 +204,7 @@ async fn adopt_cross_author_returns_403() {
 
 #[tokio::test]
 async fn reject_marks_rejected_and_writes_log() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Rejected Name").await;
 
     kb_reject(&pool, OWNER, &candidate.job_id, Some(dir.path()))
@@ -241,7 +241,7 @@ async fn reject_marks_rejected_and_writes_log() {
 
 #[tokio::test]
 async fn reject_cross_author_returns_403() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Lin Xia").await;
 
     let err = kb_reject(&pool, OTHER, &candidate.job_id, None)
@@ -260,7 +260,7 @@ async fn reject_cross_author_returns_403() {
 
 #[tokio::test]
 async fn adopted_candidate_disappears_from_pending() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let a = seed_pending(&pool, "Alpha").await;
     seed_pending(&pool, "Beta").await;
 
@@ -279,7 +279,7 @@ async fn adopted_candidate_disappears_from_pending() {
 
 #[tokio::test]
 async fn double_adopt_is_rejected() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Gamma").await;
 
     // First adopt succeeds.
@@ -321,7 +321,7 @@ async fn double_adopt_is_rejected() {
 /// pre-flip guard.
 #[tokio::test]
 async fn kb_adopt_failure_rolls_back_insert() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Race Candidate").await;
 
     // Simulate the race winner: a concurrent writer confirms the row before
@@ -403,7 +403,7 @@ async fn kb_adopt_failure_rolls_back_insert() {
 /// row, no orphan log under the wrong path).
 #[tokio::test]
 async fn kb_reject_writes_log_under_work_ref_path() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Path Check").await;
 
     kb_reject(&pool, OWNER, &candidate.job_id, Some(dir.path()))
@@ -458,7 +458,7 @@ async fn kb_reject_writes_log_under_work_ref_path() {
 /// orphan log under a wrong path).
 #[tokio::test]
 async fn kb_reject_fails_when_work_ref_missing() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
 
     // Seed a candidate pointing at a work_id that has NO works row (so
     // resolve_work_ref_for_log returns "work_id does not exist"). We bypass

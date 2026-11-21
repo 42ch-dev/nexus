@@ -27,8 +27,11 @@ pub fn stderr(out: &Output) -> String {
 }
 
 /// Build a fresh migrated pool holding one owner-scoped world and one
-/// `Character` KB entry, and return the entry id plus the tempdir that owns the
-/// database.
+/// `Character` KB entry.
+///
+/// Returns `(dir, pool, entry_id)`. The tempdir owner comes **first** so that
+/// destructuring binds it first and it drops last: the pool must go before the
+/// directory it holds open (Windows cannot unlink an open database).
 ///
 /// Callers differ only in the seed identity and body, so the world
 /// title/slug and the entry summary/tag are parameters. Every call gets its
@@ -41,7 +44,7 @@ pub async fn fresh_pool_with_block(
     slug: &str,
     summary: &str,
     tag: &str,
-) -> (sqlx::SqlitePool, String, tempfile::TempDir) {
+) -> (tempfile::TempDir, sqlx::SqlitePool, String) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -63,5 +66,5 @@ pub async fn fresh_pool_with_block(
         ..Default::default()
     });
     let result = store.insert_knowledge_entry(kb).await.unwrap();
-    (pool, result.entry_id, dir)
+    (dir, pool, result.entry_id)
 }

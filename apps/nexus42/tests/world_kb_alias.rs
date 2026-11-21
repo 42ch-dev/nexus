@@ -184,7 +184,7 @@ async fn canonical_kb_show_shows_seeded_block() {
 /// `kb_delete` soft-deletes the seeded block.
 #[tokio::test]
 async fn canonical_kb_delete_soft_deletes_block() {
-    let (pool, key_block_id, _dir) = fresh_pool_with_block(
+    let (_dir, pool, key_block_id) = fresh_pool_with_block(
         OWNER,
         WORLD,
         CANON_NAME,
@@ -207,7 +207,7 @@ async fn canonical_kb_delete_soft_deletes_block() {
 /// `kb_delete` cross-author returns an error (owner auth gate).
 #[tokio::test]
 async fn canonical_kb_delete_cross_author_rejects() {
-    let (pool, key_block_id, _dir) = fresh_pool_with_block(
+    let (_dir, pool, key_block_id) = fresh_pool_with_block(
         OWNER,
         WORLD,
         CANON_NAME,

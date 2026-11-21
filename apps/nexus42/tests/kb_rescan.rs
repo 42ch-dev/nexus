@@ -36,7 +36,7 @@ const WORK_REF: &str = "xrescan-novel";
 
 /// Build a fresh migrated pool + seed a world (owned by OWNER), a works row
 /// (with `story_ref = WORK_REF` + `world_id = WORLD`). Caller seeds chapters.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
+async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -68,7 +68,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     .execute(&pool)
     .await
     .unwrap();
-    (pool, dir)
+    (dir, pool)
 }
 
 /// Seed a `work_chapters` row for `chapter` (volume 1, finalized) pointing at
@@ -97,7 +97,7 @@ async fn seed_chapter(pool: &sqlx::SqlitePool, ws_dir: &Path, chapter: i32, pros
 
 #[tokio::test]
 async fn cross_chapter_same_entity_collapses_to_one_pending_row() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
     seed_chapter(&pool, dir.path(), 2, "Aelin surveyed the quiet harbor.").await;
     seed_chapter(&pool, dir.path(), 3, "Aelin opened the eastern gate.").await;
@@ -146,7 +146,7 @@ async fn cross_chapter_same_entity_collapses_to_one_pending_row() {
 
 #[tokio::test]
 async fn cross_chapter_distinct_entities_produce_separate_pending_rows() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
     seed_chapter(&pool, dir.path(), 2, "Bran surveyed the harbor.").await;
     seed_chapter(&pool, dir.path(), 3, "Cael opened the eastern gate.").await;
@@ -169,7 +169,7 @@ async fn cross_chapter_distinct_entities_produce_separate_pending_rows() {
 
 #[tokio::test]
 async fn cross_chapter_dry_run_shows_reuse_summary_without_writing() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
     seed_chapter(&pool, dir.path(), 2, "Aelin surveyed the harbor.").await;
     seed_chapter(&pool, dir.path(), 3, "Aelin opened the gate.").await;
@@ -214,7 +214,7 @@ async fn cross_chapter_dry_run_shows_reuse_summary_without_writing() {
 
 #[tokio::test]
 async fn cross_chapter_existing_kb_match_refreshes_body() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
 
     // First scan: produces a pending "Aelin" candidate.
@@ -285,7 +285,7 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
 
 #[tokio::test]
 async fn cross_chapter_stale_candidate_removed_when_name_vanishes_from_all() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
     seed_chapter(&pool, dir.path(), 2, "Bran surveyed the harbor.").await;
 
@@ -326,7 +326,7 @@ async fn cross_chapter_stale_candidate_removed_when_name_vanishes_from_all() {
 
 #[tokio::test]
 async fn cross_chapter_idempotent_rerun_produces_empty_candidate_diff() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
     seed_chapter(&pool, dir.path(), 2, "Aelin surveyed the harbor.").await;
 
@@ -355,7 +355,7 @@ async fn cross_chapter_idempotent_rerun_produces_empty_candidate_diff() {
 #[tokio::test]
 #[cfg(unix)] // advisory file lock is unix-only (V1.153 P2 T2)
 async fn cross_chapter_lock_contention_returns_e_lock() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
 
     // Hold the advisory lock from the test side first.
@@ -384,7 +384,7 @@ async fn cross_chapter_lock_contention_returns_e_lock() {
 #[tokio::test]
 #[cfg(unix)] // advisory file lock is unix-only (V1.153 P2 T2)
 async fn cross_chapter_dry_run_succeeds_under_lock_contention() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
 
     let work_dir = dir.path().join("Works").join(WORK_REF);
@@ -403,7 +403,7 @@ async fn cross_chapter_dry_run_succeeds_under_lock_contention() {
 #[tokio::test]
 #[cfg(unix)] // advisory file lock is unix-only (V1.153 P2 T2)
 async fn cross_chapter_lock_io_failure_returns_e_lock_io() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
 
     // Create a DIRECTORY at the .lock path so opening it as a file fails with
@@ -427,7 +427,7 @@ async fn cross_chapter_lock_io_failure_returns_e_lock_io() {
 
 #[tokio::test]
 async fn cross_chapter_missing_work_returns_clean_error() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked in.").await;
     let err = kb_rescan_work_hermetic(&pool, OWNER, Some(dir.path()), "no-such-work", false)
         .await
@@ -440,7 +440,7 @@ async fn cross_chapter_missing_work_returns_clean_error() {
 
 #[tokio::test]
 async fn cross_chapter_cross_author_returns_403() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked in.").await;
     let err = kb_rescan_work_hermetic(&pool, "ctr_other", Some(dir.path()), WORK_REF, false)
         .await

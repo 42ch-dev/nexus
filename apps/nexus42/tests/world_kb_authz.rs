@@ -30,7 +30,7 @@ const VALID_BODY: &str =
 /// Cross-author `kb_edit` returns `403 WORLD_KB_FORBIDDEN` and does not mutate the row.
 #[tokio::test]
 async fn cross_author_edit_returns_403() {
-    let (pool, block_id, _dir) = fresh_pool_with_block(
+    let (_dir, pool, block_id) = fresh_pool_with_block(
         OWNER,
         WORLD,
         CANON_NAME,
@@ -75,7 +75,7 @@ async fn cross_author_edit_returns_403() {
 /// Cross-author `kb_delete` returns `403 WORLD_KB_FORBIDDEN` and the row survives.
 #[tokio::test]
 async fn cross_author_delete_returns_403() {
-    let (pool, block_id, _dir) = fresh_pool_with_block(
+    let (_dir, pool, block_id) = fresh_pool_with_block(
         OWNER,
         WORLD,
         CANON_NAME,
@@ -113,7 +113,7 @@ async fn cross_author_delete_returns_403() {
 /// Positive control: the world owner can edit and delete.
 #[tokio::test]
 async fn owner_can_edit_and_delete() {
-    let (pool, block_id, _dir) = fresh_pool_with_block(
+    let (_dir, pool, block_id) = fresh_pool_with_block(
         OWNER,
         WORLD,
         CANON_NAME,
