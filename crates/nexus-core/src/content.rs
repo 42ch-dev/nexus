@@ -211,8 +211,9 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// The target is only replaced after the prepare await returns: dropping
 /// this future while the temp write is still queued or in flight leaves the
 /// previous content intact. The commit itself — rename, final-file fsync,
-/// parent-dir fsync — runs synchronously here and is not interruptible once
-/// entered.
+/// parent-dir fsync — runs on a second blocking task only after the
+/// prepare await returns; once entered it is not interruptible, exactly
+/// like the old `tokio::fs::rename`.
 pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
@@ -233,11 +234,26 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
         Err(join) => Err(std::io::Error::other(join)),
     };
 
-    // Commit runs on the still-live caller: a dropped future never reaches
-    // here, so the target keeps its previous content.
-    let write_result = prepare_result.and_then(|()| {
-        crate::atomic_write::commit(&target, &temp_path, true).map_err(|e| e.into_io())
-    });
+    // Commit only runs when the caller is still live: a dropped future
+    // never reaches the second blocking task, so the target keeps its
+    // previous content. It goes through `spawn_blocking` because the
+    // rename + fsyncs must not stall a Tokio worker.
+    let write_result = match prepare_result {
+        Ok(()) => {
+            let commit_target = target.clone();
+            let commit_temp = temp_path.clone();
+            match tokio::task::spawn_blocking(move || {
+                crate::atomic_write::commit(&commit_target, &commit_temp, true)
+                    .map_err(|e| e.into_io())
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(join) => Err(std::io::Error::other(join)),
+            }
+        }
+        Err(e) => Err(e),
+    };
 
     cleanup_temp_on_failure(write_result, &temp_path).await
 }
@@ -1038,9 +1054,13 @@ mod tests {
     }
 
     /// Dropping `fsync_write_atomic` while its prepare stage is still queued
-    /// on the blocking pool leaves the target untouched. The single
-    /// `max_blocking_threads` slot is held parked for the whole test, so the
-    /// prepare cannot start before the timeout — no timing races.
+    /// on the blocking pool leaves the target untouched — and this test
+    /// proves it after prepare actually ran. The single
+    /// `max_blocking_threads` slot is held parked while the write is
+    /// cancelled; the slot is then released and prepare's completion is
+    /// observed by polling for the sibling temp file holding the new bytes.
+    /// Only then is the target asserted, so a design that renamed
+    /// unconditionally after a cancelled prepare would fail here.
     #[test]
     fn cancelled_prepare_leaves_target_content_intact() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -1065,14 +1085,37 @@ mod tests {
                 outcome.is_err(),
                 "prepare must still be queued when the write is cancelled"
             );
+            // Let the parked prepare run: the sibling temp file appearing
+            // with the new bytes is prepare completion, observed rather
+            // than assumed by a fixed sleep.
+            let _ = release_tx.send(());
+            holder.await.expect("holder finishes");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let found = std::fs::read_dir(dir.path())
+                    .expect("read temp dir")
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .any(|p| {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with("chapter.md.tmp."))
+                            && std::fs::read_to_string(&p).is_ok_and(|c| c == "new bytes")
+                    });
+                if found {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "prepare temp file never appeared after the slot was released"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+
             assert_eq!(
                 std::fs::read_to_string(&target).expect("read target"),
                 "old bytes",
                 "cancelled write leaves the previous content in place"
             );
-
-            let _ = release_tx.send(());
-            holder.await.expect("holder finishes");
         });
     }
 }
