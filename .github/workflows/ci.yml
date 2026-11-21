@@ -566,6 +566,10 @@ jobs:
       # gate is visible and the test file stays behavioural.
       - name: Check knowledge-entry seam surface
         run: bash tooling/check-kb-stub-surface.sh
+      # The scanner's fixtures are the only thing keeping its matching honest;
+      # an unrun fixture suite is documentation.
+      - name: Self-test the knowledge-entry seam scanner
+        run: bash tooling/check-kb-stub-surface.sh --selftest
       # V1.174 P0 T6 (AR-74), retargeted for the v1.193 P2 product cohorts:
       # dependency graph pins — structure only (absence, single resolved
       # version, resolved feature set), never a version value: the ordinary

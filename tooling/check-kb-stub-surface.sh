@@ -35,6 +35,11 @@
 # path and the error — it is never skipped, because skipping is how a violation
 # in that file would pass.
 #
+# Known limit: this is a declaration-shaped regex over a code projection, not a
+# Rust parser, so a mapper whose only definition comes from a `macro_rules!`
+# expansion is invisible to it — expansion happens after this guard reads the
+# source.
+#
 # Usage (repository root):
 #   bash tooling/check-kb-stub-surface.sh
 #   bash tooling/check-kb-stub-surface.sh --selftest
