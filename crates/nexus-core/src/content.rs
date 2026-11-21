@@ -205,13 +205,14 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// temp file + fsync + atomic rename + final-file fsync + parent-dir fsync.
 /// The caller owns path-guard resolution, parent-directory creation and the
 /// legacy error-code mapping; the temp file is cleaned up on failure.
-/// The blocking write itself runs through the private
+/// The blocking temp-file write runs through the private
 /// [`crate::atomic_write`] kernel on Tokio's blocking pool.
 ///
-/// `spawn_blocking` runs the kernel to completion once the write starts:
-/// dropping the returned future does not stop it. Two writers racing on
-/// the same target can therefore have the older write land last — callers
-/// hold the work lock for that reason.
+/// The target is only replaced after the prepare await returns: dropping
+/// this future while the temp write is still queued or in flight leaves the
+/// previous content intact. The commit itself — rename, final-file fsync,
+/// parent-dir fsync — runs synchronously here and is not interruptible once
+/// entered.
 pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
@@ -221,22 +222,22 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     let temp_path = target.with_extension(&tmp_extension);
 
     let write_temp = temp_path.clone();
-    let write_target = target.clone();
     let write_content = content.to_string();
-    let write_result = match tokio::task::spawn_blocking(move || {
-        crate::atomic_write::atomic_write(
-            &write_target,
-            &write_temp,
-            write_content.as_bytes(),
-            true,
-        )
-        .map_err(|e| e.into_io())
+    let prepare_result = match tokio::task::spawn_blocking(move || {
+        crate::atomic_write::prepare_temp(&write_temp, write_content.as_bytes())
+            .map_err(|e| e.into_io())
     })
     .await
     {
         Ok(result) => result,
         Err(join) => Err(std::io::Error::other(join)),
     };
+
+    // Commit runs on the still-live caller: a dropped future never reaches
+    // here, so the target keeps its previous content.
+    let write_result = prepare_result.and_then(|()| {
+        crate::atomic_write::commit(&target, &temp_path, true).map_err(|e| e.into_io())
+    });
 
     cleanup_temp_on_failure(write_result, &temp_path).await
 }
@@ -1034,5 +1035,44 @@ mod tests {
             .await
             .expect("ok passes through");
         assert!(temp_path.exists(), "successful write keeps the temp path");
+    }
+
+    /// Dropping `fsync_write_atomic` while its prepare stage is still queued
+    /// on the blocking pool leaves the target untouched. The single
+    /// `max_blocking_threads` slot is held parked for the whole test, so the
+    /// prepare cannot start before the timeout — no timing races.
+    #[test]
+    fn cancelled_prepare_leaves_target_content_intact() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("chapter.md");
+        std::fs::write(&target, "old bytes").expect("seed target");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        rt.block_on(async {
+            let holder = tokio::task::spawn_blocking(move || {
+                let _ = release_rx.blocking_recv();
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let write = fsync_write_atomic(target.clone(), "new bytes");
+            let outcome = tokio::time::timeout(std::time::Duration::from_millis(200), write).await;
+            assert!(
+                outcome.is_err(),
+                "prepare must still be queued when the write is cancelled"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&target).expect("read target"),
+                "old bytes",
+                "cancelled write leaves the previous content in place"
+            );
+
+            let _ = release_tx.send(());
+            holder.await.expect("holder finishes");
+        });
     }
 }
