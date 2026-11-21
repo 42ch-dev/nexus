@@ -218,7 +218,7 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     let write_temp = temp_path.clone();
     let write_target = target.clone();
     let write_content = content.to_string();
-    let write_result = tokio::task::spawn_blocking(move || {
+    let write_result = match tokio::task::spawn_blocking(move || {
         crate::atomic_write::atomic_write(
             &write_target,
             &write_temp,
@@ -228,13 +228,29 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
         .map_err(|e| e.into_io())
     })
     .await
-    .map_err(std::io::Error::other)?;
+    {
+        Ok(result) => result,
+        Err(join) => Err(std::io::Error::other(join)),
+    };
 
-    if let Err(e) = write_result {
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(e);
+    cleanup_temp_on_failure(write_result, &temp_path).await
+}
+
+/// `fsync_write_atomic`'s single failure-exit: remove the caller-owned temp
+/// file and return the error, or pass `Ok` through. Every failure path —
+/// kernel error or blocking-task join failure — funnels through here so the
+/// temp file never survives a failed write.
+async fn cleanup_temp_on_failure(
+    result: std::io::Result<()>,
+    temp_path: &Path,
+) -> std::io::Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = tokio::fs::remove_file(temp_path).await;
+            Err(e)
+        }
     }
-    Ok(())
 }
 
 /// Per-Work advisory runtime lock (single-writer authoring contract, DF-60 §4)
@@ -987,4 +1003,31 @@ async fn patch_chapter(
     lock.release().await;
     let record = updated?;
     to_detail(&record, root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_temp_on_failure_removes_the_temp_file_only_on_error() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let temp_path = dir.path().join("chapter.md.tmp.1.1");
+        std::fs::write(&temp_path, "staged bytes").expect("seed temp file");
+
+        let err = cleanup_temp_on_failure(
+            Err(std::io::Error::other("join failure")),
+            &temp_path,
+        )
+        .await
+        .expect_err("error propagates");
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert!(!temp_path.exists(), "failed write leaves no temp file");
+
+        std::fs::write(&temp_path, "staged bytes").expect("reseed temp file");
+        cleanup_temp_on_failure(Ok(()), &temp_path)
+            .await
+            .expect("ok passes through");
+        assert!(temp_path.exists(), "successful write keeps the temp path");
+    }
 }
