@@ -207,6 +207,11 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// legacy error-code mapping; the temp file is cleaned up on failure.
 /// The blocking write itself runs through the private
 /// [`crate::atomic_write`] kernel on Tokio's blocking pool.
+///
+/// `spawn_blocking` runs the kernel to completion once the write starts:
+/// dropping the returned future does not stop it. Two writers racing on
+/// the same target can therefore have the older write land last — callers
+/// hold the work lock for that reason.
 pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
