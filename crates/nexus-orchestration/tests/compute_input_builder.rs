@@ -66,17 +66,16 @@ async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
 }
 
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
-    // SAFETY: test-only — uses runtime query to avoid duplicating sqlx cache.
-    seed_creator(pool, "ctr_test").await;
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
-         VALUES (?, 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'single', '{}')",
+    nexus_local_db::kb_store::seed::world(
+        pool,
+        world_id,
+        "ctr_test",
+        "Test World",
+        "test-world",
+        "private",
+        "single",
     )
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 async fn seed_world_with_head(pool: &sqlx::SqlitePool, world_id: &str, head_event_id: &str) {
