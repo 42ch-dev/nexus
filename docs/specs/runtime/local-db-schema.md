@@ -77,7 +77,7 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 | `narrative_worlds` | Workspace-local World projections for narrative read paths | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
 | `narrative_timeline_events` | Workspace-local timeline event projections used by `NarrativeGateway` | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
 | `kb_key_blocks` | World-scoped narrative KB KnowledgeEntries persisted in workspace `state.db` | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
-| `kb_source_anchors` | Multi-anchor rows attached to `kb_key_blocks` for `KbStore::attach_source_anchor` / `get_anchors` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
+| `kb_source_anchors` | Multi-anchor rows attached to `kb_key_blocks` for `KbStore::attach_source_anchor` / `get_anchors` | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
 
 > **Retired (V1.231, ADR K1):** `reference_sources` and `knowledge_entries` were dropped by migration `20261111000001_retire_user_and_reference_stores.sql` after their data was archived. No workspace `state.db` carries them, and no runtime path may recreate them.
 
@@ -87,9 +87,9 @@ The reference-source registry is retired (V1.231, [ADR K1 — Data handling](../
 
 ##### 4.1.2 Narrative + World KB persistence
 
-These tables live in the workspace `state.db` and support the persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
+These tables live in the workspace `state.db` and support the persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-knowledge`; `nexus-local-db` owns migration ordering and SQLite mechanics.
 
-The narrative `block_type` vocabulary (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) on `kb_key_blocks.block_type` is validated at the application layer in the `nexus-kb::validation` module; `ValidationMode::Novel` enforces `body.attributes.novel_category` on insert/update. Minimum `body_json` shape per category is enforced in `nexus-kb`, not in raw SQL. `narrative_worlds` rows are added via `creator world create` without altering `kb_key_blocks` DDL beyond existing indexes.
+The narrative `block_type` vocabulary (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) on `kb_key_blocks.block_type` is validated at the application layer in the `nexus-knowledge::world_kb::validation` module; `ValidationMode::Novel` enforces `body.attributes.novel_category` on insert/update. Minimum `body_json` shape per category is enforced in `nexus-knowledge`, not in raw SQL. `narrative_worlds` rows are added via `creator world create` without altering `kb_key_blocks` DDL beyond existing indexes.
 
 `workspace_id` is retained on `narrative_worlds` as the logical workspace binding. The current local schema has no `workspaces` catalog table, so this draft does **not** add a physical workspace FK. If a workspace catalog is introduced later, `narrative_worlds.workspace_id` should become the FK target without changing child table ownership.
 

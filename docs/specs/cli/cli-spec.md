@@ -57,7 +57,7 @@ Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect 
 - **定位**：Nexus CLI 是 **ACP-first 控制面** + **Creator 本地知识面**，不是执行逻辑聚合层。
 - **执行边界**：推理、工具调用、文件输出等执行能力统一经 ACP capability invocation。
 - **运行边界**：编排运行态由 TS/Electron 与 `nexus-core` execution 持有；CLI 不提供 daemon 控制面（控制、声明与可观测经 CLI one-shot 命令与 TS 服务）。
-- **知识边界**：`SOUL` / `memory` 归属 Creator；World/narrative KB 归属 `nexus-kb` + `nexus-narrative`，只在 canonical `creator world kb ...` 下暴露；工作资料是 Work 产物（章节/小节正文），经 `creator world kb queue-extract` / `rescan` 进入 World KB。work-scope 文件索引（`creator kb`）与 User/global knowledge 均已退役（V1.231，ADR K1）。
+- **知识边界**：`SOUL` / `memory` 归属 Creator；World/narrative KB 归属 `nexus-knowledge` + `nexus-narrative`，只在 canonical `creator world kb ...` 下暴露；工作资料是 Work 产物（章节/小节正文），经 `creator world kb queue-extract` / `rescan` 进入 World KB。work-scope 文件索引（`creator kb`）与 User/global knowledge 均已退役（V1.231，ADR K1）。
 
 ---
 
@@ -219,7 +219,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。
 
 - 无 CLI daemon 运行控制；`acp` 保留 registry/probe/agent/session/policy/permission/run，不提供 `acp status|doctor` loopback 诊断。
 - `creator` 统一承载 Creator 本地知识资产：`soul` / `memory` / `world kb` 作为 Creator 子命令，不再分散为平级心智入口。
-- KB 操作入口只有 canonical `creator world kb ...`（`nexus-kb` + `nexus-narrative`）。work-scope `creator kb` 命令组及其文件索引已退役（V1.231，ADR K1），User/global knowledge 同样已退役；两者都没有兼容别名或替代命令组。
+- KB 操作入口只有 canonical `creator world kb ...`（`nexus-knowledge` + `nexus-narrative`）。work-scope `creator kb` 命令组及其文件索引已退役（V1.231，ADR K1），User/global knowledge 同样已退役；两者都没有兼容别名或替代命令组。
 
 #### 6.1 `nexus42 system`（系统命令组）
 
@@ -388,8 +388,8 @@ KB / knowledge 相关 CLI 路由目标固定为：
 | --- | --- | --- | --- | --- |
 | Manage local work files / notes as workspace assets | **retired (V1.231)** — no CLI entrance | — | — | The work-scope `creator kb` file index and its `/v1/daemon/kb/entries` HTTP face are gone (ADR K1). Local work material is a Work artifact (chapter/section prose) and reaches the World KB only through `creator world kb queue-extract` / `rescan`. |
 | Manage narrative knowledge inside a World | `nexus42 creator world kb ... --world-id <world_id>` (canonical — §6.2G) | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No fallback to a local work index (none exists). |
-| Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title`; narrative kind is implicit | `nexus-narrative` + `nexus-kb` | `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
-| Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
+| Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title`; narrative kind is implicit | `nexus-narrative` + `nexus-knowledge` | `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
+| Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-knowledge` | Populate demo world + KB entries for testing. |
 | Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred.** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. |
 | **Assemble local three-domain narrative Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--work-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative and World KB slices | **Shipped (local).** Single assembly SSOT. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores. No User Knowledge slot (retired V1.231), no platform cloud assembly and no daemon context-assemble route. |
 
