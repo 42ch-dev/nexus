@@ -50,11 +50,12 @@ pub async fn arc_pool_dir_first() -> (TempDir, Arc<SqlitePool>) {
     (dir, Arc::new(pool))
 }
 
-/// `(Arc<SqlitePool>, NamedTempFile)` — the run-state suite re-opens the DB by
+/// `(NamedTempFile, Arc<SqlitePool>)` — the run-state suite re-opens the DB by
 /// `db.path()`, so this shape owns a named temp file instead of a dir; that
-/// owner choice is the only step it does not share.
-pub async fn arc_pool_pool_first() -> (Arc<SqlitePool>, NamedTempFile) {
+/// owner choice is the only step it does not share. The owner is the first
+/// element so the pool, declared second, drops first.
+pub async fn arc_pool_file_first() -> (NamedTempFile, Arc<SqlitePool>) {
     let db = NamedTempFile::new().unwrap();
     let pool = Arc::new(engine_pool(db.path()).await);
-    (pool, db)
+    (db, pool)
 }
