@@ -182,7 +182,8 @@ async fn start_listener_for(
 /// `shutdown` on the received clone tears the connection down abruptly, with no
 /// WebSocket close frame, so a signed consumer observes a real broken
 /// transport rather than the client's own graceful close. The receiver resolves
-/// once the peer is accepted, so the caller dials first and awaits it after.
+/// once the signed handshake completes, so the caller dials first and awaits it
+/// after.
 async fn start_listener_with_control(
     memory_service: Arc<dyn RemoteMemoryService>,
     host_manifest: HostCapabilityManifest,
