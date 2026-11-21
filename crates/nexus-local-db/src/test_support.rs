@@ -5,8 +5,14 @@
 //! `let (_dir, pool) = ...` declares `pool` second and drops it first — Windows
 //! cannot unlink a directory a live pool still holds, and `TempDir`'s drop
 //! failure is silent, so the wrong order leaks the directory.
+//!
+//! The file is named `state.db`, the product's name, so a test that has to
+//! reopen the database by path can build it from the returned tempdir.
 
 use sqlx::SqlitePool;
+
+/// The product's local database filename; the tempdir the helpers return holds it.
+const STATE_DB_NAME: &str = "state.db";
 
 /// Open a migrated pool in its own tempdir.
 ///
@@ -15,7 +21,7 @@ use sqlx::SqlitePool;
 /// Panics if the pool cannot be opened or the migrations fail.
 pub async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db");
+    let db_path = dir.path().join(STATE_DB_NAME);
     let pool = crate::open_pool(&db_path).await.unwrap();
     crate::run_migrations(&pool).await.unwrap();
     (dir, pool)
@@ -32,7 +38,7 @@ pub async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 /// Panics if the guarded pool cannot be initialized.
 pub async fn fresh_engine_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db");
+    let db_path = dir.path().join(STATE_DB_NAME);
     let pool = crate::init_engine_pool(&db_path)
         .await
         .unwrap()

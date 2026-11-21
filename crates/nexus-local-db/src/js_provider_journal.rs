@@ -209,27 +209,11 @@ async fn prune_to_cap(pool: &SqlitePool) -> Result<(), LocalDbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::writer_protocol::{init_engine_pool, GuardedPoolOptions};
-
-    /// A real migrated + admitted engine pool, exactly the production shape the
-    /// native core uses, so the writer-protocol guards on the journal table are
-    /// exercised (a plain migrator pool would bypass admission).
-    async fn admitted_pool() -> (tempfile::TempDir, SqlitePool) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("state.db");
-        let guarded = init_engine_pool(
-            &db_path,
-            crate::writer_protocol::BOOTSTRAP_CREATOR_ID,
-            GuardedPoolOptions::default(),
-        )
-        .await
-        .expect("open admitted engine pool");
-        (dir, guarded.clone_pool())
-    }
+    use crate::test_support::fresh_engine_pool;
 
     #[tokio::test]
     async fn orphaned_running_operation_settles_to_interrupted() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         upsert_operation(&pool, "op-1", "sess-1", "mock-acp", "running")
             .await
             .unwrap();
@@ -248,7 +232,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_is_never_downgraded_by_a_late_running_write() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         upsert_operation(&pool, "op-2", "sess-2", "mock-acp", "running")
             .await
             .unwrap();
@@ -265,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn journal_is_bounded_to_the_retention_cap() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         for i in 0..(MAX_JOURNAL_ENTRIES + 10) {
             upsert_operation(
                 &pool,
@@ -292,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn clean_shutdown_forgets_the_session_rows() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         upsert_operation(&pool, "op-3", "sess-3", "mock-acp", "running")
             .await
             .unwrap();
@@ -318,7 +302,7 @@ mod tests {
     /// This proves authorizer/guard behavior, not just compilation.
     #[tokio::test]
     async fn guarded_admission_permits_engine_owner_writes() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         // Engine owner write succeeds (the DAO call above already proves this,
         // but assert directly here for the guard contract).
         upsert_operation(&pool, "op-g", "sess-g", "mock-acp", "running")
@@ -352,7 +336,7 @@ mod tests {
     /// downgrade it, and settle-on-open must not rewrite it to `interrupted`.
     #[tokio::test]
     async fn cancelled_survives_late_running_upsert_and_settle_orphaned() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         upsert_operation(&pool, "op-cancel", "sess-c", "mock-acp", "cancelled")
             .await
             .unwrap();

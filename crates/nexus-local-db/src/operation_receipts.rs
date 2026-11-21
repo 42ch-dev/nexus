@@ -485,23 +485,7 @@ pub fn is_known_consumer(consumer: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::writer_protocol::{init_engine_pool, GuardedPoolOptions};
-
-    /// A real migrated + admitted engine pool, exactly the production shape the
-    /// native core uses, so the writer-protocol guards on the receipt table are
-    /// exercised (a plain migrator pool would bypass admission).
-    async fn admitted_pool() -> (tempfile::TempDir, SqlitePool) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("state.db");
-        let guarded = init_engine_pool(
-            &db_path,
-            crate::writer_protocol::BOOTSTRAP_CREATOR_ID,
-            GuardedPoolOptions::default(),
-        )
-        .await
-        .expect("open admitted engine pool");
-        (dir, guarded.clone_pool())
-    }
+    use crate::test_support::fresh_engine_pool;
 
     fn op_id(suffix: &str) -> String {
         // A wire-shaped id (`op_` + 32 lowercase hex), so the rows mirror
@@ -608,7 +592,7 @@ mod tests {
     /// and an unknown subject is `None` (never a fabricated receipt).
     #[tokio::test]
     async fn receipt_is_reachable_by_consumer_subject() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("aa");
         let begun = begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-subject", "fp-aa").await;
         let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
@@ -645,7 +629,7 @@ mod tests {
     /// again.
     #[tokio::test]
     async fn crashed_running_receipt_is_uncertain_never_reapplied() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("1");
         let begun = begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-1", "fp-1").await;
         assert_eq!(begun.status, STATUS_RUNNING);
@@ -680,7 +664,7 @@ mod tests {
     /// in-progress answer, not a re-apply and not an `uncertain` refusal.
     #[tokio::test]
     async fn live_running_receipt_is_in_progress_not_reapplied() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("2");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-2", "fp-2").await;
         match recover(&pool, &id, true).await.unwrap() {
@@ -697,7 +681,7 @@ mod tests {
     /// terminal row (no second apply, no resurrection).
     #[tokio::test]
     async fn cancelled_receipt_answers_the_replay_without_reapplying() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("3");
         begin_acquired(
             &pool,
@@ -775,7 +759,7 @@ mod tests {
     /// written `running` FIRST and settles terminal.
     #[tokio::test]
     async fn missing_receipt_applies_exactly_once() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("4");
         assert_eq!(
             recover(&pool, &id, false).await.unwrap(),
@@ -817,7 +801,7 @@ mod tests {
     /// unchanged.
     #[tokio::test]
     async fn terminal_receipt_is_never_downgraded() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("5");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5").await;
         let finished = settle_operation(&pool, &id, STATUS_FINISHED, "{\"v\":1}")
@@ -858,7 +842,7 @@ mod tests {
     /// the typed `operation_id_conflict`, and the first writer's row survives.
     #[tokio::test]
     async fn conflicting_fingerprint_is_a_typed_operation_id_conflict() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("6");
         let first = begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-6", "fp-first").await;
         let err = begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-6b", "fp-second")
@@ -883,7 +867,7 @@ mod tests {
     /// settlement status is refused and leaves the receipt running.
     #[tokio::test]
     async fn every_terminal_settlement_carries_exactly_one_payload() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         for (suffix, status) in [
             ("7a", STATUS_FINISHED),
             ("7b", STATUS_FAILED),
@@ -943,7 +927,7 @@ mod tests {
     /// An unknown consumer is refused before any row is written.
     #[tokio::test]
     async fn unknown_consumer_is_refused() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let err = begin_operation(&pool, &op_id("8"), "not_a_consumer", "s", "fp-8")
             .await
             .expect_err("unknown consumer must be refused");
@@ -964,7 +948,7 @@ mod tests {
     /// status, so the answer a replay is served can never be rewritten.
     #[tokio::test]
     async fn schema_pins_terminal_payload_and_terminal_immutability() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
 
         // Malformed terminal shapes: no payload, no terminal stamp, or two
         // payloads — all refused by the CHECK itself.
@@ -1038,7 +1022,7 @@ mod tests {
     /// the replacement insert itself.
     #[tokio::test]
     async fn replacement_insert_cannot_overwrite_a_terminal_receipt() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("e1");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e1", "fp-e1").await;
         let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
@@ -1080,7 +1064,7 @@ mod tests {
     /// settled id's answer.
     #[tokio::test]
     async fn update_replace_cannot_hijack_a_terminal_receipt() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let terminal_id = op_id("e2");
         begin_acquired(&pool, &terminal_id, CONSUMER_COMPUTE_RUN, "run-e2", "fp-e2").await;
         let settled = settle_operation(&pool, &terminal_id, STATUS_FINISHED, r#"{"ok":true}"#)
@@ -1147,7 +1131,7 @@ mod tests {
     /// the settled row must survive byte-identically and no fresh row may appear.
     #[tokio::test]
     async fn explicit_rowid_replacement_cannot_overwrite_a_terminal_receipt() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("e6");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e6", "fp-e6").await;
         let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
@@ -1196,7 +1180,7 @@ mod tests {
     /// running row both survive byte-identically.
     #[tokio::test]
     async fn update_replace_set_rowid_cannot_overwrite_a_terminal_receipt() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let terminal_id = op_id("e8");
         begin_acquired(&pool, &terminal_id, CONSUMER_COMPUTE_RUN, "run-e8", "fp-e8").await;
         let settled = settle_operation(&pool, &terminal_id, STATUS_FINISHED, r#"{"ok":true}"#)
@@ -1260,7 +1244,7 @@ mod tests {
     /// translates.
     #[tokio::test]
     async fn begin_resolves_a_racing_settled_insert_instead_of_erroring() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
 
         for (id, fingerprint, expect_conflict) in [
             (op_id("ea"), "fp-race", false),
@@ -1318,7 +1302,7 @@ mod tests {
     /// still the typed refusal.
     #[tokio::test]
     async fn replaying_a_terminal_receipt_never_reinserts_it() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("e4");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e4", "fp-e4").await;
         let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
@@ -1351,7 +1335,7 @@ mod tests {
     /// itself.
     #[tokio::test]
     async fn receipts_are_guarded_by_the_writer_protocol() {
-        let (dir, pool) = admitted_pool().await;
+        let (dir, pool) = fresh_engine_pool().await;
         let id = op_id("9");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-9", "fp-9").await;
 
@@ -1383,7 +1367,7 @@ mod tests {
     /// told to answer from the stored receipt instead of running it.
     #[tokio::test]
     async fn racing_begin_distinguishes_acquirer_from_loser() {
-        let (_dir, pool) = admitted_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let id = op_id("ff");
         let (first, second) = tokio::join!(
             begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", "fp-race"),
