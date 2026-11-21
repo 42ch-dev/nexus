@@ -59,6 +59,8 @@
 #                        separate lines)
 #   generic-duplicate  → reject, `found 2` (a generic declaration with a nested
 #                        bound, plus the plain owner declaration)
+#   raw-duplicate      → reject, `found 2` (the same mapper declared under the
+#                        raw `r#` spelling in another crate)
 #   comment-only       → reject, `found 0` (real declaration deleted; a comment
 #                        holds the only declaration-shaped text)
 #   string-only        → reject, `found 0` (same, text inside a string literal)
@@ -117,7 +119,6 @@ scan() {
       echo "FAIL: no .rs files found under crates/ or apps/ in $SCAN_ROOT — wrong root or pathspec" >&2
       exit 1
     fi
-    sort -o "$SCRATCH" "$SCRATCH"
 
     perl - "$SCRATCH" "${MAPPERS[@]}" <<'PERL'
 use strict;
@@ -238,9 +239,11 @@ while (my $path = <$list>) {
     # `[<(]` accepts a generic parameter list without parsing its nesting
     # (`fn f<T: Into<U>>`): the token after the name is `<` or `(` exactly when
     # this is a declaration, so a generic definition cannot hide from the count.
+    # `(?:r\#)?` treats the raw spelling as the same Rust identifier (`#` is
+    # escaped because /x would otherwise start a comment).
     my $decl = qr/\b((?:pub(?:\s*\([^)]*\))?\s+)?
                     (?:(?:async|unsafe|const|extern(?:\s+"[^"]*")?)\s+)*)
-                 fn\s+\Q$name\E\s*[<(]/x;
+                 fn\s+(?:r\#)?\Q$name\E\s*[<(]/x;
     while ($code =~ /$decl/g) {
       my $line = 1 + (substr($src, 0, $-[0]) =~ tr/\n//);
       my $prefix = $1;
@@ -358,7 +361,7 @@ selftest() {
     fi
   }
 
-  for case_dir in valid missing duplicate line-comment block-string split-visibility generic-duplicate comment-only string-only parallel; do
+  for case_dir in valid missing duplicate line-comment block-string split-visibility generic-duplicate raw-duplicate comment-only string-only parallel; do
     make_valid_fixture "$work/$case_dir"
   done
 
@@ -410,6 +413,14 @@ pub fn knowledge_record_to_spoke<T: Into<Record>>(entry: T) -> Wire {
 }
 RS
 
+  # raw-duplicate: `r#name` and `name` are the same identifier, so a foreign
+  # declaration under the raw spelling is a second definition.
+  cat > "$work/raw-duplicate/crates/consumer/src/extra.rs" <<'RS'
+pub fn r#knowledge_record_to_spoke(entry: &Record) -> Wire {
+    Wire::from(entry)
+}
+RS
+
   # comment-only: the real declaration is gone; a comment holds the only
   # declaration-shaped text, which must not count as the mapper.
   sed '/^\/\/\/ The seam/,/^}/d' \
@@ -447,6 +458,7 @@ RS
   expect block-string 1 "must be declared exactly \`pub fn\`"
   expect split-visibility 1 "must be declared exactly \`pub fn\`"
   expect generic-duplicate 1 "found 2"
+  expect raw-duplicate 1 "found 2"
   expect comment-only 1 "found 0"
   expect string-only 1 "found 0"
   expect parallel 1 "parallel \`KnowledgePort\` trait/impl must not exist"
@@ -457,7 +469,7 @@ RS
     exit 1
   fi
   rm -rf "$work"
-  echo "PASS: self-test — clean tree accepted; missing, duplicate, visibility, generic-duplicate, comment-only, string-only and parallel-trait fixtures rejected"
+  echo "PASS: self-test — clean tree accepted; missing, duplicate, visibility, generic-duplicate, raw-identifier duplicate, comment-only, string-only and parallel-trait fixtures rejected"
 }
 
 case "${1:-}" in
