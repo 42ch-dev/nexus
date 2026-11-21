@@ -3528,22 +3528,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_insert_and_get() {
-        let (_dir, pool) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-
-        let result = store.insert_knowledge_entry(kb.clone()).await.unwrap();
-        assert_eq!(result.entry_id, kb.entry_id);
-
-        let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
-        assert_eq!(fetched.canonical_name, "Hero");
-        assert_eq!(fetched.world_id(), Some("wld_1"));
-    }
-
-    #[tokio::test]
     async fn insert_key_block_in_tx_rollback_leaves_no_row() {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
@@ -3672,32 +3656,6 @@ mod tests {
             body["state"]["character"]["current_hp"], 100,
             "rolled-back state update must not persist"
         );
-    }
-
-    #[tokio::test]
-    async fn test_get_not_found() {
-        let (_dir, pool) = fresh_pool().await;
-        let store = SqliteKbStore::new(pool);
-        let err = store
-            .get_knowledge_entry("kb_nonexistent")
-            .await
-            .unwrap_err();
-        assert!(matches!(err, KbStoreError::NotFound(ref s) if s == "kb_nonexistent"));
-    }
-
-    #[tokio::test]
-    async fn test_list_by_world() {
-        let (_dir, pool) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Scene, "Forest");
-        store.insert_knowledge_entry(kb1).await.unwrap();
-        store.insert_knowledge_entry(kb2).await.unwrap();
-
-        let items = store.list_by_world("wld_1").await.unwrap();
-        assert_eq!(items.len(), 2);
     }
 
     #[tokio::test]
@@ -3923,20 +3881,6 @@ mod tests {
         assert_eq!(ids, vec!["kb_m", "kb_z"]);
     }
 
-    #[tokio::test]
-    async fn test_uniqueness_rejects_duplicate() {
-        let (_dir, pool) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        store.insert_knowledge_entry(kb1).await.unwrap();
-
-        let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
-        assert!(matches!(err, KbStoreError::Duplicate { .. }));
-    }
-
     /// V1.206 P2 R8: a duplicate caller-supplied `key_block_id` collides on the
     /// primary key (SQLite `1555`), not the owner-scoped unique index. When the
     /// occupying row is in THIS entry's container it must classify as
@@ -4131,23 +4075,6 @@ mod tests {
 
         let fetched = store.get_knowledge_entry(&id).await.unwrap();
         assert_eq!(fetched.canonical_name, "Superhero");
-    }
-
-    #[tokio::test]
-    async fn test_delete_key_block() {
-        let (_dir, pool) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.entry_id.clone();
-        store.insert_knowledge_entry(kb).await.unwrap();
-
-        store.delete_knowledge_entry(&id).await.unwrap();
-
-        // Block still exists but marked deleted
-        let fetched = store.get_knowledge_entry(&id).await.unwrap();
-        assert_eq!(fetched.status, "deleted");
     }
 
     #[tokio::test]

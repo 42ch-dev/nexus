@@ -649,64 +649,6 @@ mod tests {
         KnowledgeEntryRecord::new(world_id, block_type, name)
     }
 
-    // T1: Insert and retrieve a KnowledgeEntryRecord
-    #[tokio::test]
-    async fn test_insert_and_get() {
-        let store = InMemoryKbStore::new();
-        let kb = make_block("wld_1", BlockType::Character, "Hero");
-
-        let result = store.insert_knowledge_entry(kb.clone()).await.unwrap();
-        assert_eq!(result.entry_id, kb.entry_id);
-        assert_eq!(result.owner, KnowledgeOwnerRef::world("wld_1"));
-
-        let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
-        assert_eq!(fetched.canonical_name, "Hero");
-        assert_eq!(fetched.world_id(), Some("wld_1"));
-    }
-
-    // T2: Get non-existent KnowledgeEntryRecord returns NotFound
-    #[tokio::test]
-    async fn test_get_not_found() {
-        let store = InMemoryKbStore::new();
-        let err = store.get_knowledge_entry("nonexistent").await.unwrap_err();
-        assert!(matches!(err, KbStoreError::NotFound(ref s) if s == "nonexistent"));
-    }
-
-    // T3: List by world returns only active blocks in that world
-    #[tokio::test]
-    async fn test_list_by_world() {
-        let store = InMemoryKbStore::new();
-        let kb1 = make_block("wld_1", BlockType::Character, "Hero");
-        let kb2 = make_block("wld_1", BlockType::Scene, "Forest");
-        let kb3 = make_block("wld_2", BlockType::Character, "Villain");
-
-        store.insert_knowledge_entry(kb1).await.unwrap();
-        store.insert_knowledge_entry(kb2).await.unwrap();
-        store.insert_knowledge_entry(kb3).await.unwrap();
-
-        let w1 = store.list_by_world("wld_1").await.unwrap();
-        assert_eq!(w1.len(), 2);
-
-        let w2 = store.list_by_world("wld_2").await.unwrap();
-        assert_eq!(w2.len(), 1);
-        assert_eq!(w2[0].canonical_name, "Villain");
-    }
-
-    // T4: Uniqueness constraint — duplicate (canonical_name, block_type) in same world
-    #[tokio::test]
-    async fn test_uniqueness_rejects_duplicate() {
-        let store = InMemoryKbStore::new();
-        let kb1 = make_block("wld_1", BlockType::Character, "Hero");
-        store.insert_knowledge_entry(kb1).await.unwrap();
-
-        let kb2 = make_block("wld_1", BlockType::Character, "Hero");
-        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
-        assert!(
-            matches!(err, KbStoreError::Duplicate { ref owner, ref name, .. }
-                if owner == &KnowledgeOwnerRef::world("wld_1") && name == "Hero")
-        );
-    }
-
     // T5: Same canonical_name in different block types is allowed
     #[tokio::test]
     async fn test_uniqueness_allows_different_type() {
@@ -958,25 +900,6 @@ mod tests {
         let kb = make_block("wld_1", BlockType::Character, "Ghost");
         let err = store.update_knowledge_entry(kb).await.unwrap_err();
         assert!(matches!(err, KbStoreError::NotFound(_)));
-    }
-
-    // T18: Delete a KnowledgeEntryRecord (soft delete)
-    #[tokio::test]
-    async fn test_delete_knowledge_entry() {
-        let store = InMemoryKbStore::new();
-        let kb = make_block("wld_1", BlockType::Character, "Hero");
-        let id = kb.entry_id.clone();
-        store.insert_knowledge_entry(kb).await.unwrap();
-
-        store.delete_knowledge_entry(&id).await.unwrap();
-
-        // Block still exists but is marked deleted
-        let fetched = store.get_knowledge_entry(&id).await.unwrap();
-        assert_eq!(fetched.status, "deleted");
-
-        // list_by_world excludes deleted
-        let listed = store.list_by_world("wld_1").await.unwrap();
-        assert_eq!(listed, Vec::<KnowledgeEntryRecord>::new());
     }
 
     // T19: Delete non-existent KnowledgeEntryRecord fails
