@@ -30,6 +30,11 @@
 # invisible as a CI gate, and blind to `pub(crate) fn` because it matched only
 # `pub fn`.
 #
+# The scan covers exactly the tracked set (`git ls-files` under `crates/` and
+# `apps/`); a tracked file that cannot be opened or read aborts the run with the
+# path and the error — it is never skipped, because skipping is how a violation
+# in that file would pass.
+#
 # Usage (repository root):
 #   bash tooling/check-kb-stub-surface.sh
 #   bash tooling/check-kb-stub-surface.sh --selftest
@@ -82,7 +87,10 @@ scan() {
     if git rev-parse --git-dir >/dev/null 2>&1; then
       git ls-files -- 'crates/**/*.rs' 'apps/**/*.rs'
     else
-      find crates apps -type f -name '*.rs' 2>/dev/null || true
+      # Fixture trees reach this branch and need not carry an `apps/` root; a
+      # `find` failure still propagates through the pipeline.
+      find crates -type f -name '*.rs'
+      if [ -d apps ]; then find apps -type f -name '*.rs'; fi
     fi | sort > "$SCRATCH"
 
     perl - "$SCRATCH" "${MAPPERS[@]}" <<'PERL'
@@ -189,9 +197,11 @@ my ($listfile, @names) = @ARGV;
 open my $list, '<', $listfile or die "open $listfile: $!";
 while (my $path = <$list>) {
   chomp $path;
-  open my $fh, '<', $path or next;
+  open my $fh, '<', $path or die "FAIL: cannot read $path: $!\n";
   my $src = do { local $/; <$fh> };
+  die "FAIL: cannot read $path: $!\n" if !defined $src && $!;
   close $fh;
+  $src = '' unless defined $src;
   my $code = project_code($src);
 
   for my $name (@names) {
@@ -224,7 +234,9 @@ check() {
   [ -d "$SCAN_ROOT/crates" ] || fail "no crates/ directory under $SCAN_ROOT"
   SCRATCH="$(mktemp "${TMPDIR:-/tmp}/kb-stub-surface.XXXXXX")"
   trap 'rm -f "$SCRATCH"' EXIT
-  hits="$(scan)"
+  # A scan failure (unreadable tracked file, failed listing) aborts; it never
+  # degrades to a partial corpus that could pass.
+  hits="$(scan)" || { rm -f "$SCRATCH"; exit 1; }
 
   for name in "${MAPPERS[@]}"; do
     rows="$(printf '%s\n' "$hits" | awk -F'\t' -v want="$name" '$1 == "MAPPER" && $2 == want')"
