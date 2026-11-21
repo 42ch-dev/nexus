@@ -3465,6 +3465,7 @@ pub async fn read_key_block_revision(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::seed_shared;
     use crate::test_support::fresh_pool;
     use serde_json::{json, Value};
 
@@ -3477,7 +3478,17 @@ mod tests {
 
     /// Seed a world row through the crate's one seed source.
     async fn seed_world_row(pool: &SqlitePool, world_id: &str, title: &str, slug: &str) {
-        seed::world(pool, world_id, "ctr_test", title, slug, "private", "manual").await;
+        seed_shared::world_with_display_name(
+            pool,
+            world_id,
+            "ctr_test",
+            "Test",
+            title,
+            slug,
+            "private",
+            "manual",
+        )
+        .await;
     }
 
     /// The default test world (`wld_1`).

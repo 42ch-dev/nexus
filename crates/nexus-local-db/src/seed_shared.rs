@@ -9,7 +9,8 @@ use sqlx::SqlitePool;
 
 /// Seed a test world row (also seeds a minimal creator for FK).
 ///
-/// Creates a minimal creator row for FK satisfaction if it does not exist.
+/// Creates a minimal creator row for FK satisfaction if it does not exist,
+/// with the owner's id as its display name.
 ///
 /// # Panics
 ///
@@ -23,13 +24,46 @@ pub async fn world(
     visibility: &str,
     time_policy: &str,
 ) {
+    world_with_display_name(
+        pool,
+        world_id,
+        owner_creator_id,
+        owner_creator_id,
+        title,
+        slug,
+        visibility,
+        time_policy,
+    )
+    .await;
+}
+
+/// [`world`] with an explicit creator display name.
+///
+/// A fixture that pins the display name passes it here rather than forking the
+/// inserts; [`world`] keeps the creator id, so its callers seed the row they
+/// always did.
+///
+/// # Panics
+///
+/// Panics if either database insert fails.
+#[allow(clippy::too_many_arguments)] // the seeded row's fields are independent fixture values
+pub async fn world_with_display_name(
+    pool: &SqlitePool,
+    world_id: &str,
+    owner_creator_id: &str,
+    display_name: &str,
+    title: &str,
+    slug: &str,
+    visibility: &str,
+    time_policy: &str,
+) {
     // SAFETY: test-only seed helper — uses runtime query to avoid
     // duplicating sqlx cache entries across crates.
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', datetime('now'), '{}')",
     )
     .bind(owner_creator_id)
-    .bind(owner_creator_id)
+    .bind(display_name)
     .execute(pool)
     .await
     .unwrap();
