@@ -545,11 +545,13 @@ fn gate_reason(row: &nexus_local_db::works::WorkCronRow) -> Option<&'static str>
 /// mitigations hold:
 ///
 /// 1. Each test binary is its own process → its own static.
-/// 2. The lib-test binary (`mod tests`) has only one test
-///    (`cron_fires_at_minute_uses_memoised_schedule`) that touches
-///    `CRON_PARSE_COUNT`; it explicitly calls
-///    `invalidate_cron_schedule_cache()` + `CRON_PARSE_COUNT.store(0)` at
-///    the start and uses unique `(work_id, role)` keys.
+/// 2. Every lib-test (`mod tests`) call into the cached wrapper goes through
+///    `tests::row_fires`, which holds `tests::CRON_TABLE_LOCK` and gives each
+///    table row its own `(work_id, role)` key. The one test that asserts on
+///    `CRON_PARSE_COUNT` (`cron_fires_at_minute_uses_memoised_schedule`)
+///    takes the same lock and calls `invalidate_cron_schedule_cache()` +
+///    `CRON_PARSE_COUNT.store(0)` at the start, so no concurrent parse can
+///    shift its counts.
 /// 3. The integration tests (`tests/cron_supervisor.rs`,
 ///    `tests/review_cron_e2e.rs`) use unique `work_id`s per test
 ///    (`wrk_fire_review`, `wrk_review_gated`, …) so cache-key collisions
@@ -596,35 +598,15 @@ pub fn invalidate_cron_schedule_cache() {
     }
 }
 
-/// Does the cron fire at the minute containing `now` (in the author's TZ)?
-///
-/// Pure building block: parses `cron_expr` on every call. The daemon hot path
-/// uses the cached [`cron_fires_at_minute_for_work`] wrapper instead (qc3
-/// W-001 / R-V150P1CRONBW-03); this pure form is retained as a test-only
-/// fixture that exercises [`schedule_fires_at_minute`] semantics without
-/// going through the in-process cache.
+/// Minute-match check over an already-parsed `Schedule` (no allocation, no
+/// parse). Callers reach it through the cached [`cron_fires_at_minute_for_work`]
+/// wrapper, so production and tests share one evaluation path.
 ///
 /// The cron is evaluated in `tz` (spec §2.1: "Daemon converts to UTC for cron
 /// firing" — the expression is authored in local time). The match is
 /// minute-granular: returns `true` when the expression matches the
 /// `(minute, hour, day, month, weekday)` tuple at `now_local` truncated to the
 /// start of the minute.
-///
-/// Returns `false` on any parse failure (the validator at config time should
-/// have caught malformed expressions; a corrupt stored blob is skipped at the
-/// Work level).
-#[cfg(test)]
-fn cron_fires_at_minute(cron_expr: &str, tz: Tz, now: DateTime<Utc>) -> bool {
-    let normalized = normalize_cron_fields(cron_expr);
-    let Ok(schedule) = cron::Schedule::from_str(&normalized) else {
-        return false;
-    };
-    schedule_fires_at_minute(&schedule, tz, now)
-}
-
-/// Minute-match check over an already-parsed `Schedule` (no allocation, no
-/// parse). Extracted from `cron_fires_at_minute` so the cached path can reuse
-/// the identical semantics without re-parsing.
 fn schedule_fires_at_minute(schedule: &cron::Schedule, tz: Tz, now: DateTime<Utc>) -> bool {
     // Truncate `now` to the start of the minute in the author's TZ.
     let now_local = match tz.from_utc_datetime(&now.naive_utc()) {
@@ -734,6 +716,27 @@ mod tests {
             .unwrap()
     }
 
+    /// Serialises everything that touches the process-global cron cache: the
+    /// memoisation test asserts absolute `CRON_PARSE_COUNT` values, so a
+    /// concurrent row parse would make it flaky.
+    static CRON_TABLE_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Drive one table row through the production wrapper under its own
+    /// `(work_id, role)` key — a repeated key lets one row's cached schedule
+    /// answer another row (D2 / I-000582).
+    fn row_fires(label: &str, cron_expr: &str, tz: Tz, now: DateTime<Utc>) -> bool {
+        let _guard = CRON_TABLE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cron_fires_at_minute_for_work(
+            &format!("wrk_cron_table_{label}"),
+            "cron_table",
+            cron_expr,
+            tz,
+            now,
+        )
+    }
+
     // ── CronFireSummary contract (R-V150-WLA-07) ──────────────────────────
 
     /// R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1 S-001):
@@ -766,17 +769,19 @@ mod tests {
         assert_eq!(default.total_evaluated(), 0);
     }
 
-    // ── cron_fires_at_minute ───────────────────────────────────────────────
+    // ── cron minute matching (production wrapper) ──────────────────────────
 
     #[test]
     fn cron_fires_every_minute_always_matches() {
         // `* * * * *` matches every minute in UTC.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "every_minute_at_0300",
             "* * * * *",
             Tz::UTC,
             utc(2026, 6, 19, 3, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "every_minute_at_0307",
             "* * * * *",
             Tz::UTC,
             utc(2026, 6, 19, 3, 7)
@@ -786,19 +791,22 @@ mod tests {
     #[test]
     fn cron_fires_at_specific_hour_minute_matches() {
         // `0 3 * * *` fires at 03:00 UTC.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "specific_hour_0300",
             "0 3 * * *",
             Tz::UTC,
             utc(2026, 6, 19, 3, 0)
         ));
         // Not at 03:01.
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "specific_hour_0301",
             "0 3 * * *",
             Tz::UTC,
             utc(2026, 6, 19, 3, 1)
         ));
         // Not at 04:00.
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "specific_hour_0400",
             "0 3 * * *",
             Tz::UTC,
             utc(2026, 6, 19, 4, 0)
@@ -808,13 +816,15 @@ mod tests {
     #[test]
     fn cron_fires_comma_lists_match_one_slot() {
         // `0 3,9,15,21 * * *` (brainstorm default) fires at 09:00.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "comma_list_0900",
             DEFAULT_BRAINSTORM_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 9, 0)
         ));
         // Not at 10:00.
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "comma_list_1000",
             DEFAULT_BRAINSTORM_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 10, 0)
@@ -824,17 +834,20 @@ mod tests {
     #[test]
     fn cron_fires_half_hour_pattern() {
         // `0,30 * * * *` (review default) fires at :00 and :30.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "half_hour_1400",
             DEFAULT_REVIEW_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 14, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "half_hour_1430",
             DEFAULT_REVIEW_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 14, 30)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "half_hour_1415",
             DEFAULT_REVIEW_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 14, 15)
@@ -845,13 +858,15 @@ mod tests {
     fn cron_fires_in_author_tz() {
         // `0 3 * * *` in Asia/Shanghai (UTC+8) fires when UTC == 19:00 prev day.
         // 03:00 CST = 2026-06-19 19:00 UTC (2026-06-18).
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "author_tz_1900",
             "0 3 * * *",
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 0)
         ));
         // Not at 19:01 UTC.
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "author_tz_1901",
             "0 3 * * *",
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 1)
@@ -865,40 +880,47 @@ mod tests {
     #[test]
     fn cron_fires_saved_defaults_in_named_author_tz() {
         // brainstorm `0 3,9,15,21 * * *`: 03:00 CST == 19:00 UTC (previous day).
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "saved_brainstorm_fire",
             DEFAULT_BRAINSTORM_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 0)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "saved_brainstorm_miss",
             DEFAULT_BRAINSTORM_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 20, 0)
         ));
         // write `0 4,10,16,22 * * *`: 04:00 CST == 20:00 UTC (previous day),
         // 22:00 CST == 14:00 UTC (same day).
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "saved_write_2000",
             DEFAULT_WRITE_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 20, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "saved_write_1400",
             DEFAULT_WRITE_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 19, 14, 0)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "saved_write_miss",
             DEFAULT_WRITE_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 19, 15, 0)
         ));
         // review `0,30 * * * *`: :00 and :30 every local hour → 03:30 CST is 19:30 UTC.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "saved_review_1930",
             DEFAULT_REVIEW_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 30)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "saved_review_miss",
             DEFAULT_REVIEW_CRON,
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 15)
@@ -914,45 +936,53 @@ mod tests {
     #[test]
     fn cron_fires_named_tz_dst_spring_forward() {
         // 2026-03-29 00:00 UTC == 01:00 CET (UTC+1); 00:30 UTC == 01:30 CET.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "spring_review_0000",
             DEFAULT_REVIEW_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 0, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "spring_review_0030",
             DEFAULT_REVIEW_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 0, 30)
         ));
         // 01:00 UTC == 03:00 CEST (UTC+2) — the local 02:00 hour was skipped.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "spring_review_0100",
             DEFAULT_REVIEW_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 1, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "spring_review_0130",
             DEFAULT_REVIEW_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 1, 30)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "spring_review_miss",
             DEFAULT_REVIEW_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 1, 15)
         ));
         // brainstorm `0 3,9,15,21 * * *`: 03:00 local is 02:00 UTC the day
         // before the jump and 01:00 UTC on the transition day.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "spring_brainstorm_prev_day",
             DEFAULT_BRAINSTORM_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 28, 2, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "spring_brainstorm_transition",
             DEFAULT_BRAINSTORM_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 1, 0)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "spring_brainstorm_miss",
             DEFAULT_BRAINSTORM_CRON,
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 1, 30)
@@ -968,46 +998,54 @@ mod tests {
     #[test]
     fn cron_fires_named_tz_dst_fall_back_ambiguous_hour() {
         // 00:00 / 00:30 EDT (UTC−4): the last unambiguous minutes before the jump.
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "fall_review_0400",
             DEFAULT_REVIEW_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 4, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "fall_review_0430",
             DEFAULT_REVIEW_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 4, 30)
         ));
         // Local 01:00 occurs at 05:00 UTC (EDT) and 06:00 UTC (EST); neither fires.
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "fall_review_0500_miss",
             DEFAULT_REVIEW_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 5, 0)
         ));
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "fall_review_0600_miss",
             DEFAULT_REVIEW_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 6, 0)
         ));
         // Resumes at 02:00 EST (UTC−5).
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "fall_review_0700",
             DEFAULT_REVIEW_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 7, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "fall_review_0730",
             DEFAULT_REVIEW_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 7, 30)
         ));
         // write `0 4,10,16,22 * * *`: the author's 04:00 local moves from
         // 08:00 UTC (EDT) to 09:00 UTC (EST) — 04:00 still fires exactly once.
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "fall_write_0800_miss",
             DEFAULT_WRITE_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 8, 0)
         ));
-        assert!(cron_fires_at_minute(
+        assert!(row_fires(
+            "fall_write_0900",
             DEFAULT_WRITE_CRON,
             Tz::America__New_York,
             utc(2026, 11, 1, 9, 0)
@@ -1016,12 +1054,18 @@ mod tests {
 
     #[test]
     fn cron_fires_garbage_returns_false() {
-        assert!(!cron_fires_at_minute(
+        assert!(!row_fires(
+            "garbage_text",
             "not a cron",
             Tz::UTC,
             utc(2026, 6, 19, 3, 0)
         ));
-        assert!(!cron_fires_at_minute("", Tz::UTC, utc(2026, 6, 19, 3, 0)));
+        assert!(!row_fires(
+            "garbage_empty",
+            "",
+            Tz::UTC,
+            utc(2026, 6, 19, 3, 0)
+        ));
     }
 
     // ── cron_fires_at_minute_for_work (R-V150P1CRONBW-03 memoisation) ───────
@@ -1032,6 +1076,10 @@ mod tests {
     /// fresh parse. Asserts via the `CRON_PARSE_COUNT` instrumented counter.
     #[test]
     fn cron_fires_at_minute_uses_memoised_schedule() {
+        // Hold the table lock so no concurrent row parse shifts the counts.
+        let _guard = CRON_TABLE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Start from a known-empty cache + zeroed counter so the assertions
         // are independent of test-execution order within the lib binary.
         invalidate_cron_schedule_cache();
