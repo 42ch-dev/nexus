@@ -28,7 +28,6 @@ mod support;
 use std::sync::Arc;
 
 use futures_util::FutureExt as _;
-use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
@@ -40,17 +39,13 @@ use spoke_operations::spoke_schemas::Principal;
 use spoke_operations::MemoryPort;
 
 use support::{
-    assert_no_receipt_disclosure, bootstrap, capture_body, context_scope, error_code, is_committed,
-    principal, receipt_id, record_ids, result, retry_class, run_matrix_scenario, shared_scope,
-    Actor, DurableState, Kind, Matrix, OwnedResources, TaskSet, CONTEXT, OTHER_CONTEXT, SUBJECT,
-    TEXT,
+    assert_no_receipt_disclosure, bootstrap, capture_body, context_scope, dto, error_code,
+    is_committed, principal, receipt_id, record_ids, result, retry_class, run_matrix_scenario,
+    shared_scope, Actor, DurableState, Kind, Matrix, OwnedResources, TaskSet, CONTEXT,
+    OTHER_CONTEXT, SUBJECT, TEXT,
 };
 
 const OUTSIDE_CONTEXT: &str = "ctx_c090_outside";
-
-fn dto<T: DeserializeOwned>(value: Value) -> T {
-    serde_json::from_value(value).expect("wire-valid request")
-}
 
 fn candidates(body: &Value) -> Vec<String> {
     body["candidates"]

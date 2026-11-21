@@ -59,21 +59,9 @@ fn novel_work(work_id: &str, chapter: i32) -> WorkRecord {
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("review_extract_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Seed a minimal `narrative_worlds` row (and FK creator) so the work's
 /// `world_id` FK holds. Reuses the shared seed helper.
@@ -179,7 +167,7 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
 
 #[tokio::test]
 async fn ac2_extraction_inserts_pending_candidates() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     let work = novel_work("wrk_ac2", 3);
@@ -214,7 +202,7 @@ async fn ac2_extraction_inserts_pending_candidates() {
 
 #[tokio::test]
 async fn ac6_rerun_does_not_duplicate_pending() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     let work = novel_work("wrk_ac6", 1);
@@ -272,7 +260,7 @@ fn pure_heuristic_extracts_character_names() {
 
 #[tokio::test]
 async fn non_review_master_schedule_is_noop() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_noop", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -314,7 +302,7 @@ async fn non_review_master_schedule_is_noop() {
 
 #[tokio::test]
 async fn missing_workspace_dir_is_noop() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_nows", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -408,7 +396,7 @@ async fn relationship_rows(
 /// candidates as suggestions against the entities that exist.
 #[tokio::test]
 async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_ok", 3);
     works::create_work(&pool, &work).await.unwrap();
@@ -505,7 +493,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
 /// session is invented, and neither candidates nor relationships are written.
 #[tokio::test]
 async fn v1191_extract_review_hook_without_a_run_identity_writes_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_norun", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -549,7 +537,7 @@ async fn v1191_extract_review_hook_without_a_run_identity_writes_nothing() {
 /// nothing and never becomes heuristic persistence.
 #[tokio::test]
 async fn v1191_extract_review_hook_invalid_terminal_writes_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_bad", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -586,7 +574,7 @@ async fn v1191_extract_review_hook_invalid_terminal_writes_nothing() {
 /// refuses before the model runs.
 #[tokio::test]
 async fn v1191_extract_review_hook_stale_target_writes_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_stale", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -643,7 +631,7 @@ async fn v1191_extract_review_hook_stale_target_writes_nothing() {
 /// candidates nor relationships.
 #[tokio::test]
 async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_cancel", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -691,7 +679,7 @@ async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
 /// persistence (v1.191 P1 T13 review I2).
 #[tokio::test]
 async fn v1191_extract_review_hook_extractor_failure_writes_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_fail", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -734,7 +722,7 @@ async fn v1191_extract_review_hook_extractor_failure_writes_nothing() {
 /// being persisted as provenance (v1.191 P1 T13 review I1).
 #[tokio::test]
 async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_quote", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -808,7 +796,7 @@ async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
 /// callers' single transaction is what makes that true (v1.191 P1 T13 review C1).
 #[tokio::test]
 async fn v1191_extract_review_hook_post_callback_cancel_writes_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_late", 3);
     works::create_work(&pool, &work).await.unwrap();

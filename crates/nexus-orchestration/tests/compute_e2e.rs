@@ -28,7 +28,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_local_db::{init_engine_pool, narrative_write};
+use nexus_local_db::narrative_write;
 use nexus_preset::load_embedded_preset;
 use serde_json::{json, Value};
 
@@ -55,13 +55,9 @@ fn registry_with_compute_attached(pool: sqlx::SqlitePool) -> CapabilityRegistry 
     CapabilityRegistry::with_runtime_deps_and_wasm(&deps, engine, cache)
 }
 
-/// Open a fresh migrated pool on a tempdir.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("compute_e2e.db");
-    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-    (pool, dir)
-}
+mod common;
+
+use common::test_pool;
 
 /// Seed a Creator through the production creation path, which also
 /// materializes its holder registry row in the same transaction.
@@ -162,7 +158,7 @@ async fn read_current_hp(pool: &sqlx::SqlitePool, key_block_id: &str) -> i64 {
 /// resolve against the production registry shape (P-last T4 wiring check).
 #[tokio::test]
 async fn combat_engine_preset_loads_and_resolves_capabilities() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let registry = CapabilityRegistry::with_builtins_and_pool(pool);
     let loaded = load_embedded_preset("combat-engine", &registry).expect("preset loads");
     assert_eq!(loaded.id, "combat-engine");
@@ -204,7 +200,7 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_creator(&pool, "ctr_e2e").await;
     seed_world(&pool, "ctr_e2e", "wld_e2e").await;
 
@@ -303,7 +299,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
 /// fully-wired registry + engine are available — guards the boot-time wiring.
 #[tokio::test]
 async fn narrative_compute_e2e_rejects_missing_world() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_creator(&pool, "ctr_e2e").await;
     let registry = registry_with_compute_attached(pool);
     let cap = registry.get("narrative.compute").unwrap();

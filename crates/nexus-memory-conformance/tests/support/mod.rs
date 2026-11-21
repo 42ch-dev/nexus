@@ -41,7 +41,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use futures_util::FutureExt as _;
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Barrier, Notify};
 
 use sqlx::Connection as _;
@@ -64,14 +64,13 @@ use spoke_connect::remote::{
     RemoteServePortsComposite, Transport, TransportError,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
-use spoke_operations::spoke_schemas::{
-    Finding, HostCapabilityManifest, KnowledgeEntry, Principal, Relation, Rule, Scope,
-    TimelineEvent,
-};
-use spoke_operations::{
-    FindingPort, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort, MemoryPort,
-    RelationPort, RuleQueryPort, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
-};
+use spoke_operations::spoke_schemas::{HostCapabilityManifest, Principal};
+use spoke_operations::{MemoryPort, SpokeResult};
+
+// A feature-free leaf: `server_loopback` (default features) includes it too.
+pub mod memory_only_host;
+
+pub use memory_only_host::MemoryOnlyHost;
 
 /// The provider implementation behind the shared protocol surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,96 +123,6 @@ pub const OTHER_SUBJECT: &str = "sbj_c_other";
 pub const CONTEXT: &str = "ctx_c_harbor";
 pub const OTHER_CONTEXT: &str = "ctx_c_market";
 pub const TEXT: &str = "Mira promised to return before the northern gate opens at dawn.";
-
-// ---------------------------------------------------------------------------
-// A memory-only responder host
-// ---------------------------------------------------------------------------
-
-/// The baseline half of the responder ports face.
-///
-/// `RemoteServePorts` is a baseline-port supertrait; this suite serves
-/// `spoke-memory` only, so every baseline call refuses honestly instead of
-/// fabricating a baseline object. `spoke-baseline` is never negotiated.
-struct MemoryOnlyHost;
-
-fn no_baseline<T>() -> SpokeResult<T> {
-    SpokeResult::Reject(SpokeReject {
-        code: SpokeRejectCode::CapabilityPortMissing,
-        message: "this host serves no baseline family".to_owned(),
-        details: None,
-    })
-}
-
-#[async_trait]
-impl KnowledgeEntryPort for MemoryOnlyHost {
-    async fn get_knowledge_entry(&self, _entry_id: &str) -> SpokeResult<KnowledgeEntry> {
-        no_baseline()
-    }
-
-    async fn put_knowledge_entry(
-        &self,
-        _entry: KnowledgeEntry,
-        _expected_base_revision: Option<u64>,
-    ) -> SpokeResult<KnowledgeEntry> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl RelationPort for MemoryOnlyHost {
-    async fn get_relation(&self, _relation_id: &str) -> SpokeResult<Relation> {
-        no_baseline()
-    }
-
-    async fn put_relation(
-        &self,
-        _relation: Relation,
-        _expected_base_revision: Option<u64>,
-    ) -> SpokeResult<Relation> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl KnowledgeQueryPort for MemoryOnlyHost {
-    async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl ScopeQueryPort for MemoryOnlyHost {
-    async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl FindingPort for MemoryOnlyHost {
-    async fn put_findings(&self, _findings: Vec<Finding>) -> SpokeResult<Vec<Finding>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl RuleQueryPort for MemoryOnlyHost {
-    async fn list_rules(&self, _rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl HostManifestPort for MemoryOnlyHost {
-    async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        no_baseline()
-    }
-
-    async fn list_peer_host_capability_manifests(
-        &self,
-    ) -> SpokeResult<Vec<HostCapabilityManifest>> {
-        no_baseline()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Session plumbing
@@ -501,6 +410,63 @@ struct ServedEndpoint {
     socket: Arc<dyn Transport>,
     responder: Arc<ConnectResponder>,
     socket_weak: Weak<WsTransport<tokio::net::TcpStream>>,
+}
+
+/// Accept the next loopback connection on `listener` and serve `service` over
+/// the SDK's signed responder handshake.
+///
+/// `peers` is the admitted dialer table, and its keys are the responder's
+/// allowlist. The returned socket is a duplicate of the accepted one, cloned
+/// before the upgrade, so a test can tear the transport down without a
+/// WebSocket close frame.
+///
+/// Every difference the remote suites had between their own copies of this
+/// handshake — the two bounds, the invoke timeout, the host identity, the
+/// trusted table and the served service — is a parameter here.
+#[allow(clippy::too_many_arguments)]
+pub async fn accept_signed_peer(
+    listener: &TcpListener,
+    service: Arc<dyn RemoteMemoryService>,
+    host_manifest: HostCapabilityManifest,
+    peers: &HashMap<String, [u8; 32]>,
+    seed: [u8; 32],
+    accept_bound: Duration,
+    upgrade_bound: Duration,
+    invoke_timeout_ms: u64,
+) -> (std::net::TcpStream, Arc<ConnectResponder>) {
+    let (tcp, peer) = tokio::time::timeout(accept_bound, listener.accept())
+        .await
+        .expect("the client connects to the listener")
+        .expect("accept the localhost peer");
+    assert!(peer.ip().is_loopback(), "the fixture serves localhost only");
+    let std_stream = tcp.into_std().expect("the accepted socket converts");
+    let accepted = std_stream.try_clone().expect("clone the accepted socket");
+    let tcp = TcpStream::from_std(std_stream).expect("restore the accepted socket");
+    let ws = tokio::time::timeout(
+        upgrade_bound,
+        tokio_tungstenite::accept_async_with_config(
+            tcp,
+            Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+        ),
+    )
+    .await
+    .expect("the websocket upgrade is bounded")
+    .expect("websocket upgrade");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
+        RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None).with_memory(service),
+    );
+    let responder = connect_responder(ConnectResponderOptions {
+        transport,
+        identity: RemoteIdentity { seed },
+        manifest: host_manifest,
+        allowlist: peers.keys().cloned().collect(),
+        peer_keys: peers.clone(),
+        ports: Some(ports),
+        invoke_timeout_ms: Some(invoke_timeout_ms),
+    })
+    .await;
+    (accepted, responder)
 }
 
 /// Bind the ephemeral loopback listener and serve one signed responder task.
@@ -2344,7 +2310,7 @@ impl Matrix {
 // The typed protocol surface
 // ---------------------------------------------------------------------------
 
-fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
+pub fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid request")
 }
 

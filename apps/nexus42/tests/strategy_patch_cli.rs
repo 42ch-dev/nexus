@@ -11,9 +11,12 @@
 //! `not_found` and 400 `bad_request` (the public code a non-canonical
 //! rejection degrades to) surfaces.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
 use serde_json::Value;
 use std::path::Path;
@@ -55,14 +58,6 @@ fn cli(fixture: &DirectFixture, args: &[&str]) -> Output {
         .args(args)
         .output()
         .expect("spawn nexus42")
-}
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 // ── State leaf ─────────────────────────────────────────────────────────────

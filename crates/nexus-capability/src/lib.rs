@@ -380,6 +380,10 @@ pub mod admission;
 pub mod builtins;
 pub mod compute_input_builder;
 pub mod extraction_target;
+// Test-only pool bootstrap shared by this crate's unit tests. Not a shipping
+// surface: compiled only under `cfg(test)`, never re-exported.
+#[cfg(test)]
+pub(crate) mod pool_test_support;
 pub mod rules_layers;
 pub mod scan;
 pub mod state_delta;

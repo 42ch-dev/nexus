@@ -38,20 +38,9 @@ const WORK_REF: &str = "review-cron-e2e";
 
 // ── Test helpers (mirrors review_time_extraction.rs + cron_supervisor.rs) ────
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("review_cron_e2e_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+mod common;
+
+use common::test_pool;
 
 /// Seed a minimal `narrative_worlds` row (and FK creator) so the work's
 /// `world_id` FK holds. Reuses the shared seed helper.
@@ -158,7 +147,7 @@ async fn seed_chapter_with_body(
 /// `on_schedule_terminal` regardless of how the terminal state was reached).
 #[tokio::test]
 async fn review_cron_fire_triggers_kb_extraction_hook() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     let work = novel_work("wrk_e2e", 3);
@@ -276,7 +265,7 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
 /// "no work = no schedule").
 #[tokio::test]
 async fn review_cron_no_review_role_enqueues_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_e2e_none", 1);
     works::create_work(&pool, &work).await.unwrap();

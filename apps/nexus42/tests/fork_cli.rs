@@ -12,25 +12,23 @@
 //! `creator world event-add` for the fork-point event. Only the foreign-World
 //! ownership row needs a direct state-DB seed.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
-use nexus_home_layout::{nexus_root_from_home, workspace_state_db_path};
+use direct_actor::fixture_creator_id;
+use nexus_home_layout::workspace_state_db_path;
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::PathBuf;
 use std::process::Output;
 
 /// The fixture's workspace slug (mirrors `common/direct.rs`).
 const WORKSPACE_SLUG: &str = "default";
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 /// The payload of the first output line carrying `label`.
 fn labelled(out: &str, label: &str) -> String {
@@ -42,27 +40,11 @@ fn labelled(out: &str, label: &str) -> String {
         )
 }
 
-/// The fixture home holds exactly one creator; its id is the directory name
-/// under `~/.nexus42/creators/`.
-fn fixture_creator_id(fixture: &DirectFixture) -> String {
-    let creators_root = nexus_root_from_home(fixture.home.path()).join("creators");
-    let mut entries: Vec<_> = std::fs::read_dir(&creators_root)
-        .expect("read fixture creators root")
-        .map(|entry| entry.expect("creator dir entry").file_name())
-        .collect();
-    assert_eq!(entries.len(), 1, "fixture registers exactly one creator");
-    entries
-        .pop()
-        .expect("one creator")
-        .to_string_lossy()
-        .into_owned()
-}
-
 /// The fixture's workspace state DB (`.../creators/<id>/workspaces/default/state.db`).
 fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
     workspace_state_db_path(
         fixture.home.path(),
-        &fixture_creator_id(fixture),
+        &fixture_creator_id(fixture.home.path()),
         WORKSPACE_SLUG,
     )
 }

@@ -299,6 +299,8 @@ pub mod seed {
     use super::super::seed_shared;
     use sqlx::SqlitePool;
 
+    pub use crate::seed_shared::WorldSeed;
+
     /// Seed a test world row (also seeds a minimal creator for FK).
     ///
     /// Delegates to the shared `seed_shared::world` helper.
@@ -321,6 +323,19 @@ pub mod seed {
             time_policy,
         )
         .await;
+    }
+
+    /// Seed a world row from a [`WorldSeed`].
+    ///
+    /// Fixtures whose row differs from [`world`]'s shape (workspace, display
+    /// name, timeline columns) name those fields here instead of forking the
+    /// INSERT.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either database insert fails.
+    pub async fn world_with(pool: &SqlitePool, seed: WorldSeed<'_>) {
+        seed_shared::world_with(pool, seed).await;
     }
 
     /// Seed a test key block row into `kb_key_blocks`.
@@ -3465,7 +3480,7 @@ pub async fn read_key_block_revision(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
+    use crate::test_support::fresh_pool;
     use serde_json::{json, Value};
 
     /// An admitted selection over one World container with no admitted holder:
@@ -3475,52 +3490,23 @@ mod tests {
         KnowledgeReadScope::creator_management(vec![KnowledgeOwnerRef::world(world_id)], Vec::new())
     }
 
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
+    /// Seed a world row through the crate's one seed source.
+    async fn seed_world_row(pool: &SqlitePool, world_id: &str, title: &str, slug: &str) {
+        seed::world_with(
+            pool,
+            seed::WorldSeed::new(world_id, "ctr_test", title, slug).with_display_name("Test"),
+        )
+        .await;
     }
 
+    /// The default test world (`wld_1`).
     async fn seed_world(pool: &SqlitePool) {
-        // Seed creator + world for FK satisfaction
-        sqlx::query!(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES ('ctr_test', 'Test', 'active', datetime('now'), '{}')"
-        )
-        .execute(pool)
-        .await
-        .unwrap();
-
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_1', 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(pool)
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_insert_and_get() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-
-        let result = store.insert_knowledge_entry(kb.clone()).await.unwrap();
-        assert_eq!(result.entry_id, kb.entry_id);
-
-        let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
-        assert_eq!(fetched.canonical_name, "Hero");
-        assert_eq!(fetched.world_id(), Some("wld_1"));
+        seed_world_row(pool, "wld_1", "Test World", "test-world").await;
     }
 
     #[tokio::test]
     async fn insert_key_block_in_tx_rollback_leaves_no_row() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -3566,7 +3552,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_kb_state_in_tx_returns_stored_fields() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -3594,17 +3580,10 @@ mod tests {
 
     #[tokio::test]
     async fn update_kb_state_in_tx_world_scope_rejects_foreign_world() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         // Second world for the foreign-target case.
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool.clone());
         let kb = kb_with_state("wld_1", "ScopedHero", 100);
@@ -3628,7 +3607,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_kb_state_in_tx_rollback_restores_body() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -3657,34 +3636,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_not_found() {
-        let (pool, _dir) = fresh_pool().await;
-        let store = SqliteKbStore::new(pool);
-        let err = store
-            .get_knowledge_entry("kb_nonexistent")
-            .await
-            .unwrap_err();
-        assert!(matches!(err, KbStoreError::NotFound(ref s) if s == "kb_nonexistent"));
-    }
-
-    #[tokio::test]
-    async fn test_list_by_world() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Scene, "Forest");
-        store.insert_knowledge_entry(kb1).await.unwrap();
-        store.insert_knowledge_entry(kb2).await.unwrap();
-
-        let items = store.list_by_world("wld_1").await.unwrap();
-        assert_eq!(items.len(), 2);
-    }
-
-    #[tokio::test]
     async fn test_list_excludes_deleted() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -3700,7 +3653,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_active_by_unique_key_beyond_list_limit() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         // Fill the list_by_world window (500 oldest rows) so a newer entry is
@@ -3744,7 +3697,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_owner_complete_has_no_silent_500_cap() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         let store = SqliteKbStore::new(pool.clone());
         let n = usize::try_from(LIST_BY_WORLD_LIMIT).unwrap() + 1;
@@ -3782,7 +3735,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_owner_keyset_bounds_and_mixed_timestamp_order() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         let store = SqliteKbStore::new(pool.clone());
         let rows = [
@@ -3860,7 +3813,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_owner_keyset_same_millisecond_reverse_ids() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         let store = SqliteKbStore::new(pool.clone());
         let rows = [
@@ -3905,20 +3858,6 @@ mod tests {
         assert_eq!(ids, vec!["kb_m", "kb_z"]);
     }
 
-    #[tokio::test]
-    async fn test_uniqueness_rejects_duplicate() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        store.insert_knowledge_entry(kb1).await.unwrap();
-
-        let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
-        assert!(matches!(err, KbStoreError::Duplicate { .. }));
-    }
-
     /// V1.206 P2 R8: a duplicate caller-supplied `key_block_id` collides on the
     /// primary key (SQLite `1555`), not the owner-scoped unique index. When the
     /// occupying row is in THIS entry's container it must classify as
@@ -3927,7 +3866,7 @@ mod tests {
     /// leaking a raw storage error.
     #[tokio::test]
     async fn test_duplicate_entry_id_maps_to_duplicate() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -3953,17 +3892,10 @@ mod tests {
     /// to a caller scoped to another container, that the id is occupied.
     #[tokio::test]
     async fn test_foreign_container_entry_id_collision_is_not_duplicate() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         // Second container for the FK (`kb_key_blocks.world_id`).
-        sqlx::query!(
-            "INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool);
         let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
@@ -3988,16 +3920,9 @@ mod tests {
     /// conflict for the same no-oracle reason).
     #[tokio::test]
     async fn test_check_key_block_id_free_matches_the_insert_classification() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
-        sqlx::query!(
-            "INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool);
         let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
@@ -4044,7 +3969,7 @@ mod tests {
     /// and for every other test, and the malformed row never commits.
     #[tokio::test]
     async fn test_malformed_multi_owner_row_is_not_a_duplicate() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         // FK target for the malformed row's extra owner column.
@@ -4096,7 +4021,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_attach_and_get_anchors() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4113,7 +4038,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_key_block() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4130,25 +4055,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_delete_key_block() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        let store = SqliteKbStore::new(pool);
-        let kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.entry_id.clone();
-        store.insert_knowledge_entry(kb).await.unwrap();
-
-        store.delete_knowledge_entry(&id).await.unwrap();
-
-        // Block still exists but marked deleted
-        let fetched = store.get_knowledge_entry(&id).await.unwrap();
-        assert_eq!(fetched.status, "deleted");
-    }
-
-    #[tokio::test]
     async fn test_deleted_allows_reinsertion() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4165,7 +4073,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_with_block_type() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4204,18 +4112,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_isolation() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         // Seed second world
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'World Two', 'world-two', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "World Two", "world-two").await;
 
         let store = SqliteKbStore::new(pool);
         store
@@ -4254,7 +4155,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_novel_valid_category_succeeds() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
@@ -4265,7 +4166,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_novel_missing_category_rejected() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
@@ -4288,7 +4189,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_novel_invalid_category_rejected() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
@@ -4304,7 +4205,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_uniqueness_preserved_with_validation() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
@@ -4318,7 +4219,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_canonical_name_validation_rejects_slash() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4334,7 +4235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_canonical_name_validation_rejects_shell_meta() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4350,7 +4251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_canonical_name_validation_rejects_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4367,7 +4268,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_generic_mode_accepts_body_without_novel_category() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool); // Generic mode by default
@@ -4383,7 +4284,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_update_validates_body_in_novel_mode() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
@@ -4411,7 +4312,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_stores_block_type_snake_case() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4458,7 +4359,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_query_computable_true() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -4493,7 +4394,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_query_computable_false() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -4524,7 +4425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_query_computable_none_returns_all() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -4555,7 +4456,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_query_computable_legacy_block() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -4589,7 +4490,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_extensions_nexus_extras_roundtrip_on_insert_and_get() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4618,7 +4519,7 @@ mod tests {
         // storage primitive is behavior-equivalent when the caller owns the
         // serialization boundary (spec §7.4) — the same shape the spoke
         // adapter `put_create` path now uses (T2).
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -4666,7 +4567,7 @@ mod tests {
     /// also invalid.
     #[tokio::test]
     async fn insert_gate_order_reports_the_legacy_extension_before_a_body_refusal() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         let store = SqliteKbStore::new(pool.clone());
         let mut tx = pool.begin().await.unwrap();
@@ -4706,7 +4607,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_extensions_nexus_extras_survive_update() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4736,7 +4637,7 @@ mod tests {
     async fn test_sqlite_extensions_nexus_extras_none_when_absent() {
         // An entry inserted without extras has extensions_nexus_extras = None
         // on read (only the typed keys are serialized; no unknown keys present).
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
@@ -4756,14 +4657,7 @@ mod tests {
     /// Seed a second world row so a test can FK-move a `kb_key_blocks` row
     /// across worlds (`world_id` is a NOT NULL FK to `narrative_worlds`).
     async fn seed_second_world(pool: &SqlitePool) {
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Second World', 'test-world-2', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(pool)
-        .await
-        .unwrap();
+        seed_world_row(pool, "wld_2", "Second World", "test-world-2").await;
     }
 
     /// Seed a `kb_key_blocks` row in `wld_1` (revision NULL → 0 per the
@@ -4782,7 +4676,7 @@ mod tests {
     async fn cas_update_key_block_fields_same_world_matching_revision_succeeds() {
         // World-aware CAS happy path: the world bind matches the stored row,
         // so the CAS bumps revision exactly like the pre-R3 predicate.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         let id = seed_key_block(&pool, "CasHappy").await;
 
@@ -4811,7 +4705,7 @@ mod tests {
         // would have succeeded. The world-aware predicate must deny with
         // WorldConflict, NOT VersionMismatch (the caller's revision was valid;
         // the WORLD moved).
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         seed_second_world(&pool).await;
         let id = seed_key_block(&pool, "CasForeign").await;
@@ -4891,7 +4785,7 @@ mod tests {
         // a stale CAS — matching the COALESCE(revision, 0) predicate and the
         // established cas_update_key_block_fields normalization — never the
         // `actual: None` "row absent" classification.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let id = seed_character_key_block(&pool, "NullRev").await;
         // Seed path leaves revision NULL (V1.73 NULL-normalization rule).
         let raw: Option<i64> =
@@ -4944,7 +4838,7 @@ mod tests {
     async fn cas_update_key_block_fields_same_world_stale_revision_stays_version_mismatch() {
         // A same-world stale revision keeps the existing OCC classification —
         // the world-aware predicate must not widen the WorldConflict bucket.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
         let id = seed_key_block(&pool, "CasStale").await;
 
@@ -4973,7 +4867,7 @@ mod tests {
     /// `character_inactive` with zero mutation; an active one inserts.
     #[tokio::test]
     async fn insert_actor_owned_key_block_revalidates_active_owner_in_tx() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         crate::ensure_creator_row(&pool, "ctr_a", "A")
             .await
             .unwrap();

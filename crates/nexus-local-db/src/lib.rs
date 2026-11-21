@@ -68,7 +68,7 @@ pub mod world_findings;
 pub mod world_stories;
 
 mod error;
-mod seed_shared;
+pub(crate) mod seed_shared;
 mod version;
 pub mod writer_protocol;
 
@@ -76,6 +76,11 @@ pub mod writer_protocol;
 // (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
 #[cfg(test)]
 mod test_tracing;
+
+// Test-only pool bootstraps shared by this crate's unit tests. Not a shipping
+// surface: compiled only under `cfg(test)`, never re-exported.
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use std::future::Future;
 

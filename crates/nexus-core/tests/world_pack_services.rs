@@ -10,10 +10,12 @@ use nexus_core::{
 };
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE};
 use nexus_knowledge::world_kb::KbStore;
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+
+mod common;
 
 const CREATOR: &str = "test_creator";
 const SOURCE: &str = "wld_pack_source";
@@ -33,8 +35,11 @@ async fn seed(pool: &SqlitePool) {
         (TARGET, CREATOR),
         (FOREIGN, "other_creator"),
     ] {
-        sqlx::query("INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) VALUES (?, 'ws', ?, 'Pack World', 'pack-world', 'active', 'private', 'manual', '{}')")
-            .bind(world).bind(owner).execute(pool).await.unwrap();
+        world_with(
+            pool,
+            WorldSeed::new(world, owner, "Pack World", "pack-world").with_workspace_id("ws"),
+        )
+        .await;
     }
     for (id, name) in [
         ("kb_pack_a", "Aria"),
@@ -96,19 +101,12 @@ async fn atom_counts(pool: &SqlitePool, world_id: &str) -> (i64, i64) {
 
 #[tokio::test]
 async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
-    let tmp = tempfile::tempdir().unwrap();
-    let home = tmp.path().to_path_buf();
-    let nexus_home = home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &home, CREATOR, "default",
-    ))
-    .unwrap();
-    std::fs::write(nexus_home.join("config.toml"), format!("active_creator_id = \"{CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{CREATOR}\" = \"default\"\n")).unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, "default");
-    let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .unwrap();
+    let common::TestHome {
+        _tmp,
+        user_home: home,
+        db_path,
+    } = common::seed_home(CREATOR, "default");
+    let guarded = common::engine_pool(&db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     seed(&pool).await;
     let core = CoreService::open(CoreOpenOptions {
@@ -452,16 +450,11 @@ async fn stored_governance(pool: &SqlitePool, entry_id: &str) -> (Option<String>
 
 /// Boots an `EngineOwner` core over a seeded workspace.
 async fn pack_test_core() -> (tempfile::TempDir, sqlx::SqlitePool, CoreService) {
-    let tmp = tempfile::tempdir().unwrap();
-    let home = tmp.path().to_path_buf();
-    let nexus_home = home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &home, CREATOR, "default",
-    ))
-    .unwrap();
-    std::fs::write(nexus_home.join("config.toml"), format!("active_creator_id = \"{CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{CREATOR}\" = \"default\"\n")).unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, "default");
+    let common::TestHome {
+        _tmp: tmp,
+        user_home: home,
+        db_path,
+    } = common::seed_home(CREATOR, "default");
     let pool = nexus_local_db::init_pool(&db_path).await.unwrap();
     seed(&pool).await;
     let core = CoreService::open(CoreOpenOptions {

@@ -9,22 +9,17 @@
 //! — carrier admission, the revision CAS and the reviewer's keyset order are
 //! the core's own.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
 use serde_json::Value;
 use std::process::Output;
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 fn cli_ok(actor: &DirectActor, args: &[&str]) -> Output {
     let out = actor.cli(args);

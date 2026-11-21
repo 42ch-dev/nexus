@@ -71,21 +71,9 @@ fn novel_work(work_id: &str, work_ref: &str, chapter: i32, total: i32) -> WorkRe
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("review_report_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Insert a `creator_schedules` row directly for the test scenario.
 async fn insert_review_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
@@ -183,7 +171,7 @@ impl Layer<Registry> for FieldNamesCapture {
 #[serial_test::serial]
 #[tokio::test]
 async fn parsed_report_persists_findings_with_parsed_fields() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_parsed", "parsed-novel", 2, 5);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_parsed_review", "wrk_parsed").await;
@@ -251,7 +239,7 @@ Solid chapter with a few craft issues.
 #[serial_test::serial]
 #[tokio::test]
 async fn parsed_report_with_rule_suggestion_round_trips() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_rule", "rule-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_rule_review", "wrk_rule").await;
@@ -285,7 +273,7 @@ rule_suggestion: Pin dialect per region in AGENTS.md
 #[serial_test::serial]
 #[tokio::test]
 async fn parsed_report_applies_executor_default_when_omitted() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_exec", "exec-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_exec_review", "wrk_exec").await;
@@ -330,7 +318,7 @@ async fn parsed_report_applies_executor_default_when_omitted() {
 #[serial_test::serial]
 #[tokio::test]
 async fn missing_report_falls_back_to_placeholder_finding() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_missing", "missing-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_missing_review", "wrk_missing").await;
@@ -374,7 +362,7 @@ async fn missing_report_falls_back_to_placeholder_finding() {
 #[serial_test::serial]
 #[tokio::test]
 async fn empty_issues_section_falls_back_to_placeholder_finding() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_empty", "empty-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_empty_review", "wrk_empty").await;
@@ -421,7 +409,7 @@ async fn large_report_falls_back_to_placeholder() {
     // `MAX_REVIEW_REPORT_BYTES` constant in `auto_chain.rs`; if that constant
     // changes, bump this fixture to match (the assert! below guards it).
     const CAP_BYTES: usize = 256 * 1024;
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_large", "large-novel", 3, 5);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_large_review", "wrk_large").await;
@@ -480,7 +468,7 @@ async fn large_report_falls_back_to_placeholder() {
 #[serial_test::serial]
 #[tokio::test]
 async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_tx", "tx-novel", 2, 4);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_tx_review", "wrk_tx").await;
@@ -530,7 +518,7 @@ async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
 #[serial_test::serial]
 #[tokio::test]
 async fn workspace_none_uses_placeholder_path_without_filesystem() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_no_ws", "no-ws-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_no_ws_review", "wrk_no_ws").await;
@@ -556,7 +544,7 @@ async fn workspace_none_uses_placeholder_path_without_filesystem() {
 #[serial_test::serial]
 #[tokio::test]
 async fn non_review_preset_is_noop_with_workspace_dir() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_nonrev", "nonrev-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
 
@@ -625,7 +613,7 @@ async fn non_review_preset_is_noop_with_workspace_dir() {
 #[serial_test::serial]
 #[tokio::test(flavor = "current_thread")]
 async fn fallback_warn_includes_chapter_field() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_chapter_field", "chapter-field-novel", 2, 4);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_chapter_field", "wrk_chapter_field").await;

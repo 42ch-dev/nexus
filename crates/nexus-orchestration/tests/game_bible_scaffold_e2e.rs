@@ -77,16 +77,9 @@ fn scaffold_at(
         })))
 }
 
-/// Create a fresh `SQLite` pool with all migrations applied.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tmpdir");
-    let db_path = dir.path().join("test.db");
-    let guarded = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .expect("open_pool");
-    let pool = guarded.clone_pool();
-    (pool, dir)
-}
+mod common;
+
+use common::test_pool;
 
 /// Insert a minimal Work row for testing.
 async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str, work_ref: &str) {
@@ -130,7 +123,7 @@ fn scaffold_input(
 
 #[tokio::test]
 async fn bootstrap_game_bible_creates_design_tree() {
-    let (pool, _db_dir) = fresh_pool().await;
+    let (_db_dir, pool) = test_pool().await;
     let works_root = tempfile::tempdir().expect("works tmpdir");
 
     let work_id = "wrk_e2e_game_bible";
@@ -254,7 +247,7 @@ async fn bootstrap_game_bible_creates_design_tree() {
 
 #[tokio::test]
 async fn bootstrap_game_bible_idempotent() {
-    let (pool, _db_dir) = fresh_pool().await;
+    let (_db_dir, pool) = test_pool().await;
     let works_root = tempfile::tempdir().expect("works tmpdir");
 
     let work_id = "wrk_e2e_idem";
@@ -317,7 +310,7 @@ async fn bootstrap_game_bible_idempotent() {
 
 #[tokio::test]
 async fn game_bible_work_status_json() {
-    let (pool, _db_dir) = fresh_pool().await;
+    let (_db_dir, pool) = test_pool().await;
     let works_root = tempfile::tempdir().expect("works tmpdir");
 
     let work_id = "wrk_e2e_status";
@@ -377,7 +370,7 @@ async fn game_bible_work_status_json() {
 
 #[tokio::test]
 async fn game_bible_scaffold_with_world_id() {
-    let (pool, _db_dir) = fresh_pool().await;
+    let (_db_dir, pool) = test_pool().await;
     let works_root = tempfile::tempdir().expect("works tmpdir");
 
     let work_id = "wrk_world";

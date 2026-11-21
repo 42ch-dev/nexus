@@ -105,11 +105,11 @@ impl WorkspaceExecutor for FailOnChild {
 /// the active creator/workspace from, the canonical workspace root the executor
 /// was built for, the unrelated cwd, and the engine pool both halves share.
 struct Fixture {
+    pool: Arc<SqlitePool>,
     // Held so the config the port resolves its active creator from outlives the run.
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
     root: tempfile::TempDir,
-    pool: Arc<SqlitePool>,
     executor: Arc<dyn WorkspaceExecutor>,
 }
 
@@ -158,10 +158,10 @@ async fn home_and_pool() -> (tempfile::TempDir, Arc<SqlitePool>) {
 /// instead of landing them, with a home attached (a simulated executor must
 /// stay recording even then).
 struct SimFixture {
+    pool: Arc<SqlitePool>,
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
     root: tempfile::TempDir,
-    pool: Arc<SqlitePool>,
     executor: Arc<WorkspaceCommitExecutor>,
 }
 

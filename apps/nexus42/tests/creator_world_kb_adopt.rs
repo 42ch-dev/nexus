@@ -24,7 +24,7 @@ const WORLD: &str = "wld_adopt_v151";
 const WORK_ID: &str = "wrk_adopt_v151";
 
 /// Build a fresh migrated pool + seed a world owned by [`OWNER`].
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
+async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -41,13 +41,13 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         "manual",
     )
     .await;
-    (pool, dir)
+    (dir, pool)
 }
 
 /// Seed an LLM-extracted pending candidate (`block_type=scene`, confidence=0.92,
 /// verbatim `source_quote`) — mirrors what `nexus.llm.extract` produces.
-async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
-    let (pool, dir) = fresh_pool().await;
+async fn seed_llm_pending() -> (tempfile::TempDir, sqlx::SqlitePool, String) {
+    let (dir, pool) = fresh_pool().await;
     let payload = serde_json::json!({
         "summary": "The eastern gate",
         "attributes": {"novel_category": "location", "aliases": ["Azure Gate"]},
@@ -76,7 +76,7 @@ async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
     )
     .await
     .unwrap();
-    (pool, dir, row.job_id)
+    (dir, pool, row.job_id)
 }
 
 // ── AC4: adopt succeeds on an LLM-extracted candidate ──────────────────────
@@ -86,7 +86,7 @@ async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
 /// `KnowledgeEntryRecord`, and leaves the LLM columns intact on the promotion row.
 #[tokio::test]
 async fn adopt_succeeds_on_llm_extracted_candidate() {
-    let (pool, _dir, job_id) = seed_llm_pending().await;
+    let (_dir, pool, job_id) = seed_llm_pending().await;
 
     // Adopt (non-JSON path exercises the confidence/source_quote display).
     kb_adopt(&pool, OWNER, &job_id, None, false)
@@ -130,7 +130,7 @@ async fn adopt_json_output_includes_llm_metadata() {
     // --json formatter reads the same KbExtractPromotion fields this test
     // asserts on. (The exact println formatting is covered by the
     // extract_llm_metadata unit test in kb.rs.)
-    let (pool, _dir, job_id) = seed_llm_pending().await;
+    let (_dir, pool, job_id) = seed_llm_pending().await;
     kb_adopt(&pool, OWNER, &job_id, None, true)
         .await
         .expect("json adopt should succeed");
@@ -149,7 +149,7 @@ async fn adopt_json_output_includes_llm_metadata() {
 #[tokio::test]
 async fn adopt_works_on_heuristic_candidate_with_null_llm_fields() {
     use nexus_local_db::kb_extract_job::insert_pending;
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     // Valid novel-profile body (heuristic shape) so adopt-time Novel validation passes.
     let payload = serde_json::json!({
         "summary": "A heuristic hero",

@@ -16,11 +16,17 @@
 //! quarantined — never published as the importing Creator's own fact — and the
 //! batch is reviewable and adoptable through the CLI alone).
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
-use nexus_home_layout::{nexus_root_from_home, workspace_state_db_path};
+use direct_actor::fixture_creator_id;
+use nexus_home_layout::workspace_state_db_path;
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
 };
@@ -34,14 +40,6 @@ use std::process::Output;
 const WORKSPACE_SLUG: &str = "default";
 /// The foreign holder the pack's private row claims — never this workspace's.
 const FOREIGN_HOLDER: &str = "hld_foreign_peer";
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 /// The payload of the first output line carrying `label`.
 fn labelled(out: &str, label: &str) -> String {
@@ -64,27 +62,11 @@ fn reported_batch_id(report: &str) -> String {
         )
 }
 
-/// The fixture home holds exactly one creator; its id is the directory name
-/// under `~/.nexus42/creators/`.
-fn fixture_creator_id(fixture: &DirectFixture) -> String {
-    let creators_root = nexus_root_from_home(fixture.home.path()).join("creators");
-    let mut entries: Vec<_> = std::fs::read_dir(&creators_root)
-        .expect("read fixture creators root")
-        .map(|entry| entry.expect("creator dir entry").file_name())
-        .collect();
-    assert_eq!(entries.len(), 1, "fixture registers exactly one creator");
-    entries
-        .pop()
-        .expect("one creator")
-        .to_string_lossy()
-        .into_owned()
-}
-
 /// The fixture's workspace state DB (`.../creators/<id>/workspaces/default/state.db`).
 fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
     workspace_state_db_path(
         fixture.home.path(),
-        &fixture_creator_id(fixture),
+        &fixture_creator_id(fixture.home.path()),
         WORKSPACE_SLUG,
     )
 }
@@ -656,7 +638,7 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         "adoption import failed: {}",
         stderr(&adopted)
     );
-    let creator_id = fixture_creator_id(&fixture);
+    let creator_id = fixture_creator_id(fixture.home.path());
     let local_holder = nexus_local_db::holders::creator_holder_entry_id(&creator_id);
     assert_eq!(
         stored_governance(&fixture, "kb_governed_foreign").await,

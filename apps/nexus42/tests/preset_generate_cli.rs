@@ -11,12 +11,14 @@
 //! - a generated candidate drives validate → simulate → approve → apply end to end, which is what
 //!   proves the ADR's condition 4 instead of asserting it.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 
 use std::path::Path;
-use std::process::Output;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
 use nexus_contracts::generated::daemon_api::orchestration::strategy_simulation_request::{
     NexusWorkflowDocument, StrategySimulationRequest,
@@ -27,14 +29,6 @@ use serde_json::{json, Value};
 /// The strategy every generate here names: a user bundle, because only a user preset can be
 /// applied (the schedule intake reads applied identities from user presets alone).
 const STRATEGY: &str = "chain-fixture";
-
-fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
 
 fn node(id: &str, kind: &str) -> Value {
     json!({ "id": id, "kind": kind, "effect_class": "pure" })
@@ -158,9 +152,9 @@ async fn generate_prints_a_summary_and_reserves_json_for_the_flag() {
     assert!(
         output.status.success(),
         "the legal request must commit: {}",
-        stderr_of(&output)
+        stderr(&output)
     );
-    let printed = stdout_of(&output);
+    let printed = stdout(&output);
     assert!(
         serde_json::from_str::<Value>(&printed).is_err(),
         "without --json the success path is a human summary, not the payload: {printed}"
@@ -196,10 +190,10 @@ async fn generate_prints_a_summary_and_reserves_json_for_the_flag() {
     assert!(
         output.status.success(),
         "the legal request must commit: {}",
-        stderr_of(&output)
+        stderr(&output)
     );
     let printed: Value =
-        serde_json::from_str(&stdout_of(&output)).expect("--json prints one JSON object");
+        serde_json::from_str(&stdout(&output)).expect("--json prints one JSON object");
     assert_eq!(printed["new_revision"], 1, "a first candidate inserts at 1");
     assert_eq!(printed["document"]["id"], STRATEGY);
     // Success means structurally legal and nothing more: the document is still a candidate, never
@@ -234,7 +228,7 @@ async fn generate_renders_the_whole_lint_exhausted_payload() {
         !output.status.success(),
         "a lint-failing request is a non-zero exit"
     );
-    let rendered = stderr_of(&output);
+    let rendered = stderr(&output);
     // Every field the payload carries reaches the human: the code, the round count, the
     // `persisted` flag, each violation's kind/location/observed/correction, and the message.
     for fragment in [
@@ -270,7 +264,7 @@ async fn generate_renders_the_whole_lint_exhausted_payload() {
         .output()
         .expect("the generate verb runs");
     let payload: Value =
-        serde_json::from_str(&stdout_of(&json_output)).expect("--json emits the payload");
+        serde_json::from_str(&stdout(&json_output)).expect("--json emits the payload");
     assert_eq!(payload["code"], "lint_exhausted");
     assert_eq!(payload["rounds_attempted"], 1);
     assert_eq!(payload["persisted"], false);
@@ -306,9 +300,9 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     assert!(
         output.status.success(),
         "the legal request must commit: {}",
-        stderr_of(&output)
+        stderr(&output)
     );
-    let generated: Value = serde_json::from_str(&stdout_of(&output)).expect("one JSON object");
+    let generated: Value = serde_json::from_str(&stdout(&output)).expect("one JSON object");
     assert_eq!(generated["new_revision"], 1);
 
     // 2. validate — the generated document through the local IR validator.
@@ -330,8 +324,8 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     assert!(
         validated.status.success(),
         "the generated document must validate: {}{}",
-        stdout_of(&validated),
-        stderr_of(&validated)
+        stdout(&validated),
+        stderr(&validated)
     );
 
     // 3. simulate → approve → apply over the same store, through the core the transports call.

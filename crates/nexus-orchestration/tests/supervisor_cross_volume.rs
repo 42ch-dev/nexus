@@ -9,22 +9,9 @@ use nexus_orchestration::auto_chain::{self, ChainAction};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use std::sync::Arc;
 
-/// Helper: open an in-memory DB pool with migrations applied.
-async fn test_pool() -> sqlx::SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("xvol_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Helper: standard test Work.
 fn test_work(work_id: &str, chapter: i32, total: i32, auto_chain: bool) -> WorkRecord {
@@ -141,7 +128,7 @@ async fn insert_driver_schedule(
 /// volume 2 chapter 1 (not volume 1 chapter N+1).
 #[tokio::test]
 async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(
         ScheduleSupervisor::new(Arc::new(pool.clone()))
             .with_binding_provider("test-provider".to_string()),
@@ -235,7 +222,7 @@ async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
 /// should mark the work as completed (not try to advance to a non-existent vol 2).
 #[tokio::test]
 async fn f001_single_volume_all_finalized_marks_complete() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     // Work: 1 volume × 3 chapters = 3 total
@@ -305,7 +292,7 @@ async fn f001_single_volume_all_finalized_marks_complete() {
 /// when vol 1 is fully finalized but vol 2 has remaining chapters.
 #[tokio::test]
 async fn f001_volume_aware_evaluator_picks_vol2_ch1() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let work = test_work("wrk_xvol_3", 3, 6, true);
     works::create_work(&pool, &work).await.unwrap();
@@ -332,7 +319,7 @@ async fn f001_volume_aware_evaluator_picks_vol2_ch1() {
 /// when all chapters across all volumes are finalized.
 #[tokio::test]
 async fn f001_volume_aware_evaluator_work_complete() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let work = test_work("wrk_xvol_4", 6, 6, true);
     works::create_work(&pool, &work).await.unwrap();
@@ -362,7 +349,7 @@ async fn f001_volume_aware_evaluator_work_complete() {
 async fn f004_supervisor_enqueue_includes_volume_in_preset_input() {
     use nexus_orchestration::auto_chain;
 
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // Work: 2 volumes × 3 chapters = 6 total
     let work = test_work("wrk_f004_1", 3, 6, true);
@@ -396,7 +383,7 @@ async fn f004_supervisor_enqueue_includes_volume_in_preset_input() {
 /// (not present in preset input).
 #[tokio::test]
 async fn f004_single_volume_enqueue_has_no_volume_in_input() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let work = test_work("wrk_f004_2", 1, 3, true);
     works::create_work(&pool, &work).await.unwrap();
@@ -425,7 +412,7 @@ async fn f004_single_volume_enqueue_has_no_volume_in_input() {
 /// rows finalized across both volumes.
 #[tokio::test]
 async fn f002_multi_volume_work_completed_all_volumes_finalized() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let mut work = test_work("wrk_f002_1", 6, 6, true);
     work.intake_status = "complete".to_string();
@@ -448,7 +435,7 @@ async fn f002_multi_volume_work_completed_all_volumes_finalized() {
 /// unfinished chapters even though vol 1 is complete.
 #[tokio::test]
 async fn f002_multi_volume_work_not_completed_partial_vol2() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let mut work = test_work("wrk_f002_2", 3, 6, true);
     work.intake_status = "complete".to_string();

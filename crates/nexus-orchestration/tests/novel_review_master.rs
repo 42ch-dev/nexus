@@ -62,21 +62,9 @@ fn novel_work(work_id: &str, chapter: i32) -> WorkRecord {
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("novel_review_master_v151_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 async fn seed_world(pool: &SqlitePool) {
     nexus_local_db::kb_store::seed::world(
@@ -226,7 +214,7 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
 /// (`scene`), proving the heuristic `character` default was NOT used.
 #[tokio::test]
 async fn review_master_llm_path_writes_llm_payload() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_v151_llm", 3);
     works::create_work(&pool, &work).await.unwrap();
@@ -294,7 +282,7 @@ async fn review_master_llm_path_writes_llm_payload() {
 /// stay NULL. This preserves the V1.50 no-worker behavior.
 #[tokio::test]
 async fn review_master_no_registry_falls_back_to_heuristic() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_v151_fb", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -332,7 +320,7 @@ async fn review_master_no_registry_falls_back_to_heuristic() {
 
 #[tokio::test]
 async fn review_master_llm_path_is_idempotent() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_v151_idem", 2);
     works::create_work(&pool, &work).await.unwrap();

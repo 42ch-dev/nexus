@@ -50,10 +50,10 @@ fn chapters_query(value: serde_json::Value) -> ListChaptersQuery {
 }
 
 struct Fixture {
+    pool: sqlx::SqlitePool,
     _temp: tempfile::TempDir,
     core: CoreService,
     principal: nexus_core::Principal,
-    pool: sqlx::SqlitePool,
     work_id: String,
     creative_root: PathBuf,
 }

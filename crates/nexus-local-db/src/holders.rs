@@ -492,6 +492,7 @@ pub(crate) async fn stage_holder_digests_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
 
     /// Pinned digest of `nexus-holder-v1\0creator\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
@@ -501,15 +502,6 @@ mod tests {
     /// Pinned digest of `nexus-holder-v1\0character\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.
     const PINNED_CHARACTER_HOLDER: &str =
         "hld_bb4d1d30cd1166a7a1c1a85ef1fea6de3f3844ce455f1aee266a201086b0121e";
-
-    /// Fresh migrated pool in a tempdir (same pattern as `creators::tests`).
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     /// Insert the workspace `creators` row **without** its holder, so a case can
     /// hand-write registry state: the materialization helper now always commits
@@ -567,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_registers_once_and_resolves_the_subject() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         crate::ensure_creator_row(&pool, "ctr_holder_a", "Holder A")
             .await
             .unwrap();
@@ -604,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn subject_bound_to_another_id_is_a_hard_error() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_b").await;
         // A foreign/hand-written registry row binds the subject to another id.
         sqlx::query(
@@ -634,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn id_bound_to_another_subject_is_a_hard_error() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_c").await;
         seed_creator_row(&pool, "ctr_holder_d").await;
         // The id that `ctr_holder_c` must derive is already bound to another subject.
@@ -664,7 +656,7 @@ mod tests {
     /// than hand back an id that its own subject does not bind to.
     #[tokio::test]
     async fn corrupt_registry_row_is_not_resolved_as_a_holder() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_corrupt").await;
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
@@ -704,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_subject_and_unknown_holder_are_refused() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let mut tx = crate::begin_immediate(&pool).await.unwrap();
         assert!(matches!(
             ensure_creator_holder_in_tx(&mut tx, "").await,
@@ -719,7 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn staging_covers_creators_and_characters() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         crate::ensure_creator_row(&pool, "ctr_staged", "Staged")
             .await
             .unwrap();

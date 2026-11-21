@@ -4,13 +4,19 @@
 //! direct-core home — no daemon, no Node child (`common/direct.rs` precedent).
 //! Also pins PL-6: absent from `creator --help`.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
+use direct_actor::fixture_creator_id;
 use nexus_contracts::CreateWorkRequest;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
-use nexus_home_layout::{nexus_root_from_home, operational_workspace_dir, workspace_state_db_path};
+use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::Path;
 use std::process::Output;
@@ -38,14 +44,6 @@ impl InspectorEnv {
             .output()
             .expect("spawn nexus42")
     }
-}
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 /// Seed one owned World plus one `constant`-activation lore row (always fires
@@ -138,22 +136,6 @@ async fn seed_bound_work(env: &InspectorEnv) -> String {
         WORKSPACE_SLUG,
     ));
     work_id
-}
-
-/// The fixture home holds exactly one creator; its id is the directory name
-/// under the nexus root's `creators/`.
-fn fixture_creator_id(home: &Path) -> String {
-    let creators_root = nexus_root_from_home(home).join("creators");
-    let mut entries: Vec<_> = std::fs::read_dir(&creators_root)
-        .expect("read fixture creators root")
-        .map(|entry| entry.expect("creator dir entry").file_name())
-        .collect();
-    assert_eq!(entries.len(), 1, "fixture registers exactly one creator");
-    entries
-        .pop()
-        .expect("one creator")
-        .to_string_lossy()
-        .into_owned()
 }
 
 /// The core resolves workspace files against the operational `meta.json`

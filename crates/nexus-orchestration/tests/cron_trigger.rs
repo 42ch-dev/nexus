@@ -14,21 +14,13 @@ use std::sync::Arc;
 use nexus_contracts::local::schedule::{
     CoreContextVersion, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
-use nexus_local_db::SqlitePool;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
+
+mod common;
 
 // ============================================================================
 // Test helpers
 // ============================================================================
-
-async fn setup_test_db() -> (tempfile::TempDir, Arc<SqlitePool>) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db");
-    let guarded = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .expect("open pool");
-    (dir, Arc::new(guarded.clone_pool()))
-}
 
 fn make_schedule(id: &str, creator: &str, scheduled_at: Option<i64>) -> Schedule {
     Schedule {
@@ -56,7 +48,7 @@ fn make_schedule(id: &str, creator: &str, scheduled_at: Option<i64>) -> Schedule
 
 #[tokio::test]
 async fn r21_clocked_tick_triggers_at_scheduled_at() {
-    let (_dir, pool) = setup_test_db().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Schedule with scheduled_at = 2000 (not yet due at now=1000)
@@ -93,7 +85,7 @@ async fn r21_clocked_tick_triggers_at_scheduled_at() {
 
 #[tokio::test]
 async fn duplicate_fire_prevention_same_schedule_admitted_once() {
-    let (_dir, pool) = setup_test_db().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Schedule due immediately (scheduled_at = 500 < now=1000)
@@ -126,7 +118,7 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
 
 #[tokio::test]
 async fn mixed_batch_admits_due_and_keeps_future_pending() {
-    let (_dir, pool) = setup_test_db().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Multiple schedules due at different times
@@ -157,7 +149,7 @@ async fn mixed_batch_admits_due_and_keeps_future_pending() {
 
 #[tokio::test]
 async fn dst_clock_jump_recomputes_next_run() {
-    let (_dir, pool) = setup_test_db().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Simulate DST transition: clock jumps forward 1 hour
@@ -193,7 +185,7 @@ async fn dst_clock_jump_recomputes_next_run() {
 async fn current_tick_ignores_scheduled_at_field() {
     // This test verifies current behavior: tick() ignores scheduled_at.
     // Once WS-D scheduler is implemented, this test will change.
-    let (_dir, pool) = setup_test_db().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Schedule with future scheduled_at (9999-01-01)

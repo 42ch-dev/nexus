@@ -92,21 +92,9 @@ fn test_work(work_id: &str, chapter: i32, total: i32) -> WorkRecord {
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("multi_work_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
     works::create_work(pool, work).await.unwrap();
@@ -116,7 +104,7 @@ async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
 
 #[tokio::test]
 async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let tmp = TempDir::new().unwrap();
     let workspace_dir = tmp.path();
 
@@ -173,7 +161,7 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
 #[tokio::test]
 #[allow(clippy::similar_names)] // work_a_db / work_b_db are intentionally parallel test fixtures
 async fn test_other_work_continues_after_completion() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // Seed two works: novel A (completed) and novel B (still active)
     let work_a = test_work("wrk_novel_a", 3, 3);
@@ -209,7 +197,7 @@ async fn test_other_work_continues_after_completion() {
 
 #[tokio::test]
 async fn test_auto_chain_skips_completion_locked_work() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // Seed a completed work with a driver schedule still set
     let work = test_work("wrk_completed", 3, 3);

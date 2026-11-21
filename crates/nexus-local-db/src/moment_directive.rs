@@ -538,15 +538,7 @@ async fn get_active_by_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_pool;
 
     fn new_directive<'a>(
         directive_id: &'a str,
@@ -575,7 +567,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn set_and_get_round_trip() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -600,7 +592,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn second_active_in_scope_rejected_by_partial_index() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -623,7 +615,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn same_directive_ok_in_different_scopes() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -665,7 +657,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn replace_active_soft_deletes_old_with_replaced_by() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -696,7 +688,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn decrement_ttl_expires_at_zero() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -726,7 +718,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn decrement_ttl_stays_active_until_zero() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -746,7 +738,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn clear_soft_deletes_active_row() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -777,7 +769,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn scene_clear_soft_deletes_and_is_idempotent() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -804,7 +796,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn lifecycle_anchor_updates_and_round_trips() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -831,7 +823,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn chapter_anchor_round_trips_per_work() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -884,7 +876,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn decrement_ttl_by_delta_keeps_active() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,
@@ -905,7 +897,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn decrement_ttl_by_delta_expires_when_delta_exceeds_remaining() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = now_ms();
         set_active(
             &pool,

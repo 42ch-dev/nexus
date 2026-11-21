@@ -12,11 +12,14 @@
 //! - the retired `creator character run` / `soul reflect` entrances are
 //!   unknown commands while core capture/synthesis behavior stays in place.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
 use serde_json::Value;
 use std::process::Output;
@@ -25,14 +28,6 @@ use std::process::Output;
 const SHARED_MEMORY_MARKER: &str =
     "SHAREDMEMORYMARKER the harbor accord holds because Ava keeps it";
 const LOCAL_MEMORY_MARKER: &str = "LOCALMEMORYMARKER only W1 saw the lantern signal at dusk";
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 fn cli_ok(actor: &DirectActor, args: &[&str]) -> Output {
     let out = actor.cli(args);

@@ -20,7 +20,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_local_db::init_engine_pool;
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_module_manifest::ModuleManifest;
 use serde_json::{json, Map, Value};
@@ -46,52 +46,26 @@ fn scope_as(world_id: &str, holder: &str) -> KnowledgeReadScope {
         .expect("a nonempty holder always forms an ActorView selection")
 }
 
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("compute_input_builder_test.db");
-    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-    (pool, dir)
-}
+mod common;
 
-async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES (?, ?, 'active', datetime('now'), '{}')",
-    )
-    .bind(creator_id)
-    .bind(creator_id)
-    .execute(pool)
-    .await
-    .unwrap();
-}
+use common::test_pool;
 
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
-    // SAFETY: test-only — uses runtime query to avoid duplicating sqlx cache.
-    seed_creator(pool, "ctr_test").await;
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
-         VALUES (?, 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'single', '{}')",
+    world_with(
+        pool,
+        WorldSeed::new(world_id, "ctr_test", "Test World", "test-world").with_time_policy("single"),
     )
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 async fn seed_world_with_head(pool: &sqlx::SqlitePool, world_id: &str, head_event_id: &str) {
-    // SAFETY: test-only — uses runtime query to avoid duplicating sqlx cache.
-    seed_creator(pool, "ctr_test").await;
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, current_timeline_head_id, metadata_json) \
-         VALUES (?, 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'single', ?, '{}')",
+    world_with(
+        pool,
+        WorldSeed::new(world_id, "ctr_test", "Test World", "test-world")
+            .with_time_policy("single")
+            .with_current_timeline_head_id(head_event_id),
     )
-    .bind(world_id)
-    .bind(head_event_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 /// Seed a computable `KnowledgeEntryRecord` with the given `block_type` and attributes.
@@ -189,7 +163,7 @@ fn basic_manifest(required_types: Vec<&str>) -> ModuleManifest {
 /// Step 1: Empty computable set → `NoComputableEntries`.
 #[tokio::test]
 async fn empty_computable_set_returns_no_computable_entries() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_abc123").await;
     // No KB entries seeded → query returns empty set.
 
@@ -212,7 +186,7 @@ async fn empty_computable_set_returns_no_computable_entries() {
 /// Step 2: Filter by `required_key_block_types`.
 #[tokio::test]
 async fn filters_by_required_key_block_types() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
     // Seed a character (computable) and an item (computable).
@@ -243,7 +217,7 @@ async fn filters_by_required_key_block_types() {
 /// Step 3: Non-computable entries are excluded.
 #[tokio::test]
 async fn non_computable_entries_excluded() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
     // Seed a character: one computable, one not.
@@ -279,7 +253,7 @@ async fn non_computable_entries_excluded() {
 /// (not the initial query dedup branch).
 #[tokio::test]
 async fn referenced_id_entries_loaded() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
     // Attacker: computable, in manifest filter → comes from initial query.
@@ -332,7 +306,7 @@ async fn referenced_id_entries_loaded() {
 /// untouched: the unscoped listing still holds it.
 #[tokio::test]
 async fn cross_world_reference_is_not_admitted() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_world(&pool, "wld_other").await;
 
@@ -380,7 +354,7 @@ async fn cross_world_reference_is_not_admitted() {
 /// while shared rows and the reading holder's own private row do.
 #[tokio::test]
 async fn holder_private_rows_excluded_from_the_admitted_scope() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     let reader_holder = seed_holder(&pool, "ctr_reader").await;
     let other_holder = seed_holder(&pool, "ctr_other").await;
@@ -443,7 +417,7 @@ async fn holder_private_rows_excluded_from_the_admitted_scope() {
 /// admitted — the load is the by-id arm of the same eligibility rule.
 #[tokio::test]
 async fn referenced_private_entry_of_another_holder_is_not_admitted() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     let reader_holder = seed_holder(&pool, "ctr_reader").await;
     let other_holder = seed_holder(&pool, "ctr_other").await;
@@ -519,7 +493,7 @@ async fn referenced_private_entry_of_another_holder_is_not_admitted() {
 /// rather than widening to the World listing.
 #[tokio::test]
 async fn selection_without_the_world_container_reads_nothing() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
@@ -547,7 +521,7 @@ async fn selection_without_the_world_container_reads_nothing() {
 /// Step 5b: Referenced `*_id` entry that does not exist → `ReferencedEntryNotFound`.
 #[tokio::test]
 async fn referenced_entry_not_found_error() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
     // Seed one computable entry (so the initial query is non-empty).
@@ -579,7 +553,7 @@ async fn referenced_entry_not_found_error() {
 /// Step 6: `narrative_state` shape includes `timeline_position: "0"`.
 #[tokio::test]
 async fn narrative_state_shape() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
@@ -607,7 +581,7 @@ async fn narrative_state_shape() {
 /// Step 7: `world_ref` contains `world_id`, `branch_id`, and `timeline_head_event_id`.
 #[tokio::test]
 async fn world_ref_contains_expected_fields() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // Use an event ID format matching the canonical generate_event_id
     // pattern (evt_ + hex) to satisfy the newtype regex guard.
@@ -646,7 +620,7 @@ async fn world_ref_contains_expected_fields() {
 /// Step 8: `invocation` is passed through verbatim.
 #[tokio::test]
 async fn invocation_params_passed_through() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
@@ -673,7 +647,7 @@ async fn invocation_params_passed_through() {
 /// Step 9: `schema_version` is set to 1.
 #[tokio::test]
 async fn schema_version_is_one() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
@@ -693,7 +667,7 @@ async fn schema_version_is_one() {
 /// Step 10: Empty `required_key_block_types` passes ALL computable entries.
 #[tokio::test]
 async fn empty_required_types_passes_all_computable() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;

@@ -49,7 +49,7 @@ const CHAPTER_BODY_REL: &str = "Works/rescan-novel/Stories/01-chapter.md";
 /// Build a fresh migrated pool + seed a world (owned by OWNER), a works row
 /// (with `story_ref = WORK_REF` + `world_id = WORLD`), and a `work_chapters`
 /// row pointing at `CHAPTER_BODY_REL`.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
+async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -67,7 +67,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     )
     .await;
     seed_work_and_chapter(&pool).await;
-    (pool, dir)
+    (dir, pool)
 }
 
 async fn seed_work_and_chapter(pool: &sqlx::SqlitePool) {
@@ -116,7 +116,7 @@ fn target() -> String {
 
 #[tokio::test]
 async fn rescan_idempotent_rerun_produces_empty_diff() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
     let first = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
@@ -143,7 +143,7 @@ async fn rescan_idempotent_rerun_produces_empty_diff() {
 
 #[tokio::test]
 async fn rescan_after_chapter_edit_updates_candidate_rows() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
     kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
@@ -187,7 +187,7 @@ async fn rescan_after_chapter_edit_updates_candidate_rows() {
 
 #[tokio::test]
 async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
     // First scan + adopt → confirmed KnowledgeEntryRecord carrying the heuristic payload.
@@ -256,7 +256,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
 
 #[tokio::test]
 async fn dry_run_shows_diff_without_writing() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
     let dry = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), true)
@@ -291,7 +291,7 @@ async fn dry_run_shows_diff_without_writing() {
 
 #[tokio::test]
 async fn rescan_cross_author_returns_403() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
     let err = kb_rescan_hermetic(&pool, OTHER, Some(dir.path()), &target(), false)
@@ -317,7 +317,7 @@ async fn rescan_cross_author_returns_403() {
 
 #[tokio::test]
 async fn malformed_target_returns_clean_error() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     let err = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), "no-slash-here", false)
         .await
         .unwrap_err();
@@ -329,7 +329,7 @@ async fn malformed_target_returns_clean_error() {
 
 #[tokio::test]
 async fn missing_work_returns_clean_error() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
     let err = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), "no-such-work/1", false)
         .await
@@ -344,7 +344,7 @@ async fn missing_work_returns_clean_error() {
 
 #[tokio::test]
 async fn rescan_reuses_preexisting_pending_candidate_without_duplicate() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
     // Seed a pending candidate exactly as the review-time hook would.

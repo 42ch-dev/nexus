@@ -65,21 +65,9 @@ fn novel_work(work_id: &str, chapter: i32, total: i32) -> WorkRecord {
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("review_findings_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Insert a `creator_schedules` row directly for the test scenario.
 async fn insert_schedule(
@@ -126,7 +114,7 @@ async fn count_findings(pool: &SqlitePool, work_id: &str) -> i64 {
 
 #[tokio::test]
 async fn ac1_auto_chain_review_terminal_persists_finding() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(
         ScheduleSupervisor::new(Arc::new(pool.clone()))
             .with_binding_provider("test-provider".to_string()),
@@ -231,7 +219,7 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
 
 #[tokio::test]
 async fn ac2_on_demand_review_run_persists_finding_same_path() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     // Work at produce-complete — user manually triggers review via CLI.
@@ -302,7 +290,7 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
 
 #[tokio::test]
 async fn negative_non_review_preset_does_not_persist_finding() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     let work = novel_work("wrk_neg", 1, 3);
@@ -335,7 +323,7 @@ async fn negative_non_review_preset_does_not_persist_finding() {
 
 #[tokio::test]
 async fn ac3_rule_suggestion_field_exists_and_round_trips() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let work = novel_work("wrk_ac3", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
@@ -380,7 +368,7 @@ async fn ac3_rule_suggestion_field_exists_and_round_trips() {
 /// and returns the existing finding id on conflict.
 #[tokio::test]
 async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     let work = novel_work("wrk_ac5", 3, 5);
@@ -442,7 +430,7 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
 /// review-findings (or auto-chain child rerun).
 #[tokio::test]
 async fn qc1_duplicate_driven_terminal_callback_hooks_exactly_once() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     let work = novel_work("wrk_qc1", 3, 5);

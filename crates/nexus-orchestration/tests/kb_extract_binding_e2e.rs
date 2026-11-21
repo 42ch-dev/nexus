@@ -14,19 +14,16 @@ use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::InMemoryKbStore;
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::KbStore;
+use nexus_local_db::enqueue_extract_job_with_artifact;
 use nexus_local_db::kb_store::seed;
-use nexus_local_db::{enqueue_extract_job_with_artifact, init_engine_pool};
 
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db");
-    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-    (pool, dir)
-}
+mod common;
+
+use common::test_pool;
 
 #[tokio::test]
 async fn test_persist_extract_chapter_block_e2e() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let creator_id = "ctr_test";
     let workspace_slug = "ws_test";
     let world_id = "wld_novel_world";
@@ -143,7 +140,7 @@ async fn test_worldless_work_skips_world_promotion() {
 
 #[tokio::test]
 async fn test_extract_idempotent_job() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let creator_id = "ctr_idem";
     seed::world(
         &pool,

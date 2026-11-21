@@ -55,6 +55,7 @@ pub struct SeededCharacter {
 
 /// A hermetic direct-core home with one active creator, plus authorized seed
 /// helpers for the actor graph and a runner for the real CLI child.
+#[allow(dead_code)] // targets that include this module only for `fixture_creator_id`
 pub struct DirectActor {
     fixture: DirectFixture,
     creator_id: String,
@@ -291,7 +292,7 @@ impl DirectActor {
 
 /// The fixture home holds exactly one creator; its id is the directory name
 /// under the nexus root's `creators/`.
-fn fixture_creator_id(home: &Path) -> String {
+pub fn fixture_creator_id(home: &Path) -> String {
     let creators_root = nexus_root_from_home(home).join("creators");
     let mut entries: Vec<_> = std::fs::read_dir(&creators_root)
         .expect("read fixture creators root")
