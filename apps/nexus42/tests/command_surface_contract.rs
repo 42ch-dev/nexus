@@ -215,6 +215,12 @@ fn v2_target_system_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
+    let commands_start = help_text
+        .find("Commands:")
+        .expect("system --help must list a Commands section");
+    let options_start = help_text.find("\nOptions:").unwrap_or(help_text.len());
+    let commands_section = &help_text[commands_start..options_start];
+
     for subcmd in &[
         "version",
         "doctor",
@@ -228,6 +234,10 @@ fn v2_target_system_subcommands() {
         assert!(
             help_text.contains(subcmd),
             "V2 system: expected subcommand '{subcmd}'"
+        );
+        assert!(
+            commands_section.contains(subcmd),
+            "V2 system: '{subcmd}' must be listed in the Commands section, not only in usage/options"
         );
     }
 }
