@@ -4,6 +4,9 @@
 //! embedded-module tests can be cfg-gated. Mirrors `nexus-wasm-host/build.rs`:
 //! the cfg is per-crate and does not propagate to dependent crates, so this
 //! crate needs its own probe.
+//!
+//! The probe is fail-closed: a compiler that cannot answer means the build
+//! stops, never that the target is assumed absent.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -15,30 +18,56 @@ fn main() {
     // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
 
-    if !has_wasm_target() {
-        println!(
-            "cargo:warning=nexus-capability: {TARGET} target not found; \
-             skipping embedded-module tests. Install the target with: \
-             rustup target add {TARGET}"
-        );
-        println!("cargo:rustc-cfg=nexus_no_wasm_target");
-    }
-}
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    let sysroot = sysroot_of(&rustc);
 
-/// Returns `true` when the compiler's sysroot carries the wasm target's std.
-///
-/// `rustc --print sysroot --target <t>` exits 0 even for a target that is not
-/// installed, so presence is decided by the sysroot's `lib/rustlib/<target>`
-/// directory instead.
-#[must_use]
-fn has_wasm_target() -> bool {
-    sysroot().is_some_and(|root| root.join("lib/rustlib").join(TARGET).is_dir())
+    if sysroot.join("lib/rustlib").join(TARGET).is_dir() {
+        return;
+    }
+
+    println!(
+        "cargo:warning=nexus-capability: {TARGET} target not found; \
+         skipping embedded-module tests. Install the target with: \
+         rustup target add {TARGET}"
+    );
+    println!("cargo:rustc-cfg=nexus_no_wasm_target");
 }
 
 /// The sysroot of the compiler Cargo is actually driving (RUSTC, not PATH).
-fn sysroot() -> Option<PathBuf> {
-    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
-    let output = Command::new(rustc).args(["--print", "sysroot"]).output().ok()?;
-    let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
-    (output.status.success() && path.is_dir()).then_some(path)
+///
+/// `rustc --print sysroot --target <t>` exits 0 even for a target that is not
+/// installed, so presence is decided from the sysroot's `lib/rustlib/<target>`
+/// directory. An unanswerable query panics rather than reporting absence.
+fn sysroot_of(rustc: &str) -> PathBuf {
+    let output = Command::new(rustc)
+        .args(["--print", "sysroot"])
+        .output()
+        .unwrap_or_else(|err| {
+            panic!(
+                "nexus-capability build script: cannot determine whether {TARGET} is \
+                 installed: `{rustc} --print sysroot` could not be run ({err}). Fix the \
+                 rustc in RUSTC; refusing to guess the target state."
+            )
+        });
+
+    if !output.status.success() {
+        panic!(
+            "nexus-capability build script: cannot determine whether {TARGET} is \
+             installed: `{rustc} --print sysroot` failed with {} ({}). Fix the rustc in \
+             RUSTC; refusing to guess the target state.",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let path = PathBuf::from(stdout.trim());
+    if !path.is_dir() {
+        panic!(
+            "nexus-capability build script: cannot determine whether {TARGET} is \
+             installed: `{rustc} --print sysroot` printed an unusable path ({path:?}). \
+             Fix the rustc in RUSTC; refusing to guess the target state."
+        );
+    }
+    path
 }
