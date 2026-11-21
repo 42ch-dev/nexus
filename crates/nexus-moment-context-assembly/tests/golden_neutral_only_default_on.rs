@@ -101,18 +101,6 @@ async fn assemble_with_flag(
 }
 
 #[tokio::test]
-async fn dump_neutral_only_golden_for_regeneration() {
-    // Temporary helper: prints the default-on output so the golden file can be
-    // regenerated. Kept on purpose (documented regen path, same pattern as
-    // other goldens in this crate).
-    let (narrative, kb, stage0) = build_neutral_fixture();
-    seed_neutral_stores(&kb).await;
-
-    let output = assemble_with_flag(stage0, &narrative, &kb, true).await;
-    println!("===GOLDEN-BEGIN===\n{output}\n===GOLDEN-END===");
-}
-
-#[tokio::test]
 async fn neutral_only_default_on_golden() {
     let (narrative, kb, stage0) = build_neutral_fixture();
     seed_neutral_stores(&kb).await;
