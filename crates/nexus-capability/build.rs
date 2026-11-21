@@ -52,14 +52,16 @@ fn wasm_target_installed(target_dir: &Path) -> bool {
         Ok(meta) if meta.is_dir() => true,
         Ok(_) => panic!(
             "nexus-capability build script: cannot determine whether {TARGET} is \
-             installed: {target_dir:?} exists but is not a directory. Fix the \
-             toolchain; refusing to guess the target state."
+             installed: `{}` exists but is not a directory. Fix the toolchain; refusing \
+             to guess the target state.",
+            target_dir.display()
         ),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
         Err(err) => panic!(
             "nexus-capability build script: cannot determine whether {TARGET} is \
-             installed: cannot stat {target_dir:?}: {} ({err}). Fix the toolchain or \
-             its permissions; refusing to guess the target state.",
+             installed: cannot stat `{}`: {} ({err}). Fix the toolchain or its \
+             permissions; refusing to guess the target state.",
+            target_dir.display(),
             err.kind()
         ),
     }
@@ -82,24 +84,23 @@ fn sysroot_of(rustc: &str) -> PathBuf {
             )
         });
 
-    if !output.status.success() {
-        panic!(
-            "nexus-capability build script: cannot determine whether {TARGET} is \
-             installed: `{rustc} --print sysroot` failed with {} ({}). Fix the rustc in \
-             RUSTC; refusing to guess the target state.",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
+    assert!(
+        output.status.success(),
+        "nexus-capability build script: cannot determine whether {TARGET} is installed: \
+         `{rustc} --print sysroot` failed with {} ({}). Fix the rustc in RUSTC; refusing \
+         to guess the target state.",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let path = PathBuf::from(stdout.trim());
-    if !path.is_dir() {
-        panic!(
-            "nexus-capability build script: cannot determine whether {TARGET} is \
-             installed: `{rustc} --print sysroot` printed an unusable path ({path:?}). \
-             Fix the rustc in RUSTC; refusing to guess the target state."
-        );
-    }
+    assert!(
+        path.is_dir(),
+        "nexus-capability build script: cannot determine whether {TARGET} is installed: \
+         `{rustc} --print sysroot` printed an unusable path (`{}`). Fix the rustc in \
+         RUSTC; refusing to guess the target state.",
+        path.display()
+    );
     path
 }
