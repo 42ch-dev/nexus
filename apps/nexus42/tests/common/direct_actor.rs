@@ -211,6 +211,30 @@ impl DirectActor {
         world_id: &str,
         canonical_name: &str,
     ) {
+        self.seed_world_character_sheet_with_body(
+            key_block_id,
+            world_id,
+            canonical_name,
+            serde_json::Map::new(),
+        )
+        .await;
+    }
+
+    /// Same seed as [`Self::seed_world_character_sheet`], with a stored
+    /// `KnowledgeEntry` body (`summary` / `attributes` / `tags`) so a test can
+    /// assert the body a read surface prints.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the seed core cannot be opened, the body fails the core's
+    /// `Novel` validation, or the entry is refused.
+    pub async fn seed_world_character_sheet_with_body(
+        &self,
+        key_block_id: &str,
+        world_id: &str,
+        canonical_name: &str,
+        body: serde_json::Map<String, serde_json::Value>,
+    ) {
         let (core, principal) = self.open_seed_core().await;
         core.patch_world_kb_entity(
             &principal,
@@ -224,6 +248,7 @@ impl DirectActor {
                             .expect("canonical name is wire-valid"),
                     ),
                     block_type: Some(NexusWorldKbEntityPatchBlockType::Character),
+                    body,
                     ..NexusWorldKbEntityPatch::default()
                 },
             },

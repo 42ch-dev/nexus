@@ -4,10 +4,12 @@
 //! warning are gone: the `creator kb` work-scope group is itself retired
 //! (V1.231, ADR K1 §5.3), and
 //! World-scoped narrative KB entries live on the canonical `creator world kb`
-//! surface. What remains covered here is that canonical surface itself — the
-//! `world::kb` logic functions (`kb_list` / `kb_show` / `kb_delete`) driven
-//! hermetically against a fresh temp DB, plus the reachable
-//! `creator world kb adopt --help` parser entry. The former alias
+//! surface. What remains covered here is that canonical surface itself: the
+//! `list` / `show` read leaves drive the REAL `nexus42` binary against a
+//! hermetic direct-core home (`common/direct_actor.rs`) and assert the seeded
+//! row in raw stdout, the `kb_delete` auth paths drive the `world::kb` logic
+//! functions against a fresh temp DB, and the reachable
+//! `creator world kb adopt --help` parser entry is pinned. The former alias
 //! wording/forwarding assertions were deleted with the entrance they described
 //! (delete incidental wording-only tests rather than repin them).
 //!
@@ -15,16 +17,28 @@
 
 #![allow(clippy::unwrap_used)]
 
+#[path = "common/direct.rs"]
+mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
+
 use assert_cmd::Command;
-use nexus42::commands::creator::world::kb::{kb_delete, kb_list, kb_show};
+use direct_actor::DirectActor;
+use nexus42::commands::creator::world::kb::kb_delete;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
+use std::process::Output;
 
 const OWNER: &str = "ctr_alias_test";
 const WORLD: &str = "wld_alias_test";
 const CANON_NAME: &str = "char_test_alias";
+
+/// World-KB entry the CLI read tests seed through the core (stored `kb_<hex>`).
+const CLI_ENTRY_ID: &str = "kb_5ee70011";
+const CLI_CANON_NAME: &str = "char_cli_alias";
+const CLI_SUMMARY: &str = "Alias test summary";
 
 /// Build a fresh migrated pool + seed a world and a single `KnowledgeEntryRecord`.
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
@@ -58,13 +72,39 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
     (pool, result.entry_id, dir)
 }
 
+/// Seed one body-carrying World character entry through the authorized core.
+async fn seed_cli_entry(actor: &DirectActor, world_id: &str) {
+    actor
+        .seed_world_character_sheet_with_body(
+            CLI_ENTRY_ID,
+            world_id,
+            CLI_CANON_NAME,
+            serde_json::json!({
+                "summary": CLI_SUMMARY,
+                "attributes": {"novel_category": "character"},
+                "tags": ["test"],
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        )
+        .await;
+}
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
 // =============================================================================
 // CLI surface (assert_cmd)
 // =============================================================================
 
-/// `creator world kb adopt --help` should be reachable even if `--auto` has
-/// not yet landed from T-A P0. This test verifies the help output is present
-/// (the `--auto` flag assertion is conditional — T-A P0 deliverable).
+/// `creator world kb adopt --help` pins the full Usage command path and the
+/// `--auto` option line (clap renders options as trimmed indented lines).
 #[test]
 fn creator_world_kb_adopt_help_is_reachable() {
     let output = Command::cargo_bin("nexus42")
@@ -77,43 +117,106 @@ fn creator_world_kb_adopt_help_is_reachable() {
         .clone();
 
     let help_text = String::from_utf8(output).unwrap();
+
+    let usage = help_text
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("Usage:"))
+        .unwrap_or_else(|| panic!("adopt --help has no Usage line:\n{help_text}"));
     assert!(
-        help_text.contains("adopt"),
-        "expected 'adopt' in help output, got:\n{help_text}"
+        usage.starts_with("Usage: nexus42 creator world kb adopt"),
+        "unexpected adopt usage path: {usage}"
     );
-    // Note: --auto flag is a T-A P0 deliverable; this assertion is a forward
-    // compatibility check. If T-A P0 has landed, --auto should be documented.
-    let has_auto = help_text.contains("--auto");
-    if !has_auto {
-        eprintln!(
-            "NOTE: `--auto` flag not yet present on `creator world kb adopt --help`. \
-             This is expected if T-A P0 has not yet merged into iteration/v1.52."
-        );
-    }
+    assert!(
+        help_text
+            .lines()
+            .map(str::trim)
+            .any(|line| line.starts_with("--auto")),
+        "adopt --help must list the --auto option line:\n{help_text}"
+    );
+}
+
+// =============================================================================
+// Canonical World KB read leaves (the real binary over a direct-core home)
+// =============================================================================
+
+/// `creator world kb list --json` prints the entry seeded through the core.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_kb_list_lists_seeded_block() {
+    let actor = DirectActor::new().await;
+    let world_id = actor.create_world("Alias List World").await;
+    seed_cli_entry(&actor, &world_id).await;
+
+    let output = actor.cli(&["creator", "world", "kb", "list", &world_id, "--json"]);
+    assert!(
+        output.status.success(),
+        "kb list failed: {}",
+        stderr(&output)
+    );
+
+    let raw = stdout(&output);
+    assert!(
+        raw.contains(CLI_ENTRY_ID),
+        "seeded id missing from kb list stdout: {raw}"
+    );
+    assert!(
+        raw.contains(CLI_CANON_NAME),
+        "seeded canonical name missing from kb list stdout: {raw}"
+    );
+    let listed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let item = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["key_block_id"] == CLI_ENTRY_ID)
+        .expect("seeded entry is listed");
+    assert_eq!(item["canonical_name"], CLI_CANON_NAME);
+}
+
+/// `creator world kb show --json` prints the seeded entry's id, name and body.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_kb_show_shows_seeded_block() {
+    let actor = DirectActor::new().await;
+    let world_id = actor.create_world("Alias Show World").await;
+    seed_cli_entry(&actor, &world_id).await;
+
+    let output = actor.cli(&[
+        "creator",
+        "world",
+        "kb",
+        "show",
+        &world_id,
+        CLI_ENTRY_ID,
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "kb show failed: {}",
+        stderr(&output)
+    );
+
+    let raw = stdout(&output);
+    assert!(
+        raw.contains(CLI_ENTRY_ID),
+        "seeded id missing from kb show stdout: {raw}"
+    );
+    assert!(
+        raw.contains(CLI_CANON_NAME),
+        "seeded canonical name missing from kb show stdout: {raw}"
+    );
+    assert!(
+        raw.contains(CLI_SUMMARY),
+        "seeded body summary missing from kb show stdout: {raw}"
+    );
+    let shown: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(shown["entry_id"], CLI_ENTRY_ID);
+    assert_eq!(shown["canonical_name"], CLI_CANON_NAME);
+    assert_eq!(shown["body"]["summary"], CLI_SUMMARY);
 }
 
 // =============================================================================
 // Canonical World KB functions (the owners the retired alias merely forwarded to)
 // =============================================================================
-
-/// `kb_list` lists the seeded block via the canonical function.
-#[tokio::test]
-async fn canonical_kb_list_lists_seeded_block() {
-    let (pool, key_block_id, _dir) = fresh_pool_with_block().await;
-
-    let result = kb_list(&pool, WORLD, false).await;
-    assert!(result.is_ok(), "kb_list should succeed: {result:?}");
-    drop(key_block_id);
-}
-
-/// `kb_show` shows the seeded block via the canonical function.
-#[tokio::test]
-async fn canonical_kb_show_shows_seeded_block() {
-    let (pool, key_block_id, _dir) = fresh_pool_with_block().await;
-
-    let result = kb_show(&pool, WORLD, &key_block_id, false).await;
-    assert!(result.is_ok(), "kb_show should succeed: {result:?}");
-}
 
 /// `kb_delete` soft-deletes the seeded block.
 #[tokio::test]
