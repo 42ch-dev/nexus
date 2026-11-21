@@ -8,7 +8,7 @@
 //! The probe is fail-closed: a compiler that cannot answer means the build
 //! stops, never that the target is assumed absent.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const TARGET: &str = "wasm32-unknown-unknown";
@@ -21,7 +21,7 @@ fn main() {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     let sysroot = sysroot_of(&rustc);
 
-    if sysroot.join("lib/rustlib").join(TARGET).is_dir() {
+    if wasm_target_installed(&sysroot.join("lib/rustlib").join(TARGET)) {
         return;
     }
 
@@ -31,6 +31,29 @@ fn main() {
          rustup target add {TARGET}"
     );
     println!("cargo:rustc-cfg=nexus_no_wasm_target");
+}
+
+/// True when the wasm target's std directory is present.
+///
+/// Only `NotFound` means "not installed". Any other stat failure, or an entry
+/// that is not a directory, is an unanswerable state and panics — `is_dir()`
+/// would turn those into a silent "target absent".
+fn wasm_target_installed(target_dir: &Path) -> bool {
+    match std::fs::metadata(target_dir) {
+        Ok(meta) if meta.is_dir() => true,
+        Ok(_) => panic!(
+            "nexus-capability build script: cannot determine whether {TARGET} is \
+             installed: {target_dir:?} exists but is not a directory. Fix the \
+             toolchain; refusing to guess the target state."
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => panic!(
+            "nexus-capability build script: cannot determine whether {TARGET} is \
+             installed: cannot stat {target_dir:?}: {} ({err}). Fix the toolchain or \
+             its permissions; refusing to guess the target state.",
+            err.kind()
+        ),
+    }
 }
 
 /// The sysroot of the compiler Cargo is actually driving (RUSTC, not PATH).
