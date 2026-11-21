@@ -9,15 +9,14 @@ use sqlx::SqlitePool;
 
 /// The seedable columns of a `narrative_worlds` test row.
 ///
-/// A fixture names only the values it varies and takes the rest from
-/// [`WorldSeed::default`], so a difference between fixtures is a field rather
-/// than a forked INSERT. The defaults are the values the hand-written copies
-/// shared: `workspace_id = "wrk_test"`, `visibility = "private"`,
-/// `time_policy = "manual"`, no display name (the seed keeps the owner's id),
-/// and no timeline columns.
+/// Build one with [`WorldSeed::new`], name only the values the fixture varies
+/// through the `with_*` methods, and hand it to `seed::world_with`. The
+/// defaults are the values the hand-written copies shared: `workspace_id =
+/// "wrk_test"`, `visibility = "private"`, `time_policy = "manual"`, no display
+/// name (the seed keeps the owner's id), and no timeline columns.
 ///
-/// `world_id`, `owner_creator_id`, `title` and `slug` default to `""`; every
-/// call site names them.
+/// The four identifying values have no default — a seed without a `world_id`,
+/// owner, title or slug is not a row any fixture wants.
 pub struct WorldSeed<'a> {
     /// `narrative_worlds.world_id`.
     pub world_id: &'a str,
@@ -41,13 +40,24 @@ pub struct WorldSeed<'a> {
     pub current_timeline_head_id: Option<&'a str>,
 }
 
-impl<'a> Default for WorldSeed<'a> {
-    fn default() -> Self {
+impl<'a> WorldSeed<'a> {
+    /// A seed for the given row identity; every other column keeps the value
+    /// the hand-written copies used.
+    ///
+    /// The four values are positional and required: a fixture cannot forget one
+    /// and silently seed an empty string.
+    #[must_use]
+    pub fn new(
+        world_id: &'a str,
+        owner_creator_id: &'a str,
+        title: &'a str,
+        slug: &'a str,
+    ) -> Self {
         Self {
-            world_id: "",
-            owner_creator_id: "",
-            title: "",
-            slug: "",
+            world_id,
+            owner_creator_id,
+            title,
+            slug,
             visibility: "private",
             time_policy: "manual",
             workspace_id: "wrk_test",
@@ -55,6 +65,48 @@ impl<'a> Default for WorldSeed<'a> {
             root_fork_branch_id: None,
             current_timeline_head_id: None,
         }
+    }
+
+    /// The workspace the row belongs to.
+    #[must_use]
+    pub fn with_workspace_id(mut self, workspace_id: &'a str) -> Self {
+        self.workspace_id = workspace_id;
+        self
+    }
+
+    /// `visibility`.
+    #[must_use]
+    pub fn with_visibility(mut self, visibility: &'a str) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
+    /// `time_policy`.
+    #[must_use]
+    pub fn with_time_policy(mut self, time_policy: &'a str) -> Self {
+        self.time_policy = time_policy;
+        self
+    }
+
+    /// The minimal creator's display name.
+    #[must_use]
+    pub fn with_display_name(mut self, display_name: &'a str) -> Self {
+        self.display_name = Some(display_name);
+        self
+    }
+
+    /// The world's root fork branch.
+    #[must_use]
+    pub fn with_root_fork_branch_id(mut self, root_fork_branch_id: &'a str) -> Self {
+        self.root_fork_branch_id = Some(root_fork_branch_id);
+        self
+    }
+
+    /// The world's current timeline head.
+    #[must_use]
+    pub fn with_current_timeline_head_id(mut self, current_timeline_head_id: &'a str) -> Self {
+        self.current_timeline_head_id = Some(current_timeline_head_id);
+        self
     }
 }
 
@@ -77,15 +129,9 @@ pub async fn world(
 ) {
     world_with(
         pool,
-        WorldSeed {
-            world_id,
-            owner_creator_id,
-            title,
-            slug,
-            visibility,
-            time_policy,
-            ..WorldSeed::default()
-        },
+        WorldSeed::new(world_id, owner_creator_id, title, slug)
+            .with_visibility(visibility)
+            .with_time_policy(time_policy),
     )
     .await;
 }
@@ -112,16 +158,10 @@ pub async fn world_with_display_name(
 ) {
     world_with(
         pool,
-        WorldSeed {
-            world_id,
-            owner_creator_id,
-            title,
-            slug,
-            visibility,
-            time_policy,
-            display_name: Some(display_name),
-            ..WorldSeed::default()
-        },
+        WorldSeed::new(world_id, owner_creator_id, title, slug)
+            .with_visibility(visibility)
+            .with_time_policy(time_policy)
+            .with_display_name(display_name),
     )
     .await;
 }
