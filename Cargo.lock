@@ -3612,7 +3612,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
- "wiremock",
 ]
 
 [[package]]

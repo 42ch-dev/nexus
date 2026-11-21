@@ -54,7 +54,6 @@ sysinfo = { version = "0.40.1", default-features = false, features = ["system"] 
 
 [dev-dependencies]
 tokio = { workspace = true }
-wiremock = "0.6"
 assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3"
