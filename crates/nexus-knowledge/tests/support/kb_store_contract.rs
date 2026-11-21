@@ -15,7 +15,7 @@ fn make_block(world_id: &str, block_type: BlockType, name: &str) -> KnowledgeEnt
 }
 
 /// Insert returns the stored identity and `get` reads the record back.
-pub async fn insert_and_get<S: KbStore>(store: &S) {
+pub async fn insert_and_get<S: KbStore + Sync>(store: &S) {
     let kb = make_block("wld_1", BlockType::Character, "Hero");
 
     let result = store.insert_knowledge_entry(kb.clone()).await.unwrap();
@@ -28,13 +28,13 @@ pub async fn insert_and_get<S: KbStore>(store: &S) {
 }
 
 /// An unknown id is `NotFound`, never a backend-specific storage error.
-pub async fn get_not_found<S: KbStore>(store: &S) {
+pub async fn get_not_found<S: KbStore + Sync>(store: &S) {
     let err = store.get_knowledge_entry("kb_absent").await.unwrap_err();
     assert!(matches!(&err, KbStoreError::NotFound(id) if id == "kb_absent"));
 }
 
 /// `list_by_world` returns only that world's active entries.
-pub async fn list_by_world<S: KbStore>(store: &S) {
+pub async fn list_by_world<S: KbStore + Sync>(store: &S) {
     for kb in [
         make_block("wld_1", BlockType::Character, "Hero"),
         make_block("wld_1", BlockType::Scene, "Forest"),
@@ -53,7 +53,7 @@ pub async fn list_by_world<S: KbStore>(store: &S) {
 
 /// A second active entry with the same `(owner, canonical_name, block_type)`
 /// is refused with the colliding owner and name, not a raw storage error.
-pub async fn uniqueness_rejects_duplicate<S: KbStore>(store: &S) {
+pub async fn uniqueness_rejects_duplicate<S: KbStore + Sync>(store: &S) {
     store
         .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Hero"))
         .await
@@ -70,7 +70,7 @@ pub async fn uniqueness_rejects_duplicate<S: KbStore>(store: &S) {
 }
 
 /// Delete is soft: the row stays readable as `deleted` and leaves `list_by_world`.
-pub async fn soft_delete<S: KbStore>(store: &S) {
+pub async fn soft_delete<S: KbStore + Sync>(store: &S) {
     let kb = make_block("wld_1", BlockType::Character, "Hero");
     let id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
