@@ -23,7 +23,7 @@ use nexus_orchestration::auto_chronology::{advance_manual, outline_path, Advance
 /// AC §8: `chronology set my-work --auto true` round-trips through the DAO.
 #[tokio::test]
 async fn chronology_set_true_persists() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     works::set_auto_chronology(&pool, "wrk_seed", true, "2026-06-18T00:00:00Z")
         .await
         .unwrap();
@@ -36,7 +36,7 @@ async fn chronology_set_true_persists() {
 /// AC §8: `chronology set my-work --auto false` disables the flag (default).
 #[tokio::test]
 async fn chronology_set_false_disables() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     works::set_auto_chronology(&pool, "wrk_seed", true, "2026-06-18T00:00:00Z")
         .await
         .unwrap();
@@ -52,7 +52,7 @@ async fn chronology_set_false_disables() {
 /// AC §8: `show` reports the persisted flag (defaults to false on a fresh Work).
 #[tokio::test]
 async fn chronology_show_defaults_false() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     assert!(
         !works::get_auto_chronology(&pool, "wrk_seed").await.unwrap(),
         "fresh Work must default to auto_chronology=false"
@@ -63,7 +63,7 @@ async fn chronology_show_defaults_false() {
 /// + seeds 3 chapters, regardless of the `auto_chronology` flag.
 #[tokio::test]
 async fn chronology_advance_round_trip() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     let ws = tempfile::tempdir().unwrap();
     // The Work is NOT opted in; manual advance must still work (spec §2.2).
     assert!(
@@ -109,7 +109,7 @@ async fn chronology_advance_round_trip() {
 /// (returns `AlreadyAdvanced`, does not clobber).
 #[tokio::test]
 async fn chronology_advance_idempotent_on_repeat() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     let ws = tempfile::tempdir().unwrap();
     advance_manual(&pool, ws.path(), "wrk_seed", 2, None, false)
         .await
@@ -237,20 +237,21 @@ fn chronology_advance_help_documents_force_flag() {
 
 /// Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
 /// `seed-ref`) under `ctr_test` / `default`.
-async fn fresh_seeded_pool() -> sqlx::SqlitePool {
+///
+/// Returns `(dir, pool)` so callers bind the owner first: the pool drops
+/// before the tempdir it holds open.
+async fn fresh_seeded_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
         .unwrap()
         .clone_pool();
-    // Keep the tempdir alive for the test by leaking it (test process is short-lived).
-    std::mem::forget(dir);
     let record = sample_work_record("wrk_seed", "seed-ref");
     nexus_local_db::works::create_work(&pool, &record)
         .await
         .unwrap();
-    pool
+    (dir, pool)
 }
 
 /// Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
