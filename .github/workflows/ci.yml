@@ -560,6 +560,12 @@ jobs:
         run: bash tooling/check-schema-drift.sh
       - name: Check wire schema drift
         run: bash tooling/check-wire-drift.sh
+      # I-000590: the knowledge-entry seam's structural guard used to walk the
+      # checkout from `cargo test`, where a `pub(crate) fn` copy slipped past
+      # its `pub fn` needle. It is a tracked-source scan now, run here so the
+      # gate is visible and the test file stays behavioural.
+      - name: Check knowledge-entry seam surface
+        run: bash tooling/check-kb-stub-surface.sh
       # V1.174 P0 T6 (AR-74), retargeted for the v1.193 P2 product cohorts:
       # dependency graph pins — structure only (absence, single resolved
       # version, resolved feature set), never a version value: the ordinary
