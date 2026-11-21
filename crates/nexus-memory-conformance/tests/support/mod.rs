@@ -41,7 +41,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use futures_util::FutureExt as _;
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Barrier, Notify};
 
 use sqlx::Connection as _;
@@ -134,9 +134,9 @@ pub const TEXT: &str = "Mira promised to return before the northern gate opens a
 /// `RemoteServePorts` is a baseline-port supertrait; this suite serves
 /// `spoke-memory` only, so every baseline call refuses honestly instead of
 /// fabricating a baseline object. `spoke-baseline` is never negotiated.
-struct MemoryOnlyHost;
+pub struct MemoryOnlyHost;
 
-fn no_baseline<T>() -> SpokeResult<T> {
+pub fn no_baseline<T>() -> SpokeResult<T> {
     SpokeResult::Reject(SpokeReject {
         code: SpokeRejectCode::CapabilityPortMissing,
         message: "this host serves no baseline family".to_owned(),
@@ -501,6 +501,63 @@ struct ServedEndpoint {
     socket: Arc<dyn Transport>,
     responder: Arc<ConnectResponder>,
     socket_weak: Weak<WsTransport<tokio::net::TcpStream>>,
+}
+
+/// Accept the next loopback connection on `listener` and serve `service` over
+/// the SDK's signed responder handshake.
+///
+/// `peers` is the admitted dialer table, and its keys are the responder's
+/// allowlist. The returned socket is a duplicate of the accepted one, cloned
+/// before the upgrade, so a test can tear the transport down without a
+/// WebSocket close frame.
+///
+/// Every difference the remote suites had between their own copies of this
+/// handshake — the two bounds, the invoke timeout, the host identity, the
+/// trusted table and the served service — is a parameter here.
+#[allow(clippy::too_many_arguments)]
+pub async fn accept_signed_peer(
+    listener: &TcpListener,
+    service: Arc<dyn RemoteMemoryService>,
+    host_manifest: HostCapabilityManifest,
+    peers: &HashMap<String, [u8; 32]>,
+    seed: [u8; 32],
+    accept_bound: Duration,
+    upgrade_bound: Duration,
+    invoke_timeout_ms: u64,
+) -> (std::net::TcpStream, Arc<ConnectResponder>) {
+    let (tcp, peer) = tokio::time::timeout(accept_bound, listener.accept())
+        .await
+        .expect("the client connects to the listener")
+        .expect("accept the localhost peer");
+    assert!(peer.ip().is_loopback(), "the fixture serves localhost only");
+    let std_stream = tcp.into_std().expect("the accepted socket converts");
+    let accepted = std_stream.try_clone().expect("clone the accepted socket");
+    let tcp = TcpStream::from_std(std_stream).expect("restore the accepted socket");
+    let ws = tokio::time::timeout(
+        upgrade_bound,
+        tokio_tungstenite::accept_async_with_config(
+            tcp,
+            Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+        ),
+    )
+    .await
+    .expect("the websocket upgrade is bounded")
+    .expect("websocket upgrade");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
+        RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None).with_memory(service),
+    );
+    let responder = connect_responder(ConnectResponderOptions {
+        transport,
+        identity: RemoteIdentity { seed },
+        manifest: host_manifest,
+        allowlist: peers.keys().cloned().collect(),
+        peer_keys: peers.clone(),
+        ports: Some(ports),
+        invoke_timeout_ms: Some(invoke_timeout_ms),
+    })
+    .await;
+    (accepted, responder)
 }
 
 /// Bind the ephemeral loopback listener and serve one signed responder task.
@@ -2344,7 +2401,7 @@ impl Matrix {
 // The typed protocol surface
 // ---------------------------------------------------------------------------
 
-fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
+pub fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid request")
 }
 
