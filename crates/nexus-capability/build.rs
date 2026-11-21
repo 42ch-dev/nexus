@@ -20,8 +20,17 @@ fn main() {
 
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     let sysroot = sysroot_of(&rustc);
+    let rustlib = sysroot.join("lib/rustlib");
 
-    if wasm_target_installed(&sysroot.join("lib/rustlib").join(TARGET)) {
+    // Installing or removing the target changes this directory, not a package
+    // file, so a warm build cache would otherwise keep a stale cfg. A missing
+    // directory makes Cargo rerun every build, which is the safe direction.
+    println!("cargo:rerun-if-changed={}", rustlib.display());
+    // RUSTC selects which sysroot is read above, so a different compiler must
+    // be re-probed even when its sysroot directory looks unchanged.
+    println!("cargo:rerun-if-env-changed=RUSTC");
+
+    if wasm_target_installed(&rustlib.join(TARGET)) {
         return;
     }
 
