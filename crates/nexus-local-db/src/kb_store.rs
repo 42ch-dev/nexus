@@ -323,6 +323,38 @@ pub mod seed {
         .await;
     }
 
+    /// [`world`] with an explicit creator `display_name`.
+    ///
+    /// Delegates to `seed_shared::world_with_display_name`; the wrapper above
+    /// keeps the creator id, so both entry points seed the same row shape.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either database insert fails.
+    #[allow(clippy::too_many_arguments)] // the seeded row's fields are independent fixture values
+    pub async fn world_with_display_name(
+        pool: &SqlitePool,
+        world_id: &str,
+        owner_creator_id: &str,
+        display_name: &str,
+        title: &str,
+        slug: &str,
+        visibility: &str,
+        time_policy: &str,
+    ) {
+        seed_shared::world_with_display_name(
+            pool,
+            world_id,
+            owner_creator_id,
+            display_name,
+            title,
+            slug,
+            visibility,
+            time_policy,
+        )
+        .await;
+    }
+
     /// Seed a test key block row into `kb_key_blocks`.
     ///
     /// # Panics
@@ -3465,7 +3497,6 @@ pub async fn read_key_block_revision(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seed_shared;
     use crate::test_support::fresh_pool;
     use serde_json::{json, Value};
 
@@ -3478,7 +3509,7 @@ mod tests {
 
     /// Seed a world row through the crate's one seed source.
     async fn seed_world_row(pool: &SqlitePool, world_id: &str, title: &str, slug: &str) {
-        seed_shared::world_with_display_name(
+        seed::world_with_display_name(
             pool,
             world_id,
             "ctr_test",

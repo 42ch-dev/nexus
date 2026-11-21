@@ -55,6 +55,38 @@ pub mod seed {
         .await;
     }
 
+    /// [`world`] with an explicit creator `display_name`.
+    ///
+    /// Delegates to `seed_shared::world_with_display_name`; the wrapper above
+    /// keeps the creator id, so both entry points seed the same row shape.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either database insert fails.
+    #[allow(clippy::too_many_arguments)] // the seeded row's fields are independent fixture values
+    pub async fn world_with_display_name(
+        pool: &SqlitePool,
+        world_id: &str,
+        owner_creator_id: &str,
+        display_name: &str,
+        title: &str,
+        slug: &str,
+        visibility: &str,
+        time_policy: &str,
+    ) {
+        seed_shared::world_with_display_name(
+            pool,
+            world_id,
+            owner_creator_id,
+            display_name,
+            title,
+            slug,
+            visibility,
+            time_policy,
+        )
+        .await;
+    }
+
     /// Seed a test timeline event row into `narrative_timeline_events`.
     ///
     /// # Panics

@@ -788,7 +788,7 @@ pub async fn upsert_extraction_relationship(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seed_shared;
+    use crate::kb_store::seed;
     use crate::test_support::fresh_pool;
 
     async fn seed_world_and_entities(pool: &SqlitePool) -> (String, String, String) {
@@ -796,7 +796,7 @@ mod tests {
         let source_id = "kb_source";
         let target_id = "kb_target";
 
-        seed_shared::world_with_display_name(
+        seed::world_with_display_name(
             pool,
             world_id,
             "ctr_test",
@@ -996,7 +996,7 @@ mod tests {
         // must deny with WorldConflict, NOT a plain VersionMismatch.
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
-        seed_shared::world_with_display_name(
+        seed::world_with_display_name(
             &pool,
             "wld_other",
             "ctr_test",
