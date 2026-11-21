@@ -3,7 +3,7 @@
 Status: implemented — iteration v1.249 closed on 2026-11-19. The C crate graph, the eight-package public/private split with independent literal versions and caret ranges, and the engine-free Connect product all shipped and are locked in [`docs/specs/architecture/rust-core-service-boundary.md`](../../../../docs/specs/architecture/rust-core-service-boundary.md) § Public package boundary. Package-ready is not published: the independent release capability is implemented and validated without dispatching, tagging or bumping.
 Date: 2026-11-10
 Implemented: 2026-11-19 in iteration v1.249-lightweight-core, seven plans, integration `a4642e419`.
-Reconciled: 2026-11-18 against main @ 53fc30de0 — §2 figures re-measured; direction still undecided (I-000421).
+Reconciled: 2026-11-18 against main @ 53fc30de0 — §2 figures re-measured; the direction tracked by I-000421 was subsequently decided and shipped in v1.249-lightweight-core.
 Scope: Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth.
 Source: migrated from the retired tracked specs corpus
 
@@ -91,7 +91,7 @@ Not stated as a separate comparison in the migrated proposal; where the body nam
 
 ## Consequences
 
-No separate acceptance list was stated in the migrated proposal; the landed and unstarted bounds remain stated in Decision §2. No actual registry publish has been dispatched, tagged, or version-bumped, and `nexus-orchestration::capability` remains the unstarted extraction candidate. The direction tracked by `I-000421` remains undecided.
+No separate acceptance list was stated in the migrated proposal; the landed and unstarted bounds remain stated in Decision §2. No actual registry publish has been dispatched, tagged, or version-bumped, and `nexus-orchestration::capability` remains the unstarted extraction candidate. The direction tracked by `I-000421` is now decided and shipped in v1.249-lightweight-core.
 
 The decision rejects the following directions:
 
