@@ -524,13 +524,9 @@ Daemon API clients that connect over loopback HTTP use a **resolved daemon base 
 
 The desktop-shell convention:
 
-1. Default port is `8420` (the `boot.rs` default).
+1. Default port is `8420` (`DESKTOP_SERVICE_PORT` in `apps/desktop-electron/src/env.ts`).
 2. `NEXUS_DAEMON_PORT` may override the default when the client/launcher environment provides it.
-3. The desktop launcher passes the resolved port explicitly to the sidecar:
-   ```text
-   nexus42 daemon start --foreground --port <resolved_port>
-   ```
-   so CLI args and environment cannot diverge.
+3. The desktop launcher passes the resolved port explicitly to the standalone TypeScript service (`apps/nexus-service`) it hosts for browser/Electron, so launch configuration and environment cannot diverge. There is no CLI daemon command — `/v1/daemon/*` is retained wire vocabulary, not a live daemon process (root `STRATEGY.md`).
 4. Readiness is confirmed by:
    ```text
    GET http://127.0.0.1:<resolved_port>/v1/daemon/runtime/health

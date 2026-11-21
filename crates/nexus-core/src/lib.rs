@@ -4,6 +4,9 @@ mod actor_fence;
 mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
+// Private atomic-write durability kernel shared by content/creators/presets
+// (I-000564); deliberately not re-exported.
+mod atomic_write;
 mod actors;
 // v1.241 P3.5 Task 2: the apply write stays execution-owned (approval/apply
 // recovery runs on the execution cohort). Approve itself is authoring: it

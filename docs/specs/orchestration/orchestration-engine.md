@@ -1105,7 +1105,6 @@ The normative constraints for this surface are stated in §Current state; a chan
 - `apps/nexus42/src/cli.rs`
 - `apps/nexus42/Cargo.toml`
 - `apps/nexus-service`
-- `crates/nexus-daemon-runtime`
 - `crates/nexus-core`
 - `apps/nexus42`
 - `crates/nexus-contracts`

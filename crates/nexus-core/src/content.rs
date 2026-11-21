@@ -205,6 +205,16 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// temp file + fsync + atomic rename + final-file fsync + parent-dir fsync.
 /// The caller owns path-guard resolution, parent-directory creation and the
 /// legacy error-code mapping; the temp file is cleaned up on failure.
+/// The blocking temp-file write runs through the private
+/// [`crate::atomic_write`] kernel on Tokio's blocking pool.
+///
+/// The target is only replaced after the prepare await returns: dropping
+/// this future while the temp write is still queued or in flight leaves the
+/// previous content intact. The commit itself — rename, final-file fsync,
+/// parent-dir fsync — runs on a second blocking task only after the
+/// prepare await returns; once entered it is not interruptible, exactly
+/// like the old `tokio::fs::rename`. A panic mid-commit would surface as a
+/// join error with the rename potentially already applied, not a rollback.
 pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
@@ -213,30 +223,57 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     );
     let temp_path = target.with_extension(&tmp_extension);
 
-    let write_result = async {
-        tokio::fs::write(&temp_path, content).await?;
-        let file = tokio::fs::File::open(&temp_path).await?;
-        file.sync_all().await?;
-        tokio::fs::rename(&temp_path, &target).await?;
-        // Durability: fsync the final file after the atomic rename so a crash
-        // after rename() returns does not leave the rename unflushed.
-        let final_file = tokio::fs::File::open(&target).await?;
-        final_file.sync_all().await?;
-        // Durability: fsync the parent directory so the renamed entry is
-        // committed to disk (QC3-S3).
-        if let Some(parent) = target.parent() {
-            let dir = tokio::fs::File::open(parent).await?;
-            dir.sync_all().await?;
-        }
-        Ok(())
-    }
-    .await;
+    let write_temp = temp_path.clone();
+    let write_content = content.to_string();
+    let prepare_result = match tokio::task::spawn_blocking(move || {
+        crate::atomic_write::prepare_temp(&write_temp, write_content.as_bytes())
+            .map_err(|e| e.into_io())
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(join) => Err(std::io::Error::other(join)),
+    };
 
-    if let Err(e) = write_result {
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(e);
+    // Commit only runs when the caller is still live: a dropped future
+    // never reaches the second blocking task, so the target keeps its
+    // previous content. It goes through `spawn_blocking` because the
+    // rename + fsyncs must not stall a Tokio worker.
+    let write_result = match prepare_result {
+        Ok(()) => {
+            let commit_target = target.clone();
+            let commit_temp = temp_path.clone();
+            match tokio::task::spawn_blocking(move || {
+                crate::atomic_write::commit(&commit_target, &commit_temp, true)
+                    .map_err(|e| e.into_io())
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(join) => Err(std::io::Error::other(join)),
+            }
+        }
+        Err(e) => Err(e),
+    };
+
+    cleanup_temp_on_failure(write_result, &temp_path).await
+}
+
+/// `fsync_write_atomic`'s single failure-exit: remove the caller-owned temp
+/// file and return the error, or pass `Ok` through. Every failure path —
+/// kernel error or blocking-task join failure — funnels through here so the
+/// temp file never survives a failed write.
+async fn cleanup_temp_on_failure(
+    result: std::io::Result<()>,
+    temp_path: &Path,
+) -> std::io::Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = tokio::fs::remove_file(temp_path).await;
+            Err(e)
+        }
     }
-    Ok(())
 }
 
 /// Per-Work advisory runtime lock (single-writer authoring contract, DF-60 §4)
@@ -989,4 +1026,85 @@ async fn patch_chapter(
     lock.release().await;
     let record = updated?;
     to_detail(&record, root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_temp_on_failure_removes_the_temp_file_only_on_error() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let temp_path = dir.path().join("chapter.md.tmp.1.1");
+        std::fs::write(&temp_path, "staged bytes").expect("seed temp file");
+
+        let err = cleanup_temp_on_failure(
+            Err(std::io::Error::other("join failure")),
+            &temp_path,
+        )
+        .await
+        .expect_err("error propagates");
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert!(!temp_path.exists(), "failed write leaves no temp file");
+
+        std::fs::write(&temp_path, "staged bytes").expect("reseed temp file");
+        cleanup_temp_on_failure(Ok(()), &temp_path)
+            .await
+            .expect("ok passes through");
+        assert!(temp_path.exists(), "successful write keeps the temp path");
+    }
+
+    /// Dropping `fsync_write_atomic` while its prepare stage is still queued
+    /// on the blocking pool leaves the target untouched — proven after the
+    /// cancelled task has fully exited, not just after its bytes landed.
+    ///
+    /// The runtime runs `max_blocking_threads(1)`, and the pool dispatches
+    /// queued `spawn_blocking` tasks in submission order. The first slot is
+    /// parked on a channel while the write is cancelled; once released, the
+    /// cancelled task's prepare runs to completion and exits the pool, and
+    /// only then does the second (sentinel) blocking task resolve. The
+    /// sentinel's resolution is therefore the ordering proof that the
+    /// cancelled task has left the pool and any tail work it might have
+    /// performed is done — including a hypothetical rename snuck in after
+    /// the prepare, which is exactly the regression this catches.
+    #[test]
+    fn cancelled_prepare_leaves_target_content_intact() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("chapter.md");
+        std::fs::write(&target, "old bytes").expect("seed target");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        rt.block_on(async {
+            let holder = tokio::task::spawn_blocking(move || {
+                let _ = release_rx.blocking_recv();
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let write = fsync_write_atomic(target.clone(), "new bytes");
+            let outcome = tokio::time::timeout(std::time::Duration::from_millis(200), write).await;
+            assert!(
+                outcome.is_err(),
+                "prepare must still be queued when the write is cancelled"
+            );
+            // Release the parked slot. The cancelled task's prepare now
+            // runs and exits; the sentinel submitted behind it resolves
+            // only once the pool is free again — FIFO on a single slot.
+            let _ = release_tx.send(());
+            tokio::task::spawn_blocking(|| ())
+                .await
+                .expect("sentinel resolves");
+            holder.await.expect("holder finishes");
+
+            assert_eq!(
+                std::fs::read_to_string(&target).expect("read target"),
+                "old bytes",
+                "cancelled write leaves the previous content in place"
+            );
+        });
+    }
 }
