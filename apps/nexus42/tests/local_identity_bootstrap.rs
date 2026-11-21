@@ -5,12 +5,11 @@
 //! so a refused bootstrap persists nothing instead of leaving a minted,
 //! unselected persistent identity row behind.
 
-use assert_cmd::Command;
-use std::process::Output;
+#[path = "common/cli_support.rs"]
+mod cli_support;
 
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
+use assert_cmd::Command;
+use cli_support::stderr;
 
 /// A config document that cannot be read (the I-000304 refusal shape) must
 /// fail the persistent identity mint before any store write: the CLI exits
