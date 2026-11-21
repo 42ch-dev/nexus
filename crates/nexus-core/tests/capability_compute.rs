@@ -190,14 +190,16 @@ async fn fixture_with_compute(
 
 /// Seed a world owned by `owner`.
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
-    nexus_local_db::kb_store::seed::world(
+    nexus_local_db::kb_store::seed::world_with(
         pool,
-        world_id,
-        owner,
-        "Combat World",
-        "combat-world",
-        "private",
-        "manual",
+        nexus_local_db::kb_store::seed::WorldSeed {
+            world_id,
+            owner_creator_id: owner,
+            title: "Combat World",
+            slug: "combat-world",
+            workspace_id: "ws",
+            ..Default::default()
+        },
     )
     .await;
 }

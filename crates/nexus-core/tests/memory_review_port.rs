@@ -14,7 +14,7 @@ use nexus_contracts::daemon_api::characters::create_character_request::CreateCha
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::daemon_api::memory::review_request::ReviewRequest;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
@@ -22,6 +22,8 @@ use nexus_memory_provider::legacy;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tempfile::TempDir;
+
+mod common;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WORLD: &str = "wld_worldA";
@@ -36,14 +38,16 @@ const UNRELATED_WORLD: &str = "wld_worldUnrelated";
 const PROVENANCE_WORLD: &str = "wld_worldProvenance";
 
 async fn seed_world_row(pool: &SqlitePool, world_id: &str) {
-    nexus_local_db::kb_store::seed::world(
+    world_with(
         pool,
-        world_id,
-        CREATOR,
-        world_id,
-        world_id,
-        "private",
-        "manual",
+        WorldSeed {
+            world_id,
+            owner_creator_id: CREATOR,
+            title: world_id,
+            slug: world_id,
+            workspace_id: "wrk",
+            ..WorldSeed::default()
+        },
     )
     .await;
 }
@@ -60,29 +64,14 @@ struct Env {
 }
 
 async fn seed_env() -> Env {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &user_home, CREATOR, "default",
-    ))
-    .unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"\n\
-             [active_workspace_slug_by_creator]\n\
-             \"{CREATOR}\" = \"default\""
-        ),
-    )
-    .unwrap();
+    let common::TestHome {
+        _tmp: tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, "default");
 
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
     let (character_id, binding_id) = {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
         for world in [
@@ -131,7 +120,7 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
 
 async fn db_pool(env: &Env) -> SqlitePool {
     let db_path = nexus_home_layout::workspace_state_db_path(&env.user_home, CREATOR, "default");
-    nexus_local_db::open_pool(&db_path).await.unwrap()
+    common::plain_pool(&db_path).await
 }
 
 async fn count_rows(pool: &SqlitePool, sql: &str) -> i64 {

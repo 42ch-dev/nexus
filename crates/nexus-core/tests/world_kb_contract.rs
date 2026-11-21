@@ -7,13 +7,14 @@ use nexus_contracts::{
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeGovernance, DISCLOSURE_OWNER_PRIVATE};
 use nexus_knowledge::world_kb::KbStore;
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_local_db::open_pool_read_only;
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{ActorContractConflict, LocalDbError};
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+mod common;
 
 const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
@@ -32,15 +33,7 @@ struct Fixture {
 async fn live_write_pool(
     fx: &Fixture,
 ) -> (nexus_local_db::writer_protocol::GuardedPool, SqlitePool) {
-    let engine = nexus_local_db::writer_protocol::join_live_engine_pool(
-        &fx.db_path,
-        GuardedPoolOptions::default(),
-    )
-    .await
-    .unwrap()
-    .expect("live engine pool");
-    let pool = engine.clone_pool();
-    (engine, pool)
+    common::live_write_pool(&fx.db_path).await
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
@@ -50,8 +43,16 @@ async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
         .await
         .unwrap();
-    nexus_local_db::kb_store::seed::world(
-        pool, world_id, owner, "t", "s", "private", "manual",
+    world_with(
+        pool,
+        WorldSeed {
+            world_id,
+            owner_creator_id: owner,
+            title: "t",
+            slug: "s",
+            workspace_id: "wrk",
+            ..WorldSeed::default()
+        },
     )
     .await;
 }
@@ -102,8 +103,7 @@ async fn seed_pending(
 }
 
 async fn read_only_pool(user_home: &Path) -> SqlitePool {
-    let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR, SLUG);
-    open_pool_read_only(&db_path).await.expect("read-only pool")
+    common::read_only_pool(user_home, CREATOR, SLUG).await
 }
 
 /// Seed the contract fixture rows: owned + foreign worlds, KB rows in every
@@ -185,26 +185,13 @@ async fn seed_fixture_rows(pool: &SqlitePool) {
 }
 
 async fn setup() -> Fixture {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    let op = nexus_home_layout::operational_workspace_dir(&user_home, CREATOR, SLUG);
-    std::fs::create_dir_all(&op).unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"
-[active_workspace_slug_by_creator]
-\"{CREATOR}\" = \"{SLUG}\""
-        ),
-    )
-    .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    let common::TestHome {
+        _tmp: tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, SLUG);
     {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         seed_fixture_rows(&pool).await;
         pool.close().await;
@@ -570,26 +557,13 @@ async fn world_kb_contract_stored_revision_exactness() {
 
 #[tokio::test]
 async fn direct_writer_close_allows_reopen() {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    let op = nexus_home_layout::operational_workspace_dir(&user_home, CREATOR, SLUG);
-    std::fs::create_dir_all(&op).unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"
-[active_workspace_slug_by_creator]
-\"{CREATOR}\" = \"{SLUG}\""
-        ),
-    )
-    .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    let common::TestHome {
+        _tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, SLUG);
     {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         seed_world(&pool, OWNED_WORLD, CREATOR).await;
         pool.close().await;
@@ -895,28 +869,13 @@ fn private_pair(holder: &str) -> KnowledgeGovernance {
 /// A Creator with its holder registry row, two Worlds, a bound Character and a
 /// second owned Character with no binding to `SHEET_WORLD`.
 async fn setup_sheet_fixture() -> SheetFixture {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &user_home, CREATOR, SLUG,
-    ))
-    .unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"
-[active_workspace_slug_by_creator]
-\"{CREATOR}\" = \"{SLUG}\""
-        ),
-    )
-    .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    let common::TestHome {
+        _tmp: tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, SLUG);
     let (character_id, binding_id, unbound_character_id) = {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         nexus_local_db::ensure_creator_row(&pool, CREATOR, "Sheet Owner")
             .await

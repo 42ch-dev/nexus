@@ -11,9 +11,11 @@ use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, CoreTimelineEventsQuery,
     CoreTimelineOverviewQuery, Principal,
 };
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
+
+mod common;
 
 const CREATOR: &str = "test_creator";
 const OTHER: &str = "other_creator";
@@ -31,23 +33,12 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let home = tmp.path().to_path_buf();
-    let nexus_home = home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).expect("nexus home");
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &home, CREATOR, SLUG,
-    ))
-    .expect("workspace dir");
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!("active_creator_id = \"{CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{CREATOR}\" = \"{SLUG}\"\n"),
-    )
-    .expect("config.toml");
-    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
-    let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .expect("engine pool");
+    let common::TestHome {
+        _tmp: tmp,
+        user_home: home,
+        db_path,
+    } = common::seed_home(CREATOR, SLUG);
+    let guarded = common::engine_pool(&db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     for creator in [CREATOR, OTHER] {
         sqlx::query(
@@ -76,20 +67,21 @@ async fn fixture() -> Fixture {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str, root_branch: Option<&str>) {
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, root_fork_branch_id, created_at) \
-         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', ?, datetime('now'))",
+    let title = format!("Title {world_id}");
+    let slug = format!("slug-{world_id}");
+    world_with(
+        pool,
+        WorldSeed {
+            world_id,
+            owner_creator_id: owner,
+            title: &title,
+            slug: &slug,
+            workspace_id: "ws",
+            root_fork_branch_id: root_branch,
+            ..WorldSeed::default()
+        },
     )
-    .bind(world_id)
-    .bind(owner)
-    .bind(format!("Title {world_id}"))
-    .bind(format!("slug-{world_id}"))
-    .bind(root_branch)
-    .execute(pool)
-    .await
-    .expect("seed world");
+    .await;
 }
 
 #[allow(clippy::too_many_arguments)]

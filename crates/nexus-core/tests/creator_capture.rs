@@ -16,11 +16,12 @@ use nexus_contracts::generated::daemon_api::memory::create_pending_review_reques
 use nexus_contracts::generated::daemon_api::memory::review_request::ReviewRequest;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal};
 use nexus_local_db::ensure_creator_row;
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use serde_json::{json, Value};
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeResult};
 use std::path::PathBuf;
 use tempfile::TempDir;
+
+mod common;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const PENDING: &str = "pend_capture_1";
@@ -55,28 +56,13 @@ fn capture_body(pending_id: &str, creator_id: &str) -> CreatePendingReviewReques
 /// Materialize the workspace shell and seed the creator row through one engine
 /// pool, released before the cores open (mirroring the daemon boot).
 async fn seed_env() -> Env {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &user_home, CREATOR, "default",
-    ))
-    .unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"\n\
-             [active_workspace_slug_by_creator]\n\
-             \"{CREATOR}\" = \"default\""
-        ),
-    )
-    .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    let common::TestHome {
+        _tmp: tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, "default");
     {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
         pool.close().await;

@@ -582,6 +582,7 @@ mod compute_seam {
     use nexus_contracts::generated::daemon_api::compute::{
         run_accept_request::RunAcceptRequest, run_request::RunRequest,
     };
+    use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
     use nexus_wasm_host::{ModuleCache, WasmEngine};
 
     const WORLD: &str = "wld_ops";
@@ -590,14 +591,16 @@ mod compute_seam {
     /// Seed a world owned by the fixture creator plus the two computable
     /// combatants the embedded module needs.
     async fn seed_compute_world(pool: &sqlx::SqlitePool) {
-        nexus_local_db::kb_store::seed::world(
+        world_with(
             pool,
-            WORLD,
-            CREATOR,
-            "Combat World",
-            "combat-world",
-            "private",
-            "manual",
+            WorldSeed {
+                world_id: WORLD,
+                owner_creator_id: CREATOR,
+                title: "Combat World",
+                slug: "combat-world",
+                workspace_id: "ws",
+                ..WorldSeed::default()
+            },
         )
         .await;
         seed_character(pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
