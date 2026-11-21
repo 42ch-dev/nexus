@@ -299,6 +299,8 @@ pub mod seed {
     use super::super::seed_shared;
     use sqlx::SqlitePool;
 
+    pub use crate::seed_shared::WorldSeed;
+
     /// Seed a test world row (also seeds a minimal creator for FK).
     ///
     /// Delegates to the shared `seed_shared::world` helper.
@@ -321,6 +323,19 @@ pub mod seed {
             time_policy,
         )
         .await;
+    }
+
+    /// Seed a world row from a [`WorldSeed`].
+    ///
+    /// Fixtures whose row differs from [`world`]'s shape (workspace, display
+    /// name, timeline columns) name those fields here instead of forking the
+    /// INSERT.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either database insert fails.
+    pub async fn world_with(pool: &SqlitePool, seed: WorldSeed<'_>) {
+        seed_shared::world_with(pool, seed).await;
     }
 
     /// [`world`] with an explicit creator `display_name`.
@@ -3510,14 +3525,7 @@ mod tests {
     /// Seed a world row through the crate's one seed source.
     async fn seed_world_row(pool: &SqlitePool, world_id: &str, title: &str, slug: &str) {
         seed::world_with_display_name(
-            pool,
-            world_id,
-            "ctr_test",
-            "Test",
-            title,
-            slug,
-            "private",
-            "manual",
+            pool, world_id, "ctr_test", "Test", title, slug, "private", "manual",
         )
         .await;
     }
