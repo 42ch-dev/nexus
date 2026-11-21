@@ -101,19 +101,16 @@ async fn seed_env_as(creator: &str) -> Env {
             .unwrap();
         let pool = guarded.clone_pool();
         ensure_creator_row(&pool, creator, "Owner").await.unwrap();
-        sqlx::query(
-            "INSERT INTO narrative_worlds \
-             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-              time_policy, metadata_json, created_at) \
-             VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            WORLD,
+            creator,
+            WORLD,
+            WORLD,
+            "private",
+            "manual",
         )
-        .bind(WORLD)
-        .bind(creator)
-        .bind(WORLD)
-        .bind(WORLD)
-        .execute(&pool)
-        .await
-        .unwrap();
+        .await;
         let created = nexus_local_db::create_character_with_initial_binding(
             &pool,
             CreateCharacterParams {

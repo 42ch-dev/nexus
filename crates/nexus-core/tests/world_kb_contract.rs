@@ -50,14 +50,10 @@ async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
         .await
         .unwrap();
-    sqlx::query(
-        "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) VALUES (?, 'wrk', ?, 't', 's', 'active', 'private', 'manual', '{}')",
+    nexus_local_db::kb_store::seed::world(
+        pool, world_id, owner, "t", "s", "private", "manual",
     )
-    .bind(world_id)
-    .bind(owner)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 async fn seed_kb(

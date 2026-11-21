@@ -36,19 +36,16 @@ const UNRELATED_WORLD: &str = "wld_worldUnrelated";
 const PROVENANCE_WORLD: &str = "wld_worldProvenance";
 
 async fn seed_world_row(pool: &SqlitePool, world_id: &str) {
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    nexus_local_db::kb_store::seed::world(
+        pool,
+        world_id,
+        CREATOR,
+        world_id,
+        world_id,
+        "private",
+        "manual",
     )
-    .bind(world_id)
-    .bind(CREATOR)
-    .bind(world_id)
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 /// Classifies as `PromoteToLongTerm` for a `brainstorm` task (high-signal,
 /// above the creative minimum length).

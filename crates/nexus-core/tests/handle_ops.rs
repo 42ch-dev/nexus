@@ -590,18 +590,16 @@ mod compute_seam {
     /// Seed a world owned by the fixture creator plus the two computable
     /// combatants the embedded module needs.
     async fn seed_compute_world(pool: &sqlx::SqlitePool) {
-        sqlx::query(
-            "INSERT OR IGNORE INTO narrative_worlds \
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-                 time_policy, metadata_json, created_at) \
-               VALUES (?, 'ws', ?, 'Combat World', 'combat-world', \
-                 'active', 'private', 'manual', '{}', datetime('now'))",
+        nexus_local_db::kb_store::seed::world(
+            pool,
+            WORLD,
+            CREATOR,
+            "Combat World",
+            "combat-world",
+            "private",
+            "manual",
         )
-        .bind(WORLD)
-        .bind(CREATOR)
-        .execute(pool)
-        .await
-        .unwrap();
+        .await;
         seed_character(pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
         seed_character(pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
     }

@@ -33,8 +33,16 @@ async fn seed(pool: &SqlitePool) {
         (TARGET, CREATOR),
         (FOREIGN, "other_creator"),
     ] {
-        sqlx::query("INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) VALUES (?, 'ws', ?, 'Pack World', 'pack-world', 'active', 'private', 'manual', '{}')")
-            .bind(world).bind(owner).execute(pool).await.unwrap();
+        nexus_local_db::kb_store::seed::world(
+            pool,
+            world,
+            owner,
+            "Pack World",
+            "pack-world",
+            "private",
+            "manual",
+        )
+        .await;
     }
     for (id, name) in [
         ("kb_pack_a", "Aria"),

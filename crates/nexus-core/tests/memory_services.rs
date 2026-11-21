@@ -68,19 +68,16 @@ fn assert_conflict(err: CoreError, code: &str) {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    nexus_local_db::kb_store::seed::world(
+        pool,
+        world_id,
+        owner,
+        world_id,
+        world_id,
+        "private",
+        "manual",
     )
-    .bind(world_id)
-    .bind(owner)
-    .bind(world_id)
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 /// Materialize the workspace shell and seed stored rows through one engine
