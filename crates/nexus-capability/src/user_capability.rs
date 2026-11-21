@@ -1322,18 +1322,16 @@ mod tests {
     // existing `crates/nexus-wasm-host/tests/basic_combat.rs` assertions:
     // state_delta `-`/`character.current_hp`/15 on `kb_def`, one
     // `state_update` event, empty `new_key_blocks`, `kind: "combat"`.
-
-    /// True when the embedded module tree was compiled (wasm target
-    /// installed); `nexus_no_wasm_target` (R-V1139P0-005) switches embedded
-    /// lookups to empty stubs.
-    #[cfg(feature = "wasm")]
-    fn embedded_available() -> bool {
-        nexus_wasm_host::embedded_module_bytes("basic-combat").is_some()
-    }
+    //
+    // These tests need the embedded module compiled in. Without the wasm
+    // target, `nexus_no_wasm_target` (set by this crate's `build.rs`) drops
+    // them from the build, so a setup-only host reports absence rather than a
+    // green test that returns early.
 
     /// Stage `<tmp>/<name>/` with `capability.json` (real sha of the embedded
     /// module), `manifest.json` + `<module-id>.wasm` from the embedded tree.
     /// `sandbox` (when given) is embedded verbatim into the descriptor.
+    #[cfg(not(nexus_no_wasm_target))]
     #[cfg(feature = "wasm")]
     fn stage_capability_dir(tmp: &std::path::Path, name: &str, sandbox: Option<&str>) {
         use sha2::{Digest, Sha256};
@@ -1371,6 +1369,7 @@ mod tests {
     /// the fixture body stays intact. `to_compute_input` lifts `keyBlocks`
     /// into the envelope and passes the whole object through as the raw
     /// invocation (AR-37).
+    #[cfg(not(nexus_no_wasm_target))]
     #[cfg(feature = "wasm")]
     fn combat_capability_input() -> Value {
         let raw: Value = serde_json::from_str(include_str!(
@@ -1402,13 +1401,10 @@ mod tests {
     /// basic-combat module and returns the expected 4-part output (the
     /// `basic_combat.rs` assertions). The admitted-with-engine path no longer
     /// returns the P0 stub's `WorkerUnavailable` (PL-10 closed).
+    #[cfg(not(nexus_no_wasm_target))]
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn run_executes_embedded_module_and_returns_four_part_output() {
-        if !embedded_available() {
-            eprintln!("skipping: embedded wasm target not installed (nexus_no_wasm_target)");
-            return;
-        }
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", None);
         let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
@@ -1476,13 +1472,10 @@ mod tests {
     /// AR-37 module-missing at `run()`: a capability whose dir lacks
     /// `manifest.json`/`<module-id>.wasm` (edited after admission) fails
     /// fail-closed with `InputInvalid`, never the engine path.
+    #[cfg(not(nexus_no_wasm_target))]
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn run_module_missing_after_admission_returns_input_invalid() {
-        if !embedded_available() {
-            eprintln!("skipping: basic wasm target not installed (nexus_no_wasm_target)");
-            return;
-        }
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", None);
         // Simulate a post-admission edit: remove the module pair.
@@ -1524,13 +1517,10 @@ mod tests {
     /// below `~50_000` are consumed during instantiation and surface as
     /// `Internal`; `100_000` is the smallest round budget on the
     /// `compute`-trap side.)
+    #[cfg(not(nexus_no_wasm_target))]
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn descriptor_fuel_override_is_enforced_at_run() {
-        if !embedded_available() {
-            eprintln!("skipping: basic wasm target not installed (nexus_no_wasm_target)");
-            return;
-        }
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", Some(r#"{"fuel": 100000}"#));
         let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
@@ -1563,13 +1553,10 @@ mod tests {
     /// `.wasm` bytes swapped while `manifest.json` and `capability.json` keep
     /// the admitted hash — must fail closed at `run()` with `InputInvalid`
     /// before any compile/cache path executes unverified bytes.
+    #[cfg(not(nexus_no_wasm_target))]
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn run_rejects_module_bytes_changed_after_admission() {
-        if !embedded_available() {
-            eprintln!("skipping: embedded wasm target was not installed (nexus_no_wasm_target)");
-            return;
-        }
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", None);
         // Post-admission edit: swap the wasm bytes (manifest + descriptor
