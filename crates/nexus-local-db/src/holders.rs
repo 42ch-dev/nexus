@@ -492,6 +492,7 @@ pub(crate) async fn stage_holder_digests_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
 
     /// Pinned digest of `nexus-holder-v1\0creator\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
@@ -501,15 +502,6 @@ mod tests {
     /// Pinned digest of `nexus-holder-v1\0character\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.
     const PINNED_CHARACTER_HOLDER: &str =
         "hld_bb4d1d30cd1166a7a1c1a85ef1fea6de3f3844ce455f1aee266a201086b0121e";
-
-    /// Fresh migrated pool in a tempdir (same pattern as `creators::tests`).
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     /// Insert the workspace `creators` row **without** its holder, so a case can
     /// hand-write registry state: the materialization helper now always commits

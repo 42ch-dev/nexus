@@ -211,14 +211,7 @@ pub async fn delete_local_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_pool;
 
     #[tokio::test]
     async fn create_and_get_identity() {

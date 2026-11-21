@@ -644,16 +644,8 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
+    use crate::test_support::fresh_pool;
     use nexus_narrative::NarrativeGateway;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     async fn seed_creator(pool: &SqlitePool) {
         // SAFETY: test-only seed — uses runtime query for FK setup

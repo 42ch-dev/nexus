@@ -538,15 +538,7 @@ async fn get_active_by_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_pool;
 
     fn new_directive<'a>(
         directive_id: &'a str,

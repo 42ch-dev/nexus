@@ -245,16 +245,7 @@ pub async fn mark_prompt_injections_consumed(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::init_engine_pool(&db_path)
-            .await
-            .unwrap()
-            .clone_pool();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_engine_pool;
 
     fn now_ms() -> i64 {
         chrono::Utc::now().timestamp_millis()
@@ -262,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_and_claim() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
         let now = now_ms();
 
         let row = enqueue_prompt_injection(
@@ -296,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_respects_priority() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
         let now = now_ms();
 
         enqueue_prompt_injection(
@@ -344,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_consumed() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
         let now = now_ms();
 
         enqueue_prompt_injection(
@@ -378,7 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_consumed_empty_list() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
         let result = mark_prompt_injections_consumed(&pool, &[], now_ms())
             .await
             .unwrap();
@@ -387,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_nothing_for_wrong_session() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
         let now = now_ms();
 
         enqueue_prompt_injection(

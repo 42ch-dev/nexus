@@ -788,38 +788,24 @@ pub async fn upsert_extraction_relationship(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::kb_store::seed;
+    use crate::test_support::fresh_pool;
 
     async fn seed_world_and_entities(pool: &SqlitePool) -> (String, String, String) {
         let world_id = "wld_test";
         let source_id = "kb_source";
         let target_id = "kb_target";
 
-        sqlx::query!(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data)
-             VALUES ('ctr_test', 'Test', 'active', datetime('now'), '{}')"
-        )
-        .execute(pool)
-        .await
-        .unwrap();
-
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-               (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES (?, 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'manual', '{}')"#,
+        seed::world(
+            pool,
             world_id,
+            "ctr_test",
+            "Test World",
+            "test-world",
+            "private",
+            "manual",
         )
-        .execute(pool)
-        .await
-        .unwrap();
+        .await;
 
         for id in [source_id, target_id] {
             sqlx::query!(
@@ -1009,14 +995,16 @@ mod tests {
         // must deny with WorldConflict, NOT a plain VersionMismatch.
         let (pool, _dir) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-               (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_other', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')"#
+        seed::world(
+            &pool,
+            "wld_other",
+            "ctr_test",
+            "Other World",
+            "other-world",
+            "private",
+            "manual",
         )
-        .execute(&pool)
-        .await
-        .unwrap();
+        .await;
 
         let mut tx = pool.begin().await.unwrap();
         let rel_id = generate_relationship_id();

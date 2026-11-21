@@ -187,23 +187,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::init_engine_pool(&db_path)
-            .await
-            .unwrap()
-            .clone_pool();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_engine_pool;
 
     // ── cas_check ─────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_cas_check_success_on_rows_affected_1() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
         // Insert a row with version=0 (migration default).
         let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
         sqlx::query(
@@ -251,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cas_check_version_mismatch_returns_error() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
 
         let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
         sqlx::query(
@@ -312,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_succeeds_after_version_mismatch() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
 
         let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
         sqlx::query(
@@ -385,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_fails_after_max_attempts() {
-        let (pool, _dir) = fresh_pool().await;
+        let (pool, _dir) = fresh_engine_pool().await;
 
         let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
         sqlx::query(
@@ -460,7 +450,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_non_cas_error_propagates_immediately() {
-        let (_pool, _dir) = fresh_pool().await;
+        let (_pool, _dir) = fresh_engine_pool().await;
 
         let result: Result<(), LocalDbError> =
             with_cas_retry(Some(3), Some(10), "test_non_cas_error", || async {

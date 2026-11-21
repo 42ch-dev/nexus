@@ -290,15 +290,8 @@ pub fn ttl_from_env() -> i64 {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::test_support::fresh_pool;
     use crate::works;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     fn sample_work(work_id: &str) -> WorkRecord {
         works::sample_work_for_test(work_id)

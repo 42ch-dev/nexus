@@ -1891,14 +1891,7 @@ fn parse_frontmatter(content: &str) -> std::collections::HashMap<String, String>
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_pool;
 
     async fn insert_test_work(pool: &SqlitePool, work_id: &str) {
         // SAFETY: INSERT against works — runtime query.

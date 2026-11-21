@@ -586,6 +586,7 @@ fn generate_fallback_slug() -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::test_support::fresh_pool;
 
     #[test]
     fn test_title_to_slug_basic() {
@@ -631,14 +632,6 @@ mod tests {
     // ── R-V146P4-QC3-S1: trace coverage for the 5 inspiration mutation paths.
     //    Previously only `promote_to_active` (in novel_pool_entries) had a
     //    capture test — 1 of 9 instrumented paths across both DAOs.
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     /// Seed a works row so FK constraints (e.g. `inspiration_items.
     /// promoted_work_id` → works) are satisfied. Mirrors the helper in

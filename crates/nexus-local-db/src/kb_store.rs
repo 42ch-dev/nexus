@@ -3465,7 +3465,7 @@ pub async fn read_key_block_revision(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
+    use crate::test_support::fresh_pool;
     use serde_json::{json, Value};
 
     /// An admitted selection over one World container with no admitted holder:
@@ -3475,31 +3475,14 @@ mod tests {
         KnowledgeReadScope::creator_management(vec![KnowledgeOwnerRef::world(world_id)], Vec::new())
     }
 
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
+    /// Seed a world row through the crate's one seed source.
+    async fn seed_world_row(pool: &SqlitePool, world_id: &str, title: &str, slug: &str) {
+        seed::world(pool, world_id, "ctr_test", title, slug, "private", "manual").await;
     }
 
+    /// The default test world (`wld_1`).
     async fn seed_world(pool: &SqlitePool) {
-        // Seed creator + world for FK satisfaction
-        sqlx::query!(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES ('ctr_test', 'Test', 'active', datetime('now'), '{}')"
-        )
-        .execute(pool)
-        .await
-        .unwrap();
-
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_1', 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(pool)
-        .await
-        .unwrap();
+        seed_world_row(pool, "wld_1", "Test World", "test-world").await;
     }
 
     #[tokio::test]
@@ -3597,14 +3580,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
         // Second world for the foreign-target case.
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool.clone());
         let kb = kb_with_state("wld_1", "ScopedHero", 100);
@@ -3956,14 +3932,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
         // Second container for the FK (`kb_key_blocks.world_id`).
-        sqlx::query!(
-            "INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool);
         let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
@@ -3990,14 +3959,7 @@ mod tests {
     async fn test_check_key_block_id_free_matches_the_insert_classification() {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
-        sqlx::query!(
-            "INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool);
         let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
@@ -4208,14 +4170,7 @@ mod tests {
         seed_world(&pool).await;
 
         // Seed second world
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'World Two', 'world-two', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        seed_world_row(&pool, "wld_2", "World Two", "world-two").await;
 
         let store = SqliteKbStore::new(pool);
         store
@@ -4756,14 +4711,7 @@ mod tests {
     /// Seed a second world row so a test can FK-move a `kb_key_blocks` row
     /// across worlds (`world_id` is a NOT NULL FK to `narrative_worlds`).
     async fn seed_second_world(pool: &SqlitePool) {
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Second World', 'test-world-2', 'active', 'private', 'manual', '{}')"#
-        )
-        .execute(pool)
-        .await
-        .unwrap();
+        seed_world_row(pool, "wld_2", "Second World", "test-world-2").await;
     }
 
     /// Seed a `kb_key_blocks` row in `wld_1` (revision NULL → 0 per the

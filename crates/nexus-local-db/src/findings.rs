@@ -1544,15 +1544,8 @@ mod tests {
         VALID_STATUSES,
     };
     use crate::error::LocalDbError;
+    use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     // ── V1.47 P0 (qc2 W-2): closed `kind` set + `rule_suggestion` cap ───────
 
