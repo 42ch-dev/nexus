@@ -719,9 +719,19 @@ mod tests {
     #[test]
     fn test_confirm_with_revision_mismatch() {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Event, "Battle");
-        // kb.revision is None (i.e., 0 internally), but base_revision is 1
-        let result = kb.confirm(&owner_membership(), 1, &no_conflicts(), &[]);
-        assert!(matches!(result, Err(KbError::RevisionMismatch { .. })));
+        kb.revision = Some(3);
+        // base_revision 5 against stored revision 3.
+        let result = kb.confirm(&owner_membership(), 5, &no_conflicts(), &[]);
+        assert!(
+            matches!(
+                result,
+                Err(KbError::RevisionMismatch {
+                    expected: 5,
+                    actual: 3
+                })
+            ),
+            "got {result:?}"
+        );
     }
 
     #[test]
