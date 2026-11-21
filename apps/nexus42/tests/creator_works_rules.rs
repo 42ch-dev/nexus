@@ -11,11 +11,14 @@
 
 #[path = "common/direct.rs"]
 mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
 use direct::DirectFixture;
+use direct_actor::fixture_creator_id;
 use nexus_contracts::{CreateWorkRequest, CreateWorldRequest};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
-use nexus_home_layout::{nexus_root_from_home, operational_workspace_dir, workspace_state_db_path};
+use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
 use nexus_local_db::findings::{self, Finding};
 use nexus_local_db::works;
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
@@ -28,23 +31,6 @@ const WORKSPACE_SLUG: &str = "default";
 const WORK_REF: &str = "rules-root-novel";
 /// The rule suggestion the accepted finding carries.
 const RULE: &str = "Always keep dialogue tags in the past tense.";
-
-/// The fixture home holds exactly one creator; its id is the directory name
-/// under `~/.nexus42/creators/`.
-fn fixture_creator_id(fixture: &DirectFixture) -> String {
-    let creators_root = nexus_root_from_home(fixture.home.path()).join("creators");
-    let entries: Vec<_> = std::fs::read_dir(&creators_root)
-        .expect("read fixture creators root")
-        .map(|entry| entry.expect("creator dir entry").file_name())
-        .collect();
-    assert_eq!(entries.len(), 1, "fixture registers exactly one creator");
-    entries
-        .into_iter()
-        .next()
-        .expect("one creator")
-        .to_string_lossy()
-        .into_owned()
-}
 
 fn cli(fixture: &DirectFixture, args: &[&str]) -> Output {
     fixture
@@ -96,7 +82,7 @@ fn register_creative_root(op_dir: &Path, creator_id: &str, creative_root: &Path)
 
 async fn fresh_env() -> RulesEnv {
     let fixture = DirectFixture::new().await;
-    let creator_id = fixture_creator_id(&fixture);
+    let creator_id = fixture_creator_id(fixture.home.path());
     let db_path = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let op_dir = operational_workspace_dir(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let creative_root = fixture.home.path().join("creative");

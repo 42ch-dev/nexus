@@ -39,9 +39,12 @@
 //! contract — the writer is released before `finish_direct` returns — lives in
 //! `src/core.rs` (`direct_writer_lifetime`).
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
 use nexus_contracts::world_kb_patch_entity_request::{
     NexusWorldKbEntityPatch, NexusWorldKbEntityPatchBlockType, NexusWorldKbEntityPatchTitle,
@@ -49,21 +52,12 @@ use nexus_contracts::world_kb_patch_entity_request::{
 use nexus_contracts::{CreateWorldRequest, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use std::path::Path;
-use std::process::Output;
 
 const WORLD_TITLE: &str = "Direct Core Lifecycle";
 const ENTITY_ID: &str = "kb_0f1e2d3c4b5a";
 const SEEDED_TITLE: &str = "Seeded Hero";
 const STALE_TITLE: &str = "Stale Overwrite";
 const REOPENED_TITLE: &str = "Reopened Hero";
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 /// Seed one owned World plus one KB entity through the direct core seam, then
 /// close that seed core so no writer survives into the CLI children. Returns

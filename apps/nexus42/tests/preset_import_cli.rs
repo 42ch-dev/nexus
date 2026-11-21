@@ -7,12 +7,14 @@
 //! binary against an isolated `HOME` seeded through the direct-core seam — no
 //! daemon, no provider.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 
 use std::path::Path;
-use std::process::Output;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
 
 /// The strategy id every CLI fixture declares.
@@ -21,14 +23,6 @@ const PARTNER: &str = "cli-partner-fixture";
 fn write_bundle(bundle: &Path, yaml: &str) {
     std::fs::create_dir_all(bundle).expect("bundle directory");
     std::fs::write(bundle.join("preset.yaml"), yaml).expect("preset.yaml");
-}
-
-fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
 /// A partner bundle the loader, the shared validator and the static walk all accept.
@@ -105,10 +99,10 @@ async fn preset_import_prints_the_candidate_and_the_trajectory_approve_accepts()
     assert!(
         output.status.success(),
         "the import must succeed: {}",
-        stderr_of(&output)
+        stderr(&output)
     );
     let printed: serde_json::Value =
-        serde_json::from_str(&stdout_of(&output)).expect("the verb prints one JSON object");
+        serde_json::from_str(&stdout(&output)).expect("the verb prints one JSON object");
     assert_eq!(printed["candidate"]["revision"], 1);
     assert_eq!(printed["candidate"]["document"]["id"], PARTNER);
     assert_eq!(
@@ -123,7 +117,7 @@ async fn preset_import_prints_the_candidate_and_the_trajectory_approve_accepts()
         .output()
         .expect("the import verb runs");
     assert!(!again.status.success(), "a repeat import must be refused");
-    let stderr = stderr_of(&again);
+    let stderr = stderr(&again);
     assert!(
         stderr.contains("strategy_candidate_conflict"),
         "a repeat import is the typed conflict: {stderr}"
@@ -146,7 +140,7 @@ async fn preset_import_reports_a_bundle_it_cannot_simulate() {
         !output.status.success(),
         "an unsimulatable bundle is refused"
     );
-    let stderr = stderr_of(&output);
+    let stderr = stderr(&output);
     assert!(
         stderr.contains("preset_import_refused") && stderr.contains("simulation_unavailable"),
         "the refusal names the import family and the reason: {stderr}"
@@ -167,8 +161,8 @@ async fn preset_import_reports_a_bundle_that_does_not_load() {
 
     assert!(!output.status.success(), "a malformed bundle is refused");
     assert!(
-        stderr_of(&output).contains("invalid input (bundle)"),
+        stderr(&output).contains("invalid input (bundle)"),
         "a bundle that does not load is a bundle input refusal: {}",
-        stderr_of(&output)
+        stderr(&output)
     );
 }

@@ -17,19 +17,19 @@
 
 #![allow(clippy::unwrap_used)]
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
 use assert_cmd::Command;
+use cli_support::{fresh_pool_with_block, stderr, stdout};
 use direct_actor::DirectActor;
 use nexus42::commands::creator::world::kb::kb_delete;
-use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
-use std::process::Output;
 
 const OWNER: &str = "ctr_alias_test";
 const WORLD: &str = "wld_alias_test";
@@ -39,38 +39,6 @@ const CANON_NAME: &str = "char_test_alias";
 const CLI_ENTRY_ID: &str = "kb_5ee70011";
 const CLI_CANON_NAME: &str = "char_cli_alias";
 const CLI_SUMMARY: &str = "Alias test summary";
-
-/// Build a fresh migrated pool + seed a world and a single `KnowledgeEntryRecord`.
-async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("state.db");
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-
-    nexus_local_db::kb_store::seed::world(
-        &pool,
-        WORLD,
-        OWNER,
-        "Alias Test World",
-        "alias-test-world",
-        "private",
-        "manual",
-    )
-    .await;
-
-    let store = SqliteKbStore::new(pool.clone());
-    let mut kb = KnowledgeEntryRecord::new(WORLD, BlockType::Character, CANON_NAME);
-    kb.body = Some(KnowledgeEntryBody {
-        summary: Some("Alias test summary".to_string()),
-        attributes: Some(serde_json::json!({"novel_category": "character"})),
-        tags: Some(vec!["test".to_string()]),
-        ..Default::default()
-    });
-    let result = store.insert_knowledge_entry(kb).await.unwrap();
-    (pool, result.entry_id, dir)
-}
 
 /// Seed one body-carrying World character entry through the authorized core.
 async fn seed_cli_entry(actor: &DirectActor, world_id: &str) {
@@ -89,14 +57,6 @@ async fn seed_cli_entry(actor: &DirectActor, world_id: &str) {
             .unwrap(),
         )
         .await;
-}
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 // =============================================================================
@@ -224,7 +184,14 @@ async fn canonical_kb_show_shows_seeded_block() {
 /// `kb_delete` soft-deletes the seeded block.
 #[tokio::test]
 async fn canonical_kb_delete_soft_deletes_block() {
-    let (pool, key_block_id, _dir) = fresh_pool_with_block().await;
+    let (pool, key_block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Alias Test World",
+        "alias-test-world",
+    )
+    .await;
 
     let result = kb_delete(&pool, OWNER, WORLD, &key_block_id, true).await;
     assert!(result.is_ok(), "kb_delete should succeed: {result:?}");
@@ -238,7 +205,14 @@ async fn canonical_kb_delete_soft_deletes_block() {
 /// `kb_delete` cross-author returns an error (owner auth gate).
 #[tokio::test]
 async fn canonical_kb_delete_cross_author_rejects() {
-    let (pool, key_block_id, _dir) = fresh_pool_with_block().await;
+    let (pool, key_block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Alias Test World",
+        "alias-test-world",
+    )
+    .await;
 
     // A different creator should not be able to delete.
     let result = kb_delete(&pool, "ctr_stranger", WORLD, &key_block_id, true).await;

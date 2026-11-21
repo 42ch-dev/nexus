@@ -10,16 +10,18 @@
 //! the released workspace DB to prove the views share one durable row instead
 //! of a copy.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
 use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::process::Output;
 
 const NAME_W1_PUBLIC: &str = "W1Public";
 const NAME_W1_SECRET: &str = "W1Secret";
@@ -31,14 +33,6 @@ const NAME_A_W1_LOCAL: &str = "AW1Local";
 /// Character-private arm entry authored through the `creator character
 /// knowledge add --audience character-private` CLI surface (v1.191 P1 T9).
 const NAME_A_PRIVATE: &str = "APrivate";
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 /// Seeded graph ids and `KnowledgeEntry` identities.
 struct RnAct4Graph {
