@@ -521,6 +521,12 @@ mod tests {
         assert_eq!(registry.version, "1.0.0");
         assert_eq!(registry.agents.len(), 3);
         assert_eq!(registry.extensions.as_ref().map_or(0, Vec::len), 0);
+
+        let empty = RegistryClient::parse_registry_json(
+            r#"{"version": "1.0.0", "agents": [], "extensions": []}"#,
+        )
+        .unwrap();
+        assert!(empty.agents.is_empty(), "empty agents is valid");
     }
 
     #[test]
@@ -630,6 +636,20 @@ mod tests {
         let (_client, _tmp) = make_test_client();
         let result = RegistryClient::parse_registry_json(json);
         assert!(result.is_err());
+
+        // Missing top-level "version".
+        let missing_version = r#"{"agents": []}"#;
+        assert!(
+            RegistryClient::parse_registry_json(missing_version).is_err(),
+            "missing version must fail"
+        );
+
+        // Missing top-level "agents".
+        let missing_agents = r#"{"version": "1.0.0"}"#;
+        assert!(
+            RegistryClient::parse_registry_json(missing_agents).is_err(),
+            "missing agents must fail"
+        );
     }
 
     // ── Cache Tests ───────────────────────────────────────────────
