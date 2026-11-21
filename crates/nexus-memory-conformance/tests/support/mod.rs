@@ -64,14 +64,13 @@ use spoke_connect::remote::{
     RemoteServePortsComposite, Transport, TransportError,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
-use spoke_operations::spoke_schemas::{
-    Finding, HostCapabilityManifest, KnowledgeEntry, Principal, Relation, Rule, Scope,
-    TimelineEvent,
-};
-use spoke_operations::{
-    FindingPort, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort, MemoryPort,
-    RelationPort, RuleQueryPort, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
-};
+use spoke_operations::spoke_schemas::{HostCapabilityManifest, Principal};
+use spoke_operations::{MemoryPort, SpokeResult};
+
+// A feature-free leaf: `server_loopback` (default features) includes it too.
+pub mod memory_only_host;
+
+pub use memory_only_host::MemoryOnlyHost;
 
 /// The provider implementation behind the shared protocol surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,96 +123,6 @@ pub const OTHER_SUBJECT: &str = "sbj_c_other";
 pub const CONTEXT: &str = "ctx_c_harbor";
 pub const OTHER_CONTEXT: &str = "ctx_c_market";
 pub const TEXT: &str = "Mira promised to return before the northern gate opens at dawn.";
-
-// ---------------------------------------------------------------------------
-// A memory-only responder host
-// ---------------------------------------------------------------------------
-
-/// The baseline half of the responder ports face.
-///
-/// `RemoteServePorts` is a baseline-port supertrait; this suite serves
-/// `spoke-memory` only, so every baseline call refuses honestly instead of
-/// fabricating a baseline object. `spoke-baseline` is never negotiated.
-pub struct MemoryOnlyHost;
-
-pub fn no_baseline<T>() -> SpokeResult<T> {
-    SpokeResult::Reject(SpokeReject {
-        code: SpokeRejectCode::CapabilityPortMissing,
-        message: "this host serves no baseline family".to_owned(),
-        details: None,
-    })
-}
-
-#[async_trait]
-impl KnowledgeEntryPort for MemoryOnlyHost {
-    async fn get_knowledge_entry(&self, _entry_id: &str) -> SpokeResult<KnowledgeEntry> {
-        no_baseline()
-    }
-
-    async fn put_knowledge_entry(
-        &self,
-        _entry: KnowledgeEntry,
-        _expected_base_revision: Option<u64>,
-    ) -> SpokeResult<KnowledgeEntry> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl RelationPort for MemoryOnlyHost {
-    async fn get_relation(&self, _relation_id: &str) -> SpokeResult<Relation> {
-        no_baseline()
-    }
-
-    async fn put_relation(
-        &self,
-        _relation: Relation,
-        _expected_base_revision: Option<u64>,
-    ) -> SpokeResult<Relation> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl KnowledgeQueryPort for MemoryOnlyHost {
-    async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl ScopeQueryPort for MemoryOnlyHost {
-    async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl FindingPort for MemoryOnlyHost {
-    async fn put_findings(&self, _findings: Vec<Finding>) -> SpokeResult<Vec<Finding>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl RuleQueryPort for MemoryOnlyHost {
-    async fn list_rules(&self, _rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl HostManifestPort for MemoryOnlyHost {
-    async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        no_baseline()
-    }
-
-    async fn list_peer_host_capability_manifests(
-        &self,
-    ) -> SpokeResult<Vec<HostCapabilityManifest>> {
-        no_baseline()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Session plumbing
