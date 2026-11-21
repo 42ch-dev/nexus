@@ -127,12 +127,15 @@ fn creator_world_kb_adopt_help_is_reachable() {
         usage.starts_with("Usage: nexus42 creator world kb adopt"),
         "unexpected adopt usage path: {usage}"
     );
+    let option_tokens: Vec<&str> = help_text
+        .lines()
+        .skip_while(|line| line.trim() != "Options:")
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
     assert!(
-        help_text
-            .lines()
-            .map(str::trim)
-            .any(|line| line.starts_with("--auto")),
-        "adopt --help must list the --auto option line:\n{help_text}"
+        option_tokens.contains(&"--auto"),
+        "adopt --help must list the exact --auto option token:\n{help_text}"
     );
 }
 
