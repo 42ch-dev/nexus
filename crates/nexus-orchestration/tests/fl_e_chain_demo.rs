@@ -1,7 +1,8 @@
 //! FL-E stage chain integration test (T3, spec §3–4).
 //!
 //! Validates the full stage advance chain: intake → research → produce → review → persist.
-//! Covers happy path, --force semantics, wrong order rejection, and active schedule uniqueness.
+//! Covers the chain-level happy path, --force overrides, and preset input resolution.
+//! The stage-gate matrix (rejection codes and messages) is owned by `stage_gates::tests`.
 
 use nexus_contracts::local::orchestration::FL_E_STAGES;
 use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
@@ -75,64 +76,7 @@ fn fl_e_chain_happy_path_all_stages_advance() {
     assert_eq!(FL_E_STAGES.len(), 5);
 }
 
-// ── Case 2: Wrong order rejected without --force ────────────────────────────
-
-#[test]
-fn fl_e_chain_reject_intake_to_produce_skip() {
-    // Cannot skip from intake directly to produce (must go through research)
-    let work = work_state("intake", "complete", "complete");
-    let err = check_stage_advance(&work, "produce", false).unwrap_err();
-    assert!(
-        err.message.contains("Cannot skip"),
-        "Skip rejection should say 'Cannot skip': {}",
-        err.message
-    );
-}
-
-#[test]
-fn fl_e_chain_reject_backwards_produce_to_research() {
-    let work = work_state("produce", "complete", "complete");
-    let err = check_stage_advance(&work, "research", false).unwrap_err();
-    assert!(
-        err.message.contains("backwards"),
-        "Backwards rejection should say 'backwards': {}",
-        err.message
-    );
-}
-
-#[test]
-fn fl_e_chain_reject_same_stage() {
-    let work = work_state("research", "complete", "complete");
-    let err = check_stage_advance(&work, "research", false).unwrap_err();
-    assert!(
-        err.message.contains("already at stage"),
-        "Same stage rejection should say 'already at stage': {}",
-        err.message
-    );
-}
-
-#[test]
-fn fl_e_chain_reject_unknown_stage() {
-    let work = work_state("intake", "complete", "complete");
-    let err = check_stage_advance(&work, "unknown_stage", false).unwrap_err();
-    assert!(
-        err.message.contains("Unknown stage"),
-        "Unknown stage rejection should say 'Unknown stage': {}",
-        err.message
-    );
-}
-
-// ── Case 3: --force bypasses all gates ──────────────────────────────────────
-
-#[test]
-fn fl_e_chain_force_allows_skip() {
-    // Force allows skipping from intake directly to persist
-    let work = work_state("intake", "pending", "pending");
-    assert!(
-        check_stage_advance(&work, "persist", true).is_ok(),
-        "--force should allow skipping all stages"
-    );
-}
+// ── Case 2: --force bypasses all gates ──────────────────────────────────────
 
 #[test]
 fn fl_e_chain_force_allows_backwards() {
@@ -152,20 +96,7 @@ fn fl_e_chain_force_allows_incomplete_current() {
     );
 }
 
-// ── Case 4: Active schedule uniqueness (spec §2 invariant #4) ────────────────
-
-#[test]
-fn fl_e_chain_reject_advance_while_active() {
-    let work = work_state("research", "active", "complete");
-    let err = check_stage_advance(&work, "produce", false).unwrap_err();
-    assert!(
-        err.message.contains("active stage schedule"),
-        "Active schedule rejection should mention 'active stage schedule': {}",
-        err.message
-    );
-}
-
-// ── Case 5: Preset input chain correctness ──────────────────────────────────
+// ── Case 3: Preset input chain correctness ──────────────────────────────────
 
 #[test]
 fn fl_e_chain_preset_input_fields_propagate_across_stages() {
@@ -186,7 +117,7 @@ fn fl_e_chain_preset_input_fields_propagate_across_stages() {
     assert_eq!(log.as_array().map(Vec::len), Some(1));
 }
 
-// ── Case 6: End-to-end stage → preset → input resolution ────────────────────
+// ── Case 4: End-to-end stage → preset → input resolution ────────────────────
 
 #[test]
 fn fl_e_chain_e2e_resolve_presets_and_inputs() {

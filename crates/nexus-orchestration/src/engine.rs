@@ -176,18 +176,6 @@ pub struct SessionKey {
     pub instance_id: String,
 }
 
-impl SessionKey {
-    /// Deterministic key for tests (and integration tests).
-    #[must_use]
-    pub fn test_fixture() -> Self {
-        Self {
-            creator_id: "test-creator".into(),
-            preset_id: "test-preset".into(),
-            instance_id: "test-instance".into(),
-        }
-    }
-}
-
 /// Optional filters for [`OrchestrationEngine::list_active`].
 #[derive(Debug, Clone, Default)]
 pub struct SessionFilter {

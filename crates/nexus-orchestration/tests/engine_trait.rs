@@ -12,7 +12,11 @@ async fn new_session_and_list_active_roundtrip() {
         )),
     );
     let ctx = nexus_orchestration::engine::Context::new();
-    let key = nexus_orchestration::engine::SessionKey::test_fixture();
+    let key = nexus_orchestration::engine::SessionKey {
+        creator_id: "test-creator".to_string(),
+        preset_id: "test-preset".to_string(),
+        instance_id: "test-instance".to_string(),
+    };
     let sid = engine.new_session(key, ctx).await.expect("new_session");
     let listed = engine
         .list_active(SessionFilter::default())
