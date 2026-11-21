@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { applyNodeChanges, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
+import { type Edge, type Node, type NodeChangeset, type Viewport } from '@xyflow/react';
 
 import type { ConflictModalProps } from './conflict-modal';
 import type { CanvasSurfaceAdapter } from './canvas-surface-adapter';
@@ -89,8 +89,8 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   }, [projected.nodes]);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      setNodes((nds) => applyNodeChanges(changes, nds) as Node<TNodeData>[]);
+    (changes: NodeChangeset) => {
+      setNodes((nds) => changes.applyTo(nds) as Node<TNodeData>[]);
     },
     [setNodes],
   );

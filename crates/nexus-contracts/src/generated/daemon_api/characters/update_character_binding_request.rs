@@ -39,10 +39,7 @@ impl ::std::str::FromStr for UpdateCharacterBindingRequestWorldSheetEntryId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() > 128usize {
-            return Err("longer than 128 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for UpdateCharacterBindingRequestWorldSheetEntryId {
@@ -50,7 +47,10 @@ impl ::std::convert::TryFrom<&str> for UpdateCharacterBindingRequestWorldSheetEn
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() > 128usize {
+            return Err("longer than 128 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -59,7 +59,7 @@ for UpdateCharacterBindingRequestWorldSheetEntryId {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for UpdateCharacterBindingRequestWorldSheetEntryId {
@@ -67,8 +67,9 @@ impl<'de> ::serde::Deserialize<'de> for UpdateCharacterBindingRequestWorldSheetE
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

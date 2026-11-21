@@ -186,7 +186,7 @@ pub struct AgentHostConfigProvidersItem {
     pub command: ::std::option::Option<::std::string::String>,
     #[serde(default = "defaults::default_bool::<true>")]
     pub enabled: bool,
-    #[serde(default, skip_serializing_if = ":: std :: collections :: HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub env: ::std::collections::HashMap<::std::string::String, ::std::string::String>,
     ///Provider id (the catalog's `provider_id`).
     pub id: AgentHostConfigProvidersItemId,
@@ -218,10 +218,7 @@ impl ::std::str::FromStr for AgentHostConfigProvidersItemId {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        if value.chars().count() < 1usize {
-            return Err("shorter than 1 characters".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for AgentHostConfigProvidersItemId {
@@ -229,7 +226,10 @@ impl ::std::convert::TryFrom<&str> for AgentHostConfigProvidersItemId {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for AgentHostConfigProvidersItemId {
@@ -237,7 +237,7 @@ impl ::std::convert::TryFrom<::std::string::String> for AgentHostConfigProviders
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for AgentHostConfigProvidersItemId {
@@ -245,8 +245,9 @@ impl<'de> ::serde::Deserialize<'de> for AgentHostConfigProvidersItemId {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

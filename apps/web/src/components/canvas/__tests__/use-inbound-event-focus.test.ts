@@ -81,7 +81,7 @@ describe('useInboundEventFocus', () => {
     const { onNodesChange } = renderFocus('entity:evt-1');
 
     expect(onNodesChange).toHaveBeenCalledTimes(1);
-    expect(onNodesChange).toHaveBeenCalledWith([
+    expect(onNodesChange.mock.calls[0][0].toArray()).toEqual([
       { type: 'select', id: CONTEXT_NODE.id, selected: false },
       { type: 'select', id: EVENT_NODE.id, selected: true },
     ]);
@@ -111,7 +111,7 @@ describe('useInboundEventFocus', () => {
     });
 
     expect(onNodesChange).toHaveBeenCalledTimes(1);
-    expect(onNodesChange).toHaveBeenCalledWith([
+    expect(onNodesChange.mock.calls[0][0].toArray()).toEqual([
       { type: 'select', id: CONTEXT_NODE.id, selected: false },
       { type: 'select', id: EVENT_NODE.id, selected: true },
     ]);

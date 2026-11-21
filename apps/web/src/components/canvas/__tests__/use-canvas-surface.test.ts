@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import type { NodeTypes, Viewport } from '@xyflow/react';
+import { NodeChangeset, type NodeTypes, type Viewport } from '@xyflow/react';
 
 import type { ConflictModalProps } from '../conflict-modal';
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
@@ -123,10 +123,12 @@ describe('useCanvasSurface', () => {
     );
 
     act(() => {
-      hook.result.current.onNodesChange([
-        { id: 'a', type: 'position', position: { x: 999, y: 999 } },
-        { id: 'a', type: 'select', selected: true },
-      ]);
+      hook.result.current.onNodesChange(
+        new NodeChangeset([
+          { id: 'a', type: 'position', position: { x: 999, y: 999 } },
+          { id: 'a', type: 'select', selected: true },
+        ]),
+      );
     });
 
     const moved = hook.result.current.nodes.find((n) => n.id === 'a')!;
@@ -182,13 +184,15 @@ describe('useCanvasSurface', () => {
     expect(laidOutC.position.y).toBeGreaterThan(laidOutA.position.y);
 
     act(() => {
-      result.current.onNodesChange([
-        {
-          id: 'a',
-          type: 'dimensions',
-          dimensions: { width: 100, height: 50 },
-        },
-      ]);
+      result.current.onNodesChange(
+        new NodeChangeset([
+          {
+            id: 'a',
+            type: 'dimensions',
+            dimensions: { width: 100, height: 50 },
+          },
+        ]),
+      );
     });
 
     const afterMeasurement = result.current.nodes.find((n) => n.id === 'a')!;
@@ -208,10 +212,12 @@ describe('useCanvasSurface', () => {
     expect(result.current.selectedNodeId).toBeNull();
 
     act(() => {
-      result.current.onNodesChange([
-        { id: 'a', type: 'select', selected: true },
-        { id: 'b', type: 'select', selected: false },
-      ]);
+      result.current.onNodesChange(
+        new NodeChangeset([
+          { id: 'a', type: 'select', selected: true },
+          { id: 'b', type: 'select', selected: false },
+        ]),
+      );
     });
 
     expect(result.current.selectedNode?.id).toBe('a');

@@ -269,7 +269,7 @@ pub mod builder {
         fn from(value: super::Failure) -> Self {
             Self {
                 error: Ok(value.error),
-                result: Ok(value.result),
+                result: Ok(()),
             }
         }
     }
@@ -423,7 +423,7 @@ pub mod builder {
     impl ::std::convert::From<super::Success> for Success {
         fn from(value: super::Success) -> Self {
             Self {
-                error: Ok(value.error),
+                error: Ok(()),
                 result: Ok(value.result),
             }
         }

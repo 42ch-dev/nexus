@@ -19,7 +19,7 @@ pub struct NexusWorldKbEntityPatch {
     #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
     pub body: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     ///Per-entry functional-dialect modules (modules.mental, modules.belief, modules.observation, etc.) merged into the entry's stored modules_json. Mirrors the spoke ModuleMap shape: keys are functional-dialect ids matching ^[a-z][a-z0-9_-]*$, values are objects or arrays. First-level key upsert (AR-4/PD-12): provided keys replace the whole first-level value; unspecified sibling keys are preserved; `{}` is a no-op; omitted inherits the stored modules.
-    #[serde(default, skip_serializing_if = ":: std :: collections :: HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub modules: ::std::collections::HashMap<
         NexusWorldKbEntityPatchModulesKey,
         NexusWorldKbEntityPatchModulesValue,
@@ -72,12 +72,7 @@ impl ::std::str::FromStr for NexusWorldKbEntityPatchAudienceCharacterPrivate {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^chr_[0-9a-f]{32}$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^chr_[0-9a-f]{32}$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NexusWorldKbEntityPatchAudienceCharacterPrivate {
@@ -85,7 +80,12 @@ impl ::std::convert::TryFrom<&str> for NexusWorldKbEntityPatchAudienceCharacterP
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^chr_[0-9a-f]{32}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^chr_[0-9a-f]{32}$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -94,7 +94,7 @@ for NexusWorldKbEntityPatchAudienceCharacterPrivate {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusWorldKbEntityPatchAudienceCharacterPrivate {
@@ -102,8 +102,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusWorldKbEntityPatchAudienceCharacter
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -253,12 +254,7 @@ impl ::std::str::FromStr for NexusWorldKbEntityPatchModulesKey {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
-        { ::regress::Regex::new("^[a-z][a-z0-9_-]*$").unwrap() });
-        if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^[a-z][a-z0-9_-]*$\"".into());
-        }
-        Ok(Self(value.to_string()))
+        ::std::convert::TryFrom::try_from(value)
     }
 }
 impl ::std::convert::TryFrom<&str> for NexusWorldKbEntityPatchModulesKey {
@@ -266,7 +262,12 @@ impl ::std::convert::TryFrom<&str> for NexusWorldKbEntityPatchModulesKey {
     fn try_from(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[a-z][a-z0-9_-]*$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[a-z][a-z0-9_-]*$\"".into());
+        }
+        Ok(Self(value.to_string()))
     }
 }
 impl ::std::convert::TryFrom<::std::string::String>
@@ -275,7 +276,7 @@ for NexusWorldKbEntityPatchModulesKey {
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusWorldKbEntityPatchModulesKey {
@@ -283,8 +284,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusWorldKbEntityPatchModulesKey {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
@@ -331,6 +333,14 @@ impl ::std::str::FromStr for NexusWorldKbEntityPatchTitle {
     fn from_str(
         value: &str,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusWorldKbEntityPatchTitle {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         if value.chars().count() > 200usize {
             return Err("longer than 200 characters".into());
         }
@@ -340,20 +350,12 @@ impl ::std::str::FromStr for NexusWorldKbEntityPatchTitle {
         Ok(Self(value.to_string()))
     }
 }
-impl ::std::convert::TryFrom<&str> for NexusWorldKbEntityPatchTitle {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 impl ::std::convert::TryFrom<::std::string::String> for NexusWorldKbEntityPatchTitle {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
+        ::std::convert::TryFrom::try_from(value.as_str())
     }
 }
 impl<'de> ::serde::Deserialize<'de> for NexusWorldKbEntityPatchTitle {
@@ -361,8 +363,9 @@ impl<'de> ::serde::Deserialize<'de> for NexusWorldKbEntityPatchTitle {
     where
         D: ::serde::Deserializer<'de>,
     {
-        ::std::string::String::deserialize(deserializer)?
-            .parse()
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })

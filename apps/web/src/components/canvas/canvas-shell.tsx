@@ -22,11 +22,10 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
-  applyNodeChanges,
   type Edge,
   type FitViewOptions,
   type Node,
-  type NodeChange,
+  type NodeChangeset,
   type NodeTypes,
   type OnConnect,
   type OnEdgesChange,
@@ -111,7 +110,7 @@ export interface CanvasShellProps {
   surfaceKind?: CanvasSurfaceKind;
   /**
    * V1.126 P1 — optional fitView options override. When provided, these
-   * options are merged into the default `{ padding: 0.2 }`. Surfaces that
+   * options are merged into the default `{ padding: '8%' }`. Surfaces that
    * need to exclude certain nodes from fit-bounds calculations (e.g. the
    * directed-axis-spine decoration node) can pass a `nodes` filter here.
    */
@@ -202,7 +201,8 @@ function CanvasShellInner({
         nodesFocusable
         edgesFocusable
         fitView={!hasCachedViewport}
-        fitViewOptions={{ padding: 0.2, ...fitViewOptions }}
+        // RF 13 padding is px or a % string; legacy 0.2 ≈ 8% on the new scale.
+        fitViewOptions={{ padding: '8%', ...fitViewOptions }}
         defaultViewport={hasCachedViewport ? cachedViewport : undefined}
         onMove={(_, viewport) => onViewportChange(viewport)}
         proOptions={{ hideAttribution: true }}
@@ -249,8 +249,8 @@ export function useNodeChangeHandler(
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
 ): OnNodesChange {
   return useCallback(
-    (changes: NodeChange[]) => {
-      setNodes((nds) => applyNodeChanges(changes, nds));
+    (changes: NodeChangeset) => {
+      setNodes((nds) => changes.applyTo(nds) as Node[]);
     },
     [setNodes],
   );

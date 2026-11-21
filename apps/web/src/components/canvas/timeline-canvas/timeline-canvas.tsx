@@ -56,7 +56,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router';
-import type { Node } from '@xyflow/react';
+import { NodeChangeset, type Node } from '@xyflow/react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Cpu, Info, Plus } from 'lucide-react';
 
@@ -1102,12 +1102,15 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       // opens. This is exactly how a canvas node click flows through RF.
       // `simplify:` if selection semantics grow (range / multi), lift into
       // `useCanvasSurface` (DF-V1122-ALT-VIEW-SELECT).
-      const changes = surface.nodes.map((n) => ({
-        type: 'select' as const,
-        id: n.id,
-        selected: n.id === nodeId,
-      }));
-      surface.onNodesChange(changes);
+      surface.onNodesChange(
+        new NodeChangeset(
+          surface.nodes.map((n) => ({
+            type: 'select' as const,
+            id: n.id,
+            selected: n.id === nodeId,
+          })),
+        ),
+      );
     },
     // V1.123 P3 Task 4 — cross-surface navigation slots. Forwarded only when
     // a realizing Work is bound (the inspector hides the CTA otherwise —
