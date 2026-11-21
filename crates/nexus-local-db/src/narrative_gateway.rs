@@ -31,8 +31,6 @@ pub mod seed {
     use super::super::seed_shared;
     use sqlx::SqlitePool;
 
-    pub use crate::seed_shared::WorldSeed;
-
     /// Seed a test world row into `narrative_worlds`.
     ///
     /// Delegates to the shared `seed_shared::world` helper.
@@ -55,19 +53,6 @@ pub mod seed {
             time_policy,
         )
         .await;
-    }
-
-    /// Seed a world row from a [`WorldSeed`].
-    ///
-    /// Fixtures whose row differs from [`world`]'s shape (workspace, display
-    /// name, timeline columns) name those fields here instead of forking the
-    /// INSERT.
-    ///
-    /// # Panics
-    ///
-    /// Panics if either database insert fails.
-    pub async fn world_with(pool: &SqlitePool, seed: WorldSeed<'_>) {
-        seed_shared::world_with(pool, seed).await;
     }
 
     /// Seed a test timeline event row into `narrative_timeline_events`.

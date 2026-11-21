@@ -136,36 +136,6 @@ pub async fn world(
     .await;
 }
 
-/// [`world`] with an explicit creator display name.
-///
-/// A fixture that pins the display name passes it here rather than forking the
-/// inserts; [`world`] keeps the creator id, so its callers seed the row they
-/// always did.
-///
-/// # Panics
-///
-/// Panics if either database insert fails.
-#[allow(clippy::too_many_arguments)] // kept for the call sites that predate `WorldSeed`
-pub async fn world_with_display_name(
-    pool: &SqlitePool,
-    world_id: &str,
-    owner_creator_id: &str,
-    display_name: &str,
-    title: &str,
-    slug: &str,
-    visibility: &str,
-    time_policy: &str,
-) {
-    world_with(
-        pool,
-        WorldSeed::new(world_id, owner_creator_id, title, slug)
-            .with_visibility(visibility)
-            .with_time_policy(time_policy)
-            .with_display_name(display_name),
-    )
-    .await;
-}
-
 /// Seed a world row from a [`WorldSeed`] — the one INSERT every entry point
 /// above delegates to.
 ///

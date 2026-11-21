@@ -796,15 +796,10 @@ mod tests {
         let source_id = "kb_source";
         let target_id = "kb_target";
 
-        seed::world_with_display_name(
+        seed::world_with(
             pool,
-            world_id,
-            "ctr_test",
-            "Test",
-            "Test World",
-            "test-world",
-            "private",
-            "manual",
+            seed::WorldSeed::new(world_id, "ctr_test", "Test World", "test-world")
+                .with_display_name("Test"),
         )
         .await;
 
@@ -996,15 +991,10 @@ mod tests {
         // must deny with WorldConflict, NOT a plain VersionMismatch.
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
-        seed::world_with_display_name(
+        seed::world_with(
             &pool,
-            "wld_other",
-            "ctr_test",
-            "Test",
-            "Other World",
-            "other-world",
-            "private",
-            "manual",
+            seed::WorldSeed::new("wld_other", "ctr_test", "Other World", "other-world")
+                .with_display_name("Test"),
         )
         .await;
 
