@@ -253,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_and_claim() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let now = now_ms();
 
         let row = enqueue_prompt_injection(
@@ -287,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_respects_priority() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let now = now_ms();
 
         enqueue_prompt_injection(
@@ -335,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_consumed() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let now = now_ms();
 
         enqueue_prompt_injection(
@@ -369,7 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_consumed_empty_list() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let result = mark_prompt_injections_consumed(&pool, &[], now_ms())
             .await
             .unwrap();
@@ -378,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_nothing_for_wrong_session() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let now = now_ms();
 
         enqueue_prompt_injection(

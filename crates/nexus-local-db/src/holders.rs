@@ -559,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_registers_once_and_resolves_the_subject() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         crate::ensure_creator_row(&pool, "ctr_holder_a", "Holder A")
             .await
             .unwrap();
@@ -596,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn subject_bound_to_another_id_is_a_hard_error() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_b").await;
         // A foreign/hand-written registry row binds the subject to another id.
         sqlx::query(
@@ -626,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn id_bound_to_another_subject_is_a_hard_error() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_c").await;
         seed_creator_row(&pool, "ctr_holder_d").await;
         // The id that `ctr_holder_c` must derive is already bound to another subject.
@@ -656,7 +656,7 @@ mod tests {
     /// than hand back an id that its own subject does not bind to.
     #[tokio::test]
     async fn corrupt_registry_row_is_not_resolved_as_a_holder() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_corrupt").await;
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
@@ -696,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_subject_and_unknown_holder_are_refused() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let mut tx = crate::begin_immediate(&pool).await.unwrap();
         assert!(matches!(
             ensure_creator_holder_in_tx(&mut tx, "").await,
@@ -711,7 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn staging_covers_creators_and_characters() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         crate::ensure_creator_row(&pool, "ctr_staged", "Staged")
             .await
             .unwrap();

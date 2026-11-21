@@ -299,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_acquire_and_release_lock() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_work("wrk_lock_01");
         works::create_work(&pool, &record).await.unwrap();
 
@@ -337,7 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_second_acquire_fails_when_locked() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_work("wrk_lock_02");
         works::create_work(&pool, &record).await.unwrap();
 
@@ -360,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_release_wrong_holder_noop() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_work("wrk_lock_03");
         works::create_work(&pool, &record).await.unwrap();
 
@@ -384,7 +384,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stale_lock_recovery() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_work("wrk_lock_04");
         works::create_work(&pool, &record).await.unwrap();
 
@@ -433,7 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_stale_lock() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_work("wrk_lock_05");
         works::create_work(&pool, &record).await.unwrap();
 
@@ -566,7 +566,7 @@ mod tests {
     /// conditional election must leave exactly one `Acquired` and one `Locked`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_simultaneous_acquire_elects_exactly_one_winner() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         for round in 0..8 {
             let work_id = format!("wrk_race_{round}");
@@ -580,7 +580,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_simultaneous_stale_takeover_elects_exactly_one_winner() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         for round in 0..4 {
             let work_id = format!("wrk_race_stale_{round}");
@@ -616,7 +616,7 @@ mod tests {
     /// longer current even though the holder text is unchanged.
     #[tokio::test]
     async fn test_same_holder_stale_takeover_elects_exactly_one_winner() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let work_id = "wrk_race_stale_same_holder";
         works::create_work(&pool, &sample_work(work_id))
             .await
@@ -683,7 +683,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_mutation_second_fails() {
         // AC1: two concurrent mutating operations on same Work → second fails with holder hint
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_work("wrk_concurrent");
         works::create_work(&pool, &record).await.unwrap();
 

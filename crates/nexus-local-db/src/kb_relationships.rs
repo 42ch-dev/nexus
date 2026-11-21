@@ -831,7 +831,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_and_get() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         let mut tx = pool.begin().await.unwrap();
@@ -869,7 +869,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_cas_bumps_revision() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         let mut tx = pool.begin().await.unwrap();
@@ -933,7 +933,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_cas_fails_on_stale_revision() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         let mut tx = pool.begin().await.unwrap();
@@ -994,7 +994,7 @@ mod tests {
         // the row to wld_other without bumping the revision, so the pre-fix
         // id+revision CAS would have succeeded. The world-aware predicate
         // must deny with WorldConflict, NOT a plain VersionMismatch.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
         seed_shared::world_with_display_name(
             &pool,
@@ -1092,7 +1092,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_cas() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         let mut tx = pool.begin().await.unwrap();
@@ -1132,7 +1132,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_for_world() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         let mut tx = pool.begin().await.unwrap();
@@ -1172,7 +1172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_for_world_respects_sql_limit() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         // Seed 3 confirmed rows.
@@ -1225,7 +1225,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_confirmed_relationships_paginated_resumes_after_cursor() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
         // Seed 5 confirmed rows with strictly increasing RFC3339 `updated_at`
@@ -1309,7 +1309,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_entity_by_canonical_name_with_block_type() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         // seed_world_and_entities inserts kb_source + kb_target as 'character'
         // with canonical_name == id.
         let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
@@ -1323,7 +1323,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_entity_case_insensitive_without_block_type() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
 
         let resolved = resolve_entity_by_canonical_name(&pool, &world_id, "KB_SOURCE", None)
@@ -1334,7 +1334,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_entity_missing_returns_none() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, _source_id, _target_id) = seed_world_and_entities(&pool).await;
 
         let resolved = resolve_entity_by_canonical_name(&pool, &world_id, "nonexistent", None)
@@ -1345,7 +1345,7 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_extraction_relationship_inserts_then_dedup() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -1397,7 +1397,7 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_extraction_different_custom_label_inserts_separate() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
         let now = chrono::Utc::now().to_rfc3339();
 

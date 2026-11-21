@@ -705,7 +705,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_worlds_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let gw = SqliteNarrativeGateway::new(pool);
         let worlds = gw.list_worlds().await.unwrap();
         assert_eq!(worlds, Vec::<nexus_narrative::WorldState>::new());
@@ -713,7 +713,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_worlds_with_data() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed::world(
             &pool,
             "wld_1",
@@ -744,7 +744,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_world_state_found() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed::world(
             &pool,
             "wld_1",
@@ -766,7 +766,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_world_state_not_found() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let gw = SqliteNarrativeGateway::new(pool);
         let result = gw.get_world_state("wld_missing").await;
         assert!(matches!(result, Err(NarrativeError::NotFound { .. })));
@@ -774,7 +774,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_timeline() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed::world(
             &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
         )
@@ -807,7 +807,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_event() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed::world(
             &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
         )
@@ -823,7 +823,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_event_not_found() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let gw = SqliteNarrativeGateway::new(pool);
         let result = gw.get_event("evt_missing").await;
         assert!(matches!(result, Err(NarrativeError::NotFound { .. })));
@@ -842,7 +842,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_narrative_context() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed::world(
             &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
         )

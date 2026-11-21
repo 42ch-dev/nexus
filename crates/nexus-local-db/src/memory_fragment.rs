@@ -427,7 +427,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_list_fragment() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let fragment = sample_fragment("frag_001");
         create_fragment(&pool, &fragment).await.unwrap();
 
@@ -438,7 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_fragments_by_session() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let fragment1 = sample_fragment("frag_001");
         let fragment2 = MemoryFragmentRecord {
@@ -457,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_fragment() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let fragment = sample_fragment("frag_001");
         create_fragment(&pool, &fragment).await.unwrap();
 
@@ -468,13 +468,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_nonexistent_returns_false() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         assert!(!delete_fragment(&pool, "frag_ghost").await.unwrap());
     }
 
     #[tokio::test]
     async fn test_get_all_keywords_dedupes() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let fragment1 = MemoryFragmentRecord {
             fragment_id: "frag_001".to_string(),
@@ -499,14 +499,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_all_keywords_empty_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let keywords = get_all_keywords(&pool, "ctr_ghost").await.unwrap();
         assert_eq!(keywords, Vec::<String>::new());
     }
 
     #[tokio::test]
     async fn test_fragment_with_null_ttl() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let fragment = MemoryFragmentRecord {
             fragment_id: "frag_null".to_string(),
             ttl: None,
@@ -520,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fragment_ordering_by_created_at() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let fragment1 = sample_fragment("frag_001");
         let fragment2 = MemoryFragmentRecord {
@@ -539,7 +539,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_all_keywords_handles_invalid_json() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         // Insert with valid JSON
         let fragment1 = sample_fragment("frag_001");
@@ -563,7 +563,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_world_id_propagation() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let fragment = MemoryFragmentRecord {
             world_id: Some("world_alpha".to_string()),
             ..sample_fragment("frag_world")
@@ -578,7 +578,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_world_id_null_by_default() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let fragment = sample_fragment("frag_null_world");
         create_fragment(&pool, &fragment).await.unwrap();
 
@@ -589,7 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_fragments_filtered_world_filter() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let frag_world_a = MemoryFragmentRecord {
             fragment_id: "frag_a".to_string(),

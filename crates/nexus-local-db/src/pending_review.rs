@@ -208,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_get_pending_review() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_record("pending_001");
         create_pending_review(&pool, &record).await.unwrap();
 
@@ -223,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_nonexistent_returns_none() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         assert!(get_pending_review(&pool, "pending_ghost")
             .await
             .unwrap()
@@ -232,7 +232,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_pending_reviews_by_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let record1 = sample_record("pending_001");
         let record2 = PendingReviewRecord {
@@ -263,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_pending_review() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = sample_record("pending_001");
         create_pending_review(&pool, &record).await.unwrap();
 
@@ -276,13 +276,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_nonexistent_returns_false() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         assert!(!delete_pending_review(&pool, "pending_ghost").await.unwrap());
     }
 
     #[tokio::test]
     async fn test_count_pending_reviews() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         assert_eq!(count_pending_reviews(&pool, "ctr_test").await.unwrap(), 0);
 
@@ -297,7 +297,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pending_review_with_null_world_id() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let record = PendingReviewRecord {
             pending_id: "pending_null".to_string(),
             session_id: "sess_pending_null".to_string(),

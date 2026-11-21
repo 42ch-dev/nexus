@@ -1845,7 +1845,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_get_work() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_001");
         create_work(&pool, &record).await.unwrap();
 
@@ -1862,7 +1862,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_nonexistent_returns_none() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         assert!(get_work(&pool, "ctr_test", "wrk_ghost")
             .await
             .unwrap()
@@ -1871,7 +1871,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_works_by_creator() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
 
         let record1 = sample_work("wrk_001");
         let mut record2 = sample_work("wrk_002");
@@ -1894,7 +1894,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_works_with_status_filter() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
 
         let record1 = sample_work("wrk_001");
         let mut record2 = sample_work("wrk_002");
@@ -1916,7 +1916,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_patch_work() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_001");
         create_work(&pool, &record).await.unwrap();
 
@@ -1935,7 +1935,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_inspiration() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_001");
         create_work(&pool, &record).await.unwrap();
 
@@ -1962,7 +1962,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_multiple_inspirations() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_001");
         create_work(&pool, &record).await.unwrap();
 
@@ -2006,7 +2006,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_idempotency_create_and_lookup() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_001");
         create_work(&pool, &record).await.unwrap();
         record_idempotency(
@@ -2035,7 +2035,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_patch_work_clears_nullable_field() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let mut record = sample_work("wrk_001");
         record.world_id = Some("wld_test".to_string());
         create_work(&pool, &record).await.unwrap();
@@ -2054,7 +2054,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_work_has_default_stage() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_stage_001");
         create_work(&pool, &record).await.unwrap();
 
@@ -2068,7 +2068,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_work_stage() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_stage_002");
         create_work(&pool, &record).await.unwrap();
 
@@ -2082,7 +2082,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_work_stage_nonexistent() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         assert!(get_work_stage(&pool, "ctr_test", "wrk_ghost")
             .await
             .unwrap()
@@ -2091,7 +2091,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_work_stage() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_stage_003");
         create_work(&pool, &record).await.unwrap();
 
@@ -2111,7 +2111,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_work_stage_nonexistent_fails() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let result = update_work_stage(
             &pool,
             "ctr_test",
@@ -2158,7 +2158,7 @@ mod tests {
     #[tokio::test]
     async fn test_has_active_fl_e_schedule_false_for_new_work() {
         // R-FL-E-01: new work has stage_status='pending', not active
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_active_001");
         create_work(&pool, &record).await.unwrap();
 
@@ -2171,7 +2171,7 @@ mod tests {
     #[tokio::test]
     async fn test_has_active_fl_e_schedule_true_after_advance() {
         // R-FL-E-01: after stage advance (stage_status='active'), should report active
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_active_002");
         create_work(&pool, &record).await.unwrap();
 
@@ -2201,7 +2201,7 @@ mod tests {
         // R-FL-E-01 regression: advancing from an active stage to another should
         // fail at the CLI level. This test validates the DB helper returns the
         // correct state for the CLI to check.
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_active_003");
         create_work(&pool, &record).await.unwrap();
 
@@ -2248,7 +2248,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_patch_work_stage_fields() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_stage_004");
         create_work(&pool, &record).await.unwrap();
 
@@ -2275,7 +2275,7 @@ mod tests {
     /// status) with a partial WHERE clause for `auto_chain_enabled` = 1.
     #[tokio::test]
     async fn test_auto_chain_resume_index_exists() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
 
         // Query sqlite_master to verify the index was created by the migration.
         let index_sql: Option<String> = sqlx::query_scalar(

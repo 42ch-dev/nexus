@@ -1290,7 +1290,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_and_get() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc123", "wld_1")
             .await
             .unwrap();
@@ -1308,7 +1308,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_idempotent() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job1 = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc", "wld_1")
             .await
             .unwrap();
@@ -1320,7 +1320,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lifecycle_queued_running_done() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc", "wld_1")
             .await
             .unwrap();
@@ -1342,7 +1342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lifecycle_queued_running_failed() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc", "wld_1")
             .await
             .unwrap();
@@ -1359,7 +1359,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_failed_allows_re_enqueue() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc", "wld_1")
             .await
             .unwrap();
@@ -1375,7 +1375,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_creator() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
             .unwrap();
@@ -1395,7 +1395,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_creator_bounded() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         for i in 0..5 {
             enqueue(&pool, "ctr_1", "wrk_1", &format!("kb_{i}"), "wld_1")
                 .await
@@ -1413,7 +1413,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_queued() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         assert!(next_queued(&pool, "ctr_1").await.unwrap().is_none());
 
         let j1 = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
@@ -1436,7 +1436,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_job_selects_oldest_queued() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let j1 = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
             .unwrap();
@@ -1452,13 +1452,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_job_returns_none_when_empty() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         assert!(claim_job(&pool, "ctr_1").await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn test_claim_job_skips_non_queued() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let j1 = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
             .unwrap();
@@ -1470,7 +1470,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_job_concurrent_double_claim_prevented() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         // Enqueue a single job
         let _j = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
@@ -1497,7 +1497,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_job_then_full_lifecycle() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let j = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
             .unwrap();
@@ -1519,7 +1519,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_with_artifact_fields() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job = enqueue_with_artifact(
             &pool,
             "ctr_1",
@@ -1546,7 +1546,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_with_artifact_idempotent() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job1 = enqueue_with_artifact(
             &pool,
             "ctr_1",
@@ -1581,7 +1581,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_without_artifact_has_null_fields() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let job = enqueue(&pool, "ctr_1", "wrk_1", "kb_legacy", "wld_1")
             .await
             .unwrap();
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[tokio::test]
     async fn auto_promote_columns_default_to_null_and_record_on_flip() {
-        let (pool, _dir) = fresh_engine_pool().await;
+        let (_dir, pool) = fresh_engine_pool().await;
         let payload = serde_json::json!({
             "summary": "Auto candidate",
             "attributes": {"novel_category": "character", "aliases": ["Lin Xia"]},

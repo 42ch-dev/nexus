@@ -215,7 +215,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_get_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let row = create_local_identity(
             &pool,
             "ctr_localTest123",
@@ -242,7 +242,7 @@ mod tests {
     // 0-match reads can both mint; the index fences the second write.
     #[tokio::test]
     async fn duplicate_persistent_display_name_is_rejected() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localDup1",
@@ -278,7 +278,7 @@ mod tests {
     // NOT constrained — the index is partial (persistent + non-NULL name).
     #[tokio::test]
     async fn duplicate_nameless_persistent_rows_are_allowed() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localNoName1",
@@ -301,14 +301,14 @@ mod tests {
 
     #[tokio::test]
     async fn get_nonexistent_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let result = get_local_identity(&pool, "ctr_nonexistent").await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn list_identities() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         create_local_identity(
             &pool,
@@ -337,14 +337,14 @@ mod tests {
 
     #[tokio::test]
     async fn list_identities_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let list = list_local_identities(&pool).await.unwrap();
         assert!(list.is_empty());
     }
 
     #[tokio::test]
     async fn link_identity_to_platform() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localLink",
@@ -369,7 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_nonexistent_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let result = link_to_platform(&pool, "ctr_nonexistent", "ctr_Platform123").await;
         assert!(result.is_err());
         assert!(matches!(result, Err(LocalDbError::IdentityNotFound { .. })));
@@ -377,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_already_linked_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localAlreadyLinked",
@@ -404,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localDel",
@@ -431,7 +431,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_nonexistent_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let deleted = delete_local_identity(&pool, "ctr_nonexistent")
             .await
             .unwrap();
@@ -440,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlink_identity_from_platform() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localUnlink",
@@ -475,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlink_nonexistent_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let result = unlink_from_platform(&pool, "ctr_nonexistent").await;
         assert!(result.is_err());
         assert!(matches!(result, Err(LocalDbError::IdentityNotFound { .. })));
@@ -483,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlink_already_unlinked_identity() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         create_local_identity(
             &pool,
             "ctr_localNeverLinked",

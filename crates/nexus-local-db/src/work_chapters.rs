@@ -1946,7 +1946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seed_chapters_creates_rows() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_seed_001").await;
 
         seed_chapters(&pool, "wrk_seed_001", "my-novel", 5, "2026-06-07T10:00:00Z")
@@ -1964,7 +1964,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seed_chapters_idempotent() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_seed_002").await;
 
         seed_chapters(&pool, "wrk_seed_002", "my-novel", 3, "2026-06-07T10:00:00Z")
@@ -1982,7 +1982,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seed_chapters_paths_formatted_correctly() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_seed_003").await;
 
         seed_chapters(
@@ -2012,7 +2012,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_chapters_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_seed_004").await;
 
         let count = count_chapters(&pool, "wrk_seed_004").await.unwrap();
@@ -2024,7 +2024,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_insert_and_get_chapter() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_crud_001").await;
 
         insert_chapter(
@@ -2060,7 +2060,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_update_status() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_crud_002").await;
 
         seed_chapters(&pool, "wrk_crud_002", "my-novel", 2, "2026-06-07T10:00:00Z")
@@ -2112,7 +2112,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_is_work_completed_all_finalized() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_001").await;
 
         // V1.38 P0 (T7): completion requires total_planned_chapters, current_chapter,
@@ -2157,7 +2157,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_is_work_completed_one_draft() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_002").await;
 
         // SAFETY: UPDATE against works — runtime query.
@@ -2211,7 +2211,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_is_work_completed_false_when_total_planned_chapters_null() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_null").await;
 
         // insert_test_work leaves total_planned_chapters as NULL by default
@@ -2246,7 +2246,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_is_work_completed_false_when_total_planned_chapters_zero() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_zero").await;
 
         // SAFETY: UPDATE against works — runtime query.
@@ -2270,7 +2270,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_reconcile_creates_rows_from_filesystem() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_001").await;
 
         // Create 3-chapter workspace
@@ -2322,7 +2322,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_compute_is_read_only_then_apply_writes() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_split").await;
 
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
@@ -2374,7 +2374,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_reconcile_update_and_idempotent() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_002").await;
 
         // Pre-seed 3 chapters
@@ -2508,7 +2508,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_reconcile_volume_aware_from_frontmatter() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_vol").await;
 
         // Create workspace with multi-volume chapter files.
@@ -2579,7 +2579,7 @@ mod tests {
     // T10.1: next_chapter selection order (3-chapter Work with mixed statuses)
     #[tokio::test]
     async fn test_next_chapter_selects_lowest_not_started() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_sel_001").await;
         setup_work_for_selection(&pool, "wrk_sel_001", 3).await;
         seed_chapters(&pool, "wrk_sel_001", "my-novel", 3, "2026-06-08T10:00:00Z")
@@ -2606,7 +2606,7 @@ mod tests {
     // T10.2: next_chapter resumes lowest active chapter (draft beats later not_started)
     #[tokio::test]
     async fn test_next_chapter_resumes_draft() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_sel_002").await;
         setup_work_for_selection(&pool, "wrk_sel_002", 3).await;
         seed_chapters(&pool, "wrk_sel_002", "my-novel", 3, "2026-06-08T10:00:00Z")
@@ -2669,7 +2669,7 @@ mod tests {
     // T10.3: Outlined chapter is not skipped in favor of later chapters
     #[tokio::test]
     async fn test_next_chapter_outlined_not_skipped() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_sel_003").await;
         setup_work_for_selection(&pool, "wrk_sel_003", 3).await;
         seed_chapters(&pool, "wrk_sel_003", "my-novel", 3, "2026-06-08T10:00:00Z")
@@ -2720,7 +2720,7 @@ mod tests {
     // T10.8: Finalized chapters are excluded from selection
     #[tokio::test]
     async fn test_next_chapter_skips_finalized() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_sel_004").await;
         setup_work_for_selection(&pool, "wrk_sel_004", 3).await;
         seed_chapters(&pool, "wrk_sel_004", "my-novel", 3, "2026-06-08T10:00:00Z")
@@ -2773,7 +2773,7 @@ mod tests {
     // T10.4: Completion stops when all rows finalized + intake complete + current_chapter OK
     #[tokio::test]
     async fn test_completion_all_finalized() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_010").await;
         setup_work_for_selection(&pool, "wrk_comp_010", 2).await;
 
@@ -2815,7 +2815,7 @@ mod tests {
     // T10.5: Completion does NOT fire when one row is still draft
     #[tokio::test]
     async fn test_completion_blocked_by_draft() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_011").await;
         setup_work_for_selection(&pool, "wrk_comp_011", 3).await;
 
@@ -2865,7 +2865,7 @@ mod tests {
     // T10.6: Completion blocked when intake_status != 'complete'
     #[tokio::test]
     async fn test_completion_blocked_by_intake() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_012").await;
 
         // Set total + current_chapter but NOT intake_status (stays 'pending')
@@ -2902,7 +2902,7 @@ mod tests {
     // F-002: is_work_completed novel-profile early-exit narrowing
     #[tokio::test]
     async fn test_completion_novel_profile_needs_full_check() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_novel_001").await;
 
         // Set work_profile='novel', all §6.1 conditions met, but works.status='draft'
@@ -2984,7 +2984,7 @@ mod tests {
     // T10.7: One-chapter compatibility (V1.36 path still works)
     #[tokio::test]
     async fn test_one_chapter_v136_compatible() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_compat_001").await;
 
         // V1.36 style: single chapter, intake complete
@@ -3047,7 +3047,7 @@ mod tests {
     // regardless of works.status — completion detection is deferred to V1.55+.
     #[tokio::test]
     async fn test_is_work_completed_game_bible_returns_false() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_game_bible_001").await;
 
         // Set work_profile to game_bible and works.status to 'completed'
@@ -3077,7 +3077,7 @@ mod tests {
     // V1.55 P2: is_game_bible_design_complete tests
     #[tokio::test]
     async fn test_is_game_bible_design_complete_all_accepted() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_gb_comp_001").await;
 
         // SAFETY: UPDATE — runtime query.
@@ -3110,7 +3110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_game_bible_design_complete_one_draft() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_gb_comp_002").await;
 
         sqlx::query(
@@ -3148,7 +3148,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_game_bible_design_complete_missing_files() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_gb_comp_003").await;
 
         sqlx::query(
@@ -3174,7 +3174,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_game_bible_design_complete_intake_pending() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_gb_comp_004").await;
 
         // intake_status is pending
@@ -3209,7 +3209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_script_complete_all_accepted() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_scr_comp_001").await;
 
         // SAFETY: UPDATE — runtime query.
@@ -3248,7 +3248,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_script_complete_one_draft() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_scr_comp_002").await;
 
         sqlx::query(
@@ -3286,7 +3286,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_script_complete_missing_files() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_scr_comp_003").await;
 
         sqlx::query(
@@ -3315,7 +3315,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_script_complete_intake_pending() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_scr_comp_004").await;
 
         // intake_status is pending
@@ -3355,7 +3355,7 @@ mod tests {
     // V1.67 P2 (R-V160P1-QC2-W001): regression test for path validation.
     #[tokio::test]
     async fn test_is_script_complete_rejects_path_traversal_in_work_ref() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_scr_comp_005").await;
 
         sqlx::query(
@@ -3393,7 +3393,7 @@ mod tests {
     // V1.60 P1: script profile gate in is_work_completed
     #[tokio::test]
     async fn test_is_work_completed_script_returns_false() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_script_001").await;
 
         // Set work_profile to script and works.status to 'completed'
@@ -3431,7 +3431,7 @@ mod tests {
     // R-V143P0-fix: negative/zero volume frontmatter must default to 1.
     #[tokio::test]
     async fn test_reconcile_volume_rejects_negative() {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_neg_vol").await;
 
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
@@ -3474,7 +3474,7 @@ mod tests {
     /// check would fail because `current_chapter` resets per volume.
     #[tokio::test]
     async fn test_is_work_completed_multi_volume_all_finalized() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_mv_comp_001").await;
 
         // Set up as a 2-volume novel with 6 total chapters
@@ -3527,7 +3527,7 @@ mod tests {
     /// draft chapter — must NOT be completed.
     #[tokio::test]
     async fn test_is_work_completed_multi_volume_partial_vol2() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_mv_comp_002").await;
 
         // SAFETY: UPDATE against works — runtime query.
@@ -3601,7 +3601,7 @@ mod tests {
     /// F-002 edge: row count mismatch (only vol 1 seeded, total says 6).
     #[tokio::test]
     async fn test_is_work_completed_multi_volume_missing_vol2_rows() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_mv_comp_003").await;
 
         // SAFETY: UPDATE against works — runtime query.
@@ -3663,7 +3663,7 @@ mod tests {
     /// lowest-numbered active chapter wins at each step.
     #[tokio::test]
     async fn spec_4_5_7_chapter_selection_returns_lowest_eligible() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_457_001").await;
         setup_work_for_selection(&pool, "wrk_457_001", 3).await;
         seed_chapters(&pool, "wrk_457_001", "my-novel", 3, "2026-06-15T10:00:00Z")
@@ -3773,7 +3773,7 @@ mod tests {
     /// completion, then each condition individually violated returns false.
     #[tokio::test]
     async fn spec_4_5_7_completion_requires_all_section_6_1_conditions() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_457_002").await;
         setup_work_for_selection(&pool, "wrk_457_002", 2).await;
         // setup_work_for_selection sets intake_status='complete',

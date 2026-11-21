@@ -181,7 +181,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn insert_then_list_round_trips() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1, Some(PEER_ID_A))
             .await
             .unwrap();
@@ -204,7 +204,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn duplicate_host_id_upserts_one_row_with_fresh_last_seen() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1, Some(PEER_ID_A))
             .await
             .unwrap();
@@ -233,14 +233,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn empty_table_returns_empty_list() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let rows = list_peer_manifests(&pool).await.unwrap();
         assert!(rows.is_empty(), "empty table must list no peers");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn multiple_peers_list_most_recent_first() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         record_peer_manifest(&pool, "peer_older", MANIFEST_V1, T1, None)
             .await
             .unwrap();
@@ -259,7 +259,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn malformed_manifest_json_is_rejected_and_not_stored() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let err = record_peer_manifest(&pool, "peer_a", "not json {", T1, None)
             .await
             .unwrap_err();
@@ -272,7 +272,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn malformed_or_non_utc_last_seen_is_rejected_and_not_stored() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         for bad in ["2026-08-08T10:00:00+05:00", "not-a-timestamp"] {
             let err = record_peer_manifest(&pool, "peer_a", MANIFEST_V1, bad, None)
                 .await
@@ -284,7 +284,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn oversized_manifest_is_rejected_and_not_stored() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let padding = "x".repeat(MAX_MANIFEST_JSON_BYTES + 1);
         let huge = format!("{{\"padding\":\"{padding}\"}}");
         let err = record_peer_manifest(&pool, "peer_a", &huge, T1, None)
@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn empty_or_oversized_host_id_is_rejected_and_not_stored() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         for bad in ["", &"h".repeat(MAX_HOST_ID_CHARS + 1)] {
             let err = record_peer_manifest(&pool, bad, MANIFEST_V1, T1, None)
                 .await
@@ -318,7 +318,7 @@ mod tests {
     /// exports `set_peer_capabilities`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn upsert_refreshes_manifest_and_last_seen_in_one_statement() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1, Some(PEER_ID_A))
             .await
             .unwrap();
@@ -343,7 +343,7 @@ mod tests {
     /// without a peer id stores NULL (additive, pre-column rows backfill).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn peer_id_records_on_insert_and_refreshes_on_upsert() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1, Some(PEER_ID_A))
             .await
             .unwrap();
@@ -371,7 +371,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn oversized_peer_id_is_rejected_and_not_stored() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let huge = "p".repeat(MAX_PEER_ID_CHARS + 1);
         let err = record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1, Some(&huge))
             .await

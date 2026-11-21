@@ -246,7 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_world_story() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let story = create_world_story(&pool, "wld_abc123", "my-novel", "/Stories/my-novel/")
             .await
             .unwrap();
@@ -268,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_world_story_idempotent() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let story1 = create_world_story(&pool, "wld_abc", "novel-a", "/Stories/novel-a/")
             .await
             .unwrap();
@@ -290,7 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_world() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         create_world_story(&pool, "wld_world1", "story-a", "/Stories/story-a/")
             .await
@@ -317,13 +317,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_by_id_not_found() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         assert!(get_by_id(&pool, "wsr_ghost").await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn test_update_chapters() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let story = create_world_story(&pool, "wld_test", "novel-x", "/Stories/novel-x/")
             .await
             .unwrap();
@@ -352,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_chapters_with_nulls() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let story = create_world_story(&pool, "wld_null", "novel-y", "/Stories/novel-y/")
             .await
             .unwrap();
@@ -369,7 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_status() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let story = create_world_story(&pool, "wld_status", "novel-z", "/Stories/novel-z/")
             .await
             .unwrap();
@@ -389,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let story = create_world_story(&pool, "wld_del", "novel-del", "/Stories/novel-del/")
             .await
             .unwrap();

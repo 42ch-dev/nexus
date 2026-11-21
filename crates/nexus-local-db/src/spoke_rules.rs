@@ -433,7 +433,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_by_ids_returns_known_subset_and_omits_missing() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_spoke_rule_for_test(&pool, &rule_row("rule_a", "wld_1"))
             .await
             .unwrap();
@@ -475,7 +475,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_by_ids_empty_refs_returns_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_spoke_rule_for_test(&pool, &rule_row("rule_a", "wld_1"))
             .await
             .unwrap();
@@ -486,7 +486,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_by_ids_all_missing_returns_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let rows =
             get_spoke_rules_by_ids(&pool, &["rule_nope".to_string(), "rule_nada".to_string()])
                 .await

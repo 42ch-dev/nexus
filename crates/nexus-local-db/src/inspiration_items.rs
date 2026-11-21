@@ -700,7 +700,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
 
         {
@@ -732,7 +732,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
 
         {
@@ -767,7 +767,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         create_inspiration_row(
             &pool,
@@ -804,7 +804,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         // Seed the inspiration row the atomic path updates in step 3.
         create_inspiration_row(
@@ -845,7 +845,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         create_inspiration_row(
             &pool,

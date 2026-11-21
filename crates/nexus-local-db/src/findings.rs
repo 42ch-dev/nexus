@@ -1653,7 +1653,7 @@ mod tests {
     /// (the review-stage hook's hot path) must use this index.
     #[tokio::test]
     async fn test_findings_work_chapter_status_index_exists() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let index_sql: Option<String> = sqlx::query_scalar(
             "SELECT sql FROM sqlite_master \
@@ -1713,7 +1713,7 @@ mod tests {
     async fn list_open_findings_for_chapter_filters_by_chapter_and_work_level() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_a";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
         seed_minimal_work(&pool, "wrk_other", CREATOR).await;
 
@@ -1809,7 +1809,7 @@ mod tests {
     #[tokio::test]
     async fn list_open_findings_for_chapter_orders_by_created_at_asc_within_severity() {
         const WORK: &str = "wrk_b";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, "ctr_test").await;
 
         // Three minors on chapter 1, inserted with decreasing created_at.
@@ -1846,7 +1846,7 @@ mod tests {
     /// V1.48 P1 T4 — empty result when no open findings match.
     #[tokio::test]
     async fn list_open_findings_for_chapter_returns_empty_when_no_matches() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         // No seed — table is empty.
         let got = list_open_findings_for_chapter(&pool, "ctr_test", "wrk_c", 1)
             .await
@@ -1868,7 +1868,7 @@ mod tests {
     async fn findings_retention_removes_old_resolved_rows() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 10_000_000;
@@ -1951,7 +1951,7 @@ mod tests {
     async fn findings_retention_count_preview_matches_prune() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_count";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 20_000_000;
@@ -2037,7 +2037,7 @@ mod tests {
     async fn findings_retention_skips_open_rows() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune_open";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 20_000_000;
@@ -2085,7 +2085,7 @@ mod tests {
     async fn findings_retention_skips_recent_resolved_rows() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune_recent";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 30_000_000;
@@ -2161,7 +2161,7 @@ mod tests {
     async fn update_finding_can_clear_rule_suggestion_to_null() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_clr";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed with a non-empty rule_suggestion.
@@ -2207,7 +2207,7 @@ mod tests {
     async fn update_finding_can_set_rule_suggestion() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_set";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed with no rule_suggestion (NULL).
@@ -2246,7 +2246,7 @@ mod tests {
     async fn update_finding_can_omit_rule_suggestion_to_keep_unchanged() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_omit";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed with a non-empty rule_suggestion.
@@ -2407,7 +2407,7 @@ mod tests {
     async fn update_finding_accepts_canonical_lifecycle_path() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_lifecycle";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         super::create_finding(
@@ -2460,7 +2460,7 @@ mod tests {
     async fn update_finding_accepts_open_to_terminal_transitions() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_open_terminal";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         super::create_finding(
@@ -2515,7 +2515,7 @@ mod tests {
     async fn update_finding_rejects_illegal_transitions() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_reject";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed a resolved row (terminal — no outbound transitions).
@@ -2629,7 +2629,7 @@ mod tests {
     async fn update_finding_rejects_unknown_status_value() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_unknown_status";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
         super::create_finding(
             &pool,
@@ -2673,7 +2673,7 @@ mod tests {
     async fn list_open_findings_for_chapter_matches_v149_actionable_set() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_actionable";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed one finding per status, all on chapter 1, all the same
@@ -2738,7 +2738,7 @@ mod tests {
     async fn list_open_findings_for_chapter_includes_work_level_triaged() {
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_work_triaged";
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Work-level triaged finding.

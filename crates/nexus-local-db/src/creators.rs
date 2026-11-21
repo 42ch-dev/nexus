@@ -307,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_creator_row_materializes_active_row() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         ensure_creator_row(&pool, "ctr_localMat", "Local Materializer")
             .await
@@ -335,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_creator_row_is_idempotent_and_updates_in_place() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         ensure_creator_row(&pool, "ctr_localIdem", "First Name")
             .await
