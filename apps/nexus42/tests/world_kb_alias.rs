@@ -64,7 +64,8 @@ async fn seed_cli_entry(actor: &DirectActor, world_id: &str) {
 // =============================================================================
 
 /// `creator world kb adopt --help` pins the full Usage command path and the
-/// `--auto` option line (clap renders options as trimmed indented lines).
+/// exact `--auto` option token (clap renders options as trimmed indented
+/// lines).
 #[test]
 fn creator_world_kb_adopt_help_is_reachable() {
     let output = Command::cargo_bin("nexus42")
@@ -87,14 +88,14 @@ fn creator_world_kb_adopt_help_is_reachable() {
         usage.starts_with("Usage: nexus42 creator world kb adopt"),
         "unexpected adopt usage path: {usage}"
     );
-    let option_tokens: Vec<&str> = help_text
+    let has_auto = help_text
         .lines()
         .skip_while(|line| line.trim() != "Options:")
         .skip(1)
         .filter_map(|line| line.split_whitespace().next())
-        .collect();
+        .any(|token| token == "--auto");
     assert!(
-        option_tokens.contains(&"--auto"),
+        has_auto,
         "adopt --help must list the exact --auto option token:\n{help_text}"
     );
 }
