@@ -83,15 +83,34 @@ fail() {
 # `pub(crate)`, `unsafe`, or empty), so a split declaration still classifies.
 scan() {
   # Both halves run from the scanned root: the file list stays relative.
+  # Tracked mode is decided by the checkout itself: asking `git` would let a
+  # broken `git` fall back to a filesystem walk over a partial tree.
   ( cd "$SCAN_ROOT" || exit 1
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-      git ls-files -- 'crates/**/*.rs' 'apps/**/*.rs'
+    if [ -e .git ]; then
+      if ! git ls-files -- 'crates/**/*.rs' 'apps/**/*.rs' > "$SCRATCH"; then
+        echo "FAIL: git ls-files failed while listing tracked sources under $SCAN_ROOT" >&2
+        exit 1
+      fi
     else
-      # Fixture trees reach this branch and need not carry an `apps/` root; a
-      # `find` failure still propagates through the pipeline.
-      find crates -type f -name '*.rs'
-      if [ -d apps ]; then find apps -type f -name '*.rs'; fi
-    fi | sort > "$SCRATCH"
+      # Fixture trees need not carry an `apps/` root.
+      if ! find crates -type f -name '*.rs' > "$SCRATCH"; then
+        echo "FAIL: find failed while listing sources under $SCAN_ROOT/crates" >&2
+        exit 1
+      fi
+      if [ -d apps ]; then
+        if ! find apps -type f -name '*.rs' >> "$SCRATCH"; then
+          echo "FAIL: find failed while listing sources under $SCAN_ROOT/apps" >&2
+          exit 1
+        fi
+      fi
+    fi
+
+    # Zero files means the root or pathspec is wrong, never "clean".
+    if [ ! -s "$SCRATCH" ]; then
+      echo "FAIL: no .rs files found under crates/ or apps/ in $SCAN_ROOT — wrong root or pathspec" >&2
+      exit 1
+    fi
+    sort -o "$SCRATCH" "$SCRATCH"
 
     perl - "$SCRATCH" "${MAPPERS[@]}" <<'PERL'
 use strict;
@@ -198,10 +217,14 @@ open my $list, '<', $listfile or die "open $listfile: $!";
 while (my $path = <$list>) {
   chomp $path;
   open my $fh, '<', $path or die "FAIL: cannot read $path: $!\n";
-  my $src = do { local $/; <$fh> };
-  die "FAIL: cannot read $path: $!\n" if !defined $src && $!;
-  close $fh;
-  $src = '' unless defined $src;
+  my $src = '';
+  while (1) {
+    my $read = sysread $fh, my $buf, 1 << 16;
+    die "FAIL: read failed for $path: $!\n" unless defined $read;
+    last if $read == 0;
+    $src .= $buf;
+  }
+  close $fh or die "FAIL: read failed for $path: $!\n";
   my $code = project_code($src);
 
   for my $name (@names) {
