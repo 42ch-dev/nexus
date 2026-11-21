@@ -26,10 +26,10 @@ const ROOT: &str = "fbk_root";
 const OTHER_BRANCH: &str = "fbk_other";
 
 struct Fixture {
+    pool: SqlitePool,
     _tmp: TempDir,
     core: CoreService,
     principal: Principal,
-    pool: SqlitePool,
 }
 
 async fn fixture() -> Fixture {

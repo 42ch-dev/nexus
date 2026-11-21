@@ -40,7 +40,7 @@ use std::sync::Arc;
 /// function, which only `init_engine_pool` installs — a bare
 /// `SqlitePool::connect` would abort with `no such function`. Two connections
 /// is the documented budget the original proof used.
-async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::TempDir) {
+async fn fresh_pool() -> (tempfile::TempDir, Arc<sqlx::SqlitePool>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::writer_protocol::init_engine_pool(
@@ -54,7 +54,7 @@ async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::TempDir) {
     .await
     .expect("engine-admitted pool")
     .clone_pool();
-    (Arc::new(pool), dir)
+    (dir, Arc::new(pool))
 }
 
 fn recoverable_mgr(
@@ -143,7 +143,7 @@ async fn interrupted_direct_commit(
 #[tokio::test]
 #[serial]
 async fn simulated_crash_after_file_apply_then_recovery_completes() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -170,7 +170,7 @@ async fn simulated_crash_after_file_apply_then_recovery_completes() {
 #[tokio::test]
 #[serial]
 async fn simulated_crash_after_entries_then_startup_recovery() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -202,7 +202,7 @@ async fn simulated_crash_after_entries_then_startup_recovery() {
 #[tokio::test]
 #[serial]
 async fn different_digest_rejected_after_success() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -228,7 +228,7 @@ async fn different_digest_rejected_after_success() {
 #[tokio::test]
 #[serial]
 async fn recovery_conflict_blocks_subsequent_write() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -259,7 +259,7 @@ async fn recovery_conflict_blocks_subsequent_write() {
 #[tokio::test]
 #[serial]
 async fn retained_owner_survives_caller_drop() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -307,7 +307,7 @@ async fn retained_owner_survives_caller_drop() {
 #[tokio::test]
 #[serial]
 async fn occ_hash_conflict_on_stale_preimage() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -336,7 +336,7 @@ async fn occ_hash_conflict_on_stale_preimage() {
 #[tokio::test]
 #[serial]
 async fn delete_detects_target_recreated_after_capture() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -387,7 +387,7 @@ async fn executor_matches_manager_authority() {
     };
     use nexus_core::owner::executor::WorkspaceCommitExecutor;
 
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -428,7 +428,7 @@ async fn executor_matches_manager_authority() {
 #[tokio::test]
 #[serial]
 async fn empty_manifest_rejected() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -445,7 +445,7 @@ async fn empty_manifest_rejected() {
 #[tokio::test]
 #[serial]
 async fn foreign_workspace_root_is_refused() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws_a = tempfile::tempdir().unwrap();
     let ws_b = tempfile::tempdir().unwrap();
@@ -474,7 +474,7 @@ fn session_id_display_round_trips() {
 #[tokio::test]
 #[serial]
 async fn malformed_manifest_base64_bodies_are_refused() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
@@ -543,7 +543,7 @@ async fn malformed_manifest_base64_bodies_are_refused() {
 #[tokio::test]
 #[serial]
 async fn concurrent_consume_has_one_winner_and_a_stale_reentry() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let mgr = WorkspaceSessionManager::new(pool);
 
     let ws_dir = tempfile::tempdir().unwrap();
@@ -604,7 +604,7 @@ async fn concurrent_consume_has_one_winner_and_a_stale_reentry() {
 #[tokio::test]
 #[serial]
 async fn concurrent_commit_session_has_one_winner() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let mgr = Arc::new(WorkspaceSessionManager::new(pool));
 
     let ws_dir = tempfile::tempdir().unwrap();
@@ -666,7 +666,7 @@ async fn concurrent_commit_session_has_one_winner() {
 async fn manifest_validation_rejects_a_symlink_in_a_modify_path() {
     use std::os::unix::fs::symlink;
 
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let mgr = WorkspaceSessionManager::new(pool);
 
     let ws_dir = tempfile::tempdir().unwrap();
@@ -717,7 +717,7 @@ async fn manifest_validation_rejects_a_symlink_in_a_modify_path() {
 #[tokio::test]
 #[serial]
 async fn recoverable_create_modify_delete_and_idempotent_retry() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
 
     let ws_dir = tempfile::tempdir().unwrap();
@@ -884,7 +884,7 @@ async fn routed_state(
 #[tokio::test]
 #[serial]
 async fn preset_graph_branches_on_live_committed_workspace_state() {
-    let (pool, db_dir) = fresh_pool().await;
+    let (db_dir, pool) = fresh_pool().await;
     let mgr = recoverable_mgr(Arc::clone(&pool), &db_dir);
     mgr.startup_recovery().await.expect("startup recovery");
 
