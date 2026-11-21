@@ -6,17 +6,27 @@
 # seam it is driven through keeps one owner per direction. This gate asserts,
 # over tracked Rust sources:
 #   1. exactly one definition of each conversion mapper, in the allowed owner
-#      `crates/nexus-spoke-adapter/src/conversion/knowledge_entry.rs` and declared
-#      exactly `pub fn`;
-#   2. no additional visibility-qualified definition (`pub(crate)`, `pub(super)`,
-#      `pub(in …)`, or bare `fn`) of those mappers anywhere else;
+#      `crates/nexus-spoke-adapter/src/conversion/knowledge_entry.rs`;
+#   2. that definition's declaration prefix is exactly `pub` — a
+#      visibility-qualified copy (`pub(crate)`, `pub(super)`, `pub(in …)`) or a
+#      bare / `unsafe` / `extern` declaration is a second surface and is
+#      rejected;
 #   3. no parallel `KnowledgePort` trait or impl beside `KnowledgeEntryPort`.
 #
-# This used to live in `tests/knowledge_entry_port_stub.rs`, which walked the
-# checkout from `cargo test`: not deterministic outside the checkout, invisible
-# as a CI gate, and blind to `pub(crate) fn` because it matched only `pub fn`.
-# Comment content is stripped before matching, and declarations are matched as
-# whole words, so prose or a longer identifier cannot satisfy a needle.
+# Each file is read whole and declarations are matched with whitespace
+# (newlines included) between tokens, so `pub(crate)` on one line with
+# `fn name(` on the next is still one declaration, and a string literal
+# containing `//` or `/*` cannot hide the code that follows it.
+#
+# Trade accepted: matching is textual, not a Rust parser, so declaration-looking
+# text inside a comment or a string literal is reported as a definition (a
+# commented-out `pub(crate) fn` fails the gate). That direction is deliberate —
+# a silent pass is the failure this guard exists to prevent.
+#
+# This guard used to live in `tests/knowledge_entry_port_stub.rs`, which walked
+# the checkout from `cargo test`: not deterministic outside the checkout,
+# invisible as a CI gate, and blind to `pub(crate) fn` because it matched only
+# `pub fn`.
 #
 # Usage (repository root):
 #   bash tooling/check-kb-stub-surface.sh
@@ -24,6 +34,18 @@
 #
 # `SCAN_ROOT` overrides the tree under test (the self-test uses disposable
 # fixtures); the allowed owner path stays relative to that root.
+#
+# `--selftest` asserts these fixture verdicts, all under a `mktemp -d`:
+#   valid              → PASS
+#   missing            → reject (one mapper has no definition)
+#   duplicate          → reject (two definitions of one mapper)
+#   url-string         → reject (`"http://…"` line, then `pub(crate) fn`)
+#   block-string       → reject (`/*` inside a string, then `pub(crate) fn`)
+#   split-visibility   → reject (`pub(crate)` and `fn mapper(` on separate lines)
+#   commented-out      → reject (documented false-positive trade; must not crash)
+#   parallel           → reject (parallel `KnowledgePort` trait + impl)
+#
+# Requires bash and perl (perl is used for whole-file matching).
 #
 # Exit codes:
 #   0 — surface matches: one owner per mapper, no parallel port
@@ -44,12 +66,9 @@ fail() {
 }
 
 # Emits `MAPPER <name> <path> <line> <prefix>` for each declaration of a mapper
-# and `PORT <path> <line>` for each `KnowledgePort` trait/impl. The scan works on
-# comment-stripped text; rustdoc examples and prose stay out of the count. Each
-# file is read on its own so an unterminated block comment cannot swallow the
-# files after it.
-# shortcut: stripping is textual, so `//` or `/*` inside a string literal hides
-# the rest of that line — upgrade to a parser if a needle ever sits beside one.
+# and `PORT <path> <line>` for each `KnowledgePort` trait/impl. `<prefix>` is the
+# declaration text before `fn` with runs of whitespace collapsed (`pub`,
+# `pub(crate)`, `unsafe`, or empty), so a split declaration still classifies.
 scan() {
   # Both halves run from the scanned root: the file list stays relative.
   ( cd "$SCAN_ROOT" || exit 1
@@ -58,49 +77,46 @@ scan() {
     else
       find crates apps -type f -name '*.rs' 2>/dev/null || true
     fi | sort > "$SCRATCH"
-    awk -v list="$SCRATCH" -v names="${MAPPERS[*]}" '
-    function strip(line,   out, i, n, c, d) {
-      if (!inblock && line !~ /\/\*|\/\//) return line
-      out = ""; i = 1; n = length(line)
-      while (i <= n) {
-        c = substr(line, i, 1); d = substr(line, i, 2)
-        if (inblock) {
-          if (d == "*/") { inblock = 0; i += 2 } else { i++ }
-          continue
-        }
-        if (d == "/*") { inblock = 1; i += 2; continue }
-        if (d == "//") break
-        out = out c; i++
-      }
-      return out
+
+    perl - "$SCRATCH" "${MAPPERS[@]}" <<'PERL'
+use strict;
+use warnings;
+
+my ($listfile, @names) = @ARGV;
+open my $list, '<', $listfile or die "open $listfile: $!";
+while (my $path = <$list>) {
+  chomp $path;
+  open my $fh, '<', $path or next;
+  my $src = do { local $/; <$fh> };
+  close $fh;
+
+  for my $name (@names) {
+    my $decl = qr/\b((?:pub(?:\s*\([^)]*\))?\s+)?
+                    (?:(?:async|unsafe|const|extern(?:\s+"[^"]*")?)\s+)*)
+                 fn\s+\Q$name\E\s*\(/x;
+    while ($src =~ /$decl/g) {
+      my $line = 1 + (substr($src, 0, $-[0]) =~ tr/\n//);
+      my $prefix = $1;
+      $prefix =~ s/\s+/ /g;
+      $prefix =~ s/^ //;
+      $prefix =~ s/ $//;
+      print "MAPPER\t$name\t$path\t$line\t$prefix\n";
     }
-    BEGIN {
-      count = split(names, needles, " ")
-      while ((getline path < list) > 0) {
-        inblock = 0; line_no = 0
-        while ((getline line < path) > 0) {
-          line_no++
-          text = strip(line)
-          for (k = 1; k <= count; k++) {
-            name = needles[k]
-            if (match(text, "(^|[^[:alnum:]_])fn[[:space:]]+" name "[[:space:]]*\\(")) {
-              pre = substr(text, 1, RSTART - 1)
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", pre)
-              printf "MAPPER\t%s\t%s\t%d\t%s\n", name, path, line_no, pre
-            }
-          }
-          if (match(text, "(^|[^[:alnum:]_])trait[[:space:]]+KnowledgePort([^[:alnum:]_]|$)") ||
-              match(text, "(^|[^[:alnum:]_])impl([[:space:]]*<[^>]*>)?[[:space:]]+KnowledgePort[[:space:]]+for([^[:alnum:]_]|$)"))
-            printf "PORT\t%s\t%d\n", path, line_no
-        }
-        close(path)
-      }
-    }'
+  }
+
+  my $port = qr/\b(?:trait\s+KnowledgePort|impl(?:<[^>]*>)?\s+KnowledgePort\s+for)\b/;
+  while ($src =~ /$port/g) {
+    my $line = 1 + (substr($src, 0, $-[0]) =~ tr/\n//);
+    print "PORT\t$path\t$line\n";
+  }
+}
+PERL
   )
 }
 
 check() {
   local hits rows count name path line pre failed=0
+  command -v perl >/dev/null 2>&1 || fail "perl is required for whole-file matching"
   [ -d "$SCAN_ROOT/crates" ] || fail "no crates/ directory under $SCAN_ROOT"
   SCRATCH="$(mktemp "${TMPDIR:-/tmp}/kb-stub-surface.XXXXXX")"
   trap 'rm -f "$SCRATCH"' EXIT
@@ -121,7 +137,7 @@ check() {
       failed=1
     elif [ "$pre" != "pub" ]; then
       echo "FAIL: \`fn $name\` at $path:$line must be declared exactly \`pub fn\`;"
-      echo "      found prefix '$pre' — an extra visibility-qualified definition is a second surface"
+      echo "      found prefix '${pre:-none}' — a visibility-qualified or bare definition is a second surface"
       failed=1
     else
       echo "OK: one \`pub fn $name\` in $OWNER"
@@ -143,13 +159,16 @@ check() {
 }
 
 # Writes a minimal valid fixture tree: both mappers in the allowed owner, an
-# unrelated `KnowledgeEntryPort` impl, and a comment that names a mapper.
+# unrelated `KnowledgeEntryPort` impl, and string literals that carry `//` and
+# `/*` so a naive comment stripper would fail the clean case.
 make_valid_fixture() {
   local dir="$1"
   mkdir -p "$dir/crates/nexus-spoke-adapter/src/conversion" "$dir/crates/consumer/src"
   cat > "$dir/$OWNER" <<'RS'
+const DOC_URL: &str = "http://example";
+const GLOB: &str = "crates/*/*.rs";
+
 pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {
-    // `pub fn knowledge_record_to_spoke(` in a comment must not count.
     Wire::from(entry)
 }
 
@@ -188,7 +207,7 @@ selftest() {
     fi
   }
 
-  for case_dir in valid missing duplicate visibility parallel; do
+  for case_dir in valid missing duplicate url-string block-string split-visibility commented-out parallel; do
     make_valid_fixture "$work/$case_dir"
   done
 
@@ -204,10 +223,40 @@ pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {
 }
 RS
 
-  # visibility: the owner declaration is `pub(crate)` instead of `pub`.
-  sed 's/^pub fn knowledge_record_to_spoke/pub(crate) fn knowledge_record_to_spoke/' \
-    "$work/visibility/$OWNER" > "$work/visibility/$OWNER.tmp"
-  mv "$work/visibility/$OWNER.tmp" "$work/visibility/$OWNER"
+  # url-string: a `//` inside a string must not hide the `pub(crate)` violation
+  # that follows it.
+  { echo 'const ENDPOINT: &str = "http://example/v1";'
+    cat "$work/url-string/$OWNER"
+  } | sed 's/^pub fn knowledge_record_to_spoke/pub(crate) fn knowledge_record_to_spoke/' \
+    > "$work/url-string/$OWNER.tmp"
+  mv "$work/url-string/$OWNER.tmp" "$work/url-string/$OWNER"
+
+  # block-string: a `/*` inside a string must not open a comment that swallows
+  # the `pub(crate)` violation after it.
+  { echo 'const PATTERN: &str = "crates/*/*.rs";'
+    cat "$work/block-string/$OWNER"
+  } | sed 's/^pub fn knowledge_record_to_spoke/pub(crate) fn knowledge_record_to_spoke/' \
+    > "$work/block-string/$OWNER.tmp"
+  mv "$work/block-string/$OWNER.tmp" "$work/block-string/$OWNER"
+
+  # split-visibility: `pub(crate)` and `fn mapper(` on separate lines.
+  cat > "$work/split-visibility/$OWNER" <<'RS'
+pub(crate)
+fn knowledge_record_to_spoke(entry: &Record) -> Wire {
+    Wire::from(entry)
+}
+
+pub fn spoke_to_knowledge_record(entry: Wire) -> Record {
+    Record::from(entry)
+}
+RS
+
+  # commented-out: reported as a definition (documented trade), never a crash.
+  cat > "$work/commented-out/crates/consumer/src/extra.rs" <<'RS'
+// pub(crate) fn knowledge_record_to_spoke(entry: &Record) -> Wire {
+//     Wire::from(entry)
+// }
+RS
 
   # parallel: a second knowledge port trait and its impl.
   cat > "$work/parallel/crates/consumer/src/extra.rs" <<'RS'
@@ -222,8 +271,11 @@ RS
 
   expect valid 0 "PASS: knowledge-entry seam surface is intact"
   expect missing 1 "expected exactly one definition of \`fn spoke_to_knowledge_record\`"
-  expect duplicate 1 "expected exactly one definition of \`fn knowledge_record_to_spoke\`"
-  expect visibility 1 "must be declared exactly \`pub fn\`"
+  expect duplicate 1 "found 2"
+  expect url-string 1 "must be declared exactly \`pub fn\`"
+  expect block-string 1 "must be declared exactly \`pub fn\`"
+  expect split-visibility 1 "must be declared exactly \`pub fn\`"
+  expect commented-out 1 "found 2"
   expect parallel 1 "parallel \`KnowledgePort\` trait/impl must not exist"
 
   if [ "$failures" -ne 0 ]; then
@@ -232,7 +284,7 @@ RS
     exit 1
   fi
   rm -rf "$work"
-  echo "PASS: self-test — valid fixture accepted; missing, duplicate, visibility and parallel-trait fixtures rejected"
+  echo "PASS: self-test — clean tree accepted; missing, duplicate, string-masked, split-visibility, commented-out and parallel-trait fixtures rejected"
 }
 
 case "${1:-}" in
