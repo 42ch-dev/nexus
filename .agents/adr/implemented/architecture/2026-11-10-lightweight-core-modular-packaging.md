@@ -3,7 +3,7 @@
 Status: implemented — iteration v1.249 closed on 2026-11-19. The C crate graph, the eight-package public/private split with independent literal versions and caret ranges, and the engine-free Connect product all shipped and are locked in [`docs/specs/architecture/rust-core-service-boundary.md`](../../../../docs/specs/architecture/rust-core-service-boundary.md) § Public package boundary. Package-ready is not published: the independent release capability is implemented and validated without dispatching, tagging or bumping.
 Date: 2026-11-10
 Implemented: 2026-11-19 in iteration v1.249-lightweight-core, seven plans, integration `a4642e419`.
-Reconciled: 2026-11-18 against main @ 53fc30de0 — §2 figures re-measured; direction still undecided (I-000421).
+Reconciled: 2026-11-18 against main @ 53fc30de0 — §2 figures re-measured; the direction tracked by I-000421 was subsequently decided and shipped in v1.249-lightweight-core.
 Scope: Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth.
 Source: migrated from the retired tracked specs corpus
 
@@ -11,18 +11,7 @@ Source: migrated from the retired tracked specs corpus
 
 Whole-workspace rebuild cost is high and packaging is coupled: `nexus-core` (~167k LOC), `nexus-contracts` (~156k, generated-heavy) and `nexus-orchestration` (~87k, fanning in path deps across the workspace) dominate builds, while most crates share one version and cannot ship stable feature packages incrementally. Scoped `cargo -p <crate>` runs are the daily workaround, and `modules/nexus-module-sdk` is the existing standalone-publish precedent. The user-facing layer must stay TypeScript while Rust keeps narrative/orchestration truth.
 
-## Proposal
-
-### 0. Document position
-
-| Attribute | Value |
-| --- | --- |
-| **Status** | **Proposed** — not implement authority. The bracket and its two checks are named in the header line; what has landed and what is unstarted are in §2. |
-| **Document class** | Exploration |
-| **Scope** | Crate-graph and publish strategy to reduce whole-workspace rebuilds, ship stable feature packages incrementally, and keep the user-facing layer on TypeScript while Rust owns narrative/orchestration truth. |
-| **Coordinates with** | [docs/specs/architecture/overview.md](../../../../docs/specs/architecture/overview.md), [rust-core-service-boundary.md](../../../../docs/specs/architecture/rust-core-service-boundary.md), [canvas-composition-and-pattern-packages.md](2026-11-10-canvas-composition-and-pattern-packages.md), modules/nexus-module-sdk (existing standalone publish precedent) |
-
----
+## Decision
 
 ### 1. Locked product decisions
 
@@ -98,13 +87,13 @@ carries no roadmap of its own.
 
 ## Alternatives considered
 
-Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the proposal.
+Not stated as a separate comparison in the migrated proposal; where the body names a rejected direction, that record stays in the decision.
 
-## Acceptance criteria
+## Consequences
 
-Not stated as a separate acceptance list; where the proposal defines a landing or promotion sequence, it stays in the proposal.
+No separate acceptance list was stated in the migrated proposal; the landed and unstarted bounds remain stated in Decision §2. No actual registry publish has been dispatched, tagged, or version-bumped, and `nexus-orchestration::capability` remains the unstarted extraction candidate. The direction tracked by `I-000421` is now decided and shipped in v1.249-lightweight-core.
 
-## Risks
+The decision rejects the following directions:
 
 - Migrating user-facing TS surfaces into a single Rust binary “for purity.”
 - Mandatory canvas drag-edit from scratch as the only strategy authoring path.
@@ -112,5 +101,3 @@ Not stated as a separate acceptance list; where the proposal defines a landing o
 - Reducing Canvas to a **pure read-only** inspection of Agent output and discarding composition UX.
 - Publishing every internal helper crate without a consumer stability story.
 - Enabling WIT/Component work as a gate on thinning core or shipping IR v1.
-
----
