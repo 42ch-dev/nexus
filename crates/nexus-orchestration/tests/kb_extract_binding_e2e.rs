@@ -19,11 +19,11 @@ use nexus_local_db::kb_store::seed;
 
 mod common;
 
-use common::fresh_pool;
+use common::test_pool;
 
 #[tokio::test]
 async fn test_persist_extract_chapter_block_e2e() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let creator_id = "ctr_test";
     let workspace_slug = "ws_test";
     let world_id = "wld_novel_world";
@@ -140,7 +140,7 @@ async fn test_worldless_work_skips_world_promotion() {
 
 #[tokio::test]
 async fn test_extract_idempotent_job() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let creator_id = "ctr_idem";
     seed::world(
         &pool,

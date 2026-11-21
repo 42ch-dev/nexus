@@ -214,7 +214,7 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
 /// (`scene`), proving the heuristic `character` default was NOT used.
 #[tokio::test]
 async fn review_master_llm_path_writes_llm_payload() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_v151_llm", 3);
     works::create_work(&pool, &work).await.unwrap();
@@ -282,7 +282,7 @@ async fn review_master_llm_path_writes_llm_payload() {
 /// stay NULL. This preserves the V1.50 no-worker behavior.
 #[tokio::test]
 async fn review_master_no_registry_falls_back_to_heuristic() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_v151_fb", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -320,7 +320,7 @@ async fn review_master_no_registry_falls_back_to_heuristic() {
 
 #[tokio::test]
 async fn review_master_llm_path_is_idempotent() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_v151_idem", 2);
     works::create_work(&pool, &work).await.unwrap();

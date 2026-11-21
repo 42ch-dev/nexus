@@ -18,14 +18,13 @@ use std::sync::Arc;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Create a fresh test DB with migrations.
-async fn fresh_pool() -> Arc<SqlitePool> {
+/// Create a fresh test DB with migrations, plus the file that owns it.
+async fn fresh_pool() -> (tempfile::NamedTempFile, Arc<SqlitePool>) {
     let db = tempfile::NamedTempFile::new().unwrap();
     let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("open pool");
-    std::mem::forget(db);
-    Arc::new(guarded.clone_pool())
+    (db, Arc::new(guarded.clone_pool()))
 }
 
 fn make_schedule(
@@ -64,7 +63,7 @@ fn make_schedule(
 
 #[tokio::test]
 async fn r11_schedule_add_inspect_roundtrip() {
-    let pool = fresh_pool().await;
+    let (_db, pool) = fresh_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
@@ -118,7 +117,7 @@ async fn r11_schedule_add_inspect_roundtrip() {
 
 #[tokio::test]
 async fn r12_mid_execution_edit_does_not_disturb_running_state() {
-    let pool = fresh_pool().await;
+    let (_db, pool) = fresh_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
@@ -212,7 +211,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
 
 #[tokio::test]
 async fn r13_preset_hook_writes_preset_hook_derivation() {
-    let pool = fresh_pool().await;
+    let (_db, pool) = fresh_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
@@ -286,7 +285,7 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
 
 #[tokio::test]
 async fn r14_dependency_chain_auto_advances() {
-    let pool = fresh_pool().await;
+    let (_db, pool) = fresh_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 

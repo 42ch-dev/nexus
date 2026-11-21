@@ -162,7 +162,7 @@ async fn ac3_persist_last_chapter_marks_complete() {
 
 #[tokio::test]
 async fn ac3_mark_work_completed_in_db() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_ac3_db", 3, 3, true);
     seed_work_with_driver(&pool, &work, "sch_driver_003", "persist").await;
 
@@ -179,7 +179,7 @@ async fn ac3_mark_work_completed_in_db() {
 
 #[tokio::test]
 async fn ac4_find_resumable_works_finds_interrupted() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // Work with auto-chain enabled and driver pointing to a non-existent schedule
     let work = test_work("wrk_ac4a", 2, 5, true);
@@ -224,7 +224,7 @@ async fn ac4_find_resumable_works_finds_interrupted() {
 
 #[tokio::test]
 async fn ac4_find_resumable_works_empty_when_none() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // No works at all
     let resumable = auto_chain::find_resumable_works(&pool).await.unwrap();
@@ -242,7 +242,7 @@ async fn ac6_auto_chain_disabled_no_action() {
 
 #[tokio::test]
 async fn ac6_checkpoint_fields_persisted_in_db() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_ac6_db", 1, 3, false);
     seed_work_with_driver(&pool, &work, "sch_driver_006", "produce").await;
 
@@ -284,7 +284,7 @@ async fn ac6_checkpoint_fields_persisted_in_db() {
 
 #[tokio::test]
 async fn set_driver_updates_work() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_driver", 1, 3, true);
     seed_work(&pool, &work).await;
 
@@ -303,7 +303,7 @@ async fn set_driver_updates_work() {
 
 #[tokio::test]
 async fn clear_driver_clears_schedule_id() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_clear", 1, 3, true);
     seed_work_with_driver(&pool, &work, "sch_to_clear", "produce").await;
 
@@ -320,7 +320,7 @@ async fn clear_driver_clears_schedule_id() {
 
 #[tokio::test]
 async fn find_work_for_driver_returns_matching_work() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_find", 1, 3, true);
     seed_work_with_driver(&pool, &work, "sch_driver_001", "produce").await;
 
@@ -333,7 +333,7 @@ async fn find_work_for_driver_returns_matching_work() {
 
 #[tokio::test]
 async fn find_work_for_driver_returns_none_for_unknown() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_find2", 1, 3, true);
     seed_work(&pool, &work).await;
 
@@ -438,7 +438,7 @@ async fn seed_chapters(
 
 #[tokio::test]
 async fn fix1_terminal_completed_enqueues_next_stage() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = test_supervisor(pool.clone());
 
     // Create a Work at intake/complete with auto-chain enabled
@@ -521,7 +521,7 @@ async fn fix1_terminal_completed_enqueues_next_stage() {
 
 #[tokio::test]
 async fn fix1_terminal_failed_does_not_enqueue_next() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = test_supervisor(pool.clone());
 
     let mut work = test_work("wrk_fix1b", 0, 3, true);
@@ -564,7 +564,7 @@ async fn fix1_terminal_failed_does_not_enqueue_next() {
 
 #[tokio::test]
 async fn fix1_chapter_loop_after_persist() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = test_supervisor(pool.clone());
 
     // Work at persist/active, chapter 1 of 3
@@ -629,7 +629,7 @@ async fn fix1_chapter_loop_after_persist() {
 
 #[tokio::test]
 async fn fix1_last_chapter_marks_work_complete() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = test_supervisor(pool.clone());
 
     // Work at persist/active, chapter 3 of 3 (last chapter)
@@ -761,7 +761,7 @@ async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Op
 
 #[tokio::test]
 async fn fix2_boot_resume_enqueues_next_schedule() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // Create a Work at research/active with auto-chain enabled
     let mut work = test_work("wrk_fix2a", 0, 3, true);
@@ -827,7 +827,7 @@ async fn fix2_boot_resume_enqueues_next_schedule() {
 
 #[tokio::test]
 async fn fix2_boot_resume_no_resumable_works() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // No works at all → no action
     let results = simulate_boot_auto_resume(&pool).await;
@@ -843,7 +843,7 @@ async fn fix2_boot_resume_no_resumable_works() {
 
 #[tokio::test]
 async fn fix2_boot_resume_interrupted_work_not_resumed() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     let mut work = test_work("wrk_fix2c", 1, 3, true);
     work.current_stage = "produce".to_string();

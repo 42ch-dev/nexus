@@ -14,6 +14,8 @@ use nexus_contracts::local::schedule::{
 use nexus_orchestration::schedule::admission::{admit, CompletedSet, RunningSet};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 
+mod common;
+
 /// Helper: build a minimal [`Schedule`] for admission testing.
 fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
     Schedule {
@@ -138,7 +140,7 @@ fn dep_failed_blocks_start() {
 
 #[tokio::test]
 async fn two_serial_schedules_hand_off_after_first_completes() {
-    let supervisor = test_supervisor_with_inmemory_db().await;
+    let (_dir, supervisor) = test_supervisor_with_inmemory_db().await;
 
     // Add two serial schedules for the same creator
     supervisor
@@ -176,14 +178,8 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
 }
 
 /// Helper: create a [`ScheduleSupervisor`] backed by a fresh temp `SQLite` DB
-/// with the WS7 migration applied.
-async fn test_supervisor_with_inmemory_db() -> Arc<ScheduleSupervisor> {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db");
-    let guarded = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .expect("open pool");
-    // Keep dir alive by leaking it — fine for tests
-    std::mem::forget(dir);
-    Arc::new(ScheduleSupervisor::new(Arc::new(guarded.clone_pool())))
+/// with the WS7 migration applied, plus the directory that owns it.
+async fn test_supervisor_with_inmemory_db() -> (tempfile::TempDir, Arc<ScheduleSupervisor>) {
+    let (dir, pool) = common::test_pool().await;
+    (dir, Arc::new(ScheduleSupervisor::new(Arc::new(pool))))
 }

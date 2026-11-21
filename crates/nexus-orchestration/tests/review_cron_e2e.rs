@@ -147,7 +147,7 @@ async fn seed_chapter_with_body(
 /// `on_schedule_terminal` regardless of how the terminal state was reached).
 #[tokio::test]
 async fn review_cron_fire_triggers_kb_extraction_hook() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     let work = novel_work("wrk_e2e", 3);
@@ -265,7 +265,7 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
 /// "no work = no schedule").
 #[tokio::test]
 async fn review_cron_no_review_role_enqueues_nothing() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_e2e_none", 1);
     works::create_work(&pool, &work).await.unwrap();

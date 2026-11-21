@@ -443,7 +443,7 @@ async fn research_schedule_request_preset_input_contract() {
 /// the DB and the admission gate (pure function over running/completed sets).
 #[tokio::test]
 async fn research_supervisor_tick_admits_pending_schedule() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     // Work satisfies the research gates (intake complete, work_ref set).
@@ -502,7 +502,7 @@ async fn research_supervisor_tick_admits_pending_schedule() {
 /// lock release — is correct for the research preset end to end.
 #[tokio::test]
 async fn research_supervisor_tick_drives_boot_to_terminal_done() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     // Seed a research-ready Work and wire the schedule as its driver so the
@@ -580,7 +580,7 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
 /// R-V139P5-S1 ("boot resume paths").
 #[tokio::test]
 async fn research_schedule_boot_resume_running_to_paused_to_resumed() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
     let work = research_ready_work("wrk_resume", "resume-survey");

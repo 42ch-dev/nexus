@@ -15,20 +15,9 @@ use nexus_orchestration::auto_chronology::{
     advance_manual, outline_path, run_one_tick, AdvanceOutcome, SkipReason,
 };
 
-async fn fresh_pool() -> sqlx::SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("auto_chrono_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+mod common;
+
+use common::test_pool;
 
 fn base_work(work_id: &str, work_ref: &str) -> WorkRecord {
     WorkRecord {
@@ -118,7 +107,7 @@ async fn seed_and_finalize(
 /// locked → tick advances to volume 2 (outline created).
 #[tokio::test]
 async fn tick_advances_when_volume_finalized() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_pos", "pos-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -158,7 +147,7 @@ async fn tick_advances_when_volume_finalized() {
 /// not the hardcoded `"(untitled)"` / `(unset)` placeholders.
 #[tokio::test]
 async fn render_substitutes_work_title_and_total_chapters() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let mut work = base_work("wrk_title", "title-novel");
     work.title = "The Hobbit".to_string();
@@ -198,7 +187,7 @@ async fn render_substitutes_work_title_and_total_chapters() {
 
 #[tokio::test]
 async fn tick_skips_when_volume_not_finalized() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_neg1", "neg1-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -218,7 +207,7 @@ async fn tick_skips_when_volume_not_finalized() {
 
 #[tokio::test]
 async fn tick_skips_when_intake_incomplete() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let mut work = base_work("wrk_neg2", "neg2-novel");
     work.intake_status = "pending".to_string();
@@ -238,7 +227,7 @@ async fn tick_skips_when_intake_incomplete() {
 
 #[tokio::test]
 async fn tick_skips_when_runtime_locked() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_neg3", "neg3-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -270,7 +259,7 @@ async fn tick_skips_when_runtime_locked() {
 
 #[tokio::test]
 async fn tick_skips_when_outline_already_exists() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_neg4", "neg4-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -300,7 +289,7 @@ async fn tick_skips_when_outline_already_exists() {
 /// leaving the DB consistent.
 #[tokio::test]
 async fn tick_recovers_cleanly_after_crash_mid_advance() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_crash", "crash-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -349,7 +338,7 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
 /// written before tx commits → Work stuck" reliability gap (qc3 W-1).
 #[tokio::test]
 async fn perform_advance_writes_outline_after_tx_commit() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_order", "order-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -412,7 +401,7 @@ async fn perform_advance_writes_outline_after_tx_commit() {
 /// existing outline (recovery path for an orphaned crash-state outline).
 #[tokio::test]
 async fn manual_advance_force_overwrites_existing_outline() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_force", "force-novel");
     works::create_work(&pool, &work).await.unwrap();
@@ -459,7 +448,7 @@ async fn manual_advance_force_overwrites_existing_outline() {
 /// count, regardless of the `auto_chronology` flag.
 #[tokio::test]
 async fn manual_advance_bypasses_gates_and_seeds_chapters() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let mut work = base_work("wrk_manual", "manual-novel");
     // Not opted in, intake incomplete, no finalized chapters — manual must
@@ -504,7 +493,7 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
 /// outline).
 #[tokio::test]
 async fn manual_advance_respects_idempotent_guard() {
-    let pool = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_manual2", "manual2-novel");
     works::create_work(&pool, &work).await.unwrap();

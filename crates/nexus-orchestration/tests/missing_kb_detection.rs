@@ -202,7 +202,7 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
 
 #[tokio::test]
 async fn ac1_finalize_detection_writes_missing_log() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     let work = novel_work("wrk_ac1", 2);
@@ -265,7 +265,7 @@ async fn ac1_finalize_detection_writes_missing_log() {
 
 #[tokio::test]
 async fn ac4_missing_candidates_not_written_to_extract_jobs() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     let work = novel_work("wrk_ac4", 2);
@@ -298,7 +298,7 @@ async fn ac4_missing_candidates_not_written_to_extract_jobs() {
 
 #[tokio::test]
 async fn ac6_existing_key_block_filters_known_entity() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
     // Confirm a KnowledgeEntryRecord for "Aria Stormblade" before finalize.
@@ -362,7 +362,7 @@ async fn ac6_existing_key_block_filters_known_entity() {
 
 #[tokio::test]
 async fn non_novel_writing_schedule_is_noop() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_noop", 1);
     works::create_work(&pool, &work).await.unwrap();
@@ -405,7 +405,7 @@ async fn non_novel_writing_schedule_is_noop() {
 
 #[tokio::test]
 async fn missing_workspace_dir_is_noop() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
     let work = novel_work("wrk_nows", 1);
     works::create_work(&pool, &work).await.unwrap();
