@@ -564,21 +564,14 @@ mod tests {
     use super::*;
     use crate::state_delta;
     #[cfg(feature = "wasm")]
+    use crate::pool_test_support::fresh_pool;
+    #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::KbStore;
-    #[cfg(feature = "wasm")]
-    use nexus_local_db::init_engine_pool;
 
     // Fixtures below serve only the executor-driven (wasm) cases; gating them
     // keeps the default-build test surface warning-free (C3).
-    #[cfg(feature = "wasm")]
-    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-        (pool, dir)
-    }
 
     /// The explicit compute attachment real executor runs need (C3): a
     /// pool-bound capability over a real engine + warmed cache — exactly what

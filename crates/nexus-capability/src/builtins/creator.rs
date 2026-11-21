@@ -701,6 +701,7 @@ impl Capability for CreatorWriteBrief {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pool_test_support::fresh_pool;
 
     /// Standalone mode: no store injected — returns zero count.
     #[tokio::test]
@@ -802,16 +803,6 @@ mod tests {
     }
 
     // ── Integration tests (require SQLite) ──────────────────────────────
-
-    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = nexus_local_db::init_engine_pool(&db_path)
-            .await
-            .unwrap()
-            .clone_pool();
-        (pool, dir)
-    }
 
     #[tokio::test]
     async fn read_memory_with_store_returns_count() {

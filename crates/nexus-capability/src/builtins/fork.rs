@@ -187,14 +187,7 @@ impl Capability for ForkCreate {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use nexus_local_db::init_engine_pool;
-
-    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-        (pool, dir)
-    }
+    use crate::pool_test_support::fresh_pool;
 
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         // SAFETY: test-only seed.

@@ -699,11 +699,7 @@ mod tests {
 
     /// A guarded engine pool with one World owned by `CREATOR`.
     async fn test_pool_with_world() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let pool = nexus_local_db::init_engine_pool(&dir.path().join("t13.db"))
-            .await
-            .unwrap()
-            .clone_pool();
+        let (pool, dir) = crate::pool_test_support::fresh_pool().await;
         nexus_local_db::kb_store::seed::world(
             &pool,
             WORLD,
