@@ -5,6 +5,8 @@
 //! The recovering-object window uses the provider's own `test-hooks` crash
 //! seam, exactly like the round-A reconcile proofs, so it is deterministic.
 
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -34,6 +36,8 @@ use serde_json::{json, Value};
 use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{MemoryPort, SpokeResult};
 use tempfile::TempDir;
+
+use support::dto;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WORKSPACE: &str = "default";
@@ -86,10 +90,6 @@ fn principal(id: &str) -> schemas::Principal {
 
 fn admin() -> schemas::Principal {
     principal(CREATOR)
-}
-
-fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
-    serde_json::from_value(value).expect("wire-valid payload")
 }
 
 /// Project a port result onto one assertion shape (success payload or refusal).

@@ -25,7 +25,7 @@ use sqlx::Connection as _;
 use nexus_memory_conformance::{FaultHold, FaultPoint, FixtureFaults};
 
 use support::{
-    bootstrap, context_scope, error_code, error_details, grant_body, is_committed, record_body,
+    bootstrap, context_scope, dto, error_code, error_details, grant_body, is_committed, record_body,
     result, retry_class, shared_scope, wire, Matrix, OTHER_SUBJECT, SUBJECT,
 };
 
@@ -52,10 +52,6 @@ fn generate_body(subject: &str, digest: &str, key: &str) -> Value {
         "expected_state_digest": digest,
         "idempotency_key": key,
     })
-}
-
-fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
-    serde_json::from_value(value).expect("wire-valid request")
 }
 
 /// One committed shared record on the matrix subject; returns its record id.
