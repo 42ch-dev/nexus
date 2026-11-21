@@ -5,6 +5,11 @@
 //! the cfg is per-crate and does not propagate to dependent crates, so this
 //! crate needs its own probe.
 
+use std::path::PathBuf;
+use std::process::Command;
+
+const TARGET: &str = "wasm32-unknown-unknown";
+
 fn main() {
     // Declare the custom cfg flag early so rustc does not warn about
     // `unexpected_cfgs` in the library source.
@@ -12,23 +17,28 @@ fn main() {
 
     if !has_wasm_target() {
         println!(
-            "cargo:warning=nexus-capability: wasm32-unknown-unknown target not found; \
+            "cargo:warning=nexus-capability: {TARGET} target not found; \
              skipping embedded-module tests. Install the target with: \
-             rustup target add wasm32-unknown-unknown"
+             rustup target add {TARGET}"
         );
         println!("cargo:rustc-cfg=nexus_no_wasm_target");
     }
 }
 
-/// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
+/// Returns `true` when the compiler's sysroot carries the wasm target's std.
 ///
-/// Uses `rustc --print sysroot --target wasm32-unknown-unknown` which exits 0
-/// only when the target is available. This is a fast metadata query — it does
-/// not compile anything.
+/// `rustc --print sysroot --target <t>` exits 0 even for a target that is not
+/// installed, so presence is decided by the sysroot's `lib/rustlib/<target>`
+/// directory instead.
 #[must_use]
 fn has_wasm_target() -> bool {
-    std::process::Command::new("rustc")
-        .args(["--print", "sysroot", "--target", "wasm32-unknown-unknown"])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    sysroot().is_some_and(|root| root.join("lib/rustlib").join(TARGET).is_dir())
+}
+
+/// The sysroot of the compiler Cargo is actually driving (RUSTC, not PATH).
+fn sysroot() -> Option<PathBuf> {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    let output = Command::new(rustc).args(["--print", "sysroot"]).output().ok()?;
+    let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    (output.status.success() && path.is_dir()).then_some(path)
 }
