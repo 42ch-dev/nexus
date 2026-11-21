@@ -47,7 +47,7 @@ impl<'a> WorldSeed<'a> {
     /// The four values are positional and required: a fixture cannot forget one
     /// and silently seed an empty string.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         world_id: &'a str,
         owner_creator_id: &'a str,
         title: &'a str,
@@ -69,42 +69,42 @@ impl<'a> WorldSeed<'a> {
 
     /// The workspace the row belongs to.
     #[must_use]
-    pub fn with_workspace_id(mut self, workspace_id: &'a str) -> Self {
+    pub const fn with_workspace_id(mut self, workspace_id: &'a str) -> Self {
         self.workspace_id = workspace_id;
         self
     }
 
     /// `visibility`.
     #[must_use]
-    pub fn with_visibility(mut self, visibility: &'a str) -> Self {
+    pub const fn with_visibility(mut self, visibility: &'a str) -> Self {
         self.visibility = visibility;
         self
     }
 
     /// `time_policy`.
     #[must_use]
-    pub fn with_time_policy(mut self, time_policy: &'a str) -> Self {
+    pub const fn with_time_policy(mut self, time_policy: &'a str) -> Self {
         self.time_policy = time_policy;
         self
     }
 
     /// The minimal creator's display name.
     #[must_use]
-    pub fn with_display_name(mut self, display_name: &'a str) -> Self {
+    pub const fn with_display_name(mut self, display_name: &'a str) -> Self {
         self.display_name = Some(display_name);
         self
     }
 
     /// The world's root fork branch.
     #[must_use]
-    pub fn with_root_fork_branch_id(mut self, root_fork_branch_id: &'a str) -> Self {
+    pub const fn with_root_fork_branch_id(mut self, root_fork_branch_id: &'a str) -> Self {
         self.root_fork_branch_id = Some(root_fork_branch_id);
         self
     }
 
     /// The world's current timeline head.
     #[must_use]
-    pub fn with_current_timeline_head_id(mut self, current_timeline_head_id: &'a str) -> Self {
+    pub const fn with_current_timeline_head_id(mut self, current_timeline_head_id: &'a str) -> Self {
         self.current_timeline_head_id = Some(current_timeline_head_id);
         self
     }
