@@ -155,10 +155,17 @@ async fn w02_volume_aware_index_coverage() {
         .collect::<Vec<String>>()
         .join("\n");
 
-    // A full table scan is reported as "SCAN work_chapters" (no "TABLE").
+    // A full table scan is the whole plan line "SCAN work_chapters". An index
+    // scan keeps a USING clause — e.g. "SCAN work_chapters USING COVERING
+    // INDEX …" — and is not a full table scan.
+    let full_scan = plan_rows
+        .iter()
+        .map(|(_, _, _, detail)| detail.trim())
+        .find(|detail| *detail == "SCAN work_chapters");
+
     assert!(
-        !plan_text.contains("SCAN work_chapters"),
-        "EXPLAIN QUERY PLAN should not show full table scan.\n\
+        full_scan.is_none(),
+        "EXPLAIN QUERY PLAN shows a full scan of work_chapters (line: {full_scan:?}).\n\
          Plan:\n{plan_text}"
     );
 }
