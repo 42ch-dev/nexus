@@ -190,6 +190,8 @@ async fn canonical_kb_delete_soft_deletes_block() {
         CANON_NAME,
         "Alias Test World",
         "alias-test-world",
+        "Alias test summary",
+        "test",
     )
     .await;
 
@@ -211,6 +213,8 @@ async fn canonical_kb_delete_cross_author_rejects() {
         CANON_NAME,
         "Alias Test World",
         "alias-test-world",
+        "Alias test summary",
+        "test",
     )
     .await;
 

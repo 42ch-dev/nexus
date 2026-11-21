@@ -30,8 +30,16 @@ const VALID_BODY: &str =
 /// Cross-author `kb_edit` returns `403 WORLD_KB_FORBIDDEN` and does not mutate the row.
 #[tokio::test]
 async fn cross_author_edit_returns_403() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
 
     let err = kb_edit(&pool, INTRUDER, WORLD, &block_id, VALID_BODY, false)
         .await
@@ -67,8 +75,16 @@ async fn cross_author_edit_returns_403() {
 /// Cross-author `kb_delete` returns `403 WORLD_KB_FORBIDDEN` and the row survives.
 #[tokio::test]
 async fn cross_author_delete_returns_403() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
 
     let err = kb_delete(&pool, INTRUDER, WORLD, &block_id, true)
         .await
@@ -97,8 +113,16 @@ async fn cross_author_delete_returns_403() {
 /// Positive control: the world owner can edit and delete.
 #[tokio::test]
 async fn owner_can_edit_and_delete() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
 
     // Owner edit succeeds.
     kb_edit(&pool, OWNER, WORLD, &block_id, VALID_BODY, false)

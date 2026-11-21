@@ -30,15 +30,17 @@ pub fn stderr(out: &Output) -> String {
 /// `Character` KB entry, and return the entry id plus the tempdir that owns the
 /// database.
 ///
-/// Callers differ only in the seed identity, so the world title/slug are
-/// parameters. Every call gets its own tempdir; the caller must keep it alive
-/// for as long as the pool is used.
+/// Callers differ only in the seed identity and body, so the world
+/// title/slug and the entry summary/tag are parameters. Every call gets its
+/// own tempdir; the caller must keep it alive for as long as the pool is used.
 pub async fn fresh_pool_with_block(
     creator_id: &str,
     world_id: &str,
     canon_name: &str,
     title: &str,
     slug: &str,
+    summary: &str,
+    tag: &str,
 ) -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
@@ -48,22 +50,16 @@ pub async fn fresh_pool_with_block(
         .clone_pool();
 
     nexus_local_db::kb_store::seed::world(
-        &pool,
-        world_id,
-        creator_id,
-        title,
-        slug,
-        "private",
-        "manual",
+        &pool, world_id, creator_id, title, slug, "private", "manual",
     )
     .await;
 
     let store = SqliteKbStore::new(pool.clone());
     let mut kb = KnowledgeEntryRecord::new(world_id, BlockType::Character, canon_name);
     kb.body = Some(KnowledgeEntryBody {
-        summary: Some("Original summary".to_string()),
+        summary: Some(summary.to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
-        tags: Some(vec!["novel".to_string()]),
+        tags: Some(vec![tag.to_string()]),
         ..Default::default()
     });
     let result = store.insert_knowledge_entry(kb).await.unwrap();

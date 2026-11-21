@@ -168,8 +168,16 @@ fn world_kb_delete_help_shows_yes_flag() {
 /// `kb_list` returns the seeded block (human + JSON paths do not error).
 #[tokio::test]
 async fn list_returns_seeded_block() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
 
     kb_list(&pool, WORLD, false).await.unwrap();
     kb_list(&pool, WORLD, true).await.unwrap();
@@ -183,8 +191,16 @@ async fn list_returns_seeded_block() {
 /// `kb_show` returns the full block, including the seeded body.
 #[tokio::test]
 async fn show_returns_full_block() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
 
     kb_show(&pool, WORLD, &block_id, false).await.unwrap();
     kb_show(&pool, WORLD, &block_id, true).await.unwrap();
@@ -199,8 +215,16 @@ async fn show_returns_full_block() {
 /// `kb_edit` updates the body in place and the change is persisted.
 #[tokio::test]
 async fn edit_updates_body_in_place() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
     let new_body = serde_json::json!({
         "summary": "Updated summary",
         "attributes": {"novel_category": "character", "traits": ["brave"]},
@@ -229,8 +253,16 @@ async fn edit_updates_body_in_place() {
 /// and the original body is left unchanged.
 #[tokio::test]
 async fn edit_rejects_body_missing_novel_category() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
     let bad_body = serde_json::json!({
         "summary": "No category",
         "attributes": {"traits": ["old"]},
@@ -257,8 +289,16 @@ async fn edit_rejects_body_missing_novel_category() {
 /// `kb_delete` soft-deletes the block; `list` no longer returns it, the row is retained.
 #[tokio::test]
 async fn delete_soft_deletes_block() {
-    let (pool, block_id, _dir) =
-        fresh_pool_with_block(OWNER, WORLD, CANON_NAME, "Test World", "test-world").await;
+    let (pool, block_id, _dir) = fresh_pool_with_block(
+        OWNER,
+        WORLD,
+        CANON_NAME,
+        "Test World",
+        "test-world",
+        "Original summary",
+        "novel",
+    )
+    .await;
 
     kb_delete(&pool, OWNER, WORLD, &block_id, true)
         .await
