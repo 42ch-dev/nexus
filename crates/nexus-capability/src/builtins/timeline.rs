@@ -209,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeline_event_append_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let world_id = seed_world(&pool, "ctr_a").await;
         let branch = sqlx::query_scalar::<_, String>(
@@ -237,7 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeline_event_append_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         let world_id = seed_world(&pool, "ctr_a").await;
@@ -257,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeline_event_append_rejects_collision() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let world_id = seed_world(&pool, "ctr_a").await;
         let branch = sqlx::query_scalar::<_, String>(
@@ -300,7 +300,7 @@ mod tests {
     // remains.
     #[tokio::test]
     async fn timeline_event_append_explicit_id_persists_atomically() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let world_id = seed_world(&pool, "ctr_a").await;
         let branch = sqlx::query_scalar::<_, String>(

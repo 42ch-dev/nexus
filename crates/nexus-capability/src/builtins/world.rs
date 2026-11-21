@@ -912,7 +912,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_state_query_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         // Append a timeline event so the timeline slice is non-empty.
@@ -945,7 +945,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_state_query_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -960,7 +960,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_state_query_rejects_invalid_input() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let cap = WorldStateQuery::with_pool(pool);
         let err = cap.run(json!(42)).await.unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
@@ -972,7 +972,7 @@ mod tests {
     async fn world_state_query_excludes_other_holders_private_rows() {
         use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_other").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -1030,7 +1030,7 @@ mod tests {
     /// of reading the World listing.
     #[tokio::test]
     async fn world_state_query_fails_closed_without_a_holder() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_without_holder(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         let row = seed_kb_row(&pool, "wld_a", "WorldSharedRow", None, None).await;
@@ -1057,7 +1057,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_propose_success_populates_old_value() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
@@ -1084,7 +1084,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_propose_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -1108,7 +1108,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_propose_rejects_invalid_input() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let cap = WorldDeltaPropose::with_pool(pool);
         let err = cap.run(json!("not-an-object")).await.unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
@@ -1118,7 +1118,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_apply_title_update_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
@@ -1155,7 +1155,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_apply_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -1178,7 +1178,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_apply_lost_update_guard_reports_conflict() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
@@ -1216,7 +1216,7 @@ mod tests {
         // None of the 9 in-file tests exercised the create path, so CI stayed
         // green while runtime would fail with a SQL error. This test drives the
         // create branch end to end and asserts the row lands in kb_key_blocks.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
@@ -1290,7 +1290,7 @@ mod tests {
     // bulk pre-fetch path instead of one SELECT per change.
     #[tokio::test]
     async fn world_delta_apply_batch_kb_updates_prefetch() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
@@ -1392,7 +1392,7 @@ mod tests {
     // results and does not construct an oversized SQL statement.
     #[tokio::test]
     async fn world_delta_apply_batch_kb_updates_prefetch_chunks() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
@@ -1464,7 +1464,7 @@ mod tests {
     /// the row's `revision` stay exactly as they were.
     #[tokio::test]
     async fn world_delta_apply_kb_body_stale_preimage_writes_nothing() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         let kid = seed_kb_block_with_body(&pool, "wld_a", "Hero", r#"{"hp":10}"#).await;
@@ -1500,7 +1500,7 @@ mod tests {
     /// capability is asserted, not assumed.
     #[tokio::test]
     async fn world_delta_apply_kb_body_and_status_apply_without_bumping_revision() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         let kid = seed_kb_block_with_body(&pool, "wld_a", "Hero", r#"{"hp":10}"#).await;
@@ -1548,7 +1548,7 @@ mod tests {
     /// the earlier "applied" write of that transaction.
     #[tokio::test]
     async fn world_delta_apply_kb_batch_rolls_back_applied_writes_on_refusal() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         let kid = seed_kb_block_with_body(&pool, "wld_a", "Hero", r#"{"hp":10}"#).await;
@@ -1593,7 +1593,7 @@ mod tests {
     /// transaction, so a later refusal in the same package removes it again.
     #[tokio::test]
     async fn world_delta_apply_kb_create_rolls_back_on_later_refusal() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 

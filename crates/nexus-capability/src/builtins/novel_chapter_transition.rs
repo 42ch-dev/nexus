@@ -534,7 +534,7 @@ Body text here.";
     /// `works.current_chapter`.
     #[tokio::test]
     async fn spec_4_5_7_current_chapter_advances_only_on_finalize() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_457_cc").await;
 
         // Seed 3 chapters (ch1, ch2, ch3 — all not_started, volume=1).

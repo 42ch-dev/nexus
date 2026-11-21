@@ -735,7 +735,7 @@ mod tests {
     /// world context) have no world binding.
     #[tokio::test]
     async fn write_memory_with_store_uses_world_id_none() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool.clone()));
         let cap = CreatorWriteMemory::with_store(store);
 
@@ -806,7 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_memory_with_store_returns_count() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorReadMemory::with_store(store);
 
@@ -836,7 +836,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_memory_with_keyword_filter() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorReadMemory::with_store(store);
 
@@ -883,7 +883,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_memory_with_store_roundtrip() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let write_cap = CreatorWriteMemory::with_store(store.clone());
         let read_cap = CreatorReadMemory::with_store(store);
@@ -914,7 +914,7 @@ mod tests {
 
     #[tokio::test]
     async fn inject_prompt_with_store_enqueue_drain() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorInjectPrompt::with_store(store.clone());
 
@@ -942,7 +942,7 @@ mod tests {
 
     #[tokio::test]
     async fn inject_prompt_multiple_priority_order() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorInjectPrompt::with_store(store.clone());
 
@@ -979,7 +979,7 @@ mod tests {
     /// Only `_creator_id` (context-injected) is accepted for security.
     #[tokio::test]
     async fn resolve_creator_id_rejects_raw_creator_id() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = CreatorCapabilityStore::new(pool);
         let result = store
             .resolve_creator_id(&serde_json::json!({"creator_id": "ctr_direct"}))
@@ -994,7 +994,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_creator_id_from_underscore_creator_id() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = CreatorCapabilityStore::new(pool);
         let id = store
             .resolve_creator_id(&serde_json::json!({"_creator_id": "ctr_injected"}))
@@ -1005,7 +1005,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_creator_id_from_schedule_id() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         // Insert a schedule row
         let now = chrono::Utc::now().timestamp();
         sqlx::query!(
@@ -1030,7 +1030,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_creator_id_from_session_id() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().timestamp();
         sqlx::query!(
             "INSERT INTO orchestration_sessions
@@ -1054,7 +1054,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_creator_id_missing_returns_error() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = CreatorCapabilityStore::new(pool);
         let result = store
             .resolve_creator_id(&serde_json::json!({"other_field": "value"}))
@@ -1262,7 +1262,7 @@ mod tests {
     /// Integration: `write_brief` with store writes to Work entity.
     #[tokio::test]
     async fn write_brief_with_store_roundtrip() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool.clone()));
         let cap = CreatorWriteBrief::with_store(store);
 

@@ -227,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_create_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let (world_id, parent_branch, fork_point) = seed_world_with_event(&pool, "ctr_a").await;
 
@@ -249,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_create_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         let (world_id, parent_branch, fork_point) = seed_world_with_event(&pool, "ctr_a").await;
@@ -269,7 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_create_rejects_bad_fork_point() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let (world_id, parent_branch, _fork_point) = seed_world_with_event(&pool, "ctr_a").await;
 
@@ -288,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn forked_branch_marker_carries_lineage() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let (world_id, parent_branch, fork_point) = seed_world_with_event(&pool, "ctr_a").await;
 
@@ -335,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn root_branch_has_no_fork_marker() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let (world_id, parent_branch, _fork_point) = seed_world_with_event(&pool, "ctr_a").await;
 
@@ -355,7 +355,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_marker_is_canon() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let (world_id, parent_branch, fork_point) = seed_world_with_event(&pool, "ctr_a").await;
 
