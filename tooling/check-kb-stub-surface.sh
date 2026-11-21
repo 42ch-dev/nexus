@@ -52,6 +52,8 @@
 #                        `pub(crate) fn`)
 #   split-visibility   → reject, visibility (`pub(crate)` and `fn mapper(` on
 #                        separate lines)
+#   generic-duplicate  → reject, `found 2` (a generic declaration with a nested
+#                        bound, plus the plain owner declaration)
 #   comment-only       → reject, `found 0` (real declaration deleted; a comment
 #                        holds the only declaration-shaped text)
 #   string-only        → reject, `found 0` (same, text inside a string literal)
@@ -228,9 +230,12 @@ while (my $path = <$list>) {
   my $code = project_code($src);
 
   for my $name (@names) {
+    # `[<(]` accepts a generic parameter list without parsing its nesting
+    # (`fn f<T: Into<U>>`): the token after the name is `<` or `(` exactly when
+    # this is a declaration, so a generic definition cannot hide from the count.
     my $decl = qr/\b((?:pub(?:\s*\([^)]*\))?\s+)?
                     (?:(?:async|unsafe|const|extern(?:\s+"[^"]*")?)\s+)*)
-                 fn\s+\Q$name\E\s*\(/x;
+                 fn\s+\Q$name\E\s*[<(]/x;
     while ($code =~ /$decl/g) {
       my $line = 1 + (substr($src, 0, $-[0]) =~ tr/\n//);
       my $prefix = $1;
@@ -348,7 +353,7 @@ selftest() {
     fi
   }
 
-  for case_dir in valid missing duplicate line-comment block-string split-visibility comment-only string-only parallel; do
+  for case_dir in valid missing duplicate line-comment block-string split-visibility generic-duplicate comment-only string-only parallel; do
     make_valid_fixture "$work/$case_dir"
   done
 
@@ -392,6 +397,14 @@ pub fn spoke_to_knowledge_record(entry: Wire) -> Record {
 }
 RS
 
+  # generic-duplicate: a generic declaration whose bound nests `>` plus the
+  # plain owner declaration is two definitions of the same mapper.
+  cat > "$work/generic-duplicate/crates/consumer/src/extra.rs" <<'RS'
+pub fn knowledge_record_to_spoke<T: Into<Record>>(entry: T) -> Wire {
+    Wire::from(entry.into())
+}
+RS
+
   # comment-only: the real declaration is gone; a comment holds the only
   # declaration-shaped text, which must not count as the mapper.
   sed '/^\/\/\/ The seam/,/^}/d' \
@@ -428,6 +441,7 @@ RS
   expect line-comment 1 "must be declared exactly \`pub fn\`"
   expect block-string 1 "must be declared exactly \`pub fn\`"
   expect split-visibility 1 "must be declared exactly \`pub fn\`"
+  expect generic-duplicate 1 "found 2"
   expect comment-only 1 "found 0"
   expect string-only 1 "found 0"
   expect parallel 1 "parallel \`KnowledgePort\` trait/impl must not exist"
@@ -438,7 +452,7 @@ RS
     exit 1
   fi
   rm -rf "$work"
-  echo "PASS: self-test — clean tree accepted; missing, duplicate, visibility, comment-only, string-only and parallel-trait fixtures rejected"
+  echo "PASS: self-test — clean tree accepted; missing, duplicate, visibility, generic-duplicate, comment-only, string-only and parallel-trait fixtures rejected"
 }
 
 case "${1:-}" in
