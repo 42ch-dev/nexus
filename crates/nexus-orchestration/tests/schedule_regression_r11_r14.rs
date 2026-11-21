@@ -9,7 +9,6 @@ use nexus_contracts::local::schedule::{
     CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp, Schedule,
     ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
-use nexus_local_db::SqlitePool;
 use nexus_orchestration::schedule::derivation::CoreContextManager;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use std::sync::Arc;
@@ -18,14 +17,7 @@ use std::sync::Arc;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Create a fresh test DB with migrations, plus the file that owns it.
-async fn fresh_pool() -> (tempfile::NamedTempFile, Arc<SqlitePool>) {
-    let db = tempfile::NamedTempFile::new().unwrap();
-    let guarded = nexus_local_db::init_engine_pool(db.path())
-        .await
-        .expect("open pool");
-    (db, Arc::new(guarded.clone_pool()))
-}
+mod common;
 
 fn make_schedule(
     id: &str,
@@ -63,7 +55,7 @@ fn make_schedule(
 
 #[tokio::test]
 async fn r11_schedule_add_inspect_roundtrip() {
-    let (_db, pool) = fresh_pool().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
@@ -117,7 +109,7 @@ async fn r11_schedule_add_inspect_roundtrip() {
 
 #[tokio::test]
 async fn r12_mid_execution_edit_does_not_disturb_running_state() {
-    let (_db, pool) = fresh_pool().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
@@ -211,7 +203,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
 
 #[tokio::test]
 async fn r13_preset_hook_writes_preset_hook_derivation() {
-    let (_db, pool) = fresh_pool().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
@@ -285,7 +277,7 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
 
 #[tokio::test]
 async fn r14_dependency_chain_auto_advances() {
-    let (_db, pool) = fresh_pool().await;
+    let (_dir, pool) = common::arc_pool_dir_first().await;
     let sup = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let mgr = CoreContextManager::new(pool.clone());
 
