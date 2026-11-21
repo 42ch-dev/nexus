@@ -1,160 +1,17 @@
-//! V1.16 Command Surface Contract — Current-State Snapshot & V2 Target Tests
+//! V1.16 Command Surface Contract — V2 Target Tests
 //!
 //! Plan: `2026-05-12-v1.16-command-surface-contract`
 //!
-//! This file serves two purposes:
+//! This file defines the expected V2 command topology (the visible four-group
+//! lock plus the canonical subcommand shapes). Every test in this file is an
+//! active `#[test]` — there are no `#[ignore]`s: the restructuring landed
+//! (v1.193 P2 retired the daemon group, so the target contract now runs for
+//! real rather than as a to-be-un-ignored list).
 //!
-//! 1. **Current-state snapshot** — locks in the V1.15 command topology (25 groups)
-//!    as a regression anchor. Subsequent refactoring plans must NOT accidentally
-//!    lose existing commands without explicit migration.
-//!
-//! 2. **V2 target contract** — defines the expected V2 command topology (the
-//!    visible four-group lock plus the canonical subcommand shapes). Every test
-//!    in this file is an active `#[test]` — there are no `#[ignore]`s: the
-//!    restructuring landed (v1.193 P2 retired the daemon group, so the target
-//!    contract now runs for real rather than as a to-be-un-ignored list).
+//! The V1.15 current-state snapshot half is gone: it spawned the same binary
+//! with the same arguments and asserted a subset of the V2 tests below.
 
 use assert_cmd::Command;
-
-// =============================================================================
-// Part 1: Current-state snapshot (V1.15 baseline — these MUST pass today)
-// =============================================================================
-
-/// Snapshot: V1.15 has exactly 24 user-visible top-level command groups.
-///
-/// If this test breaks, a command was accidentally added or removed during
-/// refactoring — investigate before proceeding.
-#[test]
-fn current_state_visible_command_groups() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // User-visible commands after the v1.193 P2-T2 daemon-group removal
-    // (v1.193 P1-T6 removed the `sync` alias; P2-T2 removed `daemon`).
-    let expected_commands = ["acp", "creator", "platform", "system"];
-
-    for cmd in &expected_commands {
-        assert!(
-            help_text.contains(cmd),
-            "Current-state snapshot: expected command '{cmd}' missing from --help output"
-        );
-    }
-
-    // Verify hidden commands are NOT user-visible
-    let hidden_commands = [
-        "agent",
-        "session",
-        "policy",
-        "permission",
-        "auth",
-        "context",
-        "config",
-        "debug",
-        "doctor",
-        "db",
-        "explore",
-        "identity",
-        "preset",
-        "runtime-mode",
-        "soul",
-        "memory",
-        "init",
-        "clone",
-        "world",
-        "schedule",
-    ];
-    for hidden in &hidden_commands {
-        // These should not appear as visible top-level commands
-        // (they're kept as hidden for backward compat)
-        assert!(
-            !help_text.contains(&format!("  {hidden} ")),
-            "Current-state snapshot: '{hidden}' should be hidden from --help output"
-        );
-    }
-
-    // Verify count: 4 user-visible commands
-    let visible_count = expected_commands.len();
-    assert_eq!(
-        visible_count, 4,
-        "Current-state snapshot: expected exactly 4 user-visible commands, found {visible_count}"
-    );
-}
-
-/// Snapshot: `creator` command has expected subcommands in V1.15.
-#[test]
-fn current_state_creator_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    for subcmd in &["register", "status", "pair", "credentials", "list"] {
-        assert!(
-            help_text.contains(subcmd),
-            "Current-state creator: expected subcommand '{subcmd}'"
-        );
-    }
-}
-
-/// Snapshot: `system` command has expected subcommands in V1.15.
-#[test]
-fn current_state_system_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // V1.16+ system: version, doctor, completion, config, debug, db, identity, runtime-mode
-    // (v1.193 P1-T1: `system preset` — the PL-6 forwarding alias — is removed)
-    for subcmd in &[
-        "version",
-        "doctor",
-        "completion",
-        "config",
-        "debug",
-        "db",
-        "identity",
-        "runtime-mode",
-    ] {
-        assert!(
-            help_text.contains(subcmd),
-            "Current-state system: expected subcommand '{subcmd}'"
-        );
-    }
-
-    // Verify no unexpected subcommands
-    let commands_section_start = help_text.find("Commands:").unwrap_or(0);
-    let options_section_start = help_text.find("\nOptions:").unwrap_or(help_text.len());
-    let commands_section = &help_text[commands_section_start..options_section_start];
-
-    // These were NOT system subcommands before — verify they exist now
-    assert!(
-        commands_section.contains("version"),
-        "Current-state system: 'version' should now be a system subcommand"
-    );
-}
 
 // =============================================================================
 // Part 2: V2 target contract tests (all active — no #[ignore] remains)
