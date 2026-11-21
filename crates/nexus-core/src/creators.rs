@@ -793,11 +793,12 @@ pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::V
 }
 
 /// Crash-safe file write: write to a sibling temp file on the same
-/// filesystem, then rename it into place (`rename` is atomic on POSIX).
+/// filesystem, fsync it, then rename it into place (`rename` is atomic on
+/// POSIX) and fsync the parent directory so the rename is durable.
 fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)
+    crate::atomic_write::atomic_write(path, &tmp, contents.as_bytes(), false)
+        .map_err(|e| e.into_io())
 }
 
 /// Write the identity cache to disk with an atomic temp-file + rename.

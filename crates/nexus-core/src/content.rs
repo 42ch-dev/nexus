@@ -205,6 +205,8 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// temp file + fsync + atomic rename + final-file fsync + parent-dir fsync.
 /// The caller owns path-guard resolution, parent-directory creation and the
 /// legacy error-code mapping; the temp file is cleaned up on failure.
+/// The blocking write itself runs through the private
+/// [`crate::atomic_write`] kernel on Tokio's blocking pool.
 pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
@@ -213,24 +215,20 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     );
     let temp_path = target.with_extension(&tmp_extension);
 
-    let write_result = async {
-        tokio::fs::write(&temp_path, content).await?;
-        let file = tokio::fs::File::open(&temp_path).await?;
-        file.sync_all().await?;
-        tokio::fs::rename(&temp_path, &target).await?;
-        // Durability: fsync the final file after the atomic rename so a crash
-        // after rename() returns does not leave the rename unflushed.
-        let final_file = tokio::fs::File::open(&target).await?;
-        final_file.sync_all().await?;
-        // Durability: fsync the parent directory so the renamed entry is
-        // committed to disk (QC3-S3).
-        if let Some(parent) = target.parent() {
-            let dir = tokio::fs::File::open(parent).await?;
-            dir.sync_all().await?;
-        }
-        Ok(())
-    }
-    .await;
+    let write_temp = temp_path.clone();
+    let write_target = target.clone();
+    let write_content = content.to_string();
+    let write_result = tokio::task::spawn_blocking(move || {
+        crate::atomic_write::atomic_write(
+            &write_target,
+            &write_temp,
+            write_content.as_bytes(),
+            true,
+        )
+        .map_err(|e| e.into_io())
+    })
+    .await
+    .map_err(std::io::Error::other)?;
 
     if let Err(e) = write_result {
         let _ = tokio::fs::remove_file(&temp_path).await;
