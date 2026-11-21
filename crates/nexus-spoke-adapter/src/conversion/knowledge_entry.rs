@@ -808,9 +808,7 @@ mod tests {
             "unexpected error shape: {message}"
         );
         assert!(
-            message.contains(
-                "Disallowed knowledge entry status transition: deprecated -> merged",
-            ),
+            message.contains("Disallowed knowledge entry status transition: deprecated -> merged",),
             "unexpected error detail: {message}"
         );
         // A reject must not mutate the record before returning.

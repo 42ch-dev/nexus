@@ -340,7 +340,7 @@ RS
 selftest() {
   local work case_dir out status failures=0
   work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
+  trap 'rm -rf "${work:-}"' EXIT
 
   expect() {
     local label="$1" want_exit="$2" want_text="$3" dir="$work/$1" summary

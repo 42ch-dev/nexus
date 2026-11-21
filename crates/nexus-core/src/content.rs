@@ -227,7 +227,7 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     let write_content = content.to_string();
     let prepare_result = match tokio::task::spawn_blocking(move || {
         crate::atomic_write::prepare_temp(&write_temp, write_content.as_bytes())
-            .map_err(|e| e.into_io())
+            .map_err(crate::atomic_write::AtomicWriteError::into_io)
     })
     .await
     {
@@ -245,7 +245,7 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
             let commit_temp = temp_path.clone();
             match tokio::task::spawn_blocking(move || {
                 crate::atomic_write::commit(&commit_target, &commit_temp, true)
-                    .map_err(|e| e.into_io())
+                    .map_err(crate::atomic_write::AtomicWriteError::into_io)
             })
             .await
             {

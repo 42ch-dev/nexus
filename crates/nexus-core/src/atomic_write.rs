@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Which stage of the atomic write produced the error.
 #[derive(Debug)]
-pub(crate) enum Stage {
+pub enum Stage {
     /// Writing the caller's temp file failed.
     Write,
     /// Opening the temp file for fsync failed.
@@ -34,7 +34,7 @@ pub(crate) enum Stage {
 
 /// An I/O failure tagged with the kernel stage that produced it.
 #[derive(Debug)]
-pub(crate) struct AtomicWriteError {
+pub struct AtomicWriteError {
     pub stage: Stage,
     pub source: io::Error,
 }
@@ -46,7 +46,7 @@ impl AtomicWriteError {
 
     /// Discard the stage tag; used by callers that report a plain
     /// `io::Result` or fold every stage into one error code.
-    pub(crate) fn into_io(self) -> io::Error {
+    pub fn into_io(self) -> io::Error {
         self.source
     }
 }
@@ -64,10 +64,13 @@ impl std::fmt::Display for AtomicWriteError {
 /// on failure for the caller's cleanup policy to handle. Nothing about the
 /// target changes in this stage, so an async caller dropped before its
 /// [`commit`] leaves the previous content intact.
-pub(crate) fn prepare_temp(tmp_path: &Path, content: &[u8]) -> Result<(), AtomicWriteError> {
+pub fn prepare_temp(tmp_path: &Path, content: &[u8]) -> Result<(), AtomicWriteError> {
     std::fs::write(tmp_path, content).map_err(AtomicWriteError::at(Stage::Write))?;
 
-    let file = std::fs::File::open(tmp_path).map_err(AtomicWriteError::at(Stage::TempOpen))?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(tmp_path)
+        .map_err(AtomicWriteError::at(Stage::TempOpen))?;
     file.sync_all()
         .map_err(AtomicWriteError::at(Stage::TempSync))?;
 
@@ -81,7 +84,7 @@ pub(crate) fn prepare_temp(tmp_path: &Path, content: &[u8]) -> Result<(), Atomic
 /// This stage runs synchronously on the caller: it is not interruptible
 /// once entered, and on failure the temp file is left in place for the
 /// caller's cleanup policy.
-pub(crate) fn commit(
+pub fn commit(
     target_path: &Path,
     tmp_path: &Path,
     fsync_final: bool,
@@ -98,7 +101,8 @@ pub(crate) fn commit(
 
     if let Some(parent) = target_path.parent() {
         let dir = std::fs::File::open(parent).map_err(AtomicWriteError::at(Stage::DirOpen))?;
-        dir.sync_all().map_err(AtomicWriteError::at(Stage::DirSync))?;
+        dir.sync_all()
+            .map_err(AtomicWriteError::at(Stage::DirSync))?;
     }
 
     Ok(())
@@ -113,7 +117,7 @@ pub(crate) fn commit(
 ///
 /// This is the convenience composition of [`prepare_temp`] and [`commit`]
 /// for callers with no cancellation point between the two stages.
-pub(crate) fn atomic_write(
+pub fn atomic_write(
     target_path: &Path,
     tmp_path: &Path,
     content: &[u8],
