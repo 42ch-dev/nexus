@@ -20,7 +20,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_local_db::init_engine_pool;
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_module_manifest::ModuleManifest;
 use serde_json::{json, Map, Value};
@@ -46,51 +46,39 @@ fn scope_as(world_id: &str, holder: &str) -> KnowledgeReadScope {
         .expect("a nonempty holder always forms an ActorView selection")
 }
 
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("compute_input_builder_test.db");
-    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-    (pool, dir)
-}
+mod common;
 
-async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES (?, ?, 'active', datetime('now'), '{}')",
-    )
-    .bind(creator_id)
-    .bind(creator_id)
-    .execute(pool)
-    .await
-    .unwrap();
-}
+use common::fresh_pool;
 
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
-    nexus_local_db::kb_store::seed::world(
+    world_with(
         pool,
-        world_id,
-        "ctr_test",
-        "Test World",
-        "test-world",
-        "private",
-        "single",
+        WorldSeed {
+            world_id,
+            owner_creator_id: "ctr_test",
+            title: "Test World",
+            slug: "test-world",
+            time_policy: "single",
+            ..WorldSeed::default()
+        },
     )
     .await;
 }
 
 async fn seed_world_with_head(pool: &sqlx::SqlitePool, world_id: &str, head_event_id: &str) {
-    // SAFETY: test-only — uses runtime query to avoid duplicating sqlx cache.
-    seed_creator(pool, "ctr_test").await;
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, current_timeline_head_id, metadata_json) \
-         VALUES (?, 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'single', ?, '{}')",
+    world_with(
+        pool,
+        WorldSeed {
+            world_id,
+            owner_creator_id: "ctr_test",
+            title: "Test World",
+            slug: "test-world",
+            time_policy: "single",
+            current_timeline_head_id: Some(head_event_id),
+            ..WorldSeed::default()
+        },
     )
-    .bind(world_id)
-    .bind(head_event_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 /// Seed a computable `KnowledgeEntryRecord` with the given `block_type` and attributes.

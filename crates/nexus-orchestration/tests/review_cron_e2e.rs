@@ -38,20 +38,9 @@ const WORK_REF: &str = "review-cron-e2e";
 
 // ── Test helpers (mirrors review_time_extraction.rs + cron_supervisor.rs) ────
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("review_cron_e2e_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+mod common;
+
+use common::test_pool;
 
 /// Seed a minimal `narrative_worlds` row (and FK creator) so the work's
 /// `world_id` FK holds. Reuses the shared seed helper.

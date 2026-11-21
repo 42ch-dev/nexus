@@ -62,23 +62,9 @@ async fn seed_work_with_driver(pool: &SqlitePool, work: &WorkRecord, driver_id: 
         .unwrap();
 }
 
-/// Helper: open an in-memory DB pool with migrations applied.
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("auto_chain_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    // Keep the file alive for the test lifetime
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 // ── AC1: Full auto-chain stage flow ───────────────────────────────────
 

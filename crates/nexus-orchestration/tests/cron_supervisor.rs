@@ -13,22 +13,9 @@ use sqlx::SqlitePool;
 
 // ── Test helpers ───────────────────────────────────────────────────────────
 
-/// Open a migrated in-memory pool (tempfile + forget; pattern from
-/// `supervisor_cross_volume.rs`).
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("cron_sup_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+mod common;
+
+use common::test_pool;
 
 /// Standard healthy Work (intake complete, no lock, not completed).
 fn test_work(work_id: &str) -> WorkRecord {

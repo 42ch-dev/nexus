@@ -9,22 +9,9 @@ use nexus_orchestration::auto_chain::{self, ChainAction};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use std::sync::Arc;
 
-/// Helper: open an in-memory DB pool with migrations applied.
-async fn test_pool() -> sqlx::SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("xvol_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Helper: standard test Work.
 fn test_work(work_id: &str, chapter: i32, total: i32, auto_chain: bool) -> WorkRecord {

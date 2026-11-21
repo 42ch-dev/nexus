@@ -45,25 +45,9 @@ const RESEARCH_PRESET_VERSION: u32 = 2;
 
 // ── Hermetic DB helpers (modeled on tests/auto_chain.rs) ─────────────────────
 
-/// Open an in-memory-tempfile `SQLite` pool with migrations applied.
-///
-/// The tempfile is intentionally leaked (`std::mem::forget`) so the file
-/// survives for the test lifetime — matches the pattern in `auto_chain.rs`.
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("research_sup_e2e_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Build a Work record whose fields satisfy the research preset gates
 /// (`intake_status == complete`, `work_ref` required) and carry a creative

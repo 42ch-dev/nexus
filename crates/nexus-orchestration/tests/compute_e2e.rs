@@ -28,7 +28,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_local_db::{init_engine_pool, narrative_write};
+use nexus_local_db::narrative_write;
 use nexus_preset::load_embedded_preset;
 use serde_json::{json, Value};
 
@@ -55,13 +55,9 @@ fn registry_with_compute_attached(pool: sqlx::SqlitePool) -> CapabilityRegistry 
     CapabilityRegistry::with_runtime_deps_and_wasm(&deps, engine, cache)
 }
 
-/// Open a fresh migrated pool on a tempdir.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("compute_e2e.db");
-    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-    (pool, dir)
-}
+mod common;
+
+use common::fresh_pool;
 
 /// Seed a Creator through the production creation path, which also
 /// materializes its holder registry row in the same transaction.

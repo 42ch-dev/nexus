@@ -65,21 +65,9 @@ fn novel_work(work_id: &str, chapter: i32, total: i32) -> WorkRecord {
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("review_findings_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 /// Insert a `creator_schedules` row directly for the test scenario.
 async fn insert_schedule(

@@ -23,7 +23,6 @@ use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chain;
 use nexus_orchestration::findings_block::build_open_findings_block;
 use nexus_orchestration::tasks::render_core_context_template;
-use sqlx::SqlitePool;
 
 const CREATOR: &str = "ctr_findings_consumer_test";
 
@@ -63,21 +62,9 @@ fn novel_work(work_id: &str, work_ref: &str) -> WorkRecord {
     }
 }
 
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("findings_consumer_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
+mod common;
 
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+use common::test_pool;
 
 fn finding(
     id: &str,

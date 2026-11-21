@@ -64,16 +64,9 @@ impl WorkspaceExecutor for DirectWriteExecutor {
     }
 }
 
-/// Create a fresh `SQLite` pool with all migrations applied.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tmpdir");
-    let db_path = dir.path().join("test.db");
-    let guarded = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .expect("open_pool");
-    let pool = guarded.clone_pool();
-    (pool, dir)
-}
+mod common;
+
+use common::fresh_pool;
 
 /// Insert a minimal Work row for testing.
 async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
