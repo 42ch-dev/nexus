@@ -269,25 +269,6 @@ impl SyncClient {
         SyncClientBuilder::new()
     }
 
-    /// Create a new sync client with custom configuration for testing.
-    ///
-    /// # Errors
-    /// Returns the specific error type if the operation fails.
-    #[cfg(test)]
-    pub fn new_with_config(
-        platform_base_url: &str,
-        auth_token: &str,
-        max_retries: u32,
-    ) -> SyncResult<Self> {
-        Self::with_config(
-            platform_base_url,
-            auth_token,
-            DEFAULT_BODY_MAX_SIZE,
-            DEFAULT_TIMEOUT_SECS,
-            max_retries,
-        )
-    }
-
     /// Get the base URL (for testing).
     #[cfg(test)]
     #[must_use]

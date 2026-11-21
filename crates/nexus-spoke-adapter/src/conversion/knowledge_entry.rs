@@ -719,9 +719,19 @@ mod tests {
     #[test]
     fn test_confirm_with_revision_mismatch() {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Event, "Battle");
-        // kb.revision is None (i.e., 0 internally), but base_revision is 1
-        let result = kb.confirm(&owner_membership(), 1, &no_conflicts(), &[]);
-        assert!(matches!(result, Err(KbError::RevisionMismatch { .. })));
+        kb.revision = Some(3);
+        // base_revision 5 against stored revision 3.
+        let result = kb.confirm(&owner_membership(), 5, &no_conflicts(), &[]);
+        assert!(
+            matches!(
+                result,
+                Err(KbError::RevisionMismatch {
+                    expected: 5,
+                    actual: 3
+                })
+            ),
+            "got {result:?}"
+        );
     }
 
     #[test]
@@ -761,6 +771,98 @@ mod tests {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Temp");
         kb.delete().unwrap();
         assert_eq!(kb.status, "deleted");
+
+        // Shared (confirmed) row: delete reaches the terminal status.
+        let mut confirmed = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Temp");
+        confirmed
+            .confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
+        confirmed.delete().unwrap();
+        assert_eq!(confirmed.status, "deleted");
+
+        // Deprecated row: delete also reaches the terminal status.
+        let mut deprecated = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Temp");
+        deprecated
+            .confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
+        deprecated.deprecate(Some("kb_replacement")).unwrap();
+        deprecated.delete().unwrap();
+        assert_eq!(deprecated.status, "deleted");
+    }
+
+    #[test]
+    fn test_merge_from_deprecated_rejected_leaves_status() {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero v1");
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
+        kb.deprecate(Some("kb_hero_v2")).unwrap();
+
+        // spoke's cross-product table excludes deprecated → merged.
+        let result = kb.merge_into("kb_hero_v2");
+        let KbError::ValidationError(message) = result.unwrap_err() else {
+            panic!("expected ValidationError from a rejected transition");
+        };
+        // The caller receives the folded "<spoke code>: <spoke message>" text.
+        assert!(
+            message.starts_with("INVALID_KNOWLEDGE_ENTRY_STATUS_TRANSITION: "),
+            "unexpected error shape: {message}"
+        );
+        assert!(
+            message.contains(
+                "Disallowed knowledge entry status transition: deprecated -> merged",
+            ),
+            "unexpected error detail: {message}"
+        );
+        // A reject must not mutate the record before returning.
+        assert_eq!(kb.status, "deprecated");
+    }
+
+    #[test]
+    fn test_map_spoke_reject_folds_code_and_message() {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero v1");
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
+        kb.deprecate(Some("kb_hero_v2")).unwrap();
+        let spoke = knowledge_record_to_spoke(&kb);
+
+        // deprecated → merged is rejected by spoke's transition table.
+        let rejected = transition_status(&spoke, "merged");
+        assert!(
+            matches!(rejected, SpokeResult::Reject(_)),
+            "expected a spoke reject, got {rejected:?}"
+        );
+
+        match map_spoke_reject(rejected) {
+            Err(KbError::ValidationError(message)) => {
+                assert!(
+                    message.starts_with("INVALID_KNOWLEDGE_ENTRY_STATUS_TRANSITION: "),
+                    "unexpected error shape: {message}"
+                );
+                assert!(
+                    message.contains(
+                        "Disallowed knowledge entry status transition: deprecated -> merged",
+                    ),
+                    "unexpected error detail: {message}"
+                );
+            }
+            other => panic!("expected ValidationError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_delete_from_merged_rejected_leaves_status() {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero v1");
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
+        kb.merge_into("kb_hero_v2").unwrap();
+
+        // `merged` is terminal: only self-transitions are allowed.
+        let result = kb.delete();
+        assert!(
+            matches!(result, Err(KbError::ValidationError(_))),
+            "got {result:?}"
+        );
+        assert_eq!(kb.status, "merged");
     }
 
     #[test]

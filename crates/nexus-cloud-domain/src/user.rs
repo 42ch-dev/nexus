@@ -218,8 +218,11 @@ mod tests {
     #[test]
     fn cannot_mutate_subscription_when_deleted() {
         let mut u = User::register("usr_1", "alice", "a@example.com", "Alice");
+        u.set_subscription_tier(SubscriptionTier::Pro).unwrap();
+        assert_eq!(u.subscription_tier, "pro");
         u.mark_deleted().unwrap();
         assert!(u.set_subscription_tier(SubscriptionTier::Pro).is_err());
+        assert!(u.mark_deleted().is_err(), "double delete must fail");
     }
 
     #[test]

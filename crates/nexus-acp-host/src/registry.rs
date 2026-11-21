@@ -521,6 +521,12 @@ mod tests {
         assert_eq!(registry.version, "1.0.0");
         assert_eq!(registry.agents.len(), 3);
         assert_eq!(registry.extensions.as_ref().map_or(0, Vec::len), 0);
+
+        let empty = RegistryClient::parse_registry_json(
+            r#"{"version": "1.0.0", "agents": [], "extensions": []}"#,
+        )
+        .unwrap();
+        assert!(empty.agents.is_empty(), "empty agents is valid");
     }
 
     #[test]
@@ -549,6 +555,8 @@ mod tests {
         let npx = claude.distribution.npx.as_ref().unwrap();
         assert_eq!(npx.package, "@zed-industries/claude-agent-acp@0.18.0");
         assert_eq!(DistributionExt::source_kind(&claude.distribution), "npx");
+        // The alternate distribution stays absent rather than defaulting in.
+        assert!(claude.distribution.binary.is_none());
     }
 
     #[test]
@@ -558,7 +566,10 @@ mod tests {
 
         let codex = &registry.agents[1];
         assert_eq!(codex.id, "codex-acp");
+        assert_eq!(codex.name, "Codex Agent");
         assert_eq!(DistributionExt::source_kind(&codex.distribution), "binary");
+        // The alternate distribution stays absent rather than defaulting in.
+        assert!(codex.distribution.npx.is_none());
 
         let binary = codex.distribution.binary.as_ref().unwrap();
         let darwin = binary.darwin_aarch64.as_ref().unwrap();
@@ -630,6 +641,20 @@ mod tests {
         let (_client, _tmp) = make_test_client();
         let result = RegistryClient::parse_registry_json(json);
         assert!(result.is_err());
+
+        // Missing top-level "version".
+        let missing_version = r#"{"agents": []}"#;
+        assert!(
+            RegistryClient::parse_registry_json(missing_version).is_err(),
+            "missing version must fail"
+        );
+
+        // Missing top-level "agents".
+        let missing_agents = r#"{"version": "1.0.0"}"#;
+        assert!(
+            RegistryClient::parse_registry_json(missing_agents).is_err(),
+            "missing agents must fail"
+        );
     }
 
     // ── Cache Tests ───────────────────────────────────────────────

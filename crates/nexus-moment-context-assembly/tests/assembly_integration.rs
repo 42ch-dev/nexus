@@ -255,10 +255,16 @@ async fn moment_context_default_is_all_none_except_stage0() {
 async fn missing_world_yields_no_narrative_or_kb() {
     let stores = FixtureStores::empty();
 
-    let request = MomentRequest::new(Stage0Assembly::default()).with_world("wld_ghost");
+    // Nonempty Stage-0: the missing-world path must drop the three narrative
+    // domains without dropping the creator context.
+    let request = MomentRequest::new(stage0_with_soul_sections()).with_world("wld_ghost");
 
     let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
+    assert!(
+        ctx.stage0_context.contains("speculative fiction writer"),
+        "missing world → Stage-0 creator context must survive"
+    );
     assert!(ctx.world_state.is_none(), "missing world → no world state");
     assert!(ctx.timeline.is_none(), "missing world → no timeline");
     assert!(ctx.world_kb.is_none(), "missing world → no KB");
