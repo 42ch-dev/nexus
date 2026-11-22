@@ -1,5 +1,7 @@
 //! NXM-7 acceptance: the E10 memory inputs are the upstream contract DTO.
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! Run with `cargo test -p nexus-moment-context-assembly --test memory_recall_dto`.
 //!
 //! Covered here (no feature flag):
@@ -95,7 +97,8 @@ fn stage0_orders_by_namespaced_kind_then_updated_at_desc() {
         "A world.",
         "2026-04-11T00:00:00Z",
     );
-    // The DTO's `updated_at` is the recency key (an instant, not a string).
+    // note: the DTO's `updated_at` is the recency key (an instant, not a
+    // string).
     assert!(memory_updated_at(&newer_character) > memory_updated_at(&older_character));
 
     let output = stage0(vec![summary, world, newer_character, older_character]).assemble();

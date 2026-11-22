@@ -1,6 +1,8 @@
 //! Golden regression test — **neutral-only** World under **default-on** lore
 //! activation (the HARD ship guarantee).
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! V1.149 P0 T2 (spec §1 neutral-only): a World whose KB contains NO
 //! `modules.activation` modules must produce `assemble_moment` output that is
 //! byte-identical to V1.146 flag-off. No entries are silently filtered,
@@ -19,8 +21,9 @@ use nexus_moment_context_assembly::{assemble_moment, MomentRequest};
 use nexus_narrative::timeline_event::TimelineEventType;
 use nexus_narrative::InMemoryNarrativeGateway;
 
-/// Deterministic neutral-only fixture: no entry carries `modules.activation`.
-/// All wall-clock / uuid sources are frozen to fixed values.
+/// note: deterministic neutral-only fixture — no entry carries
+/// `modules.activation`; all wall-clock / uuid sources are frozen to fixed
+/// values.
 fn build_neutral_fixture() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
@@ -29,7 +32,6 @@ fn build_neutral_fixture() -> (
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
 
-    // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
         "wld_golden_neutral",
         "ctr_golden",
@@ -41,7 +43,6 @@ fn build_neutral_fixture() -> (
     world.created_at = "2026-01-01T00:00:00Z".to_string();
     narrative.insert_world(world);
 
-    // ── Timeline event (frozen id + created_at) ──
     let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
         "wld_golden_neutral",
         "fbk_root",
@@ -53,7 +54,6 @@ fn build_neutral_fixture() -> (
     event.title = Some("The Beginning".to_string());
     narrative.insert_event(event);
 
-    // ── Stage0 (no wall-clock dep) ──
     let stage0 = Stage0Assembly {
         personality: "A creative writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels and 20 short stories.".to_string(),
@@ -65,17 +65,14 @@ fn build_neutral_fixture() -> (
     (narrative, kb, stage0)
 }
 
-/// Seed a KB entry (neutral: no activation module).
-///
-/// NOTE: exactly ONE KB entry — `InMemoryKbStore::query` iterates a `HashMap`
-/// without sorting, so multi-entry fixtures would make the byte-exact golden
-/// order nondeterministic (the V1.146 flag-off golden has the same shape).
-/// Neutral-variant coverage lives in unit tests
+/// invariant: exactly ONE KB entry — `InMemoryKbStore::query` iterates a
+/// `HashMap` without sorting, so multi-entry fixtures would make the byte-exact
+/// golden order nondeterministic (the V1.146 flag-off golden has the same
+/// shape). Neutral-variant coverage lives in unit tests
 /// (`activation_flag_on_no_activation_module_includes_all` etc.).
 async fn seed_neutral_stores(kb: &InMemoryKbStore) {
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
-    // Entry with NO modules map at all.
     let mut kb_plain =
         KnowledgeEntryRecord::new("wld_golden_neutral", BlockType::Character, "Hero");
     kb_plain.entry_id = "kb_neutral_001".to_string();
@@ -85,7 +82,8 @@ async fn seed_neutral_stores(kb: &InMemoryKbStore) {
         .expect("insert kb entry");
 }
 
-/// Assemble with the given activation flag and return the full context bytes.
+/// note: assemble with the given activation flag and return the full context
+/// bytes.
 async fn assemble_with_flag(
     stage0: Stage0Assembly,
     narrative: &InMemoryNarrativeGateway<InMemoryKbStore>,
@@ -105,7 +103,8 @@ async fn neutral_only_default_on_golden() {
     let (narrative, kb, stage0) = build_neutral_fixture();
     seed_neutral_stores(&kb).await;
 
-    // Hard guarantee: default-on == explicit-off (V1.146 flag-off semantics).
+    // invariant: default-on output equals explicit-off (V1.146 flag-off
+    // semantics).
     let default_on = assemble_with_flag(stage0.clone(), &narrative, &kb, true).await;
     let explicit_off = assemble_with_flag(stage0, &narrative, &kb, false).await;
     assert_eq!(
@@ -114,7 +113,7 @@ async fn neutral_only_default_on_golden() {
          to explicit-off (V1.146 flag-off) output"
     );
 
-    // Frozen guarantee: default-on output matches the checked-in golden.
+    // invariant: default-on output matches the checked-in golden.
     let golden = include_str!("fixtures/assemble_moment_neutral_only_default_on.golden");
     assert_eq!(
         default_on, golden,

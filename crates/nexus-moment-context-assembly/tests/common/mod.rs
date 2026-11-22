@@ -1,5 +1,7 @@
 //! Shared contract-DTO fixtures for this crate's integration tests (NXM-7).
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! `RetainedRecord` is a generated upstream type with no literal constructor,
 //! so the tests build one from its wire JSON — the same shape
 //! `memory.recall` serves.
@@ -11,7 +13,7 @@
 use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use serde_json::json;
 
-/// One authored long-term memory: `nexus.<kind>` carrying a legacy
+/// note: one authored long-term memory — `nexus.<kind>` carrying a legacy
 /// `memory_id`, with `text` as the rendered body.
 pub fn memory(memory_id: &str, kind: &str, text: &str, updated_at: &str) -> RetainedRecord {
     record(&json!({
@@ -23,7 +25,7 @@ pub fn memory(memory_id: &str, kind: &str, text: &str, updated_at: &str) -> Reta
     }))
 }
 
-/// One `fact` fragment record with its legacy origin metadata.
+/// note: one `fact` fragment record with its legacy origin metadata.
 pub fn fragment(
     fragment_id: &str,
     summary: &str,
@@ -39,7 +41,7 @@ pub fn fragment(
     }))
 }
 
-/// One recall record with no legacy metadata: the provider's own shape.
+/// note: one recall record with no legacy metadata — the provider's own shape.
 pub fn native(record_id: &str, kind: &str, text: &str, at: &str) -> RetainedRecord {
     record(&json!({
         "record_id": record_id,

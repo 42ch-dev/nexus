@@ -1,5 +1,7 @@
 //! T6.11: Two-Stage Assembly Mock Tests
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! Integration tests for `TwoStageAssembly` with mocked platform responses.
 //!
 //! These tests require the `cloud-stage` feature because they import
@@ -15,7 +17,7 @@ use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 
 mod common;
 
-/// Helper to create a contract `RetainedRecord` for testing.
+/// note: create a contract `RetainedRecord` for testing.
 fn make_memory(kind: &str, body: &str, updated_at: &str) -> RetainedRecord {
     common::memory(&format!("mem_{kind}_{updated_at}"), kind, body, updated_at)
 }

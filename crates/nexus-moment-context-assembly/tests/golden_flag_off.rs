@@ -1,6 +1,8 @@
 //! Golden regression test — `assemble_moment` with explicit
 //! `activation_enabled: false` (the off-switch path).
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! V1.146 P4 T4 / V1.149 P0 T2: HARD gate. The test captures a deterministic
 //! fixture output and verifies it is byte-identical to a checked-in golden.
 //! Any drift in the OFF path (e.g. unintentional activation gate leaking into
@@ -17,8 +19,8 @@ use nexus_moment_context_assembly::{assemble_moment, MomentRequest};
 use nexus_narrative::timeline_event::TimelineEventType;
 use nexus_narrative::InMemoryNarrativeGateway;
 
-/// Deterministic fixture: all wall-clock / uuid sources are frozen to fixed
-/// values so the output is reproducible across runs.
+/// note: deterministic fixture — all wall-clock / uuid sources are frozen to
+/// fixed values so the output is reproducible across runs.
 fn build_deterministic_fixture() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
@@ -27,7 +29,6 @@ fn build_deterministic_fixture() -> (
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
 
-    // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
         "wld_golden",
         "ctr_golden",
@@ -39,7 +40,6 @@ fn build_deterministic_fixture() -> (
     world.created_at = "2026-01-01T00:00:00Z".to_string();
     narrative.insert_world(world);
 
-    // ── Timeline event (frozen id + created_at) ──
     let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
         "wld_golden",
         "fbk_root",
@@ -51,7 +51,6 @@ fn build_deterministic_fixture() -> (
     event.title = Some("The Beginning".to_string());
     narrative.insert_event(event);
 
-    // ── Stage0 (no wall-clock dep) ──
     let stage0 = Stage0Assembly {
         personality: "A creative writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels and 20 short stories.".to_string(),
@@ -63,9 +62,10 @@ fn build_deterministic_fixture() -> (
     (narrative, kb, stage0)
 }
 
-/// Seed the KB entry into the in-memory store (async).
+/// note: seed the KB entry into the in-memory store (async).
 async fn seed_stores(kb: &InMemoryKbStore) {
-    // KB entry with activation module (tests that flag OFF still includes it)
+    // why: with an activation module present, the OFF path must still include
+    // the entry.
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
     let mut kb_entry = KnowledgeEntryRecord::new("wld_golden", BlockType::Character, "Hero");
     kb_entry.entry_id = "kb_golden_001".to_string();
@@ -83,8 +83,8 @@ async fn assemble_moment_flag_off_golden() {
     let (narrative, kb, stage0) = build_deterministic_fixture();
     seed_stores(&kb).await;
 
-    // activation_enabled: false (explicit off-switch) — no activation
-    // filtering even with activation modules present.
+    // note: the explicit off-switch disables activation filtering even with
+    // activation modules present.
     let request = MomentRequest::new(stage0)
         .with_world("wld_golden")
         .with_activation_enabled(false);
@@ -92,7 +92,6 @@ async fn assemble_moment_flag_off_golden() {
     let ctx = assemble_moment(&request, &narrative, &kb).await;
     let output = ctx.to_full_context();
 
-    // Read golden from checked-in file
     let golden = include_str!("fixtures/assemble_moment_flag_off.golden");
 
     assert_eq!(

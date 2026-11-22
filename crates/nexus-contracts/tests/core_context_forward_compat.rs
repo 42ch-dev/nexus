@@ -1,5 +1,7 @@
 //! Forward-compat guard test for `core_context` derivation kinds (`WS7` T10).
 //!
+//! see docs/specs/orchestration/creator-schedule-and-core-context.md
+//!
 //! Per spec §11 / compass `RISK-10`: V1.4 defines `DerivationStep::LlmSummarize`
 //! even though it doesn't emit it. This test codifies that:
 //! 1. A V1.5+ `llm_summarize` JSON blob deserializes successfully.
@@ -10,10 +12,6 @@ use nexus_contracts::local::schedule::DerivationStep;
 
 #[test]
 fn core_context_versions_parse_unknown_derivation_kind_safely() {
-    // Simulate a V1.5+ row with kind=`llm_summarize` payload.
-    // Current V1.4 code must deserialize without panic and either preserve
-    // the variant (LlmSummarize is already defined, even if not emitted) or
-    // expose the unknown kind as a recoverable error.
     let json = r#"{
         "kind": "llm_summarize",
         "capability": "context.summarize",
@@ -28,7 +26,6 @@ fn core_context_versions_parse_unknown_derivation_kind_safely() {
 
 #[test]
 fn core_context_versions_llm_summarize_roundtrip() {
-    // Verify the variant roundtrips through JSON serialization.
     let json = r#"{
         "kind": "llm_summarize",
         "capability": "context.summarize",
@@ -38,7 +35,6 @@ fn core_context_versions_llm_summarize_roundtrip() {
     let serialized = serde_json::to_string(&v).expect("must serialize");
     let back: DerivationStep = serde_json::from_str(&serialized).expect("must re-deserialize");
 
-    // Both should be LlmSummarize.
     match (&v, &back) {
         (
             DerivationStep::LlmSummarize { capability: c1, .. },

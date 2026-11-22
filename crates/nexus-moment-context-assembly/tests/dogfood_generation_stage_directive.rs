@@ -2,6 +2,8 @@
 //! exercised together through `assemble_moment_with_directive` on a seeded
 //! World (DF-75 — spec `fl-l-w5-prompt-control-plane.md` §4).
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! The unit suites prove the gate matrix (slots.rs) and the directive
 //! lifecycle (P1) in isolation. This file is the **dogfood layer**: a
 //! Mira-at-Harbor-style World with every routing shape (`before_defs`,
@@ -39,8 +41,8 @@ use nexus_narrative::InMemoryNarrativeGateway;
 
 const WORLD_ID: &str = "wld_dogfood_stage";
 
-/// Build the dogfood World: world + timeline beat + Stage-0 whose scan text
-/// fires the keyword entry (`king`).
+/// note: build the dogfood World — world + timeline beat + Stage-0 whose scan
+/// text fires the keyword entry (`king`).
 fn build_world() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
@@ -82,7 +84,8 @@ fn build_world() -> (
     (narrative, kb, stage0)
 }
 
-/// Build a `KnowledgeEntryRecord` with the given `modules.activation` payload.
+/// note: build a `KnowledgeEntryRecord` with the given `modules.activation`
+/// payload.
 fn entry(name: &str, id: &str, activation: &serde_json::Value) -> KnowledgeEntryRecord {
     let mut entry = KnowledgeEntryRecord::new(WORLD_ID, BlockType::Character, name);
     entry.entry_id = id.to_string();
@@ -90,8 +93,8 @@ fn entry(name: &str, id: &str, activation: &serde_json::Value) -> KnowledgeEntry
     entry
 }
 
-/// Seed every routing shape (all constant seeds with distinct priorities →
-/// deterministic emit order, spec §2 / Q5):
+/// note: seed every routing shape (all constant seeds with distinct priorities
+/// → deterministic emit order, spec §2 / Q5):
 ///
 /// `### World (Before)` → fallback (Hero + keyword-fired entry) →
 /// `### World (After)` → `### Outlet: aether` → `### Outlet: zone.z` →
@@ -131,7 +134,8 @@ async fn seed_routing_shapes(kb: &InMemoryKbStore) {
             serde_json::json!({"constant": true, "priority": 40,
                 "position_hint": "outlet", "outlet": "style.post_history"}),
         ),
-        // Keyword-fired (non-constant) — sorts after the constant band.
+        // note: the keyword-fired (non-constant) entry sorts after the constant
+        // band.
         (
             "Court Scribe",
             "kb_mid",
@@ -145,8 +149,8 @@ async fn seed_routing_shapes(kb: &InMemoryKbStore) {
     }
 }
 
-/// In-memory `DirectiveStore` stub serving one fixed active directive and
-/// counting injections.
+/// note: in-memory `DirectiveStore` stub serving one fixed active directive
+/// and counting injections.
 #[derive(Default)]
 struct StubDirectiveStore {
     active: Option<ActiveDirective>,
@@ -166,7 +170,8 @@ impl StubDirectiveStore {
     }
 }
 
-// `unused_async_trait_impl` (clippy 1.98): test stub, no async I/O — trait contract.
+// why: `unused_async_trait_impl` (clippy 1.98) fires on a test stub with no
+// async I/O; `async` is required by the trait contract.
 #[allow(clippy::unused_async_trait_impl)]
 impl DirectiveStore for StubDirectiveStore {
     async fn load_active(
@@ -222,7 +227,7 @@ async fn assemble(
 
 #[tokio::test]
 async fn dogfood_produce_places_all_slots_and_directive() {
-    // `produce`: every slot fills (style on — AC-I4 on-side) and the
+    // invariant: `produce` fills every slot (style on — AC-I4 on-side) and the
     // directive injects between Timeline and World KB (above lore, below
     // system — Q1 lock).
     let (ctx, store, _narrative) = assemble(GenerationStage::Produce).await;
@@ -271,7 +276,8 @@ async fn dogfood_produce_places_all_slots_and_directive() {
 
 #[tokio::test]
 async fn dogfood_review_keeps_style_slot() {
-    // `review`: style still on (AC-I4 on-side) + directive injects.
+    // invariant: `review` keeps style on (AC-I4 on-side) and injects the
+    // directive.
     let (ctx, store, _narrative) = assemble(GenerationStage::Review).await;
     let kb_text = ctx.world_kb.as_deref().expect("world_kb present");
     assert!(
@@ -288,8 +294,9 @@ async fn dogfood_review_keeps_style_slot() {
 
 #[tokio::test]
 async fn dogfood_persist_gates_style_keeps_everything_else() {
-    // `persist` (non-style stage): `style.post_history` off — its entry is
-    // excluded, every other slot stays, directive still injects.
+    // invariant: `persist` (non-style stage) turns `style.post_history` off —
+    // its entry is excluded, every other slot stays, and the directive still
+    // injects.
     let (ctx, store, _narrative) = assemble(GenerationStage::Persist).await;
     let kb_text = ctx.world_kb.as_deref().expect("world_kb present");
     assert!(
@@ -323,8 +330,8 @@ async fn dogfood_persist_gates_style_keeps_everything_else() {
 
 #[tokio::test]
 async fn dogfood_system_maintenance_has_no_lore_but_directive_lives() {
-    // `system_maintenance`: no lore slots at all (`_system.*` isolation) —
-    // but the directive is not lore and still injects (spec §4).
+    // invariant: `system_maintenance` renders no lore slots at all (`_system.*`
+    // isolation), but the directive is not lore and still injects (spec §4).
     let (ctx, store, _narrative) = assemble(GenerationStage::SystemMaintenance).await;
     assert!(
         ctx.world_kb.is_none(),
@@ -344,9 +351,9 @@ async fn dogfood_system_maintenance_has_no_lore_but_directive_lives() {
 
 #[tokio::test]
 async fn dogfood_directive_never_enters_world_kb_section() {
-    // AC-I3 at the dogfood layer: the directive body appears exactly once —
-    // in its own `## Moment Directive` section — and never inside the
-    // World-KB block (it is not lore, never a `modules.*` object).
+    // invariant: AC-I3 at the dogfood layer — the directive body appears
+    // exactly once, in its own `## Moment Directive` section, and never inside
+    // the World-KB block (it is not lore, never a `modules.*` object).
     let (ctx, _store, _narrative) = assemble(GenerationStage::Produce).await;
     let full = ctx.to_full_context();
     assert_eq!(

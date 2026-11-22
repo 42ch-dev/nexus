@@ -5,6 +5,8 @@
 //! preserved — absent (keep) / `null` (clear) / value (set) — and serialize
 //! back without losing the clear state.
 //!
+//! see crates/nexus-contracts/src/tristate.rs
+//!
 //! The core-owned consumer type is the core-lane `FindingsApi`
 //! (`schemas/core/findings-api.schema.json`, an `allOf` alias to the
 //! daemon-api definition) and it must keep the SAME carrier: the alias's
@@ -23,19 +25,18 @@ use nexus_contracts::{
 
 #[test]
 fn update_finding_rule_suggestion_keeps_all_three_states() {
-    // Absent → None (do not touch the column).
+    // note: absent is None — do not touch the column.
     let keep: UpdateFindingRequest =
         serde_json::from_str(r#"{"status":"triaged"}"#).expect("keep parses");
     assert_eq!(keep.rule_suggestion, None);
     assert_eq!(keep.status.as_deref(), Some("triaged"));
 
-    // Explicit null → Some(Value::Null) (clear to SQL NULL); this is the
+    // note: explicit null is Some(Value::Null) (clear to SQL NULL) — the
     // state a plain Option<T> carrier erases.
     let clear: UpdateFindingRequest =
         serde_json::from_str(r#"{"rule_suggestion":null}"#).expect("clear parses");
     assert_eq!(clear.rule_suggestion, Some(serde_json::Value::Null));
 
-    // Value → Some(Value::String) (set).
     let set: UpdateFindingRequest =
         serde_json::from_str(r#"{"rule_suggestion":"prefer scene breaks"}"#).expect("set parses");
     assert_eq!(
@@ -62,7 +63,7 @@ fn update_finding_rejects_unknown_fields() {
     assert!(error.to_string().contains("unknown field"), "{error}");
 }
 
-/// The core-lane alias carries the SAME presence-aware carrier: the alias must
+/// note: the core-lane alias carries the SAME presence-aware carrier — it must
 /// not re-flatten omission onto null, because the core findings authority
 /// projects exactly this carrier (`nexus_contracts::tristate::presence_string`)
 /// and a flattened field would make "keep the stored column" indistinguishable
@@ -119,8 +120,8 @@ fn patch_work_binding_fields_keep_all_three_states() {
     );
 }
 
-/// A schema-`required` property that is also nullable stays required: the
-/// generated carrier is `Option<T>` carrying typify 0.8's
+/// note: a schema-`required` property that is also nullable stays required —
+/// the generated carrier is `Option<T>` carrying typify 0.8's
 /// `#[serde(deserialize_with = "Option::deserialize")]`, so an omitted key is
 /// a deserialization error while an explicit `null` decodes to `None`.
 /// `core-service-stop-request.schema.json` requires both `expected_instance_id`
@@ -146,10 +147,10 @@ fn required_nullable_field_rejects_omission_and_accepts_null() {
     assert_eq!(epoch.expected_engine_epoch, Some(7));
 }
 
-/// The serialization half of the same contract: a required nullable property
-/// must stay *present* on the wire while it is null. The generated field
-/// carries no `skip_serializing_if`, so the null state emits the key rather
-/// than dropping it — a `skip_serializing_if` regression here would silently
+/// note: the serialization half of the same contract — a required nullable
+/// property must stay *present* on the wire while it is null. The generated
+/// field carries no `skip_serializing_if`, so the null state emits the key
+/// rather than dropping it — a `skip_serializing_if` regression here would silently
 /// make the field disappear for consumers that treat absence as "not
 /// supplied".
 #[test]
@@ -168,7 +169,8 @@ fn required_nullable_field_serializes_its_null_state() {
     );
 }
 
-/// The v1.191 native holder-governance fields carry **two** states, not three.
+/// note: the v1.191 native holder-governance fields carry **two** states, not
+/// three.
 ///
 /// The frozen `audience` member is absent (preserve the stored pair) or an
 /// authored value; its only clear is the explicit `{"kind":"shared"}` arm, and
@@ -192,7 +194,8 @@ fn governance_fields_have_no_null_state() {
     };
     let hld = format!("hld_{}", "0123456789abcdef".repeat(4));
 
-    // Absent and `null` both leave `audience` unset — neither is a clear.
+    // invariant: absent and `null` both leave `audience` unset — neither is a
+    // clear.
     let absent: UpdateKnowledgeEntryRequest =
         serde_json::from_str(r#"{"expected_revision":0}"#).expect("absent audience");
     assert!(absent.audience.is_none());
@@ -200,7 +203,7 @@ fn governance_fields_have_no_null_state() {
         serde_json::from_str(r#"{"expected_revision":0,"audience":null}"#).expect("null audience");
     assert!(null.audience.is_none());
 
-    // The explicit shared arm is the authored clear, and it round-trips.
+    // note: the explicit shared arm is the authored clear, and it round-trips.
     let cleared: UpdateKnowledgeEntryRequest =
         serde_json::from_str(r#"{"expected_revision":0,"audience":{"kind":"shared"}}"#)
             .expect("explicit clear");
@@ -216,7 +219,8 @@ fn governance_fields_have_no_null_state() {
         serde_json::json!({ "expected_revision": 0, "audience": { "kind": "shared" } })
     );
 
-    // The projection pair is absence-bearing: a shared row emits neither key.
+    // invariant: the projection pair is absence-bearing — a shared row emits
+    // neither key.
     let shared: KnowledgeViewItem = serde_json::from_str(
         r#"{"entry_id":"kb_1","owner":{"kind":"world","id":"wld_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
             "block_type":"info_point","canonical_name":"note-alpha","status":"confirmed",
@@ -231,11 +235,11 @@ fn governance_fields_have_no_null_state() {
         "a shared projection must omit both governance members: {wire}"
     );
 
-    // A null holder is not a resolved holder; it stays the shared absence.
+    // invariant: a null holder is not a resolved holder; it stays the shared
+    // absence.
     let nulled: KnowledgeViewItem = serde_json::from_str(&view_item("null")).expect("null holder");
     assert!(nulled.holder_entry_id.is_none());
 
-    // A resolved pair round-trips as authored.
     let restricted: KnowledgeViewItem =
         serde_json::from_str(&view_item(&format!(r#""{hld}""#))).expect("resolved holder");
     let wire = serde_json::to_string(&restricted).expect("serializes");

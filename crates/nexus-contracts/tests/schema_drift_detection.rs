@@ -1,5 +1,7 @@
 //! Schema Drift Detection (`WS-D`)
 //!
+//! see crates/nexus-contracts/AGENTS.md
+//!
 //! Detects drift between JSON Schema wire contracts in `schemas/` and their
 //! corresponding Rust struct definitions in `crates/nexus-contracts/src/`.
 //!
@@ -30,43 +32,37 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use nexus_contracts::*;
-// typify barrel only re-exports the root type for single-word-title schemas;
-// these definition types live inside the module but are not glob-re-exported.
+// why: typify barrel only re-exports the root type for single-word-title
+// schemas; these definition types live inside the module but are not
+// glob-re-exported.
 use nexus_contracts::generated::platform::http_bff::context_assembly_v1::{
     ContextAssembleRequestV1, ContextAssembleResponseV1,
 };
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum CheckMode {
-    /// All schema fields must exist in Rust (bidirectional exact match)
+    /// note: all schema fields must exist in Rust (bidirectional exact match)
     Strict,
-    /// Required schema fields must exist in Rust; Rust may have extra fields
+    /// note: required schema fields must exist in Rust; Rust may have extra
+    /// fields
     #[allow(dead_code)]
     Subset,
 }
 
-/// A function pointer that deserializes a JSON Value into a concrete Rust type,
-/// serializes it back, and returns `(type_name, serialized_value)`.
+/// note: a function pointer that deserializes a JSON Value into a concrete Rust
+/// type, serializes it back, and returns `(type_name, serialized_value)`.
 type CheckFn = Box<dyn Fn(Value) -> Result<(String, Value), String>>;
 
 struct SchemaEntry {
-    /// Path to the JSON Schema file, relative to repo root
+    /// note: path to the JSON Schema file, relative to repo root
     schema_path: &'static str,
-    /// Validation mode (Strict or Subset)
+    /// note: validation mode (Strict or Subset)
     mode: CheckMode,
-    /// One checker per Rust struct type generated from this schema
+    /// note: one checker per Rust struct type generated from this schema
     checkers: Vec<CheckFn>,
 }
 
-// ---------------------------------------------------------------------------
-// Macros
-// ---------------------------------------------------------------------------
-
-/// Build a checker for a single Rust struct type.
+/// note: build a checker for a single Rust struct type.
 macro_rules! make_checker {
     ($t:ty) => {{
         let type_name: &'static str = stringify!($t);
@@ -80,7 +76,8 @@ macro_rules! make_checker {
     }};
 }
 
-/// Build a `SchemaEntry`. Accepts either a single type or a list of types in brackets.
+/// note: build a `SchemaEntry` from either a single type or a list of types in
+/// brackets.
 macro_rules! entry {
     ($path:expr, $mode:ident, [$($t:ty),+ $(,)?]) => {
         SchemaEntry {
@@ -98,25 +95,20 @@ macro_rules! entry {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Schema Inventory Registry (T1)
-// ---------------------------------------------------------------------------
-
-/// Build the complete inventory of schema → Rust struct mappings.
+/// note: build the complete inventory of schema → Rust struct mappings.
 ///
 /// This is the single source of truth for what gets checked by drift detection.
 /// Add new entries here when you add new schemas or structs.
 #[allow(clippy::too_many_lines)]
 fn build_schema_map() -> Vec<SchemaEntry> {
     vec![
-        // ── domain/ ──────────────────────────────────────────────────────
         entry!("schemas/domain/world.schema.json", Strict, World),
         entry!("schemas/domain/memory.schema.json", Strict, Memory),
         entry!("schemas/domain/creator.schema.json", Strict, Creator),
         entry!("schemas/domain/fork-branch.schema.json", Strict, ForkBranch),
-        // V1.139 P0 T4 (spoke-adapter-architecture spec §5.1): `key-block.schema.json`
-        // was deleted — KnowledgeEntry is now the atomic KB type, sourced from spoke.
-        // No local drift entry; spoke version conformance is checked by check-wire-drift.sh.
+        // note: `key-block.schema.json` was deleted — KnowledgeEntry is now the
+        // atomic KB type, sourced from spoke. No local drift entry; spoke
+        // version conformance is checked by check-wire-drift.sh.
         entry!("schemas/domain/pairing.schema.json", Strict, Pairing),
         entry!(
             "schemas/domain/story-manifest.schema.json",
@@ -134,7 +126,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldMembership
         ),
-        // v1.184 P0 Task 1 — Actor/Character/binding closed contracts.
         entry!("schemas/domain/actor-ref.schema.json", Strict, ActorRef),
         entry!("schemas/domain/character.schema.json", Strict, Character),
         entry!(
@@ -142,14 +133,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ActorWorldBinding
         ),
-        // ── core/ (v1.190 P5-T0/P5-T1 — full-TS service wire contracts) ────
-        // core/findings/
         entry!(
             "schemas/core/findings/findings-prune-response.schema.json",
             Strict,
             FindingsPruneResponse
         ),
-        // core/narrative/
         entry!(
             "schemas/core/narrative/narrative-world-response.schema.json",
             Strict,
@@ -165,7 +153,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             NarrativeWorldsListResponse
         ),
-        // core/orchestration-presets/
         entry!(
             "schemas/core/orchestration-presets/orchestration-preset-list-response.schema.json",
             Strict,
@@ -221,7 +208,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             PresetProfileState
         ),
-        // core/works/
         entry!(
             "schemas/core/works/work-inspiration-add-request.schema.json",
             Strict,
@@ -297,11 +283,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorkReconcileReport
         ),
-        // v1.207 P1 T2 — tools-api DTO replacing the handwritten
+        // note: the tools-api DTO replaces the handwritten
         // `ToolExecuteRequest`/`ToolExecuteResponse` pair.
         entry!("schemas/core/tools-api.schema.json", Strict, ToolsApi),
-        // v1.207 P2/P3 — Connect replay/gap + capability negotiation and the
-        // durable operation receipt. These four DTOs are the wire contracts
+        // note: Connect replay/gap + capability negotiation and the durable
+        // operation receipt. These four DTOs are the wire contracts
         // the peer-tools event lane serves (subscribe request/response and the
         // cursorless gap event) plus the receipt `CoreOperationReceipt`.
         // Registered Strict like every other core DTO so a field rename on
@@ -326,28 +312,24 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CoreOperationReceipt
         ),
-        // v1.207 P1 T2 — `schemas/core/findings-api.schema.json` is NOT
+        // why: `schemas/core/findings-api.schema.json` is NOT
         // registered here on purpose: it is an `allOf` alias to the
         // daemon-api update-finding-request definition (single tri-state
         // authority), and `extract_properties` does not follow `allOf` (same
         // reason `core/chapter-content-query` is absent above). Its shape is
         // covered by that definition's own entry below, plus the generated
         // `FindingsApi` parity pinned in `tri_state_presence.rs`.
-        // ── common/ ──────────────────────────────────────────────────────
         entry!("schemas/common/version-ref.schema.json", Strict, VersionRef),
-        // SourceAnchor is generated by typify from source-anchor.schema.json
-        // (un-skipped in plan v1.138 T5 alongside common.schema.json).
+        // note: SourceAnchor is generated by typify from source-anchor.schema.json
+        // (un-skipped alongside common.schema.json).
         entry!(
             "schemas/common/source-anchor.schema.json",
             Strict,
             SourceAnchor
         ),
-        // ── platform/sync/ ───────────────────────────────────────────────
-        // V1.62 reorganization: bundle/delta/sync-command moved here from domain/;
-        // conflict-response/sync-pull-* moved here from cloud-sync/.
-        // Bundle: generated ONLY from platform/sync/bundle.schema.json
-        // (platform/sync/bundle-refinement.schema.json is allOf-only, skipped by
-        // codegen per SKIP_STRUCT_GENERATION_REL_PATHS).
+        // why: bundle is generated ONLY from platform/sync/bundle.schema.json —
+        // platform/sync/bundle-refinement.schema.json is allOf-only and skipped
+        // by codegen per SKIP_STRUCT_GENERATION_REL_PATHS.
         entry!("schemas/platform/sync/bundle.schema.json", Strict, Bundle),
         entry!("schemas/platform/sync/delta.schema.json", Strict, Delta),
         entry!(
@@ -370,23 +352,21 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SyncPullResponse
         ),
-        // ── daemon-api/common/ (V1.64 — shared envelopes) ───────────────────
-        // F-E1: canonical Daemon API error detail (the `error` object inside the
+        // note: canonical Daemon API error detail (the `error` object inside the
         // daemon's `{ success, false, error: ErrorResponse }` wire body).
         entry!(
             "schemas/daemon-api/common/error-response.schema.json",
             Strict,
             ErrorResponse
         ),
-        // ── daemon-api/runtime/ (V1.92 P-1 T2 — TLS fingerprint endpoint) ────
         entry!(
             "schemas/daemon-api/runtime/cert-fingerprint-response.schema.json",
             Strict,
             CertFingerprintResponse
         ),
-        // ── daemon-api/check/ (V1.148 P2 — orchestrate_check daemon route) ──
-        // CheckRequest is a plain object → Strict. CheckResponse is a oneOf-root
-        // schema (mirrors spoke CheckResponse) with no top-level `properties`.
+        // note: CheckRequest is a plain object → Strict. CheckResponse is a
+        // oneOf-root schema (mirrors spoke CheckResponse) with no top-level
+        // `properties`.
         // The drift loop checks each non-empty root oneOf arm and skips empty
         // arms (no field comparison possible).
         entry!(
@@ -399,9 +379,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CheckResponse
         ),
-        // ── daemon-api/inspector/ (V1.151 P0 DF-76 — moment inspect +
-        // moment-directive daemon routes; additive wire DTOs) ─────────────
-        // All three are plain-object root schemas → Strict. The response
+        // note: all three are plain-object root schemas → Strict. The response
         // packet mirrors build_inspector_packet 1:1 (AC-I3: moment_directive
         // is status-only, no body field by construction).
         entry!(
@@ -419,10 +397,9 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             MomentDirectiveRequest
         ),
-        // DR-63 (V1.158 P2, R-V1151P2-002): moment-directive RESPONSE schema.
-        // oneOf-root (directive row | empty `{}`) with no top-level
-        // `properties`. Non-empty arms are field-checked; empty arms are
-        // skipped. Wire exactness is also enforced by
+        // note: moment-directive RESPONSE schema. oneOf-root (directive row |
+        // empty `{}`) with no top-level `properties`; non-empty arms are
+        // field-checked, empty arms skipped. Wire exactness is also enforced by
         // nexus-core/tests/context_services.rs
         // (`retained_moment_directive_set_show_clear_and_scope_ownership`,
         // migrated from the deleted nexus-daemon-runtime directive_api.rs
@@ -432,14 +409,12 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             MomentDirectiveResponse
         ),
-        // ── daemon-api/compute/ ───────────────────────────────────────────
-        // V1.62 reorganization: compute envelopes moved here from compute/.
-        // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
+        // note: WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
         // struct of each schema is registered; inline/definition structs
         // (ComputeOutputStateDelta) are emitted by codegen but validated
         // indirectly via their parent schema.
-        // (entity-attributes/entity-state schemas were DELETED in V1.62 P0;
-        // per-module shapes now live in modules/<id>/manifest.json per P1.)
+        // note: entity-attributes/entity-state schemas were deleted;
+        // per-module shapes now live in modules/<id>/manifest.json.
         entry!(
             "schemas/daemon-api/compute/compute-input.schema.json",
             Strict,
@@ -450,7 +425,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ComputeOutput
         ),
-        // V1.114 P2 T1: compute module registry endpoints.
         entry!(
             "schemas/daemon-api/compute/module-summary.schema.json",
             Strict,
@@ -466,9 +440,8 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListModulesResponse
         ),
-        // v1.195 P2-T1 (current-host-contracts §5): the query/response shapes
-        // the native/service Compute facade transports, promoted from the
-        // app-local declarations.
+        // note: the query/response shapes the native/service Compute facade
+        // transports, promoted from the app-local declarations.
         entry!(
             "schemas/daemon-api/compute/list-runs-query.schema.json",
             Strict,
@@ -489,7 +462,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ClearRunsResponse
         ),
-        // ── daemon-api/works/ (V1.63 P1) ──────────────────────────────────
         entry!(
             "schemas/daemon-api/works/create-work-request.schema.json",
             Strict,
@@ -540,7 +512,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ReleaseCompletionLockRequest
         ),
-        // ── daemon-api/works/chapters/ (V1.65 P0) ─────────────────────────
         entry!(
             "schemas/daemon-api/works/chapters/chapter-status.schema.json",
             Strict,
@@ -591,13 +562,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListChaptersResponse
         ),
-        // ── daemon-api/kb/ (V1.63 P1) ─────────────────────────────────────
         entry!(
             "schemas/daemon-api/kb/pagination-info.schema.json",
             Strict,
             PaginationInfo
         ),
-        // ── daemon-api/findings/ (V1.63 P1) ───────────────────────────────
         entry!(
             "schemas/daemon-api/findings/create-finding-request.schema.json",
             Strict,
@@ -618,7 +587,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListFindingsQuery
         ),
-        // F-P2 (V1.64): cursor-paginated findings list response.
+        // note: cursor-paginated findings list response.
         entry!(
             "schemas/daemon-api/findings/list-findings-response.schema.json",
             Strict,
@@ -629,7 +598,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StaleFindingsResponse
         ),
-        // V1.91 — Findings batch PATCH helper
         entry!(
             "schemas/daemon-api/findings/batch-update-findings-request.schema.json",
             Strict,
@@ -640,13 +608,12 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             BatchUpdateFindingsResponse
         ),
-        // V1.92 P-1 T5 — extracted inline patch from batch-update-findings
+        // note: extracted inline patch from batch-update-findings.
         entry!(
             "schemas/daemon-api/findings/finding-batch-patch.schema.json",
             Strict,
             FindingBatchPatch
         ),
-        // ── daemon-api/memory/ (V1.78 P0 — creator memory review-loop) ─────
         entry!(
             "schemas/daemon-api/memory/create-pending-review-request.schema.json",
             Strict,
@@ -727,7 +694,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SoulNarrativeResponse
         ),
-        // ── daemon-api/reading/ (V1.89 — reading depth: progress + annotations)
         entry!(
             "schemas/daemon-api/reading/reading-progress-query.schema.json",
             Strict,
@@ -768,7 +734,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ReadingAnnotationListResponse
         ),
-        // ── daemon-api/schedule/ (V1.63 P1) ───────────────────────────────
         entry!(
             "schemas/daemon-api/schedule/add-schedule-request.schema.json",
             Strict,
@@ -839,7 +804,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             DeleteScheduleResponse
         ),
-        // ── daemon-api/workspace/ (V1.63 P1) ──────────────────────────────
         entry!(
             "schemas/daemon-api/workspace/list-workspaces-query.schema.json",
             Strict,
@@ -880,7 +844,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SetActiveWorkspaceResponse
         ),
-        // ── daemon-api/creators/ (V1.63 P1) ───────────────────────────────
         entry!(
             "schemas/daemon-api/creators/creator-info.schema.json",
             Strict,
@@ -921,7 +884,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             LogoutResponse
         ),
-        // ── daemon-api/orchestration/sessions/ (V1.63 P3) ──────────────────
         entry!(
             "schemas/daemon-api/orchestration/sessions/session-summary.schema.json",
             Strict,
@@ -942,7 +904,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SessionDetailResponse
         ),
-        // ── daemon-api/orchestration/capabilities/ (V1.63 P3) ───────────────
         entry!(
             "schemas/daemon-api/orchestration/capabilities/capability-info.schema.json",
             Strict,
@@ -953,13 +914,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListCapabilitiesResponse
         ),
-        // ── daemon-api/orchestration/ (v1.236 P0 T1 — Workflow IR v0) ───────
         entry!(
             "schemas/daemon-api/orchestration/workflow-document.schema.json",
             Strict,
             WorkflowDocument
         ),
-        // ── daemon-api/orchestration/ (v1.237 P2 — simulator contracts) ─────
         entry!(
             "schemas/daemon-api/orchestration/simulation-trajectory.schema.json",
             Strict,
@@ -970,7 +929,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategySimulationRequest
         ),
-        // ── daemon-api/orchestration/ (v1.239 P3 — compose contracts) ───────
         entry!(
             "schemas/daemon-api/orchestration/strategy-compose-request.schema.json",
             Strict,
@@ -981,7 +939,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategyComposeResponse
         ),
-        // ── daemon-api/orchestration/ (v1.239 P3 — approve contracts) ───────
         entry!(
             "schemas/daemon-api/orchestration/approved-strategy-snapshot.schema.json",
             Strict,
@@ -992,7 +949,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategyApproveRequest
         ),
-        // ── daemon-api/orchestration/ (v1.241 P3.5 — apply contracts) ──────
         entry!(
             "schemas/daemon-api/orchestration/strategy-apply-request.schema.json",
             Strict,
@@ -1008,7 +964,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategyApprovals
         ),
-        // ── daemon-api/patterns/ (v1.239 P3 — pattern packages) ─────────────
         entry!(
             "schemas/daemon-api/patterns/pattern-slot.schema.json",
             Strict,
@@ -1034,7 +989,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListPatternsResponse
         ),
-        // ── daemon-api/preset-management/ (V1.63 P3) ────────────────────────
         entry!(
             "schemas/daemon-api/preset-management/preset-summary.schema.json",
             Strict,
@@ -1070,7 +1024,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ReloadPresetResponse
         ),
-        // V1.65 P0: full preset CRUD additions
         entry!(
             "schemas/daemon-api/preset-management/get-preset-response.schema.json",
             Strict,
@@ -1086,7 +1039,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             UpdatePresetResponse
         ),
-        // ── daemon-api/canvas/strategy/ (V1.71) ────────────────────────────
         entry!(
             "schemas/daemon-api/canvas/strategy/strategy-patch-state-request.schema.json",
             Strict,
@@ -1112,7 +1064,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategyConflictError
         ),
-        // ── daemon-api/canvas/outline/ (V1.72) ─────────────────────────────
         entry!(
             "schemas/daemon-api/canvas/outline/outline-patch-structure-request.schema.json",
             Strict,
@@ -1148,7 +1099,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorkOutline
         ),
-        // ── daemon-api/canvas/world-kb/ (V1.73) ───────────────────────────
         entry!(
             "schemas/daemon-api/canvas/world-kb/world-kb-patch-entity-request.schema.json",
             Strict,
@@ -1219,8 +1169,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldKbExtractJobProjection
         ),
-        // ── platform/http-bff/ ───────────────────────────────────────────
-        // V1.62 reorganization: platform HTTP bodies moved here from platform/.
         entry!(
             "schemas/platform/http-bff/context-assembly-v1.schema.json",
             Strict,
@@ -1406,10 +1354,8 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListTimelineEventsResponse
         ),
-        // ── daemon-api/worlds/ (V1.162 P1 T2 — local timeline fork create) ──
-        // Daemon HTTP surface for the `nexus.fork.create` capability (plan
-        // `2026-08-12-v1.162-p1-fork-backend-foundation`): POST
-        // /v1/daemon/worlds/:world_id/forks. Both are plain-object root
+        // note: daemon HTTP surface for the `nexus.fork.create` capability:
+        // POST /v1/daemon/worlds/:world_id/forks. Both are plain-object root
         // schemas → Strict.
         entry!(
             "schemas/daemon-api/worlds/create-fork-request.schema.json",
@@ -1421,8 +1367,8 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CreateForkResponse
         ),
-        // V1.165 P1 T3 (DR-68 / AR-3): world findings read surface DTO.
-        // Plain-object root (`findings` + `truncated`) → Strict; the inline
+        // note: world findings read surface DTO. Plain-object root
+        // (`findings` + `truncated`) → Strict; the inline
         // item shape is validated indirectly via the parent schema (same
         // convention as the check-response findings item).
         entry!(
@@ -1430,19 +1376,19 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldFindingsListResponse
         ),
-        // V1.166 P1 T4 (DR-64 / AR-3): world rules read surface DTO.
-        // Plain-object root (`rules` + `truncated`) → Strict; item mirrors
-        // the spoke Rule author metadata + the first-class AR-2 constraint
+        // note: world rules read surface DTO. Plain-object root (`rules` +
+        // `truncated`) → Strict; item mirrors
+        // the spoke Rule author metadata + the first-class constraint
         // carrier (extensions bag not exposed).
         entry!(
             "schemas/daemon-api/worlds/world-rules-list-response.schema.json",
             Strict,
             WorldRulesListResponse
         ),
-        // V1.169 P1 (AR-1): world rules write surface DTOs. Plain-object
+        // note: world rules write surface DTOs. Plain-object
         // roots → Strict. Type structure only (no minLength/enum/format):
         // value validation lives in the daemon handler so form-producible
-        // failures surface through the field-level envelope (AR-2), never
+        // failures surface through the field-level envelope, never
         // the axum Json extractor.
         entry!(
             "schemas/daemon-api/worlds/world-rule-create-request.schema.json",
@@ -1454,7 +1400,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldRuleUpdateRequest
         ),
-        // V1.169 P1 (AR-1): single-item response schema serving both POST
+        // note: single-item response schema serving both POST
         // 201 and PATCH 200 — the WorldRulesListResponseRulesItem shape
         // verbatim → Strict.
         entry!(
@@ -1462,7 +1408,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldRuleResponse
         ),
-        // ── daemon-api/characters/ (v1.184 P0 Task 1) ────────────────────
         entry!(
             "schemas/daemon-api/characters/create-character-request.schema.json",
             Strict,
@@ -1533,7 +1478,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             UpdateCharacterBindingRequest
         ),
-        // v1.184 P1 Task 3 / fix1 — Actor KnowledgeView contracts.
         entry!(
             "schemas/domain/knowledge-owner-ref.schema.json",
             Strict,
@@ -1589,7 +1533,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             DeleteKnowledgeEntryQuery
         ),
-        // v1.184 P2 Task 1 — agent-host session/operation/scan contracts.
         entry!(
             "schemas/daemon-api/agent-host/agent-host-config.schema.json",
             Strict,
@@ -1668,11 +1611,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
     ]
 }
 
-// ---------------------------------------------------------------------------
-// Schema File Loading and Caching (T2)
-// ---------------------------------------------------------------------------
-
-/// Derive the complete set of schema file paths from two sources:
+/// note: derive the complete set of schema file paths from two sources:
 /// 1. All paths registered in `build_schema_map()` (the checked schemas)
 /// 2. A deterministic glob over `schemas/**/*.schema.json` (catches schemas
 ///    without checkers, e.g., definitions-only or allOf-only schemas)
@@ -1685,12 +1624,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
 fn collect_all_schema_paths(entries: &[SchemaEntry]) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
 
-    // Collect from the provided schema map
     for entry in entries {
         paths.insert(entry.schema_path.to_string());
     }
 
-    // Supplement with glob discovery for any schemas not in the map
+    // why: glob discovery catches schemas with no registered checker.
     let root = workspace_root();
     let schemas_dir = root.join("schemas");
     collect_schema_files_recursive(&schemas_dir, &root, &mut paths);
@@ -1698,7 +1636,7 @@ fn collect_all_schema_paths(entries: &[SchemaEntry]) -> BTreeSet<String> {
     paths
 }
 
-/// Recursively collect `.schema.json` files under a directory.
+/// note: recursively collect `.schema.json` files under a directory.
 fn collect_schema_files_recursive(dir: &Path, root: &Path, paths: &mut BTreeSet<String>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -1716,16 +1654,14 @@ fn collect_schema_files_recursive(dir: &Path, root: &Path, paths: &mut BTreeSet<
     }
 }
 
-/// Workspace root: traverse up from `CARGO_MANIFEST_DIR` (`crates/nexus-contracts`)
-/// to the workspace root (2 levels up).
+/// note: workspace root — traverse up from `CARGO_MANIFEST_DIR`
+/// (`crates/nexus-contracts`) to the workspace root (2 levels up).
 fn workspace_root() -> PathBuf {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    // CARGO_MANIFEST_DIR = .../crates/nexus-contracts
-    // workspace root = .../ (parent of crates/)
     dir.parent().unwrap().parent().unwrap().to_path_buf()
 }
 
-/// Load a JSON file from a path relative to the workspace root.
+/// note: load a JSON file from a path relative to the workspace root.
 fn load_json(relative_path: &str) -> Result<Value, String> {
     let full_path = workspace_root().join(relative_path);
     let content = std::fs::read_to_string(&full_path)
@@ -1741,11 +1677,8 @@ fn build_schema_cache(entries: &[SchemaEntry]) -> HashMap<String, Value> {
     let mut cache = HashMap::new();
     for path in collect_all_schema_paths(entries) {
         if let Ok(val) = load_json(&path) {
-            // Key by relative path
             cache.insert(path.clone(), val.clone());
-            // Also key by the `$id` URL if present
             if let Some(id) = val.get("$id").and_then(|v| v.as_str()) {
-                // Strip any #fragment from $id before using as key
                 let clean_id = id.split('#').next().unwrap_or(id);
                 cache.insert(clean_id.to_string(), val);
             }
@@ -1754,11 +1687,8 @@ fn build_schema_cache(entries: &[SchemaEntry]) -> HashMap<String, Value> {
     cache
 }
 
-// ---------------------------------------------------------------------------
-// Schema Property Extraction (T2)
-// ---------------------------------------------------------------------------
-
-/// Extract property names and their schema definitions from a JSON Schema object.
+/// note: extract property names and their schema definitions from a JSON
+/// Schema object.
 fn extract_properties(schema: &Value) -> Vec<(String, Value)> {
     let mut props = Vec::new();
     if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
@@ -1769,7 +1699,7 @@ fn extract_properties(schema: &Value) -> Vec<(String, Value)> {
     props
 }
 
-/// Extract the set of required field names from a JSON Schema object.
+/// note: extract the set of required field names from a JSON Schema object.
 fn extract_required(schema: &Value) -> BTreeSet<String> {
     let mut required = BTreeSet::new();
     if let Some(req) = schema.get("required").and_then(|r| r.as_array()) {
@@ -1782,7 +1712,7 @@ fn extract_required(schema: &Value) -> BTreeSet<String> {
     required
 }
 
-/// Describe a property's type for error messages.
+/// note: describe a property's type for error messages.
 fn describe_type(properties: &[(String, Value)], name: &str) -> String {
     properties.iter().find(|(n, _)| n == name).map_or_else(
         || "unknown".to_string(),
@@ -1790,10 +1720,10 @@ fn describe_type(properties: &[(String, Value)], name: &str) -> String {
     )
 }
 
-/// Get a human-readable type description from a schema property definition.
+/// note: get a human-readable type description from a schema property
+/// definition.
 fn describe_schema_type(def: &Value) -> String {
     if let Some(ref_path) = def.get("$ref").and_then(|r| r.as_str()) {
-        // Extract the definition name from the ref path
         if let Some(fragment) = ref_path.split('#').nth(1) {
             if let Some(def_name) = fragment.rsplit('/').next() {
                 return format!("ref({def_name})");
@@ -1820,11 +1750,7 @@ fn describe_schema_type(def: &Value) -> String {
     "unknown".to_string()
 }
 
-// ---------------------------------------------------------------------------
-// Dummy Value Generation (T2)
-// ---------------------------------------------------------------------------
-
-/// Build a JSON test payload from schema properties using dummy values.
+/// note: build a JSON test payload from schema properties using dummy values.
 /// The returned JSON object has all schema properties filled with type-appropriate
 /// dummy values, so it can be deserialized into the corresponding Rust struct.
 fn build_test_json(
@@ -1844,7 +1770,8 @@ fn build_test_json(
     Value::Object(map)
 }
 
-/// Generate a dummy string value that satisfies typify-generated type constraints.
+/// note: generate a dummy string value that satisfies typify-generated type
+/// constraints.
 ///
 /// typify enforces:
 /// - `format: "date-time"` → `chrono::DateTime<Utc>` (needs valid RFC 3339 string)
@@ -1853,23 +1780,23 @@ fn build_test_json(
 ///
 /// For unconstrained strings, returns `"dummy"`.
 fn make_dummy_string(prop_def: &Value) -> Value {
-    // Handle format constraints
     if let Some(format) = prop_def.get("format").and_then(|f| f.as_str()) {
         if format == "date-time" {
             return Value::String("2024-01-01T00:00:00Z".to_string());
         }
-        // v1.207 P2: `CoreConnectSubscribeResponse.epoch` is `format: "uuid"`,
+        // note: `CoreConnectSubscribeResponse.epoch` is `format: "uuid"`,
         // which typify maps to `::uuid::Uuid`; the nil UUID round-trips it.
         if format == "uuid" {
             return Value::String("00000000-0000-0000-0000-000000000000".to_string());
         }
     }
 
-    // Handle pattern constraints — Nexus patterns look like `^prefix_[a-zA-Z0-9]+$`.
-    // Extract the literal prefix and append a valid suffix.
+    // note: Nexus patterns look like `^prefix_[a-zA-Z0-9]+$`; the literal
+    // prefix plus a valid suffix satisfies them.
     if let Some(pattern) = prop_def.get("pattern").and_then(|p| p.as_str()) {
-        // SemVer 2.0.0 (`pattern-manifest` `version`): alternation-heavy, so the
-        // generic prefix extraction below cannot build a conforming value.
+        // why: SemVer 2.0.0 (`pattern-manifest` `version`) is
+        // alternation-heavy, so the generic prefix extraction below cannot
+        // build a conforming value.
         if pattern.contains("(0|[1-9]") {
             return Value::String("1.0.0".to_string());
         }
@@ -1895,8 +1822,9 @@ fn make_dummy_string(prop_def: &Value) -> Value {
         }
         let prefix = inner.split(['[', '\\', '.']).next().unwrap_or("");
         if !prefix.is_empty() {
-            // Exact-length hex ids (`chr_<32hex>`, `awb_<32hex>`) use `{N}` after
-            // a character class. Pad with `a` so dummy values satisfy the pattern.
+            // note: exact-length hex ids (`chr_<32hex>`, `awb_<32hex>`) use
+            // `{N}` after a character class; pad with `a` so dummy values
+            // satisfy the pattern.
             if let Some(n) = inner
                 .rsplit_once('{')
                 .and_then(|(_, rest)| rest.split('}').next())
@@ -1904,8 +1832,8 @@ fn make_dummy_string(prop_def: &Value) -> Value {
             {
                 return Value::String(format!("{prefix}{}", "a".repeat(n)));
             }
-            // The prefix typically ends with `_` (e.g. `ctr_`). Append `0a` to
-            // satisfy `[a-zA-Z0-9]+` quantifiers that follow.
+            // note: the prefix typically ends with `_` (e.g. `ctr_`); append
+            // `0a` to satisfy `[a-zA-Z0-9]+` quantifiers that follow.
             return Value::String(format!("{prefix}0a"));
         }
     }
@@ -1913,37 +1841,34 @@ fn make_dummy_string(prop_def: &Value) -> Value {
     Value::String("dummy".to_string())
 }
 
-/// Generate a dummy JSON value for a schema property definition.
-#[allow(clippy::too_many_lines)] // one recursive schema-shape dispatch table
+/// note: generate a dummy JSON value for a schema property definition.
+#[allow(clippy::too_many_lines)] // why: one recursive schema-shape dispatch table
 fn make_dummy_value(
     prop_def: &Value,
     schema_cache: &HashMap<String, Value>,
     current_dir: &str,
     current_schema_path: &str,
 ) -> Value {
-    // Handle $ref (must be first to resolve enum references)
+    // why: $ref must be first to resolve enum references.
     if let Some(ref_path) = prop_def.get("$ref").and_then(|r| r.as_str()) {
         return make_dummy_from_ref(ref_path, schema_cache, current_dir, current_schema_path);
     }
 
-    // Handle const value (e.g., "const": 1)
     if let Some(const_val) = prop_def.get("const") {
         return const_val.clone();
     }
 
-    // Handle inline enum (must precede type-based dispatch so we get the correct value)
+    // why: inline enums must precede type-based dispatch to get the correct value.
     if let Some(enum_vals) = prop_def.get("enum").and_then(|e| e.as_array()) {
         if let Some(first) = enum_vals.first() {
             return first.clone();
         }
     }
 
-    // Handle type
     let type_val = prop_def.get("type");
     let type_str = match type_val {
         Some(Value::String(s)) => Some(s.as_str()),
         Some(Value::Array(arr)) => {
-            // Pick the first non-null type from a union type like ["integer", "null"]
             arr.iter().filter_map(|v| v.as_str()).find(|s| *s != "null")
         }
         _ => None,
@@ -1952,8 +1877,9 @@ fn make_dummy_value(
     match type_str {
         Some("string") => make_dummy_string(prop_def),
         Some("integer") => {
-            // typify maps `minimum: 1` to NonZeroU64; generate a value >= max(minimum, 1)
-            // so deserialization succeeds for both u64 and NonZeroU64 fields.
+            // why: typify maps `minimum: 1` to NonZeroU64; generate a value at
+            // least 1 so deserialization succeeds for both u64 and NonZeroU64
+            // fields.
             let min = prop_def
                 .get("minimum")
                 .and_then(serde_json::Value::as_u64)
@@ -1963,11 +1889,9 @@ fn make_dummy_value(
         Some("number") => Value::Number(serde_json::Number::from_f64(1.0).unwrap()),
         Some("boolean") => Value::Bool(false),
         Some("array") => {
-            // Check for items schema
             prop_def.get("items").map_or_else(
                 || Value::Array(vec![]),
                 |items| {
-                    // Generate a single dummy item
                     let item_val =
                         make_dummy_value(items, schema_cache, current_dir, current_schema_path);
                     Value::Array(vec![item_val])
@@ -1975,18 +1899,17 @@ fn make_dummy_value(
             )
         }
         Some("object") => {
-            // Build a dummy from sub-properties if available
             prop_def
                 .get("properties")
                 .and_then(|p| p.as_object())
                 .map_or_else(
-                    // Freeform object (no `properties`): a root/nested
-                    // `oneOf` object (e.g. the closed ActorRef /
+                    // why: a freeform object (no `properties`) that is a
+                    // root/nested `oneOf` (e.g. the closed ActorRef /
                     // KnowledgeOwnerRef unions referenced from daemon-api
-                    // schemas, v1.184 P1 T3 fix1) takes its first arm;
-                    // otherwise, if `additionalProperties` specifies a value
-                    // schema, generate one matching entry so typify's typed
-                    // maps (e.g. `Map<String, Map<…>>`) accept it.
+                    // schemas) takes its first arm; otherwise, if
+                    // `additionalProperties` specifies a value schema, generate
+                    // one matching entry so typify's typed maps (e.g.
+                    // `Map<String, Map<…>>`) accept it.
                     || {
                         if let Some(first_arm) = prop_def
                             .get("oneOf")
@@ -2007,11 +1930,11 @@ fn make_dummy_value(
                             },
                         );
                         let mut m = serde_json::Map::new();
-                        // `propertyNames.pattern` constrains the map keys:
-                        // typify emits a pattern-validated key newtype (e.g.
-                        // the spoke ModuleMap key `^[a-z][a-z0-9_-]*$` on the
-                        // V1.165 patch-DTO `modules` field). The `"_"` default
-                        // fails that pattern — use a lowercase key when the
+                        // note: `propertyNames.pattern` constrains the map
+                        // keys — typify emits a pattern-validated key newtype
+                        // (e.g. the spoke ModuleMap key `^[a-z][a-z0-9_-]*$` on
+                        // the patch-DTO `modules` field). The `"_"` default
+                        // fails that pattern, so use a lowercase key when the
                         // pattern's first class is `[a-z]` (the only
                         // propertyNames shape in the schema corpus today;
                         // same heuristic spirit as `make_dummy_string`).
@@ -2046,7 +1969,6 @@ fn make_dummy_value(
                 )
         }
         _ => {
-            // Try allOf, oneOf, anyOf
             for key in &["allOf", "oneOf", "anyOf"] {
                 if let Some(subs) = prop_def.get(*key).and_then(|a| a.as_array()) {
                     if let Some(first) = subs.first() {
@@ -2059,20 +1981,18 @@ fn make_dummy_value(
                     }
                 }
             }
-            // Last resort
             Value::String("dummy".to_string())
         }
     }
 }
 
-/// Generate a dummy value by resolving a `$ref` reference.
+/// note: generate a dummy value by resolving a `$ref` reference.
 fn make_dummy_from_ref(
     ref_path: &str,
     schema_cache: &HashMap<String, Value>,
     current_dir: &str,
     current_schema_path: &str,
 ) -> Value {
-    // Split on # to separate file part from fragment
     let (file_part, fragment) = ref_path.find('#').map_or_else(
         || (ref_path, None),
         |pos| {
@@ -2086,9 +2006,8 @@ fn make_dummy_from_ref(
         },
     );
 
-    // Resolve the file path
-    // Same-file ref (`#/definitions/...`): the cache key IS the current
-    // schema's relative path, so use it directly instead of letting
+    // why: for a same-file ref (`#/definitions/...`) the cache key IS the
+    // current schema's relative path, so use it directly instead of letting
     // `resolve_ref_file` return "" (which made every cache lookup miss and
     // hit the silent "dummy" fallback — e.g. StaleFindingsResponse.items).
     let resolved_path = if file_part.is_empty() {
@@ -2097,21 +2016,21 @@ fn make_dummy_from_ref(
         resolve_ref_file(file_part, current_dir)
     };
 
-    // Use the referenced file's directory for resolving nested relative refs
+    // why: nested relative refs resolve against the referenced file's directory.
     let ref_dir = Path::new(&resolved_path)
         .parent()
         .and_then(|p| p.to_str())
         .unwrap_or(current_dir);
 
-    // Look up in cache; try both the resolved path and the raw ref_path
     let schema = schema_cache
         .get(&resolved_path)
         .or_else(|| schema_cache.get(ref_path));
 
     if let Some(s) = schema {
         if let Some(frag) = fragment {
-            // Navigate the fragment path like "/definitions/SchemaVersion"
-            // Skip leading empty element from "/" prefix
+            // note: navigate the fragment path like
+            // "/definitions/SchemaVersion", skipping the leading empty element
+            // from the "/" prefix.
             let parts: Vec<&str> = frag.split('/').filter(|p| !p.is_empty()).collect();
             let mut current = s;
             for part in &parts {
@@ -2121,20 +2040,19 @@ fn make_dummy_from_ref(
                     return Value::String("dummy".to_string());
                 }
             }
-            // Now 'current' is the referenced definition
             make_dummy_value(current, schema_cache, ref_dir, &resolved_path)
         } else {
-            // No fragment: the entire schema is the referenced value
             make_dummy_value(s, schema_cache, ref_dir, &resolved_path)
         }
     } else {
-        // If we can't resolve, try using the raw property definition as a fallback
-        // This happens with relative refs to files that might not be in our cache
+        // note: an unresolvable ref falls back to the raw property definition;
+        // this happens with relative refs to files not in the cache.
         Value::String("dummy".to_string())
     }
 }
 
-/// Resolve a `$ref` file path to an absolute schema path relative to the repo root.
+/// note: resolve a `$ref` file path to an absolute schema path relative to the
+/// repo root.
 fn resolve_ref_file(file_part: &str, current_dir: &str) -> String {
     if file_part.is_empty() || file_part.starts_with("https://") {
         // URL like https://nexus42.invalid/schemas/common/...
@@ -2143,21 +2061,16 @@ fn resolve_ref_file(file_part: &str, current_dir: &str) -> String {
             .or_else(|| file_part.strip_prefix("https://nexus42.invalid"))
             .map_or_else(|| file_part.to_string(), ToString::to_string)
     } else if file_part.starts_with('/') {
-        // Absolute path in repo
         file_part.trim_start_matches('/').to_string()
     } else {
-        // Relative path: resolve against current schema directory
         let current = Path::new(current_dir);
         let resolved = current.join(file_part);
         resolved.to_str().unwrap_or(file_part).to_string()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Drift Detection Test (T3, T4, T5)
-// ---------------------------------------------------------------------------
-
-/// Check whether a Rust struct's serialized fields match the schema's properties.
+/// note: check whether a Rust struct's serialized fields match the schema's
+/// properties.
 fn check_fields_match(
     schema_path: &str,
     struct_name: &str,
@@ -2168,23 +2081,20 @@ fn check_fields_match(
 ) -> Vec<String> {
     let mut errors = Vec::new();
 
-    // Get the serialized field names from the Rust struct
     let rust_fields: BTreeSet<String> = match serialized {
         Value::Object(map) => map.keys().cloned().collect(),
         _other => {
-            // Not an object (e.g., serialized as a string or number)
-            // This can happen for unit structs or wrapper types
-            return errors; // nothing to compare
+            // note: non-object serialization (a unit struct or wrapper type)
+            // leaves nothing to compare.
+            return errors;
         }
     };
 
-    // Get schema property names
     let schema_fields: BTreeSet<String> =
         schema_properties.iter().map(|(n, _)| n.clone()).collect();
 
     match mode {
         CheckMode::Strict => {
-            // Check 1: every schema field must exist in Rust serialized output
             for prop_name in &schema_fields {
                 if !rust_fields.contains(prop_name) {
                     let prop_type = describe_type(schema_properties, prop_name);
@@ -2194,7 +2104,6 @@ fn check_fields_match(
                     ));
                 }
             }
-            // Check 2: every Rust serialized field must exist in schema
             for field_name in &rust_fields {
                 if !schema_fields.contains(field_name) {
                     errors.push(format!(
@@ -2205,7 +2114,6 @@ fn check_fields_match(
             }
         }
         CheckMode::Subset => {
-            // Only required schema fields must exist in Rust
             for prop_name in schema_required {
                 if !rust_fields.contains(prop_name) {
                     let prop_type = describe_type(schema_properties, prop_name);
@@ -2221,11 +2129,7 @@ fn check_fields_match(
     errors
 }
 
-// ---------------------------------------------------------------------------
-// Main Test (T5, T6)
-// ---------------------------------------------------------------------------
-
-/// Maximum acceptable wall-clock time for drift detection in milliseconds.
+/// note: maximum acceptable wall-clock time for drift detection in milliseconds.
 ///
 /// Defaults to 500ms (~25x headroom over typical ~18ms runtime). Override via
 /// `NEXUS_DRIFT_LIMIT_MS` env var for slow CI runners.
@@ -2234,7 +2138,8 @@ fn check_fields_match(
 /// the threshold is not exceeded.
 const DRIFT_DETECTION_TIME_LIMIT_MS_DEFAULT: u64 = 500;
 
-/// Returns the drift time limit, checking `NEXUS_DRIFT_LIMIT_MS` env var first.
+/// note: return the drift time limit, checking `NEXUS_DRIFT_LIMIT_MS` env var
+/// first.
 fn drift_time_limit_ms() -> u64 {
     std::env::var("NEXUS_DRIFT_LIMIT_MS")
         .ok()
@@ -2243,7 +2148,7 @@ fn drift_time_limit_ms() -> u64 {
 }
 
 #[test]
-// Exhaustive per-schema drift check over every registered contract; one sweep.
+// why: one exhaustive per-schema drift sweep over every registered contract.
 #[allow(clippy::too_many_lines)]
 fn schema_drift_detection() {
     let start = std::time::Instant::now();
@@ -2254,7 +2159,6 @@ fn schema_drift_detection() {
     let mut checked_count = 0;
 
     for entry in &entries {
-        // Load the schema file
         let schema = match load_json(entry.schema_path) {
             Ok(s) => s,
             Err(e) => {
@@ -2266,7 +2170,6 @@ fn schema_drift_detection() {
             }
         };
 
-        // Extract properties and required fields from the schema
         let properties = extract_properties(&schema);
         let required = extract_required(&schema);
 
@@ -2305,14 +2208,12 @@ fn schema_drift_detection() {
                 }
                 continue;
             }
-            // Skip schemas with no properties (definitions-only schemas like common.schema.json)
+            // note: skip definitions-only schemas like common.schema.json.
             continue;
         }
 
-        // Build a JSON test payload with dummy values
         let test_json = build_test_json(&properties, &schema_cache, entry.schema_path);
 
-        // Run each checker on this schema's struct types
         for checker in &entry.checkers {
             checked_count += 1;
             match checker(test_json.clone()) {
@@ -2341,7 +2242,6 @@ fn schema_drift_detection() {
     let elapsed_ms = elapsed.as_millis();
 
     if !all_errors.is_empty() {
-        // Build a detailed error report
         let unique_errors: HashSet<&str> = all_errors.iter().map(String::as_str).collect();
         let summary = format!(
             "\n========================================================\n\
@@ -2358,7 +2258,6 @@ fn schema_drift_detection() {
         panic!("{summary}");
     }
 
-    // Log elapsed time for observability
     let limit_ms = drift_time_limit_ms();
     eprintln!(
         "  drift detection timing: {elapsed_ms}ms for {} schemas, {} structs (limit: {limit_ms}ms)",
@@ -2366,7 +2265,6 @@ fn schema_drift_detection() {
         checked_count,
     );
 
-    // Assert time threshold
     assert!(
         elapsed < std::time::Duration::from_millis(limit_ms),
         "Schema drift detection took {elapsed_ms}ms, exceeding {limit_ms}ms \
@@ -2383,11 +2281,7 @@ fn schema_drift_detection() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Deliberate Drift Tests (T7)
-// ---------------------------------------------------------------------------
-
-/// Helper: create a schema with specific properties for deliberate-drift testing.
+/// note: create a schema with specific properties for deliberate-drift testing.
 fn make_test_schema(properties: &[(&str, &str)]) -> Value {
     let mut props = serde_json::Map::new();
     for (name, type_str) in properties {
@@ -2398,7 +2292,6 @@ fn make_test_schema(properties: &[(&str, &str)]) -> Value {
     let mut schema = serde_json::Map::new();
     schema.insert("type".to_string(), Value::String("object".to_string()));
     schema.insert("properties".to_string(), Value::Object(props));
-    // Default: all properties required
     let required: Vec<Value> = properties
         .iter()
         .map(|(n, _)| Value::String(n.to_string()))
@@ -2407,7 +2300,7 @@ fn make_test_schema(properties: &[(&str, &str)]) -> Value {
     Value::Object(schema)
 }
 
-/// A struct with fields matching a known subset of schema properties.
+/// note: a struct with fields matching a known subset of schema properties.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 struct TestFixture {
@@ -2417,8 +2310,6 @@ struct TestFixture {
 
 #[test]
 fn drift_detection_known_matched_passes() {
-    // Verify that a known in-sync schema+struct pair passes.
-    // The TestFixture above has 'id' and 'name'. Schema should match exactly.
     let schema = make_test_schema(&[("id", "string"), ("name", "string")]);
     let properties = extract_properties(&schema);
     let required = extract_required(&schema);
@@ -2446,7 +2337,7 @@ fn drift_detection_known_matched_passes() {
 
 #[test]
 fn drift_detection_deliberate_missing_field_fails() {
-    // Schema has a field ('extra_field') that the Rust struct doesn't have.
+    // note: the schema has an 'extra_field' the Rust struct doesn't have.
     let schema = make_test_schema(&[
         ("id", "string"),
         ("name", "string"),
@@ -2475,7 +2366,6 @@ fn drift_detection_deliberate_missing_field_fails() {
         "Expected drift errors for missing field but got none"
     );
 
-    // Verify the error mentions the missing field
     let error_text = errors.join("\n");
     assert!(
         error_text.contains("extra_field"),
@@ -2489,14 +2379,13 @@ fn drift_detection_deliberate_missing_field_fails() {
 
 #[test]
 fn drift_detection_type_mismatch_fails() {
-    // Schema has a field that expects integer, but TestFixture has String.
-    // The deserialization should fail because we pass JSON number for a String field.
+    // note: the schema expects an integer where TestFixture has a String, so
+    // the dummy JSON number must fail deserialization.
     let schema = make_test_schema(&[("id", "integer"), ("name", "string")]);
     let properties = extract_properties(&schema);
     let cache = HashMap::new();
     let test_json = build_test_json(&properties, &cache, "test");
 
-    // TestFixture.id is String, but schema says integer -> deserialization fails
     let result: Result<TestFixture, _> = serde_json::from_value(test_json);
     assert!(
         result.is_err(),

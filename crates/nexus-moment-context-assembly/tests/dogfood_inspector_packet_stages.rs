@@ -1,6 +1,9 @@
 //! V1.151 P2 dogfood — enriched assembly inspector packet (DF-76, spec
 //! `fl-l-w6-assembly-inspector.md` §2) exercised end-to-end on a seeded
 //! World across generation stages, through the P0/P1 surfaces:
+//!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! `assemble_moment_with_directive` (assembly) → `build_inspector_packet`
 //! (the relocated P0 builder) — **the AC-D1 dogfood evidence**.
 //!
@@ -58,13 +61,13 @@ use nexus_narrative::InMemoryNarrativeGateway;
 use nexus_spoke_adapter::adapter::activation::HopEdge;
 
 const WORLD_ID: &str = "wld_dogfood_inspector";
-/// Directive body used by the stub — must never leak into the packet.
+/// note: directive body used by the stub — must never leak into the packet.
 const DIRECTIVE_BODY: &str = "Keep the prose terse and harbor-voiced.";
-/// Hop cap threaded via `MomentRequest::with_hop_max_tokens` — must surface
-/// in the packet's `budget.cap`.
+/// note: hop cap threaded via `MomentRequest::with_hop_max_tokens` — must
+/// surface in the packet's `budget.cap`.
 const HOP_CAP: usize = 100_000;
 
-/// Build the dogfood World: world + timeline beat + Stage-0 whose scan
+/// note: build the dogfood World — world + timeline beat + Stage-0 whose scan
 /// text (timeline + user_prompt) fires the keyword entry (`king`).
 fn build_world() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
@@ -107,7 +110,8 @@ fn build_world() -> (
     (narrative, kb, stage0)
 }
 
-/// Build a `KnowledgeEntryRecord` with the given `modules.activation` payload.
+/// note: build a `KnowledgeEntryRecord` with the given `modules.activation`
+/// payload.
 fn entry(name: &str, id: &str, activation: &serde_json::Value) -> KnowledgeEntryRecord {
     let mut entry = KnowledgeEntryRecord::new(WORLD_ID, BlockType::Character, name);
     entry.entry_id = id.to_string();
@@ -120,7 +124,8 @@ fn entry(name: &str, id: &str, activation: &serde_json::Value) -> KnowledgeEntry
     entry
 }
 
-/// Build a neutral `KnowledgeEntryRecord` — no `modules.activation` at all.
+/// note: build a neutral `KnowledgeEntryRecord` — no `modules.activation` at
+/// all.
 fn neutral_entry(name: &str, id: &str) -> KnowledgeEntryRecord {
     let mut entry = KnowledgeEntryRecord::new(WORLD_ID, BlockType::InfoPoint, name);
     entry.entry_id = id.to_string();
@@ -132,8 +137,8 @@ fn neutral_entry(name: &str, id: &str) -> KnowledgeEntryRecord {
     entry
 }
 
-/// Seed every routing shape (all constant seeds with distinct priorities →
-/// deterministic emit order, spec §2 / Q5):
+/// note: seed every routing shape (all constant seeds with distinct priorities
+/// → deterministic emit order, spec §2 / Q5):
 ///
 /// `world.before` (kb_bf) → default (kb_hero + kb_mid + kb_hidden +
 /// kb_neutral) → `world.after` (kb_af) → `kb.outlet.aether` (kb_a) →
@@ -169,13 +174,14 @@ async fn seed_kb(kb: &InMemoryKbStore) {
             serde_json::json!({"constant": true, "priority": 50,
                 "position_hint": "outlet", "outlet": "style.post_history"}),
         ),
-        // Keyword-fired (non-constant) — sorts after the constant band.
+        // note: the keyword-fired (non-constant) entry sorts after the constant
+        // band.
         (
             "Court Scribe",
             "kb_mid",
             serde_json::json!({"keys": ["king"], "priority": 30}),
         ),
-        // Keyed but non-firing — only reachable via the relation hop.
+        // note: keyed but non-firing — only reachable via the relation hop.
         (
             "Hidden Cove",
             "kb_hidden",
@@ -187,13 +193,14 @@ async fn seed_kb(kb: &InMemoryKbStore) {
             .await
             .expect("insert kb entry");
     }
-    // Neutral — no activation module → default slot, "no activation module".
+    // note: a neutral entry has no activation module, so it routes to the
+    // default slot with the "no activation module" reason.
     kb.insert_knowledge_entry(neutral_entry("Neutral", "kb_neutral"))
         .await
         .expect("insert neutral kb entry");
 }
 
-/// Relation graph enabling hop expansion: the constant seed `kb_hero`
+/// note: relation graph enabling hop expansion — the constant seed `kb_hero`
 /// BFS-expands to pull the keyed-but-non-firing `kb_hidden` at depth 1.
 fn hop_edges() -> Vec<HopEdge> {
     vec![HopEdge {
@@ -204,8 +211,8 @@ fn hop_edges() -> Vec<HopEdge> {
     }]
 }
 
-/// In-memory `DirectiveStore` stub serving one fixed active directive and
-/// counting injections (V1.150 dogfood adapter pattern).
+/// note: in-memory `DirectiveStore` stub serving one fixed active directive
+/// and counting injections (the V1.150 dogfood adapter pattern).
 #[derive(Default)]
 struct StubDirectiveStore {
     active: Option<ActiveDirective>,
@@ -225,8 +232,8 @@ impl StubDirectiveStore {
     }
 }
 
-// `unused_async_trait_impl` (new in clippy 1.98): the stub performs no async
-// I/O; `async` is by `DirectiveStore` trait contract — toolchain-drift debt.
+// why: `unused_async_trait_impl` (clippy 1.98) fires because the stub performs
+// no async I/O; `async` is required by the `DirectiveStore` trait contract.
 #[allow(clippy::unused_async_trait_impl)]
 impl DirectiveStore for StubDirectiveStore {
     async fn load_active(
@@ -278,7 +285,7 @@ async fn assemble(stage: GenerationStage) -> (MomentContext, StubDirectiveStore)
     (ctx, store)
 }
 
-/// Flatten the packet's `slot_map` into `entry_id → slot`.
+/// note: flatten the packet's `slot_map` into `entry_id → slot`.
 fn slot_map(packet: &serde_json::Value) -> HashMap<String, String> {
     packet["slot_map"]
         .as_array()
@@ -293,18 +300,18 @@ fn slot_map(packet: &serde_json::Value) -> HashMap<String, String> {
         .collect()
 }
 
-/// `produce`: every slot fills (style on — AC-I4 on-side), the directive
+/// note: `produce` fills every slot (style on — AC-I4 on-side), the directive
 /// metadata is present (no body — AC-I3), and the hop entry carries hop
-/// fields on the trace + the `relation hop` reason in placement.
-// The one comprehensive packet assertion mirrors V1.149's single-big-test
-// dogfood shape; splitting it would scatter one packet's evidence.
+/// fields on the trace plus the `relation hop` reason in placement.
+// why: the one comprehensive packet assertion mirrors V1.149's
+// single-big-test dogfood shape; splitting it would scatter one packet's
+// evidence.
 #[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     let (ctx, store) = assemble(GenerationStage::Produce).await;
     let packet = build_inspector_packet(&ctx);
 
-    // ── modules.*: fired entries with reasons (unchanged spoke recipe) ──
     let placement = packet["modules"]["placement"]
         .as_array()
         .expect("placement array");
@@ -356,9 +363,10 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     let trace = packet["modules"]["activation_trace"]
         .as_array()
         .expect("trace array");
-    // 8 primary rows + 1 extra hop-accepted row for kb_hidden (its primary
-    // row is rejected — keys absent from the scan — the hop row carries the
-    // pull). Same engine semantics V1.149's dogfood asserts on the ctx trace.
+    // note: 8 primary rows plus 1 extra hop-accepted row for kb_hidden — its
+    // primary row is rejected (keys absent from the scan) and the hop row
+    // carries the pull. Same engine semantics V1.149's dogfood asserts on the
+    // ctx trace.
     assert_eq!(trace.len(), 9, "8 primary rows + 1 hop row");
     assert!(
         trace
@@ -384,8 +392,8 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         "kb_hidden hop row accepted"
     );
 
-    // Hop fields live on `ctx.activation_trace` (the packet's
-    // `modules.activation_trace` is the unchanged spoke 4-field shape).
+    // note: hop fields live on `ctx.activation_trace` — the packet's
+    // `modules.activation_trace` is the unchanged spoke 4-field shape.
     let hidden = ctx
         .activation_trace
         .as_deref()
@@ -405,7 +413,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     );
     assert_eq!(hidden.source_relation_id.as_deref(), Some("rel_hero_cove"));
 
-    // ── slot_map: every fired entry routed to its expected slot ──
     let slots = slot_map(&packet);
     assert_eq!(slots.len(), 9, "8 lore entries + 1 synthetic directive row");
     assert_eq!(slots["kb_bf"], "world.before");
@@ -421,7 +428,7 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     );
     assert_eq!(slots["dir_dogfood"], "moment.directive");
 
-    // The rendered World-KB matches the slot map (post-gate reality).
+    // note: the rendered World-KB matches the slot map (post-gate reality).
     let kb_text = ctx.world_kb.as_deref().expect("world_kb present");
     for heading in [
         "### World (Before)",
@@ -432,7 +439,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         assert!(kb_text.contains(heading), "missing {heading}");
     }
 
-    // ── budget: primary + hop estimates with caller cap / remaining ──
     assert!(
         packet["budget"]["primary_tokens_est"]
             .as_u64()
@@ -457,7 +463,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         "remaining must be present when a cap was set"
     );
 
-    // ── moment_directive: status/metadata only, body never present ──
     assert_eq!(
         packet["moment_directive"],
         serde_json::json!({
@@ -481,8 +486,9 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     assert_eq!(store.injection_count(), 1, "one directive injection");
 }
 
-/// `review`: style still on (AC-I4 on-side) — the packet's `slot_map`
-/// keeps the `style.post_history` row and the directive metadata stays.
+/// invariant: `review` keeps style on (AC-I4 on-side) — the packet's
+/// `slot_map` keeps the `style.post_history` row and the directive metadata
+/// stays.
 #[tokio::test]
 async fn dogfood_review_keeps_style_slot_in_packet() {
     let (ctx, store) = assemble(GenerationStage::Review).await;
@@ -511,8 +517,8 @@ async fn dogfood_review_keeps_style_slot_in_packet() {
     assert_eq!(store.injection_count(), 1);
 }
 
-/// `persist` (non-style stage): the slot_map reflects the post-gate
-/// reality — `style.post_history` is dropped (not re-routed), every other
+/// invariant: `persist` (non-style stage) reflects the post-gate reality in the
+/// slot_map — `style.post_history` is dropped (not re-routed), every other
 /// slot stays, and the directive still injects (TTL governs lifetime, not
 /// stage — spec §4).
 #[tokio::test]

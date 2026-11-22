@@ -1,15 +1,13 @@
 //! Schema rename compliance tests — V1.57 P2 (R-V156P1-M001).
 //!
+//! see crates/nexus-contracts/src/local/orchestration/mod.rs
+//!
 //! Verifies that the `agent_count` → `capability_count` rename in
 //! `RegistryRefreshOutput` preserves backward compatibility via serde
 //! field aliases.
 
 use nexus_contracts::local::orchestration::RegistryRefreshOutput;
 use serde_json::json;
-
-// ---------------------------------------------------------------------------
-// Test 1: New field name `capabilityCount` deserializes correctly
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_capability_count_rename_does_not_break_consumers_new_name() {
@@ -32,10 +30,6 @@ fn test_capability_count_rename_does_not_break_consumers_new_name() {
     assert_eq!(output.source, "synthetic");
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: Old field name `agentCount` deserializes via alias (camelCase)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_capability_count_rename_does_not_break_consumers_old_camelcase() {
     let json = json!({
@@ -56,10 +50,6 @@ fn test_capability_count_rename_does_not_break_consumers_old_camelcase() {
     assert_eq!(output.capability_count, 99);
     assert_eq!(output.source, "cdn");
 }
-
-// ---------------------------------------------------------------------------
-// Test 3: Old field name `agent_count` deserializes via alias (snake_case)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_capability_count_rename_does_not_break_consumers_old_snakecase() {
@@ -82,10 +72,6 @@ fn test_capability_count_rename_does_not_break_consumers_old_snakecase() {
     assert_eq!(output.source, "synthetic_fallback");
 }
 
-// ---------------------------------------------------------------------------
-// Test 4: Serialization uses the canonical name `capabilityCount`
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_capability_count_rename_serialization_uses_canonical_name() {
     let output = RegistryRefreshOutput {
@@ -102,7 +88,6 @@ fn test_capability_count_rename_serialization_uses_canonical_name() {
 
     let json = serde_json::to_value(&output).expect("serialize RegistryRefreshOutput");
 
-    // The old field name must NOT appear in the output.
     assert!(
         !json.to_string().contains("agentCount"),
         "output must not contain old field name agentCount"
@@ -112,21 +97,14 @@ fn test_capability_count_rename_serialization_uses_canonical_name() {
         "output must not contain old field name agent_count"
     );
 
-    // The canonical field name must appear.
     assert_eq!(json["capabilityCount"], json!(35));
     assert_eq!(json["source"], json!("synthetic"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: Both old and new names in same payload — serde rejects ambiguity
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_capability_count_rename_both_names_rejected_as_ambiguous() {
-    // If both old (`agentCount`) and new (`capabilityCount`) names are
-    // present in the same payload, serde correctly rejects the input as
-    // ambiguous (duplicate field). This is safer than silently picking one
-    // value over the other.
+    // why: serde rejects duplicate fields, which is safer than silently
+    // picking one of the two values.
     let json = json!({
         "cacheAgeMs": 0,
         "agentCount": 10,

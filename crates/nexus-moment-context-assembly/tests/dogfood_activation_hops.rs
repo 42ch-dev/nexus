@@ -1,6 +1,8 @@
 //! V1.149 P2 dogfood — default-on lore activation + Relation hop expand
 //! (DF-74) exercised end-to-end through `assemble_moment` on seeded Worlds.
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! The P0/P1 unit suites already prove the engine truth tables, ordering
 //! comparator, budget semantics and BFS termination in isolation. This file
 //! is the **dogfood layer**: it seeds a Mira-at-Harbor-style World A (full
@@ -30,14 +32,10 @@ use nexus_narrative::timeline_event::TimelineEventType;
 use nexus_narrative::InMemoryNarrativeGateway;
 use nexus_spoke_adapter::adapter::activation::{ActivationTraceEntry, HopEdge};
 
-// ──────────────────────────────────────────────────────────────────────────
-// World A — Mira-at-Harbor style activation World (Harbor → Dawn Dock, etc.)
-// ──────────────────────────────────────────────────────────────────────────
-
 const WORLD_A_ID: &str = "wld_dogfood_harbor";
 const WORLD_B_ID: &str = "wld_dogfood_neutral";
 
-/// Build the World A fixture: world + 3 timeline beats + 12 KB entries
+/// note: build the World A fixture — world + 3 timeline beats + 12 KB entries
 /// carrying the full `modules.activation` dialect + 7 relation edges.
 ///
 /// The scan text (stage0 + timeline outline beats) contains: `lighthouse`,
@@ -53,7 +51,6 @@ fn build_harbor_fixture() -> (
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
 
-    // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
         WORLD_A_ID,
         "ctr_dogfood",
@@ -65,7 +62,6 @@ fn build_harbor_fixture() -> (
     world.created_at = "2026-01-01T00:00:00Z".to_string();
     narrative.insert_world(world);
 
-    // ── Timeline beats (outline scan sources, frozen) ──
     let mut evt1 = nexus_narrative::timeline_event::TimelineEvent::new(
         WORLD_A_ID,
         "fbk_root",
@@ -99,7 +95,6 @@ fn build_harbor_fixture() -> (
     evt3.title = Some("The morning bell answers from the harbor guild hall.".to_string());
     narrative.insert_event(evt3);
 
-    // ── Stage0 (scan source; no wall-clock dep) ──
     let stage0 = Stage0Assembly {
         personality: "A creative writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels about seaside towns.".to_string(),
@@ -153,11 +148,10 @@ fn entry(
     e
 }
 
-// Long integration test; splitting would obscure the end-to-end scenario
+// why: the end-to-end scenario would be obscured if split.
 #[allow(clippy::too_many_lines)]
 async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
     let entries = vec![
-        // Constant seed — always fires, top of the constant band.
         entry(
             WORLD_A_ID,
             "kb_harbor",
@@ -166,7 +160,8 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
             "The old harbor where ships rest.",
             Some(activation(&[], &[], "and_any", true, 10.0, 0.0, None)),
         ),
-        // Primary literal fire (also self-match via canonical name).
+        // note: primary literal fire — `dawn` also self-matches via the
+        // canonical name.
         entry(
             WORLD_A_ID,
             "kb_dawn_dock",
@@ -175,7 +170,6 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
             "Dawn's first light on the dock planks.",
             Some(activation(&["dawn"], &[], "and_any", false, 9.0, 0.0, None)),
         ),
-        // Secondary logic (and_any): primary `harbor` + secondary `guild`.
         entry(
             WORLD_A_ID,
             "kb_harbor_guild",
@@ -192,7 +186,6 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
                 None,
             )),
         ),
-        // Non-literal match mode #1: whole_word.
         entry(
             WORLD_A_ID,
             "kb_tide_altar",
@@ -209,9 +202,9 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
                 Some("whole_word"),
             )),
         ),
-        // Non-literal match mode #2: regex (fires on lowercase `lighthouse`
-        // in the timeline beat; `Lighthouse` canonical does NOT match the
-        // case-sensitive pattern).
+        // note: regex fires on the lowercase `lighthouse` in the timeline beat;
+        // the capitalised `Lighthouse` canonical does NOT match the
+        // case-sensitive pattern.
         entry(
             WORLD_A_ID,
             "kb_lighthouse",
@@ -228,8 +221,9 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
                 Some("regex"),
             )),
         ),
-        // Same priority band, distinct order → order ascending (lower first).
-        // Keys fire ONLY from the external timeline scan (not self-match).
+        // note: same priority band, distinct order → order ascending (lower
+        // first); these keys fire ONLY from the external timeline scan, not by
+        // self-match.
         entry(
             WORLD_A_ID,
             "kb_order_evening",
@@ -262,7 +256,7 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
                 None,
             )),
         ),
-        // Low-priority fire — sorts below the priority-2 hop-pulled entry.
+        // note: sorts below the priority-2 hop-pulled entry.
         entry(
             WORLD_A_ID,
             "kb_low_priority_quay",
@@ -271,8 +265,8 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
             "A small dock for fishing boats.",
             Some(activation(&["quay"], &[], "and_any", false, 1.0, 0.0, None)),
         ),
-        // Neutral — no activation module; must remain matched (byte-
-        // equivalence family).
+        // note: neutral — no activation module; must remain matched
+        // (byte-equivalence family).
         entry(
             WORLD_A_ID,
             "kb_old_passage",
@@ -281,7 +275,8 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
             "The narrow lane behind the warehouses.",
             None,
         ),
-        // Gating: keyed entry whose key appears NOWHERE → must be filtered.
+        // note: gating — a keyed entry whose key appears NOWHERE must be
+        // filtered.
         entry(
             WORLD_A_ID,
             "kb_seagull",
@@ -298,8 +293,8 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
                 None,
             )),
         ),
-        // Hop targets: keyed but non-firing (keys absent from scan), so they
-        // may only enter via relation hops from Harbor.
+        // note: hop targets are keyed but non-firing (keys absent from scan), so
+        // they may only enter via relation hops from Harbor.
         entry(
             WORLD_A_ID,
             "kb_cove_keeper",
@@ -343,7 +338,6 @@ async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
 
 fn harbor_edges() -> Vec<HopEdge> {
     vec![
-        // Harbor → Dawn Dock style (the handbook fixture pair).
         HopEdge {
             relation_id: "rel_harbor_dock".to_string(),
             from_id: "kb_harbor".to_string(),
@@ -368,8 +362,8 @@ fn harbor_edges() -> Vec<HopEdge> {
             to_id: "kb_tide_altar".to_string(),
             relation_type: "connects".to_string(),
         },
-        // Hop chain + cycle: Harbor → Cove Keeper → Tide Pool → Cove Keeper,
-        // plus a Cove Keeper self-loop.
+        // note: hop chain plus cycle — Harbor → Cove Keeper → Tide Pool → Cove
+        // Keeper, plus a Cove Keeper self-loop.
         HopEdge {
             relation_id: "rel_harbor_cove".to_string(),
             from_id: "kb_harbor".to_string(),
@@ -391,8 +385,8 @@ fn harbor_edges() -> Vec<HopEdge> {
     ]
 }
 
-/// Emit-order assertion helper: extract canonical names from the rendered
-/// `world_kb` section, in emitted order.
+/// note: extract canonical names from the rendered `world_kb` section, in
+/// emitted order.
 fn kb_names(world_kb: &str) -> Vec<String> {
     world_kb
         .lines()
@@ -412,7 +406,7 @@ async fn assemble_harbor(
     let request = MomentRequest::new(stage0.clone())
         .with_world(WORLD_A_ID)
         .with_hop_edges(harbor_edges())
-        // Generous budget: depth + cycle only bound the pull (spec Q1);
+        // note: generous budget — depth + cycle bound the pull (spec Q1);
         // budget semantics are unit-covered in activation.rs.
         .with_hop_max_tokens(100_000);
     assemble_moment(&request, narrative, kb).await
@@ -427,7 +421,7 @@ fn trace_by_id(ctx: &MomentContext) -> HashMap<String, Vec<ActivationTraceEntry>
 }
 
 #[tokio::test]
-// Long integration test; splitting would obscure the end-to-end scenario
+// why: the end-to-end scenario would be obscured if split.
 #[allow(clippy::too_many_lines)]
 async fn dogfood_world_a_activation_hops_end_to_end() {
     let (narrative, kb, stage0) = build_harbor_fixture();
@@ -437,7 +431,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
     let kb_text = ctx.world_kb.as_deref().expect("world_kb must be present");
     let trace = trace_by_id(&ctx);
 
-    // ── (a) Gating filters non-matching keyed entries ──
     assert!(
         !kb_text.contains("Seagull"),
         "gated entry 'Seagull' (keys [barnacle]) must not appear in output"
@@ -453,8 +446,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         seagull_rows[0].reason
     );
 
-    // ── (b) Dialect fire-conditions ──
-    // and_any secondary logic.
     let guild = &trace["kb_harbor_guild"];
     assert!(
         guild
@@ -463,7 +454,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         "Harbor Guild must fire via and_any: {:?}",
         guild.iter().map(|r| &r.reason).collect::<Vec<_>>()
     );
-    // whole_word match mode.
     let altar = &trace["kb_tide_altar"];
     assert!(
         altar
@@ -472,7 +462,7 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         "Tide Altar must fire via whole_word: {:?}",
         altar.iter().map(|r| &r.reason).collect::<Vec<_>>()
     );
-    // regex match mode (case-sensitive; fires on timeline beat only).
+    // note: regex is case-sensitive, so only the timeline beat fires it.
     let lighthouse = &trace["kb_lighthouse"];
     assert!(
         lighthouse
@@ -481,7 +471,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         "Lighthouse must fire via regex: {:?}",
         lighthouse.iter().map(|r| &r.reason).collect::<Vec<_>>()
     );
-    // constant seed.
     let harbor = &trace["kb_harbor"];
     assert!(
         harbor
@@ -490,7 +479,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         "Harbor must fire as a constant seed: {:?}",
         harbor.iter().map(|r| &r.reason).collect::<Vec<_>>()
     );
-    // neutral.
     let passage = &trace["kb_old_passage"];
     assert!(
         passage
@@ -499,24 +487,24 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         "Old Passage must be included as neutral"
     );
 
-    // ── (c) priority/order emit order ──
     let names = kb_names(kb_text);
+    // note: constant band first, then priority desc, then order asc; neutrals
+    // and hop-pulled rows tie at priority 0 and keep stable append order.
     let expected_order = [
-        "Harbor",             // constant band first
-        "Dawn Dock",          // priority 9
-        "Harbor Guild",       // priority 8
-        "Tide Altar",         // priority 7 (whole_word)
-        "Lighthouse",         // priority 5
-        "Evening Order Bell", // priority 3, order 1 → before Morning
-        "Morning Order Bell", // priority 3, order 2
-        "Cove Keeper",        // priority 2 (hop-pulled, own sort key)
-        "Low Priority Quay",  // priority 1
-        "Old Passage",        // priority 0 neutral (stable before hop tie)
-        "Tide Pool",          // priority 0 hop-pulled (stable after primary)
+        "Harbor",
+        "Dawn Dock",
+        "Harbor Guild",
+        "Tide Altar",
+        "Lighthouse",
+        "Evening Order Bell",
+        "Morning Order Bell",
+        "Cove Keeper",
+        "Low Priority Quay",
+        "Old Passage",
+        "Tide Pool",
     ];
     assert_eq!(names, expected_order, "emitted order mismatch");
 
-    // ── (d) hops pull neighbors within budget ──
     let cove_hop = trace["kb_cove_keeper"]
         .iter()
         .find(|r| r.accepted && r.hop_depth.is_some())
@@ -555,23 +543,23 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         Some("cove_tide_pool")
     );
 
-    // No re-fire: hop-pulled rows are NOT key matches.
+    // invariant: hop-pulled rows are NOT key matches.
     assert!(
         cove_hop.reason.starts_with("relation hop"),
         "hop-pulled row must not re-fire keys: {}",
         cove_hop.reason
     );
 
-    // ── (e)+(f) cycle terminates; no duplicate entries ──
-    // The Cove Keeper ↔ Tide Pool 2-cycle + self-loop would hang or double-
-    // pull if the `visited` guard failed. Exactly-once presence is the proof.
+    // note: the Cove Keeper ↔ Tide Pool 2-cycle plus self-loop would hang or
+    // double-pull if the `visited` guard failed, so exactly-once presence is
+    // the proof.
     let unique: HashSet<String> = names.iter().cloned().collect();
     assert_eq!(unique.len(), names.len(), "no duplicate entries emitted");
     assert_eq!(kb_text.matches("Cove Keeper").count(), 1);
     assert_eq!(kb_text.matches("Tide Pool").count(), 1);
 
-    // One primary trace row per entry (12), each accepted at most once; hop
-    // rows carry the hop fields and are additional accepted rows only for
+    // note: one primary trace row per entry (12), each accepted at most once;
+    // hop rows carry the hop fields and are additional accepted rows only for
     // the two pulled entries. Seagull is the single rejected entry.
     assert_eq!(trace.len(), 12, "one primary trace row per entry");
     for (id, rows) in &trace {
@@ -581,7 +569,7 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
             accepted, expected,
             "entry {id} must be accepted exactly {expected} time(s) (accepted rows: {accepted})"
         );
-        // Pre-visited primary entries never get hop rows.
+        // invariant: pre-visited primary entries never get hop rows.
         if !matches!(id.as_str(), "kb_cove_keeper" | "kb_tide_pool") {
             assert!(
                 rows.iter().all(|r| r.hop_depth.is_none()),
@@ -590,11 +578,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
         }
     }
 }
-
-// ──────────────────────────────────────────────────────────────────────────
-// World B — neutral-only control: default-on must be byte-identical to the
-// explicit off-switch (the HARD ship gate, on a richer multi-entry fixture).
-// ──────────────────────────────────────────────────────────────────────────
 
 fn build_neutral_world_b() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
@@ -694,7 +677,7 @@ async fn dogfood_world_b_neutral_only_byte_equivalent() {
     let (narrative, kb, stage0) = build_neutral_world_b();
     let seeded = seed_neutral_world_b(&kb).await;
 
-    // Default-on: `MomentRequest::new` leaves activation_enabled = true.
+    // note: `MomentRequest::new` leaves activation_enabled = true (default-on).
     let default_on_request = MomentRequest::new(stage0.clone()).with_world(WORLD_B_ID);
     let explicit_off_request = MomentRequest::new(stage0)
         .with_world(WORLD_B_ID)
@@ -710,7 +693,8 @@ async fn dogfood_world_b_neutral_only_byte_equivalent() {
          explicit activation_enabled:false (V1.146 flag-off semantics)"
     );
 
-    // Nothing dropped, nothing reordered — every seeded entry present once.
+    // invariant: nothing dropped, nothing reordered — every seeded entry is
+    // present once.
     let kb_text = default_on.world_kb.as_deref().expect("world_kb present");
     for e in &seeded {
         assert_eq!(
@@ -723,7 +707,8 @@ async fn dogfood_world_b_neutral_only_byte_equivalent() {
         );
     }
 
-    // Trace plumbing: default-on exposes per-entry neutral trace; off does not.
+    // invariant: default-on exposes a per-entry neutral trace; explicit-off
+    // does not.
     assert!(
         default_on.activation_trace.is_some(),
         "default-on must expose an activation trace"

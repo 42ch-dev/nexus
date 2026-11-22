@@ -1,12 +1,8 @@
 //! Round-trip serde tests for Schedule types (WS7 T1).
 //!
-//! Tests are written FIRST per TDD; types do not yet exist.
+//! see crates/nexus-contracts/src/local/schedule/
 
 use nexus_contracts::local::schedule::*;
-
-// ---------------------------------------------------------------------------
-// Test 1: Schedule full serde round-trip
-// ---------------------------------------------------------------------------
 
 #[test]
 fn schedule_roundtrip_json() {
@@ -49,14 +45,10 @@ fn schedule_roundtrip_json() {
     assert_eq!(back.terminated_at, schedule.terminated_at);
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: DerivationStep::LlmSummarize survives roundtrip
-// ---------------------------------------------------------------------------
-
 #[test]
 fn derivation_step_reserves_llm_summarize() {
-    // Construct via JSON (as would happen when deserializing from DB/API)
-    // because #[non_exhaustive] prevents direct construction from external crates.
+    // why: `#[non_exhaustive]` prevents direct construction from external
+    // crates, so the step is built via JSON as DB/API deserialization would.
     let json = r#"{
         "kind": "llm_summarize",
         "capability": "context.summarize",
@@ -80,40 +72,30 @@ fn derivation_step_reserves_llm_summarize() {
         ),
     }
 
-    // Verify roundtrip: serialize back and confirm it's still LlmSummarize
     let json2 = serde_json::to_string(&step).expect("serialize LlmSummarize back");
     assert!(
         json2.contains("\"kind\":\"llm_summarize\""),
         "JSON should use snake_case tag, got: {json2}"
     );
 
-    // Verify it can be deserialized again
     let step2: DerivationStep = serde_json::from_str(&json2).expect("re-deserialize LlmSummarize");
     assert!(matches!(step2, DerivationStep::LlmSummarize { .. }));
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Unknown DerivationStep variant must NOT panic (RISK-10 guard)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn derivation_step_parses_unknown_variant_safely() {
-    // Simulate a future variant that the current code doesn't know about.
-    // With #[serde(tag = "kind")] + non_exhaustive, unknown kinds should
-    // fail gracefully (Err), NOT panic.
+    // why: with `#[serde(tag = "kind")]` + `non_exhaustive`, an unknown kind
+    // must fail gracefully (Err), not panic.
     let unknown_json = r#"{"kind":"ai_generated_edit","note":"future variant"}"#;
 
     let result: Result<DerivationStep, _> = serde_json::from_str(unknown_json);
-    // Accept either Err (graceful rejection) or a catch-all variant.
-    // The critical assertion: it must NOT panic.
+    // invariant: the critical assertion is that no panic occurs; either an
+    // error or a future catch-all variant is acceptable.
     match result {
-        Ok(_) => {
-            // If it parsed somehow (e.g. a future catch-all), that's acceptable
-            // as long as no panic occurred.
-        }
+        Ok(_) => {}
         Err(e) => {
-            // Expected path: serde returns an error for unknown variant.
-            // Verify the error message is informative (not a panic).
+            // why: the expected path is an error; it must be informative
+            // rather than a panic.
             let msg = e.to_string();
             assert!(!msg.is_empty(), "Error message should be non-empty");
         }

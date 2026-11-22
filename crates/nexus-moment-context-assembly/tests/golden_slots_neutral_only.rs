@@ -2,6 +2,8 @@
 //! World** (DF-75, AC-I1b — the HARD non-regression promise carried from
 //! V1.149).
 //!
+//! see crates/nexus-moment-context-assembly/AGENTS.md
+//!
 //! A World whose KB entries carry NO `modules.activation` modules AND has no
 //! Moment Directive must produce `assemble_moment` output that is
 //! **byte-identical to V1.149**:
@@ -27,7 +29,7 @@ use nexus_moment_context_assembly::{assemble_moment, MomentRequest};
 use nexus_narrative::timeline_event::TimelineEventType;
 use nexus_narrative::InMemoryNarrativeGateway;
 
-/// V1.150 slot sub-headings that must NOT appear in neutral-only output.
+/// note: slot sub-headings that must NOT appear in neutral-only output.
 const SLOT_HEADINGS: [&str; 4] = [
     "### World (Before)",
     "### World (After)",
@@ -35,8 +37,9 @@ const SLOT_HEADINGS: [&str; 4] = [
     "### Style (Post-History)",
 ];
 
-/// Deterministic neutral-only fixture: no entry carries `modules.activation`.
-/// All wall-clock / uuid sources are frozen to fixed values.
+/// note: deterministic neutral-only fixture — no entry carries
+/// `modules.activation`; all wall-clock / uuid sources are frozen to fixed
+/// values.
 fn build_neutral_fixture() -> (
     InMemoryNarrativeGateway<InMemoryKbStore>,
     InMemoryKbStore,
@@ -45,7 +48,6 @@ fn build_neutral_fixture() -> (
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
 
-    // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
         "wld_golden_slots",
         "ctr_golden",
@@ -57,7 +59,6 @@ fn build_neutral_fixture() -> (
     world.created_at = "2026-01-01T00:00:00Z".to_string();
     narrative.insert_world(world);
 
-    // ── Timeline event (frozen id + created_at) ──
     let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
         "wld_golden_slots",
         "fbk_root",
@@ -69,7 +70,6 @@ fn build_neutral_fixture() -> (
     event.title = Some("The Beginning".to_string());
     narrative.insert_event(event);
 
-    // ── Stage0 (no wall-clock dep) ──
     let stage0 = Stage0Assembly {
         personality: "A creative writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels and 20 short stories.".to_string(),
@@ -81,11 +81,9 @@ fn build_neutral_fixture() -> (
     (narrative, kb, stage0)
 }
 
-/// Seed a single neutral KB entry (no modules map).
-///
-/// NOTE: exactly ONE KB entry — `InMemoryKbStore::query` iterates a `HashMap`
-/// without sorting, so multi-entry fixtures would make the byte-exact golden
-/// order nondeterministic (same convention as the V1.149 goldens).
+/// invariant: exactly ONE KB entry — `InMemoryKbStore::query` iterates a
+/// `HashMap` without sorting, so multi-entry fixtures would make the byte-exact
+/// golden order nondeterministic (same convention as the V1.149 goldens).
 async fn seed_neutral_stores(kb: &InMemoryKbStore) {
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
@@ -97,7 +95,8 @@ async fn seed_neutral_stores(kb: &InMemoryKbStore) {
         .expect("insert kb entry");
 }
 
-/// Assemble with default activation (ON) and return the full context bytes.
+/// note: assemble with default activation (ON) and return the full context
+/// bytes.
 async fn assemble_default_on(
     stage0: Stage0Assembly,
     narrative: &InMemoryNarrativeGateway<InMemoryKbStore>,
@@ -116,14 +115,13 @@ async fn slots_neutral_only_byte_equivalent_golden() {
 
     let output = assemble_default_on(stage0, &narrative, &kb).await;
 
-    // 1. P0 reservation: no Moment Directive section renders when no
-    //    directive is active.
+    // invariant: the reserved directive slot must not render in P0.
     assert!(
         !output.contains("## Moment Directive"),
         "reserved directive slot must not render in P0"
     );
 
-    // 2. No V1.150 slot sub-headings render when all slots are empty.
+    // invariant: no slot sub-headings render when all slots are empty.
     for heading in SLOT_HEADINGS {
         assert!(
             !output.contains(heading),
@@ -131,7 +129,8 @@ async fn slots_neutral_only_byte_equivalent_golden() {
         );
     }
 
-    // 3. The World-KB section is byte-identical to the V1.149 flat block.
+    // invariant: the World-KB section is byte-identical to the V1.149 flat
+    // block.
     let world_kb = output
         .split("## World Knowledge Base")
         .nth(1)
@@ -145,7 +144,7 @@ async fn slots_neutral_only_byte_equivalent_golden() {
         "neutral-only World-KB body must be the V1.149 flat block"
     );
 
-    // 4. Frozen guarantee: full output matches the checked-in golden.
+    // invariant: full output matches the checked-in golden.
     let golden = include_str!("fixtures/assemble_moment_slots_neutral_only.golden");
     assert_eq!(
         output, golden,

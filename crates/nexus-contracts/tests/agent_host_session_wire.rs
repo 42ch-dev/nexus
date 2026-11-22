@@ -1,4 +1,6 @@
 //! v1.184 P2 Task 1 — generated agent-host session pair rules.
+//!
+//! see crates/nexus-contracts/AGENTS.md
 
 use nexus_contracts::generated::daemon_api::agent_host::create_session_request as create_mod;
 use nexus_contracts::generated::daemon_api::agent_host::session_list_response as list_mod;
