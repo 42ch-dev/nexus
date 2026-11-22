@@ -1,4 +1,5 @@
 //! Character pending-review storage (v1.184 P3 Task 1; v1.185 P3 run capture).
+// note: Character pending-review storage (v1.184 P3 Task 1; v1.185 P3 run capture).
 //!
 //! Character counterpart to [`crate::pending_review`]: session-end capture
 //! queue rows on the dedicated `character_memory_pending_review` table.
@@ -15,10 +16,10 @@ use crate::character::{require_active_owned_character_tx, require_owned_characte
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::MAX_CHARACTER_MEMORY_LIST_LIMIT;
 
-/// Reserved pending-id prefix for server-owned run capture rows.
+/// note: Reserved pending-id prefix for server-owned run capture rows.
 pub const RUN_PENDING_ID_PREFIX: &str = "run_";
 
-/// Character pending review record — mirrors DB row.
+/// note: Character pending review record — mirrors DB row.
 #[derive(Debug, Clone)]
 pub struct CharacterPendingReviewRecord {
     pub pending_id: String,
@@ -31,7 +32,7 @@ pub struct CharacterPendingReviewRecord {
     pub source_operation_id: Option<String>,
 }
 
-/// Borrowed input for explicit run capture (§11.6).
+/// note: Borrowed input for explicit run capture (§11.6).
 #[derive(Debug, Clone, Copy)]
 pub struct RunCaptureInput<'a> {
     pub operation_id: &'a str,
@@ -44,7 +45,7 @@ pub struct RunCaptureInput<'a> {
     pub lifecycle_epoch: i64,
 }
 
-/// Immutable run-capture receipt row.
+/// note: Immutable run-capture receipt row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunCaptureReceipt {
     pub operation_id: String,
@@ -56,7 +57,7 @@ pub struct RunCaptureReceipt {
     pub captured_at: String,
 }
 
-#[allow(clippy::too_many_arguments)] // row mapper mirrors SQL projection
+#[allow(clippy::too_many_arguments)] // why: row mapper mirrors SQL projection
 const fn record_from_row(
     pending_id: String,
     session_id: String,
@@ -154,7 +155,7 @@ fn is_unique_violation(err: &sqlx::Error) -> bool {
     }
 }
 
-/// Create a Character pending review record (idempotent on retry).
+/// note: Create a Character pending review record (idempotent on retry).
 ///
 /// # Errors
 ///
@@ -204,7 +205,7 @@ pub async fn create_character_pending_review(
     }
 }
 
-/// Atomically record one run capture receipt and enqueue its pending row.
+/// note: Atomically record one run capture receipt and enqueue its pending row.
 ///
 /// # Errors
 ///
@@ -312,7 +313,7 @@ async fn capture_character_run_in_tx(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, provenance, or database failure.
+/// note: Returns `LocalDbError` on ownership, provenance, or database failure.
 pub async fn get_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -359,7 +360,7 @@ pub async fn get_character_pending_review(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, provenance, or database failure.
+/// note: Returns `LocalDbError` on ownership, provenance, or database failure.
 pub async fn list_character_pending_reviews(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -414,7 +415,7 @@ pub async fn list_character_pending_reviews(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership or database failure.
+/// note: Returns `LocalDbError` on ownership or database failure.
 pub async fn delete_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -450,7 +451,7 @@ pub async fn delete_character_pending_review(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership or database failure.
+/// note: Returns `LocalDbError` on ownership or database failure.
 pub async fn delete_character_pending_review_in_tx(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
     owner_creator_id: &str,
@@ -470,7 +471,7 @@ pub async fn delete_character_pending_review_in_tx(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, provenance, or database failure.
+/// note: Returns `LocalDbError` on ownership, provenance, or database failure.
 ///
 /// # Panics
 ///

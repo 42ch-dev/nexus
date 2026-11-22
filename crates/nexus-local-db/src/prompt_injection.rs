@@ -1,4 +1,5 @@
 //! Prompt injection queue CRUD operations for `creator.inject_prompt`.
+// note: Prompt injection queue CRUD operations for `creator.inject_prompt`.
 //!
 //! Manages per-creator/per-session prompt queue in `SQLite`.
 //! Lifecycle: `queued` → `claimed` → `consumed` | `expired`.
@@ -9,62 +10,62 @@ use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
-/// Prompt injection row — mirrors DB row.
+/// note: Prompt injection row — mirrors DB row.
 #[derive(Debug, Clone)]
 pub struct PromptInjectionRow {
-    /// Unique injection ID.
+    /// note: Unique injection ID.
     pub injection_id: String,
-    /// Creator ID for ownership scoping.
+    /// note: Creator ID for ownership scoping.
     pub creator_id: String,
-    /// Session ID for session-scoped consumption.
+    /// note: Session ID for session-scoped consumption.
     pub session_id: String,
-    /// The prompt text to inject.
+    /// note: The prompt text to inject.
     pub prompt: String,
-    /// Higher priority = dequeued sooner.
+    /// note: Higher priority = dequeued sooner.
     pub priority: i64,
-    /// Lifecycle status: `queued`, `claimed`, `consumed`, `expired`.
+    /// note: Lifecycle status: `queued`, `claimed`, `consumed`, `expired`.
     pub status: String,
-    /// Unix epoch milliseconds when enqueued.
+    /// note: Unix epoch milliseconds when enqueued.
     pub created_at: i64,
-    /// Unix epoch milliseconds when claimed.
+    /// note: Unix epoch milliseconds when claimed.
     pub claimed_at: Option<i64>,
-    /// Unix epoch milliseconds when consumed.
+    /// note: Unix epoch milliseconds when consumed.
     pub consumed_at: Option<i64>,
-    /// Unix epoch milliseconds when the injection expires.
+    /// note: Unix epoch milliseconds when the injection expires.
     pub expires_at: Option<i64>,
-    /// Source schedule that enqueued this injection.
+    /// note: Source schedule that enqueued this injection.
     pub source_schedule_id: Option<String>,
-    /// Source capability call that enqueued this injection.
+    /// note: Source capability call that enqueued this injection.
     pub source_capability_call_id: Option<String>,
-    /// Optional metadata as JSON blob.
+    /// note: Optional metadata as JSON blob.
     pub metadata_json: Option<Vec<u8>>,
 }
 
-/// Parameters for creating a new prompt injection.
+/// note: Parameters for creating a new prompt injection.
 pub struct NewPromptInjection<'a> {
-    /// Unique injection ID (caller-generated).
+    /// note: Unique injection ID (caller-generated).
     pub injection_id: &'a str,
-    /// Creator ID for ownership scoping.
+    /// note: Creator ID for ownership scoping.
     pub creator_id: &'a str,
-    /// Session ID for session-scoped consumption.
+    /// note: Session ID for session-scoped consumption.
     pub session_id: &'a str,
-    /// The prompt text to inject.
+    /// note: The prompt text to inject.
     pub prompt: &'a str,
-    /// Higher priority = dequeued sooner.
+    /// note: Higher priority = dequeued sooner.
     pub priority: i64,
-    /// Unix epoch milliseconds when enqueued.
+    /// note: Unix epoch milliseconds when enqueued.
     pub created_at: i64,
-    /// Optional expiry timestamp.
+    /// note: Optional expiry timestamp.
     pub expires_at: Option<i64>,
-    /// Source schedule that enqueued this injection.
+    /// note: Source schedule that enqueued this injection.
     pub source_schedule_id: Option<&'a str>,
-    /// Source capability call that enqueued this injection.
+    /// note: Source capability call that enqueued this injection.
     pub source_capability_call_id: Option<&'a str>,
-    /// Optional metadata as JSON blob.
+    /// note: Optional metadata as JSON blob.
     pub metadata_json: Option<&'a [u8]>,
 }
 
-/// Enqueue a new prompt injection.
+/// note: Enqueue a new prompt injection.
 ///
 /// Inserts a `queued` row into `creator_prompt_injections`.
 ///
@@ -114,7 +115,7 @@ pub async fn enqueue_prompt_injection(
     })
 }
 
-/// Claim the next queued prompt injections for a creator/session.
+/// note: Claim the next queued prompt injections for a creator/session.
 ///
 /// TD-V131-01: Wrapped in a transaction so SELECT + UPDATE are atomic.
 /// Selects queued rows ordered by `priority DESC, created_at ASC`,
@@ -159,7 +160,7 @@ pub async fn claim_prompt_injections(
         return Ok(Vec::new());
     }
 
-    // Update status to claimed within the same transaction.
+    // note: Update status to claimed within the same transaction.
     let placeholders: Vec<String> = (2..=ids.len() + 1).map(|i| format!("?{i}")).collect();
     let sql = format!(
         "UPDATE creator_prompt_injections
@@ -195,7 +196,7 @@ pub async fn claim_prompt_injections(
         .collect())
 }
 
-/// Mark claimed prompt injections as consumed.
+/// note: Mark claimed prompt injections as consumed.
 ///
 /// TD-V131-03: Processes in batches of `BATCH_LIMIT` (100) to avoid
 /// unbounded IN clauses. Sets `status = 'consumed'` and `consumed_at = now`
@@ -209,7 +210,7 @@ pub async fn mark_prompt_injections_consumed(
     injection_ids: &[String],
     now: i64,
 ) -> Result<u64, LocalDbError> {
-    /// Maximum number of IDs per batched UPDATE statement.
+    /// note: Maximum number of IDs per batched UPDATE statement.
     const BATCH_LIMIT: usize = 100;
 
     if injection_ids.is_empty() {

@@ -1,4 +1,5 @@
 //! Character SOUL narrative cache persistence (v1.184 P3 Task 1).
+// note: Character SOUL narrative cache persistence (v1.184 P3 Task 1).
 //!
 //! Character counterpart to [`crate::soul_narrative`]: caches the on-demand
 //! Character SOUL narrative on the dedicated `character_soul_narratives`
@@ -16,14 +17,14 @@ use crate::character::{require_active_owned_character_tx, require_owned_characte
 use crate::error::LocalDbError;
 use crate::soul_narrative::{build_stats_fingerprint, SoulNarrativeFragmentStats};
 
-/// A row from the `character_soul_narratives` table.
+/// note: A row from the `character_soul_narratives` table.
 ///
 /// `narrative` and `generated_at` are `None` for stats-only rows (fingerprint
 /// cache for under-gate / above-gate ungenerated Characters).
 #[derive(Debug, Clone)]
 pub struct CharacterSoulNarrativeRecord {
     pub character_id: String,
-    /// `None` = shared Character scope; `Some(b)` = binding-local scope.
+    /// note: `None` = shared Character scope; `Some(b)` = binding-local scope.
     pub actor_world_binding_id: Option<String>,
     pub narrative: Option<String>,
     pub generated_at: Option<String>,
@@ -35,7 +36,7 @@ pub struct CharacterSoulNarrativeRecord {
     pub updated_at: String,
 }
 
-#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
+#[allow(clippy::too_many_arguments)] // note: raw column values — the full row shape
 const fn record_from_row(
     character_id: String,
     actor_world_binding_id: Option<String>,
@@ -96,7 +97,7 @@ async fn load_narrative(
     }))
 }
 
-/// Read the cached narrative for a Character scope.
+/// note: Read the cached narrative for a Character scope.
 ///
 /// `binding_id = None` reads the shared Character scope; `Some(b)` reads the
 /// binding-local scope and requires the stored binding tuple plus an existing
@@ -121,7 +122,7 @@ pub async fn get_character_soul_narrative(
     load_narrative(pool, character_id, binding_id).await
 }
 
-/// Insert or update the cached narrative for a Character scope.
+/// note: Insert or update the cached narrative for a Character scope.
 ///
 /// Runs in a write-serialized transaction that validates Character ownership
 /// and, for a binding-local scope, binding provenance. `INSERT OR REPLACE`
@@ -182,7 +183,7 @@ pub async fn upsert_character_soul_narrative(
     }
 }
 
-/// Distinct-keyword scan for a Character scope, saturated at 20.
+/// note: Distinct-keyword scan for a Character scope, saturated at 20.
 ///
 /// Streams keyword rows one at a time, decoding JSON, accumulating into a
 /// `HashSet`. Stops as soon as the gate threshold (20 distinct) is reached
@@ -219,7 +220,7 @@ async fn compute_distinct_keyword_count(
     Ok(distinct.len())
 }
 
-/// Persist stats cache columns for a Character scope, creating a stats-only
+/// note: Persist stats cache columns for a Character scope, creating a stats-only
 /// row if none exists.
 async fn update_stats_cache(
     pool: &SqlitePool,
@@ -263,7 +264,7 @@ async fn update_stats_cache(
     Ok(())
 }
 
-/// Compute fragment statistics for a Character scope, honoring the
+/// note: Compute fragment statistics for a Character scope, honoring the
 /// fingerprint cache.
 ///
 /// Mirrors [`crate::soul_narrative::soul_narrative_fragment_stats`] over the
@@ -308,7 +309,7 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
             .await?;
     }
 
-    // 1. Cheap SQL aggregates — O(1) index scan, no row materialization.
+    // note: Cheap SQL aggregates — O(1) index scan, no row materialization.
     let fragment_count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM character_memory_fragments
            WHERE character_id = ? AND actor_world_binding_id IS ?"#,
@@ -327,10 +328,8 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
     .fetch_one(pool)
     .await?;
 
-    // 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache for this Character scope.
     let cached = load_narrative(pool, character_id, binding_id).await?;
 
     if let Some(ref c) = cached {
@@ -347,7 +346,7 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
         }
     }
 
-    // 4. Fingerprint mismatch or no cache row: compute soundly, persist nothing.
+    // note: 4. Fingerprint mismatch or no cache row: compute soundly, persist nothing.
     let distinct_keyword_count =
         compute_distinct_keyword_count(pool, character_id, binding_id).await?;
 
@@ -363,7 +362,7 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` if the aggregate/fingerprint query or the cached
+/// note: Returns `LocalDbError` if the aggregate/fingerprint query or the cached
 /// row read fails.
 pub async fn character_soul_narrative_fragment_stats(
     pool: &SqlitePool,
@@ -383,7 +382,7 @@ pub async fn character_soul_narrative_fragment_stats(
             .await?;
     }
 
-    // 1. Cheap SQL aggregates — O(1) index scan, no row materialization.
+    // note: Cheap SQL aggregates — O(1) index scan, no row materialization.
     let fragment_count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM character_memory_fragments
            WHERE character_id = ? AND actor_world_binding_id IS ?"#,
@@ -402,10 +401,8 @@ pub async fn character_soul_narrative_fragment_stats(
     .fetch_one(pool)
     .await?;
 
-    // 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache for this Character scope.
     let cached = load_narrative(pool, character_id, binding_id).await?;
 
     if let Some(ref c) = cached {
@@ -422,11 +419,11 @@ pub async fn character_soul_narrative_fragment_stats(
         }
     }
 
-    // 4. Fingerprint mismatch or no cache row → compute soundly.
+    // note: 4. Fingerprint mismatch or no cache row → compute soundly.
     let distinct_keyword_count =
         compute_distinct_keyword_count(pool, character_id, binding_id).await?;
 
-    // 5. Persist stats cache.
+    // note: 5. Persist stats cache.
     update_stats_cache(
         pool,
         character_id,

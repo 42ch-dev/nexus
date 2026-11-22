@@ -1,4 +1,5 @@
 //! Peer-host bookkeeping storage (V1.155 P0 / N-C3 multi-host production) —
+// note: Peer-host bookkeeping storage (V1.155 P0 / N-C3 multi-host production) —
 //! the `peer_hosts` table.
 //!
 //! Pure storage (spec §8 dep-graph reversal: `nexus-local-db` has no spoke
@@ -15,35 +16,35 @@
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
-/// Maximum serialized manifest size accepted by [`record_peer_manifest`].
+/// note: Maximum serialized manifest size accepted by [`record_peer_manifest`].
 ///
 /// Fail-closed guard against unbounded blob storage: a spoke
 /// `HostCapabilityManifest` is a small document — capability kind/version
 /// entries — so 64 KiB is far beyond any realistic payload.
 pub const MAX_MANIFEST_JSON_BYTES: usize = 64 * 1024;
 
-/// Maximum `host_id` length (chars) accepted by [`record_peer_manifest`].
+/// note: Maximum `host_id` length (chars) accepted by [`record_peer_manifest`].
 pub const MAX_HOST_ID_CHARS: usize = 512;
 
-/// Maximum `last_peer_id` length (chars) accepted by [`record_peer_manifest`].
+/// note: Maximum `last_peer_id` length (chars) accepted by [`record_peer_manifest`].
 ///
 /// A libp2p `PeerId` renders as a ~52-char base58 string; the cap is a
 /// fail-closed guard against unbounded blob storage, mirroring
 /// [`MAX_HOST_ID_CHARS`].
 pub const MAX_PEER_ID_CHARS: usize = 512;
 
-/// Row type matching the `peer_hosts` DDL (`20260808120000_peer_hosts.sql`).
+/// note: Row type matching the `peer_hosts` DDL (`20260808120000_peer_hosts.sql`).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PeerHostRow {
     /// Peer manifest `host_id` (the peer's device id) — PK, stable per host
     /// installation (iteration spec §Design lock #3).
     pub host_id: String,
-    /// Serialized spoke `HostCapabilityManifest` observed at the outbound
+    /// note: Serialized spoke `HostCapabilityManifest` observed at the outbound
     /// `connect()` return (opaque to the storage layer).
     pub manifest_json: String,
-    /// RFC 3339 UTC timestamp of the observation.
+    /// note: RFC 3339 UTC timestamp of the observation.
     pub last_seen: String,
-    /// The dialed peer's libp2p `PeerId` at the observation (V1.158 P2 /
+    /// note: The dialed peer's libp2p `PeerId` at the observation (V1.158 P2 /
     /// R-V1155P0-001) — diagnostics only (the spoof/collision signal when a
     /// dialed peer claims a different `host_id`); never used for
     /// authorization. `None` for rows recorded before the column existed or
@@ -51,7 +52,7 @@ pub struct PeerHostRow {
     pub last_peer_id: Option<String>,
 }
 
-/// Upsert an observed peer host.
+/// note: Upsert an observed peer host.
 ///
 /// Idempotent — never errors on a duplicate `host_id`; a second observation
 /// refreshes `manifest_json` + `last_seen` + `last_peer_id`. Single atomic
@@ -97,7 +98,7 @@ pub async fn record_peer_manifest(
     Ok(())
 }
 
-/// List recorded peer hosts, most recently seen first.
+/// note: List recorded peer hosts, most recently seen first.
 ///
 /// Ordering: `last_seen` DESC, `host_id` ASC tiebreak. Empty table →
 /// `Ok(vec![])` (stub contract preserved for the port impl).
@@ -106,7 +107,7 @@ pub async fn record_peer_manifest(
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_peer_manifests(pool: &SqlitePool) -> Result<Vec<PeerHostRow>, LocalDbError> {
-    // `host_id as "host_id!"` — SQLite describes a TEXT PRIMARY KEY as
+    // note: `host_id as "host_id!"` — SQLite describes a TEXT PRIMARY KEY as
     // nullable (sqlx 0.8.6), the non-null coercion matches the `String` field.
     let rows = sqlx::query_as!(
         PeerHostRow,
@@ -119,7 +120,7 @@ pub async fn list_peer_manifests(pool: &SqlitePool) -> Result<Vec<PeerHostRow>, 
     Ok(rows)
 }
 
-/// Fail-closed input gate for [`record_peer_manifest`]: `host_id` non-empty
+/// note: Fail-closed input gate for [`record_peer_manifest`]: `host_id` non-empty
 /// and bounded, `manifest_json` parseable JSON within the size cap, `now` an
 /// RFC 3339 UTC timestamp, `last_peer_id` bounded when present. Rejects
 /// malformed/oversized input with [`LocalDbError::ValidationError`] before
@@ -172,7 +173,7 @@ mod tests {
 
     const T1: &str = "2026-08-08T10:00:00+00:00";
     const T2: &str = "2026-08-08T11:30:00+00:00";
-    // libp2p-style base58 `PeerId`s (R-V1155P0-001 diagnostics fixtures).
+    // note: libp2p-style base58 `PeerId`s (R-V1155P0-001 diagnostics fixtures).
     const PEER_ID_A: &str = "12D3KooWPeerIdA000000000000000000000000000000000000";
     const PEER_ID_B: &str = "12D3KooWPeerIdB000000000000000000000000000000000000";
     const MANIFEST_V1: &str =
@@ -310,7 +311,7 @@ mod tests {
         assert!(list_peer_manifests(&pool).await.unwrap().is_empty());
     }
 
-    /// The single atomic upsert contract (QC fix wave F-002): a second
+    /// note: The single atomic upsert contract (QC fix wave F-002): a second
     /// observation is ONE statement — `manifest_json` + `last_seen` refresh
     /// together; there is no denormalized column that could drift. Pinned
     /// here by asserting the row content after a conflict, and structurally
@@ -337,7 +338,7 @@ mod tests {
         );
     }
 
-    /// R-V1155P0-001: the spoof/collision signal — a second observation of
+    /// note: R-V1155P0-001: the spoof/collision signal — a second observation of
     /// the same `host_id` with a different `PeerId` refreshes
     /// `last_peer_id` (most recent observation wins); an observation
     /// without a peer id stores NULL (additive, pre-column rows backfill).

@@ -1,4 +1,5 @@
 //! Character memory fragment storage (v1.184 P3 Task 1).
+// note: Character memory fragment storage (v1.184 P3 Task 1).
 //!
 //! Character counterpart to [`crate::memory_fragment`]: keyword-indexed
 //! fragments on the dedicated `character_memory_fragments` table. Rows key
@@ -20,30 +21,30 @@ use crate::character::{require_active_owned_character_tx, require_owned_characte
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::MAX_CHARACTER_MEMORY_LIST_LIMIT;
 
-/// Character memory fragment row (storage shape; not a wire DTO).
+/// note: Character memory fragment row (storage shape; not a wire DTO).
 #[derive(Debug, Clone)]
 pub struct CharacterMemoryFragmentRecord {
-    /// Unique identifier for this fragment.
+    /// note: Unique identifier for this fragment.
     pub fragment_id: String,
-    /// ACP session ID that generated this fragment.
+    /// note: ACP session ID that generated this fragment.
     pub session_id: String,
-    /// Character ID for bearer ownership.
+    /// note: Character ID for bearer ownership.
     pub character_id: String,
-    /// Binding-local provenance; `None` = shared Character scope.
+    /// note: Binding-local provenance; `None` = shared Character scope.
     pub actor_world_binding_id: Option<String>,
-    /// Keywords extracted from digest (stored as JSON array).
+    /// note: Keywords extracted from digest (stored as JSON array).
     pub keywords: String,
-    /// Short summary of the fragment.
+    /// note: Short summary of the fragment.
     pub summary: String,
-    /// Creation timestamp.
+    /// note: Creation timestamp.
     pub created_at: String,
-    /// Optional TTL (e.g., "30d", "90d").
+    /// note: Optional TTL (e.g., "30d", "90d").
     pub ttl: Option<String>,
-    /// OCC version backing revision-checked local→shared promotion.
+    /// note: OCC version backing revision-checked local→shared promotion.
     pub revision: i64,
 }
 
-/// Inputs for minting a new Character fragment.
+/// note: Inputs for minting a new Character fragment.
 #[derive(Debug, Clone)]
 pub struct NewCharacterMemoryFragment {
     pub fragment_id: String,
@@ -56,7 +57,7 @@ pub struct NewCharacterMemoryFragment {
     pub ttl: Option<String>,
 }
 
-#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
+#[allow(clippy::too_many_arguments)] // note: raw column values — the full row shape
 const fn record_from_row(
     fragment_id: String,
     session_id: String,
@@ -81,7 +82,7 @@ const fn record_from_row(
     }
 }
 
-/// Create a Character memory fragment.
+/// note: Create a Character memory fragment.
 ///
 /// Runs in a write-serialized transaction: validates Character ownership and
 /// binding provenance first. New fragments always start at `revision = 0`.
@@ -177,7 +178,7 @@ pub async fn create_character_fragment_in_tx(
     Ok(())
 }
 
-/// Get a Character fragment by ID, scoped to the owning Character.
+/// note: Get a Character fragment by ID, scoped to the owning Character.
 ///
 /// Returns None if the fragment does not exist within this Character. A
 /// binding-scoped read requires the stored binding tuple plus an existing
@@ -238,7 +239,7 @@ async fn load_fragment(
     }))
 }
 
-/// List a bounded page of Character fragments in a single scope.
+/// note: List a bounded page of Character fragments in a single scope.
 ///
 /// `binding_id = None` reads the shared Character scope (`actor_world_binding_id
 /// IS NULL`); `Some(b)` reads only that binding-local scope. Binding-local
@@ -338,7 +339,7 @@ pub async fn list_character_fragments(
     }
 }
 
-/// Delete a Character fragment by ID, scoped to the owning Character.
+/// note: Delete a Character fragment by ID, scoped to the owning Character.
 ///
 /// Returns true if a fragment was deleted, false if it didn't exist.
 ///
@@ -379,7 +380,7 @@ pub async fn delete_character_fragment(
     }
 }
 
-/// Promote a binding-local Character fragment to shared Character memory.
+/// note: Promote a binding-local Character fragment to shared Character memory.
 ///
 /// One atomic write-serialized transaction:
 /// 1. Requires an active owned Character.
@@ -419,7 +420,7 @@ pub async fn promote_character_fragment_to_shared(
                 code: ActorContractConflict::CharacterFragmentAlreadyShared,
             });
         };
-        // Revalidate the source binding inside the write transaction before
+        // note: Revalidate the source binding inside the write transaction before
         // clearing its provenance: it must still be active, belong to this
         // Character, and target an owned active World. An invalid source
         // binding rejects with zero mutation rather than leaking the row into
@@ -460,7 +461,7 @@ pub async fn promote_character_fragment_to_shared(
         )
         .await?;
 
-        // Invalidate exactly the affected cache scopes: shared + old binding.
+        // note: Invalidate exactly the affected cache scopes: shared + old binding.
         sqlx::query!(
             "DELETE FROM character_soul_narratives
              WHERE character_id = ? AND (actor_world_binding_id IS NULL OR actor_world_binding_id = ?)",

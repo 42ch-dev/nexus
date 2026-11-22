@@ -1,4 +1,5 @@
 //! Pending review CRUD operations for memory pipeline.
+// note: Pending review CRUD operations for memory pipeline.
 //!
 //! Manages session-end captured queue entries for review → memory promotion.
 //! See creator-memory-soul-lifecycle.md §6.2.
@@ -7,26 +8,26 @@ use sqlx::SqlitePool;
 
 use crate::error::LocalDbError;
 
-/// Pending review record — mirrors DB row.
+/// note: Pending review record — mirrors DB row.
 #[derive(Debug, Clone)]
 pub struct PendingReviewRecord {
-    /// Unique identifier for this pending entry.
+    /// note: Unique identifier for this pending entry.
     pub pending_id: String,
-    /// ACP session ID that triggered the capture.
+    /// note: ACP session ID that triggered the capture.
     pub session_id: String,
-    /// Creator ID for ownership.
+    /// note: Creator ID for ownership.
     pub creator_id: String,
-    /// Optional world ID for context.
+    /// note: Optional world ID for context.
     pub world_id: Option<String>,
-    /// Task kind heuristic (brainstorm, outline, chapter, research, unknown).
+    /// note: Task kind heuristic (brainstorm, outline, chapter, research, unknown).
     pub task_kind: String,
-    /// Raw digest extracted from session.
+    /// note: Raw digest extracted from session.
     pub raw_digest: String,
-    /// Creation timestamp.
+    /// note: Creation timestamp.
     pub created_at: String,
 }
 
-/// Create a new pending review record.
+/// note: Create a new pending review record.
 ///
 /// Inserts the record into the `memory_pending_review` table.
 ///
@@ -53,7 +54,7 @@ pub async fn create_pending_review(
     Ok(())
 }
 
-/// List all pending reviews for a creator.
+/// note: List all pending reviews for a creator.
 ///
 /// Returns records ordered by `created_at` descending (most recent first).
 ///
@@ -89,7 +90,7 @@ pub async fn list_pending_reviews(
         .collect())
 }
 
-/// Get a specific pending review by ID.
+/// note: Get a specific pending review by ID.
 ///
 /// Returns None if the record doesn't exist.
 ///
@@ -122,7 +123,7 @@ pub async fn get_pending_review(
     }))
 }
 
-/// Delete a pending review by ID.
+/// note: Delete a pending review by ID.
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
 ///
@@ -164,7 +165,7 @@ pub async fn delete_pending_review_in_tx(
     Ok(result.rows_affected() > 0)
 }
 
-/// Count pending reviews for a creator.
+/// note: Count pending reviews for a creator.
 ///
 /// Used for queue depth monitoring and review scheduling.
 ///
@@ -252,11 +253,11 @@ mod tests {
         create_pending_review(&pool, &record2).await.unwrap();
         create_pending_review(&pool, &record3).await.unwrap();
 
-        // List for ctr_test should return 2 records (001 and 003)
+        // note: List for ctr_test should return 2 records (001 and 003)
         let list = list_pending_reviews(&pool, "ctr_test").await.unwrap();
         assert_eq!(list.len(), 2);
 
-        // Ordered by created_at DESC
+        // note: Ordered by created_at DESC
         assert_eq!(list[0].pending_id, "pending_003");
         assert_eq!(list[1].pending_id, "pending_001");
     }

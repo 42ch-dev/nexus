@@ -1,10 +1,11 @@
 //! Durable workspace commit intents (v1.188 P3 L2).
+// note: Durable workspace commit intents (v1.188 P3 L2).
 
 use crate::LocalDbError;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-/// Maximum accepted size of a persisted `entries_json` document, in bytes.
+/// note: Maximum accepted size of a persisted `entries_json` document, in bytes.
 ///
 /// Enforced on the RAW column value BEFORE `serde_json` deserializes it, so a
 /// hostile or corrupt row cannot force unbounded parse work; and enforced
@@ -71,7 +72,7 @@ pub struct CommitIntentRow {
 }
 
 impl CommitIntentRow {
-    /// True when durable entry metadata was parsed successfully.
+    /// note: True when durable entry metadata was parsed successfully.
     #[must_use]
     pub fn entries_metadata_valid(&self) -> bool {
         serde_json::from_str::<Vec<IntentEntryJson>>(&self.entries_json_raw).is_ok()
@@ -90,7 +91,7 @@ pub enum ClaimSessionResult {
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] when the claiming transaction fails: invalid
+/// note: Returns [`LocalDbError`] when the claiming transaction fails: invalid
 /// `entries_json` (over the raw byte bound), a database error while
 /// checking the committed digest, claiming the session, or inserting the
 /// intent row.
@@ -171,7 +172,7 @@ pub async fn claim_session_and_insert_intent(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] on a database failure, or when the stored
+/// note: Returns [`LocalDbError`] on a database failure, or when the stored
 /// `entries_json` fails bounded validation.
 pub async fn get_committed_intent_by_digest(
     pool: &SqlitePool,
@@ -194,7 +195,7 @@ pub async fn get_committed_intent_by_digest(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] on a database failure, or when the stored
+/// note: Returns [`LocalDbError`] on a database failure, or when the stored
 /// `entries_json` fails bounded validation.
 pub async fn get_intent_by_revision(
     pool: &SqlitePool,
@@ -214,7 +215,7 @@ pub async fn get_intent_by_revision(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] when the state update cannot be written.
+/// note: Returns [`LocalDbError`] when the state update cannot be written.
 pub async fn update_intent_state(
     pool: &SqlitePool,
     revision: &str,
@@ -236,7 +237,7 @@ pub async fn update_intent_state(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] when the finalizing transaction fails.
+/// note: Returns [`LocalDbError`] when the finalizing transaction fails.
 pub async fn finalize_committed_intent(
     pool: &SqlitePool,
     revision: &str,
@@ -269,7 +270,7 @@ pub async fn finalize_committed_intent(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] when the rollback-finalizing transaction fails.
+/// note: Returns [`LocalDbError`] when the rollback-finalizing transaction fails.
 pub async fn finalize_rolled_back_intent(
     pool: &SqlitePool,
     revision: &str,
@@ -295,7 +296,7 @@ pub async fn finalize_rolled_back_intent(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] when the claim cannot be cleared.
+/// note: Returns [`LocalDbError`] when the claim cannot be cleared.
 pub async fn release_session_claim(
     pool: &SqlitePool,
     session_id: &str,
@@ -312,7 +313,7 @@ pub async fn release_session_claim(
     Ok(())
 }
 
-/// Remove an intent that never applied and release its claim, atomically.
+/// note: Remove an intent that never applied and release its claim, atomically.
 ///
 /// Staging failures happen before any target mutation, so there is no durable
 /// material to recover: the row is DELETED and the claim CLEARED in one
@@ -346,7 +347,7 @@ pub async fn abort_intent_and_release_claim(
     Ok(())
 }
 
-/// Most recent committed intent for a canonical workspace root.
+/// note: Most recent committed intent for a canonical workspace root.
 ///
 /// Root comparison canonicalizes both sides (the stored value may be a
 /// non-canonical alias, e.g. `/var` vs `/private/var`); `rowid DESC` makes
@@ -373,7 +374,7 @@ pub async fn latest_committed_intent_for_root(
     row.map(IntentRowRaw::try_into_row).transpose()
 }
 
-/// Validate a settled intent's persisted metadata before ANY filesystem cleanup.
+/// note: Validate a settled intent's persisted metadata before ANY filesystem cleanup.
 ///
 /// The sweep deletes files named by this document, so it is untrusted input
 /// even though we wrote it: the raw column bytes are bounded first, then every
@@ -400,7 +401,7 @@ pub fn validate_cleanup_entries(entries_json: &str) -> Result<Vec<IntentEntryJso
     Ok(entries)
 }
 
-/// Rows for post-settle artifact cleanup, parsed leniently by the caller.
+/// note: Rows for post-settle artifact cleanup, parsed leniently by the caller.
 ///
 /// Committed and rolled-back intents are already durable, so a row whose
 /// metadata cannot be parsed must never fail startup: the caller skips what it
@@ -550,7 +551,7 @@ fn workspace_roots_match(stored: &str, workspace_root: &str) -> bool {
     }
 }
 
-/// Return the committed request digest for a session, if one exists.
+/// note: Return the committed request digest for a session, if one exists.
 /// # Errors
 ///
 /// Returns [`LocalDbError`] when the digest query fails.
@@ -568,7 +569,7 @@ pub async fn get_committed_request_digest(
     .map_err(LocalDbError::from)
 }
 
-/// Whether any intent is in `recovery_conflict` for the canonical workspace root.
+/// note: Whether any intent is in `recovery_conflict` for the canonical workspace root.
 /// # Errors
 ///
 /// Returns [`LocalDbError`] when the recovery-conflict query fails.
@@ -589,7 +590,7 @@ pub async fn workspace_has_recovery_conflict(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] on a database failure, or when an unsettled
+/// note: Returns [`LocalDbError`] on a database failure, or when an unsettled
 /// row's metadata fails bounded validation.
 pub async fn list_unsettled_intents(
     pool: &SqlitePool,
@@ -613,7 +614,7 @@ pub async fn list_unsettled_intents(
 
 /// # Errors
 ///
-/// Returns [`LocalDbError`] on a database failure, or when an unsettled
+/// note: Returns [`LocalDbError`] on a database failure, or when an unsettled
 /// row's metadata fails bounded validation.
 pub async fn list_all_unsettled_intents(
     pool: &SqlitePool,
@@ -643,7 +644,7 @@ struct IntentRowRaw {
 
 impl IntentRowRaw {
     fn try_into_row(self) -> Result<CommitIntentRow, LocalDbError> {
-        // T1: bound the RAW column bytes first — never hand an unbounded
+        // why: T1: bound the RAW column bytes first — never hand an unbounded
         // document to the JSON parser.
         if self.entries_json.len() > MAX_ENTRIES_JSON_BYTES {
             return Err(LocalDbError::ValidationError(format!(

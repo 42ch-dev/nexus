@@ -1,4 +1,5 @@
 //! Compute session persistence (V1.146 P2 T2).
+// note: Compute session persistence (V1.146 P2 T2).
 //!
 //! Bridges spoke's stateless `ProjectRequest`/`ComputeRequest` pair to nexus's
 //! stateless WASM host: `project()` stages computable state; `compute()` reads
@@ -10,18 +11,18 @@
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
-/// A row in the `compute_sessions` table.
+/// note: A row in the `compute_sessions` table.
 #[derive(Debug, Clone)]
 pub struct ComputeSessionRow {
     pub session_id: String,
     pub entry_id: String,
-    /// `state_json` is the serialized `ComputableFieldMap` (JSON object).
+    /// note: `state_json` is the serialized `ComputableFieldMap` (JSON object).
     /// NULL when no static state has been staged.
     pub state_json: Option<String>,
     pub created_at: String,
 }
 
-/// Insert a new compute session row.
+/// note: Insert a new compute session row.
 ///
 /// # Errors
 /// Returns `LocalDbError` on database failure or duplicate `session_id`.
@@ -50,7 +51,7 @@ pub async fn insert_compute_session(
     })
 }
 
-/// Look up a compute session by `session_id`.
+/// note: Look up a compute session by `session_id`.
 ///
 /// Returns `Ok(None)` when the session does not exist.
 ///
@@ -80,7 +81,7 @@ pub async fn get_compute_session(
     }))
 }
 
-/// Update the `state_json` column of an existing compute session.
+/// note: Update the `state_json` column of an existing compute session.
 ///
 /// # Errors
 /// Returns `LocalDbError` on database failure.
@@ -99,7 +100,7 @@ pub async fn update_compute_session_state(
     Ok(())
 }
 
-/// Delete a compute session by `session_id`. Safe to call on a non-existent
+/// note: Delete a compute session by `session_id`. Safe to call on a non-existent
 /// session (no-op).
 ///
 /// # Errors

@@ -1,4 +1,5 @@
 //! Narrative write repository — product write path for worlds and timeline events.
+// note: Narrative write repository — product write path for worlds and timeline events.
 //!
 //! Provides `create_world` and `append_event` as public API for CLI commands.
 //! These functions write directly to the workspace `state.db`.
@@ -12,20 +13,20 @@
 
 use sqlx::{Sqlite, SqlitePool};
 
-/// Error type for narrative write operations.
+/// note: Error type for narrative write operations.
 #[derive(Debug)]
 pub enum NarrativeWriteError {
-    /// A database operation failed.
+    /// note: A database operation failed.
     Database(String),
-    /// An ID format validation failed (e.g. not `wld_*` or `evt_*` prefix).
+    /// note: An ID format validation failed (e.g. not `wld_*` or `evt_*` prefix).
     InvalidId {
         field: String,
         value: String,
         reason: String,
     },
-    /// A required FK reference was not found (e.g. creator or world).
+    /// note: A required FK reference was not found (e.g. creator or world).
     FkNotFound { table: String, id: String },
-    /// A sequence conflict occurred (duplicate `sequence_no` for same world+branch).
+    /// note: A sequence conflict occurred (duplicate `sequence_no` for same world+branch).
     SequenceConflict {
         world_id: String,
         branch_id: String,
@@ -69,18 +70,18 @@ impl From<sqlx::Error> for NarrativeWriteError {
     }
 }
 
-/// Result of a successful world creation.
+/// note: Result of a successful world creation.
 #[derive(Debug)]
 pub struct CreateWorldResult {
-    /// The newly created world ID (prefixed `wld_`).
+    /// note: The newly created world ID (prefixed `wld_`).
     pub world_id: String,
-    /// The root fork branch ID.
+    /// note: The root fork branch ID.
     pub root_fork_branch_id: String,
-    /// Timestamp of creation.
+    /// note: Timestamp of creation.
     pub created_at: String,
 }
 
-/// Create a new world in the database (transaction variant).
+/// note: Create a new world in the database (transaction variant).
 ///
 /// Same as [`create_world`] but operates within a caller-managed transaction,
 /// allowing the INSERT to be committed or rolled back atomically with other
@@ -143,28 +144,28 @@ pub async fn create_world_tx(
     })
 }
 
-/// Result of a successful event append.
+/// note: Result of a successful event append.
 #[derive(Debug)]
 pub struct AppendEventResult {
-    /// The newly created event ID (prefixed `evt_`).
+    /// note: The newly created event ID (prefixed `evt_`).
     pub event_id: String,
-    /// The allocated sequence number.
+    /// note: The allocated sequence number.
     pub sequence_no: i64,
-    /// Timestamp of creation.
+    /// note: Timestamp of creation.
     pub created_at: String,
 }
 
-/// Generate a new `wld_` prefixed world ID.
+/// note: Generate a new `wld_` prefixed world ID.
 fn generate_world_id() -> String {
     format!("wld_{}", uuid::Uuid::new_v4().to_string().replace('-', ""))
 }
 
-/// Generate a new `evt_` prefixed event ID.
+/// note: Generate a new `evt_` prefixed event ID.
 fn generate_event_id() -> String {
     format!("evt_{}", uuid::Uuid::new_v4().to_string().replace('-', ""))
 }
 
-/// Generate a root fork branch ID.
+/// note: Generate a root fork branch ID.
 fn generate_root_branch_id() -> String {
     format!(
         "fbk_root_{}",
@@ -172,7 +173,7 @@ fn generate_root_branch_id() -> String {
     )
 }
 
-/// Validate that an ID has the expected prefix.
+/// note: Validate that an ID has the expected prefix.
 fn validate_id_prefix(
     value: &str,
     prefix: &str,
@@ -189,7 +190,7 @@ fn validate_id_prefix(
     }
 }
 
-/// Create a new world in the database.
+/// note: Create a new world in the database.
 ///
 /// Generates a `wld_*` ID, inserts into `narrative_worlds`, and sets a
 /// default `root_fork_branch_id`. Validates that `owner_creator_id`
@@ -252,7 +253,7 @@ pub async fn create_world(
     })
 }
 
-/// Shared admission gate: verify that `creator_id` owns `world_id`.
+/// note: Shared admission gate: verify that `creator_id` owns `world_id`.
 ///
 /// V1.67 P2 (R-V160P0-QC2-W001): deduplicates the ownership check that was
 /// previously inlined in both `nexus-orchestration` capabilities and the daemon
@@ -279,7 +280,7 @@ pub async fn is_world_owned(
     Ok(owned.is_some())
 }
 
-/// Append a timeline event to a world's branch.
+/// note: Append a timeline event to a world's branch.
 ///
 /// Allocates the next `sequence_no` for `(world_id, branch_id)` automatically
 /// by querying `MAX(sequence_no) + 1`. Validates that `world_id` references
@@ -305,7 +306,7 @@ pub async fn append_event(
     summary: Option<&str>,
     modules_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
+    // note: Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(pool, world_id).await? {
@@ -324,15 +325,15 @@ pub async fn append_event(
         title,
         summary,
         sequence_no,
-        None, // extensions_nexus_json — default (no provenance)
-        None, // affected_key_block_ids_json — default (none)
+        None, // note: extensions_nexus_json — default (no provenance)
+        None, // note: affected_key_block_ids_json — default (none)
         modules_json,
         "provisional",
     )
     .await
 }
 
-/// Append a timeline event inside an existing transaction.
+/// note: Append a timeline event inside an existing transaction.
 ///
 /// V1.67 P2 (R-V160P0-QC2-W002): transaction-aware variant of [`append_event`]
 /// so callers can perform the insert (and any follow-up rename) atomically.
@@ -350,7 +351,7 @@ pub async fn append_event_in_tx(
     title: Option<&str>,
     summary: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
+    // note: Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(&mut **tx, world_id).await? {
@@ -369,15 +370,15 @@ pub async fn append_event_in_tx(
         title,
         summary,
         sequence_no,
-        None, // extensions_nexus_json — default (no provenance)
-        None, // affected_key_block_ids_json — default (none)
-        None, // modules_json — default (no modules)
+        None, // note: extensions_nexus_json — default (no provenance)
+        None, // note: affected_key_block_ids_json — default (none)
+        None, // note: modules_json — default (no modules)
         "provisional",
     )
     .await
 }
 
-/// Append a **canon** timeline event inside an existing transaction, with
+/// note: Append a **canon** timeline event inside an existing transaction, with
 /// `extensions_nexus_json` provenance and optional `affected_key_block_ids`
 /// (V1.147 P2 dogfood — direct lane compute Accept).
 ///
@@ -404,7 +405,7 @@ pub async fn append_event_in_tx(
 ///
 /// Same error variants as [`append_event_in_tx`].
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors append_event_core's INSERT columns; grouping would
+// why: ^ justification: mirrors append_event_core's INSERT columns; grouping would
 // add indirection for one caller (the Accept path).
 pub async fn append_event_canon_with_extensions_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -417,7 +418,7 @@ pub async fn append_event_canon_with_extensions_in_tx(
     affected_key_block_ids_json: Option<&str>,
     modules_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
+    // note: Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(&mut **tx, world_id).await? {
@@ -444,7 +445,7 @@ pub async fn append_event_canon_with_extensions_in_tx(
     .await
 }
 
-/// Append a **canon** timeline event via the pool, with `extensions_nexus_json`.
+/// note: Append a **canon** timeline event via the pool, with `extensions_nexus_json`.
 ///
 /// Pool-scoped variant of [`append_event_canon_with_extensions_in_tx`] for
 /// callers that write without a surrounding transaction. V1.162 P1 T1
@@ -479,7 +480,7 @@ pub async fn append_event_canon_with_extensions(
     summary: Option<&str>,
     extensions_nexus_json: &str,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
+    // note: Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(pool, world_id).await? {
@@ -499,14 +500,14 @@ pub async fn append_event_canon_with_extensions(
         summary,
         sequence_no,
         Some(extensions_nexus_json),
-        None, // affected_key_block_ids_json — fork markers carry none
-        None, // modules_json — fork markers carry no l5-mind modules
+        None, // note: affected_key_block_ids_json — fork markers carry none
+        None, // note: modules_json — fork markers carry no l5-mind modules
         "canon",
     )
     .await
 }
 
-/// Shared preamble for the append family (qc1 S-2 consolidation): validates
+/// note: Shared preamble for the append family (qc1 S-2 consolidation): validates
 /// the `world_id` FK and returns whether a `narrative_worlds` row exists.
 ///
 /// Consumes an executor — callers pass a `&SqlitePool` (a `Copy` reference,
@@ -525,7 +526,7 @@ where
     )
 }
 
-/// Shared preamble for the append family: the next `sequence_no` for
+/// note: Shared preamble for the append family: the next `sequence_no` for
 /// `(world_id, branch_id)` (`MAX(sequence_no) + 1`).
 async fn max_sequence_no<'e, E>(
     executor: E,
@@ -547,7 +548,7 @@ where
     Ok(max_seq.unwrap_or(-1) + 1)
 }
 
-/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`],
+/// note: Shared INSERT logic for [`append_event`], [`append_event_in_tx`],
 /// [`append_event_canon_with_extensions_in_tx`], and
 /// [`append_event_canon_with_extensions`].
 ///
@@ -574,7 +575,7 @@ where
 /// pending/appended events; `canon` for author-committed events such as
 /// accepted direct-lane compute Runs).
 #[allow(clippy::too_many_arguments)]
-// ^ justification: internal helper; all 11 scalar args map 1:1 to INSERT columns.
+// note: ^ justification: internal helper; all 11 scalar args map 1:1 to INSERT columns.
 // Grouping into a struct would add indirection for zero abstraction gain.
 async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     executor: E,
@@ -624,7 +625,7 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
             created_at,
         }),
         Err(e) => {
-            // Check for UNIQUE constraint violation on (world_id, branch_id, sequence_no)
+            // note: Check for UNIQUE constraint violation on (world_id, branch_id, sequence_no)
             if let sqlx::Error::Database(ref db_err) = e {
                 if db_err.code().as_deref() == Some("2067") {
                     return Err(NarrativeWriteError::SequenceConflict {
@@ -638,8 +639,6 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
         }
     }
 }
-
-// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -713,17 +712,17 @@ mod tests {
         .await
         .unwrap();
 
-        // Same creator owns the world.
+        // note: Same creator owns the world.
         assert!(is_world_owned(&pool, "ctr_test", &world.world_id)
             .await
             .unwrap());
 
-        // A different creator does not own it.
+        // note: A different creator does not own it.
         assert!(!is_world_owned(&pool, "ctr_other", &world.world_id)
             .await
             .unwrap());
 
-        // A non-existent world returns false.
+        // note: A non-existent world returns false.
         assert!(!is_world_owned(&pool, "ctr_test", "wld_nonexistent")
             .await
             .unwrap());
@@ -752,7 +751,7 @@ mod tests {
             "story_advance",
             Some("The Beginning"),
             Some("A story begins."),
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await
         .unwrap();
@@ -784,7 +783,7 @@ mod tests {
             "story_advance",
             None,
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await
         .unwrap();
@@ -797,7 +796,7 @@ mod tests {
             "story_advance",
             None,
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await
         .unwrap();
@@ -810,7 +809,7 @@ mod tests {
             "story_advance",
             None,
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await
         .unwrap();
@@ -828,7 +827,7 @@ mod tests {
             "story_advance",
             None,
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await;
 
@@ -850,7 +849,7 @@ mod tests {
             "story_advance",
             None,
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await;
 
@@ -873,7 +872,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify via the read gateway
+        // note: Verify via the read gateway
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let worlds = gw.list_worlds().await.unwrap();
         assert_eq!(worlds.len(), 2);
@@ -902,7 +901,7 @@ mod tests {
             "story_advance",
             Some("Chapter 1"),
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await
         .unwrap();
@@ -913,12 +912,12 @@ mod tests {
             "story_advance",
             Some("Chapter 2"),
             None,
-            None, // modules_json — no modules
+            None, // note: modules_json — no modules
         )
         .await
         .unwrap();
 
-        // Verify via the read gateway
+        // note: Verify via the read gateway
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let events = gw
             .get_timeline(&world.world_id, Some(&world.root_fork_branch_id), None)
@@ -933,7 +932,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_writes_canon() {
-        // V1.147 P2 dogfood: an accepted direct-lane compute Run must land on
+        // why: V1.147 P2 dogfood: an accepted direct-lane compute Run must land on
         // the Timeline as a `canon` event — the projection reads canon only.
         // Folds the former `append_event_with_extensions_in_tx` assertions
         // (provenance column + affected_key_block_ids_json) into the canon
@@ -966,7 +965,7 @@ mod tests {
             None,
             provenance,
             Some(affected),
-            None, // modules_json — this path writes no l5-mind modules
+            None, // note: modules_json — this path writes no l5-mind modules
         )
         .await
         .unwrap();
@@ -995,7 +994,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_persists_modules_json() {
-        // V1.164 P1 T4 (AC-V1164-4): the l5-mind observation payload written
+        // note: V1.164 P1 T4 (AC-V1164-4): the l5-mind observation payload written
         // via the canon Accept path must survive the SQLite write→read cycle
         // byte-for-byte — including unknown keys inside the observation object
         // (mirrors Task 3's AC-V1164-3 seam gate).
@@ -1046,7 +1045,7 @@ mod tests {
             "modules_json must persist the observation payload verbatim"
         );
 
-        // Read-path: both TimelineEventRow surfaces (get_timeline list read +
+        // note: Read-path: both TimelineEventRow surfaces (get_timeline list read +
         // get_event single read) deserialize modules back to the same Value.
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
@@ -1072,7 +1071,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_writes_null_modules_json() {
-        // Backward compat: writers without modules data must store NULL (no
+        // why: Backward compat: writers without modules data must store NULL (no
         // modules = unrecorded per spoke handbook), and the read path maps
         // NULL → None.
         let (_dir, pool) = fresh_pool().await;
@@ -1096,7 +1095,7 @@ mod tests {
             "story_advance",
             Some("No Modules"),
             None,
-            None, // modules_json — explicit absence
+            None, // note: modules_json — explicit absence
         )
         .await
         .unwrap();
@@ -1124,7 +1123,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_persists_observation_modules_json() {
-        // AR-5 (a): `creator world event-add --observer … [--access …]` builds
+        // note: AR-5 (a): `creator world event-add --observer … [--access …]` builds
         // a `modules.observation` payload; `append_event` must persist it
         // verbatim in `modules_json` and both read paths (get_event +
         // get_timeline) must surface it back — the checker-consumed log
@@ -1173,7 +1172,7 @@ mod tests {
             "append_event must persist the observation payload verbatim"
         );
 
-        // Read-back round-trip through both gateway surfaces.
+        // note: Read-back round-trip through both gateway surfaces.
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
 
@@ -1198,7 +1197,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_provisional_visible_in_check_scope() {
-        // AR-5 (e): appended events are `status='provisional'` and the
+        // note: AR-5 (e): appended events are `status='provisional'` and the
         // checker's scope read (`list_timeline_events_scoped`, backing
         // `ScopeQueryPort::list_timeline_events`) filters world/branch/ids
         // only — no status filter — so the provisional observation event must
@@ -1230,7 +1229,7 @@ mod tests {
         .await
         .unwrap();
 
-        // The scope read primitive (world + branch, no status filter).
+        // note: The scope read primitive (world + branch, no status filter).
         let scoped = crate::narrative_gateway::list_timeline_events_scoped(
             &pool,
             &world.world_id,
@@ -1256,7 +1255,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_in_tx_leaves_extensions_null() {
-        // Verify backward compat: the existing `append_event_in_tx` (no
+        // note: Verify backward compat: the existing `append_event_in_tx` (no
         // extensions param) writes NULL, not a default object.
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;

@@ -1,4 +1,5 @@
 //! Inspiration items DAO (DF-61 selection pool).
+// note: Inspiration items DAO (DF-61 selection pool).
 //!
 //! Manages the `inspiration_items` table — creator-scoped inspiration
 //! items with optional markdown file scaffold under `{workspace}/Pool/Ideas/`.
@@ -39,32 +40,32 @@ use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
-/// Column list for all SELECT queries on `inspiration_items`.
+/// note: Column list for all SELECT queries on `inspiration_items`.
 pub const INSPIRATION_COLUMNS: &str = "\
     item_id, creator_id, rel_path, title, status, promoted_work_id, created_at, promoted_at";
 
-/// Inspiration item record — mirrors DB row.
+/// note: Inspiration item record — mirrors DB row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct InspirationItem {
-    /// Unique identifier (`npi_` prefix).
+    /// note: Unique identifier (`npi_` prefix).
     pub item_id: String,
-    /// Owning creator.
+    /// note: Owning creator.
     pub creator_id: String,
-    /// Relative path to markdown file under workspace root.
+    /// note: Relative path to markdown file under workspace root.
     pub rel_path: String,
-    /// Display title.
+    /// note: Display title.
     pub title: String,
-    /// Status: `idea` | `promoted` | `archived`.
+    /// note: Status: `idea` | `promoted` | `archived`.
     pub status: String,
-    /// Work ID assigned on promotion.
+    /// note: Work ID assigned on promotion.
     pub promoted_work_id: Option<String>,
-    /// Creation timestamp (ISO-8601).
+    /// note: Creation timestamp (ISO-8601).
     pub created_at: String,
-    /// Promotion timestamp (ISO-8601).
+    /// note: Promotion timestamp (ISO-8601).
     pub promoted_at: Option<String>,
 }
 
-/// Map a sqlx row to [`InspirationItem`].
+/// note: Map a sqlx row to [`InspirationItem`].
 #[must_use]
 pub fn row_to_inspiration_item(r: &sqlx::sqlite::SqliteRow) -> InspirationItem {
     InspirationItem {
@@ -79,7 +80,7 @@ pub fn row_to_inspiration_item(r: &sqlx::sqlite::SqliteRow) -> InspirationItem {
     }
 }
 
-/// List inspiration items for a creator, optionally filtered by status.
+/// note: List inspiration items for a creator, optionally filtered by status.
 ///
 /// `limit` defaults to 200 when `None`; capped at 1000.
 ///
@@ -122,7 +123,7 @@ pub async fn list_inspiration(
     Ok(rows.iter().map(row_to_inspiration_item).collect())
 }
 
-/// Count inspiration items for a creator, optionally filtered by status.
+/// note: Count inspiration items for a creator, optionally filtered by status.
 ///
 /// # Errors
 ///
@@ -147,7 +148,7 @@ pub async fn count_inspiration(
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
-/// Create a new inspiration item — inserts DB row only.
+/// note: Create a new inspiration item — inserts DB row only.
 ///
 /// The caller is responsible for creating the markdown file scaffold atomically.
 /// Use [`create_inspiration_with_scaffold`] for the atomic version that also
@@ -190,7 +191,7 @@ pub async fn create_inspiration_row(
         })
 }
 
-/// Create an inspiration item atomically: DB row + markdown file scaffold.
+/// note: Create an inspiration item atomically: DB row + markdown file scaffold.
 ///
 /// The MD file is written via tmp+rename for atomicity.
 ///
@@ -215,7 +216,7 @@ pub async fn create_inspiration_with_scaffold(
 ) -> Result<InspirationItem, LocalDbError> {
     let base_slug = title_to_slug(title);
 
-    // V1.42 P-last (R-V141P1-13): try base slug, then -2, -3, ... up to 100.
+    // note: V1.42 P-last (R-V141P1-13): try base slug, then -2, -3, ... up to 100.
     let mut suffix: u32 = 0;
     let (rel_path, abs_path) = loop {
         let candidate = if suffix == 0 {
@@ -247,7 +248,7 @@ pub async fn create_inspiration_with_scaffold(
         "inspiration mutation"
     );
 
-    // Step 1: Write MD file (tmp + rename)
+    // note: Step 1: Write MD file (tmp + rename)
     let frontmatter = format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
 
     let abs_path_clone = abs_path.clone();
@@ -268,11 +269,11 @@ pub async fn create_inspiration_with_scaffold(
     .await
     .map_err(|e| LocalDbError::Io(e.to_string()))??;
 
-    // Step 2: Insert DB row
+    // note: Step 2: Insert DB row
     match create_inspiration_row(pool, item_id, creator_id, &rel_path, title, created_at).await {
         Ok(item) => Ok(item),
         Err(e) => {
-            // Roll back MD file on DB failure
+            // note: Roll back MD file on DB failure
             let rollback_path = workspace_dir.join(&rel_path);
             let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(rollback_path)).await;
             Err(e)
@@ -280,7 +281,7 @@ pub async fn create_inspiration_with_scaffold(
     }
 }
 
-/// Promote an inspiration item: update status to `promoted` and record the `work_id`.
+/// note: Promote an inspiration item: update status to `promoted` and record the `work_id`.
 ///
 /// This does NOT create the Work or pool row — the caller (daemon handler)
 /// is responsible for that. This function only records the promotion in the
@@ -319,7 +320,7 @@ pub async fn promote_inspiration(
         })
 }
 
-/// Atomic inspiration promote: Work insert + pool promote + inspiration update
+/// note: Atomic inspiration promote: Work insert + pool promote + inspiration update
 /// in a single transaction. Rolls back all three if any step fails (qc2 W-02).
 ///
 /// # Errors
@@ -390,7 +391,7 @@ pub async fn inspiration_promote_atomic(
     .execute(&mut *tx)
     .await?;
 
-    // Step 2: Demote prior active pool entry → queued, upsert target → active
+    // note: Step 2: Demote prior active pool entry → queued, upsert target → active
     let entry_id = format!("npe_{}", uuid::Uuid::new_v4());
     let work_title: Option<String> =
         sqlx::query_scalar("SELECT title FROM works WHERE work_id = ? AND creator_id = ?")
@@ -401,7 +402,7 @@ pub async fn inspiration_promote_atomic(
             .flatten();
     let title = work_title.unwrap_or_default();
 
-    // Demote prior active
+    // note: Demote prior active
     sqlx::query(
         "UPDATE novel_pool_entries SET status = 'queued', updated_at = ? \
          WHERE creator_id = ? AND status = 'active'",
@@ -411,7 +412,7 @@ pub async fn inspiration_promote_atomic(
     .execute(&mut *tx)
     .await?;
 
-    // Upsert target
+    // note: Upsert target
     sqlx::query(
         "INSERT INTO novel_pool_entries (entry_id, creator_id, work_id, status, promoted_at, note, title, updated_at) \
          VALUES (?, ?, ?, 'active', ?, NULL, ?, ?) \
@@ -428,7 +429,7 @@ pub async fn inspiration_promote_atomic(
     .execute(&mut *tx)
     .await?;
 
-    // Step 3: Update inspiration item to promoted
+    // note: Step 3: Update inspiration item to promoted
     sqlx::query(
         "UPDATE inspiration_items SET status = 'promoted', promoted_work_id = ?, promoted_at = ? \
          WHERE item_id = ?",
@@ -441,7 +442,7 @@ pub async fn inspiration_promote_atomic(
 
     tx.commit().await?;
 
-    // Fetch the upserted pool entry
+    // note: Fetch the upserted pool entry
     crate::novel_pool_entries::get_pool_entry_by_work(pool, creator_id, work_id)
         .await?
         .ok_or_else(|| LocalDbError::MissingVersionKey {
@@ -449,7 +450,7 @@ pub async fn inspiration_promote_atomic(
         })
 }
 
-/// Archive an inspiration item (set status to `archived`).
+/// note: Archive an inspiration item (set status to `archived`).
 ///
 /// Restricted to the owning `creator_id` — rows belonging to other
 /// creators are silently unaffected (0 rows updated → `MissingVersionKey`).
@@ -491,7 +492,7 @@ pub async fn archive_inspiration(
         })
 }
 
-/// Get a single inspiration item by ID.
+/// note: Get a single inspiration item by ID.
 ///
 /// # Errors
 ///
@@ -510,7 +511,7 @@ pub async fn get_inspiration(
     Ok(row.as_ref().map(row_to_inspiration_item))
 }
 
-/// Convert a human title to a filesystem-safe slug.
+/// note: Convert a human title to a filesystem-safe slug.
 ///
 /// Rules:
 /// - Lowercase ASCII only (non-ASCII → hyphen)
@@ -530,13 +531,13 @@ pub fn title_to_slug(title: &str) -> String {
             } else if c == ' ' || c == '-' || c == '_' {
                 '-'
             } else {
-                // Non-ASCII → hyphen
+                // note: Non-ASCII → hyphen
                 '-'
             }
         })
         .collect();
 
-    // Collapse consecutive hyphens
+    // note: Collapse consecutive hyphens
     let mut result = String::with_capacity(slug.len());
     let mut prev_hyphen = false;
     for c in slug.chars() {
@@ -551,19 +552,19 @@ pub fn title_to_slug(title: &str) -> String {
         }
     }
 
-    // Strip leading/trailing hyphens
+    // note: Strip leading/trailing hyphens
     let trimmed = result.trim_matches('-');
 
-    // Truncate to 64 chars
+    // note: Truncate to 64 chars
     let truncated: String = trimmed.chars().take(64).collect();
     let final_slug = truncated.trim_matches('-').to_string();
 
-    // Reject empty
+    // note: Reject empty
     if final_slug.is_empty() {
         return generate_fallback_slug();
     }
 
-    // Reject reserved names
+    // note: Reject reserved names
     if final_slug == "." || final_slug == ".." {
         return generate_fallback_slug();
     }
@@ -571,10 +572,10 @@ pub fn title_to_slug(title: &str) -> String {
     final_slug
 }
 
-/// V1.42 P-last (R-V141P1-12): CJK fallback — when the title produces no ASCII
+/// note: V1.42 P-last (R-V141P1-12): CJK fallback — when the title produces no ASCII
 /// slug, generate a short ID suffix instead of "untitled".
 fn generate_fallback_slug() -> String {
-    // Use a simple timestamp-based short ID (6 hex chars = 24 bits of entropy).
+    // note: Use a simple timestamp-based short ID (6 hex chars = 24 bits of entropy).
     // Good enough for local-first use; avoids external deps.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -595,14 +596,14 @@ mod tests {
 
     #[test]
     fn test_title_to_slug_chinese() {
-        // V1.42 P-last (R-V141P1-12): pure CJK now produces idea-<hex>
+        // note: V1.42 P-last (R-V141P1-12): pure CJK now produces idea-<hex>
         // instead of "untitled"
         let slug = title_to_slug("灵感和创意");
         assert!(slug.starts_with("idea-"));
         assert!(slug.len() > 5);
-        // Mixed: the CJK chars become hyphens, collapsed, trailing stripped
+        // note: Mixed: the CJK chars become hyphens, collapsed, trailing stripped
         let slug = title_to_slug("My 灵感 Idea");
-        // "my-idea" (CJK → hyphens collapsed, trailing stripped)
+        // note: "my-idea" (CJK → hyphens collapsed, trailing stripped)
         assert!(slug.contains("my"));
         assert!(slug.contains("idea"));
     }
@@ -616,7 +617,7 @@ mod tests {
 
     #[test]
     fn test_title_to_slug_empty() {
-        // Empty/whitespace now produces idea-<hex> fallback
+        // note: Empty/whitespace now produces idea-<hex> fallback
         let slug = title_to_slug("");
         assert!(slug.starts_with("idea-"));
         let slug = title_to_slug("   ");
@@ -629,11 +630,11 @@ mod tests {
         assert!(slug.starts_with("idea-"));
     }
 
-    // ── R-V146P4-QC3-S1: trace coverage for the 5 inspiration mutation paths.
-    //    Previously only `promote_to_active` (in novel_pool_entries) had a
-    //    capture test — 1 of 9 instrumented paths across both DAOs.
+    // note: R-V146P4-QC3-S1: trace coverage for the 5 inspiration mutation paths
+    // note: Previously only `promote_to_active` (in novel_pool_entries) had a
+    // note: capture test — 1 of 9 instrumented paths across both DAOs
 
-    /// Seed a works row so FK constraints (e.g. `inspiration_items.
+    /// note: Seed a works row so FK constraints (e.g. `inspiration_items.
     /// promoted_work_id` → works) are satisfied. Mirrors the helper in
     /// `novel_pool_entries::tests`.
     async fn seed_work(pool: &SqlitePool, work_id: &str, creator_id: &str) {
@@ -656,7 +657,7 @@ mod tests {
         .unwrap();
     }
 
-    /// Build a minimal `WorkRecord` for `inspiration_promote_atomic` (all
+    /// note: Build a minimal `WorkRecord` for `inspiration_promote_atomic` (all
     /// 30 fields filled). The trace is emitted at function entry, so the
     /// record's DB validity is not load-bearing for the capture assertion.
     fn sample_work_record(work_id: &str, creator_id: &str) -> crate::works::WorkRecord {
@@ -749,7 +750,7 @@ mod tests {
             .unwrap();
         }
 
-        // The scaffold path emits its own `inspiration_create_with_scaffold`
+        // note: The scaffold path emits its own `inspiration_create_with_scaffold`
         // trace and then delegates to `create_inspiration_row` (which emits
         // `inspiration_create_row`). Assert the scaffold-specific tag here.
         crate::test_tracing::assert_info_emitted(
@@ -779,7 +780,7 @@ mod tests {
         )
         .await
         .unwrap();
-        // FK: inspiration_items.promoted_work_id → works.work_id.
+        // note: FK: inspiration_items.promoted_work_id → works.work_id.
         seed_work(&pool, "wrk_promoted", "ctr_test").await;
 
         {
@@ -806,7 +807,7 @@ mod tests {
 
         let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
-        // Seed the inspiration row the atomic path updates in step 3.
+        // note: Seed the inspiration row the atomic path updates in step 3.
         create_inspiration_row(
             &pool,
             "npi_4",
@@ -821,7 +822,7 @@ mod tests {
 
         {
             let _guard = tracing::subscriber::set_default(subscriber);
-            // The trace is emitted at function entry. The subsequent works
+            // note: The trace is emitted at function entry. The subsequent works
             // INSERT may succeed or fail depending on schema FKs; either way
             // the structured trace has already been recorded.
             let _ =

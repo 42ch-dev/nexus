@@ -1,4 +1,5 @@
 //! KB Extract job queue — SQLite-backed persistence.
+// note: KB Extract job queue — SQLite-backed persistence.
 //!
 //! Each job represents a request to extract a work-scope KB entry into a
 //! world-scoped `KnowledgeEntryRecord` via the `kb.extract_work` capability.
@@ -10,40 +11,40 @@ use sqlx::{Sqlite, SqliteConnection, SqlitePool};
 
 use crate::error::LocalDbError;
 
-/// Row from `kb_extract_jobs`.
+/// note: Row from `kb_extract_jobs`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct KbExtractJob {
-    /// Unique job ID (`xj_` prefix).
+    /// note: Unique job ID (`xj_` prefix).
     pub job_id: String,
-    /// Owning creator ID.
+    /// note: Owning creator ID.
     pub creator_id: String,
-    /// Workspace ID the work entry belongs to.
+    /// note: Workspace ID the work entry belongs to.
     pub workspace_id: String,
-    /// Work-scope KB entry ID to extract from (V1.29 legacy; still used for idempotency).
+    /// note: Work-scope KB entry ID to extract from (V1.29 legacy; still used for idempotency).
     pub work_entry_id: String,
-    /// Target world ID for the resulting `KnowledgeEntryRecord`.
+    /// note: Target world ID for the resulting `KnowledgeEntryRecord`.
     pub world_id: String,
-    /// Job status: `queued`, `running`, `done`, `failed`.
+    /// note: Job status: `queued`, `running`, `done`, `failed`.
     pub status: String,
-    /// Error text (set when status is `failed`).
+    /// note: Error text (set when status is `failed`).
     pub error_text: Option<String>,
-    /// When the job was created.
+    /// note: When the job was created.
     pub created_at: String,
-    /// When the job started running.
+    /// note: When the job started running.
     pub started_at: Option<String>,
-    /// When the job finished (done or failed).
+    /// note: When the job finished (done or failed).
     pub finished_at: Option<String>,
-    /// V1.40 P3: artifact type discriminator (`work_chapter`, `work_section`, etc.).
+    /// note: V1.40 P3: artifact type discriminator (`work_chapter`, `work_section`, etc.).
     pub source_kind: Option<String>,
-    /// V1.40 P3: artifact locator (relative path, artifact ID, or reference ID).
+    /// note: V1.40 P3: artifact locator (relative path, artifact ID, or reference ID).
     pub source_locator: Option<String>,
-    /// V1.40 P3: profile hint for extract prompt (`novel`, `screenplay`, `essay`, `generic`).
+    /// note: V1.40 P3: profile hint for extract prompt (`novel`, `screenplay`, `essay`, `generic`).
     pub profile_hint: Option<String>,
-    /// V1.40 P3: work ID for the source work (chapter's parent).
+    /// note: V1.40 P3: work ID for the source work (chapter's parent).
     pub work_id: Option<String>,
 }
 
-/// Generate a unique job ID: `xj_` + `UUIDv4` hex string.
+/// note: Generate a unique job ID: `xj_` + `UUIDv4` hex string.
 ///
 /// Uses the `uuid` crate for proper `UUIDv4` generation with `xj_` prefix.
 /// Collision probability is negligible but handled by the caller via single retry.
@@ -51,7 +52,7 @@ fn generate_job_id() -> String {
     format!("xj_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// Fetch a single job by ID.
+/// note: Fetch a single job by ID.
 ///
 /// # Errors
 ///
@@ -82,7 +83,7 @@ async fn fetch_by_id(pool: &SqlitePool, job_id: &str) -> Result<KbExtractJob, sq
     .await
 }
 
-/// Fetch a single optional job by ID.
+/// note: Fetch a single optional job by ID.
 ///
 /// # Errors
 ///
@@ -116,7 +117,7 @@ async fn fetch_optional_by_id(
     .await
 }
 
-/// Insert a new job row, retrying once on PRIMARY KEY collision (R18).
+/// note: Insert a new job row, retrying once on PRIMARY KEY collision (R18).
 ///
 /// `UUIDv4` collision is astronomically unlikely; this guard is defensive only.
 // 9 params mirrors the kb_extract_jobs column layout — splitting into a builder
@@ -159,18 +160,18 @@ async fn insert_with_retry(
                 return fetch_by_id(pool, &job_id).await;
             }
             Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("1555") => {
-                // SQLite UNIQUE constraint violation (code 1555) — retry with new UUID
+                // note: SQLite UNIQUE constraint violation (code 1555) — retry with new UUID
             }
             Err(e) => return Err(e),
         }
     }
-    // Should never reach here with UUIDv4
+    // why: Should never reach here with UUIDv4
     Err(sqlx::Error::Configuration(
         "UNIQUE constraint violation after retry — impossible with UUIDv4".into(),
     ))
 }
 
-/// Enqueue a new extract job. Idempotent: if a non-failed job already exists
+/// note: Enqueue a new extract job. Idempotent: if a non-failed job already exists
 /// for the same `(creator_id, work_entry_id, world_id)`, returns the existing job.
 ///
 /// # Errors
@@ -183,7 +184,7 @@ pub async fn enqueue(
     work_entry_id: &str,
     world_id: &str,
 ) -> Result<KbExtractJob, sqlx::Error> {
-    // Check for existing non-failed job (idempotency).
+    // note: Check for existing non-failed job (idempotency).
     let existing = sqlx::query_as!(
         KbExtractJob,
         r#"SELECT
@@ -214,7 +215,7 @@ pub async fn enqueue(
         return Ok(job);
     }
 
-    // Insert new job with retry on PRIMARY KEY collision.
+    // note: Insert new job with retry on PRIMARY KEY collision.
     insert_with_retry(
         pool,
         creator_id,
@@ -229,7 +230,7 @@ pub async fn enqueue(
     .await
 }
 
-/// Enqueue a new extract job with artifact locator fields (V1.40 P3).
+/// note: Enqueue a new extract job with artifact locator fields (V1.40 P3).
 ///
 /// Idempotent: if a non-failed job already exists for the same
 /// `(creator_id, work_entry_id, world_id)`, returns the existing job.
@@ -250,7 +251,7 @@ pub async fn enqueue_with_artifact(
     profile_hint: Option<&str>,
     work_id: Option<&str>,
 ) -> Result<KbExtractJob, sqlx::Error> {
-    // Check for existing non-failed job (idempotency).
+    // note: Check for existing non-failed job (idempotency).
     let existing = sqlx::query_as!(
         KbExtractJob,
         r#"SELECT
@@ -295,7 +296,7 @@ pub async fn enqueue_with_artifact(
     .await
 }
 
-/// Get a specific job by ID.
+/// note: Get a specific job by ID.
 ///
 /// # Errors
 ///
@@ -304,7 +305,7 @@ pub async fn get(pool: &SqlitePool, job_id: &str) -> Result<Option<KbExtractJob>
     fetch_optional_by_id(pool, job_id).await
 }
 
-/// List jobs for a given creator, bounded by `limit` (R20).
+/// note: List jobs for a given creator, bounded by `limit` (R20).
 ///
 /// Returns at most `limit` jobs ordered by creation date (newest first).
 /// Use a reasonable default (e.g. 100) to avoid unbounded result sets.
@@ -334,7 +335,7 @@ pub async fn list_by_creator(
         .await
 }
 
-/// Fetch the next queued job (oldest first) for a given creator.
+/// note: Fetch the next queued job (oldest first) for a given creator.
 ///
 /// Returns `None` if no queued jobs exist.
 ///
@@ -370,7 +371,7 @@ pub async fn next_queued(
     .await
 }
 
-/// Mark a job as running. Sets `started_at` to now.
+/// note: Mark a job as running. Sets `started_at` to now.
 ///
 /// TD-V130-06: Only transitions from `queued` status. If the job is not in
 /// `queued` status (e.g. already `running`, `done`, or `failed`), this is a
@@ -392,7 +393,7 @@ pub async fn mark_running(pool: &SqlitePool, job_id: &str) -> Result<(), sqlx::E
     Ok(())
 }
 
-/// Atomically claim the oldest queued job for a given creator (R15).
+/// note: Atomically claim the oldest queued job for a given creator (R15).
 ///
 /// Performs SELECT + UPDATE in a single `SQLite` transaction to prevent
 /// concurrent workers from double-claiming the same job.
@@ -408,7 +409,7 @@ pub async fn claim_job(
 ) -> Result<Option<KbExtractJob>, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    // Select oldest queued job for this creator.
+    // note: Select oldest queued job for this creator.
     let job = sqlx::query_as!(
         KbExtractJob,
         r#"SELECT
@@ -438,7 +439,7 @@ pub async fn claim_job(
         return Ok(None);
     };
 
-    // Atomically mark as running within the same transaction.
+    // note: Atomically mark as running within the same transaction.
     let result = sqlx::query!(
         r#"UPDATE kb_extract_jobs
            SET status = 'running', started_at = datetime('now')
@@ -455,12 +456,12 @@ pub async fn claim_job(
 
     tx.commit().await?;
 
-    // Re-fetch to get the updated started_at timestamp.
+    // note: Re-fetch to get the updated started_at timestamp.
     let claimed = fetch_by_id(pool, &job.job_id).await?;
     Ok(Some(claimed))
 }
 
-/// Claim the successful terminal for one extract job **inside the caller's
+/// note: Claim the successful terminal for one extract job **inside the caller's
 /// transaction** (v1.191 P1 T13).
 ///
 /// The claim is conditional on the job still being claimable (`queued` /
@@ -488,7 +489,7 @@ pub async fn mark_done_in_tx(
     Ok(result.rows_affected() == 1)
 }
 
-/// Mark a job as failed. Sets `finished_at` to now and records error text.
+/// note: Mark a job as failed. Sets `finished_at` to now and records error text.
 ///
 /// # Errors
 ///
@@ -510,12 +511,10 @@ pub async fn mark_failed(
     Ok(())
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.50 T-B P2 — Refreshable scan: idempotent upsert of pending candidates
+// note: V1.50 T-B P2 — Refreshable scan: idempotent upsert of pending candidates
 // (entity-scope-model.md §5.5; compass §0.1 decision 7)
-// ═══════════════════════════════════════════════════════════════════════
 
-/// Outcome of an idempotent upsert of a pending promotion candidate.
+/// note: Outcome of an idempotent upsert of a pending promotion candidate.
 ///
 /// Returned by [`upsert_pending_candidate`]. The composite identity of a
 /// candidate is `(source_chapter_id, canonical_name_guess)` scoped to the
@@ -529,17 +528,17 @@ pub async fn mark_failed(
 /// chapters (entity-scope-model §5.5.2: `pending → confirmed | rejected`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpsertOutcome {
-    /// A new `pending` row was inserted.
+    /// note: A new `pending` row was inserted.
     Inserted(String),
-    /// An existing `pending` row had its `proposed_payload` / `block_type_guess`
+    /// note: An existing `pending` row had its `proposed_payload` / `block_type_guess`
     /// / `source_chapter_id` refreshed.
     Updated(String),
-    /// The existing row was already `confirmed` (terminal per §5.5.2) or its
+    /// note: The existing row was already `confirmed` (terminal per §5.5.2) or its
     /// payload was identical to the new extraction — nothing was changed.
     Unchanged(String),
 }
 
-/// List promotion candidates (any `promotion_status`) for one chapter.
+/// note: List promotion candidates (any `promotion_status`) for one chapter.
 ///
 /// Used by `creator world kb rescan` to compute the diff baseline against the
 /// freshly-extracted candidate set.
@@ -570,7 +569,7 @@ pub async fn list_for_chapter(
     .await
 }
 
-/// Idempotent upsert of a pending promotion candidate (V1.50 T-B P2).
+/// note: Idempotent upsert of a pending promotion candidate (V1.50 T-B P2).
 ///
 /// Reuses any existing non-failed row keyed on
 /// `(creator_id, canonical_name_guess, world_id)` — the DB uniqueness enforced
@@ -622,7 +621,7 @@ pub async fn upsert_pending_candidate(
     .await?;
 
     let Some(row) = existing else {
-        // No existing candidate — insert a new pending row.
+        // note: No existing candidate — insert a new pending row.
         let job = insert_pending(
             pool,
             creator_id,
@@ -639,11 +638,11 @@ pub async fn upsert_pending_candidate(
     };
 
     if row.promotion_status == "confirmed" {
-        // Terminal per §5.5.2 — never mutate a promoted candidate.
+        // why: Terminal per §5.5.2 — never mutate a promoted candidate.
         return Ok(UpsertOutcome::Unchanged(row.job_id));
     }
 
-    // Pending row: refresh only if something material changed.
+    // note: Pending row: refresh only if something material changed.
     let same_payload = row.proposed_payload.as_deref() == Some(proposed_payload);
     let same_chapter = row.source_chapter_id == source_chapter_id;
     let same_type = row.block_type_guess.as_deref() == Some(block_type_guess);
@@ -667,7 +666,7 @@ pub async fn upsert_pending_candidate(
     Ok(UpsertOutcome::Updated(row.job_id))
 }
 
-/// Delete a stale `pending` candidate sourced from a specific chapter.
+/// note: Delete a stale `pending` candidate sourced from a specific chapter.
 ///
 /// Used by `creator world kb rescan` to remove candidates that were previously
 /// extracted from the rescanned chapter but no longer appear in its current
@@ -699,9 +698,7 @@ pub async fn delete_pending_for_chapter(
     Ok(result.rows_affected() > 0)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.50 T-B P1 — World KB promotion lifecycle (entity-scope-model.md §5.5)
-// ═══════════════════════════════════════════════════════════════════════
+// note: V1.50 T-B P1 — World KB promotion lifecycle (entity-scope-model.md §5.5)
 //
 // The promotion lifecycle is *orthogonal* to the V1.29/V1.40 extraction queue
 // (`KbExtractJob` + `status` = queued/running/done/failed). Review-time
@@ -713,7 +710,7 @@ pub async fn delete_pending_for_chapter(
 // they do NOT require regeneration of the shared `.sqlx` offline cache. This
 // mirrors the existing `list_by_creator` precedent in this file.
 
-/// Row from `kb_extract_jobs` carrying the V1.50 promotion-lifecycle columns.
+/// note: Row from `kb_extract_jobs` carrying the V1.50 promotion-lifecycle columns.
 ///
 /// Separate from [`KbExtractJob`] (the V1.29 extraction-queue row) so the two
 /// lifecycles do not share a struct or its `query_as!` macros.
@@ -723,62 +720,62 @@ pub async fn delete_pending_for_chapter(
 /// heuristic rows). See `llm-extract.md` §3.2.
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct KbExtractPromotion {
-    /// Unique job ID (`xj_` prefix).
+    /// note: Unique job ID (`xj_` prefix).
     pub job_id: String,
-    /// Owning creator ID.
+    /// note: Owning creator ID.
     pub creator_id: String,
-    /// Workspace ID.
+    /// note: Workspace ID.
     pub workspace_id: String,
-    /// Target world ID for the candidate.
+    /// note: Target world ID for the candidate.
     pub world_id: String,
-    /// Source work ID (V1.40 P3 column; reused for promotion candidates).
+    /// note: Source work ID (V1.40 P3 column; reused for promotion candidates).
     pub work_id: Option<String>,
-    /// Promotion state: `pending`, `confirmed`, `rejected` (§5.5.1).
+    /// note: Promotion state: `pending`, `confirmed`, `rejected` (§5.5.1).
     pub promotion_status: String,
-    /// Proposed `KnowledgeEntryRecord` body as JSON.
+    /// note: Proposed `KnowledgeEntryRecord` body as JSON.
     pub proposed_payload: Option<String>,
-    /// Source chapter number (NULL for work-level candidates).
+    /// note: Source chapter number (NULL for work-level candidates).
     pub source_chapter_id: Option<i64>,
-    /// `block_type` guess (`snake_case` wire value). V1.50 heuristic always
+    /// note: `block_type` guess (`snake_case` wire value). V1.50 heuristic always
     /// `character`; V1.51 `nexus.llm.extract` fills the LLM-judged value.
     pub block_type_guess: Option<String>,
-    /// `canonical_name` guess. V1.50 heuristic = matched phrase; V1.51
+    /// note: `canonical_name` guess. V1.50 heuristic = matched phrase; V1.51
     /// `nexus.llm.extract` = LLM-extracted canonical name.
     pub canonical_name_guess: Option<String>,
-    /// V1.51 T-A P0: LLM self-reported confidence in `[0.0, 1.0]`. `NULL` for
+    /// note: V1.51 T-A P0: LLM self-reported confidence in `[0.0, 1.0]`. `NULL` for
     /// V1.50 heuristic rows and legacy queue rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_confidence: Option<f64>,
-    /// V1.51 T-A P0: verbatim chapter excerpt justifying the extraction.
+    /// note: V1.51 T-A P0: verbatim chapter excerpt justifying the extraction.
     /// `NULL` for V1.50 heuristic rows and legacy queue rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_source_quote: Option<String>,
-    /// Row creation timestamp.
+    /// note: Row creation timestamp.
     pub created_at: String,
-    /// V1.51 T-B P1: OCC version column for CAS writes.
+    /// note: V1.51 T-B P1: OCC version column for CAS writes.
     /// Read path: callers must capture this version and pass it to
     /// [`mark_confirmed_in_tx_with_cas`] / [`upsert_pending_candidate`]
     /// to close the TOCTOU window between read and write.
     #[serde(skip)]
     pub version: i64,
-    /// V1.52 T-A P0: when the candidate was auto-promoted via
+    /// note: V1.52 T-A P0: when the candidate was auto-promoted via
     /// `creator world kb adopt --auto`. `NULL` for manually adopted or
     /// non-promoted rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_promoted_at: Option<String>,
-    /// V1.52 T-A P0: human-readable reason recorded by the auto-promotion path
+    /// note: V1.52 T-A P0: human-readable reason recorded by the auto-promotion path
     /// (e.g. "confidence=0.97, `validation_clean`, `provenance_backed`").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_promoted_reason: Option<String>,
-    /// V1.52 T-A P0: actor marker for auto-promotion (e.g. `nexus42:cli:kb-adopt-auto:<creator_id>`).
+    /// note: V1.52 T-A P0: actor marker for auto-promotion (e.g. `nexus42:cli:kb-adopt-auto:<creator_id>`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_promoted_by: Option<String>,
 }
 
-/// Default limit for `list_pending_for_world` when caller passes `None`.
+/// note: Default limit for `list_pending_for_world` when caller passes `None`.
 const DEFAULT_PENDING_LIMIT: i64 = 100;
 
-/// Insert a new promotion candidate with `promotion_status='pending'`.
+/// note: Insert a new promotion candidate with `promotion_status='pending'`.
 ///
 /// Used by the review-time extraction hook
 /// (`nexus_orchestration::quality_loop`). The caller is expected to have
@@ -804,7 +801,7 @@ pub async fn insert_pending(
     canonical_name_guess: &str,
     proposed_payload: &str,
 ) -> Result<KbExtractPromotion, sqlx::Error> {
-    // The insert runs on one pooled connection; the caller-owned transaction
+    // note: The insert runs on one pooled connection; the caller-owned transaction
     // lane passes its own connection to `insert_pending_with_llm` directly.
     let mut conn = pool.acquire().await?;
     insert_pending_with_llm(
@@ -823,7 +820,7 @@ pub async fn insert_pending(
     .await
 }
 
-/// Insert a new promotion candidate carrying LLM extraction metadata
+/// note: Insert a new promotion candidate carrying LLM extraction metadata
 /// (V1.51 T-A P0).
 ///
 /// Same as [`insert_pending`] but also populates `llm_confidence` +
@@ -886,7 +883,7 @@ pub async fn insert_pending_with_llm(
     fetch_promotion_by_id(&mut *conn, &job_id).await
 }
 
-/// Fetch a single promotion row by ID.
+/// note: Fetch a single promotion row by ID.
 ///
 /// # Errors
 ///
@@ -898,7 +895,7 @@ pub async fn get_promotion(
     fetch_promotion_optional_by_id(pool, job_id).await
 }
 
-/// List promotion candidates in the `pending` state for a world.
+/// note: List promotion candidates in the `pending` state for a world.
 ///
 /// Ordered by creation date (oldest first) so the author sees candidates in
 /// extraction order. Bounded by `limit` (default [`DEFAULT_PENDING_LIMIT`]).
@@ -931,7 +928,7 @@ pub async fn list_pending_for_world(
         .await
 }
 
-/// List `pending` promotion candidates for a world with keyset cursor
+/// note: List `pending` promotion candidates for a world with keyset cursor
 /// pagination (V1.73 qc3 W-01 fix).
 ///
 /// Rows are ordered by `(created_at, job_id)` ascending so the ordering is
@@ -989,7 +986,7 @@ where
     query.fetch_all(executor).await
 }
 
-/// Idempotency pre-check: returns `true` if a `pending` or `confirmed` row
+/// note: Idempotency pre-check: returns `true` if a `pending` or `confirmed` row
 /// already exists for the same `work_id` + `canonical_name_guess`.
 ///
 /// Prevents the review-time extraction hook from duplicating candidates when
@@ -1021,7 +1018,7 @@ where
     Ok(existing.is_some_and(|(c,)| c > 0))
 }
 
-/// Flip a promotion candidate to `confirmed`.
+/// note: Flip a promotion candidate to `confirmed`.
 ///
 /// Only transitions from `pending`. Returns `Ok(true)` when the row was
 /// flipped, `Ok(false)` when the row was not in `pending` state (already
@@ -1042,7 +1039,7 @@ pub async fn mark_confirmed(pool: &SqlitePool, job_id: &str) -> Result<bool, sql
     Ok(result.rows_affected() > 0)
 }
 
-/// Transaction-aware variant of [`mark_confirmed`] (R-V150KBED-03).
+/// note: Transaction-aware variant of [`mark_confirmed`] (R-V150KBED-03).
 ///
 /// Same conditional `UPDATE` but issued against a caller-managed transaction
 /// so the `creator world kb adopt` path can wrap the `KnowledgeEntryRecord` insert + this
@@ -1071,7 +1068,7 @@ pub async fn mark_confirmed_in_tx(
     Ok(result.rows_affected() > 0)
 }
 
-/// V1.51 T-B P1: CAS-aware variant of [`mark_confirmed_in_tx`].
+/// note: V1.51 T-B P1: CAS-aware variant of [`mark_confirmed_in_tx`].
 ///
 /// Adds a version guard (`AND version = ?`) to the UPDATE so a stale
 /// preimage (read before another writer modified the row) is rejected
@@ -1117,7 +1114,7 @@ pub async fn mark_confirmed_in_tx_with_cas(
         return Ok(true);
     }
 
-    // rows_affected == 0 — either the row was already non-pending, or the
+    // note: rows_affected == 0 — either the row was already non-pending, or the
     // version changed (CAS mismatch). Re-read to disambiguate.
     let (status, version): (Option<String>, Option<i64>) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
@@ -1128,7 +1125,7 @@ pub async fn mark_confirmed_in_tx_with_cas(
 
     match (status.as_deref(), version) {
         (Some(s), _) if s != "pending" => {
-            // Row exists but is already confirmed/rejected — not a version conflict.
+            // note: Row exists but is already confirmed/rejected — not a version conflict.
             Ok(false)
         }
         (Some(_), Some(actual)) if actual != expected_version => {
@@ -1140,13 +1137,13 @@ pub async fn mark_confirmed_in_tx_with_cas(
             })
         }
         (None, _) => {
-            // Row not found at all.
+            // note: Row not found at all.
             Err(LocalDbError::MissingVersionKey {
                 key: format!("kb_extract_jobs/{job_id}"),
             })
         }
         _ => {
-            // Defensive: row is pending and version matches but rows_affected was 0
+            // note: Defensive: row is pending and version matches but rows_affected was 0
             // — shouldn't happen, but treat as version mismatch for safety.
             Err(LocalDbError::VersionMismatch {
                 table: "kb_extract_jobs".to_string(),
@@ -1158,7 +1155,7 @@ pub async fn mark_confirmed_in_tx_with_cas(
     }
 }
 
-/// V1.52 T-A P0: CAS-aware auto-promotion flip.
+/// note: V1.52 T-A P0: CAS-aware auto-promotion flip.
 ///
 /// Same semantics as [`mark_confirmed_in_tx_with_cas`], but also records the
 /// auto-promotion audit columns (`auto_promoted_at`, `auto_promoted_reason`,
@@ -1197,7 +1194,7 @@ pub async fn mark_auto_promoted_in_tx_with_cas(
         return Ok(true);
     }
 
-    // Disambiguate stale version vs already-confirmed/rejected using the same
+    // note: Disambiguate stale version vs already-confirmed/rejected using the same
     // logic as mark_confirmed_in_tx_with_cas.
     let (status, version): (Option<String>, Option<i64>) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
@@ -1228,7 +1225,7 @@ pub async fn mark_auto_promoted_in_tx_with_cas(
     }
 }
 
-/// Flip a promotion candidate to `rejected`.
+/// note: Flip a promotion candidate to `rejected`.
 ///
 /// Only transitions from `pending`. Returns `Ok(true)` when the row was
 /// flipped, `Ok(false)` otherwise.
@@ -1248,7 +1245,7 @@ pub async fn mark_rejected(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx
     Ok(result.rows_affected() > 0)
 }
 
-// ── internal fetchers ─────────────────────────────────────────────────
+// note: internal fetchers
 
 async fn fetch_promotion_by_id<'e, E>(
     executor: E,
@@ -1297,7 +1294,7 @@ mod tests {
         assert!(job.job_id.starts_with("xj_"));
         assert_eq!(job.status, "queued");
         assert_eq!(job.creator_id, "ctr_1");
-        // UUID format: xj_ + 32 hex chars
+        // note: UUID format: xj_ + 32 hex chars
         let uuid_part = &job.job_id[3..];
         assert_eq!(uuid_part.len(), 32);
         assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));
@@ -1366,7 +1363,7 @@ mod tests {
         mark_running(&pool, &job.job_id).await.unwrap();
         mark_failed(&pool, &job.job_id, "error").await.unwrap();
 
-        // After failure, re-enqueue should create a new job.
+        // note: After failure, re-enqueue should create a new job.
         let job2 = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc", "wld_1")
             .await
             .unwrap();
@@ -1402,11 +1399,11 @@ mod tests {
                 .unwrap();
         }
 
-        // Limit of 3 should return only 3
+        // note: Limit of 3 should return only 3
         let jobs = list_by_creator(&pool, "ctr_1", 3).await.unwrap();
         assert_eq!(jobs.len(), 3);
 
-        // Limit of 100 returns all
+        // note: Limit of 100 returns all
         let jobs = list_by_creator(&pool, "ctr_1", 100).await.unwrap();
         assert_eq!(jobs.len(), 5);
     }
@@ -1432,7 +1429,7 @@ mod tests {
         assert_ne!(next.job_id, j1.job_id);
     }
 
-    // ── K1: Atomic claim_job tests ──────────────────────────────────
+    // note: K1: Atomic claim_job tests
 
     #[tokio::test]
     async fn test_claim_job_selects_oldest_queued() {
@@ -1464,19 +1461,19 @@ mod tests {
             .unwrap();
         mark_running(&pool, &j1.job_id).await.unwrap();
 
-        // Only running jobs — nothing to claim
+        // note: Only running jobs — nothing to claim
         assert!(claim_job(&pool, "ctr_1").await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn test_claim_job_concurrent_double_claim_prevented() {
         let (_dir, pool) = fresh_engine_pool().await;
-        // Enqueue a single job
+        // note: Enqueue a single job
         let _j = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
             .unwrap();
 
-        // Two concurrent claimers — SQLite may return BUSY for one of them,
+        // note: Two concurrent claimers — SQLite may return BUSY for one of them,
         // which we treat as "did not claim".
         let pool1 = pool.clone();
         let pool2 = pool.clone();
@@ -1486,7 +1483,7 @@ mod tests {
         let r1 = h1.await.unwrap().ok().flatten();
         let r2 = h2.await.unwrap().ok().flatten();
 
-        // Exactly one should succeed (the other gets SQLITE_BUSY → Err, or
+        // note: Exactly one should succeed (the other gets SQLITE_BUSY → Err, or
         // finds no queued row → None).
         let claimed_count = usize::from(r1.is_some()) + usize::from(r2.is_some());
         assert!(
@@ -1515,7 +1512,7 @@ mod tests {
         assert_eq!(done.status, "done");
     }
 
-    // ── V1.40 P3: Artifact locator tests ────────────────────────────
+    // note: V1.40 P3: Artifact locator tests
 
     #[tokio::test]
     async fn test_enqueue_with_artifact_fields() {
@@ -1561,7 +1558,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Same work_entry_id + world_id → idempotent return
+        // note: Same work_entry_id + world_id → idempotent return
         let job2 = enqueue_with_artifact(
             &pool,
             "ctr_1",
@@ -1591,7 +1588,7 @@ mod tests {
         assert!(job.work_id.is_none());
     }
 
-    // ── V1.52 T-A P0: auto-promote audit columns ──────────────────────
+    // note: V1.52 T-A P0: auto-promote audit columns
 
     #[tokio::test]
     async fn auto_promote_columns_default_to_null_and_record_on_flip() {
@@ -1618,7 +1615,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Freshly inserted rows have no auto-promotion audit.
+        // note: Freshly inserted rows have no auto-promotion audit.
         assert!(pending.auto_promoted_at.is_none());
         assert!(pending.auto_promoted_reason.is_none());
         assert!(pending.auto_promoted_by.is_none());

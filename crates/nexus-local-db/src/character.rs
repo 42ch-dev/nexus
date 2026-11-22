@@ -1,4 +1,5 @@
 //! Character bearer storage and the atomic create+initial-binding transaction.
+// note: Character bearer storage and the atomic create+initial-binding transaction.
 
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -14,7 +15,7 @@ use crate::holders::{ensure_character_holder_in_tx, require_subject_holder, Hold
 const PERSONA_JSON_MAX_BYTES: usize = 16_384;
 const IMAGE_URI_MAX_BYTES: usize = 2048;
 
-/// Persisted Character row (storage shape; not a wire DTO).
+/// note: Persisted Character row (storage shape; not a wire DTO).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharacterRecord {
     pub character_id: String,
@@ -54,7 +55,7 @@ impl Default for CharacterPatch<'_> {
 }
 
 impl CharacterPatch<'_> {
-    /// True when the patch carries no mutable fields (§11 empty patch).
+    /// note: True when the patch carries no mutable fields (§11 empty patch).
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.display_name.is_none()
@@ -102,7 +103,7 @@ const fn character_inactive(_character_id: &str) -> LocalDbError {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // row mapper mirrors SQL projection
+#[allow(clippy::too_many_arguments)] // why: row mapper mirrors SQL projection
 const fn record_from_parts(
     character_id: String,
     owner_creator_id: String,
@@ -129,7 +130,7 @@ const fn record_from_parts(
     }
 }
 
-/// Inputs for minting a Character together with its first active binding.
+/// note: Inputs for minting a Character together with its first active binding.
 #[derive(Debug, Clone, Copy)]
 pub struct CreateCharacterParams<'a> {
     pub owner_creator_id: &'a str,
@@ -140,14 +141,14 @@ pub struct CreateCharacterParams<'a> {
     pub world_sheet_entry_id: Option<&'a str>,
 }
 
-/// Atomic create result.
+/// note: Atomic create result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateCharacterResult {
     pub character: CharacterRecord,
     pub binding: ActorWorldBindingRecord,
 }
 
-/// Mint a `chr_` + 32 lowercase hex Character id.
+/// note: Mint a `chr_` + 32 lowercase hex Character id.
 #[must_use]
 pub fn mint_character_id() -> String {
     format!("chr_{}", Uuid::new_v4().simple())
@@ -196,7 +197,7 @@ pub(crate) fn validate_persona_json(raw: &str) -> Result<String, LocalDbError> {
     Ok(serialized)
 }
 
-/// Owned World validation for retained-data read paths.
+/// note: Owned World validation for retained-data read paths.
 ///
 /// The World must exist and be owned by `owner_creator_id`; no status
 /// requirement applies (retained reads tolerate an archived World).
@@ -225,7 +226,7 @@ pub(crate) async fn require_owned_world_pool(
     }
 }
 
-/// Owned **and active** World validation (v1.184 P3 provenance rule).
+/// note: Owned **and active** World validation (v1.184 P3 provenance rule).
 ///
 /// Character memory provenance requires a binding to target a World that is
 /// both owned by the caller and `status = 'active'`. Archived or paused
@@ -293,7 +294,7 @@ async fn load_character(
     }))
 }
 
-/// Ownership-scoped Character lookup. Foreign ids are not distinguished from missing.
+/// note: Ownership-scoped Character lookup. Foreign ids are not distinguished from missing.
 ///
 /// # Errors
 ///
@@ -337,7 +338,7 @@ pub async fn get_character(
     }))
 }
 
-/// Resolve the stable holder of an owned stored Character for a normal read
+/// note: Resolve the stable holder of an owned stored Character for a normal read
 /// (§2.2), including archived Characters (retained management reads).
 ///
 /// Fails closed when the registry row is missing or corrupt — a normal read
@@ -360,7 +361,7 @@ pub async fn require_character_holder(
     require_subject_holder(pool, &HolderSubject::Character(character_id.to_string())).await
 }
 
-/// List Characters owned by `owner_creator_id` with SQL `LIMIT`/`OFFSET`.
+/// note: List Characters owned by `owner_creator_id` with SQL `LIMIT`/`OFFSET`.
 ///
 /// Callers that paginate should pass `limit + 1` so they can detect `has_more`.
 ///
@@ -413,7 +414,7 @@ pub async fn list_characters(
         .collect())
 }
 
-/// Insert Character + holder registry row + first active binding in one
+/// note: Insert Character + holder registry row + first active binding in one
 /// write-serialized transaction (§2.1).
 ///
 /// # Errors
@@ -482,7 +483,7 @@ async fn create_in_tx(
     .await;
     map_actor_constraint(insert)?;
 
-    // §2.1: the Character and its holder registry row commit in this same
+    // note: §2.1: the Character and its holder registry row commit in this same
     // transaction, so the identity is never usable without its holder.
     ensure_character_holder_in_tx(tx, character_id).await?;
 
@@ -525,7 +526,7 @@ pub(crate) async fn require_owned_character(
 
 /// # Errors
 ///
-/// Returns `LocalDbError::ActorNotFound` when missing or foreign, inactive conflict,
+/// note: Returns `LocalDbError::ActorNotFound` when missing or foreign, inactive conflict,
 /// or database failure.
 pub async fn require_active_owned_character_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -539,7 +540,7 @@ pub async fn require_active_owned_character_tx(
     Ok(row)
 }
 
-/// Pool-scoped ownership check for read paths that do not hold a write
+/// note: Pool-scoped ownership check for read paths that do not hold a write
 /// transaction. Foreign ids are not distinguished from missing.
 ///
 /// # Errors
@@ -630,7 +631,7 @@ fn apply_character_patch_fields(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, CAS, validation, or database failure.
+/// note: Returns `LocalDbError` on ownership, CAS, validation, or database failure.
 pub async fn update_character(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -642,7 +643,7 @@ pub async fn update_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
-        // §2.2: a lifecycle write resolves the same registry row it must keep
+        // why: §2.2: a lifecycle write resolves the same registry row it must keep
         // across the transition. A missing/corrupt holder fails closed rather
         // than editing an identity that has none; a rename never changes it.
         require_subject_holder(&mut *tx, &HolderSubject::Character(character_id.to_string()))
@@ -696,7 +697,7 @@ async fn restore_has_active_binding_tx(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, CAS, lifecycle guard, or database failure.
+/// note: Returns `LocalDbError` on ownership, CAS, lifecycle guard, or database failure.
 pub async fn transition_character(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -708,7 +709,7 @@ pub async fn transition_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_owned_character(&mut tx, owner_creator_id, character_id).await?;
-        // §2.2: archive and restore reuse the same holder; resolving it here
+        // note: §2.2: archive and restore reuse the same holder; resolving it here
         // fails closed when the registry row is missing or corrupt, and the row
         // is never written by the transition (identity and lifecycle epoch are
         // the only things that move).
@@ -760,7 +761,7 @@ pub async fn transition_character(
     }
 }
 
-/// Unreferenced-only deletion of a stored Character and its holder (§2.2).
+/// note: Unreferenced-only deletion of a stored Character and its holder (§2.2).
 ///
 /// The holder row and the Character row are removed in one transaction, and
 /// only when the subject is unreferenced: any binding, governance reference
@@ -809,7 +810,7 @@ async fn delete_character_in_tx(
     if in_use > 0 {
         return Err(LocalDbError::actor_in_use());
     }
-    // Holder first (it references the subject), then the subject — one
+    // note: Holder first (it references the subject), then the subject — one
     // transaction, so a refusal anywhere leaves both rows untouched.
     sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND character_id = ?")
         .bind(&holder_entry_id)
@@ -826,7 +827,7 @@ async fn delete_character_in_tx(
     Ok(())
 }
 
-/// Count every row that still references a Character subject: bindings,
+/// note: Count every row that still references a Character subject: bindings,
 /// governance references (rows governed by its holder), retained owned rows and
 /// the quarantine atoms that name it as their container.
 ///
@@ -859,7 +860,7 @@ async fn character_reference_count(
     Ok(count)
 }
 
-/// Map unique/check failures onto stable actor conflicts when possible.
+/// note: Map unique/check failures onto stable actor conflicts when possible.
 pub(crate) fn map_actor_constraint<T>(result: Result<T, sqlx::Error>) -> Result<T, LocalDbError> {
     match result {
         Ok(v) => Ok(v),

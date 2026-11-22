@@ -1,4 +1,5 @@
 //! Moment Directive storage (V1.150 P1, DF-75) — persistent, scoped author
+// note: Moment Directive storage (V1.150 P1, DF-75) — persistent, scoped author
 //! instruction for the MCA `moment.directive` slot (spec
 //! `fl-l-w5-prompt-control-plane.md` §3).
 //!
@@ -43,85 +44,85 @@ use sqlx::SqlitePool;
 
 use crate::error::LocalDbError;
 
-/// Scope kinds for a Moment Directive (`scope_kind` column values).
+/// note: Scope kinds for a Moment Directive (`scope_kind` column values).
 pub mod scope_kind {
-    /// Work-scoped directive (`scope_id` = work id).
+    /// note: Work-scoped directive (`scope_id` = work id).
     pub const WORK: &str = "work";
-    /// World-scoped override (`scope_id` = world id).
+    /// note: World-scoped override (`scope_id` = world id).
     pub const WORLD: &str = "world";
 }
 
-/// Moment Directive row — mirrors the `moment_directives` DB row.
+/// note: Moment Directive row — mirrors the `moment_directives` DB row.
 ///
 /// `Serialize` powers the daemon directive route response (`show`/`set`
 /// return the full row incl. body — the author surface, not the inspector
 /// packet; AC-I3).
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct MomentDirectiveRow {
-    /// Unique directive id (application-generated).
+    /// note: Unique directive id (application-generated).
     pub directive_id: String,
-    /// Owning creator.
+    /// note: Owning creator.
     pub creator_id: String,
-    /// `work` | `world`.
+    /// note: `work` | `world`.
     pub scope_kind: String,
-    /// Work id (`scope_kind` = `work`) or world id (`scope_kind` = `world`).
+    /// note: Work id (`scope_kind` = `work`) or world id (`scope_kind` = `world`).
     pub scope_id: String,
-    /// Author instruction text (non-empty after trim).
+    /// note: Author instruction text (non-empty after trim).
     ///
     /// No size cap by design — consistent with the personality section; the
     /// MCA token budget governs overall context, not per-section caps
     /// (R-V1150P2-006 accepted).
     pub body: String,
-    /// `head` | `mid` | `tail` — placement within the directive region.
+    /// note: `head` | `mid` | `tail` — placement within the directive region.
     pub insert_depth: String,
-    /// `generations` | `chapters`.
+    /// note: `generations` | `chapters`.
     pub ttl_kind: String,
-    /// Remaining TTL count (decremented in place; 0 ⇒ expired).
+    /// note: Remaining TTL count (decremented in place; 0 ⇒ expired).
     pub ttl_remaining: i64,
-    /// Clear when the focused moment anchor changes between assembles.
+    /// note: Clear when the focused moment anchor changes between assembles.
     pub clear_on_scene_change: bool,
-    /// `active` | `expired` (soft-delete).
+    /// note: `active` | `expired` (soft-delete).
     pub status: String,
-    /// Last focused `MomentRequest.event_id` seen at an injecting assemble
+    /// note: Last focused `MomentRequest.event_id` seen at an injecting assemble
     /// (scene-change signal; `NULL` until the first injection).
     pub last_focused_event_id: Option<String>,
-    /// Unix epoch millis when created.
+    /// note: Unix epoch millis when created.
     pub created_at: i64,
-    /// Unix epoch millis of the last lifecycle write.
+    /// note: Unix epoch millis of the last lifecycle write.
     pub updated_at: i64,
-    /// Unix epoch millis when soft-deleted (TTL-0 / scene-clear / manual clear).
+    /// note: Unix epoch millis when soft-deleted (TTL-0 / scene-clear / manual clear).
     pub expires_at: Option<i64>,
-    /// New directive id when `--replace` superseded this row.
+    /// note: New directive id when `--replace` superseded this row.
     pub replaced_by: Option<String>,
 }
 
-/// Parameters for creating a new active Moment Directive.
+/// note: Parameters for creating a new active Moment Directive.
 #[derive(Debug, Clone)]
 pub struct NewMomentDirective<'a> {
-    /// Unique directive id (caller-generated).
+    /// note: Unique directive id (caller-generated).
     pub directive_id: &'a str,
-    /// Owning creator.
+    /// note: Owning creator.
     pub creator_id: &'a str,
-    /// `scope_kind::WORK` | `scope_kind::WORLD`.
+    /// note: `scope_kind::WORK` | `scope_kind::WORLD`.
     pub scope_kind: &'a str,
-    /// Work id or world id matching `scope_kind`.
+    /// note: Work id or world id matching `scope_kind`.
     pub scope_id: &'a str,
-    /// Author instruction text (must be non-empty after trim — validated by
+    /// note: Author instruction text (must be non-empty after trim — validated by
     /// the CLI; the DB only enforces non-NULL).
     pub body: &'a str,
-    /// `head` | `mid` | `tail`.
+    /// note: `head` | `mid` | `tail`.
     pub insert_depth: &'a str,
-    /// `generations` | `chapters`.
+    /// note: `generations` | `chapters`.
     pub ttl_kind: &'a str,
-    /// Starting TTL count (must be ≥ 1 — validated by the CLI).
+    /// note: Starting TTL count (must be ≥ 1 — validated by the CLI).
     pub ttl_remaining: i64,
-    /// Clear on scene change (default false).
+    /// note: Clear on scene change (default false).
     pub clear_on_scene_change: bool,
-    /// Unix epoch millis for `created_at` / `updated_at`.
+    /// note: Unix epoch millis for `created_at` / `updated_at`.
     pub now: i64,
 }
 
-/// Insert a new `active` directive for a scope.
+/// note: Insert a new `active` directive for a scope.
 ///
 /// The unique partial index `moment_directives_one_active_per_scope` rejects
 /// a second active row for the same `(creator_id, scope_kind, scope_id)` —
@@ -139,7 +140,7 @@ pub async fn set_active(
     insert_active_row(pool, new).await
 }
 
-/// Shared INSERT behind `set_active` / `replace_active` — executor-generic so
+/// note: Shared INSERT behind `set_active` / `replace_active` — executor-generic so
 /// the replace path can insert inside its transaction.
 async fn insert_active_row<'e, E>(
     executor: E,
@@ -187,7 +188,7 @@ where
     })
 }
 
-/// Supersede an existing active directive in the scope with a new one
+/// note: Supersede an existing active directive in the scope with a new one
 /// (`--replace`, spec §3.1 / §3.3).
 ///
 /// Runs in a transaction: the old active row (if any) is soft-deleted with
@@ -220,7 +221,7 @@ pub async fn replace_active(
     Ok(row)
 }
 
-/// Fetch the active directive for a Work scope.
+/// note: Fetch the active directive for a Work scope.
 ///
 /// # Errors
 ///
@@ -233,7 +234,7 @@ pub async fn get_active_for_work(
     get_active_by_scope(pool, creator_id, scope_kind::WORK, work_id).await
 }
 
-/// Fetch the active directive for a World scope (the World override).
+/// note: Fetch the active directive for a World scope (the World override).
 ///
 /// # Errors
 ///
@@ -246,7 +247,7 @@ pub async fn get_active_for_world(
     get_active_by_scope(pool, creator_id, scope_kind::WORLD, world_id).await
 }
 
-/// Fetch a directive row by id (any status — used by the lifecycle path).
+/// note: Fetch a directive row by id (any status — used by the lifecycle path).
 ///
 /// # Errors
 ///
@@ -257,7 +258,7 @@ pub async fn get_by_id(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // `directive_id!` — SQLite describes a TEXT PRIMARY KEY as nullable,
+        // note: `directive_id!` — SQLite describes a TEXT PRIMARY KEY as nullable,
         // the macro needs the non-null coercion for the `String` field;
         // `clear_on_scene_change: bool` — the column is INTEGER, the struct
         // field is `bool` (explicit decode override).
@@ -276,7 +277,7 @@ pub async fn get_by_id(
     Ok(row)
 }
 
-/// Manual clear — soft-delete the active directive in a scope immediately
+/// note: Manual clear — soft-delete the active directive in a scope immediately
 /// (spec §3.3, "Manual clear"; no TTL wait).
 ///
 /// Returns `true` when an active row was soft-deleted.
@@ -306,7 +307,7 @@ pub async fn clear(
     Ok(result.rows_affected() > 0)
 }
 
-/// Decrement `ttl_remaining` by 1 for an active directive (spec §3.3 TTL
+/// note: Decrement `ttl_remaining` by 1 for an active directive (spec §3.3 TTL
 /// expiry; the `generations` path); at 0 the row is soft-deleted
 /// (`status='expired'`, `expires_at` set).
 ///
@@ -326,7 +327,7 @@ pub async fn decrement_ttl(
     decrement_ttl_by(pool, directive_id, 1, now).await
 }
 
-/// Decrement `ttl_remaining` by `delta` for an active directive (spec §3.3
+/// note: Decrement `ttl_remaining` by `delta` for an active directive (spec §3.3
 /// TTL expiry); at 0 the row is soft-deleted (`status='expired'`,
 /// `expires_at` set).
 ///
@@ -360,7 +361,7 @@ pub async fn decrement_ttl_by(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
+        // note: Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET ttl_remaining = MAX(ttl_remaining - ?, 0),
@@ -386,7 +387,7 @@ pub async fn decrement_ttl_by(
     Ok(row)
 }
 
-/// Scene clear — soft-delete an active directive because the focused moment
+/// note: Scene clear — soft-delete an active directive because the focused moment
 /// anchor changed between injecting assembles (`clear_on_scene_change`,
 /// spec §3.3).
 ///
@@ -401,10 +402,10 @@ pub async fn clear_on_scene_change(
     directive_id: &str,
     now: i64,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    // Single round-trip `UPDATE … RETURNING` (QC3-S002) — see `decrement_ttl`.
+    // note: Single round-trip `UPDATE … RETURNING` (QC3-S002) — see `decrement_ttl`.
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
+        // note: Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET status = 'expired', expires_at = ?, updated_at = ?
@@ -424,7 +425,7 @@ pub async fn clear_on_scene_change(
     Ok(row)
 }
 
-/// Record the cross-assemble scene anchor on an active directive (spec
+/// note: Record the cross-assemble scene anchor on an active directive (spec
 /// §3.3): the `event_id` observed at this injecting assemble.
 ///
 /// Returns `true` when an active row was updated.
@@ -451,7 +452,7 @@ pub async fn update_lifecycle_anchor(
     Ok(result.rows_affected() > 0)
 }
 
-/// Read the last observed `works.current_chapter` for a (directive, work)
+/// note: Read the last observed `works.current_chapter` for a (directive, work)
 /// pair; `None` when this Work has never injected the directive.
 ///
 /// This is the anchor that drives a `chapters`-TTL delta burn
@@ -478,7 +479,7 @@ pub async fn get_chapter_anchor(
     Ok(row.map(|r| r.last_chapter_no))
 }
 
-/// Record (or overwrite) the chapter anchor for a (directive, work) pair —
+/// note: Record (or overwrite) the chapter anchor for a (directive, work) pair —
 /// the `works.current_chapter` observed at an injecting assemble.
 ///
 /// # Errors
@@ -516,7 +517,7 @@ async fn get_active_by_scope(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
+        // note: Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "SELECT directive_id as \"directive_id!\",
                 creator_id, scope_kind, scope_id, body, insert_depth,
@@ -648,7 +649,7 @@ mod tests {
             .await
             .unwrap()
             .is_some());
-        // A different creator never sees the directives.
+        // why: A different creator never sees the directives.
         assert!(get_active_for_work(&pool, "ctr_other", "wrk_1")
             .await
             .unwrap()
@@ -704,12 +705,12 @@ mod tests {
         assert_eq!(after.ttl_remaining, 0);
         assert_eq!(after.status, "expired");
         assert!(after.expires_at.is_some());
-        // Expired rows no longer inject.
+        // note: Expired rows no longer inject.
         assert!(get_active_for_work(&pool, "ctr_test", "wrk_1")
             .await
             .unwrap()
             .is_none());
-        // Idempotent: further decrements are no-ops.
+        // note: Idempotent: further decrements are no-ops.
         assert!(decrement_ttl(&pool, "dir_1", now + 2)
             .await
             .unwrap()
@@ -760,7 +761,7 @@ mod tests {
         assert_eq!(row.status, "expired");
         assert!(row.expires_at.is_some());
 
-        // Clearing an already-empty scope reports false.
+        // note: Clearing an already-empty scope reports false.
         let again = clear(&pool, "ctr_test", scope_kind::WORK, "wrk_1", now + 2)
             .await
             .unwrap();
@@ -812,7 +813,7 @@ mod tests {
         let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
         assert_eq!(row.last_focused_event_id.as_deref(), Some("evt_a"));
 
-        // NULL anchor clears the stored state.
+        // note: NULL anchor clears the stored state.
         let cleared_anchor = update_lifecycle_anchor(&pool, "dir_1", None, now + 2)
             .await
             .unwrap();
@@ -832,7 +833,7 @@ mod tests {
         .await
         .unwrap();
 
-        // No anchor yet for either work.
+        // note: No anchor yet for either work.
         assert_eq!(
             get_chapter_anchor(&pool, "dir_1", "wrk_a").await.unwrap(),
             None
@@ -842,7 +843,7 @@ mod tests {
             None
         );
 
-        // Each work records its own chapter observation.
+        // note: Each work records its own chapter observation.
         upsert_chapter_anchor(&pool, "dir_1", "wrk_a", 1, now + 1)
             .await
             .unwrap();
@@ -859,7 +860,7 @@ mod tests {
             Some(4)
         );
 
-        // Upsert overwrites the pair's own value only.
+        // note: Upsert overwrites the pair's own value only.
         upsert_chapter_anchor(&pool, "dir_1", "wrk_a", 3, now + 2)
             .await
             .unwrap();
@@ -885,7 +886,7 @@ mod tests {
         .await
         .unwrap();
 
-        // 3 chapter advances between assembles ⇒ 3 decrements.
+        // note: 3 chapter advances between assembles ⇒ 3 decrements.
         let after = decrement_ttl_by(&pool, "dir_1", 3, now + 1)
             .await
             .unwrap()
@@ -906,7 +907,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Delta larger than the remaining TTL caps at 0 and expires.
+        // note: Delta larger than the remaining TTL caps at 0 and expires.
         let after = decrement_ttl_by(&pool, "dir_1", 5, now + 1)
             .await
             .unwrap()

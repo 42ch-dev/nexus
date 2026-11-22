@@ -1,4 +1,5 @@
 //! Memory fragment CRUD operations for review pipeline.
+// note: Memory fragment CRUD operations for review pipeline.
 //!
 //! Manages lightweight keyword-indexed fragments from review decisions.
 //! See creator-memory-soul-lifecycle.md §7.2.
@@ -7,28 +8,28 @@ use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
-/// Memory fragment record — mirrors DB row.
+/// note: Memory fragment record — mirrors DB row.
 #[derive(Debug, Clone)]
 pub struct MemoryFragmentRecord {
-    /// Unique identifier for this fragment.
+    /// note: Unique identifier for this fragment.
     pub fragment_id: String,
-    /// ACP session ID that generated this fragment.
+    /// note: ACP session ID that generated this fragment.
     pub session_id: String,
-    /// Creator ID for ownership.
+    /// note: Creator ID for ownership.
     pub creator_id: String,
-    /// Keywords extracted from digest (stored as JSON array).
+    /// note: Keywords extracted from digest (stored as JSON array).
     pub keywords: String,
-    /// Short summary of the fragment.
+    /// note: Short summary of the fragment.
     pub summary: String,
-    /// Creation timestamp.
+    /// note: Creation timestamp.
     pub created_at: String,
-    /// Optional TTL (e.g., "30d", "90d").
+    /// note: Optional TTL (e.g., "30d", "90d").
     pub ttl: Option<String>,
-    /// World context (nullable provenance tag; no FK).
+    /// note: World context (nullable provenance tag; no FK).
     pub world_id: Option<String>,
 }
 
-/// Create a new memory fragment.
+/// note: Create a new memory fragment.
 ///
 /// Inserts the fragment into the `memory_fragments` table.
 ///
@@ -86,7 +87,7 @@ pub async fn create_fragment_in_tx(
     Ok(())
 }
 
-/// List all fragments for a creator.
+/// note: List all fragments for a creator.
 ///
 /// Returns records ordered by `created_at` descending (most recent first).
 ///
@@ -122,7 +123,7 @@ pub async fn list_fragments(
         .collect())
 }
 
-/// List a bounded page of fragments for a creator.
+/// note: List a bounded page of fragments for a creator.
 ///
 /// Same projection + ordering as [`list_fragments`] (`created_at DESC`) but
 /// pushes `LIMIT` into SQL so the daemon never materializes the full set before
@@ -188,7 +189,7 @@ pub async fn list_fragments_limited(
         .collect())
 }
 
-/// List all fragments for a specific session.
+/// note: List all fragments for a specific session.
 ///
 /// Returns records for a given `session_id` (useful for session-level review).
 ///
@@ -224,7 +225,7 @@ pub async fn list_fragments_by_session(
         .collect())
 }
 
-/// Delete a fragment by ID.
+/// note: Delete a fragment by ID.
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
 ///
@@ -241,7 +242,7 @@ pub async fn delete_fragment(pool: &SqlitePool, fragment_id: &str) -> Result<boo
     Ok(result.rows_affected() > 0)
 }
 
-/// Get all deduped keywords for a creator.
+/// note: Get all deduped keywords for a creator.
 ///
 /// Returns a union of all keywords from all fragments for this creator.
 /// Used for context assembly §9.2 fragment keywords block.
@@ -260,7 +261,7 @@ pub async fn get_all_keywords(
     .fetch_all(pool)
     .await?;
 
-    // Parse each JSON array and collect unique keywords
+    // note: Parse each JSON array and collect unique keywords
     let mut all_keywords: Vec<String> = Vec::new();
     for row in keywords_rows {
         if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row) {
@@ -275,7 +276,7 @@ pub async fn get_all_keywords(
     Ok(all_keywords)
 }
 
-/// List fragments for a creator with optional keyword and world filters and limit.
+/// note: List fragments for a creator with optional keyword and world filters and limit.
 ///
 /// When `keyword` is `Some`, only fragments whose `keywords` JSON array contains
 /// the given keyword (case-insensitive `LIKE` match) are returned.
@@ -374,7 +375,7 @@ pub async fn list_fragments_filtered(
         .collect())
 }
 
-/// Count fragments for a creator with optional keyword filter.
+/// note: Count fragments for a creator with optional keyword filter.
 ///
 /// Returns the number of matching fragments without fetching full rows.
 ///
@@ -533,7 +534,7 @@ mod tests {
         create_fragment(&pool, &fragment2).await.unwrap();
 
         let list = list_fragments(&pool, "ctr_test").await.unwrap();
-        assert_eq!(list[0].fragment_id, "frag_002"); // Later timestamp first
+        assert_eq!(list[0].fragment_id, "frag_002"); // note: Later timestamp first
         assert_eq!(list[1].fragment_id, "frag_001");
     }
 
@@ -541,7 +542,7 @@ mod tests {
     async fn test_get_all_keywords_handles_invalid_json() {
         let (_dir, pool) = fresh_pool().await;
 
-        // Insert with valid JSON
+        // note: Insert with valid JSON
         let fragment1 = sample_fragment("frag_001");
         create_fragment(&pool, &fragment1).await.unwrap();
 
@@ -556,7 +557,7 @@ mod tests {
         .unwrap();
 
         let keywords = get_all_keywords(&pool, "ctr_test").await.unwrap();
-        // Should still return keywords from valid fragment
+        // note: Should still return keywords from valid fragment
         assert!(keywords.contains(&"keyword1".to_string()));
         assert!(keywords.contains(&"keyword2".to_string()));
     }
@@ -611,27 +612,27 @@ mod tests {
         create_fragment(&pool, &frag_world_b).await.unwrap();
         create_fragment(&pool, &frag_null_world).await.unwrap();
 
-        // Filter by world_a — should return exactly 1
+        // note: Filter by world_a — should return exactly 1
         let filtered = list_fragments_filtered(&pool, "ctr_test", None, Some("world_a"), 10)
             .await
             .unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].fragment_id, "frag_a");
 
-        // Filter by world_b
+        // note: Filter by world_b
         let filtered_b = list_fragments_filtered(&pool, "ctr_test", None, Some("world_b"), 10)
             .await
             .unwrap();
         assert_eq!(filtered_b.len(), 1);
         assert_eq!(filtered_b[0].fragment_id, "frag_b");
 
-        // No world filter → all 3
+        // note: No world filter → all 3
         let all = list_fragments_filtered(&pool, "ctr_test", None, None, 10)
             .await
             .unwrap();
         assert_eq!(all.len(), 3);
 
-        // keyword + world filter combination
+        // note: keyword + world filter combination
         let both =
             list_fragments_filtered(&pool, "ctr_test", Some("keyword1"), Some("world_a"), 10)
                 .await

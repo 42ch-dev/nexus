@@ -1,4 +1,5 @@
 //! Workspace session persistence (DF-31 full, V1.56 P0).
+// note: Workspace session persistence (DF-31 full, V1.56 P0).
 //!
 //! DB-backed session store for `workspace.open` / `workspace.commit`.
 //! Sessions are persisted in `SQLite`, survive daemon restarts, and expire per TTL.
@@ -6,49 +7,49 @@
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
-/// A row in the `workspace_sessions` table.
+/// note: A row in the `workspace_sessions` table.
 #[derive(Debug, Clone)]
 pub struct WorkspaceSessionRow {
     pub session_id: String,
     pub workspace_root: String,
     pub relative_path: String,
     pub existed: bool,
-    /// JSON object of `{ relative_path: sha256_hex }` for tracked files.
+    /// note: JSON object of `{ relative_path: sha256_hex }` for tracked files.
     pub file_hashes_json: String,
     pub created_at: String,
     pub expires_at: String,
     pub consumed: bool,
-    /// In-flight commit revision holding this session, if any.
+    /// note: In-flight commit revision holding this session, if any.
     pub claimed_by_revision: Option<String>,
 }
 
-/// Parameters for creating a new workspace session.
+/// note: Parameters for creating a new workspace session.
 #[derive(Debug, Clone)]
 pub struct CreateSessionParams {
     pub session_id: String,
     pub workspace_root: String,
     pub relative_path: String,
     pub existed: bool,
-    /// JSON object of `{ relative_path: sha256_hex }` for tracked files.
+    /// note: JSON object of `{ relative_path: sha256_hex }` for tracked files.
     pub file_hashes_json: String,
-    /// TTL in seconds from creation time.
+    /// note: TTL in seconds from creation time.
     pub ttl_secs: i64,
 }
 
-/// Result of consuming a session.
+/// note: Result of consuming a session.
 #[derive(Debug, Clone)]
 pub enum ConsumeResult {
-    /// Session was consumed successfully.
+    /// note: Session was consumed successfully.
     Consumed(WorkspaceSessionRow),
-    /// Session not found.
+    /// note: Session not found.
     NotFound,
-    /// Session was already consumed (stale).
+    /// note: Session was already consumed (stale).
     AlreadyConsumed,
-    /// Session has expired.
+    /// note: Session has expired.
     Expired,
 }
 
-/// Create a new workspace session in the database.
+/// note: Create a new workspace session in the database.
 ///
 /// # Errors
 ///
@@ -79,7 +80,7 @@ pub async fn create_session(
         .ok_or_else(|| LocalDbError::Sqlx(sqlx::Error::RowNotFound))
 }
 
-/// Get a session by ID.
+/// note: Get a session by ID.
 ///
 /// Returns `None` if the session does not exist.
 ///
@@ -112,7 +113,7 @@ pub async fn get_session(
     }))
 }
 
-/// Consume a session atomically — marks it as consumed if it is still active and unexpired.
+/// note: Consume a session atomically — marks it as consumed if it is still active and unexpired.
 ///
 /// This is the key OCC primitive: validates that the session exists, is not consumed,
 /// and is not expired, then marks it consumed in a single atomic operation.
@@ -125,7 +126,7 @@ pub async fn consume_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<ConsumeResult, LocalDbError> {
-    // First, get the session to check its state
+    // note: First, get the session to check its state
     let Some(session) = get_session(pool, session_id).await? else {
         return Ok(ConsumeResult::NotFound);
     };
@@ -134,10 +135,10 @@ pub async fn consume_session(
         return Ok(ConsumeResult::AlreadyConsumed);
     }
 
-    // Check expiry using SQLite datetime comparison with RFC 3339 format.
+    // note: Check expiry using SQLite datetime comparison with RFC 3339 format.
     // Both expires_at and strftime output are in RFC 3339 format.
     if !is_session_active(pool, session_id).await? {
-        // Re-read to determine the reason
+        // note: Re-read to determine the reason
         let Some(session) = get_session(pool, session_id).await? else {
             return Ok(ConsumeResult::NotFound);
         };
@@ -159,7 +160,7 @@ pub async fn consume_session(
     .await?;
 
     if result.rows_affected() == 0 {
-        // Another process consumed it between our read and write, or it expired.
+        // note: Another process consumed it between our read and write, or it expired.
         // Re-read to determine the reason.
         let Some(session) = get_session(pool, session_id).await? else {
             return Ok(ConsumeResult::NotFound);
@@ -170,14 +171,14 @@ pub async fn consume_session(
         return Ok(ConsumeResult::Expired);
     }
 
-    // Re-read to get the updated row
+    // note: Re-read to get the updated row
     let consumed_session = get_session(pool, session_id)
         .await?
         .ok_or_else(|| LocalDbError::Sqlx(sqlx::Error::RowNotFound))?;
     Ok(ConsumeResult::Consumed(consumed_session))
 }
 
-/// Clean up expired sessions.
+/// note: Clean up expired sessions.
 ///
 /// # Errors
 ///
@@ -192,7 +193,7 @@ pub async fn cleanup_expired_sessions(pool: &SqlitePool) -> Result<u64, LocalDbE
     Ok(result.rows_affected())
 }
 
-/// Return whether a session is unconsumed and unexpired.
+/// note: Return whether a session is unconsumed and unexpired.
 ///
 /// # Errors
 ///
@@ -207,7 +208,7 @@ pub async fn is_session_active(pool: &SqlitePool, session_id: &str) -> Result<bo
     Ok(active_count > 0)
 }
 
-/// Count active (unconsumed + unexpired) sessions.
+/// note: Count active (unconsumed + unexpired) sessions.
 ///
 /// # Errors
 ///

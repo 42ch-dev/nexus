@@ -1,4 +1,5 @@
 //! Novel pool entries DAO (DF-61 selection pool).
+// note: Novel pool entries DAO (DF-61 selection pool).
 //!
 //! Manages the `novel_pool_entries` table — creator-scoped selection pool
 //! tracking active/queued/completed Work references.
@@ -36,32 +37,32 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
-/// Column list for all SELECT queries on `novel_pool_entries`.
+/// note: Column list for all SELECT queries on `novel_pool_entries`.
 pub const POOL_ENTRY_COLUMNS: &str = "\
     entry_id, creator_id, work_id, status, promoted_at, note, title, updated_at";
 
-/// Pool entry record — mirrors DB row.
+/// note: Pool entry record — mirrors DB row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PoolEntry {
-    /// Unique identifier (`npe_` prefix per spec; `pool_` used by P0 for compat).
+    /// note: Unique identifier (`npe_` prefix per spec; `pool_` used by P0 for compat).
     pub entry_id: String,
-    /// Owning creator.
+    /// note: Owning creator.
     pub creator_id: String,
-    /// Bound Work ID (nullable until scaffolded).
+    /// note: Bound Work ID (nullable until scaffolded).
     pub work_id: Option<String>,
-    /// Pool status: `active` | `queued` | `completed` | `archived`.
+    /// note: Pool status: `active` | `queued` | `completed` | `archived`.
     pub status: String,
-    /// When the entry was last promoted to `active`.
+    /// note: When the entry was last promoted to `active`.
     pub promoted_at: String,
-    /// Optional note.
+    /// note: Optional note.
     pub note: Option<String>,
-    /// Display title (from Work metadata or user input).
+    /// note: Display title (from Work metadata or user input).
     pub title: String,
-    /// Last update timestamp (ISO-8601).
+    /// note: Last update timestamp (ISO-8601).
     pub updated_at: String,
 }
 
-/// Map a sqlx row to [`PoolEntry`].
+/// note: Map a sqlx row to [`PoolEntry`].
 #[must_use]
 pub fn row_to_pool_entry(r: &sqlx::sqlite::SqliteRow) -> PoolEntry {
     PoolEntry {
@@ -76,7 +77,7 @@ pub fn row_to_pool_entry(r: &sqlx::sqlite::SqliteRow) -> PoolEntry {
     }
 }
 
-/// List pool entries for a creator, optionally filtered by status.
+/// note: List pool entries for a creator, optionally filtered by status.
 ///
 /// `limit` defaults to 200 when `None`; capped at 1000.
 ///
@@ -119,7 +120,7 @@ pub async fn list_pool_entries(
     Ok(rows.iter().map(row_to_pool_entry).collect())
 }
 
-/// Count pool entries for a creator, optionally filtered by status.
+/// note: Count pool entries for a creator, optionally filtered by status.
 ///
 /// # Errors
 ///
@@ -144,7 +145,7 @@ pub async fn count_pool_entries(
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
-/// Promote a pool entry to `active`, demoting any prior `active` entry to `queued`.
+/// note: Promote a pool entry to `active`, demoting any prior `active` entry to `queued`.
 ///
 /// Transactional: the demote + promote happen in a single transaction so the
 /// one-active-per-creator invariant is never violated.
@@ -182,7 +183,7 @@ pub async fn promote_to_active(
     // SAFETY: dynamic SQL for upsert — compile-time macro not applicable.
     let entry_id = format!("npe_{}", uuid::Uuid::new_v4());
 
-    // Get the title from the works table for the work_id if available
+    // note: Get the title from the works table for the work_id if available
     let work_title: Option<String> =
         sqlx::query_scalar("SELECT title FROM works WHERE work_id = ? AND creator_id = ?")
             .bind(work_id)
@@ -211,7 +212,7 @@ pub async fn promote_to_active(
 
     tx.commit().await?;
 
-    // Fetch the upserted entry
+    // note: Fetch the upserted entry
     get_pool_entry_by_work(pool, creator_id, work_id)
         .await?
         .ok_or_else(|| LocalDbError::MissingVersionKey {
@@ -219,7 +220,7 @@ pub async fn promote_to_active(
         })
 }
 
-/// Archive a pool entry (set status to `archived`).
+/// note: Archive a pool entry (set status to `archived`).
 ///
 /// Restricted to the owning `creator_id` — rows belonging to other
 /// creators are silently unaffected (0 rows updated → `MissingVersionKey`).
@@ -265,7 +266,7 @@ pub async fn archive_pool_entry(
         })
 }
 
-/// Mark a pool entry as `completed`.
+/// note: Mark a pool entry as `completed`.
 ///
 /// # Errors
 ///
@@ -293,7 +294,7 @@ pub async fn mark_pool_entry_completed(
     Ok(())
 }
 
-/// Mark a pool entry as `completed` by `creator_id` + `work_id` (for completion hook).
+/// note: Mark a pool entry as `completed` by `creator_id` + `work_id` (for completion hook).
 ///
 /// # Errors
 ///
@@ -325,7 +326,7 @@ pub async fn mark_pool_entry_completed_for_work(
     Ok(())
 }
 
-/// Get a single pool entry by `entry_id`.
+/// note: Get a single pool entry by `entry_id`.
 ///
 /// # Errors
 ///
@@ -344,7 +345,7 @@ pub async fn get_pool_entry(
     Ok(row.as_ref().map(row_to_pool_entry))
 }
 
-/// Get a pool entry by `creator_id` + `work_id`.
+/// note: Get a pool entry by `creator_id` + `work_id`.
 ///
 /// # Errors
 ///
@@ -365,7 +366,7 @@ pub async fn get_pool_entry_by_work(
     Ok(row.as_ref().map(row_to_pool_entry))
 }
 
-/// Get the active pool entry for a creator.
+/// note: Get the active pool entry for a creator.
 ///
 /// # Errors
 ///
@@ -426,7 +427,7 @@ mod tests {
         seed_work(&pool, "wrk_002", "ctr_test").await.unwrap();
 
         let now = chrono::Utc::now().to_rfc3339();
-        // Insert entries directly
+        // note: Insert entries directly
         for (eid, wid, status) in [
             ("npe_1", "wrk_001", "active"),
             ("npe_2", "wrk_002", "queued"),
@@ -450,7 +451,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(entries.len(), 2);
-        // Active comes first
+        // note: Active comes first
         assert_eq!(entries[0].status, "active");
         assert_eq!(entries[1].status, "queued");
     }
@@ -461,13 +462,13 @@ mod tests {
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         seed_work(&pool, "wrk_002", "ctr_test").await.unwrap();
 
-        // Promote first work
+        // note: Promote first work
         let entry1 = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
             .unwrap();
         assert_eq!(entry1.status, "active");
 
-        // Promote second work — should demote first
+        // note: Promote second work — should demote first
         let entry2 = promote_to_active(&pool, "ctr_test", "wrk_002")
             .await
             .unwrap();
@@ -514,7 +515,7 @@ mod tests {
         assert_eq!(entry.status, "completed");
     }
 
-    // V1.46 P4 (R-V141P1-15): verify pool mutation emits structured tracing.
+    // note: V1.46 P4 (R-V141P1-15): verify pool mutation emits structured tracing.
     #[tokio::test]
     async fn test_promote_to_active_emits_trace() {
         let (layer, captured) = crate::test_tracing::capture_layer();
@@ -540,9 +541,9 @@ mod tests {
         );
     }
 
-    // ── R-V146P4-QC1-S1: trace coverage for the remaining 3 pool mutation
-    //    paths (archive / mark_completed / mark_completed_for_work). Previously
-    //    only `promote_to_active` had a capture test (1 of 4 paths).
+    // note: R-V146P4-QC1-S1: trace coverage for the remaining 3 pool mutation
+    // note: paths (archive / mark_completed / mark_completed_for_work). Previously
+    // note: only `promote_to_active` had a capture test (1 of 4 paths)
 
     #[tokio::test]
     async fn test_archive_pool_entry_emits_trace() {

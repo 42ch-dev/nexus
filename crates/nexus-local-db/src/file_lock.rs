@@ -1,4 +1,5 @@
 //! File-based advisory lock `Works/<work_ref>/.lock` (V1.51 T-B P0).
+// note: File-based advisory lock `Works/<work_ref>/.lock` (V1.51 T-B P0).
 //!
 //! Spec: `concurrency.md` §2-§6.
 //!
@@ -20,9 +21,9 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Maximum prior lock metadata read for successful-acquire diagnostics.
+/// note: Maximum prior lock metadata read for successful-acquire diagnostics.
 const MAX_PRIOR_LOCK_BODY_BYTES: usize = 4096;
-/// Render a prior lock holder as a non-reversible fingerprint for diagnostics.
+/// note: Render a prior lock holder as a non-reversible fingerprint for diagnostics.
 ///
 /// A `.lock` body is neither provenance-authenticated nor validated by
 /// `try_acquire`, which writes the caller-supplied holder verbatim, so the raw
@@ -34,7 +35,7 @@ fn diagnostic_holder_name(holder_name: &str) -> String {
 }
 
 fn sha256(input: &[u8]) -> String {
-    // FIPS 180-4 round constants (first 32 bits of the fractional parts of the
+    // note: FIPS 180-4 round constants (first 32 bits of the fractional parts of the
     // cube roots of the first 64 primes).
     #[rustfmt::skip]
     const K: [u32; 64] = [
@@ -54,7 +55,7 @@ fn sha256(input: &[u8]) -> String {
         data.push(0);
     }
     data.extend_from_slice(&bit_len.to_be_bytes());
-    // Initial hash value: first 32 bits of the fractional parts of the square
+    // note: Initial hash value: first 32 bits of the fractional parts of the square
     // roots of the first eight primes.
     let mut state = [
         0x6a09_e667u32,
@@ -118,27 +119,27 @@ fn sha256(input: &[u8]) -> String {
     out
 }
 
-/// Heartbeat refresh interval in seconds.
+/// note: Heartbeat refresh interval in seconds.
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
-/// Stale threshold: a lock not refreshed for this many seconds is stale.
+/// note: Stale threshold: a lock not refreshed for this many seconds is stale.
 const STALE_THRESHOLD_SECS: u64 = 60;
 
-/// Conflicting lock information returned when `try_acquire` fails.
+/// note: Conflicting lock information returned when `try_acquire` fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Locked {
-    /// OS process ID of the holder.
+    /// note: OS process ID of the holder.
     pub holder_pid: u32,
-    /// Human-readable holder identity (e.g. `cli:cron-set`, `daemon:schedule:SCH...`).
+    /// note: Human-readable holder identity (e.g. `cli:cron-set`, `daemon:schedule:SCH...`).
     pub holder_name: String,
-    /// Unix epoch milliseconds when the heartbeat expires.
+    /// note: Unix epoch milliseconds when the heartbeat expires.
     pub expires_at_ms: u64,
-    /// `true` if the lock has not been refreshed in > 60 s (zombie).
+    /// note: `true` if the lock has not been refreshed in > 60 s (zombie).
     pub stale: bool,
 }
 
 impl Locked {
-    /// Format a human-readable display line.
+    /// note: Format a human-readable display line.
     #[must_use]
     pub fn display_line(&self) -> String {
         let stale_marker = if self.stale { " (STALE)" } else { "" };
@@ -149,7 +150,7 @@ impl Locked {
     }
 }
 
-/// RAII guard for the advisory file lock.
+/// note: RAII guard for the advisory file lock.
 ///
 /// Releases `flock` and cancels the heartbeat task on drop.
 ///
@@ -158,24 +159,24 @@ impl Locked {
 /// `Send` — no manual `unsafe impl` needed.
 #[derive(Debug)]
 pub struct FileLockGuard {
-    /// The underlying lock file (holds the `flock`).
+    /// note: The underlying lock file (holds the `flock`).
     fd: Option<std::fs::File>,
-    /// Handle to the heartbeat task.
+    /// note: Handle to the heartbeat task.
     heartbeat_handle: Option<tokio::task::JoinHandle<()>>,
-    /// Cancel signal for the heartbeat task.
+    /// note: Cancel signal for the heartbeat task.
     heartbeat_cancel: tokio::sync::watch::Sender<bool>,
 }
 
-/// Error returned by [`try_acquire`].
+/// note: Error returned by [`try_acquire`].
 ///
 /// Distinguishes real I/O failures (permission denied, disk full, missing
 /// parent directory) from lock contention. Callers must map these to different
 /// exit codes (e.g. 75 for temporary contention, 78 for configuration/I/O errors).
 #[derive(Debug)]
 pub enum FileLockError {
-    /// Another process holds the lock (contention — retryable).
+    /// note: Another process holds the lock (contention — retryable).
     Locked(Locked),
-    /// An I/O error prevented lock acquisition (not retryable — configuration
+    /// note: An I/O error prevented lock acquisition (not retryable — configuration
     /// or environment problem).
     Io(std::io::Error),
 }
@@ -204,16 +205,16 @@ impl From<std::io::Error> for FileLockError {
     }
 }
 
-/// Build the lock file path for a Work directory.
+/// note: Build the lock file path for a Work directory.
 #[must_use]
 fn lock_file_path(work_dir: &Path) -> PathBuf {
     work_dir.join(".lock")
 }
 
-/// Current time in Unix epoch milliseconds.
+/// note: Current time in Unix epoch milliseconds.
 fn now_ms() -> u64 {
     #[allow(clippy::cast_possible_truncation)]
-    // as_millis() returns u128 — u64 holds ~584 million years of milliseconds.
+    // note: as_millis() returns u128 — u64 holds ~584 million years of milliseconds.
     {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -222,13 +223,13 @@ fn now_ms() -> u64 {
     }
 }
 
-/// Format the lock file body: `<pid>:<holder_name>:<expires_at_ms>`.
+/// note: Format the lock file body: `<pid>:<holder_name>:<expires_at_ms>`.
 fn format_lock_body(holder_name: &str, expires_at_ms: u64) -> String {
     let pid = std::process::id();
     format!("{pid}:{holder_name}:{expires_at_ms}")
 }
 
-/// Parse the lock file body into its components.
+/// note: Parse the lock file body into its components.
 ///
 /// Returns `None` if the content is empty or malformed.
 ///
@@ -250,7 +251,7 @@ fn parse_lock_body(content: &str) -> Option<(u32, String, u64)> {
     Some((pid, holder_name, expires_at_ms))
 }
 
-/// Read lock metadata from the `.lock` file (best-effort; does not acquire `flock`).
+/// note: Read lock metadata from the `.lock` file (best-effort; does not acquire `flock`).
 fn read_lock_metadata(work_dir: &Path) -> Option<(u32, String, u64)> {
     let path = lock_file_path(work_dir);
     let mut content = String::new();
@@ -261,7 +262,7 @@ fn read_lock_metadata(work_dir: &Path) -> Option<(u32, String, u64)> {
     parse_lock_body(&content)
 }
 
-/// Write lock metadata to the lock file path (best-effort; does not require flock).
+/// note: Write lock metadata to the lock file path (best-effort; does not require flock).
 fn write_lock_metadata_to_path(path: &Path, body: &str) {
     if let Err(e) = std::fs::write(path, body) {
         tracing::error!(
@@ -272,7 +273,7 @@ fn write_lock_metadata_to_path(path: &Path, body: &str) {
     }
 }
 
-/// Attempt to acquire the advisory file lock for a Work.
+/// note: Attempt to acquire the advisory file lock for a Work.
 ///
 /// Opens (or creates) `Works/<work_ref>/.lock`, tries `flock(LOCK_EX | LOCK_NB)`.
 /// On success, writes the lock metadata, spawns a heartbeat task, and returns
@@ -289,13 +290,13 @@ fn write_lock_metadata_to_path(path: &Path, body: &str) {
 pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, FileLockError> {
     let lock_path = lock_file_path(work_dir);
 
-    // Ensure the parent directory exists. Propagate I/O errors up — do NOT
+    // note: Ensure the parent directory exists. Propagate I/O errors up — do NOT
     // silently swallow permission-denied or disk-full failures.
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Open or create the lock file.
+    // note: Open or create the lock file.
     let fd = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -303,20 +304,20 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         .truncate(false)
         .open(&lock_path)?;
 
-    // Try non-blocking exclusive lock.
+    // note: Try non-blocking exclusive lock.
     let raw_fd = fd.as_raw_fd();
-    // nix 0.28 deprecates `flock()` in favor of `Flock` struct, but the struct
+    // note: nix 0.28 deprecates `flock()` in favor of `Flock` struct, but the struct
     // API requires ownership of the inner file descriptor. Use the deprecated
     // function for now since we need to keep the `File` alive for heartbeat.
     #[allow(deprecated)]
     let locked = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::LockExclusiveNonblock).is_err();
     if locked {
-        // Lock held by another process — read metadata for conflict info.
+        // note: Lock held by another process — read metadata for conflict info.
         let metadata = read_lock_metadata(work_dir);
         let now = now_ms();
         let (holder_pid, holder_name, expires_at_ms) =
             metadata.unwrap_or_else(|| (0, "unknown".to_string(), 0));
-        // NB: We intentionally do NOT mark a parse failure as stale here. If
+        // why: NB: We intentionally do NOT mark a parse failure as stale here. If
         // another live process holds the flock, the lock is genuinely held;
         // reporting holder_name="unknown" with stale=false keeps the conflict
         // information conservative. The 60 s heartbeat window absorbs the small
@@ -331,7 +332,7 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
             stale,
         }));
     }
-    // Classify only a bounded prefix from the already-open locked descriptor.
+    // note: Classify only a bounded prefix from the already-open locked descriptor.
     // The OS lock arbitrates takeover; this is diagnostic-only.
     let mut prior_body = Vec::with_capacity(MAX_PRIOR_LOCK_BODY_BYTES + 1);
     let read_result = fd.try_clone().and_then(|reader| {
@@ -372,19 +373,19 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         Err(_) => {}
     }
 
-    // Lock acquired. Write metadata.
+    // note: Lock acquired. Write metadata.
     let expires_at_ms = now_ms() + STALE_THRESHOLD_SECS * 1000;
     let body = format_lock_body(holder_name, expires_at_ms);
     write_lock_metadata_to_path(&lock_path, &body);
 
-    // Spawn heartbeat task.
+    // note: Spawn heartbeat task.
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
     let heartbeat_holder = holder_name.to_string();
 
     let heartbeat_handle = tokio::spawn(async move {
         let mut interval =
             tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
-        // Skip the immediate first tick (we already wrote metadata).
+        // note: Skip the immediate first tick (we already wrote metadata).
         interval.tick().await;
 
         loop {
@@ -410,17 +411,17 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
 
 impl Drop for FileLockGuard {
     fn drop(&mut self) {
-        // Cancel the heartbeat task.
+        // note: Cancel the heartbeat task.
         let _ = self.heartbeat_cancel.send(true);
         if let Some(handle) = self.heartbeat_handle.take() {
             handle.abort();
         }
 
-        // Release the flock.
+        // note: Release the flock.
         if let Some(fd) = &self.fd {
             let raw_fd = fd.as_raw_fd();
             #[allow(deprecated)]
-            // nix 0.28 deprecates `flock()` — see acquire block above for rationale.
+            // note: nix 0.28 deprecates `flock()` — see acquire block above for rationale.
             {
                 if let Err(e) = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::Unlock) {
                     tracing::error!(
@@ -430,24 +431,24 @@ impl Drop for FileLockGuard {
                 }
             }
         }
-        // File is closed when `fd` is dropped.
+        // note: File is closed when `fd` is dropped.
     }
 }
 
-/// Snapshot of lock holder information for status display.
+/// note: Snapshot of lock holder information for status display.
 #[derive(Debug, Clone)]
 pub struct LockHolderInfo {
-    /// OS process ID.
+    /// note: OS process ID.
     pub pid: u32,
-    /// Human-readable holder identity.
+    /// note: Human-readable holder identity.
     pub holder_name: String,
-    /// Unix epoch milliseconds when the heartbeat expires.
+    /// note: Unix epoch milliseconds when the heartbeat expires.
     pub expires_at_ms: u64,
-    /// Whether the lock is stale (> 60 s without refresh).
+    /// note: Whether the lock is stale (> 60 s without refresh).
     pub stale: bool,
 }
 
-/// Read the lock holder information from the `.lock` file (best-effort, no `flock`).
+/// note: Read the lock holder information from the `.lock` file (best-effort, no `flock`).
 ///
 /// Returns `None` if the file doesn't exist, is empty, or is malformed.
 /// Used by informational commands like `creator works status --json`.
@@ -477,13 +478,11 @@ mod tests {
         (dir, work_dir)
     }
 
-    // ── format_lock_body / parse_lock_body ──────────────────────────
-
     #[test]
     fn format_and_parse_roundtrip() {
         let body = format_lock_body("cli:cron-set", 1_718_700_000_000);
 
-        // Verify the body uses the correct format with three colon-delimited segments.
+        // note: Verify the body uses the correct format with three colon-delimited segments.
         // Holder names may contain colons, so we use first/last colon parsing.
         let first_colon = body.find(':').unwrap();
         let pid: u32 = body[..first_colon].parse().unwrap();
@@ -493,13 +492,13 @@ mod tests {
         assert_eq!(&rest[..last_colon], "cli:cron-set");
         assert_eq!(&rest[last_colon + 1..], "1718700000000");
 
-        // Roundtrip through parse_lock_body.
+        // note: Roundtrip through parse_lock_body.
         let parsed = parse_lock_body(&body).unwrap();
         assert_eq!(parsed.0, std::process::id());
         assert_eq!(parsed.1, "cli:cron-set");
         assert_eq!(parsed.2, 1_718_700_000_000);
 
-        // Test with a daemon-style holder name with multiple colons.
+        // note: Test with a daemon-style holder name with multiple colons.
         let body2 = format_lock_body("daemon:schedule:SCH20260618120000", 1_718_800_000_000);
         let parsed2 = parse_lock_body(&body2).unwrap();
         assert_eq!(parsed2.1, "daemon:schedule:SCH20260618120000");
@@ -515,11 +514,11 @@ mod tests {
     #[test]
     fn parse_malformed_returns_none() {
         assert!(parse_lock_body("abc").is_none());
-        assert!(parse_lock_body("123:holder").is_none()); // missing expires
+        assert!(parse_lock_body("123:holder").is_none()); // note: missing expires
         assert!(parse_lock_body("not_a_pid:holder:123").is_none());
     }
 
-    // ── try_acquire + drop release ─────────────────────────────────
+    // note: try_acquire + drop release
 
     #[tokio::test]
     async fn test_acquire_and_release_via_drop() {
@@ -542,7 +541,7 @@ mod tests {
         crate::test_tracing::assert_warn_absent(&captured);
     }
 
-    // ── Contention: second acquire fails ────────────────────────────
+    // note: Contention: second acquire fails
 
     #[tokio::test]
     async fn test_second_acquire_fails_with_locked_info() {
@@ -559,7 +558,7 @@ mod tests {
         assert!(!locked.stale, "fresh lock should not be stale");
     }
 
-    // ── Lock released after drop allows reacquire ──────────────────
+    // note: Lock released after drop allows reacquire
 
     #[tokio::test]
     async fn test_lock_released_after_drop_allows_reacquire() {
@@ -576,7 +575,7 @@ mod tests {
         drop(guard);
     }
 
-    // ── Zombie detection: stale lock file ──────────────────────────
+    // note: Zombie detection: stale lock file
 
     #[tokio::test]
     async fn test_stale_lock_file_overwritten_on_acquire() {
@@ -695,7 +694,7 @@ mod tests {
     async fn stale_holder_warning_redacts_secret_bearing_identity() {
         let (_dir, work_dir) = sample_work_dir();
         let lock_path = lock_file_path(&work_dir);
-        // F-001: a grammar-conforming `cli:`-prefixed secret is the exact case
+        // note: F-001: a grammar-conforming `cli:`-prefixed secret is the exact case
         // FX-A2 still echoed; it must be fingerprinted like any other holder.
         let holder = "cli:secret-token-value";
         let expires = now_ms().saturating_sub(120_000);
@@ -716,7 +715,7 @@ mod tests {
 
     #[test]
     fn diagnostic_holder_name_always_fingerprints() {
-        // F-001: no holder text may reach diagnostics, even a grammar-conforming
+        // note: F-001: no holder text may reach diagnostics, even a grammar-conforming
         // `cli:`-prefixed secret — the case FX-A2 still echoed verbatim.
         for holder in [
             "cli:secret-token-value",
@@ -735,8 +734,6 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
-
-    // ── read_lock_holder_info ─────────────────────────────────────
 
     #[test]
     fn test_read_lock_holder_info_stale() {
@@ -773,7 +770,7 @@ mod tests {
         assert!(read_lock_holder_info(&work_dir).is_none());
     }
 
-    // ── Locked::display_line ────────────────────────────────────────
+    // note: Locked::display_line
 
     #[test]
     fn test_locked_display_line() {
@@ -795,7 +792,7 @@ mod tests {
         assert!(stale.display_line().contains("STALE"));
     }
 
-    // ── Concurrent scope isolation ─────────────────────────────────
+    // note: Concurrent scope isolation
 
     #[tokio::test]
     async fn test_concurrent_scope_isolation() {
@@ -813,17 +810,17 @@ mod tests {
         drop(guard_c);
     }
 
-    // ── I/O errors surface as FileLockError::Io ─────────────────────
+    // note: I/O errors surface as FileLockError::Io
 
     #[test]
     fn test_io_error_surfaces_not_locked() {
-        // Use a path whose parent is a regular file, not a directory.
+        // note: Use a path whose parent is a regular file, not a directory.
         // create_dir_all will fail with "Not a directory" → Io, not Locked.
         let dir = tempfile::tempdir().unwrap();
-        // Create a regular file at the lock path's parent so create_dir_all fails.
+        // note: Create a regular file at the lock path's parent so create_dir_all fails.
         let work_dir = dir.path().join("Works").join("file-as-dir");
         let _lock_path = work_dir.join(".lock");
-        // Create a regular file where a directory is expected.
+        // note: Create a regular file where a directory is expected.
         std::fs::create_dir_all(work_dir.parent().unwrap()).unwrap();
         std::fs::write(&work_dir, "block").unwrap();
 
@@ -840,7 +837,7 @@ mod tests {
                 panic!("expected FileLockError::Io, got Locked — I/O errors must not be mapped to Locked");
             }
         }
-        // Clean up for next test.
+        // note: Clean up for next test.
         std::fs::remove_file(&work_dir).ok();
     }
 }

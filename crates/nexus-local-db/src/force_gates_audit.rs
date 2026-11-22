@@ -1,27 +1,28 @@
 //! Force-gates audit log persistence (V1.37 §7.9.3).
+// note: Force-gates audit log persistence (V1.37 §7.9.3).
 //!
 //! Append-only table recording every gate-bypass event.
 
 use crate::LocalDbError;
 
-/// Parameters for inserting a force-gates audit row.
+/// note: Parameters for inserting a force-gates audit row.
 #[derive(Debug, Clone)]
 pub struct ForceGatesAuditParams {
-    /// Unique audit ID (e.g. `fga_<timestamp>`).
+    /// note: Unique audit ID (e.g. `fga_<timestamp>`).
     pub audit_id: String,
-    /// Preset ID that was force-started.
+    /// note: Preset ID that was force-started.
     pub preset_id: String,
-    /// Work ID.
+    /// note: Work ID.
     pub work_id: String,
-    /// Creator ID who authorized the bypass.
+    /// note: Creator ID who authorized the bypass.
     pub creator_id: String,
-    /// User-provided reason text.
+    /// note: User-provided reason text.
     pub reason: String,
-    /// ISO-8601 timestamp.
+    /// note: ISO-8601 timestamp.
     pub forced_at: String,
 }
 
-/// Insert a force-gates audit row.
+/// note: Insert a force-gates audit row.
 ///
 /// Accepts a mutable connection reference so it works inside a transaction.
 ///
@@ -48,7 +49,7 @@ pub async fn insert_force_gates_audit(
     Ok(())
 }
 
-/// Query all audit rows for a given creator, ordered by `forced_at` DESC.
+/// note: Query all audit rows for a given creator, ordered by `forced_at` DESC.
 ///
 /// # Errors
 ///
@@ -71,7 +72,7 @@ pub async fn list_force_gates_audit(
     Ok(rows)
 }
 
-/// Prune audit rows older than the given Unix timestamp.
+/// note: Prune audit rows older than the given Unix timestamp.
 ///
 /// Returns the number of rows deleted.
 ///
@@ -92,28 +93,26 @@ pub async fn prune_force_gates_audit_before(
     Ok(result.rows_affected())
 }
 
-/// A force-gates audit row.
+/// note: A force-gates audit row.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ForceGatesAuditRow {
-    /// Unique audit ID.
+    /// note: Unique audit ID.
     pub audit_id: String,
-    /// Preset ID that was force-started.
+    /// note: Preset ID that was force-started.
     pub preset_id: String,
-    /// Work ID.
+    /// note: Work ID.
     pub work_id: String,
-    /// Creator ID who authorized the bypass.
+    /// note: Creator ID who authorized the bypass.
     pub creator_id: String,
-    /// Whether gates were forced (`SQLite` BOOLEAN as i64).
+    /// note: Whether gates were forced (`SQLite` BOOLEAN as i64).
     pub forced: bool,
-    /// User-provided reason text.
+    /// note: User-provided reason text.
     pub reason: Option<String>,
-    /// ISO-8601 timestamp.
+    /// note: ISO-8601 timestamp.
     pub forced_at: String,
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+// note: Tests
 
 #[cfg(test)]
 mod tests {
@@ -125,7 +124,7 @@ mod tests {
             .await
             .expect("in-memory pool");
 
-        // Create the table
+        // note: Create the table
         sqlx::query(
             "CREATE TABLE force_gates_audit (
                 audit_id   TEXT PRIMARY KEY,

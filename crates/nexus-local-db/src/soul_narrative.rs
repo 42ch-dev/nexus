@@ -1,4 +1,5 @@
 //! `memory_soul_narratives` persistence DAO (V1.81).
+// note: `memory_soul_narratives` persistence DAO (V1.81).
 //!
 //! Caches the on-demand Creator-SOUL LLM narrative with stale-invalidation
 //! snapshot columns (`fragment_count_at_generation`,
@@ -12,14 +13,14 @@ use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
-/// A row from the `memory_soul_narratives` table.
+/// note: A row from the `memory_soul_narratives` table.
 ///
 /// `narrative` and `generated_at` are `None` for stats-only rows (fingerprint
 /// cache for above-gate ungenerated creators).
 #[derive(Debug, Clone)]
 pub struct SoulNarrativeRecord {
     pub creator_id: String,
-    /// `None` = Creator-level (whole) narrative; `Some(w)` = per-World narrative.
+    /// note: `None` = Creator-level (whole) narrative; `Some(w)` = per-World narrative.
     pub world_id: Option<String>,
     pub narrative: Option<String>,
     pub generated_at: Option<String>,
@@ -31,7 +32,7 @@ pub struct SoulNarrativeRecord {
     pub updated_at: String,
 }
 
-/// Fragment statistics for a creator, used for stale-detection and the
+/// note: Fragment statistics for a creator, used for stale-detection and the
 /// insufficient-data gate.
 #[derive(Debug, Clone, Default)]
 pub struct SoulNarrativeFragmentStats {
@@ -40,7 +41,7 @@ pub struct SoulNarrativeFragmentStats {
     pub max_created_at: Option<String>,
 }
 
-/// Read the cached narrative for a `(creator_id, world_id)` scope.
+/// note: Read the cached narrative for a `(creator_id, world_id)` scope.
 ///
 /// `world_id = None` reads the Creator-level (whole) narrative; `Some(w)` reads
 /// the per-World narrative for that world's fragment subset.
@@ -81,7 +82,7 @@ pub async fn get_soul_narrative(
     }))
 }
 
-/// Insert or update the cached narrative for a `(creator_id, world_id)` scope.
+/// note: Insert or update the cached narrative for a `(creator_id, world_id)` scope.
 ///
 /// Uses `INSERT OR REPLACE` so the handler can call this unconditionally
 /// after synthesis. `world_id` is bound consistently (NULL for Creator-level)
@@ -117,7 +118,7 @@ pub async fn upsert_soul_narrative(
     Ok(())
 }
 
-/// Build a stats fingerprint from cheap SQL aggregates.
+/// note: Build a stats fingerprint from cheap SQL aggregates.
 ///
 /// Format: `"{fragment_count}:{max_created_at}"`. The fingerprint is
 /// stable as long as no fragments are added or removed (or their
@@ -127,7 +128,7 @@ pub fn build_stats_fingerprint(fragment_count: i64, max_created_at: Option<&str>
     format!("{fragment_count}:{}", max_created_at.unwrap_or(""))
 }
 
-/// Persist stats cache columns, creating a stats-only row if none exists.
+/// note: Persist stats cache columns, creating a stats-only row if none exists.
 ///
 /// When `cached` is `Some`, does a targeted UPDATE that leaves narrative and
 /// generation metadata untouched. When `cached` is `None` (above-gate
@@ -143,7 +144,7 @@ async fn update_stats_cache(
     cached: Option<&SoulNarrativeRecord>,
 ) -> Result<(), LocalDbError> {
     if cached.is_some() {
-        // Targeted UPDATE — don't touch narrative/generation metadata.
+        // note: Targeted UPDATE — don't touch narrative/generation metadata.
         sqlx::query!(
             "UPDATE memory_soul_narratives
              SET distinct_keyword_count_cache = ?, stats_fingerprint = ?
@@ -156,7 +157,7 @@ async fn update_stats_cache(
         .execute(pool)
         .await?;
     } else {
-        // Stats-only INSERT — narrative/generated_at are NULL.
+        // note: Stats-only INSERT — narrative/generated_at are NULL.
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query!(
             "INSERT OR REPLACE INTO memory_soul_narratives
@@ -178,7 +179,7 @@ async fn update_stats_cache(
     Ok(())
 }
 
-/// Compute the distinct keyword count via early-exit streaming scan.
+/// note: Compute the distinct keyword count via early-exit streaming scan.
 ///
 /// Streams keyword rows one at a time, decoding JSON, accumulating into
 /// a `HashSet`. Stops as soon as the gate threshold (20 distinct) is
@@ -233,7 +234,7 @@ async fn compute_distinct_keyword_count(
             }
         }
         if distinct.len() >= DISTINCT_KEYWORD_THRESHOLD {
-            // Threshold-saturated count: the gate only needs `>= 20`, so stop
+            // note: Threshold-saturated count: the gate only needs `>= 20`, so stop
             // decoding as soon as we have 20 distinct keywords.
             return Ok(DISTINCT_KEYWORD_THRESHOLD);
         }
@@ -242,7 +243,7 @@ async fn compute_distinct_keyword_count(
     Ok(distinct.len())
 }
 
-/// Compute fragment statistics for stale-detection and the insufficient-data gate.
+/// note: Compute fragment statistics for stale-detection and the insufficient-data gate.
 ///
 /// Uses SQL aggregates for `fragment_count` and `max_created_at` to avoid
 /// materializing all rows. The `distinct_keyword_count` is served from a
@@ -333,7 +334,7 @@ pub async fn soul_narrative_fragment_stats_readonly(
         }
     }
 
-    // Fingerprint mismatch or no cache row: compute soundly, persist nothing.
+    // note: Fingerprint mismatch or no cache row: compute soundly, persist nothing.
     let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id, world_id).await?;
 
     Ok((
@@ -348,14 +349,14 @@ pub async fn soul_narrative_fragment_stats_readonly(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` if the aggregate/fingerprint query or the cached
+/// note: Returns `LocalDbError` if the aggregate/fingerprint query or the cached
 /// row read fails.
 pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: Option<&str>,
 ) -> Result<(SoulNarrativeFragmentStats, Option<SoulNarrativeRecord>), LocalDbError> {
-    // 1. Cheap SQL aggregates — always O(1) index scan, no row materialization.
+    // note: 1. Cheap SQL aggregates — always O(1) index scan, no row materialization.
     let fragment_count = if let Some(wid) = world_id {
         sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ? AND world_id = ?"#,
@@ -390,15 +391,15 @@ pub async fn soul_narrative_fragment_stats(
         .await?
     };
 
-    // 2. Build fingerprint from cheap aggregates.
+    // note: 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache for this (creator, world) scope.
+    // note: 3. Check the fingerprint cache for this (creator, world) scope.
     let cached = get_soul_narrative(pool, creator_id, world_id).await?;
 
     if let Some(ref c) = cached {
         if c.stats_fingerprint.as_deref() == Some(&fingerprint) {
-            // Fingerprint match → fragments unchanged since last compute.
+            // note: Fingerprint match → fragments unchanged since last compute.
             // Return cached distinct count — NO keyword streaming/decode.
             return Ok((
                 SoulNarrativeFragmentStats {
@@ -412,10 +413,10 @@ pub async fn soul_narrative_fragment_stats(
         }
     }
 
-    // 4. Fingerprint mismatch or no cache row → compute soundly.
+    // note: 4. Fingerprint mismatch or no cache row → compute soundly.
     let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id, world_id).await?;
 
-    // 5. Persist stats cache (inserts stats-only row if none exists — G3 fix).
+    // note: 5. Persist stats cache (inserts stats-only row if none exists — G3 fix).
     update_stats_cache(
         pool,
         creator_id,
@@ -426,7 +427,7 @@ pub async fn soul_narrative_fragment_stats(
     )
     .await?;
 
-    // Re-read cache after possible stats-only insert so callers get the
+    // note: Re-read cache after possible stats-only insert so callers get the
     // freshly-persisted row (G3: fingerprint cache hit on next poll).
     let cached = if cached.is_some() {
         cached

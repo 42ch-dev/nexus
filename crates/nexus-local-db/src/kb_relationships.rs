@@ -1,4 +1,5 @@
 //! World KB relationship storage (V1.74 Track A; V1.76 Track A extraction gate).
+// note: World KB relationship storage (V1.74 Track A; V1.76 Track A extraction gate).
 //!
 //! Provides CRUD + per-row OCC helpers for the `kb_relationships` table.
 //! All writes are transaction-aware (`*_in_tx`) so they can compose atomically
@@ -13,7 +14,7 @@ use crate::cas::cas_check_with_version_column;
 use crate::LocalDbError;
 use sqlx::{SqliteConnection, SqlitePool};
 
-/// Provenance marker for a relationship row (V1.76).
+/// note: Provenance marker for a relationship row (V1.76).
 ///
 /// `Manual` rows are author-created via the patch-relationship route;
 /// `Extraction` rows are proposed by `nexus.llm.extract` and land behind the
@@ -21,13 +22,13 @@ use sqlx::{SqliteConnection, SqlitePool};
 pub const SOURCE_MANUAL: &str = "manual";
 pub const SOURCE_EXTRACTION: &str = "extraction";
 
-/// Generate a new relationship id (`rel_<uuid>`).
+/// note: Generate a new relationship id (`rel_<uuid>`).
 #[must_use]
 pub fn generate_relationship_id() -> String {
     format!("rel_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// Row type matching the `kb_relationships` DDL (V1.74 + V1.76 + V1.146 columns).
+/// note: Row type matching the `kb_relationships` DDL (V1.74 + V1.76 + V1.146 columns).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct KbRelationshipRow {
     pub relationship_id: String,
@@ -43,18 +44,18 @@ pub struct KbRelationshipRow {
     pub created_at: String,
     pub updated_at: String,
     pub revision: i64,
-    /// V1.76: 1 = extraction suggestion (hidden from the default graph);
+    /// note: V1.76: 1 = extraction suggestion (hidden from the default graph);
     /// 0 = author-confirmed. Promotion clears the flag.
     pub needs_review: i64,
-    /// V1.76: provenance — [`SOURCE_MANUAL`] or [`SOURCE_EXTRACTION`].
+    /// note: V1.76: provenance — [`SOURCE_MANUAL`] or [`SOURCE_EXTRACTION`].
     pub source: String,
-    /// V1.146 P5 T1: full serialized `extensions.nexus` namespace (round-trip).
+    /// note: V1.146 P5 T1: full serialized `extensions.nexus` namespace (round-trip).
     /// Known identity fields stay authoritative in their typed columns above;
     /// this column preserves unknown keys when a spoke Relation transits `SQLite`.
     pub extensions_nexus_json: Option<String>,
 }
 
-/// Params for inserting a new relationship row.
+/// note: Params for inserting a new relationship row.
 #[derive(Debug, Clone)]
 pub struct InsertRelationshipParams {
     pub relationship_id: String,
@@ -69,18 +70,18 @@ pub struct InsertRelationshipParams {
     pub metadata: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
-    /// V1.76: `needs_review` gate. `false` for manual author adds; `true` for
+    /// note: V1.76: `needs_review` gate. `false` for manual author adds; `true` for
     /// extraction-sourced suggestions.
     pub needs_review: bool,
-    /// V1.76: provenance. [`SOURCE_MANUAL`] for author adds;
+    /// note: V1.76: provenance. [`SOURCE_MANUAL`] for author adds;
     /// [`SOURCE_EXTRACTION`] for extraction suggestions.
     pub source: String,
-    /// V1.146 P5 T1: serialized `extensions.nexus` for round-trip preservation.
+    /// note: V1.146 P5 T1: serialized `extensions.nexus` for round-trip preservation.
     /// `None` (NULL in DB) for rows without extra extension keys.
     pub extensions_nexus_json: Option<String>,
 }
 
-/// Params for updating an existing relationship row.
+/// note: Params for updating an existing relationship row.
 #[derive(Debug, Clone)]
 pub struct UpdateRelationshipParams {
     pub relation_type: String,
@@ -90,11 +91,11 @@ pub struct UpdateRelationshipParams {
     pub source_anchor_ids: Vec<String>,
     pub metadata: Option<serde_json::Value>,
     pub updated_at: String,
-    /// V1.76: `needs_review` gate. Promotion sets this to `false`; the existing
+    /// note: V1.76: `needs_review` gate. Promotion sets this to `false`; the existing
     /// patch-relationship route carries it so no second promotion state machine
     /// is needed. `source` is immutable and not part of the update payload.
     pub needs_review: bool,
-    /// V1.146 P5 T1: serialized `extensions.nexus` for round-trip preservation.
+    /// note: V1.146 P5 T1: serialized `extensions.nexus` for round-trip preservation.
     /// `None` clears the column; `Some(...)` writes it.
     pub extensions_nexus_json: Option<String>,
 }
@@ -112,7 +113,7 @@ pub(crate) fn serialize_string_array(ids: &[String]) -> String {
     serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string())
 }
 
-/// Insert a new `kb_relationships` row inside a caller-managed transaction.
+/// note: Insert a new `kb_relationships` row inside a caller-managed transaction.
 ///
 /// Returns the inserted row (revision 0) so callers can project it without a
 /// post-commit re-read.
@@ -182,7 +183,7 @@ pub async fn insert_relationship_in_tx(
     })
 }
 
-/// CAS-update a `kb_relationships` row inside a caller-managed transaction.
+/// note: CAS-update a `kb_relationships` row inside a caller-managed transaction.
 ///
 /// The update only applies when `revision = expected_revision` AND the stored
 /// `world_id` equals `world_id` (V1.154 P2, R3 closure, spec §3.2 LOCKED:
@@ -257,7 +258,7 @@ pub async fn update_relationship_in_tx(
     .await?;
 
     if result.rows_affected() == 0 {
-        // V1.154 P2 (R3 closure): disambiguate a world move from a version
+        // note: V1.154 P2 (R3 closure): disambiguate a world move from a version
         // mismatch before falling into the generic OCC classification. The
         // caller's revision may have been perfectly valid — the WORLD moved
         // (e.g. a second Connect process / the daemon on the same workspace
@@ -306,13 +307,13 @@ pub async fn update_relationship_in_tx(
         updated_at: params.updated_at.clone(),
         revision: new_revision,
         needs_review: needs_review_i64,
-        // source is immutable — preserved from the existing row.
+        // note: source is immutable — preserved from the existing row.
         source: existing.source.clone(),
         extensions_nexus_json: params.extensions_nexus_json.clone(),
     })
 }
 
-/// CAS-delete a `kb_relationships` row inside a caller-managed transaction.
+/// note: CAS-delete a `kb_relationships` row inside a caller-managed transaction.
 ///
 /// The delete only applies when `revision = expected_revision`. On mismatch,
 /// returns [`LocalDbError::VersionMismatch`].
@@ -348,7 +349,7 @@ pub async fn delete_relationship_in_tx(
     Ok(())
 }
 
-/// Read one relationship row by id.
+/// note: Read one relationship row by id.
 ///
 /// # Errors
 ///
@@ -387,7 +388,7 @@ pub async fn get_relationship(
     row.ok_or_else(|| LocalDbError::Sqlx(sqlx::Error::RowNotFound))
 }
 
-/// List relationships in a world, ordered by `updated_at` descending, capped
+/// note: List relationships in a world, ordered by `updated_at` descending, capped
 /// by `limit` at the SQL layer.
 ///
 /// V1.76: `include_suggested` gates the `needs_review` filter at the SQL layer
@@ -412,7 +413,7 @@ pub async fn list_relationships_for_world(
     include_suggested: bool,
     limit: i64,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // Two compile-time-checked static queries (sqlx macros can't express a
+    // note: Two compile-time-checked static queries (sqlx macros can't express a
     // conditional WHERE clause). The default (`false`) branch pushes
     // `needs_review = 0` into SQL so SQLite uses
     // `idx_kb_relationships_world_id_needs_review` and skips hidden rows. The
@@ -481,7 +482,7 @@ pub async fn list_relationships_for_world(
     Ok(rows)
 }
 
-/// [`list_relationships_for_world`] against a caller-owned transaction.
+/// note: [`list_relationships_for_world`] against a caller-owned transaction.
 ///
 /// # Errors
 ///
@@ -554,7 +555,7 @@ pub async fn list_relationships_for_world_in_tx(
     Ok(rows)
 }
 
-/// Keyset cursor for paginated reads of a world's confirmed relation graph.
+/// note: Keyset cursor for paginated reads of a world's confirmed relation graph.
 ///
 /// Encodes the `(updated_at, relationship_id)` of the **last** row of the
 /// previous page; the next page resumes strictly after it. `updated_at` is
@@ -570,7 +571,7 @@ pub struct RelationshipCursor {
     pub relationship_id: String,
 }
 
-/// Keyset-paginated read of a world's **confirmed** relation graph
+/// note: Keyset-paginated read of a world's **confirmed** relation graph
 /// (`needs_review = 0`), ordered by `(updated_at DESC, relationship_id DESC)`.
 ///
 /// The only consumer is hop-edge expansion (V1.158 P2 T3,
@@ -590,7 +591,7 @@ pub async fn list_confirmed_relationships_paginated(
     limit: i64,
     cursor: Option<&RelationshipCursor>,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // Two compile-time-checked `query_as!` branches: the cursor branch adds
+    // note: Two compile-time-checked `query_as!` branches: the cursor branch adds
     // the keyset predicate `(updated_at < ? OR (updated_at = ? AND
     // relationship_id < ?))`; the no-cursor branch omits it. Both use bind
     // params only — no string interpolation.
@@ -634,9 +635,9 @@ pub async fn list_confirmed_relationships_paginated(
     Ok(rows)
 }
 
-// ── V1.76 extraction-suggestion support ───────────────────────────────
+// note: V1.76 extraction-suggestion support
 
-/// Resolve a non-deleted `kb_key_blocks` id by `canonical_name` for one world.
+/// note: Resolve a non-deleted `kb_key_blocks` id by `canonical_name` for one world.
 ///
 /// Used by the extraction pipeline to resolve relationship endpoints before
 /// persisting a suggestion (entity-scope-model §5.6 extraction ordering).
@@ -695,7 +696,7 @@ where
     }
 }
 
-/// Idempotent upsert of an extraction-sourced relationship suggestion.
+/// note: Idempotent upsert of an extraction-sourced relationship suggestion.
 ///
 /// Implements the V1.76 architect-locked dedup: a suggestion is keyed on
 /// `(world_id, source_entity_id, target_entity_id, relation_type,
@@ -748,7 +749,7 @@ pub async fn upsert_extraction_relationship(
     .await?;
 
     if existing_id.is_some() {
-        // Idempotent: the suggestion already exists; do not re-insert or bump
+        // note: Idempotent: the suggestion already exists; do not re-insert or bump
         // the revision (avoids churn on rescan).
         return Ok(false);
     }
@@ -857,7 +858,7 @@ mod tests {
 
         let row = get_relationship(&pool, &rel_id).await.unwrap();
         assert_eq!(row.world_id, world_id);
-        // symmetric was false -> stored integer should be 0
+        // note: symmetric was false -> stored integer should be 0
         assert!(!i64_to_bool(row.symmetric));
         assert_eq!(row.confidence, Some(0.75));
     }
@@ -984,7 +985,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_cas_rejects_row_in_foreign_world() {
-        // R3 regression (relate side, atomic source of truth): the caller's
+        // note: R3 regression (relate side, atomic source of truth): the caller's
         // world-verified preimage (wld_test) is stale — another writer moved
         // the row to wld_other without bumping the revision, so the pre-fix
         // id+revision CAS would have succeeded. The world-aware predicate
@@ -1024,7 +1025,7 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
-        // The caller's preimage: read BEFORE the interleaved writer moves the
+        // note: The caller's preimage: read BEFORE the interleaved writer moves the
         // row (the OCC `existing` snapshot the update path would carry).
         let existing = get_relationship(&pool, &rel_id).await.unwrap();
         assert_eq!(
@@ -1032,7 +1033,7 @@ mod tests {
             "gate-check precondition: row is in the claimed world"
         );
 
-        // "Other writer" (Connect process ∥ daemon) moves the row across
+        // note: "Other writer" (Connect process ∥ daemon) moves the row across
         // worlds between the gate-check and the CAS, revision untouched.
         sqlx::query!(
             "UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?",
@@ -1158,14 +1159,14 @@ mod tests {
         assert_eq!(rows.len(), 3);
     }
 
-    // ── V1.77: SQL LIMIT pushdown (qc3 W-QC3-P1-001) ─────────────────────
+    // note: V1.77: SQL LIMIT pushdown (qc3 W-QC3-P1-001)
 
     #[tokio::test]
     async fn test_list_for_world_respects_sql_limit() {
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
-        // Seed 3 confirmed rows.
+        // note: Seed 3 confirmed rows.
         let mut tx = pool.begin().await.unwrap();
         for i in 0..3 {
             insert_relationship_in_tx(
@@ -1193,7 +1194,7 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        // SQL LIMIT caps at the DB layer: pass `cap + 1 = 3` and observe 3
+        // note: SQL LIMIT caps at the DB layer: pass `cap + 1 = 3` and observe 3
         // (no truncation), then pass `2` and observe the truncation sentinel
         // shape (rows.len() == limit).
         let rows = list_relationships_for_world(&pool, &world_id, true, 3)
@@ -1211,14 +1212,14 @@ mod tests {
         );
     }
 
-    // ── V1.158 P2 T3: keyset pagination (hop-edge walk, R-V1149P1-001) ──
+    // note: V1.158 P2 T3: keyset pagination (hop-edge walk, R-V1149P1-001)
 
     #[tokio::test]
     async fn list_confirmed_relationships_paginated_resumes_after_cursor() {
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
-        // Seed 5 confirmed rows with strictly increasing RFC3339 `updated_at`
+        // note: Seed 5 confirmed rows with strictly increasing RFC3339 `updated_at`
         // (lexicographic order == chronological order for the fixed format).
         let mut tx = pool.begin().await.unwrap();
         for i in 0..5 {
@@ -1248,7 +1249,7 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        // Page 1 (page size 2 + overflow probe): the caller passes
+        // note: Page 1 (page size 2 + overflow probe): the caller passes
         // `limit + 1` per the `list_relationships_for_world` convention; a
         // result of `limit + 1` rows means the graph continues past the page.
         let rows = list_confirmed_relationships_paginated(&pool, &world_id, 3, None)
@@ -1259,7 +1260,7 @@ mod tests {
         assert_eq!(rows[1].relationship_id, "rel_pg3");
         assert_eq!(rows[2].relationship_id, "rel_pg2", "probe row present");
 
-        // Resume after rel_pg3's keyset → the next two rows (plus the next
+        // note: Resume after rel_pg3's keyset → the next two rows (plus the next
         // probe), strictly after the cursor (no overlap, no gap).
         let cursor = RelationshipCursor {
             updated_at: rows[1].updated_at.clone(),
@@ -1277,7 +1278,7 @@ mod tests {
             "keyset resumes strictly after the cursor row"
         );
 
-        // One row remains; the final page returns it without a probe row.
+        // note: One row remains; the final page returns it without a probe row.
         let cursor2 = RelationshipCursor {
             updated_at: rows2[1].updated_at.clone(),
             relationship_id: rows2[1].relationship_id.clone(),
@@ -1295,12 +1296,12 @@ mod tests {
         );
     }
 
-    // ── V1.76: extraction resolve + idempotent upsert ─────────────────────
+    // note: V1.76: extraction resolve + idempotent upsert
 
     #[tokio::test]
     async fn resolve_entity_by_canonical_name_with_block_type() {
         let (_dir, pool) = fresh_pool().await;
-        // seed_world_and_entities inserts kb_source + kb_target as 'character'
+        // note: seed_world_and_entities inserts kb_source + kb_target as 'character'
         // with canonical_name == id.
         let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
 
@@ -1339,7 +1340,7 @@ mod tests {
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
         let now = chrono::Utc::now().to_rfc3339();
 
-        // First call inserts a suggestion.
+        // note: First call inserts a suggestion.
         let inserted = upsert_extraction_relationship(
             &mut pool.acquire().await.unwrap(),
             &world_id,
@@ -1356,7 +1357,7 @@ mod tests {
         .unwrap();
         assert!(inserted, "first call inserts a new suggestion");
 
-        // Second call with the same composite key is a no-op (dedup).
+        // note: Second call with the same composite key is a no-op (dedup).
         let inserted_again = upsert_extraction_relationship(
             &mut pool.acquire().await.unwrap(),
             &world_id,
@@ -1376,7 +1377,7 @@ mod tests {
             "second call is idempotent (no duplicate, no revision bump)"
         );
 
-        // Only one row exists.
+        // note: Only one row exists.
         let rows = list_relationships_for_world(&pool, &world_id, true, 100)
             .await
             .unwrap();

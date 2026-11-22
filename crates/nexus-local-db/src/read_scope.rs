@@ -1,4 +1,5 @@
 //! Admitted read-selection resolution (v1.191 P1 R5).
+// note: Admitted read-selection resolution (v1.191 P1 R5).
 //!
 //! Durable §4.1 makes the knowledge read selection **server-chosen**: it is
 //! derived from stored ownership rows and the holder registry, never from a
@@ -19,7 +20,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::LocalDbError;
 
-/// Owned containers of one World for an admitted read selection, plus the
+/// note: Owned containers of one World for an admitted read selection, plus the
 /// owned Character ids they were derived from.
 ///
 /// The returned container list starts with the World container and then follows
@@ -68,7 +69,7 @@ pub async fn owned_world_containers(
     Ok((containers, character_ids))
 }
 
-/// The `ActorView` read selection of an admitted Creator over one **owned**
+/// note: The `ActorView` read selection of an admitted Creator over one **owned**
 /// World (durable §4.1).
 ///
 /// Fail-closed by construction: a foreign/missing World refuses, and a Creator
@@ -86,7 +87,7 @@ pub async fn creator_actor_view_scope(
     creator_id: &str,
     world_id: &str,
 ) -> Result<KnowledgeReadScope, LocalDbError> {
-    // Stored ownership, no status requirement (retained reads, durable §11.2):
+    // note: Stored ownership, no status requirement (retained reads, durable §11.2):
     // a World still owned but paused/archived keeps its retained history
     // readable. The World container is authorized only because the stored row
     // says so — naming a foreign World never authorizes it.
@@ -105,7 +106,7 @@ pub async fn creator_actor_view_scope(
     let (containers, _) = owned_world_containers(pool, creator_id, world_id).await?;
     let holder_entry_id = crate::require_creator_holder(pool, creator_id).await?;
     KnowledgeReadScope::actor_view(holder_entry_id, containers).map_err(|err| {
-        // Unreachable in practice: `require_creator_holder` resolved a non-empty
+        // note: Unreachable in practice: `require_creator_holder` resolved a non-empty
         // holder id. It fails closed rather than forming a holder-less
         // selection that would admit shared rows only.
         LocalDbError::HolderStateInvalid {

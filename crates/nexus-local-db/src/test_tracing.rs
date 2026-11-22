@@ -1,4 +1,5 @@
 //! Test-only `tracing` capture helpers shared by DAO mutation-path tests.
+// note: Test-only `tracing` capture helpers shared by DAO mutation-path tests.
 //!
 //! Extracted (R-V146P4-QC1-S1 / R-V146P4-QC3-S1) from the inline
 //! `CaptureLayer` originally defined in
@@ -12,11 +13,11 @@
 
 use std::sync::{Arc, Mutex};
 
-/// `tracing_subscriber` layer that records INFO and WARN event fields into a
+/// note: `tracing_subscriber` layer that records INFO and WARN event fields into a
 /// shared buffer. Clone-safe via `Arc<Mutex<...>>`.
 #[derive(Clone)]
 pub struct CaptureLayer {
-    /// Captured INFO/WARN event field renderings (one String per event).
+    /// note: Captured INFO/WARN event field renderings (one String per event).
     pub messages: Arc<Mutex<Vec<String>>>,
 }
 
@@ -51,7 +52,7 @@ impl tracing::field::Visit for CaptureVisitor {
     }
 }
 
-/// Build a fresh capture layer + its shared message buffer.
+/// note: Build a fresh capture layer + its shared message buffer.
 pub fn capture_layer() -> (CaptureLayer, Arc<Mutex<Vec<String>>>) {
     let messages = Arc::new(Mutex::new(Vec::new()));
     (
@@ -62,7 +63,7 @@ pub fn capture_layer() -> (CaptureLayer, Arc<Mutex<Vec<String>>>) {
     )
 }
 
-/// Compose a `tracing` subscriber wired to `layer` for use with
+/// note: Compose a `tracing` subscriber wired to `layer` for use with
 /// `tracing::subscriber::set_default`. The composed subscriber owns its data
 /// (Registry + `Arc`-backed layer) and is `Send + Sync + 'static`.
 ///
@@ -74,18 +75,18 @@ pub fn subscriber_with(layer: CaptureLayer) -> impl tracing::Subscriber + Send +
     tracing_subscriber::registry().with(layer)
 }
 
-/// Assert at least one captured INFO event contains every needle in `needles`.
+/// note: Assert at least one captured INFO event contains every needle in `needles`.
 pub fn assert_info_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
     assert_level_emitted(messages, "INFO", needles);
 }
 
-/// Assert at least one captured WARN event contains every needle in `needles`.
+/// note: Assert at least one captured WARN event contains every needle in `needles`.
 pub fn assert_warn_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
     assert_level_emitted(messages, "WARN", needles);
 }
 
 pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
-    // Clone the buffer out of the guard so the lock is released before the
+    // why: Clone the buffer out of the guard so the lock is released before the
     // assert scans/formats it (clippy::significant_drop_tightening).
     let msgs = messages.lock().unwrap().clone();
     assert!(
@@ -95,7 +96,7 @@ pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
 }
 
 fn assert_level_emitted(messages: &Arc<Mutex<Vec<String>>>, level: &str, needles: &[&str]) {
-    // Clone the buffer out of the guard so the lock is released before the
+    // why: Clone the buffer out of the guard so the lock is released before the
     // prefix build and the assert scan (clippy::significant_drop_tightening).
     let msgs = messages.lock().unwrap().clone();
     let prefix = format!("{level} ");

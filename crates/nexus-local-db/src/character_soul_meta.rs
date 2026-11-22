@@ -1,4 +1,5 @@
 //! Character SOUL metadata persistence (v1.184 P3 Task 1).
+// note: Character SOUL metadata persistence (v1.184 P3 Task 1).
 //!
 //! Character counterpart to the retired per-Creator `soul_meta` DAO (its
 //! table remains schema-only): per-Character SOUL.md
@@ -10,7 +11,7 @@ use sqlx::SqlitePool;
 use crate::character::{require_active_owned_character_tx, require_owned_character_pool};
 use crate::error::LocalDbError;
 
-/// Character SOUL metadata record.
+/// note: Character SOUL metadata record.
 #[derive(Debug, Clone)]
 pub struct CharacterSoulMeta {
     pub character_id: String,
@@ -22,7 +23,7 @@ pub struct CharacterSoulMeta {
     pub updated_at: String,
 }
 
-/// Upsert Character SOUL metadata (insert or update on `character_id`).
+/// note: Upsert Character SOUL metadata (insert or update on `character_id`).
 ///
 /// Runs in a write-serialized transaction that requires an active owned
 /// Character.
@@ -74,7 +75,7 @@ pub async fn upsert_character_soul_meta(
     }
 }
 
-/// Get Character SOUL metadata, scoped to the owning Character.
+/// note: Get Character SOUL metadata, scoped to the owning Character.
 ///
 /// # Errors
 ///
@@ -106,7 +107,7 @@ pub async fn get_character_soul_meta(
     }))
 }
 
-/// Delete Character SOUL metadata, scoped to the owning Character.
+/// note: Delete Character SOUL metadata, scoped to the owning Character.
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
 ///

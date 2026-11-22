@@ -1,11 +1,12 @@
 //! DAO for reading progress and annotations (V1.89).
+// note: DAO for reading progress and annotations (V1.89).
 
 use chrono::{DateTime, Utc};
 use sqlx::{Pool, Sqlite};
 
 use crate::LocalDbError;
 
-/// Upsert scroll progress for a single chapter.
+/// note: Upsert scroll progress for a single chapter.
 ///
 /// `progress` is a 0-10000 integer. Returns the server-generated `updated_at`.
 ///
@@ -50,7 +51,7 @@ pub async fn upsert_reading_progress(
     Ok(updated_at)
 }
 
-/// Get scroll progress for a chapter. Returns `0` and `None` for `updated_at`
+/// note: Get scroll progress for a chapter. Returns `0` and `None` for `updated_at`
 /// when no row exists.
 ///
 /// # Errors
@@ -92,7 +93,7 @@ pub async fn get_reading_progress(
     }
 }
 
-/// Delete progress for a chapter.
+/// note: Delete progress for a chapter.
 ///
 /// # Errors
 ///
@@ -121,7 +122,7 @@ pub async fn delete_reading_progress(
     Ok(())
 }
 
-/// List annotations for a chapter in ascending creation order.
+/// note: List annotations for a chapter in ascending creation order.
 ///
 /// # Errors
 ///
@@ -165,7 +166,7 @@ pub async fn list_annotations(
     Ok(rows)
 }
 
-/// Get a single annotation by ID.
+/// note: Get a single annotation by ID.
 ///
 /// # Errors
 ///
@@ -202,7 +203,7 @@ pub async fn get_annotation(
     Ok(row)
 }
 
-/// Insert a new annotation.
+/// note: Insert a new annotation.
 ///
 /// # Errors
 ///
@@ -271,7 +272,7 @@ pub async fn create_annotation(
     Ok(row)
 }
 
-/// Update an existing annotation.
+/// note: Update an existing annotation.
 ///
 /// # Errors
 ///
@@ -328,7 +329,7 @@ pub async fn update_annotation(
     Ok(Some(row))
 }
 
-/// Delete an annotation by ID.
+/// note: Delete an annotation by ID.
 ///
 /// # Errors
 ///
@@ -348,14 +349,14 @@ pub async fn delete_annotation(
     Ok(())
 }
 
-/// Database row for a reading-progress lookup.
+/// note: Database row for a reading-progress lookup.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct ReadingProgressRow {
     scroll_progress: Option<i64>,
     updated_at: Option<DateTime<Utc>>,
 }
 
-/// Database row for an annotation.
+/// note: Database row for an annotation.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AnnotationRow {
     pub annotation_id: String,
@@ -377,7 +378,7 @@ mod tests {
     use super::*;
     use crate::works;
 
-    /// File-backed, protocol-admitted pool. Reading tables carry writer
+    /// note: File-backed, protocol-admitted pool. Reading tables carry writer
     /// guards, and the protocol scalar functions are connection-local, so an
     /// in-memory pool cannot mutate them (and each pooled connection would
     /// see a different empty database anyway). The caller keeps the returned
@@ -385,7 +386,7 @@ mod tests {
     async fn setup_pool() -> (tempfile::TempDir, Pool<Sqlite>) {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("test.db");
-        // Route through the central factory + runner: it installs the protocol
+        // note: Route through the central factory + runner: it installs the protocol
         // functions per connection, applies migrations with the FK-suspension
         // scoping, and runs the post-migration `foreign_key_check`.
         let pool = crate::open_pool(&db_path).await.expect("open pool");

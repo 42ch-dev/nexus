@@ -1,4 +1,5 @@
 //! Local identity CRUD operations for `SQLite`.
+// note: Local identity CRUD operations for `SQLite`.
 //!
 //! Provides async functions to create, read, list, and update local identities
 //! in the `local_identities` table. These are used by both CLI and daemon.
@@ -7,7 +8,7 @@ use sqlx::SqlitePool;
 
 use crate::error::LocalDbError;
 
-/// Row representation for the `local_identities` table.
+/// note: Row representation for the `local_identities` table.
 #[derive(Debug, Clone)]
 pub struct LocalIdentityRow {
     pub creator_id: String,
@@ -18,7 +19,7 @@ pub struct LocalIdentityRow {
     pub platform_creator_id: Option<String>,
 }
 
-/// Create a new local identity in the database.
+/// note: Create a new local identity in the database.
 ///
 /// # Errors
 ///
@@ -51,7 +52,7 @@ pub async fn create_local_identity(
     })
 }
 
-/// Get a local identity by `creator_id`.
+/// note: Get a local identity by `creator_id`.
 ///
 /// Returns `None` if no identity exists with the given ID.
 ///
@@ -82,7 +83,7 @@ pub async fn get_local_identity(
     }))
 }
 
-/// List all local identities.
+/// note: List all local identities.
 ///
 /// Returns all identities sorted by creation time (oldest first).
 ///
@@ -114,7 +115,7 @@ pub async fn list_local_identities(
         .collect())
 }
 
-/// Link a local identity to a platform Creator.
+/// note: Link a local identity to a platform Creator.
 ///
 /// Sets `platform_linked = true` and stores the `platform_creator_id`.
 ///
@@ -154,7 +155,7 @@ pub async fn link_to_platform(
     Ok(())
 }
 
-/// Unlink a local identity from its platform Creator.
+/// note: Unlink a local identity from its platform Creator.
 ///
 /// Sets `platform_linked = false` and clears `platform_creator_id`.
 ///
@@ -189,7 +190,7 @@ pub async fn unlink_from_platform(pool: &SqlitePool, creator_id: &str) -> Result
     Ok(())
 }
 
-/// Delete a local identity by `creator_id`.
+/// note: Delete a local identity by `creator_id`.
 ///
 /// # Errors
 ///
@@ -236,7 +237,7 @@ mod tests {
         assert_eq!(fetched.creator_id, "ctr_localTest123");
     }
 
-    // V1.176 P0 QC fix wave (qc3 S-002): the unique partial index on
+    // note: V1.176 P0 QC fix wave (qc3 S-002): the unique partial index on
     // persistent `display_name` rejects a second INSERT with the same name —
     // an honest failure instead of a silent duplicate. Two concurrent
     // 0-match reads can both mint; the index fences the second write.
@@ -263,7 +264,7 @@ mod tests {
         .await
         .expect_err("second same-name persistent INSERT must fail");
 
-        // Surface as a unique-constraint failure, not a silent duplicate row.
+        // note: Surface as a unique-constraint failure, not a silent duplicate row.
         let is_unique_violation = matches!(
             &err,
             LocalDbError::Sqlx(sqlx::Error::Database(db)) if db.is_unique_violation()
@@ -274,7 +275,7 @@ mod tests {
         );
     }
 
-    // qc3 S-002 companion: anonymous rows and nameless persistent rows are
+    // note: qc3 S-002 companion: anonymous rows and nameless persistent rows are
     // NOT constrained — the index is partial (persistent + non-NULL name).
     #[tokio::test]
     async fn duplicate_nameless_persistent_rows_are_allowed() {
@@ -388,12 +389,12 @@ mod tests {
         .await
         .unwrap();
 
-        // First link succeeds
+        // note: First link succeeds
         link_to_platform(&pool, "ctr_localAlreadyLinked", "ctr_Platform123")
             .await
             .unwrap();
 
-        // Second link fails with IdentityAlreadyLinked
+        // note: Second link fails with IdentityAlreadyLinked
         let result = link_to_platform(&pool, "ctr_localAlreadyLinked", "ctr_Another456").await;
         assert!(result.is_err());
         assert!(matches!(

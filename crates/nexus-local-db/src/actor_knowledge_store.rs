@@ -1,4 +1,5 @@
 //! v1.185 P2 — stored-owner summary CAS and referent-guarded delete.
+// note: v1.185 P2 — stored-owner summary CAS and referent-guarded delete.
 
 use crate::kb_store::AuthoredAudience;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeGovernance};
@@ -10,10 +11,10 @@ use crate::error::ActorContractConflict;
 use crate::kb_store::{map_kb_store_to_local_db, KeyBlockRow};
 use crate::LocalDbError;
 
-/// Maximum UTF-8 byte length for `body.summary` (durable §11.5).
+/// note: Maximum UTF-8 byte length for `body.summary` (durable §11.5).
 pub const ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES: usize = 65_536;
 
-/// Patch surface for Character-scoped knowledge maintenance (handoff §2).
+/// note: Patch surface for Character-scoped knowledge maintenance (handoff §2).
 #[derive(Debug, Clone, Copy)]
 pub struct ActorKnowledgePatch<'a> {
     pub canonical_name: Option<&'a str>,
@@ -54,7 +55,7 @@ fn is_live_kb_status(status: &str) -> bool {
     !matches!(status, "deleted" | "merged" | "deprecated")
 }
 
-/// Translate the owner-scoped unique-index violation a Character knowledge
+/// note: Translate the owner-scoped unique-index violation a Character knowledge
 /// write can raise into its domain refusal.
 ///
 /// The storage primitives report [`LocalDbError`]; the sqlx error they wrap is
@@ -193,7 +194,7 @@ fn apply_summary_patch_to_body_json(
     Ok(Some(serde_json::Value::Object(obj).to_string()))
 }
 
-/// Whether the patch is a **complete** no-op (durable §3): every supplied
+/// note: Whether the patch is a **complete** no-op (durable §3): every supplied
 /// content field materialises to the stored value **and** the resolved
 /// governance pair equals the stored pair.
 ///
@@ -218,7 +219,7 @@ fn actor_knowledge_patch_is_no_op(
     if !name_unchanged || !summary_unchanged {
         return Ok(false);
     }
-    // An authored governance pair that already equals the stored pair is a
+    // note: An authored governance pair that already equals the stored pair is a
     // no-op too — an explicit `shared` on a shared row (or the same private
     // audience re-sent) may not bump either revision.
     if let Some(governance) = governance {
@@ -308,7 +309,7 @@ async fn row_in_character_read_scope_tx(
     }
 }
 
-/// Retained-read scope: Character-owned row or binding-owned row with P0 world provenance.
+/// note: Retained-read scope: Character-owned row or binding-owned row with P0 world provenance.
 async fn row_in_character_retained_read_scope(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -338,7 +339,7 @@ async fn row_in_character_retained_read_scope(
     }
 }
 
-/// Stored-owner scoped knowledge detail read (retained archive reads allowed).
+/// note: Stored-owner scoped knowledge detail read (retained archive reads allowed).
 ///
 /// v1.191 P1 T6 (durable §4.2): the authorized-container selection **and** the
 /// visibility rule are one eligibility `WHERE`, so the database returns a row
@@ -415,7 +416,7 @@ pub async fn get_actor_knowledge_entry(
     let Some(row) = row else {
         return Ok(None);
     };
-    // Defense in depth: re-check the same rule in Rust so a future SQL change
+    // why: Defense in depth: re-check the same rule in Rust so a future SQL change
     // cannot silently widen this read.
     if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id).await? {
         return Ok(None);
@@ -633,7 +634,7 @@ async fn assert_no_protected_referents_tx(
     Ok(())
 }
 
-/// Ordinary Character/binding knowledge content patch: governance is not an
+/// note: Ordinary Character/binding knowledge content patch: governance is not an
 /// input, so the stored `holder_entry_id`/`disclosure` pair is preserved.
 ///
 /// # Errors
@@ -659,7 +660,7 @@ pub async fn update_actor_knowledge_entry(
     .await
 }
 
-/// Admitted Character/binding audience authoring (durable §3): the same
+/// note: Admitted Character/binding audience authoring (durable §3): the same
 /// content CAS as [`update_actor_knowledge_entry`] plus the explicit native
 /// governance mutation, in **one** transaction.
 ///
@@ -723,7 +724,7 @@ async fn apply_actor_knowledge_patch(
             expected_revision,
         )
         .await?;
-        // The audience is resolved against stored state **in this
+        // note: The audience is resolved against stored state **in this
         // transaction** (durable §3): ownership/activity, the World-row active
         // binding and the fail-closed registry read all see the same snapshot
         // as the write below.
@@ -768,7 +769,7 @@ async fn apply_actor_knowledge_patch(
             governance,
         )
         .await?;
-        // v1.191 P1 T7 (durable §4.3): a binding-owned authoring write bumps
+        // note: v1.191 P1 T7 (durable §4.3): a binding-owned authoring write bumps
         // its owning Character, never a World — the binding has no revision of
         // its own — and a Character-owned write bumps that Character.
         crate::kb_store::bump_character_knowledge_revision_tx(&mut tx, character_id).await?;
@@ -794,7 +795,7 @@ async fn apply_actor_knowledge_patch(
     }
 }
 
-/// CAS-write the patched row inside the caller's transaction (durable §3).
+/// note: CAS-write the patched row inside the caller's transaction (durable §3).
 ///
 /// The ownership/CAS/liveness policy that makes a zero row-count a conflict,
 /// and the duplicate-name translation, stay here; the statement itself is
@@ -828,7 +829,7 @@ async fn cas_actor_knowledge_patch_tx(
 
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, CAS, referent guard, or database failure.
+/// note: Returns `LocalDbError` on ownership, CAS, referent guard, or database failure.
 pub async fn delete_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,

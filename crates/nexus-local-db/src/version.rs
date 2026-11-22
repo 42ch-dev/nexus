@@ -1,9 +1,10 @@
 //! Local database schema version constants
+// note: Local database schema version constants
 //!
 //! DB schema version is independent from contract `schema_version`.
 //! Version-line separation follows the retired local-db-refactor-legacy baseline (local record).
 
-/// Current local database schema version
+/// note: Current local database schema version
 ///
 /// This version tracks `SQLite` structure migrations only.
 /// Increment when adding new tables, columns, or modifying DDL.
@@ -38,7 +39,7 @@
 // 38 → 39 — volume-scoped reading progress and annotations (migration 20261119000001_reading_volume.sql).
 pub const DB_SCHEMA_VERSION: u32 = 39;
 
-/// Contract schema version from generated wire types
+/// note: Contract schema version from generated wire types
 ///
 /// Re-exported from nexus-contracts for convenience.
 /// This tracks network contract compatibility, NOT local DB structure.

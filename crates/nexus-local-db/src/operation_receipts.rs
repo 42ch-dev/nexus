@@ -39,28 +39,28 @@ use sqlx::SqlitePool;
 
 use crate::LocalDbError;
 
-/// Receipt consumer: a compute Run (`subject_id` = the run id).
+/// note: Receipt consumer: a compute Run (`subject_id` = the run id).
 pub const CONSUMER_COMPUTE_RUN: &str = "compute_run";
-/// Receipt consumer: a Connect invoke (`subject_id` = `<peer_session_id>/<op>`).
+/// note: Receipt consumer: a Connect invoke (`subject_id` = `<peer_session_id>/<op>`).
 pub const CONSUMER_CONNECT_INVOKE: &str = "connect_invoke";
 
-/// Frozen wire code of the first-writer-wins receipt refusal (spec §C).
+/// note: Frozen wire code of the first-writer-wins receipt refusal (spec §C).
 pub const OPERATION_ID_CONFLICT_CODE: &str = "operation_id_conflict";
 
-/// Receipt status while the effect is in flight.
+/// note: Receipt status while the effect is in flight.
 pub const STATUS_RUNNING: &str = "running";
 
-/// Terminal receipt status: the effect committed a result.
+/// note: Terminal receipt status: the effect committed a result.
 pub const STATUS_FINISHED: &str = "finished";
-/// Terminal receipt status: the effect failed.
+/// note: Terminal receipt status: the effect failed.
 pub const STATUS_FAILED: &str = "failed";
-/// Terminal receipt status: the operation was cancelled.
+/// note: Terminal receipt status: the operation was cancelled.
 pub const STATUS_CANCELLED: &str = "cancelled";
-/// Terminal receipt status: the operation was orphaned (e.g. the owning
+/// note: Terminal receipt status: the operation was orphaned (e.g. the owning
 /// process died) and settled without a re-apply.
 pub const STATUS_INTERRUPTED: &str = "interrupted";
 
-/// Every terminal status. A terminal receipt is never downgraded back to
+/// note: Every terminal status. A terminal receipt is never downgraded back to
 /// [`STATUS_RUNNING`] (the retained contract on
 /// `core-provider-operation.schema.json`, applied to this store).
 pub const TERMINAL_STATUSES: [&str; 4] = [
@@ -70,13 +70,13 @@ pub const TERMINAL_STATUSES: [&str; 4] = [
     STATUS_INTERRUPTED,
 ];
 
-/// True when `status` settles a receipt (terminal).
+/// note: True when `status` settles a receipt (terminal).
 #[must_use]
 pub fn is_terminal_status(status: &str) -> bool {
     TERMINAL_STATUSES.contains(&status)
 }
 
-/// One durable receipt row — the storage shape of `operation_receipts`, and
+/// note: One durable receipt row — the storage shape of `operation_receipts`, and
 /// the payload [`crate::get_operation_receipt`] returns. The owned wire DTO is
 /// `nexus_contracts::CoreOperationReceipt`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
@@ -95,14 +95,14 @@ pub struct OperationReceipt {
 }
 
 impl OperationReceipt {
-    /// True when this receipt is terminal — the recovery answer is the
+    /// note: True when this receipt is terminal — the recovery answer is the
     /// receipt itself, never a re-apply.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         is_terminal_status(&self.status)
     }
 
-    /// True when the given request fingerprint is the one this receipt was
+    /// note: True when the given request fingerprint is the one this receipt was
     /// first written with (i.e. the caller is replaying the same logical
     /// operation, not colliding with another).
     #[must_use]
@@ -111,31 +111,31 @@ impl OperationReceipt {
     }
 }
 
-/// The frozen Recover decision (spec §B.3 step 3/4).
+/// note: The frozen Recover decision (spec §B.3 step 3/4).
 ///
 /// The store decides the class; the consumer owns what it renders (a typed
 /// Busy / uncertain refusal, or the effect run for [`Self::ApplyOnce`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryDecision {
-    /// A terminal receipt exists: answer the replay from the receipt. The
+    /// note: A terminal receipt exists: answer the replay from the receipt. The
     /// effect is **not** re-applied.
     AnswerFromReceipt(OperationReceipt),
-    /// A `running` receipt whose owner is still live: an in-progress answer
+    /// note: A `running` receipt whose owner is still live: an in-progress answer
     /// (spec §B.3: typed Busy). The effect is **not** re-applied here.
     InProgress(OperationReceipt),
-    /// No receipt at all: safe to apply exactly once — write the `running`
+    /// note: No receipt at all: safe to apply exactly once — write the `running`
     /// receipt FIRST ([`begin_operation`]) and only run the effect when that
     /// call reports [`BeginOutcome::Acquired`], then [`settle_operation`]
     /// terminally.
     ApplyOnce,
-    /// A `running` receipt whose owner is no longer live (crash/restart
+    /// note: A `running` receipt whose owner is no longer live (crash/restart
     /// ambiguity) on a write with no terminal receipt. Spec §B.3 item 4: the
     /// caller gets a typed uncertain/blocked answer — **never** a blind
     /// retry, and the store never fabricates a terminal for it.
     Uncertain(OperationReceipt),
 }
 
-/// The outcome of [`begin_operation`]: who performed the first (`running`)
+/// note: The outcome of [`begin_operation`]: who performed the first (`running`)
 /// write for this operation id.
 ///
 /// This is the exclusive-acquisition gate of the recover → begin → effect
@@ -145,10 +145,10 @@ pub enum RecoveryDecision {
 /// must answer from the stored receipt instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BeginOutcome {
-    /// This call wrote the `running` receipt: the caller owns the effect and
+    /// note: This call wrote the `running` receipt: the caller owns the effect and
     /// is the only one allowed to apply it.
     Acquired(OperationReceipt),
-    /// A receipt for this operation id already existed (this call inserted
+    /// note: A receipt for this operation id already existed (this call inserted
     /// nothing). The effect must **not** be run by this caller; the stored
     /// receipt — `running`, or terminal if it was already settled — is the
     /// answer.
@@ -156,7 +156,7 @@ pub enum BeginOutcome {
 }
 
 impl BeginOutcome {
-    /// The stored receipt, whichever side of the acquisition this call landed
+    /// note: The stored receipt, whichever side of the acquisition this call landed
     /// on.
     #[must_use]
     pub const fn receipt(&self) -> &OperationReceipt {
@@ -165,7 +165,7 @@ impl BeginOutcome {
         }
     }
 
-    /// True only for the caller that acquired the effect (and must run it).
+    /// note: True only for the caller that acquired the effect (and must run it).
     #[must_use]
     pub const fn is_acquired(&self) -> bool {
         matches!(self, Self::Acquired(_))
@@ -176,14 +176,14 @@ const fn db_err(e: sqlx::Error) -> LocalDbError {
     LocalDbError::Sqlx(e)
 }
 
-/// RFC 3339 UTC timestamp, as the `created_at` / `updated_at` / `terminal_at`
+/// note: RFC 3339 UTC timestamp, as the `created_at` / `updated_at` / `terminal_at`
 /// columns store it (`datetime('now')` is not RFC 3339, so the store stamps
 /// itself).
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-/// True for the schema's terminal-immutability abort.
+/// note: True for the schema's terminal-immutability abort.
 ///
 /// SQLite reports a `RAISE(ABORT, …)` message through the statement error, which
 /// is the only channel it offers (the crate's writer-protocol callers match
@@ -193,7 +193,7 @@ fn is_terminal_receipt_refusal(err: &sqlx::Error) -> bool {
         .contains("OPERATION_RECEIPT_TERMINAL_IMMUTABLE")
 }
 
-/// The begin outcome for a receipt that already owns `operation_id`: `Existing`
+/// note: The begin outcome for a receipt that already owns `operation_id`: `Existing`
 /// for the same logical request (a replay, a racing loser, or a settled id whose
 /// stored answer is the answer), and the typed `operation_id_conflict` for a
 /// different request fingerprint. The stored row is never touched.
@@ -210,7 +210,7 @@ fn existing_begin_outcome(
     })
 }
 
-/// Read one receipt by operation id.
+/// note: Read one receipt by operation id.
 ///
 /// Returns `Ok(None)` for an unknown id — recovery never fabricates a receipt
 /// for an operation it has no durable record of.
@@ -234,7 +234,7 @@ pub async fn get_operation_receipt(
     .map_err(db_err)
 }
 
-/// Read the receipt owned by one consumer subject (`consumer`, `subject_id`).
+/// note: Read the receipt owned by one consumer subject (`consumer`, `subject_id`).
 ///
 /// The §B.2 consumer subject is the recovery-side handle: compute Run keys
 /// `subject_id` on the `run_id`, so a boot pass that finds a run row stuck
@@ -266,7 +266,7 @@ pub async fn get_operation_receipt_by_subject(
     .map_err(db_err)
 }
 
-/// Write the `running` receipt for an operation **before** its effect runs
+/// note: Write the `running` receipt for an operation **before** its effect runs
 /// (spec §B.3 step 3), and report who acquired the effect.
 ///
 /// First-writer-wins on `operation_id`:
@@ -310,7 +310,7 @@ pub async fn begin_operation(
         )));
     }
 
-    // Read FIRST (QC1-C001): a receipt row is never re-inserted. The schema
+    // why: Read FIRST (QC1-C001): a receipt row is never re-inserted. The schema
     // refuses an insert over a TERMINAL id, so a replay after settlement must be
     // answered from the stored row here instead of attempting the insert the
     // store used to rely on being a no-op.
@@ -337,7 +337,7 @@ pub async fn begin_operation(
     .await
     {
         Ok(inserted) => inserted,
-        // QC1-C001 race: a racing winner inserted AND settled terminally between
+        // note: QC1-C001 race: a racing winner inserted AND settled terminally between
         // our read and this insert, so the schema refused the insert over its
         // terminal id. The loser resolves to the stored row (the typed
         // `Existing` / `operation_id_conflict`), never a raw trigger abort.
@@ -350,7 +350,7 @@ pub async fn begin_operation(
         Err(err) => return Err(db_err(err)),
     };
 
-    // `changes()` distinguishes the two sides of the first-writer-wins race:
+    // note: `changes()` distinguishes the two sides of the first-writer-wins race:
     // exactly one racer inserted the `running` row (and owns the effect), the
     // others inserted nothing and must answer from the stored receipt. Both
     // sides then read the same stored row back.
@@ -371,7 +371,7 @@ pub async fn begin_operation(
     })
 }
 
-/// Settle a receipt terminally, and return the stored row.
+/// note: Settle a receipt terminally, and return the stored row.
 ///
 /// `status` must be terminal and `payload` is required: §B.2's contract is
 /// "terminal payload, exactly one set on terminal settlement", so every
@@ -399,7 +399,7 @@ pub async fn settle_operation(
 ) -> Result<OperationReceipt, LocalDbError> {
     let (result_json, error_json) = match status {
         STATUS_FINISHED => (Some(payload), None),
-        // Non-success termination: the cancellation / interruption reason is
+        // note: Non-success termination: the cancellation / interruption reason is
         // the terminal payload, so the contract's "exactly one set" holds for
         // every terminal settlement.
         STATUS_FAILED | STATUS_CANCELLED | STATUS_INTERRUPTED => (None, Some(payload)),
@@ -427,7 +427,7 @@ pub async fn settle_operation(
     .await
     .map_err(db_err)?;
 
-    // Whether this statement settled the row or lost to an earlier terminal
+    // note: Whether this statement settled the row or lost to an earlier terminal
     // (or raced another settler), the stored row is the truth. A missing row
     // means `settle` was called without `begin` — a caller bug, surfaced as
     // `RowNotFound` rather than a fabricated receipt.
@@ -436,7 +436,7 @@ pub async fn settle_operation(
         .ok_or_else(|| db_err(sqlx::Error::RowNotFound))
 }
 
-/// Classify the frozen Recover decision for a receipt (spec §B.3 step 3/4).
+/// note: Classify the frozen Recover decision for a receipt (spec §B.3 step 3/4).
 ///
 /// `owner_is_live` is the caller's knowledge of whether the process owning a
 /// `running` receipt is still alive; the store cannot infer liveness, so it is
@@ -456,7 +456,7 @@ pub fn classify_recovery(
     }
 }
 
-/// Ask the receipt store FIRST and decide (spec §B.3 steps 2–3).
+/// note: Ask the receipt store FIRST and decide (spec §B.3 steps 2–3).
 ///
 /// This is the frozen-order entry point for recovery: it reads the receipt
 /// before anything else can re-apply. [`RecoveryDecision::ApplyOnce`] is the
@@ -476,7 +476,7 @@ pub async fn recover(
     Ok(classify_recovery(receipt.as_ref(), owner_is_live))
 }
 
-/// True for the two consumers the `operation_receipts` CHECK admits.
+/// note: True for the two consumers the `operation_receipts` CHECK admits.
 #[must_use]
 pub fn is_known_consumer(consumer: &str) -> bool {
     matches!(consumer, CONSUMER_COMPUTE_RUN | CONSUMER_CONNECT_INVOKE)
@@ -488,7 +488,7 @@ mod tests {
     use crate::test_support::fresh_engine_pool;
 
     fn op_id(suffix: &str) -> String {
-        // A wire-shaped id (`op_` + 32 lowercase hex), so the rows mirror
+        // why: A wire-shaped id (`op_` + 32 lowercase hex), so the rows mirror
         // production receipts. The suffix must already be lowercase hex: the
         // helper refuses anything else rather than silently aliasing two
         // fixture ids onto one row (e.g. `7g` and `7a`).
@@ -501,7 +501,7 @@ mod tests {
         format!("op_{suffix:0>32}")
     }
 
-    /// Begin an operation and require that THIS call acquired the effect.
+    /// note: Begin an operation and require that THIS call acquired the effect.
     async fn begin_acquired(
         pool: &SqlitePool,
         operation_id: &str,
@@ -526,7 +526,7 @@ mod tests {
         }
     }
 
-    /// The receipt write path is **cooperative** (spec §B.2, third amendment):
+    /// note: The receipt write path is **cooperative** (spec §B.2, third amendment):
     /// the DIRECT admission — the one the Connect host opens its workspace DB
     /// with (`apps/nexus42` `Schema::init` → `nexus_local_db::init_pool`) — may
     /// begin and settle receipts, so the Connect write surface can enforce
@@ -561,13 +561,13 @@ mod tests {
         assert!(settled.terminal_at.is_some());
         assert_eq!(settled.result_json.as_deref(), Some(r#"{"ok":true}"#));
 
-        // First terminal wins for the direct writer too.
+        // note: First terminal wins for the direct writer too.
         let late = settle_operation(&direct, &id, STATUS_FAILED, r#"{"late":true}"#)
             .await
             .expect("a late settlement reads the stored terminal back");
         assert_eq!(late, settled, "the settled receipt is never rewritten");
 
-        // Terminal immutability fires for EVERY admitted writer, not just the
+        // note: Terminal immutability fires for EVERY admitted writer, not just the
         // engine owner: a direct UPDATE of the settled row aborts.
         let err = sqlx::query!(
             "UPDATE operation_receipts SET status = 'running' WHERE operation_id = ?",
@@ -587,7 +587,7 @@ mod tests {
         direct.close().await;
     }
 
-    /// The subject lookup is the recovery-side handle: the receipt for a
+    /// note: The subject lookup is the recovery-side handle: the receipt for a
     /// consumer subject is reachable without re-deriving the operation id,
     /// and an unknown subject is `None` (never a fabricated receipt).
     #[tokio::test]
@@ -607,7 +607,7 @@ mod tests {
         assert_eq!(found, settled, "the subject lookup returns the stored row");
         assert_eq!(found.operation_id, begun.operation_id);
 
-        // The pair is consumer-scoped: the same subject under the other
+        // note: The pair is consumer-scoped: the same subject under the other
         // consumer is a different receipt (and here, none).
         assert!(
             get_operation_receipt_by_subject(&pool, CONSUMER_CONNECT_INVOKE, "run-subject")
@@ -624,7 +624,7 @@ mod tests {
         );
     }
 
-    /// Crash: a `running` receipt whose owner died is ambiguous — the recovery
+    /// note: Crash: a `running` receipt whose owner died is ambiguous — the recovery
     /// answer is `uncertain`, never `ApplyOnce`, so the effect is not applied
     /// again.
     #[tokio::test]
@@ -635,13 +635,13 @@ mod tests {
         assert_eq!(begun.status, STATUS_RUNNING);
         assert!(begun.terminal_at.is_none());
 
-        // The owner process is gone: replay must not re-apply.
+        // why: The owner process is gone: replay must not re-apply.
         let decision = recover(&pool, &id, false).await.unwrap();
         match decision {
             RecoveryDecision::Uncertain(receipt) => assert_eq!(receipt.status, STATUS_RUNNING),
             other => panic!("crash ambiguity must be Uncertain, got {other:?}"),
         }
-        // A replayed begin does NOT re-acquire the effect.
+        // note: A replayed begin does NOT re-acquire the effect.
         match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-1", "fp-1")
             .await
             .unwrap()
@@ -649,7 +649,7 @@ mod tests {
             BeginOutcome::Existing(receipt) => assert_eq!(receipt.status, STATUS_RUNNING),
             BeginOutcome::Acquired(receipt) => panic!("a replay must not re-acquire: {receipt:?}"),
         }
-        // The store fabricated no terminal for the orphaned receipt.
+        // note: The store fabricated no terminal for the orphaned receipt.
         assert_eq!(
             get_operation_receipt(&pool, &id)
                 .await
@@ -660,7 +660,7 @@ mod tests {
         );
     }
 
-    /// Timeout / still in flight: a `running` receipt with a live owner is an
+    /// note: Timeout / still in flight: a `running` receipt with a live owner is an
     /// in-progress answer, not a re-apply and not an `uncertain` refusal.
     #[tokio::test]
     async fn live_running_receipt_is_in_progress_not_reapplied() {
@@ -676,7 +676,7 @@ mod tests {
         }
     }
 
-    /// Cancel: a cancelled receipt is terminal, so the replay is answered from
+    /// note: Cancel: a cancelled receipt is terminal, so the replay is answered from
     /// the receipt and a retry of the same logical call stays on the same
     /// terminal row (no second apply, no resurrection).
     #[tokio::test]
@@ -701,7 +701,7 @@ mod tests {
         .unwrap();
         assert_eq!(settled.status, STATUS_CANCELLED);
         assert!(settled.terminal_at.is_some());
-        // §B.2: a terminal settlement carries exactly one payload. This store
+        // note: §B.2: a terminal settlement carries exactly one payload. This store
         // renders a non-success reason (cancel/interruption) in `error_json`.
         assert_eq!(settled.result_json, None);
         assert_eq!(
@@ -709,7 +709,7 @@ mod tests {
             Some("{\"reason\":\"cancel_requested\"}")
         );
 
-        // Even with the owner reported live, a terminal receipt wins.
+        // note: Even with the owner reported live, a terminal receipt wins.
         match recover(&pool, &id, true).await.unwrap() {
             RecoveryDecision::AnswerFromReceipt(receipt) => {
                 assert_eq!(receipt.status, STATUS_CANCELLED);
@@ -718,7 +718,7 @@ mod tests {
             other => panic!("a terminal receipt must answer, got {other:?}"),
         }
 
-        // Replaying the SAME logical call returns the same terminal row: one
+        // note: Replaying the SAME logical call returns the same terminal row: one
         // receipt, sequence and created_at unchanged — no second apply.
         let replayed = match begin_operation(
             &pool,
@@ -755,7 +755,7 @@ mod tests {
         assert_eq!(stored.sequence, settled.sequence);
     }
 
-    /// No receipt: the caller may apply exactly once; the effect-id receipt is
+    /// note: No receipt: the caller may apply exactly once; the effect-id receipt is
     /// written `running` FIRST and settles terminal.
     #[tokio::test]
     async fn missing_receipt_applies_exactly_once() {
@@ -789,14 +789,14 @@ mod tests {
         assert_eq!(settled.result_json.as_deref(), Some("{\"ok\":true}"));
         assert_eq!(settled.error_json, None);
 
-        // A second "first" attempt is answered by the receipt, not re-applied.
+        // note: A second "first" attempt is answered by the receipt, not re-applied.
         assert!(matches!(
             recover(&pool, &id, false).await.unwrap(),
             RecoveryDecision::AnswerFromReceipt(_)
         ));
     }
 
-    /// Terminal is never downgraded and never rewritten: a late settlement and
+    /// note: Terminal is never downgraded and never rewritten: a late settlement and
     /// a late `running` write both return the stored terminal receipt
     /// unchanged.
     #[tokio::test]
@@ -809,7 +809,7 @@ mod tests {
             .unwrap();
         assert_eq!(finished.status, STATUS_FINISHED);
 
-        // A late, conflicting terminal settlement loses to the first terminal.
+        // note: A late, conflicting terminal settlement loses to the first terminal.
         let late = settle_operation(&pool, &id, STATUS_FAILED, "{\"v\":2}")
             .await
             .unwrap();
@@ -818,7 +818,7 @@ mod tests {
         assert_eq!(late.error_json, None);
         assert_eq!(late.terminal_at, finished.terminal_at);
 
-        // A late `running` write (the crash-recovery shape) cannot resurrect
+        // why: A late `running` write (the crash-recovery shape) cannot resurrect
         // it, and it does not re-acquire the effect either.
         let late_begin = match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5")
             .await
@@ -838,7 +838,7 @@ mod tests {
         assert!(stored.terminal_at.is_some());
     }
 
-    /// First-writer-wins: a different fingerprint for an owned operation id is
+    /// note: First-writer-wins: a different fingerprint for an owned operation id is
     /// the typed `operation_id_conflict`, and the first writer's row survives.
     #[tokio::test]
     async fn conflicting_fingerprint_is_a_typed_operation_id_conflict() {
@@ -852,7 +852,7 @@ mod tests {
             matches!(&err, LocalDbError::OperationIdConflict { operation_id } if operation_id == &id),
             "got {err:?}"
         );
-        // The refusal is about the fingerprint, not a generic storage fault,
+        // note: The refusal is about the fingerprint, not a generic storage fault,
         // and it is never a silent dedupe: the first writer's row is intact.
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored.request_fingerprint, "fp-first");
@@ -861,7 +861,7 @@ mod tests {
         assert_eq!(stored.sequence, first.sequence);
     }
 
-    /// §B.2's terminal-payload contract: every terminal settlement carries
+    /// note: §B.2's terminal-payload contract: every terminal settlement carries
     /// exactly one of `result_json` / `error_json` — including `cancelled` and
     /// `interrupted`, whose reason IS the payload. A non-terminal (or unknown)
     /// settlement status is refused and leaves the receipt running.
@@ -913,7 +913,7 @@ mod tests {
             );
         }
 
-        // Settling a receipt that was never begun is a caller bug, not a
+        // why: Settling a receipt that was never begun is a caller bug, not a
         // fabricated receipt.
         let err = settle_operation(&pool, &op_id("7f0"), STATUS_CANCELLED, "{\"x\":1}")
             .await
@@ -924,7 +924,7 @@ mod tests {
         );
     }
 
-    /// An unknown consumer is refused before any row is written.
+    /// note: An unknown consumer is refused before any row is written.
     #[tokio::test]
     async fn unknown_consumer_is_refused() {
         let (_dir, pool) = fresh_engine_pool().await;
@@ -941,7 +941,7 @@ mod tests {
             .is_none());
     }
 
-    /// The schema is the durable home of §B.2's receipt invariant: the CHECK
+    /// note: The schema is the durable home of §B.2's receipt invariant: the CHECK
     /// requires a terminal stamp plus exactly one terminal payload, and a
     /// settled receipt is IMMUTABLE — no admitted write path can downgrade it,
     /// rewrite `finished` → `failed`, or replace its payload under the same
@@ -950,7 +950,7 @@ mod tests {
     async fn schema_pins_terminal_payload_and_terminal_immutability() {
         let (_dir, pool) = fresh_engine_pool().await;
 
-        // Malformed terminal shapes: no payload, no terminal stamp, or two
+        // note: Malformed terminal shapes: no payload, no terminal stamp, or two
         // payloads — all refused by the CHECK itself.
         for (suffix, result_json, error_json, terminal_at) in [
             ("ca", None, None, None),
@@ -978,7 +978,7 @@ mod tests {
             );
         }
 
-        // Every mutation of a settled receipt is refused.
+        // note: Every mutation of a settled receipt is refused.
         let id = op_id("cd");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-check", "fp-cd").await;
         let settled = settle_operation(&pool, &id, STATUS_FINISHED, "{\"v\":1}")
@@ -1009,12 +1009,12 @@ mod tests {
             );
         }
 
-        // The stored row is byte-identical to the settlement.
+        // note: The stored row is byte-identical to the settlement.
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled);
     }
 
-    /// QC1-C001: a settled answer cannot be deleted-and-reinserted. An
+    /// note: QC1-C001: a settled answer cannot be deleted-and-reinserted. An
     /// `INSERT OR REPLACE` over a terminal id resolves its conflict by DELETING
     /// the victim — whose DELETE trigger does not fire while
     /// `recursive_triggers` is OFF (the SQLite default) — so the DELETE-side
@@ -1046,7 +1046,7 @@ mod tests {
             "expected the terminal-immutability abort, got: {err}"
         );
 
-        // The settled row survived byte-identically (the victim was not
+        // note: The settled row survived byte-identically (the victim was not
         // deleted, and nothing was reinserted).
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled, "the settled row must be untouched");
@@ -1057,7 +1057,7 @@ mod tests {
         assert_eq!(count, 1, "no replacement row was created");
     }
 
-    /// QC1-C001, the second half: the receipt KEY is immutable, so a `running`
+    /// note: QC1-C001, the second half: the receipt KEY is immutable, so a `running`
     /// source cannot MOVE its row onto a settled id — an `UPDATE OR REPLACE`
     /// would otherwise delete the terminal victim without firing its DELETE
     /// trigger, and a plain `UPDATE … SET operation_id` would hijack the
@@ -1075,7 +1075,7 @@ mod tests {
             begin_acquired(&pool, &running_id, CONSUMER_COMPUTE_RUN, "run-e3", "fp-e3").await;
         assert_eq!(running.status, STATUS_RUNNING);
 
-        // `UPDATE OR REPLACE` from the running source onto the settled id.
+        // note: `UPDATE OR REPLACE` from the running source onto the settled id.
         let err = sqlx::query!(
             "UPDATE OR REPLACE operation_receipts SET operation_id = ? WHERE operation_id = ?",
             &terminal_id,
@@ -1089,7 +1089,7 @@ mod tests {
             "expected the key-immutability abort, got: {err}"
         );
 
-        // A plain key mutation is refused the same way.
+        // note: A plain key mutation is refused the same way.
         let err = sqlx::query!(
             "UPDATE operation_receipts SET operation_id = ? WHERE operation_id = ?",
             &terminal_id,
@@ -1103,7 +1103,7 @@ mod tests {
             "expected the key-immutability abort, got: {err}"
         );
 
-        // Both rows are byte-identical to their pre-attack state.
+        // note: Both rows are byte-identical to their pre-attack state.
         assert_eq!(
             get_operation_receipt(&pool, &terminal_id)
                 .await
@@ -1125,7 +1125,7 @@ mod tests {
         assert_eq!(count, 2, "the terminal victim was not deleted");
     }
 
-    /// QC1-C001 residual: with the table WITHOUT ROWID there is no rowid alias
+    /// note: QC1-C001 residual: with the table WITHOUT ROWID there is no rowid alias
     /// to reach a settled receipt through. An `INSERT OR REPLACE` that names an
     /// explicit rowid cannot even name one, and — whatever the failure mode —
     /// the settled row must survive byte-identically and no fresh row may appear.
@@ -1175,7 +1175,7 @@ mod tests {
         );
     }
 
-    /// QC1-C001 residual, the UPDATE half: `UPDATE OR REPLACE … SET rowid = …`
+    /// note: QC1-C001 residual, the UPDATE half: `UPDATE OR REPLACE … SET rowid = …`
     /// from a running row has no rowid to collide on, and the settled row and the
     /// running row both survive byte-identically.
     #[tokio::test]
@@ -1232,7 +1232,7 @@ mod tests {
         );
     }
 
-    /// QC1-C001 race: `begin_operation` reads first, so a racing winner can
+    /// note: QC1-C001 race: `begin_operation` reads first, so a racing winner can
     /// insert AND settle terminally before the loser's insert. The loser must
     /// resolve to the stored row (`Existing`) or the typed conflict — never the
     /// raw schema abort.
@@ -1271,7 +1271,7 @@ mod tests {
                     begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", fingerprint).await
                 }
             });
-            // The loser's read misses (the winner is uncommitted) and its insert
+            // note: The loser's read misses (the winner is uncommitted) and its insert
             // parks on the write lock; then the winner commits.
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             winner.commit().await.expect("winner commits");
@@ -1296,7 +1296,7 @@ mod tests {
         }
     }
 
-    /// The legitimate replay path is untouched by the replacement guards: after
+    /// note: The legitimate replay path is untouched by the replacement guards: after
     /// settlement, `begin_operation` answers from the stored terminal row (the
     /// store reads first and never re-inserts), and a conflicting request is
     /// still the typed refusal.
@@ -1329,7 +1329,7 @@ mod tests {
         assert_eq!(stored, settled);
     }
 
-    /// The receipt write path runs under the admitted writer protocol: an
+    /// note: The receipt write path runs under the admitted writer protocol: an
     /// admitted writer (engine owner or cooperative direct) writes, while a raw
     /// handle that never received the protocol scalars is fenced by SQLite
     /// itself.
@@ -1361,7 +1361,7 @@ mod tests {
         raw.close().await;
     }
 
-    /// The begin outcome is the exclusive-acquisition gate of the
+    /// note: The begin outcome is the exclusive-acquisition gate of the
     /// recover → begin → effect sequence: of two concurrent same-fingerprint
     /// callers exactly ONE is told it acquired the effect, and the loser is
     /// told to answer from the stored receipt instead of running it.
@@ -1408,7 +1408,7 @@ mod tests {
         .unwrap();
         assert_eq!(count, 1, "the race converges on exactly one receipt");
 
-        // A later replay is never an acquirer either.
+        // why: A later replay is never an acquirer either.
         assert!(
             !begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", "fp-race")
                 .await

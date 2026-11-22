@@ -1,4 +1,5 @@
 //! Compute run persistence — direct Control Room lane (V1.147 P0 T2).
+// note: Compute run persistence — direct Control Room lane (V1.147 P0 T2).
 //!
 //! Augments the existing `compute_sessions` table with direct-lane columns
 //! (`run_id`, `world_id`, `module_id`, `module_version`, `status`,
@@ -12,7 +13,7 @@
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
-/// A row in the `compute_sessions` table covering the direct-lane columns
+/// note: A row in the `compute_sessions` table covering the direct-lane columns
 /// added by V1.147 P0 (fix wave: `branch_id` + `timeline_head_event_id`).
 #[derive(Debug, Clone)]
 pub struct ComputeRunRow {
@@ -27,22 +28,22 @@ pub struct ComputeRunRow {
     pub updated_at: Option<String>,
     pub accepted_at: Option<String>,
     pub invocation_params_json: Option<String>,
-    /// Branch the run was scoped to at run time (snapshot; Accept appends
+    /// note: Branch the run was scoped to at run time (snapshot; Accept appends
     /// timeline events to this branch, not the current fork head — F-003).
     /// `None` only for rows created before the branch-snapshot migration.
     pub branch_id: Option<String>,
-    /// World timeline head at run time (snapshot, informational).
+    /// note: World timeline head at run time (snapshot, informational).
     pub timeline_head_event_id: Option<String>,
 }
 
-/// Valid status strings for the direct lane.
+/// note: Valid status strings for the direct lane.
 pub const RUN_STATUS_RUNNING: &str = "running";
 pub const RUN_STATUS_SUCCEEDED: &str = "succeeded";
 pub const RUN_STATUS_FAILED: &str = "failed";
 pub const RUN_STATUS_APPLIED: &str = "applied";
 pub const RUN_STATUS_DISCARDED: &str = "discarded";
 
-/// Filters for [`list_runs`].
+/// note: Filters for [`list_runs`].
 #[derive(Debug, Clone, Default)]
 pub struct RunListFilters {
     pub world_id: Option<String>,
@@ -51,7 +52,7 @@ pub struct RunListFilters {
     pub creator_world_ids: Option<Vec<String>>,
 }
 
-/// Insert a new compute run row and return its generated `run_id`.
+/// note: Insert a new compute run row and return its generated `run_id`.
 ///
 /// `branch_id` is the resolved branch the run is scoped to (defaults to the
 /// World root branch at run time — the handler resolves it before calling);
@@ -100,7 +101,7 @@ pub async fn insert_run(
     Ok(run_id)
 }
 
-/// Look up a compute run by `run_id`.
+/// note: Look up a compute run by `run_id`.
 ///
 /// Returns `Ok(None)` when no direct-lane row with the given `run_id` exists.
 ///
@@ -145,7 +146,7 @@ pub async fn get_run(
     }))
 }
 
-/// Update a run to `succeeded` status with proposals.
+/// note: Update a run to `succeeded` status with proposals.
 ///
 /// Clears `error_json` (set to NULL) and sets `updated_at` to now.
 /// Only fires when the run is in `running` status — this prevents
@@ -185,7 +186,7 @@ pub async fn set_run_succeeded(
     Ok(affected)
 }
 
-/// Update a run to `failed` status with error details.
+/// note: Update a run to `failed` status with error details.
 ///
 /// Sets `error_json`, clears `proposals_json` (set to NULL), and sets
 /// `updated_at` to now.  Only fires when the run is in `running` status
@@ -225,7 +226,7 @@ pub async fn set_run_failed(
     Ok(affected)
 }
 
-/// Update a run to `applied` status within an existing transaction.
+/// note: Update a run to `applied` status within an existing transaction.
 ///
 /// Sets `accepted_at` and `updated_at`.  Only fires when the run is in
 /// `succeeded` status — this is the atomic guard that prevents TOCTOU
@@ -267,7 +268,7 @@ pub async fn set_run_applied_in_tx(
     Ok(affected)
 }
 
-/// Update a run to `discarded` status.
+/// note: Update a run to `discarded` status.
 ///
 /// Sets `updated_at` to now.  Only fires when the run is in `succeeded`
 /// status — matches the route spec §2.4 prescribed SQL.  This prevents
@@ -301,7 +302,7 @@ pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<u64, L
     Ok(affected)
 }
 
-/// List compute runs with optional filters and keyset cursor pagination,
+/// note: List compute runs with optional filters and keyset cursor pagination,
 /// **newest-first** (`ORDER BY created_at DESC, run_id DESC`).
 ///
 /// Returns `(items, next_cursor)` where `next_cursor` is an opaque
@@ -353,7 +354,7 @@ pub async fn list_runs(
     );
 
     if let Some(cursor_val) = cursor {
-        // Keyset cursor on (created_at, run_id): decode the opaque
+        // note: Keyset cursor on (created_at, run_id): decode the opaque
         // "{created_at}|{run_id}" pair.  RFC3339 timestamps never contain
         // '|', so the split is unambiguous.
         let (cursor_created_at, cursor_run_id) = cursor_val
@@ -392,7 +393,7 @@ pub async fn list_runs(
 
     if let Some(ref world_ids) = filters.creator_world_ids {
         if world_ids.is_empty() {
-            // Empty set explicitly matches nothing (definitive no-op).
+            // note: Empty set explicitly matches nothing (definitive no-op).
             // Without this the IN clause is skipped and every world matches,
             // which is surprising for an explicit `Some(vec![])`.
             builder.push(" AND 1 = 0");
@@ -407,7 +408,7 @@ pub async fn list_runs(
     }
 
     builder.push(" ORDER BY created_at DESC, run_id DESC LIMIT ");
-    // Fetch limit + 1 to detect `has_more` without a second query.
+    // note: Fetch limit + 1 to detect `has_more` without a second query.
     // When limit == 0 this fetches 1 row: items will be empty but the
     // row exists — callers should pass limit >= 1 (see doc above).
     builder.push_bind(i64::from(limit) + 1);
@@ -453,7 +454,7 @@ pub async fn list_runs(
     Ok((items, next_cursor))
 }
 
-/// Raw row from `sqlx::query_as` for the dynamic list query.
+/// note: Raw row from `sqlx::query_as` for the dynamic list query.
 #[derive(Debug, sqlx::FromRow)]
 struct RawRunRow {
     run_id: Option<String>,
@@ -471,7 +472,7 @@ struct RawRunRow {
     timeline_head_event_id: Option<String>,
 }
 
-/// Delete terminal runs for a World (Clear history — V1.147 P3 T2).
+/// note: Delete terminal runs for a World (Clear history — V1.147 P3 T2).
 ///
 /// Clear-history semantics lock: only terminal states (`applied` |
 /// `discarded` | `failed`) are ever deleted. `running` and `succeeded`
@@ -505,7 +506,7 @@ pub async fn delete_terminal_runs(
         }
     }
     let result = match status {
-        // Guarded predicate: the IN-list is structural, so this arm can never
+        // why: Guarded predicate: the IN-list is structural, so this arm can never
         // touch running/succeeded rows.
         None => {
             sqlx::query!(
@@ -517,7 +518,7 @@ pub async fn delete_terminal_runs(
             .execute(pool)
             .await?
         }
-        // `status` was validated as terminal above; the explicit equality
+        // note: `status` was validated as terminal above; the explicit equality
         // narrows Clear to exactly that state.
         Some(s) => {
             sqlx::query!(

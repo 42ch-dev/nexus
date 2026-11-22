@@ -1,49 +1,50 @@
 //! Local database error types
+// note: Local database error types
 //!
 //! Provides descriptive errors for validation and version reading operations.
 
 use std::fmt;
 
-/// Local database errors with actionable descriptions
+/// note: Local database errors with actionable descriptions
 #[derive(Debug)]
 pub enum LocalDbError {
-    /// `workspace_meta` table does not exist
+    /// note: `workspace_meta` table does not exist
     MissingWorkspaceMetaTable,
-    /// Required version key is missing from `workspace_meta`
+    /// note: Required version key is missing from `workspace_meta`
     MissingVersionKey { key: String },
-    /// Version value is not a valid u32 integer
+    /// note: Version value is not a valid u32 integer
     InvalidVersionValue {
         key: String,
         value: String,
         reason: String,
     },
-    /// Local identity does not exist
+    /// note: Local identity does not exist
     IdentityNotFound { creator_id: String },
-    /// Local identity is already linked to a platform creator
+    /// note: Local identity is already linked to a platform creator
     IdentityAlreadyLinked { creator_id: String },
-    /// Local identity is not linked to any platform creator
+    /// note: Local identity is not linked to any platform creator
     IdentityNotLinked { creator_id: String },
-    /// I/O error with descriptive message (used by inspiration scaffold)
+    /// note: I/O error with descriptive message (used by inspiration scaffold)
     Io(String),
-    /// I/O error (file system operations with path context)
+    /// note: I/O error (file system operations with path context)
     IoWithPath {
         path: String,
         source: std::io::Error,
     },
-    /// sqlx operation failed
+    /// note: sqlx operation failed
     Sqlx(sqlx::Error),
-    /// sqlx migration failed
+    /// note: sqlx migration failed
     Migrate(sqlx::migrate::MigrateError),
-    /// A database constraint was violated (e.g., TOCTOU race detected)
+    /// note: A database constraint was violated (e.g., TOCTOU race detected)
     ConstraintViolation { table: String, constraint: String },
-    /// V1.49 P0 W-1 (findings-lifecycle): an illegal lifecycle transition
+    /// note: V1.49 P0 W-1 (findings-lifecycle): an illegal lifecycle transition
     /// was attempted (e.g. `resolved → open`). Emitted by findings
     /// [`enforce_status_transition`](crate::findings::enforce_status_transition)
     /// so the API layer can map it to a precise public code
     /// (`INVALID_TRANSITION`) without string-prefix sniffing. Other callers
     /// continue to use [`ConstraintViolation`](Self::ConstraintViolation).
     IllegalTransition { from: String, to: String },
-    /// V1.49 P0 W-1 (findings-lifecycle): a field value is not a member of
+    /// note: V1.49 P0 W-1 (findings-lifecycle): a field value is not a member of
     /// its allowed enum (invalid `severity` / `status` / `target_executor`
     /// on the findings PATCH path). Emitted instead of
     /// [`ConstraintViolation`](Self::ConstraintViolation) on the PATCH
@@ -54,9 +55,9 @@ pub enum LocalDbError {
         value: String,
         allowed: &'static [&'static str],
     },
-    /// Path escapes its expected parent directory (defense-in-depth)
+    /// note: Path escapes its expected parent directory (defense-in-depth)
     PathEscape { path: String, prefix: String },
-    /// V1.51 T-B P1: OCC version mismatch — the row's version changed between
+    /// note: V1.51 T-B P1: OCC version mismatch — the row's version changed between
     /// the caller's read and its UPDATE (CAS check failed). The caller should
     /// surface this as `E_VERSION` (exit 76) and advise retrying.
     VersionMismatch {
@@ -65,7 +66,7 @@ pub enum LocalDbError {
         expected: i64,
         actual: Option<i64>,
     },
-    /// V1.154 P2 (R3 closure): the world-aware CAS predicate
+    /// note: V1.154 P2 (R3 closure): the world-aware CAS predicate
     /// (`WHERE … AND world_id = ?`) missed because the row's stored
     /// `world_id` differs from the world the caller verified — a
     /// cross-process writer moved the row between the caller's check and the
@@ -78,30 +79,30 @@ pub enum LocalDbError {
         expected_world: String,
         actual_world: String,
     },
-    /// Input validation failed before reaching the database.
+    /// note: Input validation failed before reaching the database.
     ValidationError(String),
-    /// Character / binding / world row is missing for the scoped caller.
+    /// note: Character / binding / world row is missing for the scoped caller.
     ActorNotFound { resource: &'static str, id: String },
-    /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
+    /// note: Stable actor-contract product conflict (HTTP 409 at the Daemon).
     ActorContractConflict { code: ActorContractConflict },
-    /// Writer / engine lock or epoch could not be acquired within the bounded window.
+    /// note: Writer / engine lock or epoch could not be acquired within the bounded window.
     OwnerBusy { resource: String },
-    /// Writer registration or protocol epoch rejected the connection.
+    /// note: Writer registration or protocol epoch rejected the connection.
     WriterFenced { reason: String },
-    /// Durable workspace protocol or schema version is newer than this binary supports.
+    /// note: Durable workspace protocol or schema version is newer than this binary supports.
     SchemaMismatch { reason: String },
-    /// Malformed durable workspace commit intent row.
+    /// note: Malformed durable workspace commit intent row.
     CorruptIntent {
         revision: String,
         workspace_root: String,
     },
-    /// V1.191 P1 T4 (durable §2.2): a normal Actor read resolved a missing or
+    /// note: V1.191 P1 T4 (durable §2.2): a normal Actor read resolved a missing or
     /// corrupt holder registry row. The read never provisions the row, so this
     /// is a refusal rather than a repair; hosts surface the stable
     /// `holder_state_invalid` code (mapped from this variant, like the other
     /// payload-carrying API-precision variants above).
     HolderStateInvalid { reason: String },
-    /// v1.207 P3 (§B.1): an `operation_receipts` write carried a different
+    /// note: v1.207 P3 (§B.1): an `operation_receipts` write carried a different
     /// `request_fingerprint` for an `operation_id` that is already owned —
     /// the receipt primary key is first-writer-wins, so a genuine id collision
     /// is the typed `operation_id_conflict` refusal, never a silent dedupe.
@@ -111,7 +112,7 @@ pub enum LocalDbError {
 }
 
 impl LocalDbError {
-    /// Unreferenced-only Actor deletion refusal (durable §2.2): governance
+    /// note: Unreferenced-only Actor deletion refusal (durable §2.2): governance
     /// references, bindings, or retained owned rows still exist.
     #[must_use]
     pub(crate) const fn actor_in_use() -> Self {
@@ -120,7 +121,7 @@ impl LocalDbError {
         }
     }
 
-    /// Map a residual referential refusal onto [`Self::actor_in_use`]: the
+    /// note: Map a residual referential refusal onto [`Self::actor_in_use`]: the
     /// deletion paths pre-count every reference class they know, and SQLite's
     /// own `RESTRICT` refusal is the backstop for one they do not.
     #[must_use]
@@ -134,7 +135,7 @@ impl LocalDbError {
     }
 }
 
-/// Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
+/// note: Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorContractConflict {
     LastActiveBinding,
@@ -145,33 +146,33 @@ pub enum ActorContractConflict {
     BindingHasOwnedKnowledge,
     BindingHasLocalMemory,
     CharacterFragmentAlreadyShared,
-    /// v1.185 P0: mutation targets an owned but archived Character.
+    /// note: v1.185 P0: mutation targets an owned but archived Character.
     CharacterInactive,
-    /// v1.185 P0: `expected_revision` does not match stored Character revision.
+    /// note: v1.185 P0: `expected_revision` does not match stored Character revision.
     CharacterRevisionConflict,
-    /// v1.185 P1: `expected_revision` does not match stored binding revision.
+    /// note: v1.185 P1: `expected_revision` does not match stored binding revision.
     BindingRevisionConflict,
-    /// v1.185 P0: restore lacks a retained active binding into an owned active World.
+    /// note: v1.185 P0: restore lacks a retained active binding into an owned active World.
     CharacterRestoreRequiresActiveBinding,
-    /// v1.185 P2: duplicate `canonical_name` for the same owner scope.
+    /// note: v1.185 P2: duplicate `canonical_name` for the same owner scope.
     DuplicateActorKnowledge,
-    /// v1.185 P2: `expected_revision` does not match stored knowledge entry revision.
+    /// note: v1.185 P2: `expected_revision` does not match stored knowledge entry revision.
     KnowledgeRevisionConflict,
-    /// v1.185 P2: delete refused because a protected referent still exists.
+    /// note: v1.185 P2: delete refused because a protected referent still exists.
     KnowledgeEntryInUse,
-    /// v1.185 P2: malformed JSON in a reference-bearing column.
+    /// note: v1.185 P2: malformed JSON in a reference-bearing column.
     KnowledgeReferenceStateInvalid,
-    /// v1.185 P2: mutation targets a non-live or malformed writable knowledge row.
+    /// note: v1.185 P2: mutation targets a non-live or malformed writable knowledge row.
     KnowledgeEntryNotMutable,
-    /// v1.185 P3: run capture receipt provenance conflicts with an existing row.
+    /// note: v1.185 P3: run capture receipt provenance conflicts with an existing row.
     RunCaptureProvenanceConflict,
-    /// v1.185 P3: run capture scope changed (epoch/binding/Character) before commit.
+    /// note: v1.185 P3: run capture scope changed (epoch/binding/Character) before commit.
     RunCaptureScopeChanged,
-    /// v1.191 P1 T4: unreferenced-only Actor deletion refused because the
+    /// note: v1.191 P1 T4: unreferenced-only Actor deletion refused because the
     /// subject still has governance references, bindings, or retained owned
     /// rows (durable §2.2).
     ActorInUse,
-    /// v1.229 N3 D18: the binding still owns an unknown remote capture
+    /// note: v1.229 N3 D18: the binding still owns an unknown remote capture
     /// admission or a known live remote provider object.
     BindingHasRemoteMemory,
 }
@@ -206,7 +207,7 @@ impl ActorContractConflict {
         }
     }
 
-    /// Human-readable API message for this conflict code.
+    /// note: Human-readable API message for this conflict code.
     #[must_use]
     pub const fn message(self) -> &'static str {
         match self {
@@ -276,7 +277,7 @@ impl ActorContractConflict {
 }
 
 impl LocalDbError {
-    /// Display the [`VersionMismatch`](Self::VersionMismatch) arm. The two
+    /// note: Display the [`VersionMismatch`](Self::VersionMismatch) arm. The two
     /// OCC conflict arms are hoisted out of the main `Display` match so
     /// the impl stays under clippy's `too_many_lines` ceiling (the
     /// V1.154 `WorldConflict` arm pushed the `fmt` body over 100 lines).
@@ -295,7 +296,7 @@ impl LocalDbError {
         )
     }
 
-    /// Display the [`WorldConflict`](Self::WorldConflict) arm — see
+    /// note: Display the [`WorldConflict`](Self::WorldConflict) arm — see
     /// [`fmt_version_mismatch`].
     fn fmt_world_conflict(
         f: &mut fmt::Formatter<'_>,
@@ -314,7 +315,7 @@ impl LocalDbError {
 }
 
 impl fmt::Display for LocalDbError {
-    // One flat variant-to-text match: the arm order mirrors the enum, and
+    // why: One flat variant-to-text match: the arm order mirrors the enum, and
     // splitting it across helpers would scatter a single user-facing mapping.
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

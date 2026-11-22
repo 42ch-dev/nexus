@@ -21,7 +21,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use crate::error::LocalDbError;
 use crate::holders::{ensure_creator_holder_in_tx, require_subject_holder, HolderSubject};
 
-/// Materialize a workspace Creator and its holder registry row in one transaction.
+/// note: Materialize a workspace Creator and its holder registry row in one transaction.
 ///
 /// §2.1: "before a workspace identity becomes usable its local subject and
 /// registry row must commit together". This is the one Creator materialization
@@ -55,7 +55,7 @@ pub async fn ensure_creator_row(
     }
 }
 
-/// Transaction form of [`ensure_creator_row`]: upsert the subject, then its holder.
+/// note: Transaction form of [`ensure_creator_row`]: upsert the subject, then its holder.
 ///
 /// UPDATE-else-INSERT the minimal active `creators` row (`display_name`,
 /// `cached_at` RFC3339, `status='active'`, `data='{}'`), then ensure its stable
@@ -94,7 +94,7 @@ pub async fn ensure_creator_row_in_tx(
     ensure_creator_holder_in_tx(tx, creator_id).await
 }
 
-/// Resolve the stable holder of a stored Creator for a normal read (§2.2).
+/// note: Resolve the stable holder of a stored Creator for a normal read (§2.2).
 ///
 /// Fails closed when the registry row is missing or corrupt — a read never
 /// provisions one.
@@ -121,7 +121,7 @@ pub async fn require_creator_holder(
     require_subject_holder(pool, &HolderSubject::Creator(creator_id.to_string())).await
 }
 
-/// Unreferenced-only deletion of a stored Creator and its holder (§2.2).
+/// note: Unreferenced-only deletion of a stored Creator and its holder (§2.2).
 ///
 /// The holder row and the workspace `creators` row are removed in one
 /// transaction, and only when the subject is unreferenced: governance
@@ -172,7 +172,7 @@ async fn delete_creator_in_tx(
     if in_use > 0 {
         return Err(LocalDbError::actor_in_use());
     }
-    // Holder first (it references the subject), then the subject — one
+    // note: Holder first (it references the subject), then the subject — one
     // transaction, so a refusal anywhere leaves both rows untouched.
     sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND creator_id = ?")
         .bind(&holder_entry_id)
@@ -188,7 +188,7 @@ async fn delete_creator_in_tx(
     Ok(())
 }
 
-/// Creator-scoped tables whose rows are retained creator-owned data.
+/// note: Creator-scoped tables whose rows are retained creator-owned data.
 ///
 /// Any row in one of them refuses Creator deletion (durable §2.2: "any
 /// governance reference, binding, retained owned row or existing Actor
@@ -219,7 +219,7 @@ pub const CREATOR_RETAINED_TABLES: &[&str] = &[
     "works_idempotency",
 ];
 
-/// Creator-scoped tables the pre-count does **not** read through `creator_id`.
+/// note: Creator-scoped tables the pre-count does **not** read through `creator_id`.
 ///
 /// Each entry carries the reason it is already handled. Together with
 /// [`CREATOR_RETAINED_TABLES`] this classifies every Creator-identifying column
@@ -262,7 +262,7 @@ pub const CREATOR_SCOPE_HANDLED_ELSEWHERE: &[(&str, &str)] = &[
     ),
 ];
 
-/// Count every row that still references a Creator subject: governance
+/// note: Count every row that still references a Creator subject: governance
 /// references (rows governed by its holder), owned Worlds/Characters, the
 /// quarantine atoms and the D18 remote-binding admission attempts naming it,
 /// and the retained creator-owned rows declared in [`CREATOR_RETAINED_TABLES`].
@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(row.1, "Local Materializer");
         assert_eq!(row.2, "active");
         assert_eq!(row.4, "{}");
-        // cached_at must be RFC3339 — mirrors the daemon helper's
+        // why: cached_at must be RFC3339 — mirrors the daemon helper's
         // `chrono::Utc::now().to_rfc3339()`.
         chrono::DateTime::parse_from_rfc3339(&row.3).expect("cached_at must be RFC3339");
     }
@@ -352,7 +352,7 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "re-running must not duplicate the row");
 
-        // UPDATE branch: a changed display name is applied in place.
+        // note: UPDATE branch: a changed display name is applied in place.
         ensure_creator_row(&pool, "ctr_localIdem", "Renamed")
             .await
             .unwrap();

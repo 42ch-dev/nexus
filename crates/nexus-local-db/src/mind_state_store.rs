@@ -1,4 +1,5 @@
 //! `MindState` when-axis storage (V1.164 P2 / l5-mind) — the `mind_states`
+// note: `MindState` when-axis storage (V1.164 P2 / l5-mind) — the `mind_states`
 //! table.
 //!
 //! **Derivative storage, NOT a second authority (PD-3 / TL-3):** the
@@ -30,38 +31,38 @@
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
-/// Row type matching the `mind_states` DDL
+/// note: Row type matching the `mind_states` DDL
 /// (`20260814000002_create_mind_states.sql`).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct MindStateRow {
-    /// PK — spoke `MindState` `mind_state_id` (wire-validated non-empty string).
+    /// note: PK — spoke `MindState` `mind_state_id` (wire-validated non-empty string).
     pub mind_state_id: String,
-    /// Spoke `MindState` `schema_version` (wire-validated integer >= 1).
+    /// note: Spoke `MindState` `schema_version` (wire-validated integer >= 1).
     pub schema_version: i64,
-    /// Holder `kb_key_blocks.key_block_id` — FK, `ON DELETE CASCADE`
+    /// note: Holder `kb_key_blocks.key_block_id` — FK, `ON DELETE CASCADE`
     /// (the Rust `entry_id` field maps to this DDL column — TL-3).
     pub holder_entry_id: String,
-    /// Optional canonical name for the holder at this snapshot.
+    /// note: Optional canonical name for the holder at this snapshot.
     pub canonical_name: Option<String>,
-    /// When-axis placement (validated date-time string when present).
+    /// note: When-axis placement (validated date-time string when present).
     pub occurred_at: Option<String>,
-    /// Optional sort key for ordering snapshots within a holder.
+    /// note: Optional sort key for ordering snapshots within a holder.
     pub sort_key: Option<String>,
-    /// Serialized `snapshot` object (when present).
+    /// note: Serialized `snapshot` object (when present).
     pub snapshot_json: Option<String>,
-    /// Serialized `deltas` array (when present).
+    /// note: Serialized `deltas` array (when present).
     pub deltas_json: Option<String>,
-    /// Serialized `source_anchor` object (when present).
+    /// note: Serialized `source_anchor` object (when present).
     pub source_anchor_json: Option<String>,
-    /// Row creation timestamp (store-stamped at insert).
+    /// note: Row creation timestamp (store-stamped at insert).
     pub created_at: String,
-    /// Row last-update timestamp (store-stamped at insert).
+    /// note: Row last-update timestamp (store-stamped at insert).
     pub updated_at: String,
-    /// Serialized `extensions` object (required by the wire validator).
+    /// note: Serialized `extensions` object (required by the wire validator).
     pub extensions_json: Option<String>,
 }
 
-/// Insert a `MindState` when-axis record from raw column values.
+/// note: Insert a `MindState` when-axis record from raw column values.
 ///
 /// Pure storage: no validation is performed here — the caller (the
 /// adapter-boundary gate `validate_and_store_mind_state`) is responsible
@@ -96,7 +97,7 @@ pub const LEGACY_MIND_STATE_WIRE_FIXTURE: &str = r#"{
         "extensions": { "nexus": { "note": "derivative snapshot" } }
     }"#;
 
-/// Insert a `MindState` row inside a caller-owned transaction (v1.184 P4).
+/// note: Insert a `MindState` row inside a caller-owned transaction (v1.184 P4).
 ///
 /// # Errors
 ///
@@ -142,12 +143,12 @@ pub async fn insert_mind_state_in_tx(
     Ok(())
 }
 
-/// Insert a `MindState` row from raw column values.
+/// note: Insert a `MindState` row from raw column values.
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError` on database failure.
-#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
+#[allow(clippy::too_many_arguments)] // note: raw column values — the full row shape
 pub async fn insert_mind_state(
     pool: &SqlitePool,
     mind_state_id: &str,
@@ -188,7 +189,7 @@ pub async fn insert_mind_state(
     Ok(())
 }
 
-/// Fetch a single `MindState` row by `mind_state_id`.
+/// note: Fetch a single `MindState` row by `mind_state_id`.
 ///
 /// Returns `Ok(None)` when no row matches.
 ///
@@ -199,7 +200,7 @@ pub async fn get_mind_state(
     pool: &SqlitePool,
     mind_state_id: &str,
 ) -> Result<Option<MindStateRow>, LocalDbError> {
-    // `mind_state_id as "mind_state_id!"` — SQLite describes a TEXT PRIMARY
+    // note: `mind_state_id as "mind_state_id!"` — SQLite describes a TEXT PRIMARY
     // KEY as nullable (sqlx 0.8.6), the non-null coercion matches the field.
     let row = sqlx::query_as!(
         MindStateRow,
@@ -215,7 +216,7 @@ pub async fn get_mind_state(
     Ok(row)
 }
 
-/// List `MindState` rows for a holder, when-axis order.
+/// note: List `MindState` rows for a holder, when-axis order.
 ///
 /// Ordering is `occurred_at ASC, sort_key ASC` (chronological — the
 /// `idx_mind_states_holder_occurred` index direction; `SQLite` places NULL
@@ -243,7 +244,7 @@ pub async fn list_mind_states_by_holder(
     Ok(rows)
 }
 
-/// Delete a `MindState` row by `mind_state_id`.
+/// note: Delete a `MindState` row by `mind_state_id`.
 ///
 /// Returns `true` when a row was deleted, `false` when no row matched.
 ///

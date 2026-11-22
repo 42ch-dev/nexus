@@ -1,4 +1,5 @@
 //! SQLite-backed `NarrativeGateway` implementation.
+// note: SQLite-backed `NarrativeGateway` implementation.
 //!
 //! Implements the `NarrativeGateway` trait from `nexus-narrative` using
 //! the workspace `state.db` pool. Uses compile-time checked `sqlx` queries
@@ -23,7 +24,7 @@ use nexus_narrative::{
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-/// Test helpers for seeding narrative data into the database.
+/// note: Test helpers for seeding narrative data into the database.
 ///
 /// These functions are intended for tests and development fixtures only.
 /// They create the necessary FK parent rows (e.g. creators) if missing.
@@ -31,7 +32,7 @@ pub mod seed {
     use super::super::seed_shared;
     use sqlx::SqlitePool;
 
-    /// Seed a test world row into `narrative_worlds`.
+    /// note: Seed a test world row into `narrative_worlds`.
     ///
     /// Delegates to the shared `seed_shared::world` helper.
     pub async fn world(
@@ -55,7 +56,7 @@ pub mod seed {
         .await;
     }
 
-    /// Seed a test timeline event row into `narrative_timeline_events`.
+    /// note: Seed a test timeline event row into `narrative_timeline_events`.
     ///
     /// # Panics
     ///
@@ -84,7 +85,7 @@ pub mod seed {
     }
 }
 
-/// SQLite-backed read-only narrative gateway.
+/// note: SQLite-backed read-only narrative gateway.
 ///
 /// Holds an `Arc<SqlitePool>` shared per active workspace. Construct once
 /// at daemon boot and inject as `Arc<dyn NarrativeGateway>`.
@@ -93,7 +94,7 @@ pub struct SqliteNarrativeGateway {
 }
 
 impl SqliteNarrativeGateway {
-    /// Create a new gateway backed by the given pool.
+    /// note: Create a new gateway backed by the given pool.
     ///
     /// The pool is wrapped in `Arc` for cheap cloning if needed.
     #[must_use]
@@ -104,9 +105,9 @@ impl SqliteNarrativeGateway {
     }
 }
 
-// ── V1.145 P3 production read primitive for ScopeQueryPort ───────────────
+// note: V1.145 P3 production read primitive for ScopeQueryPort
 
-/// Read timeline events for a world, optionally narrowed by `branch_id` and/or
+/// note: Read timeline events for a world, optionally narrowed by `branch_id` and/or
 /// a set of `timeline_event_id`s (V1.145 P3 production read primitive).
 ///
 /// Backs `ScopeQueryPort::list_timeline_events` (spec §7.4). This is a **free
@@ -215,7 +216,7 @@ pub async fn list_timeline_events_scoped(
         .collect())
 }
 
-/// Read a page of timeline events for a world (V1.147 P2 T1 route read
+/// note: Read a page of timeline events for a world (V1.147 P2 T1 route read
 /// primitive).
 ///
 /// Serves `GET /v1/daemon/worlds/:world_id/timeline/events`. Unlike
@@ -299,7 +300,7 @@ pub async fn list_timeline_events_page(
         if has_branch {
             sql.push_str(" AND sequence_no > ?");
         } else {
-            // Composite keyset: strictly after (cursor_branch, cursor_seq).
+            // note: Composite keyset: strictly after (cursor_branch, cursor_seq).
             sql.push_str(" AND (branch_id > ? OR (branch_id = ? AND sequence_no > ?))");
         }
     }
@@ -331,7 +332,7 @@ pub async fn list_timeline_events_page(
     q.fetch_all(pool).await.map_err(|e| db_err(&e))
 }
 
-/// Full row surface for the daemon timeline-events page read, including the
+/// note: Full row surface for the daemon timeline-events page read, including the
 /// JSON extension columns ([`list_timeline_events_page`]).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TimelineEventPageRow {
@@ -348,14 +349,14 @@ pub struct TimelineEventPageRow {
     pub source_command_id: Option<String>,
     pub metadata_json: Option<String>,
     pub extensions_nexus_json: Option<String>,
-    // V1.164 P3 T1: full serialized `modules` namespace (l5-mind observation),
+    // note: V1.164 P3 T1: full serialized `modules` namespace (l5-mind observation),
     // surfaced on the daemon wire DTO `TimelineEventInfo.modules`. NULL when
     // unrecorded (same semantics as `TimelineEventRow.modules_json`).
     pub modules_json: Option<String>,
     pub created_at: String,
 }
 
-// Row type matching the narrative_worlds DDL.
+// note: Row type matching the narrative_worlds DDL.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct WorldRow {
     world_id: String,
@@ -389,7 +390,7 @@ impl WorldRow {
     }
 }
 
-// Row type matching the narrative_timeline_events DDL.
+// note: Row type matching the narrative_timeline_events DDL.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct TimelineEventRow {
     timeline_event_id: String,
@@ -403,7 +404,7 @@ struct TimelineEventRow {
     caused_by_event_ids_json: Option<String>,
     affected_key_block_ids_json: Option<String>,
     source_command_id: Option<String>,
-    // V1.164 P1: full serialized `modules` namespace (l5-mind observation).
+    // note: V1.164 P1: full serialized `modules` namespace (l5-mind observation).
     // Carries per-event functional-dialect modules as a JSON object. NULL for
     // rows written before the additive migration or without modules data
     // (unrecorded per spoke handbook).
@@ -432,7 +433,7 @@ impl TimelineEventRow {
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
             source_command_id: self.source_command_id.clone(),
-            // V1.164 P1: surface modules_json as TimelineEvent.modules — NULL
+            // note: V1.164 P1: surface modules_json as TimelineEvent.modules — NULL
             // → None (unrecorded), verbatim JSON otherwise (matches the
             // kb_key_blocks.modules_json read pattern in kb_store.rs).
             modules: self
@@ -444,7 +445,7 @@ impl TimelineEventRow {
     }
 }
 
-/// Convert a sqlx error into a `NarrativeError`.
+/// note: Convert a sqlx error into a `NarrativeError`.
 fn db_err(err: &sqlx::Error) -> NarrativeError {
     NarrativeError::Storage(format!("database error: {err}"))
 }
@@ -486,7 +487,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
         branch_id: Option<&str>,
         limit: Option<usize>,
     ) -> Result<Vec<TimelineEvent>, NarrativeError> {
-        // SQLite `LIMIT -1` means no limit.
+        // note: SQLite `LIMIT -1` means no limit.
         let limit_i64: i64 = limit.and_then(|n| i64::try_from(n).ok()).unwrap_or(-1);
 
         // SAFETY: dynamic SQL — LIMIT + ordering depend on whether limit is set.
@@ -594,10 +595,10 @@ impl NarrativeGateway for SqliteNarrativeGateway {
         &self,
         query: &NarrativeQuery,
     ) -> Result<NarrativeContext, NarrativeError> {
-        // Phase 1: resolve world state
+        // note: Phase 1: resolve world state
         let world_state = self.get_world_state(&query.world_id).await?;
 
-        // Phase 2: resolve timeline position
+        // note: Phase 2: resolve timeline position
         let timeline_position = if let Some(ref branch_id) = query.branch_id {
             let events = self
                 .get_timeline(&query.world_id, Some(branch_id), None)
@@ -619,7 +620,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                 })
             }
         } else if let Some(ref head_id) = world_state.current_timeline_head_id {
-            // Resolve head event to get branch info
+            // note: Resolve head event to get branch info
             let evt = self.get_event(head_id).await.ok();
             evt.map(|e| TimelinePosition {
                 branch_id: e.branch_id.clone(),
@@ -632,7 +633,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
             None
         };
 
-        // Phase 3: resolve event snapshot
+        // note: Phase 3: resolve event snapshot
         let event_snapshot = if let Some(ref event_id) = query.event_id {
             self.get_event(event_id).await.ok().map(|e| EventSnapshot {
                 event_id: e.timeline_event_id,
@@ -695,8 +696,6 @@ impl NarrativeGateway for SqliteNarrativeGateway {
         Ok(rows.iter().map(WorldRow::to_world_state).collect())
     }
 }
-
-// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -785,11 +784,11 @@ mod tests {
 
         let gw = SqliteNarrativeGateway::new(pool);
 
-        // All events for world
+        // note: All events for world
         let all = gw.get_timeline("wld_1", None, None).await.unwrap();
         assert_eq!(all.len(), 3);
 
-        // Filtered by branch
+        // note: Filtered by branch
         let root = gw
             .get_timeline("wld_1", Some("fbk_root"), None)
             .await
@@ -831,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_db_err_maps_to_storage() {
-        // R8: db_err should return NarrativeError::Storage
+        // note: R8: db_err should return NarrativeError::Storage
         let sqlx_err = sqlx::Error::Configuration("test config error".into());
         let narrative_err = db_err(&sqlx_err);
         assert!(

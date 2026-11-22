@@ -1,4 +1,5 @@
 //! Actor holder registry (v1.191 P1 T3).
+// note: Actor holder registry (v1.191 P1 T3).
 //!
 //! One service-managed holder per stored Creator or Character identity, in each
 //! workspace database. The registry owns holder identity; the Actor tables own
@@ -37,31 +38,31 @@ use sqlx::{Executor, Sqlite};
 
 use crate::LocalDbError;
 
-/// Reserved namespace for holder entry ids; never an ordinary narrative KE id.
+/// note: Reserved namespace for holder entry ids; never an ordinary narrative KE id.
 pub const HOLDER_ENTRY_ID_PREFIX: &str = "hld_";
 
-/// Stable public conflict code for missing or corrupt holder registry state on a
+/// note: Stable public conflict code for missing or corrupt holder registry state on a
 /// normal read (§2.2). Hosts map [`LocalDbError::HolderStateInvalid`] to it.
 pub const HOLDER_STATE_INVALID_CODE: &str = "holder_state_invalid";
 
-/// Domain separation for the Creator subject (`nexus-holder-v1\0creator\0`).
+/// note: Domain separation for the Creator subject (`nexus-holder-v1\0creator\0`).
 const HOLDER_ID_DOMAIN_CREATOR: &[u8] = b"nexus-holder-v1\0creator\0";
 
-/// Domain separation for the Character subject (`nexus-holder-v1\0character\0`).
+/// note: Domain separation for the Character subject (`nexus-holder-v1\0character\0`).
 const HOLDER_ID_DOMAIN_CHARACTER: &[u8] = b"nexus-holder-v1\0character\0";
 
-/// Version of the migration that creates the registry and adds the native
+/// note: Version of the migration that creates the registry and adds the native
 /// governance columns (migration `20260918000001_holder_registry.sql`).
 ///
 /// The migration runner uses this to decide when to stage the subject digests.
 pub const HOLDER_MIGRATION_VERSION: i64 = 20_260_918_000_001;
 
-/// Connection-local table the runner fills with the subject digests before the
+/// note: Connection-local table the runner fills with the subject digests before the
 /// holder migration script runs. Created and dropped inside the migration
 /// transaction, so it never survives into a migrated workspace.
 pub(crate) const HOLDER_DIGEST_STAGING_TABLE: &str = "_v1191_holder_digest_staging";
 
-/// The exact UTF-8 bytes hashed for a subject (§2.1).
+/// note: The exact UTF-8 bytes hashed for a subject (§2.1).
 fn holder_id_input(domain: &[u8], subject_id: &str) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(domain.len() + subject_id.len());
     bytes.extend_from_slice(domain);
@@ -69,25 +70,25 @@ fn holder_id_input(domain: &[u8], subject_id: &str) -> Vec<u8> {
     bytes
 }
 
-/// `hld_` + full lowercase BLAKE3 digest of the domain-separated subject bytes.
+/// note: `hld_` + full lowercase BLAKE3 digest of the domain-separated subject bytes.
 fn holder_entry_id(domain: &[u8], subject_id: &str) -> String {
     let digest = blake3::hash(&holder_id_input(domain, subject_id));
     format!("{HOLDER_ENTRY_ID_PREFIX}{}", digest.to_hex())
 }
 
-/// The stable holder id of a stored Creator (§2.1).
+/// note: The stable holder id of a stored Creator (§2.1).
 #[must_use]
 pub fn creator_holder_entry_id(creator_id: &str) -> String {
     holder_entry_id(HOLDER_ID_DOMAIN_CREATOR, creator_id)
 }
 
-/// The stable holder id of a stored Character (§2.1).
+/// note: The stable holder id of a stored Character (§2.1).
 #[must_use]
 pub fn character_holder_entry_id(character_id: &str) -> String {
     holder_entry_id(HOLDER_ID_DOMAIN_CHARACTER, character_id)
 }
 
-/// The subject a holder is registered for. Exactly one subject column is
+/// note: The subject a holder is registered for. Exactly one subject column is
 /// non-null in the registry (exclusive-subject CHECK).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HolderSubject {
@@ -96,7 +97,7 @@ pub enum HolderSubject {
 }
 
 impl HolderSubject {
-    /// The registry selector for this subject: `(kind, subject_id)`.
+    /// note: The registry selector for this subject: `(kind, subject_id)`.
     fn selector(&self) -> (&'static str, &str) {
         match self {
             Self::Creator(id) => ("creator", id),
@@ -104,7 +105,7 @@ impl HolderSubject {
         }
     }
 
-    /// The stable holder id this subject must resolve to.
+    /// note: The stable holder id this subject must resolve to.
     fn expected_holder_entry_id(&self) -> String {
         match self {
             Self::Creator(id) => creator_holder_entry_id(id),
@@ -112,14 +113,14 @@ impl HolderSubject {
         }
     }
 
-    /// Human-readable subject for integrity errors.
+    /// note: Human-readable subject for integrity errors.
     fn describe(&self) -> String {
         let (kind, id) = self.selector();
         format!("{kind}:{id}")
     }
 }
 
-/// A `knowledge_holders` row: holder identity plus its exclusive subject.
+/// note: A `knowledge_holders` row: holder identity plus its exclusive subject.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KnowledgeHolder {
     pub holder_entry_id: String,
@@ -129,7 +130,7 @@ pub struct KnowledgeHolder {
 }
 
 impl KnowledgeHolder {
-    /// The registered subject. `None` only for a row violating the registry's
+    /// note: The registered subject. `None` only for a row violating the registry's
     /// exclusive-subject CHECK (corrupt registry, not reachable through writes).
     #[must_use]
     pub fn subject(&self) -> Option<HolderSubject> {
@@ -160,7 +161,7 @@ impl From<HolderRow> for KnowledgeHolder {
     }
 }
 
-/// Read-only holder resolution (§2.2).
+/// note: Read-only holder resolution (§2.2).
 ///
 /// Accepts a pool or an in-flight transaction (`&mut *tx`), so a caller that
 /// must resolve the registry row in the same transaction as its write can do
@@ -200,7 +201,7 @@ where
     Ok(Some(validate_holder_row(row)?))
 }
 
-/// Validate one selected registry row: it must carry an exclusive subject and
+/// note: Validate one selected registry row: it must carry an exclusive subject and
 /// its id must re-derive from that subject (§2.1). Shared by the id-addressed
 /// and subject-addressed reads so both refuse corrupt registry state the same
 /// way.
@@ -223,7 +224,7 @@ fn validate_holder_row(row: HolderRow) -> Result<KnowledgeHolder, LocalDbError> 
     Ok(holder)
 }
 
-/// Read-only resolution of a stored subject's registered holder (§2.2).
+/// note: Read-only resolution of a stored subject's registered holder (§2.2).
 ///
 /// This is the read side of the registry: it never provisions, never re-mints
 /// and never repairs. `Ok(None)` means the subject has no registry row here
@@ -262,7 +263,7 @@ where
         return Ok(None);
     };
     let holder = validate_holder_row(row)?;
-    // The registry's exclusive-subject CHECK makes a subject mismatch
+    // note: The registry's exclusive-subject CHECK makes a subject mismatch
     // unreachable through writes; asserting it anyway keeps this read from
     // returning a holder the requested subject does not bind to.
     if holder.subject().as_ref() != Some(subject) {
@@ -275,7 +276,7 @@ where
     Ok(Some(holder.holder_entry_id))
 }
 
-/// Resolve a stored subject's holder for a normal read, failing closed when the
+/// note: Resolve a stored subject's holder for a normal read, failing closed when the
 /// registry row is missing or corrupt (§2.2: `holder_state_invalid`, never
 /// provisioning).
 ///
@@ -301,7 +302,7 @@ where
         })
 }
 
-/// Corrupt-registry error (`holder_state_invalid`, durable §2.2) for state that
+/// note: Corrupt-registry error (`holder_state_invalid`, durable §2.2) for state that
 /// cannot be admitted as holder authority. Carries the registry detail for
 /// diagnostics; hosts surface the stable `holder_state_invalid` code.
 fn holder_state_invalid(reason: &str) -> LocalDbError {
@@ -310,7 +311,7 @@ fn holder_state_invalid(reason: &str) -> LocalDbError {
     }
 }
 
-/// Ensure the stable holder of `creator_id` exists in `tx` (§2.1).
+/// note: Ensure the stable holder of `creator_id` exists in `tx` (§2.1).
 ///
 /// Returns the holder id. The subject's own row must exist in the same
 /// transaction (registry FK), so Creator materialization commits both together.
@@ -328,7 +329,7 @@ pub async fn ensure_creator_holder_in_tx(
     ensure_holder_in_tx(tx, &HolderSubject::Creator(creator_id.to_string())).await
 }
 
-/// Ensure the stable holder of `character_id` exists in `tx` (§2.1).
+/// note: Ensure the stable holder of `character_id` exists in `tx` (§2.1).
 ///
 /// # Errors
 ///
@@ -359,7 +360,7 @@ async fn ensure_holder_in_tx(
     }
     let expected = subject.expected_holder_entry_id();
 
-    // 1. The subject must not already resolve to another id.
+    // why: 1. The subject must not already resolve to another id.
     let subject_column = match kind {
         "creator" => "creator_id",
         _ => "character_id",
@@ -381,7 +382,7 @@ async fn ensure_holder_in_tx(
         )));
     }
 
-    // 2. The derived id must not already belong to another subject.
+    // why: 2. The derived id must not already belong to another subject.
     let by_id: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT creator_id, character_id FROM knowledge_holders WHERE holder_entry_id = ?",
     )
@@ -401,7 +402,7 @@ async fn ensure_holder_in_tx(
         )));
     }
 
-    // 3. Register. `BEGIN IMMEDIATE` callers serialize the check-then-insert.
+    // note: 3. Register. `BEGIN IMMEDIATE` callers serialize the check-then-insert.
     let (creator_id, character_id) = match subject {
         HolderSubject::Creator(id) => (Some(id.clone()), None),
         HolderSubject::Character(id) => (None, Some(id.clone())),
@@ -418,7 +419,7 @@ async fn ensure_holder_in_tx(
     Ok(expected)
 }
 
-/// Stage every stored Creator/Character subject with its derived holder id for
+/// note: Stage every stored Creator/Character subject with its derived holder id for
 /// the holder migration (§2.1, §5.3).
 ///
 /// Called by the migration runner inside the migration transaction, before the
@@ -495,15 +496,15 @@ mod tests {
     use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
 
-    /// Pinned digest of `nexus-holder-v1\0creator\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+    /// note: Pinned digest of `nexus-holder-v1\0creator\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
     /// per the §2.1 recipe (BLAKE3, full 256-bit lowercase hex).
     const PINNED_CREATOR_HOLDER: &str =
         "hld_c07e80d881ab00dd1b73c5d4ae74ca20ffb9b39702cf310ce43b759fcf5753a7";
-    /// Pinned digest of `nexus-holder-v1\0character\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.
+    /// note: Pinned digest of `nexus-holder-v1\0character\0ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.
     const PINNED_CHARACTER_HOLDER: &str =
         "hld_bb4d1d30cd1166a7a1c1a85ef1fea6de3f3844ce455f1aee266a201086b0121e";
 
-    /// Insert the workspace `creators` row **without** its holder, so a case can
+    /// note: Insert the workspace `creators` row **without** its holder, so a case can
     /// hand-write registry state: the materialization helper now always commits
     /// both rows together (§2.1).
     async fn seed_creator_row(pool: &SqlitePool, creator_id: &str) {
@@ -518,7 +519,7 @@ mod tests {
         .unwrap();
     }
 
-    /// §2.1 byte recipe, NUL separators included.
+    /// note: §2.1 byte recipe, NUL separators included.
     #[test]
     fn holder_id_input_is_the_frozen_domain_separated_bytes() {
         assert_eq!(
@@ -531,7 +532,7 @@ mod tests {
         );
     }
 
-    /// Regression pin: the id is `hld_` + the full lowercase 256-bit digest,
+    /// note: Regression pin: the id is `hld_` + the full lowercase 256-bit digest,
     /// stable across processes, and domain-separated between subject kinds.
     #[test]
     fn holder_entry_id_is_stable_and_domain_separated() {
@@ -541,12 +542,12 @@ mod tests {
             character_holder_entry_id("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             PINNED_CHARACTER_HOLDER
         );
-        // Domain separation on the *same* subject string.
+        // note: Domain separation on the *same* subject string.
         assert_ne!(
             creator_holder_entry_id("subject_same"),
             character_holder_entry_id("subject_same")
         );
-        // Deterministic: a second call (a second process) is identical.
+        // note: Deterministic: a second call (a second process) is identical.
         assert_eq!(
             creator,
             creator_holder_entry_id("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -572,7 +573,7 @@ mod tests {
 
         assert_eq!(created, creator_holder_entry_id("ctr_holder_a"));
 
-        // Idempotent: the same subject resolves the same id, no second row.
+        // note: Idempotent: the same subject resolves the same id, no second row.
         let mut tx = crate::begin_immediate(&pool).await.unwrap();
         let again = ensure_creator_holder_in_tx(&mut tx, "ctr_holder_a")
             .await
@@ -598,7 +599,7 @@ mod tests {
     async fn subject_bound_to_another_id_is_a_hard_error() {
         let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_b").await;
-        // A foreign/hand-written registry row binds the subject to another id.
+        // note: A foreign/hand-written registry row binds the subject to another id.
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
              VALUES ('hld_foreign', 'ctr_holder_b', datetime('now'))",
@@ -629,7 +630,7 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_c").await;
         seed_creator_row(&pool, "ctr_holder_d").await;
-        // The id that `ctr_holder_c` must derive is already bound to another subject.
+        // why: The id that `ctr_holder_c` must derive is already bound to another subject.
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
              VALUES (?, 'ctr_holder_d', datetime('now'))",
@@ -651,7 +652,7 @@ mod tests {
         );
     }
 
-    /// A registry row whose id does not re-derive from its subject is corrupt
+    /// note: A registry row whose id does not re-derive from its subject is corrupt
     /// state (§2.1): resolution must refuse it (`holder_state_invalid`) rather
     /// than hand back an id that its own subject does not bind to.
     #[tokio::test]
@@ -677,7 +678,7 @@ mod tests {
             "the storage detail must keep the public code prefix, got {err}"
         );
 
-        // A correctly registered holder resolves; an unregistered id is absent.
+        // note: A correctly registered holder resolves; an unregistered id is absent.
         crate::ensure_creator_row(&pool, "ctr_derived", "Derived")
             .await
             .unwrap();

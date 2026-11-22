@@ -1,4 +1,5 @@
 //! World-story association CRUD operations for novel-writing preset.
+// note: World-story association CRUD operations for novel-writing preset.
 //!
 //! Maps story references (directories under `Stories/`) to their parent world
 //! and tracks chapter metadata for sync module consumption.
@@ -8,38 +9,38 @@ use uuid::Uuid;
 
 use crate::error::LocalDbError;
 
-/// World-story association record — mirrors DB row.
+/// note: World-story association record — mirrors DB row.
 #[derive(Debug, Clone)]
 pub struct WorldStory {
-    /// Unique identifier with `wsr_` prefix.
+    /// note: Unique identifier with `wsr_` prefix.
     pub id: String,
-    /// Foreign key to world (`wld_` prefix).
+    /// note: Foreign key to world (`wld_` prefix).
     pub world_id: String,
-    /// Story reference (directory name under `Stories/`).
+    /// note: Story reference (directory name under `Stories/`).
     pub story_ref: String,
-    /// Absolute path to `Stories/<story_ref>/`.
+    /// note: Absolute path to `Stories/<story_ref>/`.
     pub workspace_path: String,
-    /// Number of chapters detected.
+    /// note: Number of chapters detected.
     pub chapter_count: i64,
-    /// First chapter file name (optional).
+    /// note: First chapter file name (optional).
     pub first_chapter_id: Option<String>,
-    /// Most recent chapter file name (optional).
+    /// note: Most recent chapter file name (optional).
     pub latest_chapter_id: Option<String>,
-    /// Story status: `draft` | `review` | `final` | `published`.
+    /// note: Story status: `draft` | `review` | `final` | `published`.
     pub status: String,
-    /// Creation timestamp.
+    /// note: Creation timestamp.
     pub created_at: String,
-    /// Last update timestamp.
+    /// note: Last update timestamp.
     pub updated_at: String,
 }
 
-/// Generate a new world-story ID with `wsr_` prefix.
+/// note: Generate a new world-story ID with `wsr_` prefix.
 #[must_use]
 pub fn generate_id() -> String {
     format!("wsr_{}", Uuid::new_v4().simple())
 }
 
-/// Create a new world-story association.
+/// note: Create a new world-story association.
 ///
 /// Uses `ON CONFLICT` upsert: if `(world_id, story_ref)` already exists,
 /// only `updated_at` is refreshed and the existing row is returned.
@@ -91,7 +92,7 @@ pub async fn create_world_story(
     })
 }
 
-/// List all stories for a given world.
+/// note: List all stories for a given world.
 ///
 /// Returns records ordered by `created_at` ascending (oldest first).
 ///
@@ -137,7 +138,7 @@ pub async fn list_by_world(
         .collect())
 }
 
-/// Get a specific world-story association by ID.
+/// note: Get a specific world-story association by ID.
 ///
 /// Returns `None` if the record doesn't exist.
 ///
@@ -177,7 +178,7 @@ pub async fn get_by_id(pool: &SqlitePool, id: &str) -> Result<Option<WorldStory>
     }))
 }
 
-/// Update chapter metadata after a sync scan.
+/// note: Update chapter metadata after a sync scan.
 ///
 /// # Errors
 ///
@@ -206,7 +207,7 @@ pub async fn update_chapters(
     Ok(())
 }
 
-/// Update story status.
+/// note: Update story status.
 ///
 /// # Errors
 ///
@@ -224,7 +225,7 @@ pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> Result<
     Ok(())
 }
 
-/// Delete a world-story association.
+/// note: Delete a world-story association.
 ///
 /// Returns `true` if a record was deleted, `false` if it didn't exist.
 ///
@@ -260,7 +261,7 @@ mod tests {
         assert!(story.latest_chapter_id.is_none());
         assert_eq!(story.status, "draft");
 
-        // Verify retrieval
+        // note: Verify retrieval
         let fetched = get_by_id(&pool, &story.id).await.unwrap().unwrap();
         assert_eq!(fetched.id, story.id);
         assert_eq!(fetched.world_id, "wld_abc123");
@@ -273,17 +274,17 @@ mod tests {
             .await
             .unwrap();
 
-        // Insert same (world_id, story_ref) again — should upsert
+        // note: Insert same (world_id, story_ref) again — should upsert
         let story2 = create_world_story(&pool, "wld_abc", "novel-a", "/Stories/novel-a/")
             .await
             .unwrap();
 
-        // Same row ID (existing preserved on conflict)
+        // note: Same row ID (existing preserved on conflict)
         assert_eq!(story1.id, story2.id);
-        // Timestamp updated
+        // note: Timestamp updated
         assert!(story2.updated_at >= story1.updated_at);
 
-        // Only one row in table
+        // note: Only one row in table
         let all = list_by_world(&pool, "wld_abc").await.unwrap();
         assert_eq!(all.len(), 1);
     }
@@ -397,7 +398,7 @@ mod tests {
         assert!(delete_world_story(&pool, &story.id).await.unwrap());
         assert!(get_by_id(&pool, &story.id).await.unwrap().is_none());
 
-        // Delete nonexistent returns false
+        // note: Delete nonexistent returns false
         assert!(!delete_world_story(&pool, &story.id).await.unwrap());
     }
 
@@ -405,7 +406,7 @@ mod tests {
     async fn test_generate_id_format() {
         let id = generate_id();
         assert!(id.starts_with("wsr_"));
-        // UUID without hyphens: 32 hex chars
+        // note: UUID without hyphens: 32 hex chars
         let uuid_part = &id[4..];
         assert_eq!(uuid_part.len(), 32);
         assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));

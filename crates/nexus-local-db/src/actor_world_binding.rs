@@ -1,4 +1,5 @@
 //! `ActorWorldBinding` storage and the authoritative last-binding removal transaction.
+// note: `ActorWorldBinding` storage and the authoritative last-binding removal transaction.
 
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
@@ -10,7 +11,7 @@ use crate::character::{
 };
 use crate::error::{ActorContractConflict, LocalDbError};
 
-/// Persisted binding row (storage shape; not a wire DTO).
+/// note: Persisted binding row (storage shape; not a wire DTO).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActorWorldBindingRecord {
     pub binding_id: String,
@@ -23,7 +24,7 @@ pub struct ActorWorldBindingRecord {
     pub updated_at: String,
 }
 
-/// Inputs for adding an active binding to an owned Character.
+/// note: Inputs for adding an active binding to an owned Character.
 #[derive(Debug, Clone, Copy)]
 pub struct CreateBindingParams<'a> {
     pub owner_creator_id: &'a str,
@@ -32,13 +33,13 @@ pub struct CreateBindingParams<'a> {
     pub world_sheet_entry_id: Option<&'a str>,
 }
 
-/// Mint an `awb_` + 32 lowercase hex binding id.
+/// note: Mint an `awb_` + 32 lowercase hex binding id.
 #[must_use]
 pub fn mint_binding_id() -> String {
     format!("awb_{}", Uuid::new_v4().simple())
 }
 
-#[allow(clippy::too_many_arguments)] // row mapper mirrors SQL projection
+#[allow(clippy::too_many_arguments)] // why: row mapper mirrors SQL projection
 const fn record_from_query(
     binding_id: String,
     character_id: String,
@@ -87,14 +88,14 @@ pub(crate) async fn validate_world_sheet_tx(
     Ok(())
 }
 
-/// `invalid_world_sheet` conflict (durable §3).
+/// note: `invalid_world_sheet` conflict (durable §3).
 pub(crate) const fn invalid_world_sheet() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::InvalidWorldSheet,
     }
 }
 
-/// The forward (link-time) `WorldSheet` eligibility rule as one `EXISTS`
+/// note: The forward (link-time) `WorldSheet` eligibility rule as one `EXISTS`
 /// (durable §3): a live, World-owned `character` entry of the same World with
 /// no disclosure.
 ///
@@ -111,7 +112,7 @@ const WORLD_SHEET_ELIGIBILITY_EXISTS_SQL: &str = "SELECT EXISTS(SELECT 1 FROM kb
               AND status NOT IN ('deleted', 'merged', 'deprecated')
               AND disclosure IS NULL)";
 
-/// Reverse-reference guard (durable §3): after a World-owned entry was
+/// note: Reverse-reference guard (durable §3): after a World-owned entry was
 /// written, every binding that links it as its `WorldSheet` must still be
 /// satisfied by the stored row.
 ///
@@ -219,7 +220,7 @@ async fn load_binding_tx(
     }))
 }
 
-/// Require an active binding that belongs to `character_id` (tx variant).
+/// note: Require an active binding that belongs to `character_id` (tx variant).
 ///
 /// Cross-Character or non-active bindings are indistinguishable from missing.
 ///
@@ -242,7 +243,7 @@ pub(crate) async fn require_active_character_binding_tx(
     }
 }
 
-/// Validate optional binding provenance inside an open write transaction.
+/// note: Validate optional binding provenance inside an open write transaction.
 ///
 /// A non-null binding must be active, belong to the same Character, and
 /// target a World owned by `owner_creator_id`. Shared-scope (`None`) writes
@@ -305,7 +306,7 @@ async fn load_binding_pool(
     }))
 }
 
-/// Retained-data read provenance: owned Character plus the stored binding
+/// note: Retained-data read provenance: owned Character plus the stored binding
 /// tuple (`binding_id` belongs to `character_id`) plus a World that exists
 /// and is owned by `owner_creator_id`.
 ///
@@ -338,7 +339,7 @@ pub(crate) async fn require_owned_binding_provenance_pool(
     Ok(())
 }
 
-/// Add a second (or later) active binding for an owned active Character.
+/// note: Add a second (or later) active binding for an owned active Character.
 ///
 /// # Errors
 ///
@@ -368,7 +369,7 @@ pub async fn add_actor_world_binding(
     }
 }
 
-/// Whether an owned Character holds an active binding to an owned World
+/// note: Whether an owned Character holds an active binding to an owned World
 /// (durable §3 `character-private` audience permission on a World row).
 ///
 /// The probe is transaction-taking on purpose: authoring admission must
@@ -399,7 +400,7 @@ pub(crate) async fn has_active_binding_to_world_tx(
     Ok(exists != 0)
 }
 
-/// The active-owned-binding `EXISTS` behind [`has_active_binding_to_world_tx`]:
+/// note: The active-owned-binding `EXISTS` behind [`has_active_binding_to_world_tx`]:
 /// the binding is
 /// active, targets `world_id`, and that World belongs to `owner_creator_id`.
 const ACTIVE_BINDING_TO_WORLD_EXISTS_SQL: &str = "SELECT EXISTS(
@@ -411,7 +412,7 @@ const ACTIVE_BINDING_TO_WORLD_EXISTS_SQL: &str = "SELECT EXISTS(
           AND w.owner_creator_id = ?
      )";
 
-/// Ownership-scoped binding list for a Character.
+/// note: Ownership-scoped binding list for a Character.
 ///
 /// # Errors
 ///
@@ -474,7 +475,7 @@ pub async fn list_bindings_for_character(
         .collect())
 }
 
-/// Count every binding for a World inside an open write transaction.
+/// note: Count every binding for a World inside an open write transaction.
 ///
 /// Includes inactive rows because `ON DELETE RESTRICT` applies to all statuses.
 ///
@@ -512,7 +513,7 @@ fn binding_sheet_patch_is_no_op(current: Option<&String>, patch: FieldPatch<&str
     resolved_world_sheet_patch(current, patch) == current.cloned()
 }
 
-/// Owner-scoped binding detail with path tuple validation.
+/// note: Owner-scoped binding detail with path tuple validation.
 ///
 /// Retained reads tolerate archived Character/World status; missing, foreign,
 /// or tuple-mismatched bindings are indistinguishable (`None`).
@@ -546,7 +547,7 @@ pub async fn get_actor_world_binding(
     }
 }
 
-/// Patch the optional `WorldSheet` link on an owned active binding.
+/// note: Patch the optional `WorldSheet` link on an owned active binding.
 ///
 /// Only `world_sheet_entry_id` is mutable. Null clears; omission (`Keep`) retains;
 /// material changes bump binding revision once inside `BEGIN IMMEDIATE`.
@@ -637,7 +638,7 @@ async fn update_actor_world_binding_tx(
         })
 }
 
-/// Authoritative binding removal. Last active binding is a zero-mutation 409.
+/// note: Authoritative binding removal. Last active binding is a zero-mutation 409.
 ///
 /// Decision order: resolve active binding + ownership → count active bindings
 /// → reject `count <= 1` → reject binding-owned `KnowledgeEntry` rows → reject
@@ -681,7 +682,7 @@ async fn commit_binding_removal(
     }
 }
 
-/// Every dependency gate one active binding must pass before removal.
+/// note: Every dependency gate one active binding must pass before removal.
 async fn require_binding_removable_tx(
     tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,
@@ -716,7 +717,7 @@ async fn require_binding_removable_tx(
         });
     }
 
-    // v1.184 P3: binding-local Character memory is the final dependency gate.
+    // note: v1.184 P3: binding-local Character memory is the final dependency gate.
     // The gate counts what is *served* for this binding, not the historical
     // legacy rows: a legacy row the provider owns under the bridge's
     // deterministic id is the provider's disposition — a dismissed pending
@@ -761,7 +762,7 @@ async fn require_binding_removable_tx(
         });
     }
 
-    // D18 (§5.1): a remote binding-local dependency keeps the binding until its
+    // note: D18 (§5.1): a remote binding-local dependency keeps the binding until its
     // own evidence settles. Unknown admissions block even after later retries
     // succeed (the supervisor-selected conservative policy; owner confirmation
     // pending); known live references block until a positive
@@ -776,7 +777,7 @@ async fn require_binding_removable_tx(
     Ok(())
 }
 
-/// Release the dependencies the removal gate proved settleable: the
+/// note: Release the dependencies the removal gate proved settleable: the
 /// binding's terminal remote facts, then the legacy provenance the gate
 /// proved the provider already owns.
 async fn release_binding_dependencies_tx(
@@ -832,7 +833,7 @@ async fn release_binding_dependencies_tx(
     Ok(())
 }
 
-/// Apply every removal gate, release what it proved settleable, then drop
+/// note: Apply every removal gate, release what it proved settleable, then drop
 /// the binding row itself.
 async fn remove_binding_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -859,13 +860,13 @@ async fn remove_binding_tx(
     Ok(())
 }
 
-// ── Remote binding-memory dependency metadata (D18, binding spec §5.1) ─────
+// note: Remote binding-memory dependency metadata (D18, binding spec §5.1)
 //
 // Content-free Nexus bookkeeping for remote binding-local memory: the tables
 // carry provider-object identity plus the namespace it was recorded under,
 // never memory text, request bodies or credentials.
 
-/// The namespace one remote binding-memory dependency belongs to.
+/// note: The namespace one remote binding-memory dependency belongs to.
 ///
 /// A fact is only visible to — and only clearable by — the exact provider
 /// authority, space, loaded public client identity and Nexus bearer/binding
@@ -876,7 +877,7 @@ pub struct RemoteBindingNamespace<'a> {
     character_id: &'a str,
     binding_id: &'a str,
     authority_host_id: &'a str,
-    /// The provider's `NonZeroU64` authority generation as its canonical
+    /// note: The provider's `NonZeroU64` authority generation as its canonical
     /// decimal text, computed once per namespace: every value in the declared
     /// range is its own identity, so two generations can never alias one row,
     /// and a multi-object receipt reuses the text instead of reformatting the
@@ -887,7 +888,7 @@ pub struct RemoteBindingNamespace<'a> {
 }
 
 impl<'a> RemoteBindingNamespace<'a> {
-    /// Build the one namespace an operation's dependency writes share.
+    /// note: Build the one namespace an operation's dependency writes share.
     ///
     /// The canonical generation text is derived here, from the exact numeric
     /// identity, so no caller can supply an independently formatted or
@@ -913,14 +914,14 @@ impl<'a> RemoteBindingNamespace<'a> {
         }
     }
 
-    /// The canonical decimal generation text every dependency row binds.
+    /// note: The canonical decimal generation text every dependency row binds.
     #[must_use]
     pub fn generation_text(&self) -> &str {
         &self.authority_generation_text
     }
 }
 
-/// One known remote provider object a binding depends on.
+/// note: One known remote provider object a binding depends on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteBindingObjectKind {
     Candidate,
@@ -937,7 +938,7 @@ impl RemoteBindingObjectKind {
     }
 }
 
-/// One monotone known-object state (D18): `live → consumed → released`.
+/// note: One monotone known-object state (D18): `live → consumed → released`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteBindingObjectState {
     Live,
@@ -956,7 +957,7 @@ impl RemoteBindingObjectState {
     }
 }
 
-/// The binding's open remote dependencies: unknown wire attempts and known
+/// note: The binding's open remote dependencies: unknown wire attempts and known
 /// live object references. Terminal (consumed/released) facts are evidence,
 /// not dependencies, and never appear here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -965,7 +966,7 @@ pub struct RemoteBindingDependencyCounts {
     pub live_objects: i64,
 }
 
-/// Record one independently identified remote capture admission (D18).
+/// note: Record one independently identified remote capture admission (D18).
 ///
 /// The caller commits it in the same writer transaction as the provenance
 /// check and before the RPC; only the definite result of this exact wire
@@ -1000,7 +1001,7 @@ pub async fn insert_remote_binding_admission_tx(
     Ok(())
 }
 
-/// Retire exactly the named admission of this namespace.
+/// note: Retire exactly the named admission of this namespace.
 ///
 /// Returns `false` when no row of that identity exists (already retired, or a
 /// foreign namespace), in which case nothing changed. No later attempt,
@@ -1034,7 +1035,7 @@ pub async fn retire_remote_binding_admission_tx(
     Ok(retired > 0)
 }
 
-/// Record one known provider-object fact for this binding (D18).
+/// note: Record one known provider-object fact for this binding (D18).
 ///
 /// The write is monotone (`live → consumed → released`) and conditional on the
 /// binding still existing, so a late acknowledgement can neither resurrect a
@@ -1082,7 +1083,7 @@ pub async fn record_remote_binding_object_tx(
     Ok(())
 }
 
-/// The binding's open remote dependencies for the removal gate.
+/// note: The binding's open remote dependencies for the removal gate.
 ///
 /// # Errors
 ///
@@ -1110,7 +1111,7 @@ pub async fn remote_binding_dependency_counts_tx(
     })
 }
 
-/// Whether this namespace recorded any D18 fact for one provider object.
+/// note: Whether this namespace recorded any D18 fact for one provider object.
 ///
 /// A positive answer is authoritative Nexus origin evidence for that exact
 /// object: only this module writes those facts, and the lookup binds the same

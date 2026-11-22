@@ -1,4 +1,5 @@
 //! Spoke `Rule` storage (V1.148 P1) — read primitives for the `spoke_rules`
+// note: Spoke `Rule` storage (V1.148 P1) — read primitives for the `spoke_rules`
 //! table.
 //!
 //! Pure storage: this module knows nothing about spoke wire types (spec §8
@@ -30,37 +31,37 @@
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
-/// Row type matching the `spoke_rules` DDL (`20260804_000001_spoke_rules.sql`).
+/// note: Row type matching the `spoke_rules` DDL (`20260804_000001_spoke_rules.sql`).
 ///
 /// `schema_version` is stored as a plain `i64` (`0` is invalid — spoke wire
 /// requires `NonZeroU64`); `created_at` / `updated_at` are Unix epoch seconds
 /// (`NULL` when unknown).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SpokeRuleRow {
-    /// Globally unique rule id (spoke `list_rules` looks up by `rule_id` only).
+    /// note: Globally unique rule id (spoke `list_rules` looks up by `rule_id` only).
     pub rule_id: String,
-    /// Owning world — ownership/CRUD later; not part of the spoke `Rule` wire.
+    /// note: Owning world — ownership/CRUD later; not part of the spoke `Rule` wire.
     pub world_id: String,
     pub schema_version: i64,
     pub canonical_name: String,
     pub kind: String,
     pub statement: Option<String>,
     pub description: Option<String>,
-    /// JSON array of entry-type strings (`spoke Rule.target_entry_types`).
+    /// note: JSON array of entry-type strings (`spoke Rule.target_entry_types`).
     pub target_entry_types_json: String,
     pub severity_hint: Option<String>,
     pub status: Option<String>,
-    /// JSON object of the optional spoke `SourceAnchor` (`NULL` when absent).
+    /// note: JSON object of the optional spoke `SourceAnchor` (`NULL` when absent).
     pub source_anchor_json: Option<String>,
-    /// JSON object: the product namespace bag (`spoke Rule.extensions`).
+    /// note: JSON object: the product namespace bag (`spoke Rule.extensions`).
     pub extensions_json: String,
-    /// Unix epoch seconds; `NULL` when unknown.
+    /// note: Unix epoch seconds; `NULL` when unknown.
     pub created_at: Option<i64>,
-    /// Unix epoch seconds; `NULL` when unknown.
+    /// note: Unix epoch seconds; `NULL` when unknown.
     pub updated_at: Option<i64>,
 }
 
-/// Fetch the rows whose `rule_id` is in `rule_ids`.
+/// note: Fetch the rows whose `rule_id` is in `rule_ids`.
 ///
 /// Unknown ids are silently omitted (the caller resolves a subset — spoke
 /// `list_rules` semantics); duplicate ids in the input are deduplicated; one
@@ -95,7 +96,7 @@ pub async fn get_spoke_rules_by_ids(
     Ok(rows)
 }
 
-/// Production insert (full row).
+/// note: Production insert (full row).
 ///
 /// A PK conflict is detected and classified here as
 /// [`LocalDbError::ConstraintViolation`] `{ table: "spoke_rules",
@@ -120,7 +121,7 @@ pub async fn insert_rule(pool: &SqlitePool, row: &SpokeRuleRow) -> Result<(), Lo
     }
 }
 
-/// World-guarded status transition: `UPDATE spoke_rules SET status = ?,
+/// note: World-guarded status transition: `UPDATE spoke_rules SET status = ?,
 /// updated_at = ? WHERE rule_id = ? AND world_id = ?`.
 ///
 /// `Ok(true)` = updated; `Ok(false)` = no row matched (unknown id OR foreign
@@ -153,7 +154,7 @@ pub async fn set_rule_status(
     Ok(result.rows_affected() == 1)
 }
 
-/// V1.169 AR-4: world-guarded multi-field update.
+/// note: V1.169 AR-4: world-guarded multi-field update.
 ///
 /// `None` fields keep their stored value (SQL `COALESCE`); `updated_at`
 /// refreshes to the current Unix epoch seconds on every matched row;
@@ -165,11 +166,11 @@ pub struct RuleUpdate {
     pub severity_hint: Option<String>,
     pub status: Option<String>,
     pub kind: Option<String>,
-    pub target_entry_types_json: Option<String>, // pre-serialized array (opaque)
-    pub extensions_json: Option<String>,         // pre-serialized bag (opaque)
+    pub target_entry_types_json: Option<String>, // note: pre-serialized array (opaque)
+    pub extensions_json: Option<String>,         // note: pre-serialized bag (opaque)
 }
 
-/// World-guarded multi-field update: single static `UPDATE ... COALESCE`
+/// note: World-guarded multi-field update: single static `UPDATE ... COALESCE`
 /// statement (offline-prepare-friendly; no dynamic SQL fragments).
 ///
 /// `Ok(true)` = updated; `Ok(false)` = no row matched (unknown id OR foreign
@@ -196,7 +197,7 @@ pub async fn update_rule(
     update_rule_sql(pool, world_id, rule_id, update).await
 }
 
-/// Read one rule by id inside the caller-owned transaction.
+/// note: Read one rule by id inside the caller-owned transaction.
 ///
 /// The World filter stays with the caller: storage returns the row for the id
 /// alone (unknown id and foreign World stay indistinguishable, the pre-existing
@@ -223,7 +224,7 @@ pub async fn get_rule_in_tx(
     Ok(row)
 }
 
-/// Updates a rule in its world within the caller-owned transaction.
+/// note: Updates a rule in its world within the caller-owned transaction.
 ///
 /// This uses the same statement as [`update_rule`], so the current-row read,
 /// lifecycle decision and write share one `BEGIN IMMEDIATE` transaction.
@@ -242,7 +243,7 @@ pub async fn update_rule_in_tx(
     update_rule_sql(&mut **tx, world_id, rule_id, update).await
 }
 
-/// The single `spoke_rules` multi-field `UPDATE ... COALESCE` statement shared
+/// note: The single `spoke_rules` multi-field `UPDATE ... COALESCE` statement shared
 /// by [`update_rule`] (pool) and [`update_rule_in_tx`] (caller transaction).
 async fn update_rule_sql<'e, E>(
     executor: E,
@@ -283,7 +284,7 @@ where
     Ok(result.rows_affected() == 1)
 }
 
-/// All statuses of one world, ordered `canonical_name ASC, rule_id ASC`
+/// note: All statuses of one world, ordered `canonical_name ASC, rule_id ASC`
 /// (PD-1 list order + deterministic tie-break).
 ///
 /// Status filtering ("active") happens at the adapter boundary (AR-1) —
@@ -313,7 +314,7 @@ pub async fn list_rules_by_world(
     Ok(rows)
 }
 
-/// Bounded world-scoped list for the read route (AR-3: SQL-side `LIMIT ?`
+/// note: Bounded world-scoped list for the read route (AR-3: SQL-side `LIMIT ?`
 /// probe — Bugbot 4bad2fca idiom, mirroring
 /// [`crate::world_findings::list_world_findings_by_world`]).
 ///
@@ -360,7 +361,7 @@ pub async fn list_rules_by_world_limited(
     Ok(rows)
 }
 
-/// Shared INSERT statement — the only `spoke_rules` write path. Kept private;
+/// note: Shared INSERT statement — the only `spoke_rules` write path. Kept private;
 /// the classification wrapper ([`insert_rule`]) owns the UNIQUE-violation
 /// mapping so callers never see raw sqlx errors.
 async fn insert_rule_sql(pool: &SqlitePool, row: &SpokeRuleRow) -> Result<(), LocalDbError> {
@@ -390,7 +391,7 @@ async fn insert_rule_sql(pool: &SqlitePool, row: &SpokeRuleRow) -> Result<(), Lo
     Ok(())
 }
 
-/// Insert a `spoke_rules` row (test/dev seed helper — V1.148 P1; kept for
+/// note: Insert a `spoke_rules` row (test/dev seed helper — V1.148 P1; kept for
 /// existing seeds, superseded by [`insert_rule`] for production callers).
 ///
 /// Routes through the production insert: a duplicate `rule_id` surfaces as
@@ -444,7 +445,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Known ids returned in any order; the missing id is omitted.
+        // note: Known ids returned in any order; the missing id is omitted.
         let refs = [
             "rule_a".to_string(),
             "rule_missing".to_string(),
@@ -456,7 +457,7 @@ mod tests {
         ids.sort_unstable();
         assert_eq!(ids, vec!["rule_a", "rule_b"]);
 
-        // Column values round-trip.
+        // note: Column values round-trip.
         let row = rows.iter().find(|r| r.rule_id == "rule_a").unwrap();
         assert_eq!(row.world_id, "wld_1");
         assert_eq!(row.schema_version, 1);
