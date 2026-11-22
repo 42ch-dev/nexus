@@ -499,7 +499,6 @@ fn workspace_root_or_error(executor: &dyn WorkspaceExecutor) -> Result<std::path
     })
 }
 
-
 /// note: `creator works rules reset [<work_id>]` (overlay §4).
 ///
 /// Restores `Works/<work_ref>/AGENTS.md` to the default scaffold. Does NOT

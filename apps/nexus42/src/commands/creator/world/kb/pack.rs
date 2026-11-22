@@ -1171,7 +1171,7 @@ mod tests {
         // why: Should create 2 entries (Alice, Bob — not Carol because
         // canonical_name collision), and skip Carol's entry_id.
         assert_eq!(count_entries(&fx2.pool, WORLD).await, 3); // note: clone Carol + Alice + Bob
-        // note: Carol's entry_id from the pack should NOT exist.
+                                                              // note: Carol's entry_id from the pack should NOT exist.
         assert!(
             store.get_knowledge_entry(carol_id).await.is_err(),
             "pack's Carol entry_id must not be imported"
