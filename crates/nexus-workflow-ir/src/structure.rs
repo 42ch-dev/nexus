@@ -6,6 +6,8 @@
 //! resolved fragment is not a leaf — it is held to its own node-graph checks, and its own nests
 //! join the same walk, which is what makes pattern-to-pattern cycles and combined pattern/workflow
 //! depth reachable.
+//!
+//! see docs/specs/orchestration/strategy-composition.md.
 
 use crate::{
     WorkflowDocument, WorkflowNestBinding, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
@@ -13,48 +15,48 @@ use crate::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Q2: at most three unexpanded nest levels. v0 represents no expansion, so every nest binding
-/// counts as one level.
+/// note: Q2 — at most three unexpanded nest levels. v0 represents no expansion, so every nest
+/// binding counts as one level.
 pub const MAX_NEST_DEPTH: usize = 3;
 
-/// A pattern body a document's pattern pins may reach.
+/// note: a pattern body a document's pattern pins may reach.
 ///
 /// The caller resolves pins it can read; a pin it cannot resolve stays a leaf, exactly as an
 /// absent child workflow does.
 #[derive(Debug, Clone, Copy)]
 pub struct PatternBody<'a> {
-    /// Registry id of the package this body belongs to.
+    /// note: registry id of the package this body belongs to.
     pub registry_id: &'a str,
-    /// Exact version label of the package.
+    /// note: exact version label of the package.
     pub version: &'a str,
-    /// What the resolution found for the pin.
+    /// note: what the resolution found for the pin.
     pub body: PatternBodyKind<'a>,
 }
 
-/// What a resolved pattern pin contributed to the walk.
+/// note: what a resolved pattern pin contributed to the walk.
 #[derive(Debug, Clone, Copy)]
 pub enum PatternBodyKind<'a> {
-    /// The package is available: its fragment's nests are walked like a child document's.
+    /// note: the package is available — its fragment's nests are walked like a child document's.
     Fragment(&'a WorkflowDocument),
-    /// Only the package's declared effect class is known (an unavailable package): a leaf in the
-    /// nest walk that still contributes its class to the rollup.
+    /// note: only the package's declared effect class is known (an unavailable package): a leaf in
+    /// the nest walk that still contributes its class to the rollup.
     Declared(WorkflowNodeEffectClass),
 }
 
 impl PatternBody<'_> {
-    /// The label this body is addressed by in a nest cycle path or depth report.
+    /// note: the label this body is addressed by in a nest cycle path or depth report.
     #[must_use]
     pub fn label(&self) -> String {
         pattern_label(self.registry_id, self.version)
     }
 }
 
-/// One document or pattern body is addressed by this label in the nest walk.
+/// note: one document or pattern body is addressed by this label in the nest walk.
 fn pattern_label(registry_id: &str, version: &str) -> String {
     format!("{registry_id}@{version}")
 }
 
-/// The exact `{id, version}` a pattern nest child pins.
+/// note: the exact `{id, version}` a pattern nest child pins.
 ///
 /// Both halves must be present and non-empty: an empty half names no package, so such a child is a
 /// malformed pin rather than a pin whose package is missing, and [`Violation::IncompleteNestChild`]
@@ -73,7 +75,7 @@ pub fn pattern_pin(child: &WorkflowNestChild) -> Option<(&str, &str)> {
     Some((id, version))
 }
 
-/// A structural violation. Every violation found is returned, never only the first.
+/// note: a structural violation. Every violation found is returned, never only the first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
     DuplicateDocumentId(String),
@@ -86,8 +88,8 @@ pub enum Violation {
         edge: String,
         node: String,
     },
-    /// A node's `depends_on` entry names no node in the document. Dependency targets carry no
-    /// edge id, so the owning node is reported instead.
+    /// note: a node's `depends_on` entry names no node in the document. Dependency targets carry
+    /// no edge id, so the owning node is reported instead.
     DanglingDependency {
         document: String,
         node: String,
@@ -100,13 +102,13 @@ pub enum Violation {
         document: String,
         nest: String,
     },
-    /// A nest's `parent_node` names no node in the document.
+    /// note: a nest's `parent_node` names no node in the document.
     UnknownNestParent {
         document: String,
         nest: String,
         parent: String,
     },
-    /// A nest's `parent_node` is not a `pattern_slot` or `nest_group`, so the nest has no
+    /// note: a nest's `parent_node` is not a `pattern_slot` or `nest_group`, so the nest has no
     /// addressable region.
     NestParentNotComposable {
         document: String,
@@ -114,7 +116,7 @@ pub enum Violation {
         parent: String,
         kind: String,
     },
-    /// A nest child omits the payload its `kind` requires.
+    /// note: a nest child omits the payload its `kind` requires.
     IncompleteNestChild {
         document: String,
         nest: String,
@@ -198,7 +200,7 @@ impl std::fmt::Display for Violation {
 
 impl std::error::Error for Violation {}
 
-/// Validate a document set against the Q2 structural rules.
+/// note: validate a document set against the Q2 structural rules.
 ///
 /// `patterns` carries the pattern bodies the caller resolved; a pin with no entry there is a leaf,
 /// so this never requires a registry. A resolved fragment body gets [`validate_fragment`]'s four
@@ -238,7 +240,7 @@ pub fn validate(
     if let Some(path) = find_cycle(graph.edges(), &roots) {
         violations.push(Violation::NestCycle { path });
     } else {
-        // A reference cycle has no finite depth, so depth is skipped for the whole set when
+        // why: a reference cycle has no finite depth, so depth is skipped for the whole set when
         // any cycle exists.
         let mut memo = HashMap::new();
         for root in &roots {
@@ -264,7 +266,7 @@ fn validate_document(document: &WorkflowDocument, violations: &mut Vec<Violation
     validate_nests(document, &nodes, violations);
 }
 
-/// A resolved pattern fragment, held to the four checks its own graph answers and no others:
+/// note: a resolved pattern fragment, held to the four checks its own graph answers and no others:
 /// duplicate node ids, edge endpoints and `depends_on` entries that name no node, and node cycles.
 ///
 /// [`validate_nests`]' nest-context rules (stable unique nest ids, a composable parent, a child that
@@ -337,8 +339,8 @@ fn validate_node_graph<'a>(
     nodes
 }
 
-/// The nest-context rules a document's own bindings answer: stable unique ids, an addressable
-/// composable parent, and a child that pins what its kind requires.
+/// note: the nest-context rules a document's own bindings answer — stable unique ids, an
+/// addressable composable parent, and a child that pins what its kind requires.
 fn validate_nests(
     document: &WorkflowDocument,
     nodes: &HashMap<&str, &WorkflowNode>,
@@ -393,16 +395,16 @@ fn validate_nests(
     }
 }
 
-/// The nest-child graph over a document set and its resolved pattern bodies.
+/// note: the nest-child graph over a document set and its resolved pattern bodies.
 ///
 /// One builder serves cycles, depth and the effect rollup, so no caller re-derives the edges and
 /// no caller can forget that a resolved fragment is not a leaf.
 pub(crate) struct NestGraph<'a> {
-    /// Child labels per body label: a document id or a `registry_id@version` pin label.
+    /// note: child labels per body label — a document id or a `registry_id@version` pin label.
     edges: HashMap<String, Vec<String>>,
-    /// Walkable bodies by label: documents and resolved fragments.
+    /// note: walkable bodies by label — documents and resolved fragments.
     documents: HashMap<String, &'a WorkflowDocument>,
-    /// Pins whose package was unavailable, so only the declared class is known.
+    /// note: pins whose package was unavailable, so only the declared class is known.
     declared: HashMap<String, WorkflowNodeEffectClass>,
 }
 
@@ -419,7 +421,7 @@ impl<'a> NestGraph<'a> {
                 .entry(document.id.to_string())
                 .or_insert(document);
         }
-        // A pin listed twice keeps its first body; a declared body never shadows a fragment.
+        // why: a pin listed twice keeps its first body; a declared body never shadows a fragment.
         for pattern in patterns {
             match pattern.body {
                 PatternBodyKind::Fragment(fragment) => {
@@ -444,21 +446,21 @@ impl<'a> NestGraph<'a> {
         &self.edges
     }
 
-    /// The nodes of one walkable body, for the effect rollup.
+    /// note: the nodes of one walkable body, for the effect rollup.
     pub(crate) fn nodes(&self, label: &str) -> Option<&'a [WorkflowNode]> {
         self.documents
             .get(label)
             .map(|document| document.nodes.as_slice())
     }
 
-    /// The declared class of a pattern body whose package could not be loaded.
+    /// note: the declared class of a pattern body whose package could not be loaded.
     pub(crate) fn declared_class(&self, label: &str) -> Option<WorkflowNodeEffectClass> {
         self.declared.get(label).copied()
     }
 }
 
-/// The label of a nest's child. An unresolved child keeps its label as a leaf so the depth walk
-/// still counts the binding as one unexpanded level; a malformed pin has no label at all.
+/// note: the label of a nest's child — an unresolved child keeps its label as a leaf so the depth
+/// walk still counts the binding as one unexpanded level; a malformed pin has no label at all.
 fn nest_child_label(nest: &WorkflowNestBinding) -> Option<String> {
     match nest.child.kind {
         WorkflowNestChildKind::Pattern => {
@@ -469,7 +471,7 @@ fn nest_child_label(nest: &WorkflowNestBinding) -> Option<String> {
     }
 }
 
-/// Depth of one body: the longest nest chain below it, with a leaf at zero.
+/// note: depth of one body — the longest nest chain below it, with a leaf at zero.
 fn nest_depth(
     label: &str,
     edges: &HashMap<String, Vec<String>>,
@@ -478,7 +480,7 @@ fn nest_depth(
     if let Some(&depth) = memo.get(label) {
         return depth;
     }
-    // A placeholder keeps the walk total if a caller ever reaches this with a cycle present.
+    // why: a placeholder keeps the walk total if a caller ever reaches this with a cycle present.
     memo.insert(label.to_owned(), 0);
     let mut depth = 0;
     for child in edges.get(label).map_or(&[][..], Vec::as_slice) {
@@ -488,7 +490,7 @@ fn nest_depth(
     depth
 }
 
-/// Depth-first search returning the label path of the first cycle reached from `roots`.
+/// note: depth-first search returning the label path of the first cycle reached from `roots`.
 ///
 /// Roots are walked in caller order, so the reported path is deterministic. Keys are node ids for
 /// the node graph and document or pattern labels for the nest graph.
@@ -784,8 +786,8 @@ mod tests {
 
     #[test]
     fn rejects_a_pattern_pin_with_an_empty_half() {
-        // An empty half names no package: the child omits its pin instead of pinning one, so a
-        // document carrying it never reaches the walks that only follow resolved pins.
+        // why: an empty half names no package — the child omits its pin instead of pinning one, so
+        // a document carrying it never reaches the walks that only follow resolved pins.
         let doc = slot_document(
             "root",
             &json!([
@@ -904,7 +906,7 @@ mod tests {
 
     #[test]
     fn rejects_a_pattern_reference_cycle() {
-        // Two published patterns that nest each other: only a resolved fragment makes this
+        // why: two published patterns that nest each other — only a resolved fragment makes this
         // reachable, because the document itself nests a leaf pattern pin.
         let a = slot_document("a", &json!([nest("n1", "slot", &pattern("b", "1.0.0"))]));
         let b = slot_document("b", &json!([nest("n2", "slot", &pattern("a", "1.0.0"))]));
@@ -941,7 +943,7 @@ mod tests {
     #[test]
     fn accepts_three_levels_combined_across_patterns_and_workflows() {
         let first = slot_document("p", &json!([nest("n2", "slot", &pattern("q", "1.0.0"))]));
-        let second = slot_document("q", &json!([])); // a leaf pattern body
+        let second = slot_document("q", &json!([])); // note: a leaf pattern body
         let wf = group_document("wf", &json!([nest("n1", "group", &pattern("p", "1.0.0"))]));
         let root = group_document("root", &json!([nest("n0", "group", &workflow("wf"))]));
 
@@ -994,7 +996,7 @@ mod tests {
         );
     }
 
-    /// A resolved pattern body, pinned at `1.0.0`.
+    /// note: a resolved pattern body, pinned at `1.0.0`.
     fn fragment<'a>(registry_id: &'a str, document: &'a WorkflowDocument) -> PatternBody<'a> {
         PatternBody {
             registry_id,

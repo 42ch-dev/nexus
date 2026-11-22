@@ -17,6 +17,8 @@
 //! Only a regular `pattern.toml` and `workflow.ir.json` no larger than [`MAX_MEMBER_BYTES`] are
 //! read, so a FIFO, a device node or an oversized member is reported as one unavailable package
 //! instead of stalling or exhausting the scan.
+//!
+//! see docs/specs/orchestration/strategy-composition.md.
 
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
@@ -33,18 +35,18 @@ use nexus_workflow_ir::{
     effect_summary, CanonicalHashError, WorkflowDocument, WorkflowDocumentEffectSummary,
 };
 
-/// Manifest file every package directory carries.
+/// note: manifest file every package directory carries.
 pub const MANIFEST_FILE: &str = "pattern.toml";
-/// IR fragment file every package directory carries.
+/// note: IR fragment file every package directory carries.
 pub const FRAGMENT_FILE: &str = "workflow.ir.json";
-/// Largest member file the reader loads.
+/// note: largest member file the reader loads.
 ///
 /// A manifest is a few hundred bytes and a fragment a few kilobytes; the ceiling is what keeps a
 /// device member or a runaway file from exhausting the daemon while it lists.
 pub const MAX_MEMBER_BYTES: u64 = 1 << 20;
 
-/// Every committed member of the fixture registry under `tests/fixtures/patterns/`, as packed into
-/// this crate: `(package_dir, file, contents)`.
+/// why: every committed member of the fixture registry under `tests/fixtures/patterns/` is packed into
+/// this crate as `(package_dir, file, contents)`.
 ///
 /// The committed fixtures are distribution inputs like any other source file, so the packed archive
 /// must carry them. Every member is embedded, so an archive that omits any one of them — a manifest,
@@ -53,7 +55,7 @@ pub const MAX_MEMBER_BYTES: u64 = 1 << 20;
 /// registry content: the reader still loads packages from a directory, and the fragments' declared
 /// asset hashes are what pin the template bytes.
 pub mod fixtures {
-    /// Every committed fixture member as `(package_dir, file, contents)`.
+    /// note: every committed fixture member as `(package_dir, file, contents)`.
     pub const MEMBERS: [(&str, &str, &str); 8] = [
         (
             "broken-manifest",
@@ -98,59 +100,57 @@ pub mod fixtures {
     ];
 }
 
-/// One discovered package directory.
-///
-/// Fields are private and read-only: only the scanner builds the load state, so a fragment and its
-/// pin cannot be edited apart after loading.
+/// why: fields are private and read-only — only the scanner builds the load state, so a fragment
+/// and its pin cannot be edited apart after loading.
 #[derive(Debug, Clone)]
 pub struct PatternPackage {
-    /// Directory name as a cursor identity: valid UTF-8 verbatim, with `%` and every byte outside
-    /// valid UTF-8 percent-escaped; never an absolute path.
+    /// note: directory name as a cursor identity — valid UTF-8 verbatim, with `%` and every byte
+    /// outside valid UTF-8 percent-escaped; never an absolute path.
     package_dir: String,
-    /// Manifest parsed from `pattern.toml`; absent only when the manifest itself could not be read
-    /// or parsed, so an unavailable package can still be named by id and version.
+    /// note: manifest parsed from `pattern.toml`; absent only when the manifest itself could not be
+    /// read or parsed, so an unavailable package can still be named by id and version.
     manifest: Option<PatternManifest>,
-    /// Fragment parsed from `workflow.ir.json`; present only when the package is available.
+    /// note: fragment parsed from `workflow.ir.json`; present only when the package is available.
     fragment: Option<WorkflowDocument>,
-    /// Canonical content hash of the fragment document — the pin staging approval compares.
+    /// note: canonical content hash of the fragment document — the pin staging approval compares.
     /// Manifest metadata is not part of it. Present only when the package is available.
     content_hash: Option<String>,
-    /// Why the package did not load; `None` only when the package is available.
+    /// note: why the package did not load; `None` only when the package is available.
     reason: Option<String>,
 }
 
 impl PatternPackage {
-    /// Whether the package loaded completely.
+    /// note: whether the package loaded completely.
     #[must_use]
     pub const fn available(&self) -> bool {
         self.reason.is_none()
     }
 
-    /// Cursor identity of the package directory.
+    /// note: cursor identity of the package directory.
     #[must_use]
     pub fn package_dir(&self) -> &str {
         &self.package_dir
     }
 
-    /// Manifest parsed from `pattern.toml`, if it could be read and parsed.
+    /// note: manifest parsed from `pattern.toml`, if it could be read and parsed.
     #[must_use]
     pub const fn manifest(&self) -> Option<&PatternManifest> {
         self.manifest.as_ref()
     }
 
-    /// Fragment parsed from `workflow.ir.json`, present only when the package is available.
+    /// note: fragment parsed from `workflow.ir.json`, present only when the package is available.
     #[must_use]
     pub const fn fragment(&self) -> Option<&WorkflowDocument> {
         self.fragment.as_ref()
     }
 
-    /// Canonical content hash of the fragment, present only when the package is available.
+    /// note: canonical content hash of the fragment, present only when the package is available.
     #[must_use]
     pub fn content_hash(&self) -> Option<&str> {
         self.content_hash.as_deref()
     }
 
-    /// Why the package did not load; `None` only when the package is available.
+    /// note: why the package did not load; `None` only when the package is available.
     #[must_use]
     pub fn reason(&self) -> Option<&str> {
         self.reason.as_deref()
@@ -162,7 +162,7 @@ impl From<&PatternPackage> for PatternSummary {
         let manifest = package.manifest.as_ref();
         Self {
             available: package.available(),
-            // The fragment's canonical hash: content identity, so a manifest-only edit keeps it.
+            // why: the fragment's canonical hash is content identity, so a manifest-only edit keeps it.
             content_hash: package.content_hash.clone(),
             description: manifest.map(|manifest| manifest.description.as_str().to_owned()),
             effect_class: manifest.map(|manifest| summary_effect(manifest.effect_class)),
@@ -182,7 +182,7 @@ impl From<&PatternPackage> for PatternSummary {
     }
 }
 
-/// Read every package under `patterns_dir`.
+/// note: read every package under `patterns_dir`.
 ///
 /// Entries are ordered by `package_dir` ascending as UTF-8 bytes. Hidden and `_`-prefixed
 /// directories are skipped, matching the preset scan convention; a missing root directory is an
@@ -218,17 +218,18 @@ pub fn scan_pattern_packages(
     Ok(packages)
 }
 
-/// Classify one scanned directory entry; `None` when the discovery convention skips it.
+/// note: classify one scanned directory entry; `None` when the discovery convention skips it.
 fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Option<PatternPackage> {
-    // Lossy conversion preserves a leading ASCII byte, so the skip prefix is judged on it either way.
+    // why: lossy conversion preserves a leading ASCII byte, so the skip prefix is judged on it either
+    // way.
     let lossy = file_name.to_string_lossy();
     if lossy.starts_with('.') || lossy.starts_with('_') {
         return None;
     }
     let package_dir = package_dir_name(&file_name);
     if file_name.to_str().is_none() {
-        // The directory cannot be loaded under a name that is not UTF-8; its escaped identity keeps
-        // it addressable instead of colliding with a sibling that renders the same way.
+        // why: the directory cannot be loaded under a name that is not UTF-8; its escaped identity
+        // keeps it addressable instead of colliding with a sibling that renders the same way.
         return Some(PatternPackage {
             package_dir,
             manifest: None,
@@ -240,8 +241,8 @@ fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Opti
     Some(read_package(directory, package_dir, ir_version))
 }
 
-/// Cursor identity of one directory name: valid UTF-8 verbatim, with `%` and every byte outside
-/// valid UTF-8 percent-escaped.
+/// note: cursor identity of one directory name — valid UTF-8 verbatim, with `%` and every byte
+/// outside valid UTF-8 percent-escaped.
 ///
 /// A lossy rendering is not an identity — distinct names collapse to the same replacement characters,
 /// so a cursor keyed on it cannot separate them. Escaping `%` as well keeps the mapping injective
@@ -305,7 +306,7 @@ fn load(
 
     let fragment: WorkflowDocument = serde_json::from_str(&read_text(directory, FRAGMENT_FILE)?)
         .map_err(Unavailable::Fragment)?;
-    // The rollup covers this document's nodes; a v0 fragment resolves no nest children.
+    // why: the rollup covers this document's nodes; a v0 fragment resolves no nest children.
     let rollup = effect_summary(&fragment.nodes);
     if document_effect(manifest.effect_class) != rollup {
         return Err(Unavailable::EffectMismatch {
@@ -313,15 +314,15 @@ fn load(
             rollup,
         });
     }
-    // The pin is the fragment document's own canonical hash, never the preset import path's
+    // why: the pin is the fragment document's own canonical hash, never the preset import path's
     // `content_hash` field (which is a constant `None` there).
     let content_hash = nexus_workflow_ir::content_hash(&fragment).map_err(Unavailable::Hash)?;
     Ok((fragment, content_hash))
 }
 
-/// Manifest rules the generated type cannot express: cross-field identity, IR compatibility and
-/// per-package uniqueness. The manifest schema's `version` pattern is the single authority over the
-/// `SemVer` 2.0.0 label; no second parser narrows it here.
+/// note: manifest rules the generated type cannot express — cross-field identity, IR compatibility
+/// and per-package uniqueness. The manifest schema's `version` pattern is the single authority over
+/// the `SemVer` 2.0.0 label; no second parser narrows it here.
 fn check_manifest(
     manifest: &PatternManifest,
     package_dir: &str,
@@ -369,11 +370,11 @@ fn check_manifest(
 
 fn read_text(directory: &Path, file: &'static str) -> Result<String, Unavailable> {
     let path = directory.join(file);
-    // Metadata is taken through symlinks, so a link to a FIFO or a device node is refused here too.
-    // The gate is what keeps this synchronous scan from blocking on a member that never reaches EOF
-    // or from loading a runaway file. A writer that swaps the member between this call and the open
-    // below can still stall it; who may write the registry is undefined in P3, so the gate guards
-    // the accidental member a scan actually meets, not a hostile one.
+    // why: metadata is taken through symlinks, so a link to a FIFO or a device node is refused here
+    // too. The gate is what keeps this synchronous scan from blocking on a member that never reaches
+    // EOF or from loading a runaway file. A writer that swaps the member between this call and the
+    // open below can still stall it; who may write the registry is undefined in P3, so the gate
+    // guards the accidental member a scan actually meets, not a hostile one.
     let metadata = std::fs::metadata(&path).map_err(|source| Unavailable::Read { file, source })?;
     if !metadata.is_file() {
         return Err(Unavailable::NotRegularFile { file });
@@ -412,7 +413,8 @@ fn summary_slots(manifest: &PatternManifest) -> Vec<SummarySlot> {
         .slots
         .iter()
         .map(|slot| SummarySlot {
-            // Both DTOs validate the name as non-empty only; re-parse into the summary's newtype.
+            // why: both DTOs validate the name as non-empty only; re-parse into the summary's
+            // newtype.
             name: slot
                 .name
                 .as_str()
@@ -432,7 +434,7 @@ const fn summary_slot_kind(kind: ManifestSlotKind) -> SummarySlotKind {
     }
 }
 
-/// Why one package could not be loaded. Every variant is rendered into the listing's `reason`.
+/// note: why one package could not be loaded; every variant is rendered into the listing's `reason`.
 #[derive(Debug, thiserror::Error)]
 enum Unavailable {
     #[error("cannot read `{file}`: {source}")]
@@ -485,7 +487,7 @@ mod tests {
 
     use super::package_entry;
 
-    /// APFS rejects these names, so the classification is exercised without a filesystem.
+    /// why: APFS rejects these names, so the classification is exercised without a filesystem.
     #[test]
     fn non_utf8_directory_names_stay_distinct_and_unavailable() {
         let entries: Vec<_> = [b"lossy-\xFF".to_vec(), b"lossy-\xFE".to_vec()]

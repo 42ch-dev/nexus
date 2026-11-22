@@ -4,12 +4,13 @@
 //! Such a platform has no supported way to keep the old document's policy, so
 //! capturing it fails and the publisher refuses to replace an existing document
 //! instead of silently dropping the policy.
+// note: capturing the old policy fails here, so publication refuses rather than dropping it.
 
 use std::fs::File;
 use std::io;
 use std::path::Path;
 
-/// No supported policy exists on this platform.
+/// note: no supported policy exists on this platform.
 pub struct PortablePolicy;
 
 pub fn capture(_target: &Path) -> io::Result<PortablePolicy> {

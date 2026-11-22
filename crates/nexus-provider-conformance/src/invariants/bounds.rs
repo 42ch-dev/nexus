@@ -4,6 +4,7 @@
 //! the event count reaches `max_events` or the wall-clock duration exceeds
 //! `max_duration`, collection stops early and a [`InvariantId::BoundedStream`]
 //! finding is recorded. A stream that ends within the bounds is conformant.
+// invariant: a stream that ends within the bounds is conformant.
 
 use std::time::Instant;
 
@@ -12,20 +13,20 @@ use nexus_agent_host::capability::model::{HostEvent, HostEventStream};
 
 use crate::model::{ConformanceConfig, ConformanceFinding, InvariantId};
 
-/// The outcome of bounded stream collection.
+/// note: the outcome of bounded stream collection.
 #[derive(Debug)]
 pub struct CollectedStream {
-    /// Events collected before the stream ended or was truncated.
+    /// note: events collected before the stream ended or was truncated.
     pub events: Vec<HostEvent>,
-    /// Bounded-stream findings (empty when the stream ended within bounds).
+    /// note: bounded-stream findings (empty when the stream ended within bounds).
     pub findings: Vec<ConformanceFinding>,
-    /// Whether collection stopped early due to a bound.
+    /// note: whether collection stopped early due to a bound.
     pub truncated: bool,
-    /// The first stream-level error item, if any: `(event index, message)`.
+    /// note: the first stream-level error item, if any: `(event index, message)`.
     pub stream_error: Option<(usize, String)>,
 }
 
-/// Collect the stream under the configured bounds.
+/// note: collect the stream under the configured bounds.
 ///
 /// Stops on stream end, on a bound hit, or on the first `Err` item. A bound
 /// hit records a [`InvariantId::BoundedStream`] finding; an `Err` item is

@@ -26,6 +26,7 @@
 //! unchanged. The same rule covers the Windows credential privacy gate the
 //! memory credential loader consumes: a failure is returned so the loader
 //! refuses the credential file.
+// safety: this crate is the single approved `unsafe` exception; every block names its contract.
 
 use std::fs::File;
 use std::io;
@@ -38,7 +39,7 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 
-/// The access policy of the document an atomic publication replaces.
+/// safety: the access policy of the document an atomic publication replaces.
 ///
 /// Captured from the real target before staging and applied to the staging file
 /// before the rename, so the replacement keeps the old document's owner, group,
@@ -53,7 +54,7 @@ pub struct AccessPolicy {
     policy: portable::PortablePolicy,
 }
 
-/// The staging location a publication writes before its atomic rename.
+/// safety: the staging location a publication writes before its atomic rename.
 ///
 /// The directory is created first, the document file only afterwards, and the
 /// platform's own protection is what keeps the staged bytes unreadable to other
@@ -81,25 +82,25 @@ pub struct Staging {
 }
 
 impl Staging {
-    /// The staging directory that must be removed after publication.
+    /// note: the staging directory that must be removed after publication.
     #[must_use]
     pub fn directory(&self) -> &Path {
         &self.directory
     }
 
-    /// The staged document path that is renamed over the target.
+    /// note: the staged document path that is renamed over the target.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// The open handle the publisher writes through.
+    /// note: the open handle the publisher writes through.
     #[must_use]
     pub const fn file(&self) -> &File {
         &self.file
     }
 
-    /// Close the staging handle before the rename publishes the bytes.
+    /// note: close the staging handle before the rename publishes the bytes.
     ///
     /// Returns the staged path and the staging directory so the caller can
     /// rename and then remove them.
@@ -110,7 +111,7 @@ impl Staging {
     }
 }
 
-/// Capture the access policy of the document a publication will replace.
+/// note: capture the access policy of the document a publication will replace.
 ///
 /// # Errors
 ///
@@ -140,7 +141,7 @@ pub fn capture(target: &Path) -> io::Result<AccessPolicy> {
     }
 }
 
-/// Create the staging directory and its document file.
+/// safety: create the staging directory and its document file.
 ///
 /// The directory must not exist yet; the caller picks its name. On Unix the
 /// directory is created owner-only and sealed first, then the file is created
@@ -200,7 +201,7 @@ fn open_staged_file(directory: &Path) -> io::Result<Staging> {
     })
 }
 
-/// Apply the captured policy once the document bytes are written.
+/// safety: apply the captured policy once the document bytes are written.
 ///
 /// The call happens while the staged handle is still open, so a Windows policy
 /// transition cannot race another principal through a reopened name, and it
@@ -222,7 +223,7 @@ pub fn apply_after_write(
     if let Some(policy) = policy {
         return unix::apply(&policy.policy, file, path);
     }
-    // The Windows transition works from the open handle alone; the portable
+    // why: the Windows transition works from the open handle alone; the portable
     // fallback refuses, so neither needs the staged path.
     #[cfg(not(unix))]
     let _ = path;
@@ -237,7 +238,7 @@ pub fn apply_after_write(
     Ok(())
 }
 
-/// The document's extended access policy as comparable bytes, for verification
+/// note: the document's extended access policy as comparable bytes, for verification
 /// (regressions and the publication smoke check); empty when it has none.
 ///
 /// # Errors
@@ -259,7 +260,7 @@ pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
     }
 }
 
-/// The document's hard-link count, so a publication can refuse to detach an
+/// note: the document's hard-link count, so a publication can refuse to detach an
 /// alias instead of replacing only one name.
 ///
 /// # Errors
@@ -281,7 +282,7 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
     }
 }
 
-/// The Windows credential privacy gate the memory credential loader consumes.
+/// safety: the Windows credential privacy gate the memory credential loader consumes.
 ///
 /// It reports whether the caller's already-open file handle grants access only
 /// to trusted principals: the file's owner, LOCAL SYSTEM and the Administrators
@@ -307,7 +308,7 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
     windows::grants_only_to_trusted_principals(file)
 }
 
-/// Report a creation failure whose staging directory could not be removed.
+/// note: report a creation failure whose staging directory could not be removed.
 ///
 /// The primary error keeps its kind and message; the cleanup error and the
 /// exact leftover path are appended so the caller sees both. A failed cleanup is

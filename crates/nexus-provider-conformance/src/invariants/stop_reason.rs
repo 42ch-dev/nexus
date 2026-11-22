@@ -11,21 +11,22 @@
 //! a typed finding instead of passing silently. The current closed sets are
 //! asserted by the tests; the drift arm is not directly constructible from
 //! today's enums.
+// invariant: stop reasons must come from their closed contract sets.
 
 use nexus_agent_host::capability::model::{FinishReason, HostEvent, SessionStopReason};
 
 use crate::model::{ConformanceFinding, InvariantId};
 
-/// Check stop-reason consistency over the collected events.
+/// note: check stop-reason consistency over the collected events.
 #[must_use]
 pub fn check(events: &[HostEvent]) -> Vec<ConformanceFinding> {
     let mut findings = Vec::new();
     for (index, event) in events.iter().enumerate() {
         match event {
             HostEvent::OpFinished(finished) => {
-                // Closed contract set; the wildcard arm is the drift gate —
-                // a new FinishReason variant fails conformance.
-                #[allow(unreachable_patterns)] // drift gate: new variant must trip conformance
+                // why: closed contract set; the wildcard arm is the drift gate — a new FinishReason
+                // variant fails conformance.
+                #[allow(unreachable_patterns)] // why: drift gate — a new variant must trip conformance
                 match finished.reason {
                     FinishReason::EndTurn
                     | FinishReason::MaxTokens
@@ -42,7 +43,7 @@ pub fn check(events: &[HostEvent]) -> Vec<ConformanceFinding> {
                 }
             }
             HostEvent::SessionStopped(stopped) => {
-                #[allow(unreachable_patterns)] // drift gate: new variant must trip conformance
+                #[allow(unreachable_patterns)] // why: drift gate — a new variant must trip conformance
                 match stopped.reason {
                     SessionStopReason::GracefulShutdown
                     | SessionStopReason::ProviderExit

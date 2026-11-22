@@ -2,13 +2,13 @@
 //!
 //! Tracks the relationship between Creators and Users. A Creator can have
 //! multiple pairings over time, but only one active pairing at a time.
-//! See data-model-v1.md §5.2A.
+// note: see data-model-v1.md §5.2A.
 
 use crate::errors::CloudDomainError;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// Pairing source enum.
+/// note: pairing source enum.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PairingSource {
@@ -28,7 +28,7 @@ impl PairingSource {
     }
 }
 
-/// Pairing aggregate — Creator-User association.
+/// note: pairing aggregate — Creator-User association.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Pairing {
     pub schema_version: u32,
@@ -43,7 +43,7 @@ pub struct Pairing {
 }
 
 impl Pairing {
-    /// Create a new pairing between creator and user.
+    /// note: create a new pairing between creator and user.
     #[must_use]
     pub fn new(
         pairing_id: &str,
@@ -62,11 +62,11 @@ impl Pairing {
             revoked_at: None,
         }
     }
+    /// note: revoke an active pairing; status becomes "revoked" and `revoked_at` is recorded.
     ///
     /// # Errors
-    /// Returns `Err(CloudDomainError::...)` if validation fails.
-    /// Revoke this pairing.
-    /// Sets status to "revoked" and records `revoked_at` timestamp.
+    ///
+    /// Returns [`CloudDomainError::AlreadyInState`] when the pairing is not active.
     pub fn revoke(&mut self) -> Result<(), CloudDomainError> {
         if self.status != "active" {
             return Err(CloudDomainError::AlreadyInState(self.status.clone()));
@@ -76,19 +76,19 @@ impl Pairing {
         Ok(())
     }
     #[must_use]
-    /// Check if this pairing is active.
+    /// note: check if this pairing is active.
     pub fn is_active(&self) -> bool {
         self.status == "active"
     }
 
-    /// Validate that this pairing authorizes the given creator+user combination.
+    /// note: validate that this pairing authorizes the given creator+user combination.
     #[must_use]
     pub fn authorizes(&self, creator_id: &str, user_id: &str) -> bool {
         self.status == "active" && self.creator_id == creator_id && self.user_id == user_id
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
+// note: conversion between the domain aggregate and the contract type.
 
 impl From<nexus_contracts::Pairing> for Pairing {
     fn from(c: nexus_contracts::Pairing) -> Self {
@@ -202,7 +202,7 @@ mod tests {
         assert!(!pairing.authorizes("ctr_a", "usr_b"));
     }
 
-    /// Two in-memory aggregates with the same creator+user can both be active; enforcement is
+    /// why: two in-memory aggregates with the same creator+user can both be active; enforcement is
     /// an application / repository concern (DM-R3 — document domain boundary).
     #[test]
     fn two_distinct_active_pairings_same_creator_user_both_authorize() {

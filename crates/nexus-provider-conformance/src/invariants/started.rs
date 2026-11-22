@@ -3,12 +3,13 @@
 //! The normalized operation lifecycle begins with `OpStarted`
 //! (`OperationStartedEvent`). A stream with zero or multiple `OpStarted`
 //! events violates the contract.
+// invariant: exactly one `OpStarted` event per operation stream.
 
 use nexus_agent_host::capability::model::HostEvent;
 
 use crate::model::{ConformanceFinding, InvariantId};
 
-/// Check that the stream contains exactly one `OpStarted` event.
+/// note: check that the stream contains exactly one `OpStarted` event.
 ///
 /// Evidence: the indices of every `OpStarted` event (empty when none were
 /// emitted — a missing event has no index to point at).

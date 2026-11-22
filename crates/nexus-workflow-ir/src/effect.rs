@@ -3,13 +3,15 @@
 //! `pure < read < write_candidate < external`. A document summary is the join of every reachable
 //! node's declared class — this document's nodes and, through [`document_summary`], every resolved
 //! nest child's — so grouping or nesting never hides a write or external effect.
+//!
+//! see docs/specs/orchestration/strategy-composition.md.
 
 use crate::structure::{NestGraph, PatternBody};
 use crate::{
     WorkflowDocument, WorkflowDocumentEffectSummary, WorkflowNode, WorkflowNodeEffectClass,
 };
 
-/// Rank one node class in the shared order.
+/// note: rank one node class in the shared order.
 const fn effect_rank(class: WorkflowNodeEffectClass) -> u8 {
     match class {
         WorkflowNodeEffectClass::External => 3,
@@ -19,7 +21,7 @@ const fn effect_rank(class: WorkflowNodeEffectClass) -> u8 {
     }
 }
 
-/// Rank one document summary in the same order.
+/// note: rank one document summary in the same order.
 const fn summary_rank(summary: WorkflowDocumentEffectSummary) -> u8 {
     match summary {
         WorkflowDocumentEffectSummary::External => 3,
@@ -29,7 +31,7 @@ const fn summary_rank(summary: WorkflowDocumentEffectSummary) -> u8 {
     }
 }
 
-/// The summary a single declared class folds to.
+/// note: the summary a single declared class folds to.
 const fn class_summary(class: WorkflowNodeEffectClass) -> WorkflowDocumentEffectSummary {
     match class {
         WorkflowNodeEffectClass::External => WorkflowDocumentEffectSummary::External,
@@ -39,8 +41,8 @@ const fn class_summary(class: WorkflowNodeEffectClass) -> WorkflowDocumentEffect
     }
 }
 
-/// Join every node's effect class into the worst-case document summary. An empty node list is
-/// `pure`.
+/// note: join every node's effect class into the worst-case document summary. An empty node list
+/// is `pure`.
 #[must_use]
 pub fn effect_summary(nodes: &[WorkflowNode]) -> WorkflowDocumentEffectSummary {
     let rank = nodes
@@ -56,7 +58,7 @@ pub fn effect_summary(nodes: &[WorkflowNode]) -> WorkflowDocumentEffectSummary {
     }
 }
 
-/// Join two summaries by worst case.
+/// note: join two summaries by worst case.
 #[must_use]
 pub const fn join(
     left: WorkflowDocumentEffectSummary,
@@ -69,7 +71,8 @@ pub const fn join(
     }
 }
 
-/// The worst-case summary of `document` and every pattern body reachable from its pattern pins.
+/// note: the worst-case summary of `document` and every pattern body reachable from its pattern
+/// pins.
 ///
 /// A resolved fragment contributes its nodes; an unavailable package contributes only its declared
 /// class, so a pin that no longer loads still never lowers the fence. A pin with no body at all is

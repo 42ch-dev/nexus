@@ -1,46 +1,47 @@
 //! Conformance report model: findings, invariant identifiers, and config.
+// note: these report types are shared by every invariant check.
 
 use std::fmt;
 use std::time::Duration;
 
-/// Identifier for each conformance invariant checked by the runner.
+/// note: identifier for each conformance invariant checked by the runner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InvariantId {
-    /// Exactly one `OpStarted` event per operation stream.
+    /// note: exactly one `OpStarted` event per operation stream.
     ExactlyOneStarted,
-    /// Event count and wall-clock duration stay within the configured bounds.
+    /// note: event count and wall-clock duration stay within the configured bounds.
     BoundedStream,
-    /// `OpStarted` precedes op-scoped events; the terminal event is last.
+    /// note: `OpStarted` precedes op-scoped events; the terminal event is last.
     LifecycleOrdering,
-    /// Exactly one terminal event (`OpFinished` | `OpFailed`), then the stream ends.
+    /// note: exactly one terminal event (`OpFinished` | `OpFailed`), then the stream ends.
     SingleTerminal,
-    /// `FinishReason` / `SessionStopReason` carry only closed-set values.
+    /// note: `FinishReason` / `SessionStopReason` carry only closed-set values.
     StopReasonConsistency,
-    /// Normalized fields carry only contract values (closed `error_category`,
+    /// note: normalized fields carry only contract values (closed `error_category`,
     /// 512-byte `error_message` cap, closed enum fields).
     ForbiddenValueExclusion,
 }
 
-/// A single conformance finding: one invariant violation with event-index evidence.
+/// note: a single conformance finding — one invariant violation with event-index evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConformanceFinding {
-    /// The invariant that was violated.
+    /// note: the invariant that was violated.
     pub invariant: InvariantId,
-    /// Human-readable description of the violation.
+    /// note: human-readable description of the violation.
     pub message: String,
-    /// Event indices that constitute the evidence for the violation.
+    /// note: event indices that constitute the evidence for the violation.
     pub evidence: Vec<usize>,
 }
 
-/// Bounds for stream collection.
+/// note: bounds for stream collection.
 ///
 /// The runner stops collecting when either bound is hit and reports a
 /// [`InvariantId::BoundedStream`] finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConformanceConfig {
-    /// Maximum number of events collected before the stream is truncated.
+    /// note: maximum number of events collected before the stream is truncated.
     pub max_events: usize,
-    /// Maximum wall-clock duration before the stream is truncated.
+    /// note: maximum wall-clock duration before the stream is truncated.
     pub max_duration: Duration,
 }
 
@@ -53,21 +54,21 @@ impl Default for ConformanceConfig {
     }
 }
 
-/// Result of running conformance over one operation stream.
+/// note: result of running conformance over one operation stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConformanceReport {
-    /// All findings across every invariant (empty = conformant).
+    /// note: all findings across every invariant (empty = conformant).
     pub findings: Vec<ConformanceFinding>,
-    /// Number of events collected before the stream ended or was truncated.
+    /// note: number of events collected before the stream ended or was truncated.
     pub event_count: usize,
-    /// Wall-clock time spent collecting the stream.
+    /// note: wall-clock time spent collecting the stream.
     pub duration: Duration,
-    /// Whether collection stopped early due to a bound (count or duration).
+    /// note: whether collection stopped early due to a bound (count or duration).
     pub truncated: bool,
 }
 
 impl ConformanceReport {
-    /// Whether the stream conformed: no findings were produced.
+    /// note: whether the stream conformed — no findings were produced.
     #[must_use]
     pub const fn passed(&self) -> bool {
         self.findings.is_empty()

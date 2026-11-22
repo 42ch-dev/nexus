@@ -1,22 +1,24 @@
 //! The `EmbeddingProvider` seam and the OSS `NoEmbeddings` posture.
+//!
+//! see docs/specs/runtime/embedding-readiness.md.
 
 use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::EmbeddingIdentity;
 
-/// Errors from embedding providers. The only in-repo implementation
+/// note: errors from embedding providers. The only in-repo implementation
 /// ([`NoEmbeddings`]) always reports [`Unavailable`]; platform
 /// implementations extend this additively.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum EmbeddingError {
-    /// Embeddings are a Nexus Platform-provided feature; the OSS product
+    /// note: embeddings are a Nexus Platform-provided feature; the OSS product
     /// ships no embedding execution.
     #[error("no embedding provider is available — embeddings are a Nexus Platform-provided feature and the OSS product ships no execution")]
     Unavailable,
 }
 
-/// Embedding provider seam implemented and injected by the Nexus Platform.
+/// note: embedding provider seam, implemented and injected by the Nexus Platform.
 ///
 /// The platform constructs its provider and injects it as
 /// `Arc<dyn EmbeddingProvider>` at the daemon composition root; provider
@@ -30,10 +32,10 @@ pub enum EmbeddingError {
 /// daemon tasks as `Arc<dyn EmbeddingProvider>`.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
-    /// The identity this provider serves vectors under.
+    /// note: the identity this provider serves vectors under.
     fn identity(&self) -> &EmbeddingIdentity;
 
-    /// Embed `texts` as vectors of the identity's declared `dim`.
+    /// note: embed `texts` as vectors of the identity's declared `dim`.
     ///
     /// Providers must not return vectors whose length differs from `dim` —
     /// the verifier ([`crate::verify_vector_dimensions`]) treats that as
@@ -41,7 +43,7 @@ pub trait EmbeddingProvider: Send + Sync {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError>;
 }
 
-/// The OSS default: no platform provider injected.
+/// note: the OSS default — no platform provider injected.
 ///
 /// It documents the OSS posture in code — embeddings are platform-provided,
 /// the OSS product ships no execution — and lets consumers be written against
@@ -53,7 +55,7 @@ pub struct NoEmbeddings;
 #[async_trait]
 impl EmbeddingProvider for NoEmbeddings {
     fn identity(&self) -> &EmbeddingIdentity {
-        // No real serving identity exists without a platform provider. While
+        // why: no real serving identity exists without a platform provider. While
         // `NoEmbeddings` is the injected provider, the composition root must
         // pass `None` (no provider) to `verify_index` — this placeholder is
         // never a valid populate stamp.

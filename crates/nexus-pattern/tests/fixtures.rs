@@ -4,6 +4,7 @@
 //! (one prompt step, one step-then-judge) and one deliberately malformed manifest. The service
 //! end-to-end test copies this directory into a disposable home, so these bytes are the ones a
 //! daemon actually lists.
+// note: the same reader walks these bytes and a temporary root.
 
 use std::path::PathBuf;
 
@@ -13,12 +14,12 @@ use nexus_contracts::generated::daemon_api::patterns::pattern_summary::{
 use nexus_pattern::{scan_pattern_packages, PatternPackage};
 use nexus_workflow_ir::IR_VERSION;
 
-/// The committed registry root.
+/// note: the committed registry root.
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/patterns")
 }
 
-/// Pins of the fixture fragments. Editing a fragment byte without updating its constant fails
+/// why: pins of the fixture fragments — editing a fragment byte without updating its constant fails
 /// this test, which is what keeps a pin from drifting silently under an unchanged version.
 const PROMPT_STEP_HASH: &str = "b89e9707bf2d39e27bf825f74c8bfac37acbdf1f7109614d0942fb8613212a04";
 const STEP_WITH_JUDGE_HASH: &str =
@@ -90,7 +91,7 @@ fn the_committed_packages_load_with_their_pins() {
         Some(STEP_WITH_JUDGE_HASH)
     );
 
-    // The malformed manifest is its own unavailable item and leaves both peers available.
+    // why: the malformed manifest is its own unavailable item and leaves both peers available.
     let broken = summary(&packages, "broken-manifest");
     assert!(!broken.available);
     assert_eq!(broken.id, None);

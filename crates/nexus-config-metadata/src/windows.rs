@@ -7,6 +7,7 @@
 //! documented `GetFileSecurityW` / `SetSecurityInfo` pair rather than parsed by
 //! hand; the owner/group/DACL component pointers come from the documented
 //! `GetSecurityDescriptor*` accessors.
+// safety: every unsafe site names the handle and buffer contract it relies on.
 
 use std::ffi::c_void;
 use std::fs::File;
@@ -33,7 +34,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_NORMAL, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
-/// Owner, group and DACL is the access policy this writer reproduces; the
+/// note: owner, group and DACL is the access policy this writer reproduces; the
 /// mandatory label, resource attributes and scoped policy are detected and
 /// refused instead of being dropped.
 const CAPTURE_INFORMATION: u32 = OWNER_SECURITY_INFORMATION
@@ -43,9 +44,9 @@ const CAPTURE_INFORMATION: u32 = OWNER_SECURITY_INFORMATION
     | ATTRIBUTE_SECURITY_INFORMATION
     | SCOPE_SECURITY_INFORMATION;
 
-/// The security descriptor a publication must carry to the replacement.
+/// note: the security descriptor a publication must carry to the replacement.
 pub struct WindowsPolicy {
-    /// A self-relative descriptor, word-aligned for the Win32 security API.
+    /// note: a self-relative descriptor, word-aligned for the Win32 security API.
     descriptor: Vec<u64>,
 }
 
@@ -169,7 +170,7 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     let control_read = unsafe {
         GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
     };
-    // D39: all four accessor statuses are aggregated, so any zero refuses the
+    // why: D39 — all four accessor statuses are aggregated, so any zero refuses the
     // transition before the DACL/protection derivation below.
     let read = owner_read & group_read & dacl_read & control_read;
     if read == 0 {
@@ -181,7 +182,7 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     } else {
         ptr::null()
     };
-    // A protected DACL must stay protected; an inherited one must stay
+    // why: a protected DACL must stay protected; an inherited one must stay
     // inheritable, or the replacement silently changes the effective policy.
     let protection = if control & SE_DACL_PROTECTED != 0 {
         PROTECTED_DACL_SECURITY_INFORMATION
@@ -227,7 +228,7 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
     Ok(u64::from(information.nNumberOfLinks))
 }
 
-/// Create the staged document file with no sharing, so no other principal can
+/// safety: create the staged document file with no sharing, so no other principal can
 /// open it between creation and the policy transition.
 ///
 /// The handle also carries `WRITE_OWNER`, which the owner/group components of
@@ -266,12 +267,12 @@ pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
         .collect())
 }
 
-/// The two documented ACE classes (`winnt.h`) the credential privacy gate can
+/// note: the two documented ACE classes (`winnt.h`) the credential privacy gate can
 /// interpret; windows-sys 0.61 does not declare these `#define` values.
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0x0;
 const ACCESS_DENIED_ACE_TYPE: u8 = 0x1;
 
-/// Read the advertised subauthority count of a SID — the single bounded
+/// safety: read the advertised subauthority count of a SID — the single bounded
 /// fixed-SID safety-metadata access (D45): exactly one byte at the
 /// documented count offset, read only to size the SID for its enclosure
 /// check. No identifier, subauthority or other content byte is read.
@@ -292,7 +293,7 @@ fn advertised_subauthority_count(sid: PSID) -> u32 {
     unsafe { u32::from(std::ptr::read((sid as *const u8).add(1))) }
 }
 
-/// The complete byte length of a SID advertising `count` subauthorities:
+/// note: the complete byte length of a SID advertising `count` subauthorities —
 /// the fixed prefix of the `SID` representation (everything but its one
 /// subauthority slot) plus four bytes per advertised subauthority. `None`
 /// when the advertised count cannot yield a bounded length.
@@ -301,7 +302,7 @@ fn sid_required_length(count: u32) -> Option<u32> {
     fixed_prefix.checked_add(count.checked_mul(4)?)
 }
 
-/// Whether a record of `record_extent` bytes encloses its fixed fields
+/// note: whether a record of `record_extent` bytes encloses its fixed fields
 /// (header and access mask) plus the complete SID advertised by `count`.
 /// An unbounded advertised length never encloses.
 fn record_encloses_sid(record_extent: u32, count: u32) -> bool {
@@ -310,7 +311,7 @@ fn record_encloses_sid(record_extent: u32, count: u32) -> bool {
         .is_some_and(|sid_length| fixed_fields.checked_add(sid_length) <= Some(record_extent))
 }
 
-/// Decide whether the open file's DACL grants any access right to a principal
+/// safety: decide whether the open file's DACL grants any access right to a principal
 /// beyond the file's owner, LOCAL SYSTEM and the Administrators group.
 ///
 /// `Ok(())` means every allow grant belongs to one of those three principals.
@@ -400,12 +401,12 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has no verifiable owner or DACL",
         ));
     }
-    // The owner SID lives inside the returned descriptor: its readable extent
+    // why: the owner SID lives inside the returned descriptor — its readable extent
     // ends at the bytes the second query actually wrote (`needed`), not at
     // the allocation's spare capacity or padding.
     let descriptor_end = (descriptor.as_ptr() as usize).checked_add(needed as usize);
     let owner_start = owner as usize;
-    // Fixed-prefix readability before the metadata read: the whole minimal
+    // safety: fixed-prefix readability before the metadata read — the whole minimal
     // `SID` representation (revision, count, identifier authority, one
     // subauthority slot) must lie inside the returned bytes.
     if !descriptor_end.is_some_and(|end| {
@@ -418,7 +419,7 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has an invalid owner security identifier",
         ));
     }
-    // Bounded safety metadata (D45), then the complete count-dependent
+    // safety: bounded safety metadata (D45), then the complete count-dependent
     // enclosure, before any unbounded SID validator or comparison.
     let owner_count = advertised_subauthority_count(owner);
     if !descriptor_end.is_some_and(|end| {
@@ -472,7 +473,8 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
-        // NonNull enforces only nonnull; it does not establish native extent, alignment or lifetime.
+        // safety: NonNull enforces only nonnull; it does not establish native extent, alignment or
+        // lifetime.
         let ace = match ptr::NonNull::new(ace) {
             Some(ace) => ace,
             None => {
@@ -491,10 +493,10 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         // boundary, so this four-byte, four-aligned header read is in extent.
         let header = unsafe { &*ace.as_ptr().cast::<ACE_HEADER>() };
         match header.AceType {
-            // A denied ACE only narrows access; it grants nobody anything.
+            // why: a denied ACE only narrows access; it grants nobody anything.
             ACCESS_DENIED_ACE_TYPE => {}
             ACCESS_ALLOWED_ACE_TYPE => {
-                // The fixed-prefix guard: a record whose documented
+                // safety: the fixed-prefix guard — a record whose documented
                 // `AceSize` does not cover the header, the mask and the
                 // complete minimal `SID` structure (revision, subauthority
                 // count, identifier authority and one subauthority slot)
@@ -520,7 +522,7 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
                 // the fixed SID structure is readable before validation.
                 let allowed = unsafe { &*ace.as_ptr().cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
-                // Bounded safety metadata (D45): the count byte's fixed
+                // safety: bounded safety metadata (D45) — the count byte's fixed
                 // prefix was proved readable by the extent guard above, and
                 // only then is the complete count-dependent enclosure
                 // checked, before any unbounded SID validator or comparison.
@@ -567,7 +569,7 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
     Ok(())
 }
 
-/// Whether the SID is the file's owner, LOCAL SYSTEM or the Administrators
+/// note: whether the SID is the file's owner, LOCAL SYSTEM or the Administrators
 /// group — the three principals a credential file may grant access to.
 ///
 /// Both operands must already have passed the native `IsValidSid` check at
@@ -588,7 +590,7 @@ fn sid_is_trusted(sid: PSID, owner: PSID) -> bool {
         || unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0 }
 }
 
-/// NUL-terminated UTF-16 form of a path for the wide Win32 APIs.
+/// note: NUL-terminated UTF-16 form of a path for the wide Win32 APIs.
 fn wide_path(path: &Path) -> Vec<u16> {
     path.as_os_str()
         .encode_wide()
@@ -600,8 +602,8 @@ fn wide_path(path: &Path) -> Vec<u16> {
 mod sid_bounds_tests {
     use super::{record_encloses_sid, sid_required_length, ACE_HEADER, SID};
 
-    /// A record whose fixed storage fits but whose advertised variable tail
-    /// does not must be refused: one-subauthority storage does not enclose a
+    /// note: a record whose fixed storage fits but whose advertised variable tail
+    /// does not must be refused — one-subauthority storage does not enclose a
     /// SID advertising a second subauthority.
     #[test]
     fn sid_bounds_fixed_fit_does_not_enclose_longer_advertised_tail() {
@@ -618,7 +620,7 @@ mod sid_bounds_tests {
         );
     }
 
-    /// The exact enclosing boundary is accepted: header + mask + the SID's
+    /// note: the exact enclosing boundary is accepted — header + mask + the SID's
     /// complete advertised length, and not a byte less.
     #[test]
     fn sid_bounds_exact_enclosing_boundary_is_accepted_and_shorter_refused() {
@@ -635,7 +637,7 @@ mod sid_bounds_tests {
         );
     }
 
-    /// The advertised length is the fixed prefix plus four bytes per
+    /// note: the advertised length is the fixed prefix plus four bytes per
     /// subauthority, bounded even at the maximum representable count.
     #[test]
     fn sid_bounds_required_length_is_bounded_per_subauthority() {
@@ -645,7 +647,7 @@ mod sid_bounds_tests {
         assert_eq!(sid_required_length(255), Some(fixed_prefix + 255 * 4));
     }
 
-    /// An unbounded advertised length (overflow path) never encloses,
+    /// note: an unbounded advertised length (overflow path) never encloses,
     /// regardless of the record extent.
     #[test]
     fn sid_bounds_unbounded_advertised_length_never_encloses() {

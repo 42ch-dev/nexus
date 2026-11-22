@@ -1,4 +1,5 @@
 //! Reader behaviour on real package directories written to a temporary root.
+// note: the checkout fixtures cover the same reader without depending on their bytes.
 
 use std::collections::HashSet;
 use std::fs;
@@ -35,7 +36,8 @@ fn manifest_with_compat(id: &str, effect_class: &str, min: u64, max: u64) -> Str
     manifest(id, effect_class).replace("min = 0\nmax = 0", &format!("min = {min}\nmax = {max}"))
 }
 
-/// `summary` is the fragment's own `effect_summary` claim; `node_effect` is the worst node class.
+/// note: `summary` is the fragment's own `effect_summary` claim; `node_effect` is the worst node
+/// class.
 fn fragment(summary: &str, node_effect: &str) -> String {
     format!(
         r#"{{
@@ -191,7 +193,7 @@ fn broken_packages_do_not_hide_their_peers() {
         .iter()
         .all(|package| package.fragment().is_none()));
 
-    // A manifest that parsed stays readable on an unavailable package, so a client can name it.
+    // why: a manifest that parsed stays readable on an unavailable package, so a client can name it.
     let bad_toml = packages
         .iter()
         .find(|package| package.package_dir() == "bad-toml")
@@ -228,7 +230,7 @@ fn broken_packages_do_not_hide_their_peers() {
 #[test]
 fn declared_effect_must_match_the_fragment_rollup() {
     let root = tempfile::tempdir().expect("temp root");
-    // The fragment claims `pure` in its own summary while a node is `external`; the reader
+    // why: the fragment claims `pure` in its own summary while a node is `external`; the reader
     // joins the nodes itself rather than believing either claim.
     write_package(
         root.path(),
@@ -299,8 +301,8 @@ fn manifest_rules_are_enforced() {
     assert!(packages.iter().all(|package| !package.available()));
 
     assert!(reason(&packages, "id-mismatch").contains("does not match package directory"));
-    // The manifest schema carries the SemVer 2.0.0 pattern and is the only validator of the label,
-    // so a bad version is rejected while parsing `pattern.toml`.
+    // why: the manifest schema carries the SemVer 2.0.0 pattern and is the only validator of the
+    // label, so a bad version is rejected while parsing `pattern.toml`.
     assert!(
         reason(&packages, "not-semver").contains("doesn't match pattern"),
         "a non-SemVer version is rejected by the manifest schema"
@@ -313,7 +315,7 @@ fn manifest_rules_are_enforced() {
     );
 }
 
-/// Render the package's own pin for a directory, panicking when the package is unavailable.
+/// note: render the package's own pin for a directory, panicking when the package is unavailable.
 fn pin(packages: &[PatternPackage], package_dir: &str) -> String {
     packages
         .iter()
@@ -328,7 +330,7 @@ fn content_hash_pins_the_fragment_not_the_manifest() {
     let root = tempfile::tempdir().expect("temp root");
     let bytes = fragment("read", "read");
     valid_package(root.path(), "alpha", "read");
-    // Same fragment bytes, different manifest version: the pin is content, not metadata.
+    // why: same fragment bytes, different manifest version — the pin is content, not metadata.
     write_package(
         root.path(),
         "beta",
@@ -346,7 +348,7 @@ fn content_hash_pins_the_fragment_not_the_manifest() {
         "same bytes, same pin"
     );
 
-    // One changed byte of the fragment moves the pin; the untouched peer keeps its own.
+    // why: one changed byte of the fragment moves the pin; the untouched peer keeps its own.
     fs::write(
         root.path().join("alpha").join("workflow.ir.json"),
         bytes.replace("\"id\": \"probe\"", "\"id\": \"probe2\""),
@@ -360,8 +362,8 @@ fn content_hash_pins_the_fragment_not_the_manifest() {
 #[test]
 fn a_fragment_whose_pin_cannot_be_computed_is_unavailable() {
     let root = tempfile::tempdir().expect("temp root");
-    // A resolved asset without its own hash leaves the pin incomplete; that is a reason, never an
-    // available package with a null pin.
+    // why: a resolved asset without its own hash leaves the pin incomplete; that is a reason, never
+    // an available package with a null pin.
     let unpinned_asset = fragment("pure", "pure").replace(
         "\"assets\": []",
         "\"assets\": [{\"id\": \"tpl\", \"path\": \"tpl.md\", \"kind\": \"template\"}]",
@@ -401,7 +403,7 @@ fn a_missing_registry_root_is_an_empty_listing() {
 #[test]
 fn the_version_label_is_owned_by_the_manifest_schema() {
     let root = tempfile::tempdir().expect("temp root");
-    // SemVer 2.0.0 puts no ceiling on a numeric identifier, and the schema pattern is the only
+    // why: SemVer 2.0.0 puts no ceiling on a numeric identifier, and the schema pattern is the only
     // authority over the label, so the value a `u64`-backed parser would reject is accepted.
     write_package(
         root.path(),
@@ -426,7 +428,7 @@ fn the_version_label_is_owned_by_the_manifest_schema() {
     );
 }
 
-/// A FIFO member must be refused without being opened. The scan runs on its own thread, so a
+/// why: a FIFO member must be refused without being opened. The scan runs on its own thread, so a
 /// regression fails this test after a short wait instead of hanging the suite.
 #[cfg(unix)]
 #[test]

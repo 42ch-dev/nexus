@@ -9,12 +9,13 @@
 //! - Enum fields never leak vendor raw strings: `StatusLevel` is a closed
 //!   three-token set (`Info` | `Warning` | `Error`); the wildcard arm is the
 //!   drift gate for a new variant.
+// invariant: normalized fields carry only contract values.
 
 use nexus_agent_host::capability::model::{HostEvent, StatusLevel};
 
 use crate::model::{ConformanceFinding, InvariantId};
 
-/// The closed `error_category` token set (PD-3, AR-7).
+/// note: the closed `error_category` token set (PD-3, AR-7).
 const ERROR_CATEGORIES: [&str; 5] = [
     "decode_error",
     "stream_closed",
@@ -23,10 +24,10 @@ const ERROR_CATEGORIES: [&str; 5] = [
     "provider_error",
 ];
 
-/// The `error_message` byte cap applied by `truncate_error_message` (N-2).
+/// note: the `error_message` byte cap applied by `truncate_error_message` (N-2).
 const MAX_ERROR_MESSAGE_BYTES: usize = 512;
 
-/// Check forbidden-value exclusion over the collected events.
+/// note: check forbidden-value exclusion over the collected events.
 #[must_use]
 pub fn check(events: &[HostEvent]) -> Vec<ConformanceFinding> {
     let mut findings = Vec::new();
@@ -55,7 +56,7 @@ pub fn check(events: &[HostEvent]) -> Vec<ConformanceFinding> {
                 }
             }
             HostEvent::Status(status) => {
-                #[allow(unreachable_patterns)] // drift gate: new variant must trip conformance
+                #[allow(unreachable_patterns)] // why: drift gate — a new variant must trip conformance
                 match status.level {
                     StatusLevel::Info | StatusLevel::Warning | StatusLevel::Error => {}
                     _ => findings.push(ConformanceFinding {

@@ -9,12 +9,13 @@
 //! `SessionCreated` (session bootstrap precedes the operation) and `Status`
 //! (session-level status messages carry no `op_id`). The "terminal last" rule
 //! applies to every event kind.
+// invariant: `OpStarted` precedes op-scoped events; the terminal event is last.
 
 use nexus_agent_host::capability::model::HostEvent;
 
 use crate::model::{ConformanceFinding, InvariantId};
 
-/// Whether the event is operation-scoped and must follow `OpStarted`.
+/// note: whether the event is operation-scoped and must follow `OpStarted`.
 const fn is_op_scoped(event: &HostEvent) -> bool {
     matches!(
         event,
@@ -26,12 +27,12 @@ const fn is_op_scoped(event: &HostEvent) -> bool {
     )
 }
 
-/// Whether the event is a terminal event.
+/// note: whether the event is a terminal event.
 const fn is_terminal(event: &HostEvent) -> bool {
     matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
 }
 
-/// Human-readable variant name for finding messages.
+/// note: human-readable variant name for finding messages.
 const fn variant_name(event: &HostEvent) -> &'static str {
     match event {
         HostEvent::SessionCreated(_) => "SessionCreated",
@@ -48,7 +49,7 @@ const fn variant_name(event: &HostEvent) -> &'static str {
     }
 }
 
-/// Check lifecycle ordering over the collected events.
+/// note: check lifecycle ordering over the collected events.
 ///
 /// The missing-`OpStarted` case is owned by the [`crate::invariants::started`]
 /// invariant; ordering stays silent when no `OpStarted` exists so one root
@@ -189,8 +190,8 @@ mod tests {
 
     #[test]
     fn no_started_does_not_double_report_ordering() {
-        // The exactly-one-OpStarted invariant owns the missing-start case;
-        // ordering stays silent to avoid duplicate findings for one root cause.
+        // why: the exactly-one-OpStarted invariant owns the missing-start case; ordering stays
+        // silent to avoid duplicate findings for one root cause.
         let events = vec![message_delta(), op_finished(FinishReason::EndTurn)];
         let findings = check(&events);
         assert!(findings.is_empty(), "expected no findings: {findings:?}");

@@ -5,10 +5,13 @@
 //! and the effect rollup that schema cannot express. It is deliberately dependency-thin:
 //! `nexus-contracts` is the only dependency, so generators, Canvas and validators share the
 //! contract without pulling preset loading or orchestration.
+//!
+//! see schemas/daemon-api/orchestration/workflow-document.schema.json.
 
 pub use nexus_contracts::generated::daemon_api::orchestration::workflow_document::*;
 
-/// The workflow IR version this build composes, validates and resolves pattern packages against.
+/// note: the workflow IR version this build composes, validates and resolves pattern packages
+/// against.
 pub const IR_VERSION: u64 = 0;
 
 pub mod canonical;

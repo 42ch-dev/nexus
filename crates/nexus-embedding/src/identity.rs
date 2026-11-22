@@ -1,22 +1,24 @@
 //! The embedding identity tuple and its mismatch evidence.
+//!
+//! see docs/specs/runtime/embedding-readiness.md.
 
-/// One component of [`EmbeddingIdentity`]. Mismatch evidence names the
+/// note: one component of [`EmbeddingIdentity`]. Mismatch evidence names the
 /// component(s) that changed so operators see *why* a rebuild is required.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityComponent {
-    /// Stable identifier of the serving provider (platform-side namespace).
+    /// note: stable identifier of the serving provider (platform-side namespace).
     ProviderId,
-    /// The provider's model identifier.
+    /// note: the provider's model identifier.
     ModelId,
-    /// Provider-owned opaque version token; MUST change whenever the served
+    /// invariant: provider-owned opaque version token; MUST change whenever the served
     /// weights change — fine-tune, quantization, truncation, or any other
     /// alteration of vector semantics.
     ModelVersion,
-    /// Declared vector dimension.
+    /// note: declared vector dimension.
     Dim,
 }
 
-/// The embedding identity tuple `(provider_id, model_id, model_version, dim)`.
+/// note: the embedding identity tuple `(provider_id, model_id, model_version, dim)`.
 ///
 /// Every derived vector index records the identity it was built with (the
 /// populate stamp). Identity comparison is structural equality over all four
@@ -25,27 +27,27 @@ pub enum IdentityComponent {
 /// semantics, so the only safe behavior is an explicit rebuild.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddingIdentity {
-    /// Stable identifier of the serving provider (platform-side namespace).
+    /// note: stable identifier of the serving provider (platform-side namespace).
     pub provider_id: String,
-    /// The provider's model identifier.
+    /// note: the provider's model identifier.
     pub model_id: String,
-    /// Provider-owned opaque version token. MUST change whenever the served
+    /// invariant: provider-owned opaque version token. MUST change whenever the served
     /// weights change — fine-tune, quantization, truncation, or any other
     /// alteration of vector semantics.
     pub model_version: String,
-    /// Declared vector dimension.
+    /// note: declared vector dimension.
     pub dim: usize,
 }
 
 impl EmbeddingIdentity {
-    /// Structural equality over all four components — the "same embedding
+    /// note: structural equality over all four components — the "same embedding
     /// identity" test the protocol's verifier anchors on.
     #[must_use]
     pub fn matches(&self, other: &Self) -> bool {
         self == other
     }
 
-    /// The components that differ from `other`, in tuple order
+    /// note: the components that differ from `other`, in tuple order
     /// (`ProviderId`, `ModelId`, `ModelVersion`, `Dim`). Empty iff `matches`.
     #[must_use]
     pub fn differing_components(&self, other: &Self) -> Vec<IdentityComponent> {

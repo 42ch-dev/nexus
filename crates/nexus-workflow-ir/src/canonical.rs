@@ -6,16 +6,18 @@
 //! nest-child hash set. Nested members are hashed through the document body itself, so an
 //! expanded nest needs no extra input; a `defer_until_apply` child is unresolved by contract
 //! and is excluded until Apply records its hash.
+//!
+//! see docs/specs/contracts/canonical-hash.md.
 
 use crate::{WorkflowDocument, WorkflowNestBindingExpansion};
 use serde_json::Value;
 
-/// A document member is missing the resolved hash the identity requires.
+/// note: a document member is missing the resolved hash the identity requires.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalHashError {
-    /// The document could not be serialized to canonical JSON.
+    /// note: the document could not be serialized to canonical JSON.
     Serialize(String),
-    /// A resolved member carries no content hash, so the identity would be incomplete.
+    /// note: a resolved member carries no content hash, so the identity would be incomplete.
     MissingMemberHash(String),
 }
 
@@ -32,7 +34,7 @@ impl std::fmt::Display for CanonicalHashError {
 
 impl std::error::Error for CanonicalHashError {}
 
-/// Compute the Q3 canonical content hash of `document`.
+/// note: compute the Q3 canonical content hash of `document`.
 ///
 /// # Errors
 ///
@@ -41,7 +43,7 @@ impl std::error::Error for CanonicalHashError {}
 pub fn content_hash(document: &WorkflowDocument) -> Result<String, CanonicalHashError> {
     let mut body = serde_json::to_value(document)
         .map_err(|error| CanonicalHashError::Serialize(error.to_string()))?;
-    // The hash never covers itself: the candidate's optional `content_hash` is not identity.
+    // why: the hash never covers itself; the candidate's optional `content_hash` is not identity.
     if let Value::Object(members) = &mut body {
         members.remove("content_hash");
     }
@@ -81,7 +83,7 @@ fn feed(hasher: &mut blake3::Hasher, tag: &[u8], bytes: &[u8]) {
     hasher.update(bytes);
 }
 
-/// Sorted member hashes; a resolved member without one is an error, not an omission.
+/// note: sorted member hashes; a resolved member without one is an error, not an omission.
 fn resolved_hashes<'a>(
     members: impl Iterator<Item = (String, Option<&'a str>)>,
 ) -> Result<Vec<&'a str>, CanonicalHashError> {
@@ -92,7 +94,7 @@ fn resolved_hashes<'a>(
     Ok(hashes)
 }
 
-/// Rebuild every object with ascending keys so serialization order is content, not history.
+/// note: rebuild every object with ascending keys so serialization order is content, not history.
 fn sort_keys(value: &Value) -> Value {
     match value {
         Value::Object(members) => {
@@ -225,7 +227,7 @@ mod tests {
             content_hash(&missing),
             Err(CanonicalHashError::MissingMemberHash("nests[n1]".into()))
         );
-        // A deferred child is unresolved by contract: Apply records its hash later.
+        // why: a deferred child is unresolved by contract; Apply records its hash later.
         assert!(content_hash(&deferred).is_ok());
     }
 }

@@ -23,9 +23,11 @@
 //!   ([`invariants::stop_reason`])
 //! - forbidden-value exclusion: closed `error_category`, 512-byte
 //!   `error_message` cap, closed enum fields ([`invariants::values`])
+//!
+//! see docs/specs/architecture/rust-core-service-boundary.md.
 
 #![deny(clippy::unwrap_used)]
-// Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
+// why: test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
 #![cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
@@ -40,7 +42,7 @@ use std::time::Instant;
 
 use nexus_agent_host::capability::model::HostEventStream;
 
-/// Run the conformance checks over one operation stream.
+/// note: run the conformance checks over one operation stream.
 ///
 /// Collects the stream under the configured bounds, then evaluates every
 /// invariant over the collected events. The returned report carries one typed
@@ -74,6 +76,7 @@ pub async fn run_conformance(
 #[cfg(test)]
 pub(crate) mod test_support {
     //! Helpers that build real `HostEvent` values for invariant tests.
+    // note: fixtures build real types, never mocks.
 
     use nexus_agent_host::capability::model::{
         FinishReason, HostEvent, OperationFailedEvent, OperationFinishedEvent,

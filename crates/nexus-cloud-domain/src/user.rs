@@ -1,12 +1,12 @@
 //! User aggregate — end-user account identity.
 //!
-//! Aligned with data-model-v1.md §5.1.
+// note: aligned with data-model-v1.md §5.1.
 
 use crate::errors::CloudDomainError;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// Account lifecycle status (spec §5.1).
+/// note: account lifecycle status (spec §5.1).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountStatus {
@@ -26,7 +26,7 @@ impl AccountStatus {
     }
 }
 
-/// Subscription / entitlements tier (spec §5.1).
+/// note: subscription / entitlements tier (spec §5.1).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionTier {
@@ -48,7 +48,7 @@ impl SubscriptionTier {
     }
 }
 
-/// User aggregate — platform identity for auth and sync attribution.
+/// note: platform identity used for auth and sync attribution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
     pub schema_version: u32,
@@ -64,7 +64,7 @@ pub struct User {
 }
 
 impl User {
-    /// New user with active account and free tier.
+    /// note: new user with active account and free tier.
     #[must_use]
     pub fn register(user_id: &str, username: &str, email: &str, display_name: &str) -> Self {
         Self {
@@ -80,7 +80,7 @@ impl User {
         }
     }
 
-    /// Suspend an active account.
+    /// note: suspend an active account.
     ///
     /// # Errors
     ///
@@ -100,10 +100,11 @@ impl User {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
+    /// note: soft-delete marker (`account_status` = deleted).
     ///
     /// # Errors
-    /// Returns `Err(CloudDomainError::...)` if validation fails.
-    /// Soft-delete marker (`account_status` = deleted).
+    ///
+    /// Returns [`CloudDomainError::AlreadyInState`] when already deleted.
     pub fn mark_deleted(&mut self) -> Result<(), CloudDomainError> {
         if self.account_status == AccountStatus::Deleted.as_str() {
             return Err(CloudDomainError::AlreadyInState("deleted".to_string()));
@@ -112,13 +113,11 @@ impl User {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
+    /// note: change subscription tier (blocked when deleted).
     ///
     /// # Errors
-    /// Returns `Err(CloudDomainError::...)` if validation fails.
     ///
-    /// # Errors
-    /// Returns `Err(CloudDomainError::...)` if validation fails.
-    /// Change subscription tier (blocked when deleted).
+    /// Returns [`CloudDomainError::InvalidState`] when the account is deleted.
     pub fn set_subscription_tier(
         &mut self,
         tier: SubscriptionTier,

@@ -9,6 +9,7 @@
 //! - [`stop_reason`] — `FinishReason` / `SessionStopReason` closed-set values.
 //! - [`values`] — forbidden-value exclusion (`error_category` closed set,
 //!   512-byte `error_message` cap, closed enum fields).
+// note: each submodule owns one invariant and reports typed findings.
 
 pub mod bounds;
 pub mod ordering;

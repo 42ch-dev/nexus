@@ -21,11 +21,11 @@
 //! passed through the provider constructors — no PATH mutation, so the
 //! `nexus-agent-host` `PROCESS_ENV_LOCK` (pub(crate), cross-crate
 //! inaccessible) is not needed here.
+// note: every adapter goes through the neutral runner, never bespoke assertions.
 
-// Test-only: adapters' execute/cancel return nested Results over async
-// streams; unwrapping in assertions keeps failure modes readable, and the
-// fixture harness (not product code) owns the panics. File-scoped to the
-// integration tests only.
+// why: adapters' execute/cancel return nested Results over async streams;
+// unwrapping in assertions keeps failure modes readable, and the fixture harness
+// (not product code) owns the panics. File-scoped to the integration tests only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::unwrap_in_result)]
 
 use std::collections::HashMap;
@@ -99,7 +99,7 @@ fn invariant_ids(report: &ConformanceReport) -> Vec<InvariantId> {
     report.findings.iter().map(|f| f.invariant).collect()
 }
 
-/// Assert the report's ONLY finding is the missing-OpStarted adapter gap
+/// note: assert the report's only finding is the missing-OpStarted adapter gap
 /// (claude pinned conformance record).
 fn assert_only_missing_started(report: &ConformanceReport) {
     assert!(
@@ -124,7 +124,7 @@ fn terminal_of(events: &[HostEvent]) -> Option<&HostEvent> {
         .find(|e| matches!(e, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
 }
 
-/// Unique per-test request-log path (fixture `REQ_LOG` knob).
+/// note: unique per-test request-log path (fixture `REQ_LOG` knob).
 fn req_log(label: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "nexus-provider-conformance-{}-{label}.log",
@@ -134,7 +134,7 @@ fn req_log(label: &str) -> PathBuf {
     path
 }
 
-/// Poll `path` until `needle` appears in its content or the deadline passes.
+/// note: poll `path` until `needle` appears in its content or the deadline passes.
 async fn wait_for_log(path: &Path, needle: &str, timeout: Duration) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
@@ -150,7 +150,7 @@ async fn wait_for_log(path: &Path, needle: &str, timeout: Duration) -> bool {
     }
 }
 
-// ── Claude (stream-json) ────────────────────────────────────────────────
+// note: Claude (stream-json) adapter.
 
 #[tokio::test]
 async fn claude_happy_path_conforms_except_missing_started() {
@@ -185,7 +185,7 @@ async fn claude_mid_stream_tool_call_conforms_except_missing_started() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // The tool_use block is AR-1-skipped by the mapper: no ToolCall event.
+    // why: the tool_use block is AR-1-skipped by the mapper; no ToolCall event.
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
         "tool_use blocks carry no host event this iteration (AR-1): {events:?}"
@@ -239,7 +239,7 @@ async fn claude_cancel_terminates_fixture() {
         .await
         .expect("execute");
 
-    // Pump the first frame so the turn is visibly streaming.
+    // why: pump the first frame so the turn is visibly streaming.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::MessageDelta(_)));
     assert!(
@@ -266,7 +266,7 @@ async fn claude_cancel_terminates_fixture() {
     assert_only_missing_started(&report);
 }
 
-// ── Codex (app-server JSON-RPC) ────────────────────────────────────────
+// note: Codex (app-server JSON-RPC) adapter.
 
 #[tokio::test]
 async fn codex_happy_path_conforms() {
@@ -301,8 +301,8 @@ async fn codex_mid_stream_tool_call_conforms() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // item/toolUse is an unknown method in codex-codes 0.146.4: parsed as
-    // Notification::Unknown and mapper-skipped (AR-1) — no ToolCall event.
+    // why: item/toolUse is an unknown method in codex-codes 0.146.4 — parsed as
+    // Notification::Unknown and mapper-skipped (AR-1), so no ToolCall event.
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
         "tool-use notifications carry no host event this iteration (AR-1): {events:?}"
@@ -356,7 +356,7 @@ async fn codex_cancel_interrupts_turn() {
         .await
         .expect("execute");
 
-    // Pump the first frame so the turn is visibly streaming.
+    // why: pump the first frame so the turn is visibly streaming.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::OpStarted(_)));
 
@@ -380,7 +380,7 @@ async fn codex_cancel_interrupts_turn() {
     assert_passes(&report);
 }
 
-/// Mutation probe: one flipped fixture frame must turn the runner red.
+/// note: mutation probe — one flipped fixture frame must turn the runner red.
 ///
 /// The `mutate` scenario flips the `turn/started` notification's turn id to a
 /// stale value; the provider's B-1 stale filter skips it, so the normalized
@@ -415,9 +415,9 @@ async fn codex_mutated_frame_turns_runner_red() {
     );
 }
 
-// ── Dsh (deepseek-harness-sdk runtime) ──────────────────────────────────
+// note: Dsh (deepseek-harness-sdk runtime) adapter.
 
-/// Hermetic dsh provider env (P0 T2): the SDK resolves/creates `DSH_HOME`
+/// note: hermetic dsh provider env (P0 T2) — the SDK resolves/creates `DSH_HOME`
 /// at harness start, so every dsh conformance run gets an isolated
 /// caller-env `DSH_HOME` plus a `REQ_LOG` the fixture records its launch
 /// identity (`_spawn`: exact argv + `DSH_HOME`) and requests into.
@@ -435,8 +435,8 @@ fn dsh_env(scenario: &str, label: &str) -> (HashMap<String, String>, PathBuf, Pa
     (env, log, home)
 }
 
-/// Assert the P0 T2 ordinary launch identity from the fixture's request
-/// log: exactly one runtime spawn with argv exactly `--profile sdk`, the
+/// note: assert the P0 T2 ordinary launch identity from the fixture's request
+/// log — exactly one runtime spawn with argv exactly `--profile sdk`, the
 /// caller-env `DSH_HOME` injected, and `initialize` before the one wire
 /// prompt. The log is fixture-written JSONL (default `json.dumps`
 /// separators), asserted by exact substring rather than a serde dep.
@@ -512,7 +512,7 @@ async fn dsh_mid_stream_tool_call_conforms() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // The tool/call event is collected as raw noise by the SDK; the
+    // why: the tool/call event is collected as raw noise by the SDK; the
     // normalized surface never surfaces tool calls (AR-6).
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
@@ -572,7 +572,7 @@ async fn dsh_cancel_is_honest_noop() {
         .await
         .expect("execute");
 
-    // Exactly one OpStarted precedes content (P0 T2); P1 maps committed
+    // why: exactly one OpStarted precedes content (P0 T2); P1 maps committed
     // assistant/message units into MessageDelta before the terminal.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::OpStarted(_)));
@@ -589,7 +589,7 @@ async fn dsh_cancel_is_honest_noop() {
         "the turn must complete normally — dsh cancel is a documented no-op \
          (AR-6), the fixture is NOT terminated: {events:?}"
     );
-    // The fixture never saw a cancellation: its request log shows the
+    // why: the fixture never saw a cancellation — its request log shows the
     // normal _spawn + initialize + session/prompt sequence (no cancel RPC
     // exists).
     let log_content = std::fs::read_to_string(&log).unwrap_or_default();
@@ -661,6 +661,6 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
         ),
         "{events:?}"
     );
-    // P1 maps non-success finish reasons to typed OpFailed categories; the
+    // why: P1 maps non-success finish reasons to typed OpFailed categories; the
     // neutral runner's closed error_category set is unchanged in P1.
 }

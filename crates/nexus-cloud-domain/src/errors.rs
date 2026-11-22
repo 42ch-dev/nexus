@@ -1,24 +1,25 @@
 //! Cloud-domain error types.
+// note: one error enum is shared by the User and Pairing aggregates.
 
 use thiserror::Error;
 
-/// Error type for User and Pairing domain operations.
+/// note: error type for User and Pairing domain operations.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CloudDomainError {
-    /// Entity is already in the target state.
+    /// note: entity is already in the target state.
     #[error("entity is already in state: {0}")]
     AlreadyInState(String),
 
-    /// Entity is not in the expected state.
+    /// note: entity is not in the expected state.
     #[error("entity is not in expected state: expected {expected}, got {actual}")]
     InvalidState {
-        /// Expected state.
+        /// note: expected state.
         expected: String,
-        /// Actual state.
+        /// note: actual state.
         actual: String,
     },
 
-    /// Validation error.
+    /// note: validation error.
     #[error("validation error: {0}")]
     ValidationError(String),
 }

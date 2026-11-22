@@ -4,6 +4,7 @@
 //! Every `unsafe` block below wraps exactly one documented OS call
 //! (`fchown`, `f*listxattr`/`f*getxattr`/`f*setxattr`/`f*removexattr`, and the
 //! macOS `acl_*` family) and states the buffer/descriptor contract it relies on.
+// safety: each unsafe site states the buffer and descriptor contract it relies on.
 
 use std::ffi::{CStr, CString};
 use std::fs::{File, Permissions};
@@ -13,7 +14,7 @@ use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as 
 use std::path::Path;
 use std::ptr;
 
-/// The policy a publication must carry from the old document to the new one.
+/// note: the policy a publication must carry from the old document to the new one.
 pub struct UnixPolicy {
     uid: u32,
     gid: u32,
@@ -23,19 +24,19 @@ pub struct UnixPolicy {
     acl: Option<AclHandle>,
 }
 
-/// The "no such attribute" errno of this platform.
+/// note: the "no such attribute" errno of this platform.
 #[cfg(target_os = "linux")]
 const NO_ATTR: libc::c_int = libc::ENODATA;
-/// The "no such attribute" errno of this platform.
+/// note: the "no such attribute" errno of this platform.
 #[cfg(target_os = "macos")]
 const NO_ATTR: libc::c_int = libc::ENOATTR;
 
-/// Create the staging directory owner-only.
+/// note: create the staging directory owner-only.
 pub fn create_staging_directory(directory: &Path) -> io::Result<()> {
     std::fs::DirBuilder::new().mode(0o700).create(directory)
 }
 
-/// Make the staging directory private before its child exists.
+/// safety: make the staging directory private before its child exists.
 ///
 /// The directory is created before the document file, so removing its ACLs here
 /// means the file is created without any inherited grant: no other principal can
@@ -87,7 +88,7 @@ pub fn seal_staging_directory(directory: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The document's hard-link count.
+/// note: the document's hard-link count.
 pub fn link_count(target: &Path) -> io::Result<u64> {
     Ok(std::fs::metadata(target)?.nlink())
 }
@@ -118,8 +119,8 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
         }
     }
 
-    // Replace the inherited ACL/extended policy *before* restoring group bits:
-    // widening the mode first would reopen a named ACE inherited from the
+    // why: replace the inherited ACL/extended policy *before* restoring group bits.
+    // Widening the mode first would reopen a named ACE inherited from the
     // target directory for the rest of the window.
     for (name, value) in &policy.xattrs {
         if read_xattr(descriptor, name)?.is_some_and(|existing| existing == *value) {
@@ -130,7 +131,7 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        // A directory default ACL is inherited by the staging file. Drop it when
+        // why: a directory default ACL is inherited by the staging file. Drop it when
         // the target had no access ACL, so the replacement cannot grant more
         // than the document it replaces.
         let acl = c"system.posix_acl_access";
@@ -151,13 +152,13 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
                     return Err(io::Error::last_os_error());
                 }
             }
-            // The target had no extended ACL: clear any ACL the staging file
+            // why: the target had no extended ACL; clear any ACL the staging file
             // inherited so the replacement cannot grant more.
             None => clear_acl(descriptor)?,
         }
     }
 
-    // The mode is applied last: on Linux this records the captured ACL mask,
+    // why: the mode is applied last — on Linux this records the captured ACL mask,
     // on macOS it records the captured mode beside the explicit ACL entries.
     file.set_permissions(Permissions::from_mode(policy.mode))
 }
@@ -191,7 +192,7 @@ pub fn access_policy_blob(target: &Path) -> io::Result<Vec<u8>> {
     }
 }
 
-/// Read every extended attribute of the open document.
+/// note: read every extended attribute of the open document.
 fn read_xattrs(descriptor: RawFd) -> io::Result<Vec<(CString, Vec<u8>)>> {
     let size = list_xattr(descriptor, ptr::null_mut(), 0);
     if size < 0 {
@@ -221,7 +222,7 @@ fn read_xattrs(descriptor: RawFd) -> io::Result<Vec<(CString, Vec<u8>)>> {
         }
         let name = CString::new(name.to_vec())
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        // A name that disappeared between the list and the read is simply gone.
+        // why: a name that disappeared between the list and the read is simply gone.
         if let Some(value) = read_xattr(descriptor, &name)? {
             xattrs.push((name, value));
         }
@@ -277,7 +278,7 @@ fn remove_xattr(descriptor: RawFd, name: &CStr) -> io::Result<()> {
     Err(error)
 }
 
-/// Convert a non-negative syscall length, refusing a negative result.
+/// note: convert a non-negative syscall length, refusing a negative result.
 fn checked_len(length: libc::ssize_t, what: &str) -> io::Result<usize> {
     usize::try_from(length).map_err(|_| {
         io::Error::new(
@@ -287,10 +288,10 @@ fn checked_len(length: libc::ssize_t, what: &str) -> io::Result<usize> {
     })
 }
 
-/// Whether the filesystem does not support extended attributes at all.
+/// note: whether the filesystem does not support extended attributes at all.
 fn is_unsupported(error: &io::Error) -> bool {
     let code = error.raw_os_error();
-    // Written as one expression per platform: clippy 1.100 rejects an
+    // why: written as one expression per platform — clippy 1.100 rejects an
     // early-return `if` followed by a bool tail, and on Linux the macOS-only
     // branch below is compiled away, exposing exactly that shape.
     #[cfg(target_os = "macos")]
@@ -378,7 +379,7 @@ extern "C" {
     fn acl_to_text(acl: *mut libc::c_void, length: *mut libc::ssize_t) -> *mut libc::c_char;
 }
 
-/// An owned macOS ACL handle.
+/// note: an owned macOS ACL handle.
 #[cfg(target_os = "macos")]
 pub struct AclHandle(pub *mut libc::c_void);
 
@@ -392,7 +393,7 @@ impl Drop for AclHandle {
     }
 }
 
-/// Capture the document's extended ACL, or `None` when it has none.
+/// note: capture the document's extended ACL, or `None` when it has none.
 ///
 /// `acl_get_fd` reports "no ACL" as a null handle, so errno is cleared first and
 /// then classified: only "no ACL" is a normal absence; any other failure is
@@ -417,7 +418,7 @@ fn read_acl(descriptor: RawFd) -> io::Result<Option<AclHandle>> {
     Ok(Some(AclHandle(acl)))
 }
 
-/// Clear the object's ACL (an empty ACL grants nothing).
+/// note: clear the object's ACL (an empty ACL grants nothing).
 #[cfg(target_os = "macos")]
 fn clear_acl(descriptor: RawFd) -> io::Result<()> {
     // SAFETY: acl_init returns an owned, empty handle (or null).
@@ -448,7 +449,7 @@ mod tests {
 
     static NEXT: AtomicU32 = AtomicU32::new(0);
 
-    /// Take a fresh scratch directory by exclusive creation: a name this call
+    /// why: take a fresh scratch directory by exclusive creation — a name this call
     /// did not create is never removed.
     fn scratch_directory() -> PathBuf {
         loop {
@@ -473,7 +474,7 @@ mod tests {
             & 0o7777
     }
 
-    /// SEC-01: a mode another principal widened through inherited authority
+    /// why: SEC-01 — a mode another principal widened through inherited authority
     /// before sealing must not survive it, and sealing must refuse a directory
     /// it can no longer make owner-only rather than publishing from it.
     #[test]

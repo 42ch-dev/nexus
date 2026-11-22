@@ -6,17 +6,18 @@
 //! violates the contract (the `ProviderAdapter::execute` doc: "The stream MUST
 //! emit exactly one terminal event (`OpFinished` or `OpFailed`) before
 //! ending").
+// invariant: exactly one terminal event, then the stream ends.
 
 use nexus_agent_host::capability::model::HostEvent;
 
 use crate::model::{ConformanceFinding, InvariantId};
 
-/// Whether the event is a terminal event.
+/// note: whether the event is a terminal event.
 const fn is_terminal(event: &HostEvent) -> bool {
     matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
 }
 
-/// Check the single-terminal contract over the collected events.
+/// note: check the single-terminal contract over the collected events.
 ///
 /// `stream_error` carries the first stream-level `Err` item
 /// `(event index, message)` observed by the bounded collector, if any.
