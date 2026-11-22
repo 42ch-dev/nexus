@@ -136,7 +136,6 @@ pub fn run(cmd: CapabilityCommand, _config: &CliConfig, _output_format: &str) ->
     }
 }
 
-
 /// note: Validate a capability descriptor (and optionally its module pair).
 ///
 /// Exit 2 on descriptor/manifest failure (field-level), exit 3 on pairing
@@ -180,7 +179,6 @@ fn cmd_validate(
     }
     Ok(())
 }
-
 
 /// note: Re-verify the trio and install it into `~/.nexus42/capabilities/<name>/`
 /// (AR-35 layout: `capability.json` + `manifest.json` + `<module-id>.wasm`).
@@ -301,7 +299,6 @@ fn cmd_install(
     }
     Ok(())
 }
-
 
 /// note: Build a [`CliError::ComputeExit`] with an AR-41 exit code.
 fn capability_exit(code: i32, message: impl Into<String>) -> CliError {
@@ -692,7 +689,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn validate_accepts_valid_descriptor_only() {
         let dir = tempfile::tempdir().unwrap();
@@ -908,7 +904,6 @@ mod tests {
         assert_eq!(parsed["errors"][0]["field"], "name");
         assert_eq!(parsed["errors"][0]["message"], "invalid name");
     }
-
 
     #[test]
     fn install_copies_trio_to_capabilities_dir() {

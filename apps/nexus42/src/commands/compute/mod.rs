@@ -129,7 +129,6 @@ pub fn run(cmd: ComputeCommand, _config: &CliConfig, _output_format: &str) -> Re
     }
 }
 
-
 /// note: Build a module daemon-free and stage the pair under `dist/<module_id>/`.
 #[allow(clippy::too_many_lines)]
 fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
@@ -272,7 +271,6 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
     );
     Ok(())
 }
-
 
 /// note: Validate a manifest (and optionally its `wasm_sha256` pairing).
 ///
@@ -454,7 +452,6 @@ fn field_error(message: String) -> FieldError {
     FieldError { field, message }
 }
 
-
 /// note: Re-verify pairing and copy the pair into `~/.nexus42/modules/<id>/`.
 ///
 /// Exit vocabulary (I1): 2 = validation failure (bad module id, unreadable/
@@ -549,7 +546,6 @@ fn cmd_install(
     }
     Ok(())
 }
-
 
 /// note: Build a [`CliError::ComputeExit`] with an AR-9 exit code.
 fn compute_exit(code: i32, message: impl Into<String>) -> CliError {

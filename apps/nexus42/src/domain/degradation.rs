@@ -579,7 +579,6 @@ impl DegradationGuard {
 mod tests {
     use super::*;
 
-
     #[test]
     fn default_policy_has_expected_values() {
         let policy = DegradationPolicy::default();
@@ -615,7 +614,6 @@ mod tests {
         let deserialized: DegradationPolicy = serde_json::from_str(&json).unwrap();
         assert_eq!(policy, deserialized);
     }
-
 
     #[test]
     fn degradation_state_depths() {
@@ -677,7 +675,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn healthy_check_result() {
         let result = HealthCheckResult::healthy(42);
@@ -693,7 +690,6 @@ mod tests {
         assert!(result.response_time_ms.is_none());
         assert_eq!(result.error_message, Some("connection refused".to_string()));
     }
-
 
     #[test]
     fn guard_starts_in_normal_state() {
@@ -918,7 +914,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn snapshot_new_creates_default() {
         let snap = DegradationSnapshot::new(DegradationState::Normal, 0);
@@ -955,7 +950,6 @@ mod tests {
         let back: DegradationSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(snap, back);
     }
-
 
     #[test]
     fn display_label_returns_human_readable() {

@@ -126,7 +126,6 @@ pub enum SyncCommand {
     },
 }
 
-
 /// note: Sync status from the local outbox.
 #[derive(Debug)]
 pub struct SyncStatusInfo {
@@ -137,7 +136,6 @@ pub struct SyncStatusInfo {
     pub failed_count: usize,
     pub conflicted_count: usize,
 }
-
 
 /// note: Check whether the user confirms a destructive auto-reject action.
 ///
@@ -163,7 +161,6 @@ pub fn confirm_auto_reject(force: bool) -> bool {
             false
         })
 }
-
 
 /// Run sync command.
 ///
@@ -358,7 +355,6 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
 
     Ok(())
 }
-
 
 /// note: Get local outbox status by opening the CLI's state.db.
 async fn get_local_outbox_status(config: &CliConfig) -> Result<SyncStatusInfo> {

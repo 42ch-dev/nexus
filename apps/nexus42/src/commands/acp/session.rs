@@ -22,7 +22,6 @@ use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use nexus_acp_host::{SessionEntry, SessionManager};
 
-
 #[derive(Debug, Subcommand)]
 pub enum SessionCommand {
     /// List persisted ACP sessions
@@ -51,7 +50,6 @@ pub enum SessionCommand {
     },
 }
 
-
 /// note: Run a session command.
 ///
 /// # Errors
@@ -70,7 +68,6 @@ pub fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
         SessionCommand::Delete { session_id } => run_delete(&manager, &session_id),
     }
 }
-
 
 fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
     // note: Auto-cleanup expired sessions unless --all flag is set
@@ -173,7 +170,6 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
 
     Ok(())
 }
-
 
 /// note: Print detailed session information.
 fn print_session_details(session: &SessionEntry) {

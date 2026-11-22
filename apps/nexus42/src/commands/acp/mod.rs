@@ -32,7 +32,6 @@ use clap::Subcommand;
 use nexus_acp_host::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
 use nexus_acp_host::transport::AgentSpawner;
 
-
 /// note: Output format for list/show commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -53,7 +52,6 @@ impl std::str::FromStr for OutputFormat {
         }
     }
 }
-
 
 /// Registry subcommands
 // note: clap renders this doc as --help text; keep the text stable
@@ -170,7 +168,6 @@ pub enum AcpCommand {
     },
 }
 
-
 /// note: Run ACP command.
 ///
 /// # Errors
@@ -207,7 +204,6 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
         } => cmd_run(&agent_ref, message, cwd, run_id).await,
     }
 }
-
 
 pub(super) async fn cmd_probe(_registry_flag: bool, agent: Option<String>) -> Result<()> {
     match agent {
@@ -329,7 +325,6 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
     Ok(())
 }
 
-
 pub(super) async fn cmd_registry_list(format_str: &str) -> Result<()> {
     let output_format: OutputFormat = format_str
         .parse()
@@ -441,7 +436,6 @@ fn print_list_json(
     Ok(())
 }
 
-
 pub(super) async fn cmd_registry_inspect(agent_ref: &str) -> Result<()> {
     let client = RegistryClient::new()?;
     let registry = client.get_registry().await?;
@@ -482,7 +476,6 @@ fn print_show_details(agent: &AgentEntry) {
     );
     println!("Source: {source_detail}");
 }
-
 
 /// note: File name for the persisted default agent config (TOML).
 const DEFAULT_AGENT_CONFIG_FILE: &str = "acp-default-agent.toml";
@@ -627,7 +620,6 @@ pub(crate) fn default_agent_ref(config: &CliConfig) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-
 /// note: Resolve the launch command from an agent's distribution metadata.
 pub(super) fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
     if let Some(ref npx) = agent.distribution.npx {
@@ -712,7 +704,6 @@ fn describe_distribution(agent: &AgentEntry) -> String {
         _ => "unknown".to_string(),
     }
 }
-
 
 /// note: Run an ACP agent interactively or with a single message.
 ///
@@ -1026,7 +1017,6 @@ fn interactive_prompt_loop(
 
     Ok(())
 }
-
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
