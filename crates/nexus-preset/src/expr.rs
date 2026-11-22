@@ -36,41 +36,42 @@
 //!   stack overflow from user-installable presets with deeply-nested `when:` expressions.
 //! * Depth counter is incremented at each recursive descent (parens, binary ops, unary NOT).
 //! * Exceeding the limit returns [`ExprError::DepthExceeded`].
+// note: the grammar, null semantics and depth bound above are the caller-facing contract.
 
 use std::fmt;
 
-/// Maximum expression nesting depth to prevent stack overflow from deeply
+/// note: Maximum expression nesting depth to prevent stack overflow from deeply
 /// nested `when:` expressions in user-installable presets (V1.56 P2 fix-wave, W-003).
 pub const MAX_EXPR_DEPTH: u32 = 32;
 
-/// Expression AST node.
+/// note: Expression AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    /// Boolean literal (`true` / `false`).
+    /// note: Boolean literal (`true` / `false`).
     Bool(bool),
-    /// Numeric literal (stored as f64; integer literals are normalized).
+    /// note: Numeric literal (stored as f64; integer literals are normalized).
     Number(f64),
-    /// String literal (without surrounding quotes).
+    /// note: String literal (without surrounding quotes).
     Str(String),
-    /// Null literal.
+    /// note: Null literal.
     Null,
-    /// Context field access: `_context.<path>`.
+    /// note: Context field access: `_context.<path>`.
     FieldAccess { path: Vec<String> },
-    /// Comparison: `lhs op rhs`.
+    /// note: Comparison: `lhs op rhs`.
     Comparison {
         lhs: Box<Self>,
         op: CmpOp,
         rhs: Box<Self>,
     },
-    /// Logical AND: `lhs && rhs`.
+    /// note: Logical AND: `lhs && rhs`.
     And(Box<Self>, Box<Self>),
-    /// Logical OR: `lhs || rhs`.
+    /// note: Logical OR: `lhs || rhs`.
     Or(Box<Self>, Box<Self>),
-    /// Logical NOT: `!inner`.
+    /// note: Logical NOT: `!inner`.
     Not(Box<Self>),
 }
 
-/// Comparison operator.
+/// note: Comparison operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmpOp {
     Eq,
@@ -94,22 +95,22 @@ impl fmt::Display for CmpOp {
     }
 }
 
-/// Errors that can occur during expression parsing or evaluation.
+/// note: Errors that can occur during expression parsing or evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprError {
-    /// Unexpected character or token at a given position.
+    /// note: Unexpected character or token at a given position.
     Parse {
         pos: usize,
         message: String,
         full_expr: String,
     },
-    /// Expected a value but reached end of input.
+    /// note: Expected a value but reached end of input.
     UnexpectedEnd { message: String, full_expr: String },
-    /// Field not found in context.
+    /// note: Field not found in context.
     FieldNotFound { path: String },
-    /// Type mismatch (e.g. comparing string to int).
+    /// note: Type mismatch (e.g. comparing string to int).
     TypeError { message: String },
-    /// Expression exceeds maximum nesting depth (V1.56 P2 fix-wave, W-003).
+    /// note: Expression exceeds maximum nesting depth (V1.56 P2 fix-wave, W-003).
     DepthExceeded(u32),
 }
 
@@ -142,11 +143,8 @@ impl fmt::Display for ExprError {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parser
-// ---------------------------------------------------------------------------
 
-/// Parse an expression string into an AST.
+/// note: Parse an expression string into an AST.
 ///
 /// # Errors
 ///
@@ -162,7 +160,6 @@ pub fn parse(input: &str) -> Result<Expr, ExprError> {
         depth: 0,
     };
     let expr = parser.parse_or_expr()?;
-    // Ensure we consumed all tokens.
     if parser.pos < parser.tokens.len() {
         let remaining: String = parser.tokens[parser.pos..]
             .iter()
@@ -258,13 +255,11 @@ fn tokenize(input: &str) -> Vec<Token> {
     while i < len {
         let ch = chars[i];
 
-        // Whitespace
         if ch.is_whitespace() {
             i += 1;
             continue;
         }
 
-        // Two-char operators
         if i + 1 < len {
             let next = chars[i + 1];
             match (ch, next) {
@@ -302,7 +297,6 @@ fn tokenize(input: &str) -> Vec<Token> {
             }
         }
 
-        // Single-char tokens
         match ch {
             '>' => {
                 tokens.push(Token::Gt((i, i + 1)));
@@ -337,11 +331,10 @@ fn tokenize(input: &str) -> Vec<Token> {
             _ => {}
         }
 
-        // String literals (single or double quoted)
         if ch == '\'' || ch == '"' {
             let quote = ch;
             let start = i;
-            i += 1; // skip opening quote
+            i += 1;
             let mut s = String::new();
             while i < len && chars[i] != quote {
                 if chars[i] == '\\' && i + 1 < len {
@@ -362,13 +355,12 @@ fn tokenize(input: &str) -> Vec<Token> {
                 i += 1;
             }
             if i < len {
-                i += 1; // skip closing quote
+                i += 1;
             }
             tokens.push(Token::StringLit(s, (start, i)));
             continue;
         }
 
-        // Numbers
         if ch.is_ascii_digit() || (ch == '-' && i + 1 < len && chars[i + 1].is_ascii_digit()) {
             let start = i;
             let mut num_str = String::new();
@@ -385,7 +377,6 @@ fn tokenize(input: &str) -> Vec<Token> {
             continue;
         }
 
-        // Identifiers / keywords
         if ch.is_ascii_alphabetic() || ch == '_' {
             let start = i;
             let mut ident = String::new();
@@ -402,7 +393,6 @@ fn tokenize(input: &str) -> Vec<Token> {
             continue;
         }
 
-        // Unknown character
         return vec![Token::Ident(
             format!("<unexpected char '{ch}'>"),
             (i, i + 1),
@@ -420,7 +410,7 @@ struct Parser {
 }
 
 impl Parser {
-    /// Check and bump depth. Returns `Err(DepthExceeded)` if depth exceeds `MAX_EXPR_DEPTH`.
+    /// note: Check and bump depth. Returns `Err(DepthExceeded)` if depth exceeds `MAX_EXPR_DEPTH`.
     const fn check_depth(&mut self) -> Result<(), ExprError> {
         self.depth += 1;
         if self.depth > MAX_EXPR_DEPTH {
@@ -438,7 +428,6 @@ impl Parser {
         if tok.is_some() {
             self.pos += 1;
         }
-        // Return the token we just advanced past (at old position).
         self.tokens.get(self.pos - 1)
     }
 
@@ -466,7 +455,6 @@ impl Parser {
         matches!(self.peek(), Some(Token::Bang(_)))
     }
 
-    // expr = or_expr
     fn parse_or_expr(&mut self) -> Result<Expr, ExprError> {
         let mut left = self.parse_and_expr()?;
         while self.is_oror() {
@@ -514,10 +502,9 @@ impl Parser {
                 }
             }
             Some(Token::Ident(_, _)) => {
-                // Could be field_access or comparison if followed by cmp_op,
+                // note: Could be field_access or comparison if followed by cmp_op,
                 // or a bare field_access (truthy check).
                 let field = self.parse_field_access()?;
-                // Peek for comparison operator
                 let cmp_op = match self.peek() {
                     Some(Token::EqEq(_)) => Some(CmpOp::Eq),
                     Some(Token::Ne(_)) => Some(CmpOp::Ne),
@@ -529,7 +516,7 @@ impl Parser {
                 };
                 if let Some(op) = cmp_op {
                     self.advance();
-                    // RHS can be a literal OR another field access.
+                    // note: RHS can be a literal OR another field access.
                     let rhs = self.parse_primary()?;
                     Ok(Expr::Comparison {
                         lhs: Box::new(field),
@@ -537,7 +524,7 @@ impl Parser {
                         rhs: Box::new(rhs),
                     })
                 } else {
-                    // Bare field access — truthy check at eval time.
+                    // note: Bare field access — truthy check at eval time.
                     Ok(field)
                 }
             }
@@ -549,7 +536,7 @@ impl Parser {
                 | Token::Null(_),
             ) => {
                 let lhs = self.parse_value()?;
-                // Check if it's followed by a comparison operator (for cases like `"abc" == field`)
+                // note: Check if it's followed by a comparison operator (for cases like `"abc" == field`)
                 let cmp_op = match self.peek() {
                     Some(Token::EqEq(_)) => Some(CmpOp::Eq),
                     Some(Token::Ne(_)) => Some(CmpOp::Ne),
@@ -571,7 +558,7 @@ impl Parser {
         }
     }
 
-    /// Parse a contextual field access: `_context` [ `.` IDENT ]*
+    /// note: Parse a contextual field access: `_context` [ `.` IDENT ]*
     fn parse_field_access(&mut self) -> Result<Expr, ExprError> {
         let tok = self.advance();
         let Some(tok) = tok else {
@@ -582,7 +569,7 @@ impl Parser {
             _ => return Err(self.err("expected identifier for field access")),
         };
 
-        // `_context` is the required root for context field access.
+        // note: `_context` is the required root for context field access.
         if path[0] != "_context" {
             return Err(ExprError::Parse {
                 pos: tok.token_span().0,
@@ -591,9 +578,8 @@ impl Parser {
             });
         }
 
-        // Collect dot-separated path segments.
         while matches!(self.peek(), Some(Token::Dot(_))) {
-            self.advance(); // skip dot
+            self.advance();
             match self.advance() {
                 Some(Token::Ident(name, _)) => path.push(name.clone()),
                 _ => return Err(self.err("expected identifier after '.'")),
@@ -601,11 +587,11 @@ impl Parser {
         }
 
         Ok(Expr::FieldAccess {
-            path: path[1..].to_vec(), // drop the "_context" prefix
+            path: path[1..].to_vec(),
         })
     }
 
-    /// Parse a literal value (not a field access).
+    /// note: Parse a literal value (not a field access).
     fn parse_value(&mut self) -> Result<Expr, ExprError> {
         let tok = self.advance();
         match tok {
@@ -619,18 +605,15 @@ impl Parser {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Evaluator
-// ---------------------------------------------------------------------------
 
-/// Evaluate a parsed expression against a JSON context object.
+/// note: Evaluate a parsed expression against a JSON context object.
 ///
 /// # Errors
 ///
 /// Returns [`ExprError::FieldNotFound`] if a field path references a
 /// non-existent key, or [`ExprError::TypeError`] on type mismatches.
 pub fn evaluate(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprError> {
-    // R-V156P2-L002: debug span capturing input context shape + expression
+    // note: R-V156P2-L002: debug span capturing input context shape + expression
     // kind + result. Kept at `debug!` so it is no-op by default; enable with
     // `RUST_LOG=nexus_preset::expr=debug` when diagnosing
     // conditional-routing misfires.
@@ -645,7 +628,7 @@ pub fn evaluate(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprEr
     result
 }
 
-/// Compact one-line summary of a JSON context for debug logging (top-level
+/// note: Compact one-line summary of a JSON context for debug logging (top-level
 /// keys only — avoids dumping large nested values).
 fn context_summary(context: &serde_json::Value) -> String {
     match context {
@@ -657,7 +640,7 @@ fn context_summary(context: &serde_json::Value) -> String {
     }
 }
 
-/// Short type name for a JSON value (debug aid).
+/// note: Short type name for a JSON value (debug aid).
 const fn context_type_name(v: &serde_json::Value) -> &'static str {
     match v {
         serde_json::Value::Null => "null",
@@ -670,7 +653,7 @@ const fn context_type_name(v: &serde_json::Value) -> &'static str {
 }
 
 impl Expr {
-    /// Debug-friendly variant name (R-V156P2-L002 tracing aid).
+    /// note: Debug-friendly variant name (R-V156P2-L002 tracing aid).
     const fn variant_name(&self) -> &'static str {
         match self {
             Self::Bool(_) => "Bool",
@@ -686,7 +669,7 @@ impl Expr {
     }
 }
 
-/// Inner recursive evaluation (entry point for the public `evaluate` wrapper).
+/// note: Inner recursive evaluation (entry point for the public `evaluate` wrapper).
 fn evaluate_inner(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprError> {
     match expr {
         Expr::Bool(b) => Ok(*b),
@@ -705,14 +688,14 @@ fn evaluate_inner(expr: &Expr, context: &serde_json::Value) -> Result<bool, Expr
         Expr::And(left, right) => {
             let l = evaluate_inner(left, context)?;
             if !l {
-                return Ok(false); // short-circuit
+                return Ok(false);
             }
             evaluate_inner(right, context)
         }
         Expr::Or(left, right) => {
             let l = evaluate_inner(left, context)?;
             if l {
-                return Ok(true); // short-circuit
+                return Ok(true);
             }
             evaluate_inner(right, context)
         }
@@ -723,7 +706,7 @@ fn evaluate_inner(expr: &Expr, context: &serde_json::Value) -> Result<bool, Expr
     }
 }
 
-/// Resolve a dotted path in a JSON value, returning `&Value::Null` for missing fields.
+/// note: Resolve a dotted path in a JSON value, returning `&Value::Null` for missing fields.
 fn resolve_field<'a>(root: &'a serde_json::Value, path: &[String]) -> &'a serde_json::Value {
     static NULL: serde_json::Value = serde_json::Value::Null;
     let mut current = root;
@@ -738,7 +721,7 @@ fn resolve_field<'a>(root: &'a serde_json::Value, path: &[String]) -> &'a serde_
     current
 }
 
-/// Evaluate a sub-expression as a JSON value (for comparison operands).
+/// note: Evaluate a sub-expression as a JSON value (for comparison operands).
 fn eval_value(expr: &Expr, context: &serde_json::Value) -> Result<serde_json::Value, ExprError> {
     match expr {
         Expr::Bool(b) => Ok(serde_json::Value::Bool(*b)),
@@ -753,7 +736,7 @@ fn eval_value(expr: &Expr, context: &serde_json::Value) -> Result<serde_json::Va
     }
 }
 
-/// Truthy check: non-null, non-false, non-zero, non-empty.
+/// note: Truthy check: non-null, non-false, non-zero, non-empty.
 fn is_truthy(val: &serde_json::Value) -> bool {
     match val {
         serde_json::Value::Null => false,
@@ -765,7 +748,7 @@ fn is_truthy(val: &serde_json::Value) -> bool {
     }
 }
 
-/// Compare two JSON values with a comparison operator.
+/// note: Compare two JSON values with a comparison operator.
 fn compare(lhs: &serde_json::Value, op: CmpOp, rhs: &serde_json::Value) -> Result<bool, ExprError> {
     match op {
         CmpOp::Eq => Ok(json_eq(lhs, rhs)),
@@ -789,24 +772,24 @@ fn compare(lhs: &serde_json::Value, op: CmpOp, rhs: &serde_json::Value) -> Resul
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: ---------------------------------------------------------------------------
 // Context dependency scanning (V1.56 P3 — DF-56 dependent slice)
 // ---------------------------------------------------------------------------
 
-/// What external context data a conditional expression depends on.
+/// note: What external context data a conditional expression depends on.
 ///
 /// Used by the orchestration runtime to decide whether to invoke
 /// `registry.refresh` or query workspace session state before evaluating
 /// branches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextDeps {
-    /// Expression references `_context.registry_refresh.*`
+    /// note: Expression references `_context.registry_refresh.*`
     pub needs_registry_refresh: bool,
-    /// Expression references `_context.workspace.*`
+    /// note: Expression references `_context.workspace.*`
     pub needs_workspace: bool,
 }
 
-/// Scan an expression AST for context field dependencies.
+/// note: Scan an expression AST for context field dependencies.
 ///
 /// Walks the tree recursively, collecting any `FieldAccess` paths whose first
 /// segment is `registry_refresh` or `workspace`.
@@ -817,7 +800,7 @@ pub fn scan_context_deps(expr: &Expr) -> ContextDeps {
     deps
 }
 
-/// Recursively scan an expression node, OR-ing dependencies into `deps`.
+/// note: Recursively scan an expression node, OR-ing dependencies into `deps`.
 fn scan_expr(expr: &Expr, deps: &mut ContextDeps) {
     match expr {
         Expr::FieldAccess { path } => {
@@ -843,7 +826,6 @@ fn json_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         (serde_json::Value::Null, serde_json::Value::Null) => true,
         (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => a == b,
         (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
-            // Compare numerically.
             a.as_f64() == b.as_f64()
         }
         (serde_json::Value::String(a), serde_json::Value::String(b)) => a == b,
@@ -859,9 +841,6 @@ fn to_f64(v: &serde_json::Value) -> Option<f64> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -880,7 +859,6 @@ mod tests {
         serde_json::Value::Object(map)
     }
 
-    // ── Parser tests ────────────────────────────────────────────────
 
     #[test]
     fn parse_simple_equality_v2() {
@@ -918,13 +896,13 @@ mod tests {
     #[test]
     fn parse_nested_parens() {
         let expr = parse("((_context.a))").unwrap();
-        // ((_context.a)) → parens around FieldAccess, which stays as bare FieldAccess
+        // note: ((_context.a)) → parens around FieldAccess, which stays as bare FieldAccess
         // (truthy check at eval time).
         assert!(matches!(expr, Expr::FieldAccess { .. }));
     }
 
     #[test]
-    #[allow(clippy::approx_constant)] // -3.14 is the parser's expected output for literal "-3.14", not an approximation of π
+    #[allow(clippy::approx_constant)] // note: -3.14 is the parser's expected output for literal "-3.14", not an approximation of π
     fn parse_literals() {
         let expr = parse("true").unwrap();
         assert_eq!(expr, Expr::Bool(true));
@@ -996,7 +974,6 @@ mod tests {
         assert!(err.to_string().contains("trailing"));
     }
 
-    // ── Evaluator tests ─────────────────────────────────────────────
 
     #[test]
     fn eval_eq_string() {
@@ -1050,7 +1027,7 @@ mod tests {
     #[test]
     fn eval_bool_flag() {
         let ctx = make_ctx(&[("approved", serde_json::json!(true))]);
-        // Bare field access → truthy check
+        // note: Bare field access → truthy check
         let result = evaluate_expr("_context.approved", &ctx).unwrap();
         assert!(result);
     }
@@ -1114,7 +1091,7 @@ mod tests {
             ("b", serde_json::json!(2)),
             ("c", serde_json::json!(3)),
         ]);
-        // (a < b) && (b < c)
+        // note: (a < b) && (b < c)
         let result = evaluate_expr(
             "(_context.a < _context.b) && (_context.b < _context.c)",
             &ctx,
@@ -1159,7 +1136,7 @@ mod tests {
             ("status", serde_json::json!("active")),
             ("reviewed", serde_json::json!(true)),
         ]);
-        // (score > 80 && status == "active") || reviewed
+        // note: (score > 80 && status == "active") || reviewed
         let result = evaluate_expr(
             "(_context.score > 80 && _context.status == \"active\") || _context.reviewed",
             &ctx,
@@ -1196,11 +1173,10 @@ mod tests {
         assert!(result);
     }
 
-    // ── Depth limit tests (V1.56 P2 fix-wave, W-003) ─────────────────
 
     #[test]
     fn depth_32_succeeds() {
-        // Build an expression with depth exactly 32 (nested paren-paren).
+        // note: Build an expression with depth exactly 32 (nested paren-paren).
         // 32 parens wrap a simple field access.
         let expr = format!("{}_context.x{}", "(".repeat(32), ")".repeat(32));
         let result = parse(&expr);
@@ -1213,7 +1189,7 @@ mod tests {
 
     #[test]
     fn depth_33_fails() {
-        // 33 parens should exceed MAX_EXPR_DEPTH (32).
+        // note: 33 parens should exceed MAX_EXPR_DEPTH (32).
         let expr = format!("{}_context.x{}", "(".repeat(33), ")".repeat(33));
         let result = parse(&expr);
         assert!(
@@ -1224,7 +1200,7 @@ mod tests {
 
     #[test]
     fn depth_1000_no_panic() {
-        // Extremely deep nesting should return an error, not panic.
+        // note: Extremely deep nesting should return an error, not panic.
         let expr = format!("{}_context.x{}", "(".repeat(1000), ")".repeat(1000));
         let result = parse(&expr);
         assert!(
@@ -1233,7 +1209,6 @@ mod tests {
         );
     }
 
-    // ── Null comparison semantics (V1.56 P2 fix-wave, M-001) ─────────
 
     #[test]
     fn null_eq_null_is_true() {
@@ -1273,7 +1248,6 @@ mod tests {
         assert!(!result, "null != null should be false (JSON semantics)");
     }
 
-    // ── Context dependency scanning tests (V1.56 P3) ─────────────────
 
     #[test]
     fn scan_registry_source_ref() {

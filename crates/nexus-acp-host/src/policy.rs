@@ -53,98 +53,99 @@
 //! [agents.my-agent.ask]
 //! "file_system.write" = true
 //! ```
+// note: evaluation order is agent-scoped rules, then global rules, then the default policy.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Known top-level keys in the permissions TOML file.
+/// note: Known top-level keys in the permissions TOML file.
 pub const VALID_TOP_LEVEL_KEYS: &[&str] = &["default", "grant", "deny", "agents"];
 
-/// Permission decision returned by policy evaluation.
+/// note: Permission decision returned by policy evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionDecision {
-    /// Grant the permission request.
+    /// note: Grant the permission request.
     Grant,
-    /// Deny the permission request.
+    /// note: Deny the permission request.
     Deny,
-    /// Ask the user interactively.
+    /// note: Ask the user interactively.
     Ask,
 }
 
-/// Default policy when no explicit rule matches.
+/// note: Default policy when no explicit rule matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DefaultPolicy {
-    /// Always ask the user for unknown permissions.
+    /// note: Always ask the user for unknown permissions.
     #[default]
     Ask,
-    /// Auto-grant unknown permissions.
+    /// note: Auto-grant unknown permissions.
     Grant,
-    /// Auto-deny unknown permissions.
+    /// note: Auto-deny unknown permissions.
     Deny,
 }
 
-/// Per-agent permission rules (V1.6).
+/// note: Per-agent permission rules (V1.6).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentRules {
-    /// Permissions to always grant for this agent.
+    /// note: Permissions to always grant for this agent.
     #[serde(default)]
     pub grant: HashMap<String, bool>,
 
-    /// Permissions to always deny for this agent.
+    /// note: Permissions to always deny for this agent.
     #[serde(default)]
     pub deny: HashMap<String, bool>,
 
-    /// Permissions that prompt the user for this agent.
+    /// note: Permissions that prompt the user for this agent.
     #[serde(default)]
     pub ask: HashMap<String, bool>,
 }
 
 impl AgentRules {
-    /// Create a new empty agent rules set.
+    /// note: Create a new empty agent rules set.
     #[allow(dead_code)]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Check whether any rules are configured.
+    /// note: Check whether any rules are configured.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.grant.is_empty() && self.deny.is_empty() && self.ask.is_empty()
     }
 }
 
-/// Permission policy configuration loaded from workspace.
+/// note: Permission policy configuration loaded from workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PermissionPolicy {
-    /// Default policy for permissions without explicit rules.
+    /// note: Default policy for permissions without explicit rules.
     #[serde(default)]
     pub default: DefaultPolicy,
 
-    /// Permissions to always grant (global).
+    /// note: Permissions to always grant (global).
     #[serde(default)]
     pub grant: HashMap<String, bool>,
 
-    /// Permissions to always deny (global).
+    /// note: Permissions to always deny (global).
     #[serde(default)]
     pub deny: HashMap<String, bool>,
 
-    /// Per-agent permission rules (V1.6).
+    /// note: Per-agent permission rules (V1.6).
     #[serde(default)]
     pub agents: HashMap<String, AgentRules>,
 }
 
 impl PermissionPolicy {
-    /// Create a new permission policy with default settings.
+    /// note: Create a new permission policy with default settings.
     #[allow(dead_code)]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Load permission policy from workspace.
+    /// note: Load permission policy from workspace.
     ///
     /// If the policy file doesn't exist, returns a default policy.
     ///
@@ -162,7 +163,7 @@ impl PermissionPolicy {
         Ok(policy)
     }
 
-    /// Save permission policy to workspace using `toml_edit` for round-trip
+    /// note: Save permission policy to workspace using `toml_edit` for round-trip
     /// preservation of comments, formatting, and unknown keys.
     ///
     /// If the policy file already exists, it is parsed as a `toml_edit` document
@@ -174,16 +175,12 @@ impl PermissionPolicy {
     pub fn save_toml_edit(&self, workspace_root: &Path) -> anyhow::Result<()> {
         let mut doc = Self::load_toml_edit(workspace_root)?;
 
-        // Update `default` key
         doc["default"] = toml_edit::value(format!("{:?}", self.default).to_lowercase());
 
-        // Update `grant` keys
         Self::sync_hashmap_to_table(&mut doc, "grant", &self.grant);
 
-        // Update `deny` keys
         Self::sync_hashmap_to_table(&mut doc, "deny", &self.deny);
 
-        // Update per-agent rules
         for (agent_id, rules) in &self.agents {
             if !rules.grant.is_empty() || !rules.deny.is_empty() || !rules.ask.is_empty() {
                 Self::ensure_agents_table_doc(&mut doc);
@@ -197,7 +194,7 @@ impl PermissionPolicy {
         Ok(())
     }
 
-    /// Load the permissions TOML as a mutable `toml_edit` document.
+    /// note: Load the permissions TOML as a mutable `toml_edit` document.
     ///
     /// Returns an empty document if the file doesn't exist.
     ///
@@ -217,7 +214,7 @@ impl PermissionPolicy {
         }
     }
 
-    /// Save a `toml_edit` document to the permissions file.
+    /// note: Save a `toml_edit` document to the permissions file.
     ///
     /// # Errors
     ///
@@ -234,14 +231,14 @@ impl PermissionPolicy {
         Ok(())
     }
 
-    /// Ensure the `[agents]` table exists in the document.
+    /// note: Ensure the `[agents]` table exists in the document.
     pub fn ensure_agents_table_doc(doc: &mut toml_edit::DocumentMut) {
         if doc.get("agents").is_none() {
             doc["agents"] = toml_edit::Item::Table(toml_edit::Table::new());
         }
     }
 
-    /// Ensure `[agents.<agent>.<action>]` table exists.
+    /// note: Ensure `[agents.<agent>.<action>]` table exists.
     ///
     /// # Panics
     ///
@@ -262,7 +259,7 @@ impl PermissionPolicy {
         }
     }
 
-    /// Set a capability value in `[agents.<agent>.<action>]`.
+    /// note: Set a capability value in `[agents.<agent>.<action>]`.
     pub fn set_agent_capability_doc(
         doc: &mut toml_edit::DocumentMut,
         agent: &str,
@@ -279,7 +276,7 @@ impl PermissionPolicy {
         }
     }
 
-    /// Remove a capability from `[agents.<agent>.<action>]`.
+    /// note: Remove a capability from `[agents.<agent>.<action>]`.
     /// Returns true if the capability existed and was removed.
     pub fn remove_agent_capability_doc(
         doc: &mut toml_edit::DocumentMut,
@@ -302,7 +299,7 @@ impl PermissionPolicy {
         false
     }
 
-    /// Clean up empty action tables and agent entries after removal.
+    /// note: Clean up empty action tables and agent entries after removal.
     pub fn clean_empty_agent_tables_doc(doc: &mut toml_edit::DocumentMut, agent: &str) {
         let actions = ["grant", "deny", "ask"];
         if let Some(agents) = doc.get_mut("agents") {
@@ -318,14 +315,14 @@ impl PermissionPolicy {
                         }
                     }
                 }
-                // If the agent entry is now empty, remove it
+                // note: If the agent entry is now empty, remove it
                 if let Some(table) = agent_table.as_table() {
                     if table.is_empty() {
                         agents.as_table_like_mut().map(|t| t.remove(agent));
                     }
                 }
             }
-            // If the agents table is now empty, remove it
+            // note: If the agents table is now empty, remove it
             if let Some(agents_table) = doc["agents"].as_table() {
                 if agents_table.is_empty() {
                     doc.remove("agents");
@@ -334,25 +331,22 @@ impl PermissionPolicy {
         }
     }
 
-    /// Reset all rules for a specific agent by clearing its action tables
+    /// note: Reset all rules for a specific agent by clearing its action tables
     /// and removing the agent entry. Uses the same cleanup logic as
     /// `clean_empty_agent_tables_doc` but clears all actions first.
     pub fn reset_agent_doc(doc: &mut toml_edit::DocumentMut, agent: &str) {
         let actions = ["grant", "deny", "ask"];
         if let Some(agents) = doc.get_mut("agents") {
             if let Some(agent_table) = agents.get_mut(agent) {
-                // Clear all action sub-tables
                 if let Some(t) = agent_table.as_table_like_mut() {
                     for action in &actions {
                         t.remove(action);
                     }
                 }
             }
-            // Remove the agent entry entirely (now empty after clearing actions)
             if let Some(t) = agents.as_table_like_mut() {
                 t.remove(agent);
             }
-            // Remove agents table if empty
             if let Some(agents_table) = doc["agents"].as_table() {
                 if agents_table.is_empty() {
                     doc.remove("agents");
@@ -361,19 +355,18 @@ impl PermissionPolicy {
         }
     }
 
-    /// Reset all agent rules by clearing the entire `[agents]` table.
+    /// note: Reset all agent rules by clearing the entire `[agents]` table.
     pub fn reset_all_agents_doc(doc: &mut toml_edit::DocumentMut) {
         doc.remove("agents");
     }
 
-    /// Validate top-level keys in the TOML document against the known schema.
+    /// note: Validate top-level keys in the TOML document against the known schema.
     ///
     /// Returns a list of warning messages for unknown keys.
     #[must_use]
     pub fn validate_toml_keys(doc: &toml_edit::DocumentMut) -> Vec<String> {
         let mut warnings = Vec::new();
 
-        // Check top-level keys
         for (key, _value) in doc.iter() {
             let key_str = key.to_string();
             if !VALID_TOP_LEVEL_KEYS.contains(&key_str.as_str()) {
@@ -381,7 +374,7 @@ impl PermissionPolicy {
             }
         }
 
-        // Check sub-keys under [agents.<agent>]
+        // note: Check sub-keys under [agents.<agent>]
         if let Some(agents) = doc.get("agents") {
             if let Some(agents_table) = agents.as_table() {
                 for (agent_id, agent_item) in agents_table {
@@ -403,13 +396,13 @@ impl PermissionPolicy {
         warnings
     }
 
-    /// Get the path to the policy file.
+    /// note: Get the path to the policy file.
     #[must_use]
     pub fn policy_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".nexus42").join("permissions.toml")
     }
 
-    /// Sync a `HashMap<String, bool>` into a top-level table in the document.
+    /// note: Sync a `HashMap<String, bool>` into a top-level table in the document.
     ///
     /// Removes keys not in the map, adds keys that are missing, preserves existing formatting.
     fn sync_hashmap_to_table(
@@ -421,13 +414,11 @@ impl PermissionPolicy {
             doc.remove(table_key);
             return;
         }
-        // Ensure the table exists
         if doc.get(table_key).is_none() {
             doc[table_key] = toml_edit::Item::Table(toml_edit::Table::new());
         }
         if let Some(item) = doc.get_mut(table_key) {
             if let Some(table) = item.as_table_mut() {
-                // Remove keys not in the map
                 let to_remove: Vec<String> = table
                     .iter()
                     .filter_map(|(k, _)| {
@@ -442,7 +433,6 @@ impl PermissionPolicy {
                 for key in &to_remove {
                     table.remove(key);
                 }
-                // Add/update keys from the map
                 for (k, v) in map {
                     table[k.as_str()] = toml_edit::value(*v);
                 }
@@ -450,7 +440,7 @@ impl PermissionPolicy {
         }
     }
 
-    /// Sync a `HashMap<String, bool>` into a nested `[agents.<agent>.<action>]` table.
+    /// note: Sync a `HashMap<String, bool>` into a nested `[agents.<agent>.<action>]` table.
     fn sync_hashmap_to_table_nested(
         doc: &mut toml_edit::DocumentMut,
         agent: &str,
@@ -458,7 +448,7 @@ impl PermissionPolicy {
         map: &HashMap<String, bool>,
     ) {
         if map.is_empty() {
-            // Remove the action table if empty
+            // note: Remove the action table if empty
             if let Some(agents) = doc.get_mut("agents") {
                 if let Some(agent_table) = agents.get_mut(agent) {
                     if let Some(action_table) = agent_table.get_mut(action) {
@@ -477,7 +467,6 @@ impl PermissionPolicy {
             if let Some(agent_table) = agents.get_mut(agent) {
                 if let Some(action_item) = agent_table.get_mut(action) {
                     if let Some(table) = action_item.as_table_mut() {
-                        // Remove keys not in the map
                         let to_remove: Vec<String> = table
                             .iter()
                             .filter_map(|(k, _)| {
@@ -492,7 +481,6 @@ impl PermissionPolicy {
                         for key in &to_remove {
                             table.remove(key);
                         }
-                        // Add/update keys from the map
                         for (k, v) in map {
                             table[k.as_str()] = toml_edit::value(*v);
                         }
@@ -502,22 +490,20 @@ impl PermissionPolicy {
         }
     }
 
-    /// Evaluate a permission request against the policy.
+    /// note: Evaluate a permission request against the policy.
     ///
     /// Returns the decision for this permission.
     #[must_use]
     pub fn evaluate(&self, permission_name: &str) -> PermissionDecision {
-        // Check explicit grant rules
         if self.grant.contains_key(permission_name) {
             return PermissionDecision::Grant;
         }
 
-        // Check explicit deny rules
         if self.deny.contains_key(permission_name) {
             return PermissionDecision::Deny;
         }
 
-        // Use default policy
+        // note: Use default policy
         match self.default {
             DefaultPolicy::Ask => PermissionDecision::Ask,
             DefaultPolicy::Grant => PermissionDecision::Grant,
@@ -525,19 +511,19 @@ impl PermissionPolicy {
         }
     }
 
-    /// Grant a permission by adding it to the grant list.
+    /// note: Grant a permission by adding it to the grant list.
     pub fn grant_permission(&mut self, permission_name: String) {
         self.deny.remove(&permission_name);
         self.grant.insert(permission_name, true);
     }
 
-    /// Deny a permission by adding it to the deny list.
+    /// note: Deny a permission by adding it to the deny list.
     pub fn deny_permission(&mut self, permission_name: String) {
         self.grant.remove(&permission_name);
         self.deny.insert(permission_name, true);
     }
 
-    /// List all configured permissions.
+    /// note: List all configured permissions.
     #[must_use]
     pub fn list_permissions(&self) -> (Vec<String>, Vec<String>) {
         let granted: Vec<String> = self.grant.keys().cloned().collect();
@@ -545,9 +531,9 @@ impl PermissionPolicy {
         (granted, denied)
     }
 
-    // -- V1.6 agent-scoped methods --
+    // note: -- V1.6 agent-scoped methods --
 
-    /// Set a grant rule for a specific agent and capability.
+    /// note: Set a grant rule for a specific agent and capability.
     /// Removes any existing deny/ask rule for the same agent+capability.
     pub fn grant_agent(&mut self, agent_id: &str, capability: &str) {
         let rules = self.agents.entry(agent_id.to_string()).or_default();
@@ -556,7 +542,7 @@ impl PermissionPolicy {
         rules.grant.insert(capability.to_string(), true);
     }
 
-    /// Set a deny rule for a specific agent and capability.
+    /// note: Set a deny rule for a specific agent and capability.
     /// Removes any existing grant/ask rule for the same agent+capability.
     pub fn deny_agent(&mut self, agent_id: &str, capability: &str) {
         let rules = self.agents.entry(agent_id.to_string()).or_default();
@@ -565,7 +551,7 @@ impl PermissionPolicy {
         rules.deny.insert(capability.to_string(), true);
     }
 
-    /// Set an ask (prompt) rule for a specific agent and capability.
+    /// note: Set an ask (prompt) rule for a specific agent and capability.
     /// Removes any existing grant/deny rule for the same agent+capability.
     pub fn ask_agent(&mut self, agent_id: &str, capability: &str) {
         let rules = self.agents.entry(agent_id.to_string()).or_default();
@@ -574,7 +560,7 @@ impl PermissionPolicy {
         rules.ask.insert(capability.to_string(), true);
     }
 
-    /// Revoke a specific rule for an agent+capability tuple.
+    /// note: Revoke a specific rule for an agent+capability tuple.
     /// Returns true if a rule was found and removed.
     pub fn revoke_agent(&mut self, agent_id: &str, capability: &str) -> bool {
         if let Some(rules) = self.agents.get_mut(agent_id) {
@@ -589,23 +575,22 @@ impl PermissionPolicy {
         false
     }
 
-    /// Reset all rules for a specific agent.
+    /// note: Reset all rules for a specific agent.
     /// Returns true if the agent had any rules.
     pub fn reset_agent(&mut self, agent_id: &str) -> bool {
         self.agents.remove(agent_id).is_some()
     }
 
-    /// Reset all agent rules (but keep global rules and default policy).
+    /// note: Reset all agent rules (but keep global rules and default policy).
     pub fn reset_all_agents(&mut self) {
         self.agents.clear();
     }
 
-    /// Evaluate a permission request for a specific agent.
+    /// note: Evaluate a permission request for a specific agent.
     ///
     /// Checks agent-scoped rules first, then global rules, then default policy.
     #[must_use]
     pub fn evaluate_for_agent(&self, agent_id: &str, capability: &str) -> PermissionDecision {
-        // Check agent-scoped rules first
         if let Some(rules) = self.agents.get(agent_id) {
             if rules.grant.contains_key(capability) {
                 return PermissionDecision::Grant;
@@ -618,11 +603,11 @@ impl PermissionPolicy {
             }
         }
 
-        // Fall through to global evaluation
+        // note: Fall through to global evaluation
         self.evaluate(capability)
     }
 
-    /// List all rules for a specific agent.
+    /// note: List all rules for a specific agent.
     /// Returns (granted, denied, asked) capability lists.
     #[must_use]
     pub fn list_agent_rules(&self, agent_id: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
@@ -637,7 +622,7 @@ impl PermissionPolicy {
         )
     }
 
-    /// List all agents that have rules configured.
+    /// note: List all agents that have rules configured.
     #[must_use]
     pub fn list_agents(&self) -> Vec<&str> {
         let mut agents: Vec<&str> = self
@@ -751,12 +736,10 @@ mod tests {
         policy.grant_permission("file_system.read".to_string());
         policy.deny_permission("terminal.kill".to_string());
 
-        // Save
         policy
             .save_toml_edit(workspace_root)
             .expect("Failed to save policy");
 
-        // Load
         let loaded = PermissionPolicy::load(workspace_root).expect("Failed to load policy");
 
         assert_eq!(loaded.default, DefaultPolicy::Grant);
@@ -792,13 +775,13 @@ mod tests {
         }
         std::fs::write(&path, "this is not valid toml {{{{").expect("write failed");
 
-        // A malformed policy file must be rejected by both readers — never
+        // note: A malformed policy file must be rejected by both readers — never
         // silently downgraded to defaults or to an empty document, which
         // `save_toml_edit` would then write back over the author's rules.
         assert!(PermissionPolicy::load(workspace_root).is_err());
         assert!(PermissionPolicy::load_toml_edit(workspace_root).is_err());
 
-        // A save against an unparseable file fails before writing, so the
+        // note: A save against an unparseable file fails before writing, so the
         // author's bytes survive verbatim.
         assert!(PermissionPolicy::new()
             .save_toml_edit(workspace_root)
@@ -822,7 +805,6 @@ mod tests {
         assert!(toml_str.contains("file_system.read"));
         assert!(toml_str.contains("terminal.kill"));
 
-        // Deserialize back
         let deserialized: PermissionPolicy =
             toml::from_str(&toml_str).expect("Failed to deserialize");
 
@@ -837,7 +819,7 @@ mod tests {
         );
     }
 
-    // -- V1.6 agent-scoped tests --
+    // note: -- V1.6 agent-scoped tests --
 
     #[test]
     fn test_grant_agent_adds_rule() {
@@ -978,12 +960,12 @@ mod tests {
         policy.default = DefaultPolicy::Deny;
         policy.grant_agent("test-agent", "terminal.create");
 
-        // Agent has grant rule -> grant
+        // note: Agent has grant rule -> grant
         assert_eq!(
             policy.evaluate_for_agent("test-agent", "terminal.create"),
             PermissionDecision::Grant
         );
-        // Unknown agent -> falls through to default deny
+        // note: Unknown agent -> falls through to default deny
         assert_eq!(
             policy.evaluate_for_agent("other-agent", "terminal.create"),
             PermissionDecision::Deny
@@ -996,12 +978,12 @@ mod tests {
         policy.grant_permission("file_system.read".to_string());
         policy.deny_agent("test-agent", "file_system.read");
 
-        // Agent deny overrides global grant
+        // note: Agent deny overrides global grant
         assert_eq!(
             policy.evaluate_for_agent("test-agent", "file_system.read"),
             PermissionDecision::Deny
         );
-        // Other agent gets global grant
+        // note: Other agent gets global grant
         assert_eq!(
             policy.evaluate_for_agent("other-agent", "file_system.read"),
             PermissionDecision::Grant
@@ -1036,7 +1018,6 @@ mod tests {
 
         let toml_str = toml::to_string_pretty(&policy).expect("Failed to serialize");
 
-        // Verify key structure
         assert!(toml_str.contains("[agents.test-agent.grant]"));
         assert!(toml_str.contains("terminal.create"));
         assert!(toml_str.contains("[agents.test-agent.deny]"));
@@ -1044,7 +1025,6 @@ mod tests {
         assert!(toml_str.contains("[agents.test-agent.ask]"));
         assert!(toml_str.contains("file_system.write"));
 
-        // Deserialize and verify
         let loaded: PermissionPolicy = toml::from_str(&toml_str).expect("Failed to deserialize");
         let (granted, denied, asked) = loaded.list_agent_rules("test-agent");
         assert_eq!(granted, vec!["terminal.create"]);
@@ -1090,7 +1070,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let workspace_root = temp_dir.path();
 
-        // Write a file with a comment
+        // note: Write a file with a comment
         let path = PermissionPolicy::policy_path(workspace_root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create dir failed");
@@ -1103,7 +1083,7 @@ mod tests {
             .save_toml_edit(workspace_root)
             .expect("Failed to save policy");
 
-        // Reload raw content and check comment preserved
+        // note: Reload raw content and check comment preserved
         let content = std::fs::read_to_string(&path).expect("read failed");
         assert!(content.contains("# My important comment"));
     }
@@ -1113,7 +1093,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let workspace_root = temp_dir.path();
 
-        // Write a file with a future unknown key
+        // note: Write a file with a future unknown key
         let path = PermissionPolicy::policy_path(workspace_root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create dir failed");
@@ -1127,7 +1107,7 @@ mod tests {
             .save_toml_edit(workspace_root)
             .expect("Failed to save policy");
 
-        // Reload raw content and check unknown key preserved
+        // note: Reload raw content and check unknown key preserved
         let content = std::fs::read_to_string(&path).expect("read failed");
         assert!(content.contains("future_feature"));
     }

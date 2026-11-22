@@ -23,8 +23,7 @@
 //!   state would either drop its judgment or emit `next: go/nogo` with no `exit_when`, which the
 //!   preset validator rejects.
 //!
-//! shortcut: legacy `next: { kind: conditional, rules: [...] }` exports as the equivalent
-//! `branches` form; upgrade when a consumer needs the legacy spelling back.
+//! shortcut: legacy `next: { kind: conditional, rules: [...] }` exports as the equivalent `branches` form, upgrade: when a consumer needs the legacy spelling back.
 
 use crate::manifest::{
     ConditionalBranches, ConditionalRule, ContextUpdateHook, ContextUpdateOp, ConvergeConfig,
@@ -51,31 +50,31 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
 
-// IR version emitted by this adapter; v0 stays 0 until P1 parity.
+// note: IR version emitted by this adapter; v0 stays 0 until P1 parity.
 const IR_VERSION: u64 = nexus_workflow_ir::IR_VERSION;
 
-/// Adapter failure. Every refusal names the carrier it could not project.
+/// note: Adapter failure. Every refusal names the carrier it could not project.
 #[derive(Debug, Error)]
 pub enum WorkflowIrError {
-    /// A referenced asset could not be read from the bundle.
+    /// note: A referenced asset could not be read from the bundle.
     #[error("failed to read referenced asset `{path}`: {source}")]
     AssetRead {
-        /// Bundle-relative asset path.
+        /// note: Bundle-relative asset path.
         path: String,
-        /// Underlying read error.
+        /// note: Underlying read error.
         #[source]
         source: std::io::Error,
     },
-    /// The preset or the document cannot be represented in the target shape.
+    /// note: The preset or the document cannot be represented in the target shape.
     #[error("workflow IR conversion refused: {reason}")]
     NotProjectable {
-        /// What could not be represented.
+        /// note: What could not be represented.
         reason: String,
     },
-    /// The manifest marks more than one state `terminal: true`; a preset header names exactly one.
+    /// note: The manifest marks more than one state `terminal: true`; a preset header names exactly one.
     #[error("preset declares {count} terminal states; a v0 document carries exactly one")]
     MultipleTerminalStates {
-        /// Number of states marked terminal.
+        /// note: Number of states marked terminal.
         count: usize,
     },
 }
@@ -86,7 +85,7 @@ fn refuse(reason: impl Into<String>) -> WorkflowIrError {
     }
 }
 
-/// Canonical bytes of a committed IR twin: `document` as pretty JSON with every object key sorted,
+/// note: Canonical bytes of a committed IR twin: `document` as pretty JSON with every object key sorted,
 /// plus one trailing newline.
 ///
 /// The sort is what makes a twin reproducible. `serde_json::Map` keeps insertion order whenever
@@ -106,7 +105,7 @@ pub fn canonical_twin_json(document: &WorkflowDocument) -> Result<String, serde_
     Ok(json)
 }
 
-/// Recursively sort every object's keys (arrays keep their order, scalars are untouched).
+/// note: Recursively sort every object's keys (arrays keep their order, scalars are untouched).
 fn sort_object_keys(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(members) => {
@@ -126,21 +125,21 @@ fn sort_object_keys(value: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// An imported document plus the referenced asset bytes it hashed.
+/// note: An imported document plus the referenced asset bytes it hashed.
 #[derive(Debug, Clone)]
 pub struct PresetIrImport {
-    /// The imported IR document.
+    /// note: The imported IR document.
     pub document: WorkflowDocument,
-    /// Asset bytes keyed by asset id (the bundle-relative path).
+    /// note: Asset bytes keyed by asset id (the bundle-relative path).
     pub assets: BTreeMap<String, Vec<u8>>,
 }
 
-/// Where [`import_preset_bundle`] reads referenced asset bytes from.
+/// note: Where [`import_preset_bundle`] reads referenced asset bytes from.
 ///
 /// A source answers bundle-relative paths only: `import_preset_bundle` applies
 /// `assert_template_file_safe` before the first read, so no implementation repeats that check.
 pub trait AssetSource {
-    /// Bytes at a bundle-relative `path`; `Ok(None)` means the source has no such entry.
+    /// note: Bytes at a bundle-relative `path`; `Ok(None)` means the source has no such entry.
     ///
     /// # Errors
     ///
@@ -149,14 +148,14 @@ pub trait AssetSource {
     fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error>;
 }
 
-/// A bundle directory on disk, confined to its canonicalized root.
+/// note: A bundle directory on disk, confined to its canonicalized root.
 #[derive(Debug, Clone)]
 pub struct FsAssetSource {
     root: std::path::PathBuf,
 }
 
 impl FsAssetSource {
-    /// Canonicalize `root` once; every read joins and resolves inside it.
+    /// note: Canonicalize `root` once; every read joins and resolves inside it.
     ///
     /// # Errors
     ///
@@ -181,7 +180,7 @@ impl AssetSource for FsAssetSource {
     }
 }
 
-/// Assets compiled into the binary, from a [`include_dir::Dir`].
+/// note: Assets compiled into the binary, from a [`include_dir::Dir`].
 ///
 /// Pass the preset's own bundle directory: entries carry their path from the `include_dir!` root, so
 /// each lookup is prefixed with the directory's own path (`prompts/x.md` -> `<preset>/prompts/x.md`).
@@ -197,11 +196,11 @@ impl AssetSource for EmbeddedAssetSource<'_> {
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: ---------------------------------------------------------------------------
 // Import: PresetManifest -> WorkflowDocument
 // ---------------------------------------------------------------------------
 
-/// Import a preset manifest into a Workflow IR document, hashing every asset the manifest
+/// note: Import a preset manifest into a Workflow IR document, hashing every asset the manifest
 /// references from `source`.
 ///
 /// # Errors
@@ -218,7 +217,7 @@ pub fn import_preset_bundle(
     references.sort_by(|a, b| a.1.cmp(&b.1));
     references.dedup_by(|a, b| a.1 == b.1);
 
-    // Fail closed before the source is touched: the manifest chooses these paths, and the same
+    // note: Fail closed before the source is touched: the manifest chooses these paths, and the same
     // rule the loader/validator enforce (`assert_template_file_safe`) applies to every source.
     for (_, path) in &references {
         if let Err(reason) = crate::loader::assert_template_file_safe(path) {
@@ -265,7 +264,7 @@ pub fn import_preset_bundle(
     })
 }
 
-/// Project a manifest into IR for semantic validation: no filesystem reads.
+/// note: Project a manifest into IR for semantic validation: no filesystem reads.
 ///
 /// Asset references stay on their carriers (node `template`s, exit/context templates, enter
 /// args, role prompts) and are not registered in [`WorkflowDocument::assets`]: validation sweeps
@@ -308,7 +307,7 @@ fn document_from_manifest(
     }
 
     let effect_summary = nexus_workflow_ir::effect_summary(&nodes);
-    // The header names the declared terminal; per-state markers ride on the node kinds. A preset
+    // note: The header names the declared terminal; per-state markers ride on the node kinds. A preset
     // whose markers disagree with the header still projects, so validation can report the defect.
     let terminal = if header.terminal.is_empty() {
         manifest
@@ -419,7 +418,7 @@ fn inner_step_node(graph_name: &str, graph: &InnerGraph, step: &GraphNode) -> Wo
     WorkflowNode {
         id: format!("{graph_name}/{}", step.id),
         kind: WorkflowNodeKind::InnerStep,
-        // An ACP prompt can reach any tool through its policy: worst case is external.
+        // note: An ACP prompt can reach any tool through its policy: worst case is external.
         effect_class: WorkflowNodeEffectClass::External,
         step_kind: Some(WorkflowNodeStepKind::AcpPrompt),
         template: step.template_file.clone(),
@@ -446,7 +445,7 @@ fn inner_step_node(graph_name: &str, graph: &InnerGraph, step: &GraphNode) -> Wo
     }
 }
 
-/// Whether this state's gate is an `llm_judge`: the preset's only judged exit kind.
+/// note: Whether this state's gate is an `llm_judge`: the preset's only judged exit kind.
 const fn is_judged(state: &StateDefinition) -> bool {
     matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. }))
 }
@@ -460,7 +459,7 @@ fn push_next_edges(
     match &state.next {
         None => {}
         Some(NextTarget::Linear(to)) => {
-            // A judged state's unconditional advance is the branch a run takes when its judge
+            // note: A judged state's unconditional advance is the branch a run takes when its judge
             // passes, which is what the IR calls that node's `default` edge (and the only edge a
             // static walk may follow out of an `llm_judge` node). A `linear` edge here would
             // leave the judge with no branch to follow.
@@ -668,7 +667,7 @@ fn context_update_ir(hook: &ContextUpdateHook) -> WorkflowContextUpdate {
             WorkflowContextUpdateOp::StructMerge,
             None,
             None,
-            // An explicit null is a patch value; only an absent key stays absent.
+            // note: An explicit null is a patch value; only an absent key stays absent.
             patch.clone().map(Option::unwrap_or_default),
             None,
         ),
@@ -823,7 +822,7 @@ fn role_ir(role: &crate::manifest::PresetRoleDefinition) -> WorkflowRoleDefiniti
 }
 
 fn state_effect(state: &StateDefinition) -> WorkflowNodeEffectClass {
-    // Every `EnterAction` variant reaches an outside caller (capability, inner graph, host tool)
+    // note: Every `EnterAction` variant reaches an outside caller (capability, inner graph, host tool)
     // and a judge exit calls a capability; v0 has no capability-effect catalog, so worst case.
     let mut rank = if state.enter.is_empty() { 0 } else { 3 };
     if matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
@@ -844,11 +843,11 @@ const fn effect_from_rank(rank: u8) -> WorkflowNodeEffectClass {
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: ---------------------------------------------------------------------------
 // Export: WorkflowDocument -> PresetManifest
 // ---------------------------------------------------------------------------
 
-/// Project a Workflow IR document back to a preset manifest.
+/// note: Project a Workflow IR document back to a preset manifest.
 ///
 /// # Errors
 ///
@@ -1026,7 +1025,7 @@ fn preset_header(document: &WorkflowDocument) -> Result<PresetHeader, WorkflowIr
     })
 }
 
-/// Projected preset state list plus the optional inner-graph map.
+/// note: Projected preset state list plus the optional inner-graph map.
 type ProjectedNodes = (Vec<StateDefinition>, Option<BTreeMap<String, InnerGraph>>);
 
 fn outgoing_edges(document: &WorkflowDocument) -> HashMap<&str, Vec<&WorkflowEdge>> {
@@ -1072,7 +1071,7 @@ fn state_from_node(
     })
 }
 
-/// Whether this document node's gate is an `llm_judge` — the inverse side of [`is_judged`].
+/// note: Whether this document node's gate is an `llm_judge` — the inverse side of [`is_judged`].
 fn is_judged_node(node: &WorkflowNode) -> bool {
     node.exit_when
         .as_ref()
@@ -1088,7 +1087,7 @@ fn next_from_edges(
         return Ok(None);
     };
 
-    // A judged node's single `default` edge is the import projection of the preset's `linear`
+    // note: A judged node's single `default` edge is the import projection of the preset's `linear`
     // next; projecting it back as [`NextTarget::Linear`] keeps the round trip byte-identical and
     // keeps the builder's outer topology on the same edge it had before.
     if judged && edges.len() == 1 && matches!(first.kind, WorkflowEdgeKind::Default) {
@@ -1574,7 +1573,7 @@ states:
             "a judged state's unconditional advance is the branch a run takes: its default edge"
         );
 
-        // The inverse projection restores the preset's `linear` next. Without it the lone default
+        // note: The inverse projection restores the preset's `linear` next. Without it the lone default
         // edge would project as branches-with-no-rules, which wires no outer edge at all.
         let exported = export_preset(&document).expect("export");
         assert_eq!(

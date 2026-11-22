@@ -3,101 +3,101 @@
 //! Covers all error scenarios arising from ACP communication:
 //! connection failures, timeouts, protocol errors, agent crashes,
 //! and missing agent installations.
+// invariant: hosts classify teardown failures by variant; never by message text.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use thiserror::Error;
 
-/// ACP result type alias.
+/// note: ACP result type alias.
 #[allow(dead_code)]
 pub type AcpResult<T> = std::result::Result<T, AcpError>;
 
-/// Errors that can occur during ACP client operations.
+/// note: Errors that can occur during ACP client operations.
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 pub enum AcpError {
-    /// Failed to establish a connection to the agent subprocess.
+    /// note: Failed to establish a connection to the agent subprocess.
     #[error("failed to connect to agent: {message}")]
     ConnectionFailed {
-        /// Human-readable error detail.
+        /// note: Human-readable error detail.
         message: String,
-        /// Optional underlying I/O error.
+        /// note: Optional underlying I/O error.
         #[source]
         source: Option<std::io::Error>,
     },
 
-    /// An ACP operation timed out.
+    /// note: An ACP operation timed out.
     #[error("ACP operation timed out after {duration:?}: {operation}")]
     Timeout {
-        /// Which operation timed out.
+        /// note: Which operation timed out.
         operation: String,
-        /// The configured timeout duration.
+        /// note: The configured timeout duration.
         duration: Duration,
     },
 
-    /// The agent returned an invalid or unexpected protocol response.
+    /// note: The agent returned an invalid or unexpected protocol response.
     #[error("ACP protocol error: {message}")]
     Protocol {
-        /// Human-readable error detail.
+        /// note: Human-readable error detail.
         message: String,
     },
 
-    /// The agent subprocess terminated unexpectedly (non-zero exit, signal, etc.).
+    /// note: The agent subprocess terminated unexpectedly (non-zero exit, signal, etc.).
     #[error("agent crashed: {details}")]
     AgentCrashed {
-        /// Exit code of the subprocess (None if killed by signal).
+        /// note: Exit code of the subprocess (None if killed by signal).
         exit_code: Option<i32>,
-        /// Path to the agent binary or command that crashed.
+        /// note: Path to the agent binary or command that crashed.
         agent_path: PathBuf,
-        /// Captured stderr output (if available).
+        /// note: Captured stderr output (if available).
         stderr_output: Option<String>,
-        /// Formatted details string (computed).
+        /// note: Formatted details string (computed).
         details: String,
     },
 
-    /// The owned process group's liveness could not be proven: the leader may
+    /// note: The owned process group's liveness could not be proven: the leader may
     /// still be running or descendants may survive teardown. Distinct from
     /// [`AcpError::AgentCrashed`] so hosts can classify teardown failures by
     /// kind — never by message text.
     #[error("cleanup unconfirmed: {reason}")]
     CleanupUnconfirmed {
-        /// Human-readable reason the cleanup could not be confirmed.
+        /// note: Human-readable reason the cleanup could not be confirmed.
         reason: String,
     },
 
-    /// The requested agent is not installed and cannot be resolved.
+    /// note: The requested agent is not installed and cannot be resolved.
     #[error("agent not installed: {agent_id}. Run `nexus42 agent run {agent_id}` to start, or install it first.")]
     NotInstalled {
-        /// Agent identifier that was not found.
+        /// note: Agent identifier that was not found.
         agent_id: String,
     },
 
-    /// The agent executable (e.g. `npx`, `node`) was not found on PATH.
+    /// note: The agent executable (e.g. `npx`, `node`) was not found on PATH.
     #[error("required executable not found on PATH: {executable}")]
     ExecutableNotFound {
-        /// Name of the missing executable.
+        /// note: Name of the missing executable.
         executable: String,
     },
 
-    /// An error from the underlying ACP SDK.
+    /// note: An error from the underlying ACP SDK.
     #[error("ACP SDK error: {0}")]
     Sdk(String),
 
-    /// A general I/O error during ACP operations.
+    /// note: A general I/O error during ACP operations.
     #[error("I/O error during ACP operation: {0}")]
     Io(#[from] std::io::Error),
 
-    /// A JSON serialization/deserialization error.
+    /// note: A JSON serialization/deserialization error.
     #[error("JSON error during ACP operation: {0}")]
     Json(#[from] serde_json::Error),
 }
 
-// ── Constructors ──────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 impl AcpError {
-    /// Create a connection-failed error from a message string.
+    /// note: Create a connection-failed error from a message string.
     pub fn connection_failed(message: impl Into<String>) -> Self {
         Self::ConnectionFailed {
             message: message.into(),
@@ -105,7 +105,7 @@ impl AcpError {
         }
     }
 
-    /// Create a connection-failed error wrapping an I/O error.
+    /// note: Create a connection-failed error wrapping an I/O error.
     #[must_use]
     pub fn connection_io(err: std::io::Error) -> Self {
         Self::ConnectionFailed {
@@ -114,7 +114,7 @@ impl AcpError {
         }
     }
 
-    /// Create a timeout error for a named operation.
+    /// note: Create a timeout error for a named operation.
     pub fn timeout(operation: impl Into<String>, duration: Duration) -> Self {
         Self::Timeout {
             operation: operation.into(),
@@ -122,14 +122,14 @@ impl AcpError {
         }
     }
 
-    /// Create a protocol error from a message.
+    /// note: Create a protocol error from a message.
     pub fn protocol(message: impl Into<String>) -> Self {
         Self::Protocol {
             message: message.into(),
         }
     }
 
-    /// Create an agent-crashed error.
+    /// note: Create an agent-crashed error.
     #[must_use]
     pub fn agent_crashed(
         exit_code: Option<i32>,
@@ -165,7 +165,7 @@ impl AcpError {
         }
     }
 
-    /// Create a cleanup-unconfirmed error for the given reason: the owned
+    /// note: Create a cleanup-unconfirmed error for the given reason: the owned
     /// process group's liveness could not be proven.
     pub fn cleanup_unconfirmed(reason: impl Into<String>) -> Self {
         Self::CleanupUnconfirmed {
@@ -173,21 +173,21 @@ impl AcpError {
         }
     }
 
-    /// Create a not-installed error for the given agent ID.
+    /// note: Create a not-installed error for the given agent ID.
     pub fn not_installed(agent_id: impl Into<String>) -> Self {
         Self::NotInstalled {
             agent_id: agent_id.into(),
         }
     }
 
-    /// Create an executable-not-found error.
+    /// note: Create an executable-not-found error.
     pub fn executable_not_found(executable: impl Into<String>) -> Self {
         Self::ExecutableNotFound {
             executable: executable.into(),
         }
     }
 
-    /// Wrap an ACP SDK error.
+    /// note: Wrap an ACP SDK error.
     #[must_use]
     pub fn sdk(err: &agent_client_protocol::Error) -> Self {
         Self::Sdk(err.to_string())
@@ -243,7 +243,6 @@ mod tests {
         let err = AcpError::agent_crashed(None, PathBuf::from("npx"), None);
         let msg = err.to_string();
         assert!(msg.contains("agent crashed"));
-        // Should not have a stderr hint line
         assert!(!msg.contains("stderr"));
     }
 
@@ -285,13 +284,12 @@ mod tests {
         let long_stderr = "x".repeat(300);
         let err = AcpError::agent_crashed(Some(1), PathBuf::from("agent"), Some(long_stderr));
         let msg = err.to_string();
-        // Should contain truncation marker
         assert!(msg.contains("..."));
     }
 
     #[test]
     fn source_chain_is_preserved() {
-        // `ConnectionFailed` carries an optional `#[source]` field: when set it
+        // note: `ConnectionFailed` carries an optional `#[source]` field: when set it
         // must stay reachable through `std::error::Error::source()`.
         let err = AcpError::connection_io(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
@@ -301,11 +299,11 @@ mod tests {
         assert_eq!(source.to_string(), "pipe broken");
         assert!(source.downcast_ref::<std::io::Error>().is_some());
 
-        // Without an underlying error there is nothing to report as source.
+        // note: Without an underlying error there is nothing to report as source.
         let err = AcpError::connection_failed("pipe broken");
         assert!(std::error::Error::source(&err).is_none());
 
-        // `#[from]` variants forward the wrapped error as the source.
+        // note: `#[from]` variants forward the wrapped error as the source.
         let err: AcpError = std::io::Error::new(std::io::ErrorKind::NotFound, "missing").into();
         assert_eq!(
             std::error::Error::source(&err).map(ToString::to_string),
@@ -316,7 +314,7 @@ mod tests {
             .into();
         assert!(std::error::Error::source(&err).is_some());
 
-        // Variants wrapping no error report no source.
+        // note: Variants wrapping no error report no source.
         assert!(std::error::Error::source(&AcpError::protocol("boom")).is_none());
     }
 }

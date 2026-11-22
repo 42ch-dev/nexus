@@ -31,6 +31,7 @@
 //!
 //! These are documented in the tech spec (§5.2) and tracked as residual findings
 //! (ACP-R3 through ACP-R11) for future implementation.
+// note: see docs/specs/agents/acp-capability-set.md.
 
 use agent_client_protocol::v1::schema::ClientCapabilities;
 use agent_client_protocol::v1::schema::FileSystemCapabilities;
@@ -45,27 +46,27 @@ use agent_client_protocol::v1::schema::FileSystemCapabilities;
 /// The `dead_code` warning is suppressed to acknowledge this design.
 #[allow(dead_code)]
 pub mod capabilities {
-    /// Client can read text files from the workspace.
+    /// note: Client can read text files from the workspace.
     ///
     /// Handler: `fs/read_text_file`
     pub const FILE_SYSTEM_READ: &str = "file_system.read";
 
-    /// Client can write text files to the workspace.
+    /// note: Client can write text files to the workspace.
     ///
     /// Handler: `fs/write_text_file`
     pub const FILE_SYSTEM_WRITE: &str = "file_system.write";
 
-    /// Client can create terminal sessions.
+    /// note: Client can create terminal sessions.
     ///
     /// Handler: `terminal/create`
     pub const TERMINAL_CREATE: &str = "terminal.create";
 
-    /// Client can stream terminal output.
+    /// note: Client can stream terminal output.
     ///
     /// Handler: `terminal/output`
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
 
-    /// Client can release terminal sessions.
+    /// note: Client can release terminal sessions.
     ///
     /// Handler: `terminal/release`
     pub const TERMINAL_RELEASE: &str = "terminal.release";
@@ -105,7 +106,7 @@ pub fn build_v1_0_capabilities() -> ClientCapabilities {
 mod tests {
     use super::capabilities::*;
 
-    /// Verify that all frozen capability IDs match the ACP spec exactly.
+    /// note: Verify that all frozen capability IDs match the ACP spec exactly.
     ///
     /// These tests guard against accidental typos or drift from the official
     /// ACP capability registry. If the ACP spec changes these IDs, the tests
@@ -135,14 +136,13 @@ mod tests {
         assert_eq!(TERMINAL_RELEASE, "terminal.release");
     }
 
-    /// Verify the capability set builder enables the required capabilities.
+    /// note: Verify the capability set builder enables the required capabilities.
     #[test]
     fn test_build_v1_0_capabilities_returns_non_default() {
         use super::build_v1_0_capabilities;
 
         let caps = build_v1_0_capabilities();
 
-        // The fs field is a FileSystemCapabilities struct, not an Option
         assert!(caps.fs.read_text_file);
         assert!(caps.fs.write_text_file);
         assert!(caps.terminal);

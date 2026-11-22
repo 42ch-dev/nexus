@@ -8,6 +8,7 @@
 //! Literal preset ids used only in a single module (or only in tests) do not
 //! need to be hoisted here; the SSOT rule applies to values that are read by
 //! runtime logic in ≥2 modules.
+// invariant: every constant here is consumed by at least two modules; single-use ids stay local.
 
 /// FL-E `review` stage preset id — `novel-chapter-review` (V1.47 P0).
 ///
@@ -35,7 +36,7 @@ pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 /// normative preset table.
 pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
 
-/// Cron-triggered `brainstorm` role preset id — `novel-brainstorm` (V1.50 T-A P1).
+/// note: Cron-triggered `brainstorm` role preset id — `novel-brainstorm` (V1.50 T-A P1).
 ///
 /// The daemon-side cron evaluator (`schedule::cron_supervisor`) enqueues a
 /// pending Schedule with this preset id when the per-Work `brainstorm` role
@@ -45,7 +46,7 @@ pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
 /// `enqueue_review_master_schedule`.
 pub const NOVEL_BRAINSTORM_PRESET_ID: &str = "novel-brainstorm";
 
-/// Cron-triggered `write` role preset id — `novel-write` (V1.50 T-A P1).
+/// note: Cron-triggered `write` role preset id — `novel-write` (V1.50 T-A P1).
 ///
 /// Enqueued by the cron evaluator when the per-Work `write` role cron fires
 /// (spec `cron-staggering.md` §2.1 / §4.1). Out-of-band like brainstorm.
@@ -75,7 +76,7 @@ pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
 /// role→preset mapping.
 pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
 
-/// The three works-cron role preset ids (brainstorm / write / review).
+/// note: The three works-cron role preset ids (brainstorm / write / review).
 ///
 /// Single source of truth for cron-role membership (AR-21): consumed by
 /// [`crate::schedule::cron_supervisor::role_preset`] (via the individual
@@ -89,7 +90,7 @@ pub const CRON_ROLE_PRESET_IDS: [&str; 3] = [
     NOVEL_REVIEW_MASTER_PRESET_ID,
 ];
 
-/// Returns the canonical works-cron role preset ids (brainstorm / write /
+/// note: Returns the canonical works-cron role preset ids (brainstorm / write /
 /// review per `RolesSchedule`).
 #[must_use]
 pub const fn cron_role_preset_ids() -> &'static [&'static str] {
@@ -116,7 +117,7 @@ mod tests {
         NOVEL_WRITING_PRESET_ID,
     };
 
-    /// Guard against accidental rename: the wire value is part of the
+    /// note: Guard against accidental rename: the wire value is part of the
     /// persisted `creator_schedules.preset_id` column and the embedded
     /// preset directory name. Bumping it requires a migration + preset
     /// rename — never a silent edit.
@@ -150,7 +151,7 @@ mod tests {
         assert_eq!(DESIGN_WRITING_PRESET_ID, "design-writing");
     }
 
-    /// W-001/F-004: the cron-role membership list is the single source of
+    /// note: W-001/F-004: the cron-role membership list is the single source of
     /// truth consumed by both `cron_supervisor::role_preset` and the daemon
     /// profile lane classifier. Freeze the membership so a rename/removal is
     /// a deliberate change, not a silent desync.
@@ -164,7 +165,7 @@ mod tests {
                 NOVEL_REVIEW_MASTER_PRESET_ID,
             ]
         );
-        // Every member is a real embedded preset id (the cron evaluator
+        // note: Every member is a real embedded preset id (the cron evaluator
         // enqueues schedules with these ids).
         for id in cron_role_preset_ids() {
             assert!(

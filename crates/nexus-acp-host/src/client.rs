@@ -49,6 +49,8 @@
 //! `!Send` futures. The bridge serializes all operations through a single
 //! `mpsc` channel, guaranteeing exclusive access to [`SdkConnection`] state
 //! (including `ActiveSession` handles) without additional synchronization.
+// note: trait signatures use nexus_contracts DTOs; SDK types stay inside AcpSdkAdapter.
+// note: see docs/specs/agents/acp-client-tech-spec.md.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -107,7 +109,7 @@ use nexus_contracts::local::acp::{
     NexusSetConfigOptionRequest, NexusSetConfigOptionResponse, NexusStopReason,
 };
 
-// ── Compile-time Send assertion for v1::ConnectionTo<Agent> ────────
+// note: ── Compile-time Send assertion for v1::ConnectionTo<Agent> ────────
 //
 // The LocalSetBridge pattern relies on v1::ConnectionTo<Agent> being Send
 // so it can be extracted from the !Send LocalSet context and stored in
@@ -118,7 +120,7 @@ const _: fn() = || {
     assert_send::<agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Agent>>();
 };
 
-// ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
+// note: ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
 //
 // These are free functions (not trait impls) to avoid orphan rule violations
 // since both the SDK types and Nexus DTOs are defined in external crates.
@@ -133,7 +135,7 @@ const fn nexus_stop_reason_from_sdk(reason: StopReason) -> NexusStopReason {
         StopReason::MaxTurnRequests => NexusStopReason::MaxTurnRequests,
         StopReason::Refusal => NexusStopReason::Refusal,
         StopReason::Cancelled => NexusStopReason::Cancelled,
-        _ => NexusStopReason::EndTurn, // fallback for future variants
+        _ => NexusStopReason::EndTurn, // note: fallback for future variants
     }
 }
 
@@ -204,7 +206,7 @@ fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> InitializeR
 }
 
 fn sdk_protocol_version_from_nexus(version: &NexusProtocolVersion) -> ProtocolVersion {
-    // Stable-v1-only boundary: the ONLY supported wire protocol value is "1".
+    // note: Stable-v1-only boundary: the ONLY supported wire protocol value is "1".
     // Any other value — including a numeric string like "2" that ACP's numeric
     // `ProtocolVersion` newtype would silently accept — is rejected back to
     // the explicit stable `ProtocolVersion::V1` fallback (never `LATEST`), so
@@ -233,7 +235,7 @@ fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> McpServer {
         NexusMcpServer::Http(h) => McpServer::Http(McpServerHttp::new(h.name, h.url)),
         NexusMcpServer::Sse(s) => McpServer::Sse(McpServerSse::new(s.name, s.url)),
         NexusMcpServer::Stdio(s) => {
-            // W-C (QC2 W-1): carry `args` through the mapping so a
+            // note: W-C (QC2 W-1): carry `args` through the mapping so a
             // hand-built `NexusMcpServer::Stdio { command, args }` spawns
             // the correct subcommand.
             McpServer::Stdio(McpServerStdio::new(s.name, s.command).args(s.args))
@@ -288,12 +290,11 @@ fn sdk_list_sessions_response_to_nexus(resp: &ListSessionsResponse) -> NexusList
     NexusListSessionsResponse::new(sessions).next_cursor_opt(resp.next_cursor.clone())
 }
 
-// ── Config option SDK ↔ Nexus conversion helpers ─────────────────────
 
 fn sdk_set_config_option_request_from_nexus(
     req: NexusSetConfigOptionRequest,
 ) -> SetSessionConfigOptionRequest {
-    // ACP 2.1: `SessionConfigOptionValue` implements `From<&str>` (not
+    // note: ACP 2.1: `SessionConfigOptionValue` implements `From<&str>` (not
     // `From<String>`); pass a borrowed &str of the same value.
     SetSessionConfigOptionRequest::new(req.session_id.0, req.config_id, req.value.as_str())
 }
@@ -410,99 +411,99 @@ fn sdk_set_config_option_response_to_nexus(
     NexusSetConfigOptionResponse::new(config_options)
 }
 
-/// Streaming update from an ACP prompt operation.
+/// note: Streaming update from an ACP prompt operation.
 ///
 /// Emitted by [`NexusAcpClient::stream_prompt`] as the agent processes a prompt.
 /// Each update carries the session ID for routing. The stream ends after
 /// exactly one [`AcpStreamUpdate::Stopped`] variant.
 #[derive(Debug, Clone)]
 pub enum AcpStreamUpdate {
-    /// Agent emitted a text delta (partial output).
+    /// note: Agent emitted a text delta (partial output).
     TextDelta {
-        /// The session ID that produced this delta.
+        /// note: The session ID that produced this delta.
         session_id: String,
-        /// Incremental text content.
+        /// note: Incremental text content.
         text: String,
     },
-    /// Agent emitted a thinking/reasoning delta.
+    /// note: Agent emitted a thinking/reasoning delta.
     ThoughtDelta {
-        /// The session ID that produced this delta.
+        /// note: The session ID that produced this delta.
         session_id: String,
-        /// Incremental thinking content.
+        /// note: Incremental thinking content.
         text: String,
     },
-    /// Agent initiated a tool call.
+    /// note: Agent initiated a tool call.
     ToolCall {
-        /// The session ID for the tool call.
+        /// note: The session ID for the tool call.
         session_id: String,
-        /// Tool call ID (provider-assigned).
+        /// note: Tool call ID (provider-assigned).
         tool_call_id: String,
-        /// Tool name.
+        /// note: Tool name.
         tool_name: String,
     },
-    /// Agent updated a tool call (result or status).
+    /// note: Agent updated a tool call (result or status).
     ToolCallUpdate {
-        /// The session ID for the tool call update.
+        /// note: The session ID for the tool call update.
         session_id: String,
-        /// Tool call ID.
+        /// note: Tool call ID.
         tool_call_id: String,
-        /// Update content (partial result or status).
+        /// note: Update content (partial result or status).
         content: String,
     },
-    /// Agent emitted a plan update.
+    /// note: Agent emitted a plan update.
     PlanUpdate {
-        /// The session ID for the plan update.
+        /// note: The session ID for the plan update.
         session_id: String,
-        /// Plan content (structured or free text).
+        /// note: Plan content (structured or free text).
         content: String,
     },
-    /// Prompt processing completed with a stop reason.
+    /// note: Prompt processing completed with a stop reason.
     Stopped {
-        /// The session ID that completed.
+        /// note: The session ID that completed.
         session_id: String,
-        /// Why the agent stopped generating.
+        /// note: Why the agent stopped generating.
         stop_reason: NexusStopReason,
     },
-    /// Prompt streaming failed before a normal stop reason.
+    /// note: Prompt streaming failed before a normal stop reason.
     Failed {
-        /// The session ID whose prompt failed.
+        /// note: The session ID whose prompt failed.
         session_id: String,
-        /// Stable failure category for host mapping.
+        /// note: Stable failure category for host mapping.
         error_category: String,
-        /// Human-readable protocol or transport failure.
+        /// note: Human-readable protocol or transport failure.
         error_message: String,
     },
-    /// Permission request was evaluated and responded to.
+    /// note: Permission request was evaluated and responded to.
     ///
     /// Emitted for observability: the permission was already handled by the
     /// SDK adapter's `on_receive_request` handler. This event lets the host
     /// layer know a permission decision was made.
     PermissionResult {
-        /// The session ID for the permission request.
+        /// note: The session ID for the permission request.
         session_id: String,
-        /// Tool name from the permission request.
+        /// note: Tool name from the permission request.
         tool_name: String,
-        /// Whether the permission was approved.
+        /// note: Whether the permission was approved.
         approved: bool,
     },
 }
 
-/// Permission evaluation outcome for ACP permission requests.
+/// note: Permission evaluation outcome for ACP permission requests.
 ///
 /// Returned by the host-level permission callback to indicate whether
 /// the tool operation should be approved or denied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpPermissionOutcome {
-    /// Approve the permission request.
+    /// note: Approve the permission request.
     Approve,
-    /// Deny the permission request.
+    /// note: Deny the permission request.
     Deny,
 }
 
-/// Type alias for the boxed permission evaluation callback.
+/// note: Type alias for the boxed permission evaluation callback.
 type PermissionHandlerFn = Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync>;
 
-/// The nexus42 ACP client abstraction.
+/// note: The nexus42 ACP client abstraction.
 ///
 /// All ACP communication from the CLI goes through this trait. The methods
 /// mirror the ACP protocol lifecycle: initialize → session → prompt → cancel.
@@ -511,19 +512,19 @@ type PermissionHandlerFn = Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Syn
 /// `nexus_contracts::local::acp`. SDK types are confined to `AcpSdkAdapter`.
 #[allow(async_fn_in_trait)]
 pub trait NexusAcpClient: Send + Sync {
-    /// Perform the ACP `initialize` handshake with the agent.
+    /// note: Perform the ACP `initialize` handshake with the agent.
     fn initialize(
         &self,
         request: NexusInitializeRequest,
     ) -> impl Future<Output = AcpResult<NexusInitializeResponse>> + Send;
 
-    /// Create a new ACP session on the agent.
+    /// note: Create a new ACP session on the agent.
     fn create_session(
         &self,
         request: NexusNewSessionRequest,
     ) -> impl Future<Output = AcpResult<NexusSessionCreated>> + Send;
 
-    /// Send a prompt to the agent within an existing session (one-shot).
+    /// note: Send a prompt to the agent within an existing session (one-shot).
     ///
     /// Blocks until the prompt completes and returns the final result.
     /// For streaming results, use [`stream_prompt`](Self::stream_prompt).
@@ -532,7 +533,7 @@ pub trait NexusAcpClient: Send + Sync {
         request: NexusPromptRequest,
     ) -> impl Future<Output = AcpResult<NexusPromptCompleted>> + Send;
 
-    /// Send a prompt and stream updates as they arrive.
+    /// note: Send a prompt and stream updates as they arrive.
     ///
     /// Returns a channel receiver that emits [`AcpStreamUpdate`] items.
     /// The receiver is guaranteed to receive exactly one `Stopped` variant
@@ -542,13 +543,13 @@ pub trait NexusAcpClient: Send + Sync {
         request: NexusPromptRequest,
     ) -> impl Future<Output = AcpResult<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>> + Send;
 
-    /// Cancel an in-progress prompt operation.
+    /// note: Cancel an in-progress prompt operation.
     fn cancel(
         &self,
         session_id: NexusSessionId,
     ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send;
 
-    /// List sessions on the agent.
+    /// note: List sessions on the agent.
     ///
     /// Supports filtering by working directory and cursor-based pagination.
     fn list_sessions(
@@ -556,7 +557,7 @@ pub trait NexusAcpClient: Send + Sync {
         request: NexusListSessionsRequest,
     ) -> impl Future<Output = AcpResult<NexusListSessionsResponse>> + Send;
 
-    /// Set a session configuration option.
+    /// note: Set a session configuration option.
     ///
     /// Sends a `session/set_config_option` request to the agent and returns
     /// the full set of configuration options with their updated values.
@@ -565,7 +566,7 @@ pub trait NexusAcpClient: Send + Sync {
         request: NexusSetConfigOptionRequest,
     ) -> impl Future<Output = AcpResult<NexusSetConfigOptionResponse>> + Send;
 
-    /// Set the session mode via the stable `session/set_mode` RPC.
+    /// note: Set the session mode via the stable `session/set_mode` RPC.
     ///
     /// Sends a `SetSessionModeRequest` with the given session and mode IDs.
     fn set_mode(
@@ -575,17 +576,17 @@ pub trait NexusAcpClient: Send + Sync {
     ) -> impl Future<Output = AcpResult<()>> + Send;
 }
 
-/// Internal state for the SDK adapter.
+/// note: Internal state for the SDK adapter.
 ///
 /// All fields are accessed exclusively from the [`LocalSetBridge`] thread,
 /// so no additional synchronization (Mutex, etc.) is needed for the session
 /// map or init response.
 struct SdkConnection {
-    /// The ACP SDK connection handle to the agent.
+    /// note: The ACP SDK connection handle to the agent.
     connection: ConnectionTo<Agent>,
-    /// Cached initialize response (populated after first `initialize()` call).
+    /// note: Cached initialize response (populated after first `initialize()` call).
     init_response: Option<InitializeResponse>,
-    /// Active sessions keyed by session ID string.
+    /// note: Active sessions keyed by session ID string.
     ///
     /// `v1::ActiveSession<'static, Agent>` is `'static` when obtained from
     /// `SessionBuilder::start_session()` (via `SessionSetup.session`), so it
@@ -594,7 +595,7 @@ struct SdkConnection {
     sessions: HashMap<String, ActiveSession<'static, Agent>>,
 }
 
-/// Concrete adapter wrapping the `agent-client-protocol` SDK.
+/// note: Concrete adapter wrapping the `agent-client-protocol` SDK.
 ///
 /// This struct uses the SDK v5 `Client.v1().connect_with()` pattern
 /// to establish a connection to the agent. The `v1::ConnectionTo<Agent>`
@@ -603,24 +604,24 @@ struct SdkConnection {
 /// The adapter uses [`LocalSetBridge`] to execute operations that may require
 /// !Send futures, bridging them to the async tokio world.
 pub struct AcpSdkAdapter {
-    /// The agent's resolved binary path or command string (for error messages).
+    /// note: The agent's resolved binary path or command string (for error messages).
     agent_path: PathBuf,
-    /// Agent ID for logging context.
+    /// note: Agent ID for logging context.
     agent_id: String,
-    /// `LocalSet` bridge for executing !Send futures.
+    /// note: `LocalSet` bridge for executing !Send futures.
     bridge: LocalSetBridge,
-    /// The ACP SDK connection (wrapped for thread-safe access).
+    /// note: The ACP SDK connection (wrapped for thread-safe access).
     /// This is `Some` after `with_connection()` is called.
     connection: Arc<RwLock<Option<SdkConnection>>>,
-    /// Connection handle used by control-plane notifications such as cancel.
+    /// note: Connection handle used by control-plane notifications such as cancel.
     ///
     /// Kept outside `connection` so cancellation cannot deadlock behind a
     /// streaming prompt that mutably owns the active SDK session.
     control_connection: Arc<RwLock<Option<ConnectionTo<Agent>>>>,
-    /// Handle to the tracked connection-loop task on the bridge's `LocalSet`
+    /// note: Handle to the tracked connection-loop task on the bridge's `LocalSet`
     /// thread (aborted on session cleanup).
     setup_owned: Option<crate::localset_bridge::OwnedTaskHandle>,
-    /// Permission evaluation callback, set by the host layer.
+    /// note: Permission evaluation callback, set by the host layer.
     ///
     /// When an ACP agent sends a `session/request_permission` request, the
     /// SDK's `on_receive_request` handler calls this callback with the tool
@@ -628,7 +629,7 @@ pub struct AcpSdkAdapter {
     /// selects the matching `PermissionOption` from the request.
     /// If `None`, all permission requests are cancelled (safe default).
     permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>>,
-    /// Broadcast of permission result events produced by the SDK's
+    /// note: Broadcast of permission result events produced by the SDK's
     /// `on_receive_request` handler.
     ///
     /// Every `stream_prompt` operation subscribes at its start and forwards
@@ -639,7 +640,7 @@ pub struct AcpSdkAdapter {
 }
 
 impl AcpSdkAdapter {
-    /// Get a clone of the inner `ConnectionTo<Agent>` handle, acquiring the read
+    /// note: Get a clone of the inner `ConnectionTo<Agent>` handle, acquiring the read
     /// lock for the minimum time needed. Returns an error if not yet connected.
     #[allow(clippy::significant_drop_tightening)]
     async fn get_connection_handle(
@@ -654,7 +655,7 @@ impl AcpSdkAdapter {
         Ok(conn.connection.clone())
     }
 
-    /// Check if an init response is cached, returning it if so.
+    /// note: Check if an init response is cached, returning it if so.
     #[allow(clippy::significant_drop_tightening)]
     async fn get_cached_init(
         connection: &Arc<RwLock<Option<SdkConnection>>>,
@@ -662,7 +663,7 @@ impl AcpSdkAdapter {
         let guard = connection.read().await;
         guard.as_ref().and_then(|conn| conn.init_response.clone())
     }
-    /// Create a new adapter without an established connection.
+    /// note: Create a new adapter without an established connection.
     ///
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[must_use]
@@ -680,7 +681,7 @@ impl AcpSdkAdapter {
         }
     }
 
-    /// Create adapter with established connection.
+    /// note: Create adapter with established connection.
     ///
     /// This method establishes the ACP SDK connection using the provided
     /// stdin/stdout pipes from the agent subprocess. The connection uses
@@ -714,7 +715,7 @@ impl AcpSdkAdapter {
         let permission_events_for_handler = permission_events_tx.clone();
 
         let bridge_clone = bridge.clone();
-        // The connection loop is a tracked session-ownership future on the
+        // note: The connection loop is a tracked session-ownership future on the
         // bridge's LocalSet thread: registered by task id/abort handle and
         // aborted by bridge shutdown, but not charged against the bounded
         // request budget (it lives as long as the owned child transport).
@@ -724,19 +725,17 @@ impl AcpSdkAdapter {
             let perm_handler = permission_handler_clone;
             let perm_events = permission_events_for_handler;
 
-            // Convert tokio pipes to futures-compatible traits inside the LocalSet
-            let stdin_compat = stdin.compat_write(); // ChildStdin → AsyncWrite (outgoing)
-            let stdout_compat = stdout.compat(); // ChildStdout → AsyncRead (incoming)
+            let stdin_compat = stdin.compat_write(); // note: ChildStdin → AsyncWrite (outgoing)
+            let stdout_compat = stdout.compat(); // note: ChildStdout → AsyncRead (incoming)
 
             Box::pin(async move {
-                // Create the transport using SDK ByteStreams.
                 let transport = ByteStreams::new(stdin_compat, stdout_compat);
 
-                // Build the Client with permission request handler (v5:
+                // note: Build the Client with permission request handler (v5:
                 // `Client.v1()` replaces the removed `Client.builder()`).
                 let builder = acp::Client.v1().name(&agent_id);
 
-                // Register permission request handler via on_receive_request.
+                // note: Register permission request handler via on_receive_request.
                 // The agent sends `session/request_permission` when it needs
                 // approval for a tool operation. The handler evaluates using
                 // the host-level permission callback and responds.
@@ -847,13 +846,13 @@ impl AcpSdkAdapter {
         }
     }
 
-    /// Return a reference to the agent path (for error reporting).
+    /// note: Return a reference to the agent path (for error reporting).
     #[must_use]
     pub fn agent_path(&self) -> &Path {
         &self.agent_path
     }
 
-    /// Whether the SDK connection has been established.
+    /// note: Whether the SDK connection has been established.
     ///
     /// `with_connection` spawns the connection setup asynchronously; callers
     /// that need the connection immediately (e.g. a lazy session spawn) poll
@@ -861,20 +860,20 @@ impl AcpSdkAdapter {
     pub async fn is_connected(&self) -> bool {
         self.connection.read().await.is_some()
     }
-    /// Abort the long-lived SDK connection loop so owned transport pipes close.
+    /// note: Abort the long-lived SDK connection loop so owned transport pipes close.
     pub fn abort_connection_loop(&self) {
         if let Some(handle) = &self.setup_owned {
             handle.abort();
         }
     }
 
-    /// Return the agent ID.
+    /// note: Return the agent ID.
     #[must_use]
     pub fn agent_id(&self) -> &str {
         &self.agent_id
     }
 
-    /// Set the permission evaluation callback.
+    /// note: Set the permission evaluation callback.
     ///
     /// Must be called before any prompt operations. The callback receives
     /// the tool name from the ACP `session/request_permission` request and
@@ -888,7 +887,7 @@ impl AcpSdkAdapter {
         *guard = Some(handler);
     }
 
-    /// Build a permission response from the evaluation outcome and available options.
+    /// note: Build a permission response from the evaluation outcome and available options.
     ///
     /// When approving, prefers `AllowAlways` over `AllowOnce`.
     /// When denying, prefers `RejectAlways` over `RejectOnce`.
@@ -916,7 +915,7 @@ impl AcpSdkAdapter {
             }
         }
 
-        // No matching option — cancel
+        // note: No matching option — cancel
         tracing::warn!(
             available_kinds = ?options.iter().map(|o| &o.kind).collect::<Vec<_>>(),
             ?outcome,
@@ -925,7 +924,7 @@ impl AcpSdkAdapter {
         RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
     }
 
-    /// Send a prompt to an existing session and stream until completion.
+    /// note: Send a prompt to an existing session and stream until completion.
     ///
     /// The write lock must span the entire streaming loop because
     /// `active_session` borrows mutably from `conn.sessions`.
@@ -942,7 +941,6 @@ impl AcpSdkAdapter {
             ));
         };
 
-        // Get the active session
         let Some(active_session) = conn.sessions.get_mut(&session_id_str) else {
             return Err(crate::AcpError::protocol(format!(
                 "No active session found for session_id: {session_id_str}",
@@ -958,7 +956,6 @@ impl AcpSdkAdapter {
             .send_prompt(&prompt_text)
             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-        // Read streaming updates until we get a StopReason
         loop {
             let update = active_session
                 .read_update()
@@ -967,7 +964,7 @@ impl AcpSdkAdapter {
 
             match update {
                 SessionMessage::Message(_dispatch) => {
-                    // Streaming content update — logged but not accumulated
+                    // note: Streaming content update — logged but not accumulated
                     // in NexusPromptCompleted (content consumption is handled
                     // by the caller via subscribe/future streaming API).
                     tracing::trace!(
@@ -991,7 +988,7 @@ impl AcpSdkAdapter {
                     });
                 }
                 _ => {
-                    // Future SDK variants — log and continue
+                    // note: Future SDK variants — log and continue
                     tracing::trace!(
                         session_id = %session_id_str,
                         "Received unknown session message variant"
@@ -1001,7 +998,7 @@ impl AcpSdkAdapter {
         }
     }
 
-    /// Streaming variant of [`run_prompt`]: sends the prompt and forwards
+    /// note: Streaming variant of [`run_prompt`]: sends the prompt and forwards
     /// `AcpStreamUpdate` items through the provided sender.
     ///
     /// The caller supplies an `mpsc::Sender` so it controls the channel
@@ -1044,7 +1041,7 @@ impl AcpSdkAdapter {
 
             match update {
                 SessionMessage::Message(dispatch) => {
-                    // Use MatchDispatch to extract all streaming updates from the notification
+                    // note: Use MatchDispatch to extract all streaming updates from the notification
                     let updates =
                         Self::extract_updates_from_dispatch(dispatch, &session_id_str).await;
                     for acp_update in updates {
@@ -1081,7 +1078,7 @@ impl AcpSdkAdapter {
         }
     }
 
-    /// Extract streaming events from an SDK `Dispatch` using `MatchDispatch`.
+    /// note: Extract streaming events from an SDK `Dispatch` using `MatchDispatch`.
     ///
     /// Returns a list of `AcpStreamUpdate` items extracted from the notification.
     /// Handles all `SessionUpdate` variants: text, thought, tool calls, plans.
@@ -1094,7 +1091,7 @@ impl AcpSdkAdapter {
         let captured_clone = captured.clone();
         let sid = session_id.to_string();
 
-        // ACP 5.0: `MatchDispatch` handles are typed per protocol version;
+        // note: ACP 5.0: `MatchDispatch` handles are typed per protocol version;
         // convert the v1 dispatch to the raw form first.
         let result = MatchDispatch::new(dispatch.into_raw())
             .if_notification(async move |notif: SessionNotification| {
@@ -1108,13 +1105,13 @@ impl AcpSdkAdapter {
             .await
             .otherwise_ignore();
 
-        // If MatchDispatch itself errored, we still return whatever we captured (non-fatal).
+        // note: If MatchDispatch itself errored, we still return whatever we captured (non-fatal).
         let _ = result;
         let mut guard = captured.lock().expect("mutex not poisoned");
         std::mem::take(&mut *guard)
     }
 
-    /// Convert an SDK `SessionUpdate` to zero or more `AcpStreamUpdate` items.
+    /// note: Convert an SDK `SessionUpdate` to zero or more `AcpStreamUpdate` items.
     fn session_update_to_acp_updates(
         update: SessionUpdate,
         session_id: &str,
@@ -1159,7 +1156,6 @@ impl AcpSdkAdapter {
                     content,
                 }]
             }
-            // Skip other variants (available commands, mode updates, config updates, etc.)
             _ => vec![],
         }
     }
@@ -1167,7 +1163,7 @@ impl AcpSdkAdapter {
 
 impl Drop for AcpSdkAdapter {
     fn drop(&mut self) {
-        // The connection loop lives on the bridge's LocalSet thread and is
+        // note: The connection loop lives on the bridge's LocalSet thread and is
         // tracked there; abort it by task id so the owned transport closes.
         if let Some(handle) = self.setup_owned.take() {
             handle.abort();
@@ -1190,7 +1186,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                     let connection = connection.clone();
 
                     Box::pin(async move {
-                        // Check for cached response
+                        // note: Check for cached response
                         if let Some(resp) = Self::get_cached_init(&connection).await {
                             tracing::debug!(
                                 agent_id = %agent_id,
@@ -1199,14 +1195,12 @@ impl NexusAcpClient for AcpSdkAdapter {
                             return Ok(nexus_initialize_response_from_sdk(&resp));
                         }
 
-                        // Convert Nexus request to SDK InitializeRequest and send
                         let sdk_req = sdk_initialize_request_from_nexus(request);
                         tracing::info!(
                             agent_id = %agent_id,
                             "Sending initialize request to agent"
                         );
 
-                        // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
                         let cancel = CancellationToken::new();
                         let cancel_watch = cancel.clone();
@@ -1238,7 +1232,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             })?
                             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-                        // Cache the response (write lock, brief scope)
                         let nexus_response = nexus_initialize_response_from_sdk(&init_result);
                         {
                             let mut guard = connection.write().await;
@@ -1274,7 +1267,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                     let connection = connection.clone();
 
                     Box::pin(async move {
-                        // Convert Nexus request to SDK NewSessionRequest
                         let sdk_req = sdk_new_session_request_from_nexus(request);
                         tracing::info!(
                             agent_id = %agent_id,
@@ -1282,7 +1274,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             "Creating new session"
                         );
 
-                        // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
                         let cancel = CancellationToken::new();
                         let cancel_watch = cancel.clone();
@@ -1315,7 +1306,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                             })?
                             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-                        // ACP 5.0: `start_session()` returns a `SessionSetup`
+                        // note: ACP 5.0: `start_session()` returns a `SessionSetup`
                         // holding the session and the complete setup response
                         // (`ActiveSession::response()` was removed).
                         let SessionSetup {
@@ -1324,13 +1315,13 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         let session_id_str = session.session_id().to_string();
 
-                        // Convert modes. ACP 2.1: the setup response carries
+                        // note: Convert modes. ACP 2.1: the setup response carries
                         // `Option<SessionModeState>` — map directly.
                         let nexus_modes = response
                             .modes
                             .map(|state| nexus_session_mode_state_from_sdk(&state));
 
-                        // Convert config_options from the setup response. The
+                        // note: Convert config_options from the setup response. The
                         // SDK response may include config_options exposing
                         // agent-specific configuration IDs for model/mode
                         // switching via `set_config_option`.
@@ -1338,7 +1329,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             .config_options
                             .map(|opts| opts.iter().map(sdk_config_option_to_nexus).collect());
 
-                        // Store the active session (write lock, brief scope)
                         {
                             let mut guard = connection.write().await;
                             if let Some(conn) = guard.as_mut() {
@@ -1373,11 +1363,10 @@ impl NexusAcpClient for AcpSdkAdapter {
         let bridge = self.bridge.clone();
 
         async move {
-            // Extract session_id and prompt text before entering the bridge closure,
+            // note: Extract session_id and prompt text before entering the bridge closure,
             // since we need `request` to be owned for the borrow checker.
             let session_id_str = request.session_id.0.clone();
 
-            // Build the prompt text from content blocks
             let prompt_text = request
                 .prompt
                 .iter()
@@ -1429,7 +1418,7 @@ impl NexusAcpClient for AcpSdkAdapter {
             let stream_session_id = session_id_str.clone();
             let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
-            // Subscribe to the adapter-wide permission broadcast for THIS
+            // note: Subscribe to the adapter-wide permission broadcast for THIS
             // operation. Each stream_prompt gets its own subscription, so
             // permission results route per active operation and remain
             // observable across serial prompts on the same session.
@@ -1487,7 +1476,7 @@ impl NexusAcpClient for AcpSdkAdapter {
         let agent_id = self.agent_id.clone();
 
         async move {
-            // Cooperative cancel is teardown/control work: it must reach the
+            // note: Cooperative cancel is teardown/control work: it must reach the
             // peer even when the bounded work queue is saturated, otherwise a
             // full queue could block the cancellation that drains it.
             bridge
@@ -1547,7 +1536,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                     let connection = connection.clone();
 
                     Box::pin(async move {
-                        // Convert Nexus request to SDK ListSessionsRequest
                         let sdk_req = sdk_list_sessions_request_from_nexus(request);
 
                         tracing::info!(
@@ -1557,7 +1545,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             "Listing sessions"
                         );
 
-                        // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
                         let cancel = CancellationToken::new();
                         let cancel_watch = cancel.clone();
@@ -1590,7 +1577,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             })?
                             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-                        // Convert SDK response to Nexus DTOs
                         let nexus_response = sdk_list_sessions_response_to_nexus(&list_result);
 
                         tracing::info!(
@@ -1622,7 +1608,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                     let connection = connection.clone();
 
                     Box::pin(async move {
-                        // Convert Nexus request to SDK SetSessionConfigOptionRequest
                         let sdk_req = sdk_set_config_option_request_from_nexus(request);
 
                         tracing::info!(
@@ -1632,7 +1617,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             "Setting session config option"
                         );
 
-                        // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
                         let cancel = CancellationToken::new();
                         let cancel_watch = cancel.clone();
@@ -1665,7 +1649,6 @@ impl NexusAcpClient for AcpSdkAdapter {
                             })?
                             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-                        // Convert SDK response to Nexus DTOs
                         let nexus_response = sdk_set_config_option_response_to_nexus(&set_result);
 
                         tracing::info!(
@@ -1830,7 +1813,7 @@ mod tests {
 
     #[test]
     fn auth_method_from_sdk_unknown_variant_fallback() {
-        // When AuthMethod is not Agent, the converter falls back to "unknown".
+        // note: When AuthMethod is not Agent, the converter falls back to "unknown".
         // We test this by using an Agent variant with an empty id and name,
         // then checking the conversion doesn't panic (the match arm is hit).
         // Since only the Agent variant is available without feature flags,
@@ -1884,7 +1867,6 @@ mod tests {
     fn initialize_request_to_sdk() {
         let nexus_req = NexusInitializeRequest::new();
         let _sdk_req = sdk_initialize_request_from_nexus(nexus_req);
-        // Just verify conversion succeeds
     }
 
     #[test]
@@ -1926,7 +1908,6 @@ mod tests {
         let sdk_req = sdk_new_session_request_from_nexus(nexus_req);
         assert_eq!(sdk_req.mcp_servers.len(), 3);
 
-        // Verify HTTP server
         match &sdk_req.mcp_servers[0] {
             McpServer::Http(h) => {
                 assert_eq!(h.name, "http-server");
@@ -1939,7 +1920,6 @@ mod tests {
             _ => panic!("Expected Http variant"),
         }
 
-        // Verify SSE server
         match &sdk_req.mcp_servers[1] {
             McpServer::Sse(s) => {
                 assert_eq!(s.name, "sse-server");
@@ -1948,7 +1928,6 @@ mod tests {
             _ => panic!("Expected Sse variant"),
         }
 
-        // Verify Stdio server (args carried through — W-C)
         match &sdk_req.mcp_servers[2] {
             McpServer::Stdio(s) => {
                 assert_eq!(s.name, "local-server");
@@ -2029,7 +2008,7 @@ mod tests {
 
     #[test]
     fn protocol_version_numeric_two_falls_back_to_stable_v1() {
-        // "2" parses as a number and ACP's numeric newtype would accept it,
+        // note: "2" parses as a number and ACP's numeric newtype would accept it,
         // but this adapter is stable-v1-only: it must NOT pass through.
         let version = NexusProtocolVersion::new("2");
         let sdk_version = sdk_protocol_version_from_nexus(&version);
@@ -2054,7 +2033,7 @@ mod tests {
         assert_eq!(adapter.agent_id(), "test-agent");
         assert_eq!(adapter.agent_path(), Path::new("/usr/bin/test-agent"));
 
-        // Connection should be None
+        // note: Connection should be None
         assert!(adapter.connection.read().await.is_none());
     }
 
@@ -2118,7 +2097,7 @@ mod tests {
             LocalSetBridge::new(),
         );
 
-        // Manually verify the error path when connection exists but session doesn't.
+        // note: Manually verify the error path when connection exists but session doesn't.
         // We can't easily create a real ConnectionTo without a transport,
         // so just verify the error path when connection is None.
         {
@@ -2134,7 +2113,6 @@ mod tests {
             )],
         );
         let result = adapter.prompt(request).await;
-        // Should fail because connection is None (no real connection established)
         assert!(result.is_err());
     }
 
@@ -2151,7 +2129,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── List sessions conversion tests ────────────────────────────────────────
 
     #[test]
     fn list_sessions_request_to_sdk_empty() {
@@ -2229,7 +2206,6 @@ mod tests {
         assert_eq!(nexus_resp.next_cursor, Some("page-2".to_string()));
     }
 
-    // ── Set config option conversion tests ────────────────────────────────────
 
     #[test]
     fn set_config_option_request_to_sdk() {
@@ -2241,7 +2217,7 @@ mod tests {
         let sdk_req = sdk_set_config_option_request_from_nexus(nexus_req);
         assert_eq!(sdk_req.session_id.to_string(), "sess-1");
         assert_eq!(sdk_req.config_id.to_string(), "model");
-        // ACP 2.1: `SessionConfigOptionValue` is a value-id/boolean enum
+        // note: ACP 2.1: `SessionConfigOptionValue` is a value-id/boolean enum
         // without `Display`; assert the value-id payload instead.
         assert_eq!(
             sdk_req.value.as_value_id().map(ToString::to_string),
@@ -2390,7 +2366,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── Permission handling tests ──────────────────────────────────────────
 
     #[test]
     fn build_permission_response_approve_prefers_allow_always() {
@@ -2410,7 +2385,6 @@ mod tests {
         let response =
             AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
 
-        // Should prefer AllowAlways over AllowOnce
         match response.outcome {
             RequestPermissionOutcome::Selected(sel) => {
                 assert_eq!(sel.option_id.to_string(), "opt-2");
@@ -2475,7 +2449,7 @@ mod tests {
         let response =
             AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
 
-        // No reject option available, so should cancel
+        // note: No reject option available, so should cancel
         assert!(matches!(
             response.outcome,
             RequestPermissionOutcome::Cancelled

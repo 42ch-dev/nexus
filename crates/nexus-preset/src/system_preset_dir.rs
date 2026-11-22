@@ -7,6 +7,7 @@
 //!
 //! Design: v1.6 WS-D — replace hardcoded `_system.maintenance` with
 //! configurable directory scanning.
+// note: a broken preset degrades to a warning; the scan never fails as a whole.
 
 #[cfg(test)]
 use crate::capability_catalog::BuiltinCapabilityCatalog;
@@ -14,54 +15,45 @@ use crate::capability_catalog::CapabilityCatalog;
 use crate::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
 use std::path::{Path, PathBuf};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
-/// System preset directory name under `~/.nexus42/presets/`.
+/// note: System preset directory name under `~/.nexus42/presets/`.
 const SYSTEM_PRESET_DIR_NAME: &str = "_system";
 
-/// Prefix applied to all system preset identifiers.
+/// note: Prefix applied to all system preset identifiers.
 const SYSTEM_PREFIX: &str = "_system.";
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
 
-/// A discovered system preset with its directory origin.
+/// note: A discovered system preset with its directory origin.
 #[derive(Debug, Clone)]
 pub struct SystemPresetEntry {
-    /// The preset's qualified ID (e.g. `_system.maintenance`).
+    /// note: The preset's qualified ID (e.g. `_system.maintenance`).
     pub qualified_id: String,
-    /// The bundle directory on disk (e.g. `~/.nexus42/presets/_system/maintenance/`).
+    /// note: The bundle directory on disk (e.g. `~/.nexus42/presets/_system/maintenance/`).
     pub bundle_dir: PathBuf,
-    /// The fully loaded preset.
+    /// note: The fully loaded preset.
     pub loaded: LoadedPreset,
 }
 
-/// Result of scanning the system preset directory.
+/// note: Result of scanning the system preset directory.
 #[derive(Debug, Default)]
 pub struct SystemPresetScanResult {
-    /// Successfully loaded system presets.
+    /// note: Successfully loaded system presets.
     pub presets: Vec<SystemPresetEntry>,
-    /// Warnings for presets that were skipped (corrupted, invalid YAML, etc.).
+    /// note: Warnings for presets that were skipped (corrupted, invalid YAML, etc.).
     pub warnings: Vec<SystemPresetWarning>,
 }
 
-/// A warning produced during system preset scanning.
+/// note: A warning produced during system preset scanning.
 #[derive(Debug, Clone)]
 pub struct SystemPresetWarning {
-    /// Directory name that produced the warning.
+    /// note: Directory name that produced the warning.
     pub dir_name: String,
-    /// Human-readable warning message.
+    /// note: Human-readable warning message.
     pub message: String,
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
-/// Scan the system preset directory and load all discovered presets.
+/// note: Scan the system preset directory and load all discovered presets.
 ///
 /// Location: `<nexus_home>/presets/_system/<name>/`
 ///
@@ -77,7 +69,7 @@ pub fn scan_system_presets(
 ) -> SystemPresetScanResult {
     let system_dir = system_preset_base_dir(nexus_home);
 
-    // T4: missing directory = no system presets (not an error).
+    // note: T4: missing directory = no system presets (not an error).
     if !system_dir.exists() {
         tracing::debug!(
             ?system_dir,
@@ -103,7 +95,6 @@ pub fn scan_system_presets(
     for entry in entries.flatten() {
         let path = entry.path();
 
-        // Only process directories.
         if !path.is_dir() {
             continue;
         }
@@ -113,7 +104,6 @@ pub fn scan_system_presets(
             None => continue,
         };
 
-        // Skip hidden directories (starting with `.`).
         if dir_name.starts_with('.') {
             continue;
         }
@@ -140,7 +130,7 @@ pub fn scan_system_presets(
     result
 }
 
-/// Load a single system preset from a bundle directory.
+/// note: Load a single system preset from a bundle directory.
 ///
 /// Reads `preset.yaml`, validates it, and returns a [`SystemPresetEntry`]
 /// with the `_system.` prefix applied.
@@ -208,10 +198,10 @@ pub fn load_system_preset_from_dir(
         }
     };
 
-    // The qualified ID uses `_system.<dir_name>` convention.
+    // note: The qualified ID uses `_system.<dir_name>` convention.
     let qualified_id = format!("{SYSTEM_PREFIX}{dir_name}");
 
-    // A system preset is a directory bundle: it knows its source identity
+    // note: A system preset is a directory bundle: it knows its source identity
     // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
@@ -230,19 +220,19 @@ pub fn load_system_preset_from_dir(
     })
 }
 
-/// Get the system preset base directory path: `<nexus_home>/presets/_system/`.
+/// note: Get the system preset base directory path: `<nexus_home>/presets/_system/`.
 #[must_use]
 pub fn system_preset_base_dir(nexus_home: &Path) -> PathBuf {
     nexus_home.join("presets").join(SYSTEM_PRESET_DIR_NAME)
 }
 
-/// Get the path to a specific system preset's bundle directory.
+/// note: Get the path to a specific system preset's bundle directory.
 #[must_use]
 pub fn system_preset_bundle_dir(nexus_home: &Path, name: &str) -> PathBuf {
     system_preset_base_dir(nexus_home).join(name)
 }
 
-/// Return the qualified system preset IDs from a scan result.
+/// note: Return the qualified system preset IDs from a scan result.
 #[must_use]
 pub fn list_system_preset_ids(result: &SystemPresetScanResult) -> Vec<String> {
     result
@@ -252,7 +242,7 @@ pub fn list_system_preset_ids(result: &SystemPresetScanResult) -> Vec<String> {
         .collect()
 }
 
-/// Find a system preset entry by qualified ID.
+/// note: Find a system preset entry by qualified ID.
 #[must_use]
 pub fn find_system_preset<'a>(
     result: &'a SystemPresetScanResult,
@@ -264,11 +254,8 @@ pub fn find_system_preset<'a>(
         .find(|e| e.qualified_id == qualified_id)
 }
 
-// ---------------------------------------------------------------------------
-// Embedded fallback (T3)
-// ---------------------------------------------------------------------------
 
-/// The embedded `_system.maintenance` preset YAML content.
+/// note: The embedded `_system.maintenance` preset YAML content.
 ///
 /// This is used as the first-start fallback: if the `_system/maintenance/`
 /// directory doesn't exist, auto-create it from this embedded definition.
@@ -311,7 +298,7 @@ states:
     terminal: true
 "#;
 
-/// Auto-create the `_system/maintenance/` directory from embedded content
+/// note: Auto-create the `_system/maintenance/` directory from embedded content
 /// if it doesn't exist (first-start fallback for backward compatibility).
 ///
 /// Returns `true` if the directory was created (first start),
@@ -327,7 +314,6 @@ pub fn ensure_maintenance_preset(nexus_home: &Path) -> std::io::Result<bool> {
         return Ok(false);
     }
 
-    // Create the directory structure.
     std::fs::create_dir_all(&bundle_dir)?;
     std::fs::write(&preset_yaml, EMBEDDED_MAINTENANCE_YAML)?;
 
@@ -339,9 +325,6 @@ pub fn ensure_maintenance_preset(nexus_home: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -350,7 +333,7 @@ mod tests {
 
     #[test]
     fn system_preset_base_dir_layout() {
-        // nexus_home is typically ~/.nexus42 (already includes .nexus42)
+        // note: nexus_home is typically ~/.nexus42 (already includes .nexus42)
         let nexus_home = PathBuf::from("/fake/home/.nexus42");
         let dir = system_preset_base_dir(&nexus_home);
         assert_eq!(dir, PathBuf::from("/fake/home/.nexus42/presets/_system"));
@@ -384,7 +367,6 @@ mod tests {
         let nexus_home = tmp.path().to_path_buf();
         let base = system_preset_base_dir(&nexus_home);
 
-        // Create _system/maintenance/ with valid preset.yaml
         let maintenance_dir = base.join("maintenance");
         fs::create_dir_all(&maintenance_dir).unwrap();
         fs::write(
@@ -407,7 +389,6 @@ mod tests {
         let nexus_home = tmp.path().to_path_buf();
         let base = system_preset_base_dir(&nexus_home);
 
-        // Create _system/maintenance/
         let maintenance_dir = base.join("maintenance");
         fs::create_dir_all(&maintenance_dir).unwrap();
         fs::write(
@@ -416,7 +397,6 @@ mod tests {
         )
         .unwrap();
 
-        // Create _system/health-check/ with a minimal valid preset
         let health_dir = base.join("health-check");
         fs::create_dir_all(&health_dir).unwrap();
         let health_yaml = r#"
@@ -457,7 +437,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = system_preset_base_dir(&nexus_home);
 
-        // Create _system/broken/ with invalid YAML
         let broken_dir = base.join("broken");
         fs::create_dir_all(&broken_dir).unwrap();
         fs::write(broken_dir.join("preset.yaml"), "not valid yaml: [").unwrap();
@@ -477,7 +456,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = system_preset_base_dir(&nexus_home);
 
-        // Create _system/empty/ with no preset.yaml
         let empty_dir = base.join("empty");
         fs::create_dir_all(&empty_dir).unwrap();
 
@@ -495,7 +473,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = system_preset_base_dir(&nexus_home);
 
-        // Create _system/.hidden/ (should be skipped)
         let hidden_dir = base.join(".hidden");
         fs::create_dir_all(&hidden_dir).unwrap();
         fs::write(hidden_dir.join("preset.yaml"), "bogus").unwrap();
@@ -504,7 +481,7 @@ states:
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
-        assert!(result.warnings.is_empty()); // Hidden dirs are silently skipped
+        assert!(result.warnings.is_empty());
     }
 
     #[test]
@@ -554,7 +531,6 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
 
-        // First call: directory doesn't exist, should create.
         let created = ensure_maintenance_preset(&nexus_home).unwrap();
         assert!(created);
 
@@ -564,7 +540,6 @@ states:
         assert!(content.contains("id: maintenance"));
         assert!(content.contains("kind: system"));
 
-        // Second call: directory already exists, should not overwrite.
         let created_again = ensure_maintenance_preset(&nexus_home).unwrap();
         assert!(!created_again);
     }
@@ -582,7 +557,7 @@ states:
         let created = ensure_maintenance_preset(&nexus_home).unwrap();
         assert!(!created);
 
-        // Content should remain the custom version.
+        // note: Content should remain the custom version.
         let content = fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
         assert!(content.contains("version: 2"));
         assert!(content.contains("custom"));

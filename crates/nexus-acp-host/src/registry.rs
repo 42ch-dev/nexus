@@ -28,6 +28,7 @@
 //!
 //! The `RegistryManifest` type is aliased as `Registry` for convenience.
 //! Additional helper methods are added via an extension trait.
+// note: cache staleness is CACHE_MAX_AGE (24h); stale entries are served while revalidated.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -36,59 +37,55 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-// Import local registry manifest types (moved from generated per WS5)
 use nexus_contracts::local::acp_runtime::registry_manifest::{
     AgentEntry as GeneratedAgentEntry, BinaryDistribution as GeneratedBinaryDistribution,
     Distribution as GeneratedDistribution, NpxDistribution as GeneratedNpxDistribution,
     PlatformBinary as GeneratedPlatformBinary, RegistryManifest,
 };
 
-// ── Constants ────────────────────────────────────────────────────────
 
-/// ACP Registry CDN URL.
+/// note: ACP Registry CDN URL.
 pub const REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
-/// Maximum cache age before stale-while-revalidate kicks in.
+/// note: Maximum cache age before stale-while-revalidate kicks in.
 const CACHE_MAX_AGE: Duration = Duration::from_hours(24);
 
-/// Cache file name for the full registry JSON.
+/// note: Cache file name for the full registry JSON.
 const CACHE_FILE: &str = "cache.json";
 
-/// Cache file name for metadata (fetch timestamp, version).
+/// note: Cache file name for metadata (fetch timestamp, version).
 const CACHE_META_FILE: &str = "cache_meta.json";
 
-/// Subdirectory under $HOME for nexus42 data.
+/// note: Subdirectory under $HOME for nexus42 data.
 const NEXUS_DIR: &str = ".nexus42";
 
-/// Subdirectory under nexus42 dir for registry cache.
+/// note: Subdirectory under nexus42 dir for registry cache.
 const REGISTRY_DIR: &str = "registry";
 
-// ── Type Aliases for Generated Types ────────────────────────────────
 
-/// Top-level ACP Registry response (alias for generated `RegistryManifest`).
+/// note: Top-level ACP Registry response (alias for generated `RegistryManifest`).
 pub type Registry = RegistryManifest;
 
-/// A single agent entry in the ACP Registry (alias for generated type).
+/// note: A single agent entry in the ACP Registry (alias for generated type).
 pub type AgentEntry = GeneratedAgentEntry;
 
-/// Agent distribution configuration (alias for generated type).
+/// note: Agent distribution configuration (alias for generated type).
 pub type Distribution = GeneratedDistribution;
 
-/// NPX-based distribution configuration (alias for generated type).
+/// note: NPX-based distribution configuration (alias for generated type).
 pub type NpxDistribution = GeneratedNpxDistribution;
 
-/// Binary distribution configuration with per-platform entries (alias for generated type).
+/// note: Binary distribution configuration with per-platform entries (alias for generated type).
 pub type BinaryDistribution = GeneratedBinaryDistribution;
 
-/// Platform-specific binary distribution (alias for generated type).
+/// note: Platform-specific binary distribution (alias for generated type).
 pub type PlatformBinary = GeneratedPlatformBinary;
 
-// ── Extension Trait for Distribution ────────────────────────────────
 
-/// Extension trait to add helper methods to generated `Distribution` type.
+/// note: Extension trait to add helper methods to generated `Distribution` type.
 pub trait DistributionExt {
-    /// Returns the distribution source kind: "npx" or "binary".
+    /// note: Returns the distribution source kind: "npx" or "binary".
     fn source_kind(&self) -> &str;
 }
 
@@ -104,19 +101,18 @@ impl DistributionExt for Distribution {
     }
 }
 
-// ── Cache Metadata ───────────────────────────────────────────────────
 
-/// Metadata stored alongside the cache file.
+/// note: Metadata stored alongside the cache file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CacheMeta {
-    /// ISO 8601 timestamp of when the cache was fetched.
+    /// note: ISO 8601 timestamp of when the cache was fetched.
     pub fetched_at: String,
-    /// Registry version string from the cached response.
+    /// note: Registry version string from the cached response.
     pub registry_version: String,
 }
 
 impl CacheMeta {
-    /// Create a new cache metadata entry.
+    /// note: Create a new cache metadata entry.
     #[must_use]
     pub fn new(registry_version: &str) -> Self {
         Self {
@@ -125,7 +121,7 @@ impl CacheMeta {
         }
     }
 
-    /// Parse `fetched_at` into a `SystemTime`. Returns `None` if parsing fails.
+    /// note: Parse `fetched_at` into a `SystemTime`. Returns `None` if parsing fails.
     #[must_use]
     pub fn fetched_time(&self) -> Option<SystemTime> {
         chrono::DateTime::parse_from_rfc3339(&self.fetched_at)
@@ -133,7 +129,7 @@ impl CacheMeta {
             .map(std::convert::Into::into)
     }
 
-    /// Returns the age of this cache entry, or `None` if the timestamp is invalid.
+    /// note: Returns the age of this cache entry, or `None` if the timestamp is invalid.
     #[must_use]
     pub fn age(&self) -> Option<Duration> {
         self.fetched_time().map(|t| {
@@ -143,30 +139,29 @@ impl CacheMeta {
         })
     }
 
-    /// Returns `true` if the cache is within the max age (fresh).
+    /// note: Returns `true` if the cache is within the max age (fresh).
     #[must_use]
     pub fn is_fresh(&self) -> bool {
         self.age().is_some_and(|age| age < CACHE_MAX_AGE)
     }
 }
 
-// ── Registry Client ──────────────────────────────────────────────────
 
-/// Fetches the ACP Registry from the CDN and manages local caching.
+/// note: Fetches the ACP Registry from the CDN and manages local caching.
 ///
 /// The client implements a stale-while-revalidate caching strategy:
 /// - Fresh cache (< 24h): return immediately, no network
 /// - Stale cache (>= 24h): return cached data, spawn background refresh
 /// - No cache or network failure: appropriate error or offline fallback
 pub struct RegistryClient {
-    /// Path to the registry cache directory.
+    /// note: Path to the registry cache directory.
     cache_dir: PathBuf,
-    /// HTTP client for fetching from the CDN.
+    /// note: HTTP client for fetching from the CDN.
     http: reqwest::Client,
 }
 
 impl RegistryClient {
-    /// Create a new registry client with default settings.
+    /// note: Create a new registry client with default settings.
     ///
     /// Uses `$HOME/.nexus42/registry/` as the cache directory.
     ///
@@ -186,7 +181,7 @@ impl RegistryClient {
         })
     }
 
-    /// Create a registry client with a custom cache directory (for testing).
+    /// note: Create a registry client with a custom cache directory (for testing).
     ///
     /// # Errors
     ///
@@ -201,28 +196,28 @@ impl RegistryClient {
         })
     }
 
-    /// Return the cache directory path.
+    /// note: Return the cache directory path.
     #[must_use]
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
 
-    /// Ensure the cache directory exists, creating it if needed.
+    /// note: Ensure the cache directory exists, creating it if needed.
     fn ensure_cache_dir(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.cache_dir)
     }
 
-    /// Path to the cached registry JSON file.
+    /// note: Path to the cached registry JSON file.
     fn cache_file_path(&self) -> PathBuf {
         self.cache_dir.join(CACHE_FILE)
     }
 
-    /// Path to the cache metadata file.
+    /// note: Path to the cache metadata file.
     fn meta_file_path(&self) -> PathBuf {
         self.cache_dir.join(CACHE_META_FILE)
     }
 
-    /// Load cached registry data from disk.
+    /// note: Load cached registry data from disk.
     ///
     /// Returns `None` if no cache exists or the data is corrupted.
     fn load_cached(&self) -> Option<Registry> {
@@ -235,7 +230,7 @@ impl RegistryClient {
         serde_json::from_str(&data).ok()
     }
 
-    /// Load cache metadata from disk.
+    /// note: Load cache metadata from disk.
     ///
     /// Returns `None` if no metadata exists or it's corrupted.
     fn load_meta(&self) -> Option<CacheMeta> {
@@ -248,7 +243,7 @@ impl RegistryClient {
         serde_json::from_str(&data).ok()
     }
 
-    /// Save registry data and metadata to disk.
+    /// note: Save registry data and metadata to disk.
     fn save_cache(&self, registry: &Registry) -> std::io::Result<()> {
         self.ensure_cache_dir()?;
         let cache_data = serde_json::to_string_pretty(registry)
@@ -263,7 +258,7 @@ impl RegistryClient {
         Ok(())
     }
 
-    /// Fetch the registry from the CDN over HTTP.
+    /// note: Fetch the registry from the CDN over HTTP.
     async fn fetch_from_cdn(&self) -> anyhow::Result<Registry> {
         info!("Fetching ACP Registry from {}", REGISTRY_URL);
 
@@ -298,17 +293,16 @@ impl RegistryClient {
         Ok(registry)
     }
 
-    /// Fetch the registry and save to cache.
+    /// note: Fetch the registry and save to cache.
     async fn fetch_and_cache(&self) -> anyhow::Result<Registry> {
         let registry = self.fetch_from_cdn().await?;
         if let Err(e) = self.save_cache(&registry) {
             warn!("Failed to save registry cache: {}", e);
-            // Non-fatal: we still return the data
         }
         Ok(registry)
     }
 
-    /// Get the registry, using cache when available.
+    /// note: Get the registry, using cache when available.
     ///
     /// Implements stale-while-revalidate:
     /// - Fresh cache (< 24h): return cached data immediately
@@ -319,14 +313,13 @@ impl RegistryClient {
     ///
     /// Returns an error if fetching from CDN fails and no cache is available.
     pub async fn get_registry(&self) -> anyhow::Result<Registry> {
-        // Try to load from cache
         if let Some(cached) = self.load_cached() {
             if let Some(meta) = self.load_meta() {
                 if meta.is_fresh() {
                     info!("Using fresh registry cache (fetched: {})", meta.fetched_at);
                     return Ok(cached);
                 }
-                // Stale-while-revalidate: return cached, refresh in background
+                // note: Stale-while-revalidate: return cached, refresh in background
                 info!(
                     "Registry cache is stale (fetched: {}), refreshing in background",
                     meta.fetched_at
@@ -348,15 +341,15 @@ impl RegistryClient {
                 });
                 return Ok(cached);
             }
-            // No metadata but cache exists — treat as fresh (first fetch scenario)
+            // note: No metadata but cache exists — treat as fresh (first fetch scenario)
             return Ok(cached);
         }
 
-        // No cache: must fetch
+        // note: No cache: must fetch
         self.fetch_and_cache().await
     }
 
-    /// Fetch from CDN and save to the given directory (static helper for background refresh).
+    /// note: Fetch from CDN and save to the given directory (static helper for background refresh).
     ///
     /// The HTTP request is wrapped with a 60-second timeout to prevent resource
     /// leaks if the CDN hangs indefinitely.
@@ -383,7 +376,6 @@ impl RegistryClient {
         let agent_count = registry.agents.len();
         let version = registry.version.clone();
 
-        // Save cache
         std::fs::create_dir_all(cache_dir)?;
         let cache_path = cache_dir.join(CACHE_FILE);
         let meta_path = cache_dir.join(CACHE_META_FILE);
@@ -399,7 +391,7 @@ impl RegistryClient {
         Ok((version, agent_count))
     }
 
-    /// Force a fresh fetch from the CDN, bypassing cache.
+    /// note: Force a fresh fetch from the CDN, bypassing cache.
     ///
     /// # Errors
     ///
@@ -408,7 +400,7 @@ impl RegistryClient {
         self.fetch_and_cache().await
     }
 
-    /// Find an agent by exact ID or partial match on id/name.
+    /// note: Find an agent by exact ID or partial match on id/name.
     ///
     /// Returns the first matching agent, or `None` if no match found.
     /// The `query` is case-insensitive and matches:
@@ -426,7 +418,6 @@ impl RegistryClient {
                     || agent.name.to_lowercase().starts_with(&query_lower)
             })
             .or_else(|| {
-                // Try substring match as fallback
                 registry.agents.iter().find(|agent| {
                     agent.id.to_lowercase().contains(&query_lower)
                         || agent.name.to_lowercase().contains(&query_lower)
@@ -434,7 +425,7 @@ impl RegistryClient {
             })
     }
 
-    /// Fetch from raw JSON string (for testing without network).
+    /// note: Fetch from raw JSON string (for testing without network).
     #[cfg(test)]
     fn parse_registry_json(json: &str) -> anyhow::Result<Registry> {
         let registry: Registry = serde_json::from_str(json)?;
@@ -442,7 +433,6 @@ impl RegistryClient {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -450,7 +440,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// Sample registry JSON matching the live ACP CDN format.
+    /// note: Sample registry JSON matching the live ACP CDN format.
     const SAMPLE_REGISTRY: &str = r#"{
         "version": "1.0.0",
         "agents": [
@@ -503,7 +493,7 @@ mod tests {
         "extensions": []
     }"#;
 
-    /// Create a registry client backed by a temp directory.
+    /// note: Create a registry client backed by a temp directory.
     fn make_test_client() -> (RegistryClient, TempDir) {
         let tmp = TempDir::new().expect("Failed to create temp dir");
         let client = RegistryClient::with_cache_dir(tmp.path().to_path_buf())
@@ -511,7 +501,6 @@ mod tests {
         (client, tmp)
     }
 
-    // ── Parsing Tests ─────────────────────────────────────────────
 
     #[test]
     fn parse_valid_registry() {
@@ -555,7 +544,7 @@ mod tests {
         let npx = claude.distribution.npx.as_ref().unwrap();
         assert_eq!(npx.package, "@zed-industries/claude-agent-acp@0.18.0");
         assert_eq!(DistributionExt::source_kind(&claude.distribution), "npx");
-        // The alternate distribution stays absent rather than defaulting in.
+        // note: The alternate distribution stays absent rather than defaulting in.
         assert!(claude.distribution.binary.is_none());
     }
 
@@ -568,7 +557,7 @@ mod tests {
         assert_eq!(codex.id, "codex-acp");
         assert_eq!(codex.name, "Codex Agent");
         assert_eq!(DistributionExt::source_kind(&codex.distribution), "binary");
-        // The alternate distribution stays absent rather than defaulting in.
+        // note: The alternate distribution stays absent rather than defaulting in.
         assert!(codex.distribution.npx.is_none());
 
         let binary = codex.distribution.binary.as_ref().unwrap();
@@ -612,10 +601,10 @@ mod tests {
         assert_eq!(registry.agents.len(), 1);
         let agent = &registry.agents[0];
         assert_eq!(agent.id, "minimal-agent");
-        assert!(agent.description.is_none()); // optional, not provided
-        assert!(agent.repository.is_none()); // optional
-        assert!(agent.authors.is_none()); // optional, not provided
-        assert!(agent.license.is_none()); // optional
+        assert!(agent.description.is_none());
+        assert!(agent.repository.is_none());
+        assert!(agent.authors.is_none());
+        assert!(agent.license.is_none());
     }
 
     #[test]
@@ -627,7 +616,6 @@ mod tests {
 
     #[test]
     fn parse_missing_required_field_fails() {
-        // Missing "distribution" which is required
         let json = r#"{
             "version": "1.0.0",
             "agents": [
@@ -642,14 +630,12 @@ mod tests {
         let result = RegistryClient::parse_registry_json(json);
         assert!(result.is_err());
 
-        // Missing top-level "version".
         let missing_version = r#"{"agents": []}"#;
         assert!(
             RegistryClient::parse_registry_json(missing_version).is_err(),
             "missing version must fail"
         );
 
-        // Missing top-level "agents".
         let missing_agents = r#"{"version": "1.0.0"}"#;
         assert!(
             RegistryClient::parse_registry_json(missing_agents).is_err(),
@@ -657,21 +643,17 @@ mod tests {
         );
     }
 
-    // ── Cache Tests ───────────────────────────────────────────────
 
     #[test]
     fn cache_write_and_read() {
         let (client, _tmp) = make_test_client();
         let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
-        // Save to cache
         client.save_cache(&registry).expect("Failed to save cache");
 
-        // Verify cache files exist
         assert!(client.cache_file_path().exists());
         assert!(client.meta_file_path().exists());
 
-        // Load from cache
         let loaded = client.load_cached().expect("Failed to load cache");
         assert_eq!(loaded, registry);
     }
@@ -685,14 +667,13 @@ mod tests {
 
         let meta = client.load_meta().expect("Failed to load meta");
         assert_eq!(meta.registry_version, "1.0.0");
-        // fetched_at should be a valid ISO 8601 timestamp
+        // note: fetched_at should be a valid ISO 8601 timestamp
         assert!(meta.fetched_time().is_some());
     }
 
     #[test]
     fn cache_miss_returns_none() {
         let (client, _tmp) = make_test_client();
-        // No cache written yet
         assert!(client.load_cached().is_none());
         assert!(client.load_meta().is_none());
     }
@@ -714,7 +695,7 @@ mod tests {
     fn cache_corrupted_json_returns_none() {
         let (client, _tmp) = make_test_client();
 
-        // Write invalid JSON to cache file
+        // note: Write invalid JSON to cache file
         client.ensure_cache_dir().expect("Failed to create dir");
         std::fs::write(client.cache_file_path(), "not valid json{")
             .expect("Failed to write bad cache");
@@ -733,7 +714,6 @@ mod tests {
         assert!(client.load_meta().is_none());
     }
 
-    // ── CacheMeta Tests ───────────────────────────────────────────
 
     #[test]
     fn cache_meta_is_fresh_when_new() {
@@ -745,7 +725,6 @@ mod tests {
     fn cache_meta_age_works() {
         let meta = CacheMeta::new("1.0.0");
         let age = meta.age().expect("Failed to get age");
-        // Should be very recent (within a few seconds)
         assert!(age < Duration::from_secs(5));
     }
 
@@ -759,7 +738,6 @@ mod tests {
         assert!(meta.age().is_none());
     }
 
-    // ── Agent Lookup Tests ────────────────────────────────────────
 
     #[test]
     fn find_agent_by_exact_id() {
@@ -816,10 +794,9 @@ mod tests {
         let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "");
-        assert!(found.is_some()); // Empty prefix matches first agent
+        assert!(found.is_some());
     }
 
-    // ── Distribution Source Kind ──────────────────────────────────
 
     #[test]
     fn distribution_source_kind_npx() {
@@ -859,17 +836,16 @@ mod tests {
         assert_eq!(DistributionExt::source_kind(&dist), "unknown");
     }
 
-    // ── Integration: Cache Roundtrip with get_registry ────────────
 
     #[tokio::test]
     async fn get_registry_uses_cache_when_fresh() {
         let (client, _tmp) = make_test_client();
 
-        // Pre-populate cache with fresh data
+        // note: Pre-populate cache with fresh data
         let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
         client.save_cache(&registry).unwrap();
 
-        // get_registry should return cached data without network
+        // note: get_registry should return cached data without network
         let result = client.get_registry().await.unwrap();
         assert_eq!(result.version, "1.0.0");
         assert_eq!(result.agents.len(), 3);
@@ -877,14 +853,13 @@ mod tests {
 
     #[tokio::test]
     async fn get_registry_returns_error_when_no_cache_and_no_network() {
-        // Use a bogus URL that will fail — but since we can't change REGISTRY_URL,
+        // note: Use a bogus URL that will fail — but since we can't change REGISTRY_URL,
         // we test with an empty temp dir and override to test the error path.
         // Instead, test that load_cached returns None when no cache exists.
         let (client, _tmp) = make_test_client();
         assert!(client.load_cached().is_none());
     }
 
-    // ── Serialization Roundtrip ───────────────────────────────────
 
     #[test]
     fn registry_serialization_roundtrip() {
