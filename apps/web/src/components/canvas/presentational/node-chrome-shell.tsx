@@ -69,14 +69,14 @@ export const NODE_STATUS_DOT: Record<NodeStatus, string> = {
 };
 
 /**
- * Per-surface accent spine kind. `true` is accepted as a backward-compatible
+ * note: Per-surface accent spine kind. `true` is accepted as a backward-compatible
  * synonym for `'strategy'` (existing call sites); the surface names let new
  * callers pick the outline / worldkb spine without touching the shell.
  */
 export type NodeAccent = boolean | 'strategy' | 'outline' | 'worldkb';
 
 /**
- * Accent → Tailwind spine classes. Centralized so the surface → token map is
+ * note: Accent → Tailwind spine classes. Centralized so the surface → token map is
  * one place to read; P3 T2 introduced the outline + worldkb entries to match
  * DESIGN.md §Canvas Surface ("strategy = purple-700, outline = amber-700,
  * World KB = teal-700").
@@ -88,38 +88,38 @@ const ACCENT_SPINE_CLASSES: Record<Exclude<NodeAccent, boolean>, string> = {
 };
 
 export interface NodeChromeShellProps {
-  /** Selection state — toggles `canvas-node-border-selected` + two-layer ring. */
+  /** note: Selection state — toggles `canvas-node-border-selected` + two-layer ring. */
   selected?: boolean;
-  /** Optional status overlay ring (strategy surface). */
+  /** note: Optional status overlay ring (strategy surface). */
   status?: NodeStatus;
   /**
-   * Optional per-surface accent spine. `true` is a backward-compatible
+   * note: Optional per-surface accent spine. `true` is a backward-compatible
    * synonym for `'strategy'` (existing strategy call sites render the
    * strategy spine unchanged).
    */
   accent?: NodeAccent;
   /**
-   * Dragging state — when true, switches the elevation recipe from
+   * note: Dragging state — when true, switches the elevation recipe from
    * `shadow-card` (rest = elevation-1) to `shadow-elevation-4` so the node
    * visibly lifts while the author is repositioning it (DESIGN.md §Elevation
    * v0.4 recipe). RF node wrappers forward `NodeProps.dragging`.
    */
   dragging?: boolean;
   /**
-   * Extra classes merged via `cn()` (tailwind-merge). Use to override the
+   * note: Extra classes merged via `cn()` (tailwind-merge). Use to override the
    * default `min-w-canvas-node-default` (e.g. scene/beat pass
    * `min-w-canvas-node-outline-scene-beat`) or add node-specific sizing.
    */
   className?: string;
   /**
-   * Inline style overrides. Scene/beat nodes pass `background` (fill token)
+   * note: Inline style overrides. Scene/beat nodes pass `background` (fill token)
    * and `borderColor` (border token, undefined when selected so the selected
    * class wins); outline volume/timeline pass their pin/fill tokens here.
    * Inline style wins over the base `bg-canvas-node-fill` / border classes.
    */
   style?: CSSProperties;
   /**
-   * Accessible name for the node card (QC S-aria — family-wide a11y fix:
+   * note: Accessible name for the node card (QC S-aria — family-wide a11y fix:
    * every node kind passes `aria-label`; before this prop existed it was
    * silently dropped and the i18n strings were dead).
    */
@@ -144,7 +144,7 @@ export function NodeChromeShell({
   'aria-label': ariaLabel,
   children,
 }: NodeChromeShellProps) {
-  // `accent={true}` (legacy boolean) → 'strategy' so existing call sites
+  // why: `accent={true}` (legacy boolean) → 'strategy' so existing call sites
   // keep rendering the strategy spine verbatim.
   const accentKind: Exclude<NodeAccent, boolean> | undefined =
     accent === true ? 'strategy' : accent === false ? undefined : accent;
@@ -154,7 +154,7 @@ export function NodeChromeShell({
       data-dragging={dragging ? 'true' : undefined}
       aria-label={ariaLabel}
       className={cn(
-        // Base structural chrome. `shadow-card` is the v0.4 elevation-1 alias
+        // note: Base structural chrome. `shadow-card` is the v0.4 elevation-1 alias
         // (DESIGN.md §Elevation). Hover lifts to elevation-2; the
         // `data-[dragging=true]` variant lifts further to elevation-4 when
         // the RF wrapper forwards the dragging prop. The transition covers
@@ -166,7 +166,7 @@ export function NodeChromeShell({
         selected
           ? 'border-canvas-node-border-selected'
           : 'border-canvas-node-border',
-        // Two-layer selection ring — only when no status overlay is active
+        // note: Two-layer selection ring — only when no status overlay is active
         // (status ring wins the ring slot when present). Pairs a 2px
         // selected-color ring with a 2px background-color offset so the
         // selection reads as a halo, not just a border-color flip.

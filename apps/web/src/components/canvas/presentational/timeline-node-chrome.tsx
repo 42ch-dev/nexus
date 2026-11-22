@@ -23,26 +23,24 @@
  */
 import { BookMarked, Flag, Hourglass, Milestone } from 'lucide-react';
 
-// ─── World Timeline — Brief-era ─────────────────────────────────────────────
-
 export interface TimelineBriefEraChromeProps {
-  /** Canonical era name (already resolved; wrapper applies unnamed fallback). */
+  /** note: Canonical era name (already resolved; wrapper applies unnamed fallback). */
   title: string;
-  /** Block-type pill label (e.g. "Era") — plain string, no contracts. */
+  /** note: Block-type pill label (e.g. "Era") — plain string, no contracts. */
   blockTypeLabel: string;
   /**
-   * Resolved time-span text (`start → end`, start-only, or end-only).
+   * note: Resolved time-span text (`start → end`, start-only, or end-only).
    * `null` → render the temporal-unknown pill with `temporalUnknownLabel`.
    */
   timeSpan: string | null;
-  /** Resolved temporal-unknown pill copy (i18n stays in the RF wrapper). */
+  /** note: Resolved temporal-unknown pill copy (i18n stays in the RF wrapper). */
   temporalUnknownLabel: string;
-  /** Optional era id pill. */
+  /** note: Optional era id pill. */
   eraId?: string;
-  /** Optional world-summary line (clamped). */
+  /** note: Optional world-summary line (clamped). */
   worldSummary?: string;
   /**
-   * Resolved source-anchor count label (e.g. "3 source anchors").
+   * note: Resolved source-anchor count label (e.g. "3 source anchors").
    * Version suffix is appended by this chrome as ` · v{version}`.
    */
   sourceAnchorLabel: string;
@@ -112,12 +110,10 @@ export function TimelineBriefEraChrome({
   );
 }
 
-// ─── World Timeline — Event ─────────────────────────────────────────────────
-
 export interface TimelineEventChromeProps {
   title: string;
   blockTypeLabel: string;
-  /** Resolved occurred-at hint, or null → temporal-unknown pill. */
+  /** note: Resolved occurred-at hint, or null → temporal-unknown pill. */
   occurredAtHint: string | null;
   temporalUnknownLabel: string;
   sourceAnchorLabel: string;
@@ -168,8 +164,6 @@ export function TimelineEventChrome({
   );
 }
 
-// ─── World Timeline — KeyBlock Context cluster ──────────────────────────────
-
 export interface TimelineKeyBlockChromeProps {
   title: string;
   blockTypeLabel: string;
@@ -209,17 +203,15 @@ export function TimelineKeyBlockChrome({
   );
 }
 
-// ─── Work Timeline — Narrative event ────────────────────────────────────────
-
 export interface WorkTimelineNarrativeEventChromeProps {
   title: string;
   eventId: string;
   /**
-   * Resolved chapter-anchor badge text (e.g. "Ch. 3"), or null →
+   * note: Resolved chapter-anchor badge text (e.g. "Ch. 3"), or null →
    * `noChapterLabel` pill.
    */
   chapterAnchor: string | null;
-  /** Resolved "No chapter anchor" (or locale equivalent). */
+  /** note: Resolved "No chapter anchor" (or locale equivalent). */
   noChapterLabel: string;
   description?: string;
 }
@@ -277,12 +269,10 @@ export function WorkTimelineNarrativeEventChrome({
   );
 }
 
-// ─── Work Timeline — Moment scene ───────────────────────────────────────────
-
 export interface WorkTimelineMomentSceneChromeProps {
   title: string;
   sceneId: string;
-  /** Resolved manuscript-anchor badge (e.g. "Ch. 1 · sc-1"), or null. */
+  /** note: Resolved manuscript-anchor badge (e.g. "Ch. 1 · sc-1"), or null. */
   manuscriptAnchorLabel: string | null;
   status?: string;
 }
@@ -331,11 +321,9 @@ export function WorkTimelineMomentSceneChrome({
   );
 }
 
-// ─── Work Timeline — Moment beat ────────────────────────────────────────────
-
 export interface WorkTimelineMomentBeatChromeProps {
   title: string;
-  /** Resolved manuscript-anchor badge, or null. */
+  /** note: Resolved manuscript-anchor badge, or null. */
   manuscriptAnchorLabel: string | null;
   status?: string;
 }

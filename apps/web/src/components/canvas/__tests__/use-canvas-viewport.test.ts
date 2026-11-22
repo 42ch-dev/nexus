@@ -1,5 +1,5 @@
 /**
- * `useCanvasViewport` — viewport preservation across graph↔list toggle
+ * note: `useCanvasViewport` — viewport preservation across graph↔list toggle
  * (FB-GS-000, V1.109 P2 T1).
  *
  * The alt-view toggle unmounts `CanvasShell` (and therefore the React Flow
@@ -33,18 +33,14 @@ describe('useCanvasViewport — viewport caching across remounts (FB-GS-000)', (
   });
 
   it('caches viewport changes and restores them on remount', () => {
-    // First "mount" — graph is shown; no cached viewport yet.
     const first = renderHook(() => useCanvasViewport(SURFACE_KEY));
     expect(first.result.current.cachedViewport).toBeNull();
 
-    // Simulate the user panning/zooming — RF onMove fires.
     first.result.current.onViewportChange(VIEWPORT_A);
 
-    // Simulate graph→list toggle (unmount) then list→graph (remount).
     first.unmount();
     const second = renderHook(() => useCanvasViewport(SURFACE_KEY));
 
-    // The cached viewport is restored.
     expect(second.result.current.cachedViewport).toEqual(VIEWPORT_A);
   });
 
@@ -56,7 +52,6 @@ describe('useCanvasViewport — viewport caching across remounts (FB-GS-000)', (
     const second = renderHook(() => useCanvasViewport(SURFACE_KEY));
     expect(second.result.current.cachedViewport).toEqual(VIEWPORT_A);
 
-    // Pan to a different position after remount.
     second.result.current.onViewportChange(VIEWPORT_B);
     second.unmount();
 
@@ -70,7 +65,6 @@ describe('useCanvasViewport — viewport caching across remounts (FB-GS-000)', (
     outlineHook.unmount();
 
     const strategyHook = renderHook(() => useCanvasViewport('strategy:wk_test'));
-    // Strategy surface has its own cache slot — Outline viewport does not leak.
     expect(strategyHook.result.current.cachedViewport).toBeNull();
   });
 

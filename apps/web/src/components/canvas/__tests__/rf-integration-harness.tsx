@@ -1,5 +1,5 @@
 /**
- * Real React Flow integration test harness (V1.109 P2 T3; FB-GS-002).
+ * note: Real React Flow integration test harness (V1.109 P2 T3; FB-GS-002).
  *
  * CanvasShell was fully mocked in the outline-canvas orchestrator tests
  * (`R-V1108P0QC3-S003`), so the graph-click → inspector selection wiring — the
@@ -50,13 +50,13 @@ export interface RFIntegrationHarnessProps {
   edges: Edge[];
   nodeTypes: NodeTypes;
   onNodesChange: OnNodesChange;
-  /** Graph-level SR summary (A8) — rendered in a live region, mirrors CanvasShell. */
+  /** note: Graph-level SR summary (A8) — rendered in a live region, mirrors CanvasShell. */
   summaryText?: string;
-  /** Accessible label for the canvas region. */
+  /** note: Accessible label for the canvas region. */
   ariaLabel?: string;
-  /** Overlay children rendered above the graph (EmptyState overlay, etc.). */
+  /** note: Overlay children rendered above the graph (EmptyState overlay, etc.). */
   children?: ReactNode;
-  /** Accepted for CanvasShell prop-shape parity; unused by the harness. */
+  /** note: Accepted for CanvasShell prop-shape parity; unused by the harness. */
   surfaceKey?: string;
 }
 
@@ -75,14 +75,14 @@ function HarnessInner({
       aria-label={ariaLabel}
       className="relative h-[480px] w-full overflow-hidden"
     >
-      {/* Screen-reader graph summary — live region, matches CanvasShell. */}
+      {/* note: Screen-reader graph summary — live region, matches CanvasShell. */}
       {summaryText ? (
         <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {summaryText}
         </div>
       ) : null}
       {/*
-        Nodes are non-draggable in jsdom (no real pointer geometry); selection
+        note: Nodes are non-draggable in jsdom (no real pointer geometry); selection
         via click is the integration path under test, so `nodesFocusable` keeps
         the keyboard/click surface real. `fitView` is off so node positions do
         not depend on measured dimensions (zero in jsdom) — nodes render at

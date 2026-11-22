@@ -1,5 +1,5 @@
 /**
- * Entity inspector — modules.mental editing (v1.203 P2 Task 2, O1).
+ * note: Entity inspector — modules.mental editing (v1.203 P2 Task 2, O1).
  *
  * Holder-capable kinds (`character` / `faction` / `organization`) get the
  * editable Mental State section: values seed from the stored bag, empty bags
@@ -35,7 +35,7 @@ const node: WorldKbNodeData = {
   computable: false,
 };
 
-/** Character with a populated `modules.mental` bag (mirrors the Task 2 fixture). */
+/** note: Character with a populated `modules.mental` bag (mirrors the Task 2 fixture). */
 const entityWithMental: WorldKbEntityProjection = {
   key_block_id: 'kb-bo',
   world_id: 'w-1',
@@ -56,7 +56,7 @@ const entityWithMental: WorldKbEntityProjection = {
   },
 };
 
-/** Character without a `modules` bag at all (mirrors the Task 2 fixture). */
+/** note: Character without a `modules` bag at all (mirrors the Task 2 fixture). */
 const entityWithoutMental: WorldKbEntityProjection = {
   key_block_id: 'kb-ana',
   world_id: 'w-1',
@@ -66,7 +66,7 @@ const entityWithoutMental: WorldKbEntityProjection = {
   version: 1,
 };
 
-/** Non-holder kind with a populated bag — PD-16 read-only path. */
+/** note: Non-holder kind with a populated bag — PD-16 read-only path. */
 const sceneEntityWithMental: WorldKbEntityProjection = {
   key_block_id: 'kb-dock',
   world_id: 'w-1',
@@ -81,7 +81,7 @@ const sceneEntityWithMental: WorldKbEntityProjection = {
   },
 };
 
-/** Non-holder kind without any stored modules. */
+/** note: Non-holder kind without any stored modules. */
 const sceneEntityWithoutModules: WorldKbEntityProjection = {
   key_block_id: 'kb-empty-scene',
   world_id: 'w-1',
@@ -112,7 +112,7 @@ function renderWith(client: NexusClient, ui: React.ReactElement) {
   );
 }
 
-/** Mock-call capture without coupling to the `vi` helper implementation type. */
+/** note: Mock-call capture without coupling to the `vi` helper implementation type. */
 interface EntityPatchRequest {
   entity_id: string;
   expected_version: number;
@@ -141,7 +141,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
       'true',
     );
 
-    // Locked nine-field labels render; seeded values sit in editable JSON inputs.
+    // note: Locked nine-field labels render; seeded values sit in editable JSON inputs.
     expect(within(section).getByLabelText('Beliefs')).toHaveDisplayValue(/kb_bo_beliefs/);
     expect(within(section).getByLabelText('Goals')).toHaveDisplayValue(/clear the dawn berths/);
     expect(within(section).getByLabelText('Emotions')).toHaveDisplayValue(/"alert"/);
@@ -162,7 +162,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
     const section = screen.getByTestId('mental-state-section');
     expect(within(section).getByText('Goals')).toBeInTheDocument();
     expect(within(section).getByText(/keep the cranes turning/)).toBeInTheDocument();
-    // No input controls — read-only, no create affordance.
+    // note: No input controls — read-only, no create affordance.
     expect(within(section).queryByRole('textbox')).not.toBeInTheDocument();
   });
 
@@ -241,7 +241,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
       expected_version: 1,
       patch: {
         modules: {
-          // Whole-first-level value: untouched keys round-trip verbatim.
+          // note: Whole-first-level value: untouched keys round-trip verbatim.
           mental: {
             identity: { role: 'harbor_master' },
             beliefs: { ref: 'kb_bo_beliefs', count: 12 },
@@ -254,7 +254,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
         },
       },
     });
-    // Governance is untouched: no `audience` key is emitted.
+    // note: Governance is untouched: no `audience` key is emitted.
     expect(call[1].patch).not.toHaveProperty('audience');
   });
 
@@ -285,7 +285,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
       modules: {
         mental: {
           goals: [{ goal: 'mend the nets' }],
-          // A deep freeform key the locked vocabulary cannot represent.
+          // note: A deep freeform key the locked vocabulary cannot represent.
           custom_model_state: { nested: { deeply: ['a', 'b'] } },
         },
       },
@@ -299,14 +299,14 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
     const extra = within(section).getByLabelText('custom_model_state');
     expect(extra).toHaveDisplayValue(/deeply/);
 
-    // Dirty the form (edit the goals field) so the save path runs.
+    // note: Dirty the form (edit the goals field) so the save path runs.
     fireEvent.change(within(section).getByLabelText('Goals'), {
       target: { value: '[{"goal":"mend the nets","status":"active"}]' },
     });
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
     const call = callsOf(client.worldKbPatchEntity)[0];
-    // The unknown key survives the write — nothing is silently dropped.
+    // note: The unknown key survives the write — nothing is silently dropped.
     expect(
       (call[1].patch.modules!.mental as Record<string, unknown>).custom_model_state,
     ).toEqual({
@@ -347,15 +347,15 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
       <EntityInspector worldId="w-1" node={node} entity={entityWithMental} onConflict={vi.fn()} />,
     );
 
-    // Any change to make the form dirty — replace norms with valid JSON.
+    // note: Any change to make the form dirty — replace norms with valid JSON.
     fireEvent.change(screen.getByLabelText('Norms'), { target: { value: '[]' } });
 
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
 
     const section = await screen.findByTestId('mental-state-section');
-    // The field-prefixed reason lands on the Goals field…
+    // note: The field-prefixed reason lands on the Goals field…
     expect(within(section).getByText('must be an object')).toBeInTheDocument();
-    // …while the whole-dialect entry stays section-level, verbatim.
+    // note: …while the whole-dialect entry stays section-level, verbatim.
     expect(screen.getByText('modules.mental: must be an object')).toBeInTheDocument();
   });
 
@@ -420,7 +420,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
       'false',
     );
 
-    // (rerender replaces the whole root element, so re-wrap the providers.)
+    // note: (rerender replaces the whole root element, so re-wrap the providers.)
     rerender(
       <QueryClientProvider client={makeQueryClient()}>
         <ToastProvider>
@@ -460,7 +460,7 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
 
-    // The canvas re-reads the entity and re-renders the inspector (new version).
+    // note: The canvas re-reads the entity and re-renders the inspector (new version).
     rerender(
       <QueryClientProvider client={makeQueryClient()}>
         <ToastProvider>
@@ -480,14 +480,14 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
 
     const section = screen.getByTestId('mental-state-section');
     expect(within(section).getByLabelText('Goals')).toHaveDisplayValue(/keep the docks quiet/);
-    // Keys absent from the updated stored value no longer appear.
+    // note: Keys absent from the updated stored value no longer appear.
     expect(within(section).getByLabelText('Beliefs')).toHaveDisplayValue('');
   });
 });
 
 describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ key round-trips)', () => {
   /**
-   * Holder whose stored mental bag carries a legal unknown own key
+   * note: Holder whose stored mental bag carries a legal unknown own key
    * `__proto__` (accepted under PD-13). Seeded through JSON.parse — an object
    * literal would have different `__proto__` syntax semantics.
    */
@@ -519,7 +519,7 @@ describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ k
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
     const call = callsOf(client.worldKbPatchEntity)[0];
     const mental = call[1].patch.modules!.mental as Record<string, unknown>;
-    // The own data property survives as an exact own member — not swallowed
+    // note: The own data property survives as an exact own member — not swallowed
     // by the inherited prototype setter — and serializes back verbatim.
     expect(Object.prototype.hasOwnProperty.call(mental, '__proto__')).toBe(true);
     expect(mental.__proto__).toEqual({ future: 'keep' });
@@ -545,7 +545,7 @@ describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ k
  * text-compared so an unrelated save never touches the dialect.
  */
 describe('EntityInspector — modules.mental raw-JSON fallback (Greptile P1)', () => {
-  /** Holder whose stored `modules.mental` is an ARRAY — nonrepresentable for the nine-field form. */
+  /** note: Holder whose stored `modules.mental` is an ARRAY — nonrepresentable for the nine-field form. */
   const entityWithArrayMental: WorldKbEntityProjection = {
     key_block_id: 'kb-bo',
     world_id: 'w-1',
@@ -569,9 +569,9 @@ describe('EntityInspector — modules.mental raw-JSON fallback (Greptile P1)', (
     expect(raw).toHaveDisplayValue(
       JSON.stringify([{ goal: 'legacy row the form cannot represent' }], null, 2),
     );
-    // Structured nine-field inputs stay inactive for a nonrepresentable seed.
+    // note: Structured nine-field inputs stay inactive for a nonrepresentable seed.
     expect(within(section).queryByLabelText('Goals')).not.toBeInTheDocument();
-    // Untouched seed is not dirty — Save stays disabled.
+    // note: Untouched seed is not dirty — Save stays disabled.
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
   });
 
@@ -589,7 +589,7 @@ describe('EntityInspector — modules.mental raw-JSON fallback (Greptile P1)', (
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
     const call = callsOf(client.worldKbPatchEntity)[0];
     expect(call[1].patch).toEqual({ title: 'Bo (retired)' });
-    // The stored dialect is never rewritten by an unrelated save.
+    // note: The stored dialect is never rewritten by an unrelated save.
     expect(call[1].patch).not.toHaveProperty('modules');
   });
 

@@ -1,5 +1,5 @@
 /**
- * V1.163 P1 inbound `?event=` focus — shared-hook extraction (R-V1163P1QC1-002).
+ * note: V1.163 P1 inbound `?event=` focus — shared-hook extraction (R-V1163P1QC1-002).
  *
  * The hook is the deduplicated body of the two Timeline surfaces' identical
  * inbound-focus effects: World (`timeline-canvas.tsx`) and Work
@@ -37,7 +37,7 @@ const EVENT_NODE: Node<TestNodeData> = {
   data: { layoutHint: 'event' },
 };
 
-/** The World Timeline's target rule (its `entity:` ids are shared). */
+/** note: The World Timeline's target rule (its `entity:` ids are shared). */
 const isEventNode = (node: Node<TestNodeData>) => node.data.layoutHint === 'event';
 
 interface HarnessProps {
@@ -60,7 +60,7 @@ function renderFocus(
     selectedNodeId: options.selectedNodeId ?? null,
     onNodesChange,
   };
-  // Annotated so `renderHook`'s inferred Props keep `isFocusTarget` optional —
+  // why: Annotated so `renderHook`'s inferred Props keep `isFocusTarget` optional —
   // the rerenders below exercise the "no target rule" (Work) call shape.
   const initialProps: HarnessProps = { surface, nodeId, isFocusTarget: options.isFocusTarget };
   const view = renderHook(
@@ -121,7 +121,6 @@ describe('useInboundEventFocus', () => {
     const { onNodesChange, surface, rerender } = renderFocus('entity:evt-1');
     expect(onNodesChange).toHaveBeenCalledTimes(1);
 
-    // A projection rebuild + the user selecting a different node.
     rerender({
       surface: {
         ...surface,

@@ -1,5 +1,5 @@
 /**
- * Strategy canvas — compose path end-to-end and flag-off parity
+ * note: Strategy canvas — compose path end-to-end and flag-off parity
  * (v239-p3-canvas-compose-ui T3/T3b/T4/T6/T7).
  *
  * Flag on (explicit selection over the content-creator default): the header
@@ -125,7 +125,7 @@ function nestedResponse(bind: Record<string, unknown> = {}) {
           pattern: { registry_id: 'prompt-step', version: '1.0.0', content_hash: 'abc' },
         },
       ],
-      // The daemon writes the connecting edge `nest` commits (`attach_to`).
+      // note: The daemon writes the connecting edge `nest` commits (`attach_to`).
       edges: [
         ...SEED.edges,
         { id: 'draft->prompt-step-slot', from: 'draft', to: 'prompt-step-slot', kind: 'linear' },
@@ -184,13 +184,13 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     renderCanvas();
     expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
     expect(screen.getByTestId('strategy-add-pattern')).toBeInTheDocument();
-    // One structural authority: the YAML transition author is gone on the compose path,
+    // why: One structural authority: the YAML transition author is gone on the compose path,
     // and no canvas gesture can start a structural edit outside the candidate.
     expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
     expect(shellProps.current.onConnect).toBeUndefined();
     expect(shellProps.current.onReconnect).toBeUndefined();
 
-    // Nest: pick the pattern and commit.
+    // note: Nest: pick the pattern and commit.
     fireEvent.click(screen.getByTestId('strategy-add-pattern'));
     fireEvent.click(await screen.findByTestId('pattern-option-prompt-step'));
     fireEvent.click(screen.getByTestId('pattern-nest'));
@@ -206,7 +206,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       },
     });
 
-    // Simulate walks the committed document — the edge `nest` wrote from the
+    // why: Simulate walks the committed document — the edge `nest` wrote from the
     // canvas's attach target reaches the slot, so no client-authored edge (T3b).
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(simulateBodies).toHaveLength(1));
@@ -230,7 +230,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       ),
     ).toBe(true);
 
-    // The unbound required slot gates Approve with its named reason.
+    // invariant: The unbound required slot gates Approve with its named reason.
     await waitFor(() => expect(screen.getByTestId('approve-gate')).toBeInTheDocument());
     expect(screen.getByTestId('approve-gate')).toHaveTextContent(
       'Bind slot topic on prompt-step before approval.',
@@ -326,7 +326,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toBeInTheDocument());
 
-    // Approving moves newest_approval; without this invalidation the badge
+    // why: Approving moves newest_approval; without this invalidation the badge
     // keeps comparing against the stale read.
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({
@@ -396,7 +396,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
 
-    // Approve A → apply A → approve B: B's block replaces A's, they never stack.
+    // note: Approve A → apply A → approve B: B's block replaces A's, they never stack.
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_42'));
     fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
@@ -404,12 +404,12 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_43'));
-    // The stale "This approval is the running identity" block from apply A is gone.
+    // invariant: The stale "This approval is the running identity" block from apply A is gone.
     expect(screen.queryByTestId('apply-applied')).toBeNull();
   });
 
   it('aims Apply at an approval older than the live one and moves the live identity back to it', async () => {
-    // The read the surface needs: every approval newest first, plus the live apply.
+    // why: The read the surface needs: every approval newest first, plus the live apply.
     const approvals: {
       approval_id: string;
       content_hash: string;
@@ -438,7 +438,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
         HttpResponse.json({
           current_apply: live,
           newest_approval: approvals[0] ?? null,
-          // The applied preset is what the Canvas renders; the identity alone
+          // why: The applied preset is what the Canvas renders; the identity alone
           // would read as D16(c) "document no longer verifies".
           applied_document: SEED,
           applied_document_refusal: null,
@@ -492,7 +492,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
 
-    // Approve A and apply it: A is the live identity.
+    // note: Approve A and apply it: A is the live identity.
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_42'));
     await waitFor(() =>
@@ -501,7 +501,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
     await waitFor(() => expect(screen.getByTestId('apply-applied')).toHaveTextContent('apr_42'));
 
-    // Approve B: the newest target, so the badge shows and no rollback is claimed.
+    // note: Approve B: the newest target, so the badge shows and no rollback is claimed.
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toHaveTextContent('apr_43'));
     await waitFor(() =>
@@ -510,13 +510,13 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     expect(screen.getByTestId('apply-newer-available')).toBeInTheDocument();
     expect(screen.queryByTestId('apply-rollback-note')).toBeNull();
 
-    // Apply B: production moves forward to B, so A is now neither live nor newest.
+    // note: Apply B: production moves forward to B, so A is now neither live nor newest.
     fireEvent.click(screen.getByRole('button', { name: 'Apply snapshot' }));
     await waitFor(() => expect(applyBodies).toHaveLength(2));
     expect(applyBodies[1]).toEqual({ approval_content_hash: 'hash-2' });
     await waitFor(() => expect(screen.getByTestId('apply-approval')).toHaveTextContent('apr_43'));
 
-    // Aim the same control at A — the superseded approval — and apply it.
+    // note: Aim the same control at A — the superseded approval — and apply it.
     fireEvent.change(screen.getByTestId('apply-target-select'), { target: { value: 'apr_42' } });
     await waitFor(() =>
       expect(screen.getByTestId('apply-rollback-note')).toBeInTheDocument(),
@@ -525,7 +525,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 
     await waitFor(() => expect(applyBodies).toHaveLength(3));
     expect(applyBodies[2]).toEqual({ approval_content_hash: 'hash-1' });
-    // The live identity moved back to A, and the new row superseded B's.
+    // note: The live identity moved back to A, and the new row superseded B's.
     await waitFor(() => expect(screen.getByTestId('apply-approval')).toHaveTextContent('apr_42'));
     expect(screen.getByTestId('apply-applied')).toHaveTextContent('app_3');
   });
@@ -571,7 +571,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     expect(screen.getByTestId('compose-conflict')).toHaveTextContent(
       'Candidate changed before this edit. Reload revision 7 and reapply the change.',
     );
-    // The recovery is a real reload of the canonical candidate at the revision
+    // why: The recovery is a real reload of the canonical candidate at the revision
     // the daemon holds, so the user can reapply the edit against those bytes.
     expect(screen.getByTestId('compose-conflict-reload')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('compose-conflict-reload'));
@@ -579,7 +579,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       expect(screen.queryByTestId('compose-conflict')).not.toBeInTheDocument(),
     );
     expect(candidateReads).toBe(2);
-    // Nothing auto-retried the refused op.
+    // invariant: Nothing auto-retried the refused op.
     expect(composeCalls).toBe(1);
   });
 
@@ -620,11 +620,11 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     await waitFor(() => expect(screen.getByTestId('compose-conflict')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('compose-conflict-reload'));
 
-    // The failed recovery is named in the dialog instead of a rejected void click.
+    // note: The failed recovery is named in the dialog instead of a rejected void click.
     const refusal = await screen.findByTestId('compose-refusal');
     expect(refusal).toHaveAttribute('role', 'alert');
     expect(refusal).toHaveTextContent('candidate read failed');
-    // The conflict it could not clear is still on screen.
+    // note: The conflict it could not clear is still on screen.
     expect(screen.getByTestId('compose-conflict')).toBeInTheDocument();
     expect(candidateReads).toBe(2);
   });
@@ -650,7 +650,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 
   it('refuses to claim completeness at the approve gate when the listing is unreadable', async () => {
     useHandlers(
-      // The candidate does pin a required slot, but the failed listing leaves
+      // why: The candidate does pin a required slot, but the failed listing leaves
       // its slots unreadable: the gate must name the failure, not "[nothing] unbound".
       http.get(CANDIDATE_PATH, () => HttpResponse.json(nestedResponse().document)),
       http.get(PATTERNS_PATH, () =>
@@ -664,7 +664,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 
     renderCanvas();
 
-    // The disclosure opens on Simulate; the gate names the listing failure.
+    // note: The disclosure opens on Simulate; the gate names the listing failure.
     fireEvent.click(await screen.findByRole('button', { name: 'Simulate…' }));
     expect(await screen.findByTestId('approve-gate')).toHaveTextContent(
       'The pattern listing is unreadable: registry read failed.',
@@ -675,7 +675,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
   it('keeps Approve enabled when a background refetch of the listing fails with items retained', async () => {
     let patternReads = 0;
     useHandlers(
-      // The slot is bound, so the first read's items prove the candidate complete.
+      // why: The slot is bound, so the first read's items prove the candidate complete.
       http.get(CANDIDATE_PATH, () => HttpResponse.json(nestedResponse({ topic: 'x' }).document)),
       http.get(PATTERNS_PATH, () => {
         patternReads += 1;
@@ -698,7 +698,7 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
 
-    // The refetch fails, yet the last read's items are still in hand: the slots
+    // why: The refetch fails, yet the last read's items are still in hand: the slots
     // are known, so the gate must not claim them unknown.
     await queryClient.refetchQueries({ queryKey: ['canvas', 'strategy-compose', 'patterns'] });
     await waitFor(() => expect(patternReads).toBe(2));
@@ -745,29 +745,29 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     );
 
     renderCanvas();
-    // The applied read is async; wait for the rendered preset before asserting.
+    // why: The applied read is async; wait for the rendered preset before asserting.
     await screen.findByRole('button', { name: 'Simulate…' });
 
-    // No Staging badge, no Add pattern entry point.
+    // invariant: No Staging badge, no Add pattern entry point.
     expect(screen.queryByTestId('strategy-staging')).not.toBeInTheDocument();
     expect(screen.queryByTestId('strategy-add-pattern')).not.toBeInTheDocument();
-    // The compose seed/patterns reads never fire with the flag off.
+    // invariant: The compose seed/patterns reads never fire with the flag off.
     expect(irReads).toBe(0);
     expect(patternReads).toBe(0);
 
-    // The applied view is read-only (P6 condition 2): the YAML transition author
+    // why: The applied view is read-only (P6 condition 2): the YAML transition author
     // and both connection gestures write the preset file, which is not the
     // document on canvas, so neither is offered — editing goes through Compose.
     expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
     expect(shellProps.current.onConnect).toBeUndefined();
     expect(shellProps.current.onReconnect).toBeUndefined();
 
-    // Today's Simulate behaviour: resolve the installed preset IR and walk it.
+    // note: Today's Simulate behaviour: resolve the installed preset IR and walk it.
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
     expect(irReads).toBe(1);
 
-    // Approve stays the disabled disclosure with its shipped reason.
+    // invariant: Approve stays the disabled disclosure with its shipped reason.
     expect(screen.getByTestId('approve-unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
     expect(composeCalls).toBe(0);
@@ -791,7 +791,7 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
           applied_document_refusal: null,
         }),
       ),
-      // What Compose seeds from: the strategy's candidate, a successor of the
+      // why: What Compose seeds from: the strategy's candidate, a successor of the
       // applied document (never the applied bytes themselves).
       http.get(CANDIDATE_PATH, () => {
         candidateReads += 1;
@@ -804,19 +804,19 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
 
     renderCanvas();
     await screen.findByRole('button', { name: 'Simulate…' });
-    // Applied view, flag off: nothing is authored in place (no canvas gesture,
+    // why: Applied view, flag off: nothing is authored in place (no canvas gesture,
     // no transition author) — every editing affordance is disabled.
     expect(shellProps.current.onConnect).toBeUndefined();
     expect(shellProps.current.onReconnect).toBeUndefined();
     expect(screen.queryByTestId('strategy-add-pattern')).not.toBeInTheDocument();
 
-    // The one authoring entry is reachable, and it states what it seeds from.
+    // note: The one authoring entry is reachable, and it states what it seeds from.
     expect(screen.getByTestId('strategy-edit-applied-hint')).toHaveTextContent(
       "Opens Compose on this strategy's candidate document",
     );
     fireEvent.click(screen.getByTestId('strategy-open-compose'));
 
-    // Compose is enabled and the write affordance (nest) is now offered.
+    // note: Compose is enabled and the write affordance (nest) is now offered.
     expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
     expect(await screen.findByTestId('strategy-add-pattern')).toBeInTheDocument();
     await waitFor(() => expect(candidateReads).toBe(1));

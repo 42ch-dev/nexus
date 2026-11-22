@@ -1,5 +1,5 @@
 /**
- * Entity inspector — modules.belief editing (v1.203 P2 Task 2, O2).
+ * note: Entity inspector — modules.belief editing (v1.203 P2 Task 2, O2).
  *
  * Holder-capable kinds get the editable "Belief Propositions" section beside
  * the mental editor: rows seed from the stored array, authors can add /
@@ -37,7 +37,7 @@ const node: WorldKbNodeData = {
   computable: false,
 };
 
-/** Character with two stored belief propositions. */
+/** note: Character with two stored belief propositions. */
 const entityWithBeliefs: WorldKbEntityProjection = {
   key_block_id: 'kb-bo',
   world_id: 'w-1',
@@ -69,7 +69,7 @@ const entityWithBeliefs: WorldKbEntityProjection = {
   },
 };
 
-/** Character without any stored modules. */
+/** note: Character without any stored modules. */
 const entityWithoutBeliefs: WorldKbEntityProjection = {
   key_block_id: 'kb-ana',
   world_id: 'w-1',
@@ -79,7 +79,7 @@ const entityWithoutBeliefs: WorldKbEntityProjection = {
   version: 1,
 };
 
-/** Non-holder kind with populated beliefs — PD-16 read-only path. */
+/** note: Non-holder kind with populated beliefs — PD-16 read-only path. */
 const sceneEntityWithBeliefs: WorldKbEntityProjection = {
   key_block_id: 'kb-dock',
   world_id: 'w-1',
@@ -92,7 +92,7 @@ const sceneEntityWithBeliefs: WorldKbEntityProjection = {
   },
 };
 
-/** Non-holder kind without any stored modules. */
+/** note: Non-holder kind without any stored modules. */
 const sceneEntityWithoutModules: WorldKbEntityProjection = {
   key_block_id: 'kb-empty-scene',
   world_id: 'w-1',
@@ -123,7 +123,7 @@ function renderWith(client: NexusClient, ui: React.ReactElement) {
   );
 }
 
-/** Mock-call capture without coupling to the `vi` helper implementation type. */
+/** note: Mock-call capture without coupling to the `vi` helper implementation type. */
 interface EntityPatchRequest {
   entity_id: string;
   expected_version: number;
@@ -151,10 +151,10 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
       'true',
     );
 
-    // Rows seed independently (duplicate labels → within(row) scoping).
+    // note: Rows seed independently (duplicate labels → within(row) scoping).
     const rows = within(section).getAllByRole('group');
     expect(rows).toHaveLength(2);
-    // Row 1 seeds with every populated field.
+    // note: Row 1 seeds with every populated field.
     expect(within(rows[0]).getByLabelText('Holder')).toHaveDisplayValue('chr_bo');
     expect(within(rows[0]).getByLabelText('Proposition')).toHaveDisplayValue(
       'the dawn ferry is late',
@@ -162,10 +162,10 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
     expect(within(rows[0]).getByLabelText('Order')).toHaveDisplayValue('0');
     expect(within(rows[0]).getByLabelText('Truth Status')).toHaveDisplayValue('True');
     expect(within(rows[0]).getByLabelText('Knowledge Access')).toHaveDisplayValue('Public');
-    // Row 2 seeds independently.
+    // note: Row 2 seeds independently.
     expect(within(rows[1]).getByLabelText('Holder')).toHaveDisplayValue('chr_mara');
     expect(within(rows[1]).getByLabelText('Truth Status')).toHaveDisplayValue('Unknown');
-    // Closed-label selects only offer the handbook spaces (plus empty).
+    // note: Closed-label selects only offer the handbook spaces (plus empty).
     expect(within(rows[1]).getByLabelText('Representation')).toHaveValue('');
   });
 
@@ -257,9 +257,9 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
         },
       },
     });
-    // Governance untouched — no `audience` key is emitted.
+    // note: Governance untouched — no `audience` key is emitted.
     expect(call[1].patch).not.toHaveProperty('audience');
-    // Whole-value per-dialect gating: mental was not edited, so it is absent.
+    // note: Whole-value per-dialect gating: mental was not edited, so it is absent.
     expect(call[1].patch.modules).not.toHaveProperty('mental');
   });
 
@@ -365,7 +365,7 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
       </QueryClientProvider>,
     );
 
-    // Empty container = "absent": the editable section still offers
+    // note: Empty container = "absent": the editable section still offers
     // populate-empty on holder kinds, but no rows render.
     const section = screen.getByTestId('belief-section');
     expect(within(section).queryByRole('group')).not.toBeInTheDocument();
@@ -408,7 +408,7 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
       <EntityInspector worldId="w-1" node={node} entity={entityWithBeliefs} onConflict={vi.fn()} />,
     );
 
-    // Make the form dirty (second row proposition edit).
+    // note: Make the form dirty (second row proposition edit).
     const proposition = screen.getByDisplayValue('Bo suspects the tide tables');
     await user.type(proposition, ' today');
 
@@ -445,7 +445,7 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
 });
 
 describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
-  /** Stored rows with content the flat form cannot represent. */
+  /** note: Stored rows with content the flat form cannot represent. */
   const richEntity: WorldKbEntityProjection = {
     key_block_id: 'kb-bo',
     world_id: 'w-1',
@@ -484,7 +484,7 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
     const belief = callsOf(client.worldKbPatchEntity)[0][1].patch!.modules!.belief as Array<
       Record<string, unknown>
     >;
-    // The edited member applies; every untouched member of the same row —
+    // note: The edited member applies; every untouched member of the same row —
     // including the unknown nested key — round-trips verbatim (no trimming).
     expect(belief[0]).toEqual({
       holder: 'chr_bo',
@@ -493,7 +493,7 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
       truth: 'False',
       custom_model_state: { nested: ['a', 'b'] },
     });
-    // The untouched second row is byte-identical, explicit null included.
+    // note: The untouched second row is byte-identical, explicit null included.
     expect(belief[1]).toEqual({
       holder: 'chr_mara',
       proposition: 'untouched row',
@@ -597,12 +597,12 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
 
     const section = await screen.findByTestId('belief-section');
     const rows = within(section).getAllByRole('group');
-    // Non-closed-label members map 1:1 onto their row fields...
+    // note: Non-closed-label members map 1:1 onto their row fields...
     expect(
       within(rows[0]).getByText('must reference a known character: got "chr_x"'),
     ).toBeInTheDocument();
     expect(within(rows[1]).getByText('must be a whole number: got 1.5')).toBeInTheDocument();
-    // ...while a well-formed prefix addressing a row that does not exist stays
+    // note: ...while a well-formed prefix addressing a row that does not exist stays
     // at the form-level error list, verbatim (outside the collapsible section).
     expect(screen.getByText('modules.belief.5.truth: row does not exist')).toBeInTheDocument();
   });
@@ -621,7 +621,7 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
 });
 
 describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)', () => {
-  /** Holder with a degenerate stored `{}` row before a populated row. */
+  /** note: Holder with a degenerate stored `{}` row before a populated row. */
   const emptyRowEntity: WorldKbEntityProjection = {
     key_block_id: 'kb-bo',
     world_id: 'w-1',
@@ -655,7 +655,7 @@ describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)'
       expected_version: 1,
       patch: { title: 'Bo the ferryman' },
     });
-    // The untouched stored `[{}]` must not turn into `belief: []`.
+    // note: The untouched stored `[{}]` must not turn into `belief: []`.
     expect(call[1].patch).not.toHaveProperty('modules');
   });
 
@@ -698,7 +698,7 @@ describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)'
       <EntityInspector worldId="w-1" node={node} entity={emptyRowEntity} onConflict={vi.fn()} />,
     );
 
-    // Type into a mental raw-JSON field: the change makes mental the only
+    // note: Type into a mental raw-JSON field: the change makes mental the only
     // dirty dialect.
     const mentalSection = screen.getByTestId('mental-state-section');
     fireEvent.change(within(mentalSection).getByLabelText('Identity'), {
@@ -714,7 +714,7 @@ describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)'
 });
 
 describe('EntityInspector — plan QC fix 1 (QC1-F001/QC3-001: belief raw fallback + holder-gated modules)', () => {
-  /** Holder with a legacy stored row the structured editor cannot represent. */
+  /** note: Holder with a legacy stored row the structured editor cannot represent. */
   const holderWithMixedBelief: WorldKbEntityProjection = {
     key_block_id: 'kb-bo',
     world_id: 'w-1',
@@ -723,12 +723,12 @@ describe('EntityInspector — plan QC fix 1 (QC1-F001/QC3-001: belief raw fallba
     status: 'confirmed',
     version: 1,
     modules: {
-      // Seeded through JSON.parse so the array is a real parsed value.
+      // note: Seeded through JSON.parse so the array is a real parsed value.
       belief: JSON.parse('[42, {"proposition": "keep me"}]'),
     },
   };
 
-  /** Non-holder kind carrying the same nonrepresentable stored dialect. */
+  /** note: Non-holder kind carrying the same nonrepresentable stored dialect. */
   const sceneWithMixedBelief: WorldKbEntityProjection = {
     key_block_id: 'kb-dock',
     world_id: 'w-1',
@@ -747,7 +747,7 @@ describe('EntityInspector — plan QC fix 1 (QC1-F001/QC3-001: belief raw fallba
       <EntityInspector worldId="w-1" node={node} entity={holderWithMixedBelief} onConflict={vi.fn()} />,
     );
 
-    // The complete stored value seeds the raw textarea; no structured rows.
+    // note: The complete stored value seeds the raw textarea; no structured rows.
     const raw = screen.getByTestId('belief-raw-json');
     expect(JSON.parse((raw as HTMLTextAreaElement).value)).toEqual([42, { proposition: 'keep me' }]);
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
@@ -772,7 +772,7 @@ describe('EntityInspector — plan QC fix 1 (QC1-F001/QC3-001: belief raw fallba
       entity_id: 'kb-bo',
       patch: { title: 'Bo the ferryman' },
     });
-    // The untouched nonrepresentable dialect must not be rewritten (lossy or not).
+    // note: The untouched nonrepresentable dialect must not be rewritten (lossy or not).
     expect(call[1].patch).not.toHaveProperty('modules');
   });
 
@@ -878,14 +878,14 @@ describe('EntityInspector — plan QC fix 1 (QC1-F003: 422 row addresses map thr
     await user.click(within(section).getByRole('button', { name: 'Add belief' }));
     const rows = within(section).getAllByRole('group');
     expect(rows).toHaveLength(2);
-    // First row stays blank (compacted away); the second carries the rejected
+    // note: First row stays blank (compacted away); the second carries the rejected
     // integer-valued order and is submitted at wire index 0.
     await user.type(within(rows[1]).getByLabelText('Proposition'), 'the tide tables are forged');
     await user.type(within(rows[1]).getByLabelText('Order'), '9223372036854775808');
 
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
 
-    // The daemon addressed wire row 0; the error must land on the SECOND form
+    // note: The daemon addressed wire row 0; the error must land on the SECOND form
     // row (the contributing one), not the blank first row. The reason keeps
     // its additional ': ' text intact.
     const updated = await screen.findByTestId('belief-section');

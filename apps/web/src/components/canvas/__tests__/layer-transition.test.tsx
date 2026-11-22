@@ -1,5 +1,5 @@
 /**
- * Layer transition animation — V1.123 P4 Task 4.
+ * note: Layer transition animation — V1.123 P4 Task 4.
  *
  * Locks the layer-swap animation contract (layer-feel-differentiation.md §4
  * + Plan `2026-07-18-v1.123-three-layer-zoom-experience.md` Task 4):
@@ -36,8 +36,6 @@ import type { WorkOutline } from '@42ch/nexus-contracts';
 
 import { TimelineCanvas } from '../timeline-canvas/timeline-canvas';
 import { WorkTimelineCanvas } from '../work-timeline-canvas/work-timeline-canvas';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function worldEntity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -93,8 +91,6 @@ function makeWorkMockClient(outline: WorkOutline): NexusClient {
   } as unknown as NexusClient;
 }
 
-// ─── Timeline canvas — keyed layer transition wrapper ──────────────────────
-
 describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -119,7 +115,7 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // The transition wrapper carries the CSS keyframe class. Default layer
+    // note: The transition wrapper carries the CSS keyframe class. Default layer
     // is Brief (era data exists).
     const wrapper = screen.getByTestId('timeline-canvas-layer-transition');
     expect(wrapper).toBeInTheDocument();
@@ -127,7 +123,7 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
   });
 
   it('carries the active layer as a `key` so React unmounts + remounts on swap (animation replay)', async () => {
-    // The wrapper's React `key={activeLayer}` is the mechanism that forces
+    // note: The wrapper's React `key={activeLayer}` is the mechanism that forces
     // a remount on layer swap so the CSS keyframe animation replays in a
     // real browser. We assert the wrapper is present with the right class
     // + the layer swap updates `data-active-layer` on the ancestor — those
@@ -168,12 +164,12 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
       );
     });
 
-    // Wrapper exists on Brief with the animation class.
+    // note: Wrapper exists on Brief with the animation class.
     expect(screen.getByTestId('timeline-canvas-layer-transition').className).toContain(
       'nexus-layer-enter',
     );
 
-    // Swap to Narrative — the layer changes, the wrapper is re-rendered
+    // note: Swap to Narrative — the layer changes, the wrapper is re-rendered
     // under the new key.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
     await waitFor(() => {
@@ -183,10 +179,10 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
       );
     });
 
-    // The wrapper is present with the animation class on the new layer.
+    // note: The wrapper is present with the animation class on the new layer.
     const wrapperAfter = screen.getByTestId('timeline-canvas-layer-transition');
     expect(wrapperAfter.className).toContain('nexus-layer-enter');
-    // Sanity: the layer transition wrapper sits inside the canvas root,
+    // note: Sanity: the layer transition wrapper sits inside the canvas root,
     // which carries the new layer on its data attribute.
     expect(
       (wrapperAfter.closest('[data-testid="timeline-canvas"]') as HTMLElement)?.getAttribute(
@@ -195,8 +191,6 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
     ).toBe('narrative');
   });
 });
-
-// ─── Work Timeline canvas — keyed layer transition wrapper ─────────────────
 
 describe('WorkTimelineCanvas — layer transition animation wrapper (P4 Task 4)', () => {
   afterEach(() => {
@@ -232,7 +226,7 @@ describe('WorkTimelineCanvas — layer transition animation wrapper (P4 Task 4)'
   });
 
   it('carries the active layer as a `key` so React unmounts + remounts on swap (animation replay)', async () => {
-    // Same contract-surface approach as the Timeline test above. The
+    // note: Same contract-surface approach as the Timeline test above. The
     // wrapper's React `key={activeLayer}` is the keyed-remount idiom; the
     // CSS keyframe in `apps/web/src/index.css` carries the visual
     // animation. Real-browser evidence is owned by the Task 8 screenshot
@@ -286,7 +280,7 @@ describe('WorkTimelineCanvas — layer transition animation wrapper (P4 Task 4)'
       screen.getByTestId('work-timeline-canvas-layer-transition').className,
     ).toContain('nexus-layer-enter');
 
-    // Swap to Moment — wrapper re-renders under the new key with the
+    // note: Swap to Moment — wrapper re-renders under the new key with the
     // animation class still present (fixture supplies one scene so the
     // canvas branch stays active).
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-moment'));

@@ -1,5 +1,5 @@
 /**
- * WorkTimelineCanvasAdapter — V1.123 P2 Task 2 (Narrative layer projection).
+ * note: WorkTimelineCanvasAdapter — V1.123 P2 Task 2 (Narrative layer projection).
  *
  * Verifies the Narrative projection contract locked by
  *   - `iterations/v1.123/specs/three-layer-architecture.md` §7 + §8 (Work
@@ -48,8 +48,6 @@ import {
   type WorkTimelineCanvasAdapterContext,
   type WorkTimelineNodeData,
 } from '../work-timeline-canvas-adapter';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
@@ -106,8 +104,6 @@ function makeContext(
   };
 }
 
-// ─── Narrative projection (architect §7 + §8) ─────────────────────────────
-
 describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projection', () => {
   it("projects outline.timeline_events onto the Narrative when-axis as 'work-timeline-narrative-event' nodes", () => {
     const g = outline({
@@ -123,7 +119,7 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
     );
     const { nodes } = adapter.projectGraph(g);
 
-    // V1.126 P1: excludes directed-axis spine from entity node assertions.
+    // note: V1.126 P1: excludes directed-axis spine from entity node assertions.
     const entityNodes = nodes.filter((n) => n.type !== 'directedAxisSpine');
     expect(entityNodes).toHaveLength(2);
     expect(entityNodes.every((n) => n.type === 'work-timeline-narrative-event')).toBe(true);
@@ -156,11 +152,11 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
   });
 
   it('sorts Narrative events by realizes_chapter_id (ascending) with undefined chapters tailing', () => {
-    // Architect §8: sort by realizes_chapter_id then event_id.
+    // note: Architect §8: sort by realizes_chapter_id then event_id.
     const g = outline({
       timeline_events: [
         event({ event_id: 'evt-late', realizes_chapter_id: 12 }),
-        event({ event_id: 'evt-none' }), // no chapter anchor → tails
+        event({ event_id: 'evt-none' }), // note: no chapter anchor → tails
         event({ event_id: 'evt-early', realizes_chapter_id: 1 }),
         event({ event_id: 'evt-mid', realizes_chapter_id: 6 }),
       ],
@@ -168,8 +164,8 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
 
     const { nodes } = projectWorkTimelineGraph(g, 'narrative');
 
-    // Ordering: evt-early (ch1) → evt-mid (ch6) → evt-late (ch12) → evt-none.
-    // V1.126 P1: excludes directed-axis spine node.
+    // note: Ordering: evt-early (ch1) → evt-mid (ch6) → evt-late (ch12) → evt-none.
+    // note: V1.126 P1: excludes directed-axis spine node.
     const entityNodes = nodes.filter((n) => n.type !== 'directedAxisSpine');
     const ids = entityNodes.map((n) => n.id);
     expect(ids).toEqual([
@@ -190,7 +186,7 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
     });
 
     const { nodes } = projectWorkTimelineGraph(g, 'narrative');
-    // V1.126 P1: excludes directed-axis spine node.
+    // note: V1.126 P1: excludes directed-axis spine node.
     const entityNodes = nodes.filter((n) => n.type !== 'directedAxisSpine');
     const ids = entityNodes.map((n) => n.id);
     expect(ids).toEqual(['wt-event:evt-alpha', 'wt-event:evt-mid', 'wt-event:evt-zeta']);
@@ -210,10 +206,10 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
     const e2 = nodes.find((n) => n.id === 'wt-event:evt-2')!;
     const eNone = nodes.find((n) => n.id === 'wt-event:evt-none')!;
 
-    // LR ordering: evt-1 → evt-2 → evt-none (X strictly increasing).
+    // note: LR ordering: evt-1 → evt-2 → evt-none (X strictly increasing).
     expect(e1.position.x).toBeLessThan(e2.position.x);
     expect(e2.position.x).toBeLessThan(eNone.position.x);
-    // All events sit on the Narrative when-axis baseline (Y = 0). The
+    // note: All events sit on the Narrative when-axis baseline (Y = 0). The
     // undated tail stays on the axis per architect §7 — Work Timeline
     // has no Context-cluster lane; chapter-unbound events tail right
     // rather than cluster below.
@@ -241,7 +237,7 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
   });
 
   it('drops foreshadows edges whose source or target event is absent (honest projection)', () => {
-    // Mirrors the V1.108 rf-projection dangling-edge guard.
+    // note: Mirrors the V1.108 rf-projection dangling-edge guard.
     const g = outline({
       timeline_events: [event({ event_id: 'src' })],
       foreshadows: [
@@ -263,17 +259,15 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
   });
 });
 
-// ─── Adapter shape (architect §7.1 + §7.3) ────────────────────────────────
-
 describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
   it("declares surfaceKind: 'work-timeline' and defaultLayer: 'narrative'", () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
-    // Architect §7.1: surfaceKind is 'work-timeline' (Task 5 promotes the
+    // note: Architect §7.1: surfaceKind is 'work-timeline' (Task 5 promotes the
     // string literal to a real CanvasSurfaceKind enum value; until then
     // the adapter casts so the contract stays type-compatible).
     expect(adapter.surfaceKind).toBe('work-timeline');
-    // Architect §7.3: defaultLayer = 'narrative' (UX-risk override).
+    // note: Architect §7.3: defaultLayer = 'narrative' (UX-risk override).
     expect(adapter.defaultLayer).toBe('narrative');
   });
 
@@ -285,7 +279,7 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
     const { nodes } = adapter.projectGraph(g);
 
-    // V1.126 P1: directed-axis spine node is also added.
+    // note: V1.126 P1: directed-axis spine node is also added.
     expect(nodes).toHaveLength(2);
     expect(nodes[0].type).toBe('work-timeline-narrative-event');
   });
@@ -295,7 +289,7 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
       timeline_events: [event({ event_id: 'evt-1' })],
     });
 
-    // No scene/beat fixture → Moment layer emits honest empty projection
+    // note: No scene/beat fixture → Moment layer emits honest empty projection
     // (Task 3 covers the populated Moment path; here we verify the
     // delegation switch alone).
     const adapter = createWorkTimelineCanvasAdapter(
@@ -310,7 +304,7 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
   it('registers the Narrative event node type and NO fork marker (Task 2 minimum; Task 3 adds scene/beat)', () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
-    // Task 2 ships the Narrative event node; Task 3 ADDS the Moment scene
+    // note: Task 2 ships the Narrative event node; Task 3 ADDS the Moment scene
     // + beat nodes (verified in moment-projection.test.tsx). The Task 2
     // invariant under test here is: (1) the Narrative event node is
     // registered; (2) NO fork marker exists (V1.122 §8 + V1.123 §9
@@ -321,8 +315,6 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
     expect(Object.keys(adapter.nodeTypes).some((k) => k.includes('fork'))).toBe(false);
   });
 });
-
-// ─── Honest summary (architect §7) ─────────────────────────────────────────
 
 describe('WorkTimelineCanvasAdapter.summarizeGraph — honest a11y summary', () => {
   it('counts events + foreshadows for the screen-reader live region', () => {
@@ -351,7 +343,7 @@ describe('WorkTimelineCanvasAdapter.summarizeGraph — honest a11y summary', () 
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
     const summary = adapter.summarizeGraph(g);
 
-    // Architect §7: do not fabricate chronology. The disclaimer surfaces
+    // note: Architect §7: do not fabricate chronology. The disclaimer surfaces
     // honestly even when events carry realizes_chapter_id (chapter order
     // is a structural hint, not a temporal chronology).
     expect(summary.toLowerCase()).toMatch(/order|chronology|inferred/);

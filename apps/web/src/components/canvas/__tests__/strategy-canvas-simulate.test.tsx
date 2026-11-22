@@ -1,5 +1,5 @@
 /**
- * Strategy canvas — the Simulate action reachability (v1.237 P2).
+ * note: Strategy canvas — the Simulate action reachability (v1.237 P2).
  *
  * The disclosure is only useful if a creator can open it from the open
  * strategy. One action must resolve the installed preset as its candidate IR,
@@ -184,7 +184,7 @@ describe('StrategyCanvas — Simulate action', () => {
       http.post(SIMULATE_PATH, async ({ request }) => {
         const body = (await request.json()) as { document: { entry: string } };
         walkedEntries.push(body.document.entry);
-        // Hold the re-walk in flight so the stale surface is observable.
+        // why: Hold the re-walk in flight so the stale surface is observable.
         if (walkedEntries.length === 2) await delay(100);
         return HttpResponse.json(simulationTrajectory());
       }),
@@ -195,11 +195,11 @@ describe('StrategyCanvas — Simulate action', () => {
     await waitFor(() => expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
-    // The route keeps `revision: 0`; only the document content moves.
+    // note: The route keeps `revision: 0`; only the document content moves.
     irDocument = servedIrDocument({ id: STRATEGY_ID, entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
 
-    // While its replacement is walked the surface reports progress; the stale
+    // note: While its replacement is walked the surface reports progress; the stale
     // banner stays visible from the held snapshot's own staleness.
     await waitFor(() => expect(screen.getByTestId('approve-stale')).toBeInTheDocument());
     expect(screen.getByText('Running the static simulation…')).toBeInTheDocument();

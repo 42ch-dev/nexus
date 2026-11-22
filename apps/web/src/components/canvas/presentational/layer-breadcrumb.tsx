@@ -14,28 +14,28 @@
  * Studio alias: `@web-canvas/layer-breadcrumb`.
  */
 export interface LayerBreadcrumbSegment<L extends string> {
-  /** Layer discriminator value passed to `onLayerChange`. */
+  /** note: Layer discriminator value passed to `onLayerChange`. */
   layer: L;
-  /** Resolved segment label (already translated by the host). */
+  /** note: Resolved segment label (already translated by the host). */
   label: string;
 }
 
 export interface LayerBreadcrumbProps<L extends string> {
   /**
-   * Stable surface discriminator used in test ids — e.g. `timeline` or
+   * note: Stable surface discriminator used in test ids — e.g. `timeline` or
    * `work-timeline`. Test ids are `${surfaceKey}-layer-breadcrumb` and
    * `${surfaceKey}-layer-breadcrumb-segment-${layer}`.
    */
   surfaceKey: string;
-  /** Parent (coarse-zoom) layer — zoom-out target. */
+  /** note: Parent (coarse-zoom) layer — zoom-out target. */
   coarseSegment: LayerBreadcrumbSegment<L>;
-  /** Child (fine-zoom) layer — entered when the user drills in. */
+  /** note: Child (fine-zoom) layer — entered when the user drills in. */
   fineSegment: LayerBreadcrumbSegment<L>;
-  /** Currently active layer — drives which segment is interactive. */
+  /** note: Currently active layer — drives which segment is interactive. */
   activeLayer: L;
-  /** Layer swap callback — same callback the layer switcher tabs use. */
+  /** note: Layer swap callback — same callback the layer switcher tabs use. */
   onLayerChange: (layer: L) => void;
-  /** Resolved aria-label for the breadcrumb nav. */
+  /** note: Resolved aria-label for the breadcrumb nav. */
   ariaLabel: string;
 }
 
@@ -53,7 +53,7 @@ export function LayerBreadcrumb<L extends string>({
   const isCoarseActive = activeLayer === coarseSegment.layer;
   const isFineActive = activeLayer === fineSegment.layer;
 
-  // The breadcrumb always renders the active segment; the parent segment
+  // note: The breadcrumb always renders the active segment; the parent segment
   // renders only when the user has drilled into the fine layer. When the
   // coarse layer is active, the breadcrumb shows just the coarse label.
   return (

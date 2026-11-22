@@ -1,5 +1,5 @@
 /**
- * NleTimelineChrome — presentational NLE-style multi-track Timeline band.
+ * note: NleTimelineChrome — presentational NLE-style multi-track Timeline band.
  *
  * Renders a vertically centered, horizontally scrollable multi-lane timeline
  * for dogfood visual verification in Design Studio and thin App adoption
@@ -25,9 +25,9 @@ export type NleTimelineTrackAccent = 'brief' | 'narrative' | 'moment';
 export type NleTimelineClip = {
   id: string;
   label: string;
-  /** Distance from the timeline origin in pixels. */
+  /** note: Distance from the timeline origin in pixels. */
   startPx: number;
-  /** Clip width in pixels. */
+  /** note: Clip width in pixels. */
   widthPx: number;
 };
 
@@ -47,19 +47,19 @@ export type NleTimelineRulerTick = {
 
 export type NleTimelineChromeProps = {
   tracks: NleTimelineTrack[];
-  /** Total scrollable width of the time axis in pixels. */
+  /** note: Total scrollable width of the time axis in pixels. */
   contentWidthPx?: number;
-  /** Lane height per track in pixels. */
+  /** note: Lane height per track in pixels. */
   laneHeightPx?: number;
-  /** Optional playhead position along the time axis (px). */
+  /** note: Optional playhead position along the time axis (px). */
   playheadPx?: number;
-  /** Ruler tick marks; defaults to evenly spaced markers when omitted. */
+  /** note: Ruler tick marks; defaults to evenly spaced markers when omitted. */
   rulerTicks?: NleTimelineRulerTick[];
-  /** Accessible label for the horizontal scrub region. */
+  /** note: Accessible label for the horizontal scrub region. */
   scrollAriaLabel?: string;
-  /** Clip IDs that render a detach affordance (callback-driven; no internal state). */
+  /** note: Clip IDs that render a detach affordance (callback-driven; no internal state). */
   detachableClipIds?: ReadonlySet<string>;
-  /** Fired when the user activates detach on a clip in `detachableClipIds`. */
+  /** note: Fired when the user activates detach on a clip in `detachableClipIds`. */
   onClipDetach?: (trackId: string, clip: NleTimelineClip) => void;
   className?: string;
   'data-testid'?: string;
@@ -263,7 +263,7 @@ export function NleTimelineChrome({
         data-testid="nle-timeline-band"
       >
         <div className="flex min-h-0 flex-1">
-          {/* Fixed track label column */}
+          {/* note: Fixed track label column */}
           <div
             className="flex shrink-0 flex-col border-r border-gray-alpha-200 bg-background-100"
             style={{ width: LABEL_COLUMN_WIDTH }}
@@ -293,7 +293,7 @@ export function NleTimelineChrome({
             ))}
           </div>
 
-          {/* Shared horizontal scroll region — ruler + lanes pan together */}
+          {/* note: Shared horizontal scroll region — ruler + lanes pan together */}
           <div
             className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100"
             data-testid="nle-timeline-scroll"

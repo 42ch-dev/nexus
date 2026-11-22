@@ -1,5 +1,5 @@
 /**
- * Cross-surface Timeline navigation — V1.123 P3 Task 4.
+ * note: Cross-surface Timeline navigation — V1.123 P3 Task 4.
  *
  * Pins the bidirectional cross-surface navigation contract locked by:
  *   - Plan `2026-07-18-v1.123-timeline-first-ia-deepening.md` Task 4 +
@@ -44,8 +44,6 @@ import {
 } from '../work-timeline-canvas/work-timeline-inspector';
 import type { WorkTimelineNodeData } from '../work-timeline-canvas/work-timeline-canvas-adapter';
 
-// ─── Work Timeline — View on World Timeline affordance ──────────────────────
-
 function workTimelineEventNode(
   overrides: Partial<WorkTimelineNodeData> = {},
 ): Node<WorkTimelineNodeData> {
@@ -84,7 +82,7 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
   });
 
   it('hides "View on World Timeline" when worldId is absent (honest scope cut)', () => {
-    // Per plan §"If binding is missing or unreliable, P3 hides the affordance".
+    // note: Per plan §"If binding is missing or unreliable, P3 hides the affordance".
     // Works without a bound World (WorkDetailResponse.world_id absent) hide the
     // affordance — silent degradation is forbidden.
     render(
@@ -100,7 +98,7 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
   });
 
   it('hides "View on World Timeline" when onViewOnWorldTimeline is absent (no callback wired)', () => {
-    // Even if a worldId is somehow present, the CTA hides when the orchestrator
+    // note: Even if a worldId is somehow present, the CTA hides when the orchestrator
     // has not wired the navigation callback. Guards against a phantom CTA that
     // navigates nowhere.
     render(
@@ -132,13 +130,13 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
     fireEvent.click(screen.getByTestId('work-timeline-view-on-world-timeline'));
 
     expect(handler).toHaveBeenCalledTimes(1);
-    // The callback receives the selected node so the orchestrator can read
+    // note: The callback receives the selected node so the orchestrator can read
     // node.data.realizesChapterId etc. when composing the navigation URL.
     expect(handler.mock.calls[0][0]).toEqual(workTimelineEventNode());
   });
 
   it('hides the affordance on Moment-layer scene nodes (cross-surface nav is Narrative-event-bound)', () => {
-    // The plan calls out "Work Timeline Moment ↔ World Timeline Narrative" as
+    // note: The plan calls out "Work Timeline Moment ↔ World Timeline Narrative" as
     // the binding axis, but the durable V1.123 slice is Narrative-event-driven
     // (WorkDetailResponse.world_id is the only join the wire exposes today).
     // Moment scene/beat nodes do NOT surface this CTA — the inspector's
@@ -168,14 +166,12 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
       </MemoryRouter>,
     );
 
-    // The cross-surface affordance is reserved for Narrative-event binding
+    // note: The cross-surface affordance is reserved for Narrative-event binding
     // (architect §3.4 — Moment-on-Outline carrier has no Work-event →
     // World-event binding today). Moment inspectors MUST NOT surface it.
     expect(screen.queryByTestId('work-timeline-view-on-world-timeline')).toBeNull();
   });
 });
-
-// ─── World Timeline — View in Work Timeline affordance ──────────────────────
 
 function timelineEventNode(
   overrides: Partial<TimelineNodeData> = {},
@@ -232,7 +228,7 @@ describe('Task 4 — World Timeline → Work Timeline affordance', () => {
   });
 
   it('hides "View in Work Timeline" when boundWorkId is absent (honest scope cut)', () => {
-    // Worlds with no realizing Work (zero Works in the workspace, or every Work
+    // note: Worlds with no realizing Work (zero Works in the workspace, or every Work
     // binds to a different World) hide the affordance. Silent degradation is
     // forbidden.
     render(
@@ -280,7 +276,7 @@ describe('Task 4 — World Timeline → Work Timeline affordance', () => {
   });
 
   it('does NOT render the affordance on context (non-event) nodes', () => {
-    // The cross-surface affordance is reserved for `layoutHint='event'` nodes
+    // note: The cross-surface affordance is reserved for `layoutHint='event'` nodes
     // (the World-event → Work-Timeline binding axis). Context entities
     // (characters, locations) do not surface this CTA even when a realizing
     // Work exists — they are not on the narrative when-axis.

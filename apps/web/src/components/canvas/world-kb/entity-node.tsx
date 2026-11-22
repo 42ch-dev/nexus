@@ -44,7 +44,7 @@ const LIFECYCLE_BADGE: Record<EntityLifecycle, { labelKey: string; className: st
 };
 
 interface SourceAnchorNodeData {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   relationType: 'source_anchor';
   reference: string;
@@ -65,13 +65,13 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
     <div
       data-dragging={dragging ? 'true' : undefined}
       className={[
-        // V1.121 P3 T2 — v0.4 elevation recipe (DESIGN.md §Elevation):
+        // note: V1.121 P3 T2 — v0.4 elevation recipe (DESIGN.md §Elevation):
         // rest shadow-card (elevation-1) → hover elevation-2 → dragging
         // elevation-4. The data-dragging attribute variant lets the RF
         // wrapper forward the dragging prop without a class-name branch,
         // mirroring NodeChromeShell's pattern.
         'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-shadow duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4 focus-visible:outline-none',
-        // V1.121 P3 T2 — per-surface accent spine (World KB = teal-700 per
+        // note: V1.121 P3 T2 — per-surface accent spine (World KB = teal-700 per
         // DESIGN.md §Canvas Surface). Mirrors NodeChromeShell's spine; this
         // node keeps its bespoke 3-state fill tokens (default/hover/selected)
         // rather than routing through NodeChromeShell because the entity
@@ -122,7 +122,7 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
           onClose={close}
           onConnectTo={() => {
             close();
-            // React Flow node data is not directly wired to onConnectTo; the
+            // why: React Flow node data is not directly wired to onConnectTo; the
             // canvas listens for selection change after the menu closes.
             const event = new CustomEvent('world-kb-connect-to', {
               detail: { sourceEntityId: d.keyBlockId! },

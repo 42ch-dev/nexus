@@ -1,5 +1,5 @@
 /**
- * WorkTimelineCanvas — V1.123 P2 Task 4 (layer switcher + default-layer logic).
+ * note: WorkTimelineCanvas — V1.123 P2 Task 4 (layer switcher + default-layer logic).
  *
  * Verifies the Narrative↔Moment layer switcher UI + the Work-entry default
  * layer logic locked by:
@@ -49,8 +49,6 @@ import type {
 
 import { WorkTimelineCanvas } from '../work-timeline-canvas';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
     work_id: 'work-1',
@@ -89,7 +87,7 @@ function beat(partial: Partial<BeatFixture> & Pick<BeatFixture, 'beatId' | 'scen
 function makeMockClient(outlineData: WorkOutline): NexusClient {
   return {
     getWorkOutline: vi.fn().mockResolvedValue(outlineData),
-    // Explicit no-bound-World: the Work detail carries no `world_id`, so
+    // note: Explicit no-bound-World: the Work detail carries no `world_id`, so
     // the Brief layer has no era data source → honest Brief-empty panel
     // when the user switches to Brief (V1.156 P2 T2).
     getWork: vi.fn().mockResolvedValue({ work_id: 'work-1', world_id: null }),
@@ -99,8 +97,6 @@ function makeMockClient(outlineData: WorkOutline): NexusClient {
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
-
-// ─── Layer switcher UI (Narrative ↔ Moment) ───────────────────────────────
 
 describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   afterEach(() => {
@@ -115,7 +111,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
       expect(screen.getByTestId('work-timeline-canvas')).toBeInTheDocument();
     });
 
-    // All three layer tabs render — explicit layer control per layer-feel
+    // note: All three layer tabs render — explicit layer control per layer-feel
     // §3.3 (V1.156 adds the Brief segment; Narrative + Moment unchanged).
     expect(screen.getByTestId('work-timeline-layer-tab-brief')).toBeInTheDocument();
     expect(screen.getByTestId('work-timeline-layer-tab-narrative')).toBeInTheDocument();
@@ -123,7 +119,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('clicking the Brief tab switches active layer to Brief (Narrative → Brief)', async () => {
-    // V1.156 P2 T2 — Brief is the coarsest layer, one click from Narrative.
+    // note: V1.156 P2 T2 — Brief is the coarsest layer, one click from Narrative.
     // No bound World in this fixture → the projection is empty, but the
     // active layer swap is observable via `data-active-layer` + the tab's
     // `aria-pressed` (the honest empty-state panel is covered by
@@ -133,7 +129,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
 
     const canvas = await screen.findByTestId('work-timeline-canvas');
 
-    // Default = Narrative.
+    // note: Default = Narrative.
     await waitFor(() => {
       expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
     });
@@ -158,7 +154,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('keeps the segmented-control a11y contract on the 3-way switcher (role=group + aria-label + per-tab aria-pressed)', async () => {
-    // a11y contract (V1.123 P2 Task 4, preserved through the 2-way→3-way
+    // note: a11y contract (V1.123 P2 Task 4, preserved through the 2-way→3-way
     // extension): the switcher is a labeled `role="group"`; each layer tab
     // is a real button with `aria-pressed` so SR users hear the active
     // layer as a toggle state. Keyboard nav is native button behavior
@@ -171,7 +167,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
     const group = screen.getByRole('group', { name: 'Work Timeline layer' });
     expect(group).toBeInTheDocument();
 
-    // Three tabs inside the group, each a native button (implicit
+    // note: Three tabs inside the group, each a native button (implicit
     // role="button" — keyboard focusable) with aria-pressed reflecting
     // the active layer (default Narrative → only Narrative pressed).
     const tabButtons = within(group).getAllByRole('button');
@@ -194,13 +190,13 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
 
     const canvas = await screen.findByTestId('work-timeline-canvas');
 
-    // Architect §7.3: default = 'narrative' regardless of scene/beat data.
+    // note: Architect §7.3: default = 'narrative' regardless of scene/beat data.
     // The Narrative tab is pressed and the container's `data-active-layer`
     // mirror reads 'narrative'.
     const narrativeTab = screen.getByTestId('work-timeline-layer-tab-narrative');
     expect(narrativeTab).toHaveAttribute('aria-pressed', 'true');
     expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
-    // Moment tab is NOT pressed.
+    // note: Moment tab is NOT pressed.
     expect(screen.getByTestId('work-timeline-layer-tab-moment')).toHaveAttribute(
       'aria-pressed',
       'false',
@@ -208,7 +204,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it("defaults to 'narrative' even when the canvas injects a scene/beat fixture (override is UNCONDITIONAL)", async () => {
-    // Architect §7.3: the override is unconditional because real Works
+    // note: Architect §7.3: the override is unconditional because real Works
     // have no wire-scene/beat data today. Even when a fixture is wired
     // (Design Studio / test), the V1.123 default stays 'narrative' so
     // the surface does not flip its UX between real Works and test
@@ -245,7 +241,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
 
     const canvas = await screen.findByTestId('work-timeline-canvas');
 
-    // Default = Narrative.
+    // note: Default = Narrative.
     await waitFor(() => {
       expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
     });
@@ -271,7 +267,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
 
     const canvas = await screen.findByTestId('work-timeline-canvas');
 
-    // Default → Narrative; user clicks Moment then back to Narrative.
+    // note: Default → Narrative; user clicks Moment then back to Narrative.
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-moment'));
     await waitFor(() => {
       expect(canvas).toHaveAttribute('data-active-layer', 'moment');
@@ -292,7 +288,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('hides the layer switcher from the empty-state branch (no events to show)', async () => {
-    // Architect §7 + Task 7: when the outline has zero events, the
+    // note: Architect §7 + Task 7: when the outline has zero events, the
     // empty-state panel owns the surface (Task 7 owns the visible copy;
     // Task 4 hides the switcher so it does not add noise to the empty
     // branch — mirrors the V1.122 Timeline layer-switcher gate).
@@ -310,7 +306,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('does NOT trigger any forbidden write endpoint during a layer swap (read-only surface)', async () => {
-    // Architect §6: Work Timeline is read-only in V1.123. The layer
+    // note: Architect §6: Work Timeline is read-only in V1.123. The layer
     // swap is a pure projection swap; no write path is wired. The
     // orchestrator does not own any mutation hook here (unlike V1.122
     // Timeline which wires `usePatchWorldKbEntity`). The negative
@@ -325,7 +321,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-narrative'));
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-moment'));
 
-    // Every outline write path stays unset during a three-step layer swap.
+    // note: Every outline write path stays unset during a three-step layer swap.
     expect((client.patchOutlineStructure as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((client.patchOutlineChapter as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((client.patchTimelineEvent as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();

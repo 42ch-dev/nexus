@@ -1,5 +1,5 @@
 /**
- * World KB canvas orchestrator state hook (V1.74 A6).
+ * note: World KB canvas orchestrator state hook (V1.74 A6).
  *
  * Encapsulates selection, conflict state, reseed signaling, and selection
  * lifecycle so the thin canvas facade stays focused on rendering and composition.
@@ -45,7 +45,7 @@ export function useWorldKbCanvasState({
     setReseedSignal((s) => s + 1);
   }
 
-  // Reset selection when the graph refetch drops the backing projection.
+  // why: Reset selection when the graph refetch drops the backing projection.
   useEffect(() => {
     if (!selection) return;
     if (selection.kind === 'entity') {
@@ -58,7 +58,7 @@ export function useWorldKbCanvasState({
       const fresh = relationships.find((r) => r.relationship_id === selection.relationship.relationship_id);
       if (!fresh) setSelection(null);
     }
-    // new-relationship selection is transient and never needs invalidation.
+    // note: new-relationship selection is transient and never needs invalidation.
   }, [entities, candidateItems, relationships, selection]);
 
   function onSelectNode(node: WorldKbNodeData) {
@@ -138,7 +138,7 @@ export function buildEntityConflict(
   if (payload.dirtyFields.includes('aliases')) draftValues.aliases = payload.draft.aliasesText;
   if (payload.dirtyFields.includes('body')) draftValues.body = payload.draft.bodyText;
   if (payload.dirtyFields.includes('modules')) {
-    // Summary line for the conflict modal's "what you were about to do" block:
+    // note: Summary line for the conflict modal's "what you were about to do" block:
     // the module editors write whole first-level values, so the JSON preview
     // is the faithful representation of the pending edit.
     draftValues.modules = JSON.stringify({

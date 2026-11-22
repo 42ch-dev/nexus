@@ -1,5 +1,5 @@
 /**
- * Work Timeline inspector — V1.123 P2 Task 6 (Moment inspector + Narrative
+ * note: Work Timeline inspector — V1.123 P2 Task 6 (Moment inspector + Narrative
  * event inspector) + V1.123 P3 Task 4 (cross-surface navigation affordance).
  *
  * Three inspector shapes dispatch on `node.data.nodeKind`:
@@ -42,10 +42,8 @@ import type { Node } from '@xyflow/react';
 import type { WorkTimelineNodeData } from './work-timeline-canvas-adapter';
 import type { TimelineNodeData } from '../timeline-canvas/timeline-canvas-adapter';
 
-// ─── Shared shell ──────────────────────────────────────────────────────────
-
 /**
- * Inspector shell — title + description + manuscript-anchor block + "Edit in
+ * note: Inspector shell — title + description + manuscript-anchor block + "Edit in
  * Outline" CTA. Accent (worldkb vs outline) discriminates Narrative vs Moment
  * feel at a glance.
  *
@@ -67,7 +65,7 @@ function WorkTimelineInspectorShell({
   workId: string;
   children?: React.ReactNode;
   /**
-   * Optional cross-surface navigation affordance rendered between the field
+   * note: Optional cross-surface navigation affordance rendered between the field
    * block and the Edit-in-Outline CTA (V1.123 P3 Task 4). The shell stays
    * agnostic to the affordance's destination; the caller (e.g. the event
    * inspector) composes the right element. Null/undefined when the
@@ -97,7 +95,7 @@ function WorkTimelineInspectorShell({
       </div>
       {children}
       {crossSurfaceAffordance}
-      {/* "Edit in Outline" hand-off (architect §6 read-only invariant).
+      {/* note: "Edit in Outline" hand-off (architect §6 read-only invariant).
           The CTA navigates to the Outline surface where the writes live;
           no patch is invoked from this inspector. */}
       <Link
@@ -111,8 +109,6 @@ function WorkTimelineInspectorShell({
     </form>
   );
 }
-
-// ─── Field row primitive ───────────────────────────────────────────────────
 
 function FieldRow({ label, value }: { label: string; value: string | number | null | undefined }) {
   if (value === null || value === undefined || value === '') return null;
@@ -154,10 +150,8 @@ function ManuscriptAnchorBlock({
   );
 }
 
-// ─── V1.123 P3 Task 4 — cross-surface affordance primitive ─────────────────
-
 /**
- * "View on World Timeline" affordance — fired by the Narrative event
+ * note: "View on World Timeline" affordance — fired by the Narrative event
  * inspector when the Work is bound to a World.
  *
  * The orchestrator owns the navigation; this primitive only fires the
@@ -194,7 +188,7 @@ function ViewOnWorldTimelineAffordance({
       type="button"
       data-testid="work-timeline-view-on-world-timeline"
       data-world-id={worldId}
-      // V1.163 P1 Task 3 — when the selected Work event carries an event-level
+      // note: V1.163 P1 Task 3 — when the selected Work event carries an event-level
       // bind (`worldEventId` — the World KB entity `key_block_id`), the CTA
       // target deep-links to the specific World event
       // (`?layer=narrative&event=<id>`); absent → the V1.123 surface-level
@@ -216,10 +210,8 @@ function ViewOnWorldTimelineAffordance({
   );
 }
 
-// ─── Narrative event inspector ─────────────────────────────────────────────
-
 /**
- * Narrative event inspector — Work-scoped event on the Narrative when-axis.
+ * note: Narrative event inspector — Work-scoped event on the Narrative when-axis.
  * Shows event id + chapter anchor + description (if any) + the Edit-in-Outline
  * hand-off. Worldkb accent mirrors the Narrative event node.
  *
@@ -235,10 +227,10 @@ export function WorkTimelineEventInspector({
 }: {
   node: Node<WorkTimelineNodeData>;
   workId: string;
-  /** Optional bound World id (P3 Task 4 cross-surface navigation). */
+  /** note: Optional bound World id (P3 Task 4 cross-surface navigation). */
   worldId?: string;
   /**
-   * Optional cross-surface navigation hand-off — fires when the user clicks
+   * note: Optional cross-surface navigation hand-off — fires when the user clicks
    * "View on World Timeline". The orchestrator composes the URL and calls
    * `useNavigate`; the inspector stays decoupled from routing.
    */
@@ -285,10 +277,8 @@ export function WorkTimelineEventInspector({
   );
 }
 
-// ─── Moment scene inspector ────────────────────────────────────────────────
-
 /**
- * Moment scene inspector — scene card detail. Shows scene id + chapter +
+ * note: Moment scene inspector — scene card detail. Shows scene id + chapter +
  * status (if any) + the manuscript anchor + Edit-in-Outline hand-off.
  * Outline accent mirrors the Moment scene node (Work-scoped outline-projection).
  *
@@ -306,12 +296,12 @@ export function WorkTimelineMomentSceneInspector({
 }: {
   node: Node<WorkTimelineNodeData>;
   workId: string;
-  /** Reserved for forward compatibility (P3 Task 4 — unused on Moment nodes). */
+  /** note: Reserved for forward compatibility (P3 Task 4 — unused on Moment nodes). */
   worldId?: string;
-  /** Reserved for forward compatibility (P3 Task 4 — unused on Moment nodes). */
+  /** note: Reserved for forward compatibility (P3 Task 4 — unused on Moment nodes). */
   onViewOnWorldTimeline?: (node: Node<WorkTimelineNodeData>) => void;
 }) {
-  // Slots intentionally unused on Moment inspectors — see JSDoc above. They
+  // note: Slots intentionally unused on Moment inspectors — see JSDoc above. They
   // exist on the signature so callers (e.g. tests checking that Moment nodes
   // do NOT surface the CTA even when the slots are wired) can pass them
   // without TypeScript errors. If P4+ extends the cross-surface binding to
@@ -354,10 +344,8 @@ export function WorkTimelineMomentSceneInspector({
   );
 }
 
-// ─── Moment beat inspector ─────────────────────────────────────────────────
-
 /**
- * Moment beat inspector — beat pin detail. Shows beat id + parent scene id +
+ * note: Moment beat inspector — beat pin detail. Shows beat id + parent scene id +
  * status (if any) + the chapter/scene/beat manuscript anchor + Edit-in-Outline
  * hand-off. Outline accent mirrors the Moment beat node.
  */
@@ -401,10 +389,8 @@ export function WorkTimelineMomentBeatInspector({
   );
 }
 
-// ─── V1.156 P2 T2 — read-only Brief-era inspector ──────────────────────────
-
 /**
- * Work-Brief era inspector — read-only era detail for a `timeline-brief-era`
+ * note: Work-Brief era inspector — read-only era detail for a `timeline-brief-era`
  * node selected on the Work Timeline Brief layer.
  *
  * Work-Brief is a read-only **projection** of the bound World's Brief
@@ -427,11 +413,11 @@ export function WorkTimelineBriefEraInspector({
   worldId,
 }: {
   node: Node<WorkTimelineNodeData>;
-  /** Optional bound World id — drives the "View on World Timeline" CTA. */
+  /** note: Optional bound World id — drives the "View on World Timeline" CTA. */
   worldId?: string;
 }) {
   const { t } = useTranslation('canvas');
-  // Brief-era nodes carry the World Timeline carrier (`TimelineNodeData`
+  // note: Brief-era nodes carry the World Timeline carrier (`TimelineNodeData`
   // with `layoutHint: 'brief'`) — Work-Brief reuses the World Brief
   // projection verbatim (T1). The Work surface never reads
   // `WorkTimelineNodeData` fields on Brief nodes; read the era markers
@@ -442,7 +428,7 @@ export function WorkTimelineBriefEraInspector({
   const endHint = data.endHint;
   const worldSummary = data.worldSummary;
 
-  // The time-span label mirrors the Brief-era node card: prefer
+  // note: The time-span label mirrors the Brief-era node card: prefer
   // `start_hint → end_hint`; fall back to whichever hint exists; fall back
   // to the temporal-unknown label when neither is present (same format as
   // the World Timeline Brief-era inspector).
@@ -469,6 +455,7 @@ export function WorkTimelineBriefEraInspector({
       <div className="flex items-center justify-between gap-2">
         <h3
           className="flex items-center gap-2 text-heading-14 font-heading font-semibold text-canvas-worldkb-accent"
+          // note: data-testid hook requires a DOM prop (mirrors sibling inspector test hooks)
           // eslint-disable-next-line react/forbid-dom-props
           data-testid="work-timeline-brief-era-inspector-title"
         >
@@ -494,7 +481,7 @@ export function WorkTimelineBriefEraInspector({
         })}
       </p>
 
-      {/* Era identity block — read-only marker fields surface the era's
+      {/* note: Era identity block — read-only marker fields surface the era's
           identity (mirrors the World Timeline Brief-era inspector chrome). */}
       <div
         className="flex flex-col gap-2 rounded-card border border-gray-alpha-400 bg-background-100 p-3"
@@ -511,6 +498,7 @@ export function WorkTimelineBriefEraInspector({
             </span>
             <span
               className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-900 self-start"
+              // note: data-testid hook requires a DOM prop (mirrors sibling inspector test hooks)
               // eslint-disable-next-line react/forbid-dom-props
               data-testid="work-timeline-brief-era-inspector-era-id"
             >
@@ -527,6 +515,7 @@ export function WorkTimelineBriefEraInspector({
           </span>
           <span
             className="rounded-pill border border-canvas-worldkb-accent/30 bg-canvas-worldkb-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-worldkb-accent self-start"
+            // note: data-testid hook requires a DOM prop (mirrors sibling inspector test hooks)
             // eslint-disable-next-line react/forbid-dom-props
             data-testid="work-timeline-brief-era-inspector-span"
           >
@@ -543,6 +532,7 @@ export function WorkTimelineBriefEraInspector({
             </span>
             <p
               className="text-copy-13 text-gray-900"
+              // note: data-testid hook requires a DOM prop (mirrors sibling inspector test hooks)
               // eslint-disable-next-line react/forbid-dom-props
               data-testid="work-timeline-brief-era-inspector-world-summary"
             >
@@ -552,7 +542,7 @@ export function WorkTimelineBriefEraInspector({
         ) : null}
       </div>
 
-      {/* Read-only note (PD-2): the Work surface owns NO Brief write path.
+      {/* note: Read-only note (PD-2): the Work surface owns NO Brief write path.
           The bound World owns Brief authoring (World spine). */}
       <p className="text-copy-13 text-gray-700">
         {t('workTimeline.briefEraInspector.readOnly', {
@@ -560,7 +550,7 @@ export function WorkTimelineBriefEraInspector({
         })}
       </p>
 
-      {/* Cross-surface affordance — source-World attribution (spec §3.3.3:
+      {/* note: Cross-surface affordance — source-World attribution (spec §3.3.3:
           full bound-World Brief with source-World attribution). Direct Link
           mirrors the Edit-in-Outline Link pattern; targets the bound World's
           Timeline Brief layer. Hidden when no World is bound. */}
@@ -581,10 +571,8 @@ export function WorkTimelineBriefEraInspector({
   );
 }
 
-// ─── Dispatch ──────────────────────────────────────────────────────────────
-
 /**
- * Dispatch the selected node to the right Work Timeline inspector by
+ * note: Dispatch the selected node to the right Work Timeline inspector by
  * `node.data.nodeKind`. Returns `null` for unknown kinds so the
  * `useCanvasSurface` derived `surface.inspector` slot renders nothing when
  * the selection does not match a Work Timeline node.

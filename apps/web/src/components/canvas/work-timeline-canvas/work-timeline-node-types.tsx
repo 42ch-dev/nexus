@@ -1,5 +1,5 @@
 /**
- * Work Timeline canvas node types — V1.123 P2 Task 2/3 + V1.124 P0 T2.
+ * note: Work Timeline canvas node types — V1.123 P2 Task 2/3 + V1.124 P0 T2.
  *
  * Three node kinds, all projecting from V1.72 `WorkOutline`:
  *   • work-timeline-narrative-event — Narrative event marker. Body chrome:
@@ -32,10 +32,8 @@ import {
 import { DirectedAxisSpine } from '../timeline-canvas/directed-axis-spine';
 import type { WorkTimelineNodeData } from './work-timeline-canvas-adapter';
 
-// ─── Narrative event node (Task 2) ─────────────────────────────────────────
-
 /**
- * Narrative event node — projected onto the Work Timeline Narrative LR
+ * note: Narrative event node — projected onto the Work Timeline Narrative LR
  * when-axis. Body chrome extracted to `WorkTimelineNarrativeEventChrome`
  * (V1.124). i18n resolves chapter-anchor / no-chapter labels here.
  */
@@ -100,10 +98,8 @@ export const WorkTimelineNarrativeEventNode = memo(function WorkTimelineNarrativ
   );
 });
 
-// ─── Moment scene node (Task 3) ────────────────────────────────────────────
-
 /**
- * Moment scene node — projected onto the Work Timeline Moment vertical
+ * note: Moment scene node — projected onto the Work Timeline Moment vertical
  * scene-stack. Body chrome extracted to `WorkTimelineMomentSceneChrome`
  * (V1.124). Manuscript-anchor badge resolved here via i18n.
  */
@@ -165,10 +161,8 @@ export const WorkTimelineMomentSceneNode = memo(function WorkTimelineMomentScene
   );
 });
 
-// ─── Moment beat node (Task 3) ─────────────────────────────────────────────
-
 /**
- * Moment beat node — child of a Scene card in the vertical scene-stack.
+ * note: Moment beat node — child of a Scene card in the vertical scene-stack.
  * Body chrome extracted to `WorkTimelineMomentBeatChrome` (V1.124).
  */
 export const WorkTimelineMomentBeatNode = memo(function WorkTimelineMomentBeatNode({
@@ -229,10 +223,8 @@ export const WorkTimelineMomentBeatNode = memo(function WorkTimelineMomentBeatNo
   );
 });
 
-// ─── Node type registry (Task 2 + Task 3) ──────────────────────────────────
-
 /**
- * Node type registry for the Work Timeline surface.
+ * note: Node type registry for the Work Timeline surface.
  *
  * Consumed by `createWorkTimelineCanvasAdapter` and forwarded to
  * `useCanvasSurface` (V1.114) so React Flow can dispatch by `node.type`.

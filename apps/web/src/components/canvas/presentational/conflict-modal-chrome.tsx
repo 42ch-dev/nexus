@@ -1,5 +1,5 @@
 /**
- * Conflict-modal chrome — shared presentational shell (V1.124 P2).
+ * note: Conflict-modal chrome — shared presentational shell (V1.124 P2).
  *
  * Overlay + dialog + field-diff chips + action tray + optional side-by-side
  * review. Props-first strings (no `useTranslation`, no RF, no contracts, no
@@ -14,9 +14,9 @@ import { AlertTriangle, RefreshCw, Shield, Split } from 'lucide-react';
 export interface ConflictField<T extends string = string> {
   id: T;
   label: string;
-  /** Server-side value, if known. When undefined the field is not shown as a server change. */
+  /** note: Server-side value, if known. When undefined the field is not shown as a server change. */
   serverValue?: string;
-  /** Local draft value. When undefined the field is not shown as a local change. */
+  /** note: Local draft value. When undefined the field is not shown as a local change. */
   localValue?: string;
 }
 
@@ -32,15 +32,15 @@ export interface ConflictModalChromeProps<T extends string = string> {
   title: string;
   description?: ReactNode;
   /**
-   * Node rendered after the server revision span in the description branch.
+   * note: Node rendered after the server revision span in the description branch.
    * Additive (V1.73): lets domain variants append a trailing clause without
    * changing existing Strategy/Outline descriptions.
    */
   descriptionSuffix?: ReactNode;
   currentRevision: number;
-  /** Fallback description when `description` is omitted. */
+  /** note: Fallback description when `description` is omitted. */
   revisionLabel?: string;
-  /** Sentence after the revision number when no custom description is provided. */
+  /** note: Sentence after the revision number when no custom description is provided. */
   defaultDescription?: string;
   serverSectionTitle?: string;
   localSectionTitle?: string;
@@ -58,7 +58,7 @@ export interface ConflictModalChromeProps<T extends string = string> {
   reviewLabel?: string;
   reapplyTitleEnabled?: string;
   reapplyTitleDisabled?: string;
-  /** Live-region announcement fragments (screen readers). */
+  /** note: Live-region announcement fragments (screen readers). */
   liveRevisionText?: string;
   liveLocalChangesText?: string;
   liveServerChangesText?: string;
@@ -66,7 +66,7 @@ export interface ConflictModalChromeProps<T extends string = string> {
   liveNoOverlapText?: string;
   liveNothingLabel?: string;
   liveNothingDetectableLabel?: string;
-  /** Review row column labels. */
+  /** note: Review row column labels. */
   reviewServerLabel?: (fieldLabel: string) => string;
   reviewLocalLabel?: (fieldLabel: string) => string;
   reviewUnchangedSuffix?: string;

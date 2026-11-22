@@ -1,5 +1,5 @@
 /**
- * Relationship inspector field grid (V1.74 A10 split).
+ * note: Relationship inspector field grid (V1.74 A10 split).
  *
  * Holds the symmetric toggle, confidence input, and source-anchor picker so
  * the relationship inspector stays under the 250-line cap.

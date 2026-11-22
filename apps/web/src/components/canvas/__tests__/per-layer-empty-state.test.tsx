@@ -1,5 +1,5 @@
 /**
- * Per-layer honest empty-state copy — V1.123 P4 Task 7.
+ * note: Per-layer honest empty-state copy — V1.123 P4 Task 7.
  *
  * Pins the honest empty-state copy contract from
  * `iterations/v1.123/specs/layer-feel-differentiation.md` §7 + plan Task 7:
@@ -51,8 +51,6 @@ import type {
 import { TimelineCanvas } from '../timeline-canvas/timeline-canvas';
 import { WorkTimelineCanvas } from '../work-timeline-canvas/work-timeline-canvas';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function worldEntity(
   overrides: Partial<WorldKbEntityProjection> &
     Pick<WorldKbEntityProjection, 'key_block_id' | 'block_type' | 'canonical_name'>,
@@ -88,7 +86,7 @@ function makeWorkMockClient(outline: WorkOutline): NexusClient {
 }
 
 async function setI18nLanguage(language: 'en' | 'zh-CN') {
-  // Pre-set the localStorage preference so the LocaleProvider (mounted via
+  // note: Pre-set the localStorage preference so the LocaleProvider (mounted via
   // renderInApp) resolves to the target language. The provider's mount
   // effect calls `i18n.changeLanguage(resolvedLocale)` based on the stored
   // preference, so changing the i18n singleton alone is not enough — the
@@ -99,8 +97,6 @@ async function setI18nLanguage(language: 'en' | 'zh-CN') {
   await i18n.changeLanguage(language);
 }
 
-// ─── Brief empty-state — World Timeline ───────────────────────────────────
-
 describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
   afterEach(async () => {
     vi.clearAllMocks();
@@ -108,7 +104,7 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
   });
 
   it('renders the honest Brief-empty copy + Switch to Narrative CTA in English', async () => {
-    // Graph has events but zero eras → Brief layer is empty when the user
+    // note: Graph has events but zero eras → Brief layer is empty when the user
     // explicitly switches to it (default layer is Narrative without era data).
     const graph: WorldKbGraphResponse = {
       entities: [
@@ -126,7 +122,7 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
       client: makeWorldMockClient(graph),
     });
 
-    // Default layer is Narrative (no era data).
+    // note: Default layer is Narrative (no era data).
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
         'data-active-layer',
@@ -134,22 +130,22 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
       );
     });
 
-    // User switches to Brief → empty-state branch fires.
+    // note: User switches to Brief → empty-state branch fires.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     const emptyState = await screen.findByTestId('timeline-brief-empty-state');
     expect(emptyState).toBeInTheDocument();
 
-    // Title conveys "no eras yet"; body conveys the Brief purpose + an escape
+    // note: Title conveys "no eras yet"; body conveys the Brief purpose + an escape
     // hatch back to Narrative. Per layer-feel §7, the body must mention
     // "Switch to Narrative" so the user has an actionable next step.
     expect(emptyState).toHaveTextContent('No era markers yet');
     expect(emptyState).toHaveTextContent('Switch to Narrative');
 
-    // CTA is the primary affordance — same label as the body's escape hatch.
+    // note: CTA is the primary affordance — same label as the body's escape hatch.
     const cta = screen.getByTestId('timeline-brief-empty-cta');
     expect(cta).toHaveTextContent('Switch to Narrative');
 
-    // CTA click swaps back to Narrative — escape hatch actually works.
+    // note: CTA click swaps back to Narrative — escape hatch actually works.
     fireEvent.click(cta);
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -188,7 +184,7 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     const emptyState = await screen.findByTestId('timeline-brief-empty-state');
 
-    // zh-CN parity: title is localized + body still references the Narrative
+    // note: zh-CN parity: title is localized + body still references the Narrative
     // escape hatch (translated).
     expect(emptyState).toHaveTextContent('尚无纪元标记');
     expect(emptyState).toHaveTextContent('切换到叙事');
@@ -198,8 +194,6 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
   });
 });
 
-// ─── Moment empty-state — Work Timeline ───────────────────────────────────
-
 describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
   afterEach(async () => {
     vi.clearAllMocks();
@@ -207,7 +201,7 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
   });
 
   it('renders the honest Moment-empty copy + Switch to Narrative CTA in English', async () => {
-    // Outline has events but no scene/beat fixture is supplied → Moment layer
+    // note: Outline has events but no scene/beat fixture is supplied → Moment layer
     // renders zero nodes when the user switches to it.
     const outline: WorkOutline = {
       work_id: 'work-1',
@@ -234,12 +228,12 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
       );
     });
 
-    // User switches to Moment → empty-state branch fires (no fixture).
+    // note: User switches to Moment → empty-state branch fires (no fixture).
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-moment'));
     const emptyState = await screen.findByTestId('work-timeline-moment-empty-state');
     expect(emptyState).toBeInTheDocument();
 
-    // Title conveys "no scene/beat data yet"; body conveys the Moment
+    // note: Title conveys "no scene/beat data yet"; body conveys the Moment
     // purpose + escape hatch back to Narrative. Per layer-feel §7, the body
     // must reference switching to Narrative for events.
     expect(emptyState).toHaveTextContent('No scene or beat data yet');
@@ -248,7 +242,7 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
     const cta = screen.getByTestId('work-timeline-moment-empty-cta');
     expect(cta).toHaveTextContent('Switch to Narrative');
 
-    // CTA click swaps back to Narrative.
+    // note: CTA click swaps back to Narrative.
     fireEvent.click(cta);
     await waitFor(() => {
       expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
@@ -289,7 +283,7 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-moment'));
     const emptyState = await screen.findByTestId('work-timeline-moment-empty-state');
 
-    // zh-CN parity: title + body + CTA translated.
+    // note: zh-CN parity: title + body + CTA translated.
     expect(emptyState).toHaveTextContent('尚无场景或节拍数据');
     expect(emptyState).toHaveTextContent('切换到叙事');
 

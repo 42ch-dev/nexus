@@ -1,5 +1,5 @@
 /**
- * Work Timeline canvas — orchestrator facade (V1.123 P2 Task 2 + Task 4).
+ * note: Work Timeline canvas — orchestrator facade (V1.123 P2 Task 2 + Task 4).
  *
  * Slim composition root for the Work Timeline surface. Coordinates:
  *   - Graph read via the shared `useWorkOutline(workId)` hook (V1.72
@@ -65,7 +65,7 @@ import { filterTimelineEntityNodes } from '../timeline-canvas/nle-timeline-proje
 export interface WorkTimelineCanvasProps {
   workId: string;
   /**
-   * Optional Scene/Beat payload — EXPLICIT injection mode (Design Studio /
+   * note: Optional Scene/Beat payload — EXPLICIT injection mode (Design Studio /
    * component tests). Production passes nothing: the Moment layer projects
    * the canonical `WorkOutline.scenes[]` / `beats[]` carrier (V1.200 DR-26)
    * from the outline read itself. An explicitly supplied payload is
@@ -81,7 +81,7 @@ export interface WorkTimelineCanvasProps {
 }
 
 /**
- * Work Timeline canvas facade.
+ * note: Work Timeline canvas facade.
  *
  * Task 2 shipped the minimal facade (loading / error / empty / CanvasShell
  * + adapter wiring with a fixed `'narrative'` active layer). Task 4 adds:
@@ -97,8 +97,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const navigate = useNavigate();
   const outlineQuery = useWorkOutline(workId);
 
-  // ── V1.123 P3 Task 4 — Work's bound World (cross-surface navigation) ────
-  //
+  // note: V1.123 P3 Task 4 — Work's bound World (cross-surface navigation).
   // The Work detail carries an optional `world_id` (V1.72 WorkDetailResponse).
   // When present, the Narrative event inspector surfaces a "View on World
   // Timeline" affordance that navigates to the bound World's Timeline
@@ -113,8 +112,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const workDetailQuery = useWork(workId);
   const boundWorldId = workDetailQuery.data?.world_id ?? undefined;
 
-  // ── V1.156 P2 T2 — bound World's KB graph (Brief layer era data) ────────
-  //
+  // note: V1.156 P2 T2 — bound World's KB graph (Brief layer era data).
   // Work-Brief is a read-only **projection** of the bound World's Brief
   // (PD-2): Brief remains World spine; the Work does NOT gain an authored
   // Brief. The Brief layer composes from the bound World's
@@ -127,7 +125,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const worldKbGraphQuery = useWorldKbGraph(boundWorldId);
   const boundWorldGraph = worldKbGraphQuery.data;
 
-  // Cross-surface navigation hand-off. Composed once per render via
+  // note: Cross-surface navigation hand-off. Composed once per render via
   // `useCallback`; the adapter context ref captures the latest closure so
   // the inspector's CTA always targets the current `boundWorldId`. The
   // callback is only referenced by the adapter context when `boundWorldId`
@@ -160,8 +158,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
     [boundWorldId, navigate],
   );
 
-  // ── V1.123 P2 Task 4 + P4 Task 6 — layer state + URL persistence ────────
-  //
+  // note: V1.123 P2 Task 4 + P4 Task 6 — layer state + URL persistence.
   // Architect §7.3 UX-risk override: default = 'narrative' UNCONDITIONALLY
   // in V1.123. Unlike the V1.122 World Timeline (which flips Brief↔Narrative
   // based on era data), the Work Timeline default does NOT consult the
@@ -192,14 +189,14 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
     ) {
       return urlLayerRaw;
     }
-    // Invalid / absent → fall back to the Narrative default.
+    // note: Invalid / absent → fall back to the Narrative default.
     return 'narrative';
   }, [urlLayerRaw]);
 
   const handleLayerChange = useCallback(
     (layer: WorkTimelineLayer) => {
       if (layer === 'narrative') {
-        // Default layer — drop the URL param if present so the URL stays
+        // note: Default layer — drop the URL param if present so the URL stays
         // minimal and the surface can resume tracking the (future)
         // architect-override default.
         if (searchParams.has('layer')) {
@@ -239,7 +236,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
     workId,
   });
 
-  // Keep the adapter context current. The adapter object stays
+  // note: Keep the adapter context current. The adapter object stays
   // referentially stable; only the values inside ctxRef.current change.
   // The `sceneBeatFixture` slot is the EXPLICIT injection mode for Design
   // Studio / tests; production leaves it undefined and the Moment layer
@@ -264,7 +261,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
     onViewOnWorldTimeline: boundWorldId ? onViewOnWorldTimeline : undefined,
   };
 
-  // Rebuild the adapter on layer swap so `useCanvasSurface`'s `[graph,
+  // note: Rebuild the adapter on layer swap so `useCanvasSurface`'s `[graph,
   // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
   // The ctxRef stays mutable; the adapter just captures the new layer
   // value, so this is a cheap factory re-run, not a full layout rebuild.
@@ -281,8 +278,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
-  // ── V1.163 P1 Task 3 — inbound event focus (architect lock) ───────────────
-  //
+  // note: V1.163 P1 Task 3 — inbound event focus (architect lock).
   // The REVERSE-direction destination: a World→Work deep-link
   // (`/worlds/... → /works/:workId/timeline?layer=narrative&event=<workEventId>`,
   // Task 2) lands here. Reads `?event=` via the existing `useSearchParams()`
@@ -298,8 +294,6 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const inboundEventNodeId =
     eventParamRaw && eventParamRaw.length > 0 ? narrativeEventNodeId(eventParamRaw) : null;
   useInboundEventFocus(surface, inboundEventNodeId);
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   if (outlineQuery.isLoading) {
     return <LoadingState label={t('workTimeline.loading', { defaultValue: 'Loading Work Timeline…' })} />;
@@ -318,7 +312,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const outline = outlineQuery.data;
   const isEmpty = !outline || (outline.timeline_events ?? []).length === 0;
 
-  // V1.156 P2 fix-wave F1 — bound-World graph query status gates (Brief
+  // note: V1.156 P2 fix-wave F1 — bound-World graph query status gates (Brief
   // layer only). The Brief layer's era data comes from the bound World's KB
   // graph (`worldKbGraphQuery`) — a second async source independent of the
   // outline projection. Without these gates the Brief-empty panel would
@@ -345,7 +339,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
     );
   }
 
-  // V1.156 P2 T2 — Work-Brief empty detection. Active layer is Brief AND
+  // note: V1.156 P2 T2 — Work-Brief empty detection. Active layer is Brief AND
   // the projection returned zero nodes (no bound World / no era data in the
   // bound World's graph). The Brief layer is a read-only projection of the
   // bound World's Brief (PD-2) — the panel explains the world-shape context
@@ -355,7 +349,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const isBriefEmpty =
     !isEmpty && activeLayer === 'brief' && surface.nodes.length === 0;
 
-  // V1.123 P2 Task 7 — Moment-empty detection. Active layer is Moment AND
+  // note: V1.123 P2 Task 7 — Moment-empty detection. Active layer is Moment AND
   // the projection returned zero nodes (no scene/beat fixture / empty
   // fixture). The graph itself is NOT globally empty here (the global empty
   // branch above owns zero-event outlines). The Moment-empty branch only
@@ -395,7 +389,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
       ) : isMomentEmpty ? (
         <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : activeLayer === 'brief' && surface.briefTimeBands ? (
-        // V1.160 P2 T1 — Work-Brief vertical time-bands (mirror the World
+        // note: V1.160 P2 T1 — Work-Brief vertical time-bands (mirror the World
         // Timeline's V1.159 time-band panel, `timeline-canvas.tsx`). The
         // time-band panel SUPERSEDES the V1.156 horizontal era sweep as
         // the Work Brief-layer rendering model: eras stack as indented,
@@ -427,13 +421,13 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
               </div>
             ) : null}
           </div>
-          {/* Screen-reader graph summary — parity with CanvasShell (A8 #3). */}
+          {/* note: Screen-reader graph summary — parity with CanvasShell (A8 #3). */}
           <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             {surface.summaryText}
           </div>
         </div>
       ) : (
-        // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
+        // note: V1.123 P4 Task 4 — layer transition animation. The `key` forces a
         // remount on layer swap so the CSS keyframe animation replays; the
         // `nexus-layer-enter` class carries the keyframe (fade + subtle scale
         // per layer-feel-differentiation.md §4 "changing instrument"). The
@@ -454,7 +448,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
             })}
             surfaceKey="work-timeline"
             surfaceKind="work-timeline"
-            // v1.183 P0 QC fix (qc2 F-003): the Work Timeline surface reads
+            // note: v1.183 P0 QC fix (qc2 F-003): the Work Timeline surface reads
             // the minimap with the shared Timeline accent token (brand-blue),
             // matching its surface chrome, not the shell's strategy default.
             minimapAccent="var(--color-canvas-timeline-accent)"
@@ -471,7 +465,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
                 defaultValue: 'Work Timeline scrub area',
               })}
             />
-            {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
+            {/* note: V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
                 CanvasShell so it lives within the ReactFlowProvider; observes
                 viewport zoom and fires `handleLayerChange` when the user crosses
                 the architect-locked 0.55–0.70 hysteresis band
@@ -484,7 +478,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
               onLayerChange={handleLayerChange}
               chain={{ coarseLayer: 'narrative', fineLayer: 'moment' }}
             />
-            {/* Task 6 — Work Timeline inspector overlay. Renders when
+            {/* note: Task 6 — Work Timeline inspector overlay. Renders when
                 `useCanvasSurface`'s selection state resolves to a node; the
                 adapter's `renderInspector` dispatches by `nodeKind`
                 (event / scene / beat). Read-only in V1.123 (architect §6). */}
@@ -501,7 +495,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 }
 
 /**
- * Canvas header — surfaces the Work Timeline label + the Brief | Narrative |
+ * note: Canvas header — surfaces the Work Timeline label + the Brief | Narrative |
  * Moment layer switcher (Task 4 + V1.156 P2 T2) + the Outline peer-link
  * (Task 5 — Work Canvas shell peer nav). The Outline link is the canonical
  * escape hatch back to where the writes live (architect §6 — Work Timeline
@@ -517,7 +511,7 @@ function WorkTimelineCanvasHeader({
   activeLayer: WorkTimelineLayer;
   onLayerChange: (layer: WorkTimelineLayer) => void;
   /**
-   * Gates the layer switcher visibility. The empty-state branch owns its
+   * note: Gates the layer switcher visibility. The empty-state branch owns its
    * own surface; the layer tabs add noise without value when the outline
    * is empty (Task 7 owns the per-layer empty-state copy).
    */
@@ -538,7 +532,7 @@ function WorkTimelineCanvasHeader({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {/* V1.123 P4 Task 5 + V1.156 P2 T2 — layer breadcrumb. Shows the
+        {/* note: V1.123 P4 Task 5 + V1.156 P2 T2 — layer breadcrumb. Shows the
             layer path (Brief, or Brief > Narrative when drilled). Mirrors
             the Timeline surface's Brief ↔ Narrative breadcrumb pattern —
             Brief is the coarsest (world-shape) layer, Narrative the layer
@@ -572,7 +566,7 @@ function WorkTimelineCanvasHeader({
             onLayerChange={onLayerChange}
           />
         ) : null}
-        {/* Task 5 — peer-link to Outline. Work Timeline is read-only in
+        {/* note: Task 5 — peer-link to Outline. Work Timeline is read-only in
             V1.123 (architect §6); edits route through the Outline surface.
             The link preserves the active `workId` so the pivot is
             zero-friction. Mirrors the V1.122 Timeline peer-nav pattern
@@ -589,7 +583,7 @@ function WorkTimelineCanvasHeader({
           >
             {t('workTimeline.header.outlineLink', { defaultValue: 'Outline' })}
           </Link>
-          {/* V1.151 P1 (DF-76) — Assembly Inspector peer link. Read-only
+          {/* note: V1.151 P1 (DF-76) — Assembly Inspector peer link. Read-only
               moment-level debug surface at `/works/:workId/inspector`; the
               same peer-nav pattern as the Outline link. */}
           <Link
@@ -605,7 +599,7 @@ function WorkTimelineCanvasHeader({
 }
 
 /**
- * V1.123 P2 Task 4 + V1.156 P2 T2 — Brief | Narrative | Moment layer
+ * note: V1.123 P2 Task 4 + V1.156 P2 T2 — Brief | Narrative | Moment layer
  * switcher (layer-feel-differentiation.md §3.3 explicit layer control).
  *
  * Inline segmented control (three buttons with `aria-pressed`). Built inline
@@ -643,7 +637,7 @@ function WorkTimelineLayerSwitcher({
     defaultValue: string;
   }> = [
     {
-      // V1.156 P2 T2 — Brief tab. Additive first segment; Brief is the
+      // note: V1.156 P2 T2 — Brief tab. Additive first segment; Brief is the
       // coarsest (world-shape) layer — read-only projection of the bound
       // World's Brief (PD-2). Never the Work Timeline default (architect
       // §7.3 — Narrative stays default).
@@ -697,7 +691,7 @@ function WorkTimelineLayerSwitcher({
 }
 
 /**
- * V1.123 P2 Task 7 — Moment-layer honest empty-state.
+ * note: V1.123 P2 Task 7 — Moment-layer honest empty-state.
  *
  * Renders when the active layer is Moment but the projection has zero nodes
  * (no V1.108 scene/beat fixture; or fixture is empty). The V1.72 `WorkOutline`
@@ -752,7 +746,7 @@ function MomentEmptyState({
 }
 
 /**
- * V1.156 P2 T2 — Work-Brief honest empty-state (PD-2).
+ * note: V1.156 P2 T2 — Work-Brief honest empty-state (PD-2).
  *
  * Renders when the active layer is Brief but the projection has zero nodes
  * (no bound World; or the bound World's KB graph has no `block_type=era`

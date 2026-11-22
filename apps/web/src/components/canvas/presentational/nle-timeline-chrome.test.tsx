@@ -1,5 +1,5 @@
 /**
- * NleTimelineChrome — boundary + multi-track rendering tests (V1.128 P1 T1).
+ * note: NleTimelineChrome — boundary + multi-track rendering tests (V1.128 P1 T1).
  *
  * Boundary: the extract MUST NOT import `@xyflow/react` (architect lock).
  * Rendering: ≥2 labeled tracks, centered band host, horizontal scroll region.
@@ -35,10 +35,6 @@ const TWO_TRACK_FIXTURE: NleTimelineTrack[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Boundary — no RF / contracts / i18n in the extract module
-// ---------------------------------------------------------------------------
-
 describe('nle-timeline-chrome presentational boundary', () => {
   it('does not import the React Flow package', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
@@ -66,10 +62,6 @@ describe('nle-timeline-chrome presentational boundary', () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------
-// Rendering — multi-track band + horizontal scrub region
-// ---------------------------------------------------------------------------
 
 describe('NleTimelineChrome rendering', () => {
   it('renders ≥2 labeled tracks in a vertically centered band host', () => {

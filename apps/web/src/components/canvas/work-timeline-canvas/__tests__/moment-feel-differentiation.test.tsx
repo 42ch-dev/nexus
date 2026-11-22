@@ -1,5 +1,5 @@
 /**
- * WorkTimelineCanvas — V1.123 P2 Task 6 (Moment-layer feel differentiation +
+ * note: WorkTimelineCanvas — V1.123 P2 Task 6 (Moment-layer feel differentiation +
  * Moment inspector).
  *
  * Verifies the per-layer feel contract locked by:
@@ -46,8 +46,6 @@ import {
   type WorkTimelineCanvasAdapterContext,
 } from '../work-timeline-canvas-adapter';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
     work_id: 'work-1',
@@ -83,15 +81,13 @@ function beat(partial: Partial<BeatFixture> & Pick<BeatFixture, 'beatId' | 'scen
   };
 }
 
-// ─── Adapter layout options (feel-differentiation §2.4) ────────────────────
-
 describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it('Moment adapter layout options are TB direction with tighter spacing than Narrative', () => {
-    // layer-feel §2.4: Moment = vertical scene-stack (TB), dense layout.
+    // note: layer-feel §2.4: Moment = vertical scene-stack (TB), dense layout.
     // Plan Task 6 Step 2: tight `nodeSep` / `rankSep` (e.g. 30 / 60 per brief).
     // Narrative = LR direction (V1.122 baseline); the two directions MUST
     // differ so a screenshot reads as a different instrument.
@@ -102,11 +98,11 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     expect(momentAdapter.layoutOptions?.direction).toBe('TB');
     expect(narrativeAdapter.layoutOptions?.direction).toBe('LR');
 
-    // Moment rankSep + nodeSep are present (denser than no-config baseline).
+    // note: Moment rankSep + nodeSep are present (denser than no-config baseline).
     expect(momentAdapter.layoutOptions?.rankSep).toBeDefined();
     expect(momentAdapter.layoutOptions?.nodeSep).toBeDefined();
 
-    // Narrative does NOT carry Moment-specific rankSep/nodeSep (LR baseline
+    // note: Narrative does NOT carry Moment-specific rankSep/nodeSep (LR baseline
     // inherits V1.122 default spacing — the differentiation axis is direction
     // + Moment density, not Narrative re-tuning).
     expect(narrativeAdapter.layoutOptions?.rankSep).toBeUndefined();
@@ -114,7 +110,7 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('Moment projection stacks scenes vertically by chapter region (Y grows, X by chapter)', () => {
-    // layer-feel §2.4: "Vertical scene-stack or scene-card (T→B preferred);
+    // note: layer-feel §2.4: "Vertical scene-stack or scene-card (T→B preferred);
     //   scene/beat cards + manuscript-anchor badges."
     // Two scenes in different chapters → different X (chapter region) AND
     // Y position reflecting the vertical stack. The exact metrics are
@@ -141,16 +137,16 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     const opening = sceneNodes.find((n) => n.data.sceneId === 'sc-1')!;
     const rising = sceneNodes.find((n) => n.data.sceneId === 'sc-2')!;
 
-    // Different chapter regions → different X (chapter step is non-zero).
+    // note: Different chapter regions → different X (chapter step is non-zero).
     expect(rising.position.x).toBeGreaterThan(opening.position.x);
-    // manuscript-anchor badges mandatory (layer-feel §2.4).
+    // note: manuscript-anchor badges mandatory (layer-feel §2.4).
     expect(opening.data.manuscriptAnchor).toBeDefined();
     expect(opening.data.manuscriptAnchor?.chapterId).toBe(1);
     expect(rising.data.manuscriptAnchor?.chapterId).toBe(2);
   });
 
   it('Moment projection stacks beats inside their parent scene (Y offset within scene)', () => {
-    // layer-feel §2.4: "Beats stack vertically inside their scene."
+    // note: layer-feel §2.4: "Beats stack vertically inside their scene."
     const ctxRef = {
       current: {
         workId: 'work-1',
@@ -170,24 +166,22 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     const beatNodes = nodes.filter((n) => n.data.nodeKind === 'beat');
     expect(beatNodes).toHaveLength(2);
 
-    // Beats sit below their parent scene (Y greater than scene's Y).
+    // note: Beats sit below their parent scene (Y greater than scene's Y).
     for (const b of beatNodes) {
       expect(b.position.y).toBeGreaterThan(sceneNode.position.y);
-      // manuscript-anchor carries chapter + scene + beat ids (mandatory).
+      // note: manuscript-anchor carries chapter + scene + beat ids (mandatory).
       expect(b.data.manuscriptAnchor?.beatId).toBeDefined();
       expect(b.data.manuscriptAnchor?.sceneId).toBe('sc-1');
     }
 
-    // Beats stack in deterministic order (sorted by beatId ascending).
+    // note: Beats stack in deterministic order (sorted by beatId ascending).
     const [first, second] = [...beatNodes].sort((a, b) => a.position.y - b.position.y);
     expect(first.data.beatId).toBe('bt-1');
     expect(second.position.y).toBeGreaterThan(first.position.y);
   });
 
-  // ─── Moment inspector (Step 3) ────────────────────────────────────────────
-
   it('adapter exposes a renderInspector that returns a non-null node for Moment scene nodes', () => {
-    // Adapter contract: `renderInspector(node)` returns the inspector
+    // note: Adapter contract: `renderInspector(node)` returns the inspector
     // ReactNode for a given selected node. The useCanvasSurface hook drives
     // this from selection state.
     const ctxRef = { current: { workId: 'work-1' } } as React.MutableRefObject<WorkTimelineCanvasAdapterContext>;
@@ -213,7 +207,7 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('Moment scene inspector surfaces the manuscript anchor + "Edit in Outline" CTA (read-only hand-off per architect §6)', () => {
-    // Plan Task 6 Step 3 + architect §6: inspector shows scene/beat details
+    // note: Plan Task 6 Step 3 + architect §6: inspector shows scene/beat details
     // with manuscript link + "Edit in Outline" hand-off. The CTA MUST NOT
     // trigger any forbidden write endpoint (Work Timeline is read-only).
     //
@@ -229,7 +223,7 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     const { nodes } = adapter.projectGraph(
       outline(),
     );
-    // No fixture wired → Moment projection returns zero nodes. Inject a
+    // note: No fixture wired → Moment projection returns zero nodes. Inject a
     // scene node directly so we can test renderInspector on a real shape.
     const fakeSceneNode = {
       id: 'wt-scene:sc-1',
@@ -253,11 +247,11 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     const { container } = renderInApp(inspector as React.ReactElement);
     const panel = container.querySelector('[data-testid="work-timeline-inspector"]');
     expect(panel).not.toBeNull();
-    // Title + label + manuscript anchor chapter + scene id surface.
+    // note: Title + label + manuscript anchor chapter + scene id surface.
     expect(panel?.textContent ?? '').toContain('Opening Scene');
     expect(panel?.textContent ?? '').toContain('sc-1');
 
-    // "Edit in Outline" CTA present (read-only hand-off per architect §6).
+    // note: "Edit in Outline" CTA present (read-only hand-off per architect §6).
     const editCta = container.querySelector(
       '[data-testid="work-timeline-inspector-edit-in-outline"]',
     );
@@ -266,7 +260,7 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('Moment beat inspector surfaces beat-level manuscript anchor + "Edit in Outline" CTA', () => {
-    // layer-feel §2.4: beat pins carry chapter/scene/beat manuscript anchor.
+    // note: layer-feel §2.4: beat pins carry chapter/scene/beat manuscript anchor.
     // The beat inspector surfaces all three ids so the author can pivot to
     // Outline at beat precision.
     const ctxRef = { current: { workId: 'work-1' } } as React.MutableRefObject<WorkTimelineCanvasAdapterContext>;
@@ -297,14 +291,14 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     expect(panel?.textContent ?? '').toContain('bt-1');
     expect(panel?.textContent ?? '').toContain('sc-1');
 
-    // Beat inspector also surfaces "Edit in Outline" CTA (architect §6).
+    // note: Beat inspector also surfaces "Edit in Outline" CTA (architect §6).
     expect(
       container.querySelector('[data-testid="work-timeline-inspector-edit-in-outline"]'),
     ).not.toBeNull();
   });
 
   it('Narrative event inspector surfaces event id + chapter + "Edit in Outline" CTA (distinct from Moment)', () => {
-    // Inspector dispatch MUST discriminate by nodeKind: Narrative event →
+    // note: Inspector dispatch MUST discriminate by nodeKind: Narrative event →
     // event inspector; Moment scene/beat → moment inspector. Asserts the
     // dispatch contract mirrors the V1.123 P1 Brief-era dispatch pattern.
     const ctxRef = { current: { workId: 'work-1' } } as React.MutableRefObject<WorkTimelineCanvasAdapterContext>;

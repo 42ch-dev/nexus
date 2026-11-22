@@ -1,5 +1,5 @@
 /**
- * `useCanvasSurface` — composition hook for the shared canvas surface adapter.
+ * note: `useCanvasSurface` — composition hook for the shared canvas surface adapter.
  *
  * Pins: projection correctness, conflict-state handling, alt-view toggle, and
  * viewport delegation. React Flow / CanvasShell are not mounted; the hook is

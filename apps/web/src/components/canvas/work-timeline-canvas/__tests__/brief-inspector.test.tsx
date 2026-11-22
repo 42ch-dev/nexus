@@ -1,5 +1,5 @@
 /**
- * WorkTimelineCanvas — V1.156 P2 T2 (read-only Work-Brief era inspector).
+ * note: WorkTimelineCanvas — V1.156 P2 T2 (read-only Work-Brief era inspector).
  *
  * Verifies the read-only Brief-era inspector contract locked by
  * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment + plan
@@ -43,8 +43,6 @@ import {
   createWorkTimelineCanvasAdapter,
   type WorkTimelineCanvasAdapterContext,
 } from '../work-timeline-canvas-adapter';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
@@ -107,15 +105,13 @@ function makeContext(
   };
 }
 
-// ─── Brief-era inspector dispatch (V1.156 P2 T2) ─────────────────────────
-
 describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era dispatch', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it('routes a timeline-brief-era node to the Work-Brief inspector (distinct from Narrative event inspector)', () => {
-    // T2 Step: Brief-era selections must surface a Brief-era-distinct
+    // note: T2 Step: Brief-era selections must surface a Brief-era-distinct
     // inspector — NOT the generic Work Timeline inspector shell.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
@@ -137,14 +133,14 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
     expect(
       container.querySelector('[data-testid="work-timeline-brief-era-inspector"]'),
     ).not.toBeNull();
-    // NOT the generic shell (dispatch contract distinct).
+    // note: NOT the generic shell (dispatch contract distinct).
     expect(
       container.querySelector('[data-testid="work-timeline-inspector"]'),
     ).toBeNull();
   });
 
   it('surfaces era markers (era id, time span, world summary) + read-only note', () => {
-    // Mirrors the World Timeline Brief-era inspector marker chrome: era id
+    // note: Mirrors the World Timeline Brief-era inspector marker chrome: era id
     // pill + time-span label + full world summary.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
@@ -182,14 +178,14 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
       container.querySelector('[data-testid="work-timeline-brief-era-inspector-world-summary"]')
         ?.textContent,
     ).toContain('A time of myth and legend.');
-    // Read-only note (PD-2) surfaces.
+    // note: Read-only note (PD-2) surfaces.
     expect(container.textContent ?? '').toContain('Read-only');
-    // Version badge surfaces (identity chrome).
+    // note: Version badge surfaces (identity chrome).
     expect(container.textContent ?? '').toContain('v3');
   });
 
   it('renders NO editable fields, NO Save, NO Edit-in-Outline CTA (read-only projection — PD-2)', () => {
-    // P1 fix-wave lesson W-1 applied proactively: Brief-era nodes on the
+    // note: P1 fix-wave lesson W-1 applied proactively: Brief-era nodes on the
     // Work Timeline must NOT dispatch a write-capable inspector. The World
     // surface owns Brief writes (`kb.patch_entity`); the Work surface is a
     // read-only projection — no text inputs, no submit, no manuscript
@@ -210,22 +206,22 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
     const inspector = adapter.renderInspector?.(eraNode as never);
     const { container } = renderInApp(inspector as React.ReactElement);
 
-    // No editable controls.
+    // note: No editable controls.
     expect(container.querySelectorAll('input, textarea')).toHaveLength(0);
-    // No Save/submit button.
+    // note: No Save/submit button.
     expect(
       [...container.querySelectorAll('button')].some((b) =>
         /save|submit/i.test(b.textContent ?? ''),
       ),
     ).toBe(false);
-    // No "Edit in Outline" hand-off (the era is World-owned).
+    // note: No "Edit in Outline" hand-off (the era is World-owned).
     expect(
       container.querySelector('[data-testid="work-timeline-inspector-edit-in-outline"]'),
     ).toBeNull();
   });
 
   it('renders the "View on World Timeline" CTA to the bound World\u2019s Brief layer when a World is bound', () => {
-    // Spec §3.3.3: full bound-World Brief with source-World attribution.
+    // note: Spec §3.3.3: full bound-World Brief with source-World attribution.
     // The CTA targets the bound World's Timeline Brief layer
     // (`?layer=brief`) — the era's home surface.
     const era = eraEntity({
@@ -257,7 +253,7 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
     });
-    // No `worldId` in the context → the CTA must not render.
+    // note: No `worldId` in the context → the CTA must not render.
     const ctxRef = { current: makeContext() };
     const adapter = createWorkTimelineCanvasAdapter(
       ctxRef as React.MutableRefObject<WorkTimelineCanvasAdapterContext>,
@@ -278,7 +274,7 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
   });
 
   it('still dispatches Narrative event nodes to the event inspector (Brief dispatch does not shadow)', () => {
-    // Regression: the Brief-era branch must not intercept event nodes.
+    // note: Regression: the Brief-era branch must not intercept event nodes.
     const ctxRef = { current: makeContext() } as React.MutableRefObject<WorkTimelineCanvasAdapterContext>;
     const adapter = createWorkTimelineCanvasAdapter(ctxRef, 'narrative');
     const fakeEventNode = {
@@ -300,7 +296,7 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
     expect(inspector).not.toBeNull();
 
     const { container } = renderInApp(inspector as React.ReactElement);
-    // Generic inspector shell (event branch), NOT the Brief-era inspector.
+    // note: Generic inspector shell (event branch), NOT the Brief-era inspector.
     expect(
       container.querySelector('[data-testid="work-timeline-inspector"]'),
     ).not.toBeNull();

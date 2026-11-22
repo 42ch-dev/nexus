@@ -1,5 +1,5 @@
 /**
- * Cross-surface EVENT binding — V1.163 P1 Task 3 (Work → World deep-link).
+ * note: Cross-surface EVENT binding — V1.163 P1 Task 3 (Work → World deep-link).
  *
  * Upgrades the V1.123 P3 surface-level "View on World Timeline" CTA to an
  * event-level deep link: when the selected Work Narrative event carries
@@ -56,8 +56,6 @@ import {
   projectWorkTimelineGraph,
   type WorkTimelineNodeData,
 } from '../work-timeline-canvas-adapter';
-
-// ─── Fixtures ───────────────────────────────────────────────────────────────
 
 const WORLD_EVENT_ID = 'kb-evt-1';
 
@@ -118,8 +116,6 @@ function makeMockClient(outlineData: WorkOutline, worldId: string | null): Nexus
   } as unknown as NexusClient;
 }
 
-// ─── Inspector-level fixtures (mirrors cross-surface-nav.test.tsx) ──────────
-
 function workTimelineEventNode(
   overrides: Partial<WorkTimelineNodeData> = {},
 ): Node<WorkTimelineNodeData> {
@@ -175,8 +171,6 @@ function momentBeatNode(): Node<WorkTimelineNodeData> {
   };
 }
 
-// ─── Orchestrator-level journey (mocked client + real router) ───────────────
-
 function WorkTimelineRoutes() {
   const location = useLocation();
   return (
@@ -213,8 +207,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── Inspector-level: CTA slot wiring ───────────────────────────────────────
-
 describe('V1.163 Task 3 — Work inspector CTA slots (event-level)', () => {
   it('renders "View on World Timeline" with the event id when the node carries worldEventId', () => {
     render(
@@ -231,14 +223,14 @@ describe('V1.163 Task 3 — Work inspector CTA slots (event-level)', () => {
     const cta = screen.queryByTestId('work-timeline-view-on-world-timeline');
     expect(cta).not.toBeNull();
     expect(cta).toHaveTextContent('View on World Timeline');
-    // The CTA target carries the event id when an event-level bind exists
+    // note: The CTA target carries the event id when an event-level bind exists
     // (PD-5 state 1: deep-link `?layer=narrative&event=…`).
     expect(cta).toHaveAttribute('data-world-id', 'world-9');
     expect(cta).toHaveAttribute('data-event-id', WORLD_EVENT_ID);
   });
 
   it('renders the CTA WITHOUT an event id when the node has no worldEventId (V1.123 fallback)', () => {
-    // PD-5 state 2: surface bind only → the CTA stays but carries no event id
+    // note: PD-5 state 2: surface bind only → the CTA stays but carries no event id
     // (the orchestrator falls back to `?layer=narrative`).
     render(
       <MemoryRouter>
@@ -257,7 +249,7 @@ describe('V1.163 Task 3 — Work inspector CTA slots (event-level)', () => {
   });
 
   it('hides the CTA when no bound World exists (even with a worldEventId)', () => {
-    // An event bind without a surface bind is not a valid target — never
+    // note: An event bind without a surface bind is not a valid target — never
     // surface a dead CTA (honest scope cut).
     render(
       <MemoryRouter>
@@ -312,8 +304,6 @@ describe('V1.163 Task 3 — Work inspector CTA slots (event-level)', () => {
   });
 });
 
-// ─── Adapter-level: world_event_id projection ───────────────────────────────
-
 describe('V1.163 Task 3 — Narrative projection carries worldEventId (Task 1 carrier)', () => {
   it('projects world_event_id onto WorkTimelineNodeData.worldEventId; absent stays undefined', () => {
     const g = outline('work-1', [
@@ -330,8 +320,6 @@ describe('V1.163 Task 3 — Narrative projection carries worldEventId (Task 1 ca
   });
 });
 
-// ─── Orchestrator-level: forward deep-link + navigation ─────────────────────
-
 describe('V1.163 Task 3 — Work → World event deep-link (AC-V1163-1/4/5, PD-5)', () => {
   it('AC-V1163-1: Work event with world_event_id + bound World → CTA click URL includes event=<worldEventId>', async () => {
     renderWorkApp(
@@ -344,7 +332,7 @@ describe('V1.163 Task 3 — Work → World event deep-link (AC-V1163-1/4/5, PD-5
       ['/works/work-1/timeline?layer=narrative&event=evt-1'],
     );
 
-    // Inbound `?event=evt-1` selects `wt-event:evt-1` → the event inspector
+    // note: Inbound `?event=evt-1` selects `wt-event:evt-1` → the event inspector
     // opens with the event-level CTA.
     const cta = await screen.findByTestId('work-timeline-view-on-world-timeline');
     expect(cta).toHaveAttribute('data-event-id', WORLD_EVENT_ID);
@@ -392,15 +380,13 @@ describe('V1.163 Task 3 — Work → World event deep-link (AC-V1163-1/4/5, PD-5
       ['/works/work-1/timeline?layer=narrative&event=evt-1'],
     );
 
-    // The inspector still opens (inbound focus), but the CTA must be absent.
+    // note: The inspector still opens (inbound focus), but the CTA must be absent.
     const inspector = await screen.findByTestId('work-timeline-inspector');
     expect(
       within(inspector).queryByTestId('work-timeline-view-on-world-timeline'),
     ).toBeNull();
   });
 });
-
-// ─── Orchestrator-level: inbound event focus (AC-V1163-3, Work side) ────────
 
 describe('V1.163 Task 3 — inbound `?event=` focus on the Work Timeline (AC-V1163-3)', () => {
   it('selects the React Flow node wt-event:<id> when the event param matches a projected event', async () => {
@@ -414,7 +400,7 @@ describe('V1.163 Task 3 — inbound `?event=` focus on the Work Timeline (AC-V11
       ['/works/work-1/timeline?layer=narrative&event=evt-1'],
     );
 
-    // Selection drives the inspector (existing shell behavior — no new focus
+    // note: Selection drives the inspector (existing shell behavior — no new focus
     // primitive). The deep-linked event's inspector opening is the observable
     // proof that `wt-event:evt-1` got selected.
     const inspector = await screen.findByTestId('work-timeline-inspector');
@@ -432,20 +418,18 @@ describe('V1.163 Task 3 — inbound `?event=` focus on the Work Timeline (AC-V11
       ['/works/work-1/timeline?layer=narrative&event=kb-unknown'],
     );
 
-    // Canvas renders normally (no error state) on the Narrative layer.
+    // note: Canvas renders normally (no error state) on the Narrative layer.
     const canvas = await screen.findByTestId('work-timeline-canvas');
     await waitFor(() =>
       expect(canvas).toHaveAttribute('data-active-layer', 'narrative'),
     );
-    // The unknown id must NOT fabricate a selection (no inspector opens).
+    // note: The unknown id must NOT fabricate a selection (no inspector opens).
     expect(screen.queryByTestId('work-timeline-inspector')).toBeNull();
   });
 });
 
-// ─── Task 4: PD-5 three-state matrix, table-driven (Work → World) ───────────
-
 /**
- * PD-5 honest scope cut — same CTA chrome, three states. Work → World
+ * note: PD-5 honest scope cut — same CTA chrome, three states. Work → World
  * direction: surface bind = bound World (`worldId`), event bind =
  * `world_event_id` projected onto the node (`worldEventId`). Expected CTA +
  * URL contract per the plan's Task 4 table.
@@ -516,7 +500,7 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, Work → World (table-drive
       );
 
       if (cta === 'hidden') {
-        // Inbound focus still opens the inspector; the CTA must be absent.
+        // note: Inbound focus still opens the inspector; the CTA must be absent.
         const inspector = await screen.findByTestId('work-timeline-inspector');
         expect(
           within(inspector).queryByTestId('work-timeline-view-on-world-timeline'),
@@ -534,7 +518,7 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, Work → World (table-drive
         );
       }
 
-      // Read-only navigation (the preserved half of AC-V1163-7): a CTA click
+      // note: Read-only navigation (the preserved half of AC-V1163-7): a CTA click
       // (or an honest hide) never fires a write op.
       expect(client.patchTimelineEvent).not.toHaveBeenCalled();
       expect(client.patchOutlineStructure).not.toHaveBeenCalled();

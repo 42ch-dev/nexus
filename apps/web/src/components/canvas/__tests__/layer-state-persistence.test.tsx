@@ -1,5 +1,5 @@
 /**
- * Layer-state persistence — V1.123 P4 Task 6.
+ * note: Layer-state persistence — V1.123 P4 Task 6.
  *
  * Pins the layer-state persistence contract from
  * `iterations/v1.123/specs/layer-feel-differentiation.md` §5 + plan
@@ -37,9 +37,7 @@ import type {
 import { TimelineCanvas } from '../timeline-canvas/timeline-canvas';
 import { WorkTimelineCanvas } from '../work-timeline-canvas/work-timeline-canvas';
 
-// ─── Location spy — captures MemoryRouter's current location.search ───────
-//
-// `MemoryRouter` does NOT update `window.location` — it manages its own
+// note: `MemoryRouter` does NOT update `window.location` — it manages its own
 // internal history. To assert that a layer swap writes `?layer=` back to the
 // URL, we mount a tiny spy component inside the router that records
 // `useLocation().search` into a mutable ref.
@@ -52,8 +50,6 @@ function makeLocationSpy() {
   }
   return { captured, LocationSpy };
 }
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function worldEntity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -97,7 +93,7 @@ function makeWorldMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    // V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
+    // note: V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
     // complete works enumeration) must RESOLVE: an unresolved / failed read is
     // no longer rendered as "no bound Works". An empty page = no bound Works.
     listWorks: vi.fn().mockResolvedValue({
@@ -118,7 +114,7 @@ function makeWorkMockClient(
       work_id: 'work-1',
       world_id: world?.worldId ?? null,
     }),
-    // V1.156 P2 T2 — the bound World's KB graph (Brief layer era data).
+    // note: V1.156 P2 T2 — the bound World's KB graph (Brief layer era data).
     // Only fetched when a World is bound (`useWorldKbGraph` disables the
     // query otherwise); the mock stays callable either way for negative
     // assertions.
@@ -130,14 +126,10 @@ function makeWorkMockClient(
   } as unknown as NexusClient;
 }
 
-// ─── Location spy usage pattern ───────────────────────────────────────────
-//
-// Tests that assert URL writes mount `<LocationSpy />` as a sibling of the
+// note: Tests that assert URL writes mount `<LocationSpy />` as a sibling of the
 // canvas inside the same `MemoryRouter`. The spy records `location.search`
 // into a mutable ref on every render so the test can assert after a layer
 // swap that the URL was updated.
-
-// ─── World Timeline — URL ?layer= drives + reflects active layer ──────────
 
 describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)', () => {
   afterEach(() => {
@@ -145,7 +137,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
   });
 
   it('restores the Narrative layer from URL ?layer=narrative even when era data exists', async () => {
-    // Era data present → default would be Brief. URL ?layer=narrative must
+    // note: Era data present → default would be Brief. URL ?layer=narrative must
     // override the default so the user returns to the layer they left.
     const graph: WorldKbGraphResponse = {
       entities: [
@@ -177,7 +169,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
   });
 
   it('restores the Moment layer from URL ?layer=moment (V1.156 — World-Moment restriction lifted)', async () => {
-    // V1.156 spec §3.3.3 amendment: `?layer=moment` is now VALID on the
+    // note: V1.156 spec §3.3.3 amendment: `?layer=moment` is now VALID on the
     // World Timeline (the V1.123 "moment is Work-only" restriction is
     // lifted — both surfaces render all three layers). The URL must restore
     // the Moment layer even though era data exists (default would otherwise
@@ -211,7 +203,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
   });
 
   it('ignores invalid layer values (?layer=bogus) and falls back to the era-derived default', async () => {
-    // V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
+    // note: V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
     // the World Timeline. Unknown values must fall back to the era-derived
     // default (era data present → Brief). This suite's old invalid-value
     // test was repurposed into the moment-restore test above, unpinning the
@@ -269,7 +261,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       },
     );
 
-    // Default — Brief (era data exists, no URL param).
+    // note: Default — Brief (era data exists, no URL param).
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
         'data-active-layer',
@@ -277,7 +269,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // User swaps to Narrative via the layer tab.
+    // note: User swaps to Narrative via the layer tab.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -286,13 +278,13 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // URL must now carry ?layer=narrative so the choice survives a refresh
+    // note: URL must now carry ?layer=narrative so the choice survives a refresh
     // or a peer-surface round-trip.
     expect(captured.search).toContain('layer=narrative');
   });
 
   it('writes ?layer=moment back to the URL when the user swaps to the Moment tab (V1.156)', async () => {
-    // Spec §3.3.3 layer-state persistence (V1.156): all three layers persist
+    // note: Spec §3.3.3 layer-state persistence (V1.156): all three layers persist
     // on the World Timeline. A swap into Moment must write `?layer=moment`
     // so the choice survives a refresh or a peer-surface round-trip.
     const graph: WorldKbGraphResponse = {
@@ -317,7 +309,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       },
     );
 
-    // Default — Brief (era data exists, no URL param).
+    // note: Default — Brief (era data exists, no URL param).
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
         'data-active-layer',
@@ -325,7 +317,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // User swaps to Moment via the layer tab.
+    // note: User swaps to Moment via the layer tab.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -334,12 +326,12 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // URL must now carry ?layer=moment (shareable, refresh-safe).
+    // note: URL must now carry ?layer=moment (shareable, refresh-safe).
     expect(captured.search).toContain('layer=moment');
   });
 
   it('clears the URL param when the user swaps back to the default layer', async () => {
-    // When the user returns to the default layer (Brief, era data exists),
+    // note: When the user returns to the default layer (Brief, era data exists),
     // the URL should NOT carry ?layer=narrative — it would be redundant with
     // the default-derived layer and would prevent the surface from tracking
     // graph changes. The test asserts the URL drops the narrative param
@@ -380,7 +372,7 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // Swap back to Brief via the layer tab.
+    // note: Swap back to Brief via the layer tab.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -389,12 +381,10 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // URL must NOT still say narrative — either `?layer=brief` or no param.
+    // note: URL must NOT still say narrative — either `?layer=brief` or no param.
     expect(captured.search).not.toContain('layer=narrative');
   });
 });
-
-// ─── Work Timeline — URL ?layer= drives + reflects active layer ───────────
 
 describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)', () => {
   afterEach(() => {
@@ -446,7 +436,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
   });
 
   it('restores the Brief layer from URL ?layer=brief (V1.156 — Work-Brief restriction lifted)', async () => {
-    // V1.156 spec §3.3.3 amendment: `?layer=brief` is now VALID on the Work
+    // note: V1.156 spec §3.3.3 amendment: `?layer=brief` is now VALID on the Work
     // Timeline (the V1.123 "Brief is World-only" restriction is lifted —
     // both surfaces render all three layers). The URL must restore the
     // Brief layer when the Work is bound to a World with era markers.
@@ -492,7 +482,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
   });
 
   it('ignores unknown layer values (?layer=bogus) and falls back to the Narrative default', async () => {
-    // V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
+    // note: V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
     // the Work Timeline. Unknown values must fall back to the surface
     // default (Narrative — architect §7.3 UX-risk override).
     const outline: WorkOutline = {
@@ -582,7 +572,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
   });
 
   it('writes ?layer=brief back to the URL when the user swaps to the Brief tab (V1.156)', async () => {
-    // Spec §3.3.3 layer-state persistence (V1.156): all three layers persist
+    // note: Spec §3.3.3 layer-state persistence (V1.156): all three layers persist
     // on the Work Timeline. A swap into Brief must write `?layer=brief` so
     // the choice survives a refresh or a peer-surface round-trip.
     const outline: WorkOutline = {
@@ -621,7 +611,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
       },
     );
 
-    // Default — Narrative (architect §7.3, unconditional).
+    // note: Default — Narrative (architect §7.3, unconditional).
     await waitFor(() => {
       expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
         'data-active-layer',
@@ -629,7 +619,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
       );
     });
 
-    // User swaps to Brief via the layer tab.
+    // note: User swaps to Brief via the layer tab.
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-brief'));
     await waitFor(() => {
       expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
@@ -638,7 +628,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
       );
     });
 
-    // URL must now carry ?layer=brief (shareable, refresh-safe).
+    // note: URL must now carry ?layer=brief (shareable, refresh-safe).
     expect(captured.search).toContain('layer=brief');
   });
 });
