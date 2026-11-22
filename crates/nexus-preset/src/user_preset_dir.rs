@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-
 /// note: A discovered user preset with its directory origin.
 #[derive(Debug, Clone)]
 pub struct UserPresetEntry {
@@ -55,7 +54,6 @@ pub struct UserPresetWarning {
     /// note: Human-readable warning message.
     pub message: String,
 }
-
 
 /// note: Scan the user preset directory and load all discovered presets.
 ///
@@ -309,7 +307,6 @@ pub fn is_scan_cache_fresh(result: &UserPresetScanResult, nexus_home: &Path) -> 
     current_count == result.presets.len()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,7 +523,6 @@ states:
         assert_eq!(loaded.id, "test-strat");
         assert_eq!(loaded.loaded.id, "test-strategy");
     }
-
 
     #[test]
     fn find_user_preset_is_o1_with_index() {

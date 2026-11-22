@@ -32,7 +32,6 @@ pub use workflow_ir::{
     FsAssetSource, PresetIrImport, WorkflowIrError,
 };
 
-
 /// note: Embedded presets directory, compiled into the binary at build time.
 ///
 /// Location: `crates/nexus-preset/embedded-presets/`
@@ -414,7 +413,6 @@ pub fn read_embedded_template(preset_id: &str, template_path: &str) -> Option<St
         .and_then(|f| f.contents_utf8().map(std::string::ToString::to_string))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,7 +434,6 @@ mod tests {
                 .is_none_or(std::collections::BTreeMap::is_empty),
             "P3 novel-writing should not have inner graphs"
         );
-
 
         assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
@@ -646,7 +643,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn resolve_preset_finds_embedded_preset_by_default() {
         let tmp = tempfile::tempdir().unwrap();
@@ -725,7 +721,6 @@ states:
         assert_eq!(loaded.id, "maintenance");
     }
 
-
     #[test]
     fn user_preset_loads_end_to_end() {
         use std::fs;
@@ -778,7 +773,6 @@ states:
         assert_eq!(loaded.manifest.states[0].id, "start");
         assert!(loaded.manifest.states[1].terminal);
 
-
         assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
     }
@@ -797,7 +791,6 @@ states:
         assert_eq!(writer.recommended_skills.len(), 1);
         assert_eq!(writer.recommended_skills[0], "novel-writing-assistant");
     }
-
 
     #[test]
     fn list_embedded_presets_includes_novel_chapter_review() {
@@ -1088,7 +1081,6 @@ states:
         );
     }
 
-
     /// note: Collect all asset file references from a manifest and check they exist
     /// in the embedded presets directory.
     fn check_embedded_asset_existence(
@@ -1346,7 +1338,6 @@ states:
             result.diagnostics
         );
     }
-
 
     #[test]
     fn list_embedded_presets_includes_novel_brainstorm() {

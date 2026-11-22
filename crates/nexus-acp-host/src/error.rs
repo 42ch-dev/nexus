@@ -94,7 +94,6 @@ pub enum AcpError {
     Json(#[from] serde_json::Error),
 }
 
-
 #[allow(dead_code)]
 impl AcpError {
     /// note: Create a connection-failed error from a message string.

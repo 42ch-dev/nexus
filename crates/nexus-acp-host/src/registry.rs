@@ -43,7 +43,6 @@ use nexus_contracts::local::acp_runtime::registry_manifest::{
     PlatformBinary as GeneratedPlatformBinary, RegistryManifest,
 };
 
-
 /// note: ACP Registry CDN URL.
 pub const REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
@@ -63,7 +62,6 @@ const NEXUS_DIR: &str = ".nexus42";
 /// note: Subdirectory under nexus42 dir for registry cache.
 const REGISTRY_DIR: &str = "registry";
 
-
 /// note: Top-level ACP Registry response (alias for generated `RegistryManifest`).
 pub type Registry = RegistryManifest;
 
@@ -82,7 +80,6 @@ pub type BinaryDistribution = GeneratedBinaryDistribution;
 /// note: Platform-specific binary distribution (alias for generated type).
 pub type PlatformBinary = GeneratedPlatformBinary;
 
-
 /// note: Extension trait to add helper methods to generated `Distribution` type.
 pub trait DistributionExt {
     /// note: Returns the distribution source kind: "npx" or "binary".
@@ -100,7 +97,6 @@ impl DistributionExt for Distribution {
         }
     }
 }
-
 
 /// note: Metadata stored alongside the cache file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,7 +141,6 @@ impl CacheMeta {
         self.age().is_some_and(|age| age < CACHE_MAX_AGE)
     }
 }
-
 
 /// note: Fetches the ACP Registry from the CDN and manages local caching.
 ///
@@ -433,7 +428,6 @@ impl RegistryClient {
     }
 }
 
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -500,7 +494,6 @@ mod tests {
             .expect("Failed to create client");
         (client, tmp)
     }
-
 
     #[test]
     fn parse_valid_registry() {
@@ -643,7 +636,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn cache_write_and_read() {
         let (client, _tmp) = make_test_client();
@@ -714,7 +706,6 @@ mod tests {
         assert!(client.load_meta().is_none());
     }
 
-
     #[test]
     fn cache_meta_is_fresh_when_new() {
         let meta = CacheMeta::new("1.0.0");
@@ -737,7 +728,6 @@ mod tests {
         assert!(!meta.is_fresh());
         assert!(meta.age().is_none());
     }
-
 
     #[test]
     fn find_agent_by_exact_id() {
@@ -797,7 +787,6 @@ mod tests {
         assert!(found.is_some());
     }
 
-
     #[test]
     fn distribution_source_kind_npx() {
         let dist = Distribution {
@@ -836,7 +825,6 @@ mod tests {
         assert_eq!(DistributionExt::source_kind(&dist), "unknown");
     }
 
-
     #[tokio::test]
     async fn get_registry_uses_cache_when_fresh() {
         let (client, _tmp) = make_test_client();
@@ -859,7 +847,6 @@ mod tests {
         let (client, _tmp) = make_test_client();
         assert!(client.load_cached().is_none());
     }
-
 
     #[test]
     fn registry_serialization_roundtrip() {

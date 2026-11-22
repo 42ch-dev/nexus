@@ -33,7 +33,6 @@ use nexus_workflow_ir::{
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
-
 /// note: Severity of a validation diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,7 +130,6 @@ impl ValidationResult {
             .collect()
     }
 }
-
 
 /// note: Run all semantic validation checks (A1–A4) against a workflow IR document.
 ///
@@ -262,7 +260,6 @@ fn projection_refusal(error: &crate::workflow_ir::WorkflowIrError) -> Validation
         }],
     }
 }
-
 
 /// note: Outer-state nodes with the `states[i]` index every diagnostic path uses.
 fn outer_states(document: &WorkflowDocument) -> impl Iterator<Item = (usize, &WorkflowNode)> {
@@ -1302,7 +1299,6 @@ states:
         serde_yaml::from_str(yaml).unwrap()
     }
 
-
     #[test]
     fn valid_preset_passes_semantic_validation() {
         let manifest = minimal_manifest();
@@ -1613,7 +1609,6 @@ states:
         );
     }
 
-
     #[test]
     fn missing_template_file_in_bundle_is_error() {
         let yaml = r"
@@ -1689,7 +1684,6 @@ states:
             result.diagnostics
         );
     }
-
 
     #[test]
     fn unknown_requires_capabilities_is_error() {
@@ -1772,7 +1766,6 @@ states:
         );
     }
 
-
     #[test]
     fn c4_bundle_id_matches_directory() {
         let manifest = minimal_manifest();
@@ -1803,7 +1796,6 @@ states:
             result.diagnostics
         );
     }
-
 
     #[test]
     fn w2_dotdot_in_template_file_is_error() {
@@ -2047,7 +2039,6 @@ mod stage_tests {
         assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
     }
 
-
     #[test]
     fn merge_node_valid_all_with_2_incoming() {
         let yaml = r"
@@ -2222,7 +2213,6 @@ states:
         );
     }
 
-
     #[test]
     fn cross_state_label_duplicate_errors() {
         let yaml = r"
@@ -2315,7 +2305,6 @@ states:
             result.diagnostics
         );
     }
-
 
     fn diagnostic_shape(
         result: &ValidationResult,

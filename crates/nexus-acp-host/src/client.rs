@@ -290,7 +290,6 @@ fn sdk_list_sessions_response_to_nexus(resp: &ListSessionsResponse) -> NexusList
     NexusListSessionsResponse::new(sessions).next_cursor_opt(resp.next_cursor.clone())
 }
 
-
 fn sdk_set_config_option_request_from_nexus(
     req: NexusSetConfigOptionRequest,
 ) -> SetSessionConfigOptionRequest {
@@ -2129,7 +2128,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-
     #[test]
     fn list_sessions_request_to_sdk_empty() {
         let nexus_req = NexusListSessionsRequest::new();
@@ -2205,7 +2203,6 @@ mod tests {
         assert_eq!(nexus_resp.sessions[0].title, Some("Session A".to_string()));
         assert_eq!(nexus_resp.next_cursor, Some("page-2".to_string()));
     }
-
 
     #[test]
     fn set_config_option_request_to_sdk() {
@@ -2365,7 +2362,6 @@ mod tests {
         let result = adapter.set_config_option(request).await;
         assert!(result.is_err());
     }
-
 
     #[test]
     fn build_permission_response_approve_prefers_allow_always() {

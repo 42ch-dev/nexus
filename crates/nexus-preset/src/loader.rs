@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
 
-
 /// note: A validated preset manifest and its source metadata.
 ///
 /// Design: `orchestration-engine.md` §8.1.
@@ -49,7 +48,6 @@ pub struct LoadedPreset {
     /// caller must supply the identity before starting a v1 run.
     pub source_identity: Option<PresetSourceIdentity>,
 }
-
 
 /// note: Default maximum YAML file size for user-supplied presets (1 MiB).
 pub const DEFAULT_MAX_YAML_SIZE: usize = 1024 * 1024;
@@ -123,7 +121,6 @@ pub struct ValidationProblem {
     /// note: Human-readable error description.
     pub error: String,
 }
-
 
 /// note: Load a preset from a YAML string.
 ///
@@ -569,7 +566,6 @@ fn validate_manifest(
     // so the bounded-join fail-closed rule below accepts implicit
     // labeled-edge merges exactly as `build_outer_graph` wires them.
     let incoming_labeled = incoming_labeled_edge_counts(manifest);
-
 
     for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
         if caps.input_schema(req_cap).is_none() {
@@ -1101,7 +1097,6 @@ pub fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, Str
     bindings
 }
 
-
 /// note: Measure the maximum nesting depth of a [`serde_yaml::Value`].
 ///
 /// Scalars have depth 1, sequences/mappings add 1 for the container level.
@@ -1128,7 +1123,6 @@ pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
         _ => 1,
     }
 }
-
 
 /// note: Known top-level keys in `preset.yaml` per the `PresetManifest` schema.
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &["preset", "states", "inner_graphs", "signals", "roles"];
@@ -1161,7 +1155,6 @@ pub fn warn_unknown_top_level_keys(yaml_value: &serde_yaml::Value) {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1302,7 +1295,6 @@ inner_graphs:
             "expected 'cycle' problem in inner_graphs: {problems:?}"
         );
     }
-
 
     #[test]
     fn reject_timeout_fields_on_non_join_state() {
@@ -1819,7 +1811,6 @@ states:
         );
     }
 
-
     #[test]
     fn parse_initial_action_and_context_update() {
         use crate::manifest::{ContextUpdateOp, InitialAction};
@@ -2120,7 +2111,6 @@ states:
         );
     }
 
-
     #[test]
     fn template_file_safe_accepts_simple_relative_path() {
         assert!(assert_template_file_safe("prompts/system.md").is_ok());
@@ -2212,7 +2202,6 @@ states:
             "expected validation error for unknown llm_summarize capability: {problems:?}"
         );
     }
-
 
     #[test]
     fn reject_template_file_dotdot_traversal_in_exit_when() {
@@ -2473,7 +2462,6 @@ states:
         );
     }
 
-
     #[test]
     fn reject_oversized_yaml() {
         let base = "preset:\n  id: big\n  version: 1\n  kind: creator\n  description: \"";
@@ -2572,7 +2560,6 @@ states:
         );
     }
 
-
     /// note: C-001 regression: `load_preset()` must reject a preset that references
     /// a template file which does not exist in the bundle directory.
     /// This exercises the `validate_assets_in_bundle()` A3 surface.
@@ -2655,7 +2642,6 @@ states:
             "expected '..' path safety error from A3 surface on system_prompt_file: {problems:?}"
         );
     }
-
 
     /// note: Helper YAML for a preset with `llm_judge` + `GoNogo` next.
     fn gonogo_yaml() -> &'static str {

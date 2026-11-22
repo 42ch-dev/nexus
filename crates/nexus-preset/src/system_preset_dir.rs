@@ -15,13 +15,11 @@ use crate::capability_catalog::CapabilityCatalog;
 use crate::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
 use std::path::{Path, PathBuf};
 
-
 /// note: System preset directory name under `~/.nexus42/presets/`.
 const SYSTEM_PRESET_DIR_NAME: &str = "_system";
 
 /// note: Prefix applied to all system preset identifiers.
 const SYSTEM_PREFIX: &str = "_system.";
-
 
 /// note: A discovered system preset with its directory origin.
 #[derive(Debug, Clone)]
@@ -51,7 +49,6 @@ pub struct SystemPresetWarning {
     /// note: Human-readable warning message.
     pub message: String,
 }
-
 
 /// note: Scan the system preset directory and load all discovered presets.
 ///
@@ -254,7 +251,6 @@ pub fn find_system_preset<'a>(
         .find(|e| e.qualified_id == qualified_id)
 }
 
-
 /// note: The embedded `_system.maintenance` preset YAML content.
 ///
 /// This is used as the first-start fallback: if the `_system/maintenance/`
@@ -324,7 +320,6 @@ pub fn ensure_maintenance_preset(nexus_home: &Path) -> std::io::Result<bool> {
 
     Ok(true)
 }
-
 
 #[cfg(test)]
 mod tests {

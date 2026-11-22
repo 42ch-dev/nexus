@@ -143,7 +143,6 @@ impl fmt::Display for ExprError {
     }
 }
 
-
 /// note: Parse an expression string into an AST.
 ///
 /// # Errors
@@ -605,7 +604,6 @@ impl Parser {
     }
 }
 
-
 /// note: Evaluate a parsed expression against a JSON context object.
 ///
 /// # Errors
@@ -825,9 +823,7 @@ fn json_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
     match (a, b) {
         (serde_json::Value::Null, serde_json::Value::Null) => true,
         (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => a == b,
-        (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
-            a.as_f64() == b.as_f64()
-        }
+        (serde_json::Value::Number(a), serde_json::Value::Number(b)) => a.as_f64() == b.as_f64(),
         (serde_json::Value::String(a), serde_json::Value::String(b)) => a == b,
         _ => false,
     }
@@ -840,7 +836,6 @@ fn to_f64(v: &serde_json::Value) -> Option<f64> {
         _ => None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -858,7 +853,6 @@ mod tests {
         }
         serde_json::Value::Object(map)
     }
-
 
     #[test]
     fn parse_simple_equality_v2() {
@@ -973,7 +967,6 @@ mod tests {
         let err = parse("_context.x == 1 extra").unwrap_err();
         assert!(err.to_string().contains("trailing"));
     }
-
 
     #[test]
     fn eval_eq_string() {
@@ -1173,7 +1166,6 @@ mod tests {
         assert!(result);
     }
 
-
     #[test]
     fn depth_32_succeeds() {
         // note: Build an expression with depth exactly 32 (nested paren-paren).
@@ -1208,7 +1200,6 @@ mod tests {
             "depth 1000 should produce an error, not panic"
         );
     }
-
 
     #[test]
     fn null_eq_null_is_true() {
@@ -1247,7 +1238,6 @@ mod tests {
         let result = evaluate_expr("_context.missing != null", &ctx).unwrap();
         assert!(!result, "null != null should be false (JSON semantics)");
     }
-
 
     #[test]
     fn scan_registry_source_ref() {
