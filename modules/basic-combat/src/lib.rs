@@ -3,7 +3,7 @@
 //! Implements the V1 compute envelope ABI (compass Q9): a **stateless pure
 //! function** that resolves one attack between two characters with simple
 //! `ATK − DEF` arithmetic. Triple role: integration test, ABI validation, and
-//! reference implementation for module authors (see `modules/README.md`).
+//! reference implementation for module authors (see modules/README.md).
 //!
 //! The module is authored on the official `nexus-module-sdk` (V1.170 P0,
 //! AR-11): `nexus_entry!` generates the three ABI exports (`alloc`, `init`,
@@ -46,11 +46,8 @@ use nexus_module_sdk::{
     nexus_entry, ComputeInput, ComputeOutput, DeltaOp, ModuleError, StateDeltaOp,
 };
 
-// ===========================================================================
-// Combat logic
-// ===========================================================================
-
-/// Resolve a single attack between two characters and build the output envelope.
+/// note: resolves one attack into damage, a state delta, a timeline event, and
+/// the report.
 fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let key_blocks = &input.key_blocks;
     if key_blocks.is_empty() {
@@ -68,7 +65,8 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let def = read_attr_int(defender, "base_def")
         .or_else(|| read_int(defender, &["body", "base_def"]))
         .unwrap_or(0);
-    // current_hp: nested by block_type (compass Q5) -> body.state.character.current_hp
+    // note: current_hp nests by block type (compass Q5):
+    // body.state.character.current_hp.
     let hp_before = read_int(defender, &["body", "state", "character", "current_hp"])
         .or_else(|| read_int(defender, &["body", "state", "current_hp"]))
         .or_else(|| read_attr_int(defender, "max_hp"))
@@ -77,7 +75,6 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let damage = (atk - def).max(0);
     let hp_after = (hp_before - damage).max(0);
 
-    // --- state_delta -----------------------------------------------------
     let mut state_delta = Vec::new();
     state_delta.push(StateDeltaOp {
         op: DeltaOp::Sub,
@@ -94,13 +91,11 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
         });
     }
 
-    // world_ref inner fields are optional on the wire (schema requires
-    // `world_ref` itself, not its properties); keep the legacy fallbacks so
-    // domain-shaped fixtures keep producing the same timeline event.
+    // why: `world_ref` properties are optional on the wire, so the legacy
+    // fallbacks keep domain-shaped fixtures producing the same timeline event.
     let world_id = input.world_ref.world_id.as_deref().unwrap_or("world");
     let branch_id = input.world_ref.branch_id.as_deref().unwrap_or("root");
 
-    // --- timeline_events -------------------------------------------------
     let summary = format!(
         "{attacker} struck {defender} for {damage} ({hp_before} -> {hp_after} hp)",
         attacker = attacker_id,
@@ -120,12 +115,11 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
         "title": "Combat resolved",
         "summary": summary,
         "affected_key_block_ids": [attacker_id.clone(), defender_id.clone()],
-        // Modules cannot read a wall clock on wasm32-unknown-unknown; the host
-        // owns authoritative timestamps when it applies the event.
+        // why: no wall clock on wasm32-unknown-unknown; the host owns
+        // authoritative timestamps when it applies the event.
         "created_at": "1970-01-01T00:00:00Z",
     })];
 
-    // --- battle_report ---------------------------------------------------
     let battle_report = json!({
         "kind": "combat",
         "attacker_id": attacker_id,
@@ -145,18 +139,17 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     })
 }
 
-/// Module entry (V1 fn form). [`nexus_entry!`] wires it to the `alloc` /
-/// `init` / `compute` exports.
+/// note: V1 fn-form entry; [`nexus_entry!`] wires it to the `alloc` / `init` /
+/// `compute` exports.
 fn combat(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
     run_combat(&input)
 }
 
 nexus_entry!(combat);
 
-/// Pick the attacker and defender KeyBlocks.
-///
-/// Honors `invocation.attacker_id` / `invocation.defender_id` when present;
-/// otherwise falls back to the first two character-typed blocks.
+/// note: picks the attacker and defender KeyBlocks, honoring
+/// `invocation.attacker_id` / `invocation.defender_id` when present and
+/// otherwise falling back to the first two character-typed blocks.
 fn select_combatants<'a>(
     invocation: &'a Value,
     key_blocks: &'a [Value],
@@ -176,7 +169,6 @@ fn select_combatants<'a>(
         };
     }
 
-    // Fallback: first two character blocks.
     let mut chars = key_blocks.iter().filter(|kb| is_kind(kb, "character"));
     let attacker = chars.next().ok_or(ModuleError::InputMalformed)?;
     let defender = chars.next().ok_or(ModuleError::InputMalformed)?;
@@ -187,12 +179,11 @@ fn select_combatants<'a>(
 mod tests {
     use super::*;
 
-    /// The `nexus-spoke-adapter` key-block conversion emits spoke attribute
-    /// values as f64-backed JSON numbers in the FLAT form
-    /// (`body.attributes.base_atk` = `20.0` — the spoke `BodyAttributeValue`
-    /// number variant is an f64). `read_attr_int` must accept them on the
-    /// flat path exactly like the array path already did (L2 review
-    /// Minor-1: the flat branch previously read floats as 0 → damage 0).
+    /// why: the `nexus-spoke-adapter` conversion emits attribute values as
+    /// f64-backed JSON numbers in the flat form (`body.attributes.base_atk` =
+    /// `20.0`; the spoke `BodyAttributeValue` number variant is an f64).
+    /// `read_attr_int` must accept them on the flat path like the array path
+    /// does — the flat branch previously read floats as 0 → damage 0.
     #[test]
     fn flat_object_attributes_accept_f64_values() {
         let kb = serde_json::json!({
@@ -206,7 +197,7 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_def"), Some(5));
     }
 
-    /// Integer-valued flat attributes keep working (legacy domain form).
+    /// note: integer-valued flat attributes keep working (legacy domain form).
     #[test]
     fn flat_object_attributes_accept_integer_values() {
         let kb = serde_json::json!({
@@ -218,8 +209,8 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
     }
 
-    /// The canonical ERC721-array form still accepts both int and float
-    /// values (unchanged behavior — regression pin).
+    /// note: the canonical ERC721-array form accepts both int and float
+    /// values (regression pin).
     #[test]
     fn array_attributes_accept_int_and_float_values() {
         let kb = serde_json::json!({
@@ -235,10 +226,10 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_def"), Some(5));
     }
 
-    /// End-to-end on the canonical fixture: `run_combat` on the typed
-    /// envelope must produce the wire contract the real-host fixture test
-    /// asserts (delta `-`/`character.current_hp`/15 on `kb_def`, one
-    /// `state_update` event, empty `new_key_blocks`, `kind: combat` report).
+    /// note: end-to-end on the canonical fixture — `run_combat` must produce
+    /// the wire contract the real-host fixture test asserts (delta
+    /// `-`/`character.current_hp`/15 on `kb_def`, one `state_update` event,
+    /// empty `new_key_blocks`, `kind: combat` report).
     #[test]
     fn run_combat_produces_four_part_output() {
         let input: ComputeInput = serde_json::from_str(include_str!(
