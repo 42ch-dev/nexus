@@ -1,4 +1,5 @@
 //! Bounded per-run workflow event rings and live SSE replay (v1.188 P4 §6.3).
+// note: capacities are fixed per run; the rings fan out live and replay the retained window.
 
 use nexus_session_storage::run_state::RunRecord;
 use serde::Serialize;
@@ -14,11 +15,11 @@ pub const MAX_FRAME_BYTES: usize = 512 * 1024;
 pub const MAX_LIVE_RINGS: usize = 64;
 pub const MAX_TERMINAL_RINGS: usize = 64;
 pub const MAX_SUBSCRIBERS_PER_RUN: usize = 16;
-/// Data frames a live subscriber may lag behind before it is evicted as
+/// note: data frames a live subscriber may lag behind before it is evicted as
 /// lagging.
 pub const MAX_PENDING_FRAMES_PER_SUB: usize = 16;
 pub const MAX_PENDING_BYTES_PER_SUB: usize = 1024 * 1024;
-/// Live-subscriber channel capacity: the data-frame cap PLUS one reserved
+/// note: live-subscriber channel capacity: the data-frame cap PLUS one reserved
 /// control slot (QC2 F-005).
 ///
 /// The eviction path must ALWAYS be able to enqueue its terminal lag gap.
@@ -37,15 +38,15 @@ pub const MAX_PULL_FRAMES: usize = 16;
 /// dropped, so the bound never loses content.
 pub const MAX_PULL_BYTES: usize = 1024 * 1024;
 
-/// The one event name a run's stream ends on when its retained history cannot
+/// note: the one event name a run's stream ends on when its retained history cannot
 /// be resumed (prior epoch, evicted ring, restart).
 pub const HISTORY_UNAVAILABLE_EVENT: &str = "history_unavailable";
 
-/// Shared map of per-run sinks registered before drive; the coordinator and
+/// note: shared map of per-run sinks registered before drive; the coordinator and
 /// the daemon's prompt executor share this handle.
 pub type RunEventSinkMap = Arc<tokio::sync::Mutex<std::collections::HashMap<String, RunEventSink>>>;
 
-/// Root run id of any session id.
+/// note: root run id of any session id.
 ///
 /// Nested prompt steps execute against CHILD sessions minted as
 /// `<parent>:child:<uuid>` (recursively), but every host event belongs to the
@@ -58,10 +59,10 @@ pub fn root_run_id(session_id: &str) -> &str {
         .map_or(session_id, |(root, _)| root)
 }
 
-/// Child-session id infix (mirrors `spawn_child_session_internal`).
+/// note: child-session id infix (mirrors `spawn_child_session_internal`).
 pub const CHILD_SESSION_INFIX: &str = ":child:";
 
-/// Resolve the sink that owns `run_id`: an exact match, else the sink of the
+/// note: resolve the sink that owns `run_id`: an exact match, else the sink of the
 /// ROOT run that admitted it.
 ///
 /// Without the root fallback a nested prompt (whose `run_id` is a child
@@ -83,7 +84,7 @@ pub struct RunEventSink {
 }
 
 impl RunEventSink {
-    /// Publish one host-lifecycle event onto this run's ring.
+    /// note: publish one host-lifecycle event onto this run's ring.
     ///
     /// The payload is any `Serialize` value: the execution cohort owns the
     /// bounded ring, not the Host event vocabulary, so the daemon passes its
@@ -107,7 +108,7 @@ impl RunEventSink {
     }
 }
 
-/// One host-lifecycle frame. Generic over the payload so the execution
+/// note: one host-lifecycle frame. Generic over the payload so the execution
 /// cohort never names the Host event enum; `T = HostEvent` on the daemon side
 /// serializes to the same bytes.
 #[derive(Debug, Clone, Serialize)]
@@ -170,7 +171,7 @@ pub struct SseFrame {
     pub data: String,
 }
 
-/// Live subscriber queue entry: carries the exact wire-byte reservation used
+/// note: live subscriber queue entry: carries the exact wire-byte reservation used
 /// for backpressure accounting so dequeue/drop releases the same count.
 #[derive(Debug, Clone)]
 struct QueuedFrame {
@@ -178,17 +179,17 @@ struct QueuedFrame {
     wire_bytes: usize,
 }
 
-/// One retained frame with its parsed sequence.
+/// note: one retained frame with its parsed sequence.
 ///
 /// The sequence is parsed once, here, so a consumer paging on it never
 /// re-derives it from the frame id.
 #[derive(Debug, Clone)]
 pub struct RunEventFrame {
-    /// Monotonic per-run sequence (the frame id's trailing segment).
+    /// note: monotonic per-run sequence (the frame id's trailing segment).
     pub sequence: u64,
-    /// Event kind discriminant (`run_state`, `host_event`, `gap`, …).
+    /// note: event kind discriminant (`run_state`, `host_event`, `gap`, …).
     pub kind: String,
-    /// Encoded frame payload.
+    /// note: encoded frame payload.
     pub data: String,
 }
 
@@ -202,23 +203,23 @@ impl RunEventFrame {
     }
 }
 
-/// One bounded page of a run's retained frames.
+/// note: one bounded page of a run's retained frames.
 #[derive(Debug, Clone)]
 pub struct RunPage {
-    /// Frames strictly after the requested cursor, capped by `limit`.
+    /// note: frames strictly after the requested cursor, capped by `limit`.
     pub frames: Vec<RunEventFrame>,
-    /// Watermark to pass as the next `after_sequence`.
+    /// note: watermark to pass as the next `after_sequence`.
     pub next_sequence: u64,
-    /// The run reached an authoritative terminal state.
+    /// note: the run reached an authoritative terminal state.
     pub terminal: bool,
-    /// The requested tail was retention-trimmed; the caller must resynchronize.
+    /// note: the requested tail was retention-trimmed; the caller must resynchronize.
     pub resync_required: bool,
 }
 
-/// Why a bounded page read could not be served.
+/// note: why a bounded page read could not be served.
 #[derive(Debug, Clone)]
 pub enum PageError {
-    /// No live or terminal ring is retained for the run.
+    /// note: no live or terminal ring is retained for the run.
     UnknownRun(String),
 }
 
@@ -281,7 +282,7 @@ impl Drop for SubscriberRelease {
     }
 }
 
-/// Live SSE subscription: replay is delivered first; subsequent frames arrive
+/// note: live SSE subscription: replay is delivered first; subsequent frames arrive
 /// on [`recv`](Self::recv). Dropping releases the subscriber permit.
 pub struct LiveSubscription {
     replay: VecDeque<SseFrame>,
@@ -311,7 +312,7 @@ impl LiveSubscription {
         }
     }
 
-    /// The next frame that is ALREADY available (replayed or queued), without
+    /// note: the next frame that is ALREADY available (replayed or queued), without
     /// awaiting anything.
     ///
     /// A pull drains what is buffered and blocks only when it has nothing to
@@ -352,28 +353,28 @@ impl Drop for LiveSubscription {
     }
 }
 
-/// What a non-awaiting read of a live subscription found.
+/// note: what a non-awaiting read of a live subscription found.
 #[derive(Debug)]
 pub enum PolledFrame {
-    /// A frame was ready (replayed or queued).
+    /// note: A frame was ready (replayed or queued).
     Frame(SseFrame),
-    /// Nothing is buffered right now; the stream may still produce a frame.
+    /// note: nothing is buffered right now; the stream may still produce a frame.
     Empty,
-    /// The frame channel closed: no further frame can arrive.
+    /// note: the frame channel closed: no further frame can arrive.
     Closed,
 }
 
-/// What one bounded pull produced.
+/// note: what one bounded pull produced.
 #[derive(Debug)]
 pub enum PullOutcome {
-    /// The frames this pull may return, and whether the stream ended AT it.
+    /// note: the frames this pull may return, and whether the stream ended AT it.
     Batch { frames: Vec<SseFrame>, closed: bool },
     /// Another pull is already outstanding on this subscription (contract §4:
     /// exactly one).
     Busy,
 }
 
-/// One AUTHORIZED subscription to a run's bounded event stream.
+/// note: one AUTHORIZED subscription to a run's bounded event stream.
 ///
 /// The token is an environment-local opaque UUID; the entry behind it is bound
 /// to the principal's creator, the core generation that minted it and the one
@@ -396,10 +397,10 @@ pub struct WorkflowSubscription {
 }
 
 struct SubscriptionState {
-    /// The ring attachment, or `None` for a subscription that carries only a
+    /// note: the ring attachment, or `None` for a subscription that carries only a
     /// control frame (an unresumable history).
     live: Option<LiveSubscription>,
-    /// A frame read but not yet returned because the batch ceiling was
+    /// note: A frame read but not yet returned because the batch ceiling was
     /// reached; it is delivered by the NEXT pull.
     pending: Option<SseFrame>,
 }
@@ -423,7 +424,7 @@ impl WorkflowSubscription {
         }
     }
 
-    /// A subscription attached to the run's live/terminal ring.
+    /// note: A subscription attached to the run's live/terminal ring.
     #[must_use]
     pub fn live(
         creator_id: String,
@@ -434,7 +435,7 @@ impl WorkflowSubscription {
         Self::new(creator_id, core_generation, root_run_id, Some(live), None)
     }
 
-    /// A subscription whose only frame is the `history_unavailable` control
+    /// note: A subscription whose only frame is the `history_unavailable` control
     /// frame: the run exists and is owned, but its retained history is gone
     /// (prior epoch, evicted ring, restart). The stream closes with it.
     #[must_use]
@@ -458,7 +459,7 @@ impl WorkflowSubscription {
         &self.id
     }
 
-    /// Whether this token is the one `(creator, core generation)` pair was
+    /// note: whether this token is the one `(creator, core generation)` pair was
     /// minted for. A foreign creator or a token from another core generation
     /// refuses exactly like an unknown one.
     #[must_use]
@@ -466,13 +467,13 @@ impl WorkflowSubscription {
         self.creator_id == creator_id && self.core_generation == core_generation
     }
 
-    /// The root run this token may read.
+    /// note: the root run this token may read.
     #[must_use]
     pub fn root_run_id(&self) -> &str {
         &self.root_run_id
     }
 
-    /// Take one bounded pull: at most [`MAX_PULL_FRAMES`] frames and
+    /// note: take one bounded pull: at most [`MAX_PULL_FRAMES`] frames and
     /// [`MAX_PULL_BYTES`] encoded bytes, in ring order, from the retained
     /// replay and then the live tail.
     ///
@@ -491,27 +492,27 @@ impl WorkflowSubscription {
                 frame
             } else {
                 let Some(live) = state.live.as_mut() else {
-                    // Only a control frame was ever queued (already taken).
+                    // why: only a control frame was ever queued (already taken).
                     closed = true;
                     break;
                 };
                 match live.poll() {
                     PolledFrame::Frame(frame) => frame,
-                    // The ring closed: an authoritative terminal state was
+                    // why: the ring closed: an authoritative terminal state was
                     // published, or the owner released the ring.
                     PolledFrame::Closed => {
                         closed = true;
                         break;
                     }
                     PolledFrame::Empty => {
-                        // Drain-and-return: what is already buffered is
+                        // why: drain-and-return: what is already buffered is
                         // returned NOW, so the transport flushes each frame
                         // as it arrives. Only an otherwise empty pull waits
                         // for the next one.
                         if !frames.is_empty() {
                             break;
                         }
-                        // Register BEFORE the closed check and the await: a
+                        // why: register BEFORE the closed check and the await: a
                         // release landing in between must not be lost, and
                         // `notify_waiters` stores no permit for a later
                         // waiter.
@@ -539,7 +540,7 @@ impl WorkflowSubscription {
             };
             let wire_bytes = encoded_sse_frame_bytes(&frame);
             if !frames.is_empty() && bytes.saturating_add(wire_bytes) > MAX_PULL_BYTES {
-                // Hold the frame for the next pull: the ceiling must never
+                // why: hold the frame for the next pull: the ceiling must never
                 // lose a frame, and the caller's cursor then resumes from the
                 // last frame actually delivered.
                 state.pending = Some(frame);
@@ -554,7 +555,7 @@ impl WorkflowSubscription {
         PullOutcome::Batch { frames, closed }
     }
 
-    /// End this subscription: a blocked pull wakes with `closed`, and the
+    /// note: end this subscription: a blocked pull wakes with `closed`, and the
     /// caller (release / owner close) drops it from the owner's table.
     pub fn release(&self) {
         self.closed.store(true, Ordering::SeqCst);
@@ -562,7 +563,7 @@ impl WorkflowSubscription {
     }
 }
 
-/// The owner-scoped table of authorized subscriptions.
+/// note: the owner-scoped table of authorized subscriptions.
 ///
 /// Live on the execution owner (never process-global, never in TS), so the
 /// tokens die with the owner generation that minted them.
@@ -583,7 +584,7 @@ impl WorkflowSubscriptionRegistry {
         Self::default()
     }
 
-    /// Publish a freshly authorized subscription, or refuse (`None`) when the
+    /// note: publish a freshly authorized subscription, or refuse (`None`) when the
     /// owner's close has already sealed the table.
     ///
     /// The seal check and the insert share ONE critical section while
@@ -604,13 +605,13 @@ impl WorkflowSubscriptionRegistry {
         }
         let entry = Arc::new(subscription);
         entries.insert(entry.id.clone(), Arc::clone(&entry));
-        // The critical section ends WITH the insert: the table lock is done
+        // why: the critical section ends WITH the insert: the table lock is done
         // there and is released before the published entry is handed back.
         drop(entries);
         Some(entry)
     }
 
-    /// The entry behind an opaque token, if this owner still serves it.
+    /// note: the entry behind an opaque token, if this owner still serves it.
     #[must_use]
     pub fn get(&self, subscription_id: &str) -> Option<Arc<WorkflowSubscription>> {
         self.entries
@@ -620,7 +621,7 @@ impl WorkflowSubscriptionRegistry {
             .cloned()
     }
 
-    /// Withdraw one token (release). The caller wakes the withdrawn entry so a
+    /// note: withdraw one token (release). The caller wakes the withdrawn entry so a
     /// blocked pull ends instead of waiting for a frame that cannot come.
     pub fn take(&self, subscription_id: &str) -> Option<Arc<WorkflowSubscription>> {
         self.entries
@@ -629,7 +630,7 @@ impl WorkflowSubscriptionRegistry {
             .remove(subscription_id)
     }
 
-    /// End EVERY subscription this owner minted AND seal the table: a blocked
+    /// note: end EVERY subscription this owner minted AND seal the table: a blocked
     /// pull wakes with `closed`, no token survives the close, and a mint that
     /// is still in flight refuses instead of republishing one.
     ///
@@ -650,7 +651,7 @@ impl WorkflowSubscriptionRegistry {
         }
     }
 
-    /// Number of tokens this owner still serves (test/diagnostic).
+    /// note: number of tokens this owner still serves (test/diagnostic).
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries
@@ -659,7 +660,7 @@ impl WorkflowSubscriptionRegistry {
             .len()
     }
 
-    /// Whether this owner serves no token at all (test/diagnostic).
+    /// note: whether this owner serves no token at all (test/diagnostic).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries
@@ -668,7 +669,7 @@ impl WorkflowSubscriptionRegistry {
             .is_empty()
     }
 
-    /// Whether the table is sealed (test/diagnostic).
+    /// note: whether the table is sealed (test/diagnostic).
     #[must_use]
     pub fn is_sealed(&self) -> bool {
         self.sealed.load(Ordering::SeqCst)
@@ -696,7 +697,7 @@ impl RunEventRegistry {
         }
     }
 
-    // The `MAX_LIVE_RINGS` capacity check and the ring insertion MUST stay in
+    // why: the `MAX_LIVE_RINGS` capacity check and the ring insertion MUST stay in
     // one critical section: splitting them (as the lint's early `drop`
     // suggests) would let two concurrent registrations both observe capacity
     // and both insert, exceeding the cap. The guard is therefore held to the
@@ -765,7 +766,7 @@ impl RunEventRegistry {
         self.inner.append_json(run_id, "run_state", &wire);
     }
 
-    /// Close a run's live ring after its durable **authoritative terminal**
+    /// note: close a run's live ring after its durable **authoritative terminal**
     /// winner was published (Completed/Failed/Cancelled).
     ///
     /// Callers must NOT use this for `Interrupted` (QC2 F-001): an
@@ -799,7 +800,7 @@ impl RunEventRegistry {
         }
     }
 
-    /// Live SSE: atomically replay from `Last-Event-ID`, then register for live tail.
+    /// note: live SSE: atomically replay from `Last-Event-ID`, then register for live tail.
     ///
     /// # Errors
     ///
@@ -898,7 +899,7 @@ impl RunEventRegistry {
         })
     }
 
-    /// Read a bounded page of a run's retained frames.
+    /// note: read a bounded page of a run's retained frames.
     ///
     /// Reads the SAME ring the SSE transport replays from, so the ring's
     /// item/byte caps and the explicit-gap frames are identical here. The
@@ -928,7 +929,7 @@ impl RunEventRegistry {
             return Err(PageError::UnknownRun(run_id.to_string()));
         };
         let first_retained = ring.records.front().map_or(1, |r| r.sequence);
-        // A cursor below the retained window means the requested tail was
+        // why: A cursor below the retained window means the requested tail was
         // retention-trimmed: the reader must resynchronize rather than
         // silently receive a non-contiguous page. The comparison is written
         // WITHOUT `seq + 1`, which would wrap at `u64::MAX` (a schema-valid
@@ -948,7 +949,7 @@ impl RunEventRegistry {
         })
     }
 
-    /// Current live subscriber count for a run (diagnostic).
+    /// note: current live subscriber count for a run (diagnostic).
     ///
     /// An authorized subscription holds exactly one of these per run; the
     /// subscribe/close race regression reads it to prove a refused mint does
@@ -964,7 +965,7 @@ impl RunEventRegistry {
             .map_or(0, |r| r.subscribers.len())
     }
 
-    /// Pending backpressure counters for a live subscriber (test/diagnostic).
+    /// note: pending backpressure counters for a live subscriber (test/diagnostic).
     #[cfg(test)]
     pub fn subscriber_pending(&self, run_id: &str, subscriber_id: u64) -> (usize, usize) {
         self.inner
@@ -1114,18 +1115,18 @@ impl RunEventRegistryInner {
     }
 }
 
-/// Encoded size of one SSE frame as the wire writes it.
+/// note: encoded size of one SSE frame as the wire writes it.
 ///
 /// Public because the authorized subscription's pull ceiling is measured in
 /// exactly these bytes — the same measure the ring and the live subscribers
 /// account with.
 #[must_use]
 pub const fn encoded_sse_frame_bytes(frame: &SseFrame) -> usize {
-    // Wire estimate: `id:` + id + `\n` + `event:` + event + `\n` + `data:` + data + `\n\n`
+    // note: wire estimate: `id:` + id + `\n` + `event:` + event + `\n` + `data:` + data + `\n\n`
     frame.id.len() + frame.event.len() + frame.data.len() + 16
 }
 
-/// Fan a frame out to every live subscriber.
+/// note: fan a frame out to every live subscriber.
 ///
 /// A subscriber that has fallen behind (data-frame or pending-byte cap) is
 /// evicted with an explicit terminal lag gap (QC2 F-005). The gap is written
@@ -1240,7 +1241,7 @@ fn lag_gap_frame(run_id: &str, epoch: Uuid, sequence: u64) -> SseFrame {
     gap_frame(run_id, epoch, sequence, sequence)
 }
 
-/// The numeric sequence carried by a frame id (`<epoch>:<sequence>`).
+/// note: the numeric sequence carried by a frame id (`<epoch>:<sequence>`).
 fn parse_frame_sequence(frame: &SseFrame) -> u64 {
     frame
         .id
@@ -1343,7 +1344,7 @@ mod tests {
         assert_eq!(wire.inspect_url, "/inspect");
     }
 
-    /// Nested prompt steps run under child session ids; the root must be
+    /// note: nested prompt steps run under child session ids; the root must be
     /// recoverable at any depth so their lifecycle events land on the driven
     /// root run's single ring.
     #[test]
@@ -1353,7 +1354,7 @@ mod tests {
         assert_eq!(root_run_id("root-run:child:a:child:b"), "root-run");
     }
 
-    /// A descendant prompt resolves to the OWNING root ring; an unknown run
+    /// note: A descendant prompt resolves to the OWNING root ring; an unknown run
     /// resolves to nothing (never a wrong ring).
     #[tokio::test]
     async fn sink_for_run_resolves_descendant_to_owning_root_ring() {
@@ -1485,7 +1486,7 @@ mod tests {
         let sink = registry.try_register_live("run-1").expect("register");
         registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Completed, 1));
         registry.mark_terminal("run-1");
-        // Any serializable payload stands in for the daemon's concrete
+        // why: any serializable payload stands in for the daemon's concrete
         // `HostEvent`; the ring's rejection is payload-independent.
         sink.publish_host_event("step", "attempt", &serde_json::json!({ "late": true }));
         let mut sub = registry
@@ -1688,7 +1689,7 @@ mod tests {
         assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
 
-    /// QC2 F-005: a lagging subscriber must ALWAYS receive the explicit lag
+    /// note: QC2 F-005: a lagging subscriber must ALWAYS receive the explicit lag
     /// gap, even when its data channel is completely full — the gap is
     /// parked in the channel's reserved control slot. The reader drains the
     /// buffered frames, reads the gap, then observes a clean close; a silent
@@ -1700,7 +1701,7 @@ mod tests {
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
-        // Never drain while the ring fans out: the data queue fills to its
+        // why: never drain while the ring fans out: the data queue fills to its
         // cap and the subscriber is evicted as lagging.
         for i in 0..=MAX_PENDING_FRAMES_PER_SUB {
             registry.publish_run_state(
@@ -1713,7 +1714,7 @@ mod tests {
             0,
             "lagging subscriber must be evicted once the pending cap is exceeded"
         );
-        // Drain buffered data frames until the explicit gap arrives.
+        // note: drain buffered data frames until the explicit gap arrives.
         let mut drained = 0usize;
         loop {
             match tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv()).await {
@@ -1730,7 +1731,7 @@ mod tests {
                 Err(error) => panic!("timed out waiting for the explicit lag gap: {error}"),
             }
         }
-        // After the gap the evicted subscriber's channel closes.
+        // note: after the gap the evicted subscriber's channel closes.
         let closed = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv()).await;
         assert!(
             matches!(closed, Ok(None)),
@@ -1738,7 +1739,7 @@ mod tests {
         );
     }
 
-    /// QC2 F-005 (control): a slow-but-draining subscriber must never be
+    /// note: QC2 F-005 (control): a slow-but-draining subscriber must never be
     /// evicted — eviction is for readers that actually stop consuming.
     #[tokio::test]
     async fn draining_subscriber_is_never_evicted_with_reserved_control_slot() {
@@ -1761,13 +1762,13 @@ mod tests {
         assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
 
-    /// A payload that makes one frame almost exactly `bytes` on the wire.
+    /// note: A payload that makes one frame almost exactly `bytes` on the wire.
     #[derive(serde::Serialize)]
     struct SizedHostEvent {
         blob: String,
     }
 
-    /// The newest RETAINED frame of a run's live ring.
+    /// note: the newest RETAINED frame of a run's live ring.
     fn newest_frame(registry: &RunEventRegistry, run_id: &str) -> SseFrame {
         let state = registry
             .inner
@@ -1796,7 +1797,7 @@ mod tests {
         );
     }
 
-    /// The pull's byte ceiling must never LOSE a frame: a frame the batch
+    /// note: the pull's byte ceiling must never LOSE a frame: a frame the batch
     /// cannot fit is held for the next pull, and the ceiling holds even when
     /// the reserved gap frame is what pushes the batch over it.
     ///
@@ -1810,7 +1811,7 @@ mod tests {
     async fn pull_holds_back_the_frame_that_exceeds_the_batch_ceiling() {
         const TARGET_FRAME_BYTES: usize = MAX_FRAME_BYTES - 32;
 
-        // One calibration step on a throwaway ring: the payload contributes 1:1
+        // why: one calibration step on a throwaway ring: the payload contributes 1:1
         // to the encoded frame, so the measured overshoot is the exact payload
         // adjustment. The probe publishes one frame that is safely UNDER the
         // frame cap (an over-cap frame is replaced by a gap record, which would
@@ -1886,7 +1887,7 @@ mod tests {
             "the held frame is exactly what would have exceeded the ceiling"
         );
 
-        // The run reaches its durable terminal state: the held frame is
+        // why: the run reaches its durable terminal state: the held frame is
         // delivered, and the stream then reports the close.
         registry.mark_terminal("run-1");
         let PullOutcome::Batch { frames, closed } = subscription.pull().await else {
@@ -1901,7 +1902,7 @@ mod tests {
         assert!(closed, "the terminal close ends the stream");
     }
 
-    /// The token table the owner serves: a token is bound to the creator, the
+    /// note: the token table the owner serves: a token is bound to the creator, the
     /// core generation and the root run it was minted for, and it is
     /// WITHDRAWN — never merely marked — by release and by owner close.
     #[tokio::test]
@@ -1947,12 +1948,12 @@ mod tests {
             "the table serves the entry the caller was handed"
         );
 
-        // Release withdraws the token; a second take finds nothing.
+        // note: release withdraws the token; a second take finds nothing.
         assert!(tokens.take(minted.id()).is_some());
         assert!(tokens.take(minted.id()).is_none());
         assert_eq!(tokens.len(), 0);
 
-        // Owner close withdraws EVERY remaining token AND seals the table, so a
+        // why: owner close withdraws EVERY remaining token AND seals the table, so a
         // subscribe still in flight cannot republish one.
         let second = rings
             .subscribe_live("run-1", None, "/inspect".into())
@@ -1975,7 +1976,7 @@ mod tests {
             "close also ends the entry a blocked pull is holding"
         );
 
-        // A mint that raced the close is REFUSED, and the subscription it was
+        // why: A mint that raced the close is REFUSED, and the subscription it was
         // handed (with the ring permit it attaches) is dropped by the refusal.
         // The tokens this test still holds keep their own permits alive, so the
         // count is measured around the race rather than from zero.

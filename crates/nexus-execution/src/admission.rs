@@ -1,6 +1,6 @@
 //! The applied-identity admission port.
 //!
-//! Run admission must resolve the strategy's current apply before it builds a
+// why: run admission must resolve the strategy's current apply before it builds a
 //! graph: the apply decides the intake mode and the frozen document the run is
 //! built from. That resolution reads the Creator store, the preset loader and
 //! the home config — none of which this crate owns — so the engine asks this
@@ -18,39 +18,39 @@ use nexus_home_layout::strategy_intake::StrategyIntakeMode;
 use nexus_orchestration::applied_document::AppliedDocument;
 use nexus_preset::LoadedPreset;
 
-/// What one admission resolved: the intake mode it runs under and the applied
+/// note: what one admission resolved: the intake mode it runs under and the applied
 /// document it builds the graph from.
 ///
 /// `intake_mode: None` means the preset is not a user bundle, so no intake key
 /// governs it; `applied: None` means the strategy has no current apply (never an
 /// embedded bundle, whose document always resolves).
 pub struct AppliedAdmission {
-    /// The `[strategy_intake]` mode this admission runs under, when one does.
+    /// note: the `[strategy_intake]` mode this admission runs under, when one does.
     pub intake_mode: Option<StrategyIntakeMode>,
-    /// The applied document the run's graph is built from.
+    /// note: the applied document the run's graph is built from.
     pub applied: Option<AppliedDocument>,
 }
 
-/// Why one admission resolution refused.
+/// note: why one admission resolution refused.
 #[derive(Debug)]
 pub enum AppliedAdmissionError {
-    /// The store could not be read. Each site maps it to its own store variant.
+    /// note: the store could not be read. Each site maps it to its own store variant.
     Store(String),
-    /// `[strategy_intake]` is unreadable or names a mode outside the known arms.
+    /// note: `[strategy_intake]` is unreadable or names a mode outside the known arms.
     InvalidIntakeConfig(String),
-    /// The applied identity no longer replays: a coded refusal, not a fault.
+    /// note: the applied identity no longer replays: a coded refusal, not a fault.
     AppliedIdentity {
-        /// Stable lowercase wire code (`applied_pin_*`, `applied_document_*`).
+        /// note: stable lowercase wire code (`applied_pin_*`, `applied_document_*`).
         code: String,
-        /// The sentence naming the strategy and the apply.
+        /// note: the sentence naming the strategy and the apply.
         message: String,
     },
 }
 
-/// Resolve the applied identity one run admission runs under.
+/// note: resolve the applied identity one run admission runs under.
 #[async_trait]
 pub trait AppliedAdmissionPort: Send + Sync {
-    /// Resolve the intake mode and the applied document for `preset_id`.
+    /// note: resolve the intake mode and the applied document for `preset_id`.
     ///
     /// The port takes no home: the workspace whose `[strategy_intake]` key and
     /// pattern pins this resolution reads is the one the implementation holds,

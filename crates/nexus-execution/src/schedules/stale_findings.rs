@@ -35,29 +35,29 @@ use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-/// Default sweep cadence: 24 hours.
+/// note: default sweep cadence: 24 hours.
 pub const DEFAULT_SWEEP_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
-/// Default stale threshold: 96 hours (V1.39 master-decision SLA).
+/// note: default stale threshold: 96 hours (V1.39 master-decision SLA).
 pub const DEFAULT_STALE_THRESHOLD_SECS: i64 = 96 * 60 * 60;
 
-/// Env var overriding the sweep cadence (seconds). Test-only knob.
+/// note: env var overriding the sweep cadence (seconds). Test-only knob.
 pub const ENV_SWEEP_INTERVAL_SECS: &str = "NEXUS_DAEMON_STALE_FINDINGS_INTERVAL_SECS";
 
-/// Env var overriding the stale threshold (seconds). Test-only knob.
+/// note: env var overriding the stale threshold (seconds). Test-only knob.
 pub const ENV_STALE_THRESHOLD_SECS: &str = "NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS";
 
-/// Resolved configuration for the stale-findings watcher.
+/// note: resolved configuration for the stale-findings watcher.
 #[derive(Debug, Clone, Copy)]
 pub struct StaleFindingsWatcherConfig {
-    /// How often to scan the `findings` table.
+    /// note: how often to scan the `findings` table.
     pub interval: Duration,
-    /// How old (in seconds) an open finding must be to count as stale.
+    /// note: how old (in seconds) an open finding must be to count as stale.
     pub threshold_seconds: i64,
 }
 
 impl StaleFindingsWatcherConfig {
-    /// Build the config from defaults, allowing env overrides for tests.
+    /// note: build the config from defaults, allowing env overrides for tests.
     ///
     /// Invalid env values silently fall back to defaults — the watcher
     /// must be best-effort and must never refuse to start.
@@ -82,7 +82,7 @@ impl StaleFindingsWatcherConfig {
     }
 }
 
-/// Spawn the master-decision timeout watcher.
+/// note: spawn the master-decision timeout watcher.
 ///
 /// Returns a `JoinHandle` so callers (the boot path, integration tests)
 /// can observe completion; in production the handle is dropped and the
@@ -117,7 +117,7 @@ pub fn spawn_stale_findings_watcher(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // Default `MissedTickBehavior::Burst` would cause back-to-back
+        // why: default `MissedTickBehavior::Burst` would cause back-to-back
         // sweeps after a long pause (e.g. laptop sleep). `Delay` keeps
         // sweeps spaced and avoids piling work on the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -142,7 +142,7 @@ pub fn spawn_stale_findings_watcher(
     })
 }
 
-/// Perform a single sweep. Public for the hermetic integration test
+/// note: perform a single sweep. Public for the hermetic integration test
 /// (V1.39 P4 T5) which drives the sweep deterministically without
 /// running the spawned interval loop.
 ///
@@ -195,7 +195,7 @@ pub async fn run_one_sweep(
             }
         }
         Err(e) => {
-            // Non-blocking: log and continue. The watcher must never
+            // why: non-blocking: log and continue. The watcher must never
             // bubble errors — that would crash the spawned task and
             // silently stop the SLA signal.
             tracing::error!(
@@ -207,7 +207,7 @@ pub async fn run_one_sweep(
     }
 }
 
-/// Look up the Work for a stale finding and, if it has opted in via
+/// note: look up the Work for a stale finding and, if it has opted in via
 /// `auto_review_master_on_timeout = true`, enqueue a `novel-review-master`
 /// schedule (V1.39 P4 T4, AC3).
 ///
@@ -244,7 +244,7 @@ async fn maybe_enqueue_review_master(
     };
 
     if !work.auto_review_master_on_timeout {
-        // Default branch — no opt-in, no schedule. AC3.
+        // note: default branch — no opt-in, no schedule. AC3.
         tracing::debug!(
             creator_id,
             work_id,
@@ -253,7 +253,7 @@ async fn maybe_enqueue_review_master(
         return;
     }
 
-    // N-9: derive the complete binding map for `novel-review-master` from
+    // why: N-9: derive the complete binding map for `novel-review-master` from
     // the configured default provider. The preset's graphs issue prompts
     // (`acp.prompt` + `judge.llm`), so a missing provider refuses the
     // enqueue — never a drive-enabled row with an empty binding map.
@@ -294,7 +294,7 @@ async fn maybe_enqueue_review_master(
                 schedule_id = %schedule_id,
                 "stale-findings: enqueued novel-review-master (opt-in)"
             );
-            // N-11: guaranteed post-commit coordinator handoff — the
+            // why: N-11: guaranteed post-commit coordinator handoff — the
             // review-master row is admitted through the SAME production
             // starter as every other insertion branch. A starter failure is
             // explicit (logged at error level); the row stays pending for a
@@ -333,7 +333,7 @@ async fn maybe_enqueue_review_master(
     }
 }
 
-/// Current UNIX epoch in seconds.
+/// note: current UNIX epoch in seconds.
 ///
 /// Falls back to `0` if the system clock is before the UNIX epoch — that
 /// is impossible on a sane host but the watcher must never panic.

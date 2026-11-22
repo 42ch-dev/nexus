@@ -1,6 +1,6 @@
 //! Scheduler and background-effect ownership (v1.190 P3-T2).
 //!
-//! These three tasks moved out of the daemon unchanged in behavior. They own
+// note: these three tasks moved out of the daemon unchanged in behavior. They own
 //! the periodic domain effects the transport used to drive — no TypeScript
 //! timer performs a domain effect any more.
 //!

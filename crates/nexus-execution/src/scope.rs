@@ -1,11 +1,12 @@
 //! Opened-scope coordinate resolution (v1.188 P3 L2).
+// note: every component is opened with `openat`/`O_NOFOLLOW`, so a symlink swap cannot redirect resolution.
 
 use std::path::{Path, PathBuf};
 
 use crate::bounds::validate_relative_path;
 use crate::session::{enforce_path_boundary, SessionError};
 
-/// Canonical scope directory for a session (`relative_path` may be empty).
+/// note: canonical scope directory for a session (`relative_path` may be empty).
 ///
 /// # Errors
 ///
@@ -28,7 +29,7 @@ pub fn scope_directory(
     Ok(base)
 }
 
-/// Resolve a manifest `path` relative to the opened scope coordinate.
+/// note: resolve a manifest `path` relative to the opened scope coordinate.
 ///
 /// # Errors
 ///
@@ -40,7 +41,7 @@ pub fn resolve_in_scope(scope_dir: &Path, change_path: &str) -> Result<PathBuf, 
     Ok(target)
 }
 
-/// Require a session's persisted workspace root to match the active executor root.
+/// note: require a session's persisted workspace root to match the active executor root.
 ///
 /// Both paths are canonicalized before comparison so symlink-equivalent roots
 /// match and foreign sessions cannot commit through a different authority.

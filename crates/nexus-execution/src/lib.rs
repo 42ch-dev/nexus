@@ -1,6 +1,6 @@
 //! The durable run engine (v1.245 extraction).
 //!
-//! This crate owns everything that can be driven by ports: the bounded run
+// note: this crate owns everything that can be driven by ports: the bounded run
 //! driver and its single-flight coordinator, the durable workspace commit
 //! authority with its snapshot/OCC filesystem primitives and sessions, the
 //! bounded per-run event rings the SSE transport replays from, and the

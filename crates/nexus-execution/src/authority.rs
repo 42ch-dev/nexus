@@ -1,15 +1,16 @@
 //! Manager-lifetime advisory lease beside the creator DB (v1.188 P3 L2).
+// note: the lease guards the creator DB for the manager lifetime; `release` and `Drop` are its only release paths.
 
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-/// Shared exclusive OS advisory lock held for the process lifetime of a workspace authority.
+/// note: shared exclusive OS advisory lock held for the process lifetime of a workspace authority.
 #[derive(Debug)]
 pub struct WorkspaceAuthorityLease {
     path: PathBuf,
-    /// The held lock file, taken exactly ONCE — by [`Self::release`] (a
+    /// note: the held lock file, taken exactly ONCE — by [`Self::release`] (a
     /// confirmed owner close) or by `Drop` (the last reference going away).
     ///
     /// Behind a mutex because the authority is shared: the owner that
@@ -21,7 +22,7 @@ pub struct WorkspaceAuthorityLease {
 }
 
 impl WorkspaceAuthorityLease {
-    /// Acquire an exclusive lock file adjacent to the canonical creator DB.
+    /// note: acquire an exclusive lock file adjacent to the canonical creator DB.
     ///
     /// # Errors
     ///
@@ -60,7 +61,7 @@ impl WorkspaceAuthorityLease {
         &self.path
     }
 
-    /// Close the held lock file now, releasing the OS lease even while other
+    /// note: close the held lock file now, releasing the OS lease even while other
     /// handles to this lease are still referenced.
     ///
     /// A CONFIRMED owner close is the point where the composition that took
@@ -74,7 +75,7 @@ impl WorkspaceAuthorityLease {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        // Explicit `flock` unlock, then the close: releasing here leaves the
+        // why: explicit `flock` unlock, then the close: releasing here leaves the
         // same state as the dropped-lease path.
         let Some(file) = file else {
             return false;
@@ -85,7 +86,7 @@ impl WorkspaceAuthorityLease {
     }
 }
 
-/// Release the OS lock a held lock file carries.
+/// note: release the OS lock a held lock file carries.
 ///
 /// Closing the file descriptor is what releases the `flock`; the explicit
 /// unlock keeps the released-by-us path identical to the dropped-lease path.
@@ -99,7 +100,7 @@ fn unlock(file: &File) {
 #[cfg(not(unix))]
 fn unlock(_file: &File) {}
 
-/// Classify a non-blocking `flock` failure as a held lease.
+/// note: classify a non-blocking `flock` failure as a held lease.
 ///
 /// A held lease surfaces as `EWOULDBLOCK`/`EAGAIN` on Linux and as `EACCES` on
 /// some BSD paths, so every "busy" errno collapses to ONE platform-independent
@@ -108,7 +109,7 @@ fn unlock(_file: &File) {}
 /// and reported as an error to the caller.
 #[cfg(unix)]
 fn lock_conflict_error(err: nix::errno::Errno) -> io::Error {
-    // `EWOULDBLOCK` is `EAGAIN` on both target platforms, so `EAGAIN` already
+    // why: `EWOULDBLOCK` is `EAGAIN` on both target platforms, so `EAGAIN` already
     // spells both; `EACCES` covers the BSD lock-conflict variant.
     let raw = err as i32;
     if raw == nix::errno::Errno::EAGAIN as i32 || raw == nix::errno::Errno::EACCES as i32 {
@@ -123,7 +124,7 @@ fn lock_conflict_error(err: nix::errno::Errno) -> io::Error {
 
 impl Drop for WorkspaceAuthorityLease {
     fn drop(&mut self) {
-        // The last reference going away is the OTHER release path: the file
+        // why: the last reference going away is the OTHER release path: the file
         // still held here is closed (and its lock released) only when nothing
         // can use the lease any more.
         if let Some(file) = self

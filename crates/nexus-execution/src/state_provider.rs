@@ -1,5 +1,5 @@
 //! Live workspace state for preset expression evaluation (v1.190 P3-T2;
-//! moved from the daemon's `workspace::state_provider`).
+// note: moved from the daemon's `workspace::state_provider`).
 //!
 //! Preset states may branch on `_context.workspace.*`. The wiring here binds
 //! that object to the SAME shared [`WorkspaceSessionManager`] the commit
@@ -13,14 +13,14 @@ use nexus_capability::WorkspaceStateProvider;
 
 use crate::session::WorkspaceSessionManager;
 
-/// Resolves workspace state from the core workspace session authority.
+/// note: resolves workspace state from the core workspace session authority.
 pub struct CoreWorkspaceStateProvider {
     session_manager: Arc<WorkspaceSessionManager>,
     canonical_workspace_root: String,
 }
 
 impl CoreWorkspaceStateProvider {
-    /// Bind the provider to one shared manager and workspace root.
+    /// note: bind the provider to one shared manager and workspace root.
     #[must_use]
     pub const fn new(
         session_manager: Arc<WorkspaceSessionManager>,

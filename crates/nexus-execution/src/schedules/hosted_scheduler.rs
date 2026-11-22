@@ -1,6 +1,6 @@
 //! Hosted scheduler wake/clock task (v1.195 P0-T2).
 //!
-//! The hosted production owner composes exactly ONE retained task for schedule
+// note: the hosted production owner composes exactly ONE retained task for schedule
 //! admission: on every clock tick it drives the injected
 //! [`ScheduleSupervisor`], whose tick admits eligible durable pending
 //! `driven_v1` rows through the coordinator-backed
@@ -37,7 +37,7 @@ use nexus_orchestration::schedule::supervisor::{ScheduleSupervisor, SupervisorEr
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-/// Default cadence for the hosted supervisor clock.
+/// note: default cadence for the hosted supervisor clock.
 ///
 /// One second: this is the admission clock a just-inserted durable pending
 /// schedule waits for, so it must be short enough to read as immediate to a
@@ -45,13 +45,13 @@ use tokio::task::JoinHandle;
 /// decision per eligible row).
 pub const DEFAULT_HOSTED_SCHEDULER_INTERVAL_SECS: u64 = 1;
 
-/// Env var overriding the cadence (seconds). Test/boot knob.
+/// note: env var overriding the cadence (seconds). Test/boot knob.
 pub const ENV_HOSTED_SCHEDULER_INTERVAL_SECS: &str = "NEXUS_HOSTED_SCHEDULER_INTERVAL_SECS";
 
-/// Resolved cadence for the owned supervisor clock.
+/// note: resolved cadence for the owned supervisor clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HostedSchedulerConfig {
-    /// How often to admit eligible durable pending schedules.
+    /// note: how often to admit eligible durable pending schedules.
     pub interval: Duration,
 }
 
@@ -64,13 +64,13 @@ impl Default for HostedSchedulerConfig {
 }
 
 impl HostedSchedulerConfig {
-    /// Build a config with an explicit cadence.
+    /// note: build a config with an explicit cadence.
     #[must_use]
     pub const fn new(interval: Duration) -> Self {
         Self { interval }
     }
 
-    /// Build the config from defaults, allowing an env override.
+    /// note: build the config from defaults, allowing an env override.
     ///
     /// An invalid or zero value silently falls back to the default — the
     /// scheduler must never refuse to start because of a bad knob.
@@ -85,7 +85,7 @@ impl HostedSchedulerConfig {
     }
 }
 
-/// Drive ONE supervisor clock tick.
+/// note: drive ONE supervisor clock tick.
 ///
 /// This is the exact work the spawned loop performs per tick, exposed so the
 /// tick can be driven deterministically (tests, and any future bounded caller)
@@ -105,7 +105,7 @@ pub async fn run_one_tick(supervisor: &ScheduleSupervisor) -> Result<(), Supervi
         .await
 }
 
-/// Spawn the owner's ONE supervisor wake/clock task.
+/// note: spawn the owner's ONE supervisor wake/clock task.
 ///
 /// Returns the task handle the owner must join on close. `start` is signalled
 /// by the owner once recovery has completed; `shutdown` is fired by the
@@ -123,7 +123,7 @@ pub fn spawn(
             interval_secs = config.interval.as_secs(),
             "hosted scheduler task installed; waiting for the owner's post-recovery start"
         );
-        // The owner installs this task before recovery: no admission sweep may
+        // why: the owner installs this task before recovery: no admission sweep may
         // run until recovery has classified the durable runs.
         tokio::select! {
             biased;
@@ -132,10 +132,10 @@ pub fn spawn(
         }
 
         let mut ticker = tokio::time::interval(config.interval);
-        // `Delay` keeps ticks spaced after a long pause (laptop sleep) instead
+        // why: `Delay` keeps ticks spaced after a long pause (laptop sleep) instead
         // of firing a burst of sweeps at the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // `interval`'s first tick is immediate; the clock is measured from the
+        // why: `interval`'s first tick is immediate; the clock is measured from the
         // owner's start signal, so consume it and wait a full cadence.
         ticker.tick().await;
 

@@ -1,19 +1,20 @@
 //! Manifest and metadata bounds (v1.188 P3 L2).
+// note: the validators below enforce every limit declared here.
 
 use crate::session::SessionError;
 
-/// Max relative path length (bytes).
+/// note: max relative path length (bytes).
 pub const MAX_PATH_LEN: usize = 4096;
-/// Max SHA-256 hex length.
+/// note: max SHA-256 hex length.
 pub const MAX_HASH_LEN: usize = 64;
-/// Max base64-encoded body before decode.
-pub const MAX_ENCODED_BODY: usize = 1_398_104; // ceil(1MiB * 4/3)
-/// Max serialized intent entries JSON length.
+/// note: max base64-encoded body before decode.
+pub const MAX_ENCODED_BODY: usize = 1_398_104; // note: ceil(1MiB * 4/3)
+/// note: max serialized intent entries JSON length.
 pub const MAX_ENTRIES_JSON: usize = 512_000;
-/// Max stage/backup basename length.
+/// note: max stage/backup basename length.
 pub const MAX_BASENAME_LEN: usize = 256;
 
-/// Validate a manifest-relative path.
+/// note: validate a manifest-relative path.
 ///
 /// # Errors
 ///
@@ -36,7 +37,7 @@ pub fn validate_relative_path(path: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-/// Validate a lowercase 64-character SHA-256 hex digest.
+/// note: validate a lowercase 64-character SHA-256 hex digest.
 ///
 /// # Errors
 ///
@@ -56,7 +57,7 @@ pub fn validate_hash_hex(hash: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-/// Validate the size of a base64-encoded body before decoding it.
+/// note: validate the size of a base64-encoded body before decoding it.
 ///
 /// # Errors
 ///
@@ -71,7 +72,7 @@ pub fn validate_encoded_body(encoded: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-/// Validate the serialized length of intent metadata entries.
+/// note: validate the serialized length of intent metadata entries.
 ///
 /// # Errors
 ///
@@ -86,7 +87,7 @@ pub fn validate_entries_json_len(json: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-/// Validate a private stage/backup basename.
+/// note: validate a private stage/backup basename.
 ///
 /// # Errors
 ///
@@ -112,7 +113,7 @@ pub fn validate_stage_basename(name: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-/// Validate a durable-intent operation name.
+/// note: validate a durable-intent operation name.
 ///
 /// # Errors
 ///

@@ -34,27 +34,27 @@ use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-/// Default auto-chronology tick cadence: 5 minutes (spec §3).
+/// note: default auto-chronology tick cadence: 5 minutes (spec §3).
 pub const DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS: u64 = 5 * 60;
 
-/// Env var overriding the cadence (minutes). Test-only knob.
+/// note: env var overriding the cadence (minutes). Test-only knob.
 pub const ENV_AUTO_CHRONOLOGY_INTERVAL_MIN: &str = "NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN";
 
-/// Resolved configuration for the auto-chronology task.
+/// note: resolved configuration for the auto-chronology task.
 #[derive(Debug, Clone, Copy)]
 pub struct AutoChronologyConfig {
-    /// How often to scan opted-in Works for finish detection.
+    /// note: how often to scan opted-in Works for finish detection.
     pub interval: Duration,
 }
 
 impl AutoChronologyConfig {
-    /// Build the config from defaults, allowing env overrides for tests.
+    /// note: build the config from defaults, allowing env overrides for tests.
     ///
     /// Invalid env values silently fall back to the default — the task must
     /// be best-effort and must never refuse to start.
     #[must_use]
     pub fn from_env() -> Self {
-        // Spec §3 names the env in minutes (`NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`).
+        // note: spec §3 names the env in minutes (`NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`).
         let env_value = std::env::var(ENV_AUTO_CHRONOLOGY_INTERVAL_MIN)
             .ok()
             .map(|s| s.as_str().to_string());
@@ -65,7 +65,7 @@ impl AutoChronologyConfig {
     }
 }
 
-/// Pure parsing of the `NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN` env override into
+/// note: pure parsing of the `NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN` env override into
 /// an interval in seconds (V1.50 §3).
 ///
 /// Extracted from [`AutoChronologyConfig::from_env`] so tests can exercise the
@@ -87,7 +87,7 @@ pub fn parse_interval_secs(env_value: Option<&str>) -> u64 {
         })
 }
 
-/// Spawn the auto-chronology background task.
+/// note: spawn the auto-chronology background task.
 ///
 /// Returns a `JoinHandle` so callers (boot, integration tests) can observe
 /// completion; in production the handle is dropped and the task lives for the
@@ -109,7 +109,7 @@ pub fn spawn_auto_chronology_tick(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // `Delay` keeps ticks spaced after a long pause (e.g. laptop sleep);
+        // why: `Delay` keeps ticks spaced after a long pause (e.g. laptop sleep);
         // avoids piling advance evaluations onto the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -127,13 +127,13 @@ pub fn spawn_auto_chronology_tick(
     })
 }
 
-/// Perform a single auto-chronology tick. Public for hermetic integration tests
+/// note: perform a single auto-chronology tick. Public for hermetic integration tests
 /// which drive the tick deterministically without running the spawned loop.
 ///
 /// Thin wrapper over [`nexus_orchestration::auto_chronology::run_one_tick`];
 /// the orchestration layer owns scan + finish detection + advance.
 pub async fn run_one_tick(pool: &SqlitePool, workspace_dir: Option<&std::path::Path>) {
-    // Use an empty path sentinel when the caller has no workspace (hermetic
+    // why: use an empty path sentinel when the caller has no workspace (hermetic
     // DB-only tests). The orchestration advance will fail its outline write
     // per-Work and log the error non-fatally; production always passes a real
     // workspace path.

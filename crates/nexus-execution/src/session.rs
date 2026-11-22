@@ -1,6 +1,6 @@
 //! Workspace session management (DF-31 full, V1.56 P0).
 //!
-//! DB-backed session store for `workspace.open` / `workspace.commit` with
+// note: DB-backed session store for `workspace.open` / `workspace.commit` with
 //! file-level optimistic concurrency control (content hash) and changes[] manifest validation.
 //! `SQLite`, survive daemon restarts, and expire per TTL.
 
@@ -16,36 +16,32 @@ use sqlx::SqlitePool;
 use crate::authority::WorkspaceAuthorityLease;
 use tracing;
 
-// ── OCC metrics (V1.58 P0 T6 — R-V156P0-M006) ──────────────────────────────
-//
-// Lightweight process-wide counter for OCC conflicts surfaced at the
+// note: lightweight process-wide counter for OCC conflicts surfaced at the
 // workspace-session layer. Operators can read it via the monitoring endpoint
 // or `tracing` spans. No external metrics pipeline is required (pre-1.0
 // local-first posture; see daemon-runtime.md §observability).
 
-/// Total OCC conflicts detected at the workspace session commit path
+/// note: total OCC conflicts detected at the workspace session commit path
 /// (`AlreadyCommitted` race or content hash mismatch).
 static OCC_CONFLICT_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-/// Increment the OCC conflict counter (V1.58 P0 T6).
+/// note: increment the OCC conflict counter (V1.58 P0 T6).
 fn incr_occ_conflict() {
     OCC_CONFLICT_TOTAL.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Read the current OCC conflict counter (for monitoring / tests).
+/// note: read the current OCC conflict counter (for monitoring / tests).
 #[must_use]
 pub fn occ_conflict_total() -> u64 {
     OCC_CONFLICT_TOTAL.load(Ordering::Relaxed)
 }
 
-// ── Public types ────────────────────────────────────────────────────────────
-
-/// A workspace session identifier.
+/// note: a workspace session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionId(pub String);
 
 impl SessionId {
-    /// Generate a new session ID.
+    /// note: generate a new session ID.
     #[must_use]
     pub fn new() -> Self {
         let id = uuid::Uuid::new_v4().to_string();
@@ -65,29 +61,29 @@ impl Default for SessionId {
     }
 }
 
-/// Typed error for session operations.
+/// note: typed error for session operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionError {
-    /// The requested session ID does not exist in the session store.
+    /// note: the requested session ID does not exist in the session store.
     NotFound(SessionId),
-    /// The session has already been consumed (committed) and is now stale.
+    /// note: the session has already been consumed (committed) and is now stale.
     AlreadyCommitted(SessionId),
-    /// The session has exceeded its time-to-live.
+    /// note: the session has exceeded its time-to-live.
     Expired(SessionId),
-    /// The changes[] manifest does not match the session snapshot (OCC conflict).
+    /// note: the changes[] manifest does not match the session snapshot (OCC conflict).
     HashConflict {
         session_id: SessionId,
         path: String,
         expected_hash: String,
         actual_hash: String,
     },
-    /// Persisted session snapshot JSON is corrupt (v1.188 P3 L2).
+    /// note: persisted session snapshot JSON is corrupt (v1.188 P3 L2).
     CorruptSnapshot(String),
-    /// Manifest shape or bounds violation (v1.188 P3).
+    /// note: manifest shape or bounds violation (v1.188 P3).
     ManifestInvalid(String),
-    /// Unsettled commit intent blocks new writes (v1.188 P3).
+    /// note: unsettled commit intent blocks new writes (v1.188 P3).
     RecoveryConflict(String),
-    /// The exclusive workspace-authority lease beside the DB is held by
+    /// note: the exclusive workspace-authority lease beside the DB is held by
     /// another workspace writer (v1.195 P0-T1).
     ///
     /// Deliberately distinct from [`Self::Io`]: the environment did not fail —
@@ -95,19 +91,19 @@ pub enum SessionError {
     /// must report a retryable writer conflict, not a storage fault. Only
     /// [`WorkspaceSessionManager::new_recoverable`] produces this variant.
     AuthorityBusy,
-    /// A database error occurred during session operations.
+    /// note: A database error occurred during session operations.
     Database(String),
-    /// An I/O error occurred during file operations.
+    /// note: an I/O error occurred during file operations.
     Io(String),
-    /// Internal invariant violation.
+    /// note: internal invariant violation.
     Internal(String),
-    /// V1.58 P0 T2 (R-V156P0-M002): the resolved path escapes the canonical
+    /// note: V1.58 P0 T2 (R-V156P0-M002): the resolved path escapes the canonical
     /// workspace root (symlink traversal or prefix-boundary violation).
     PathEscape {
         path: String,
         workspace_root: String,
     },
-    /// Session belongs to a different canonical workspace root than the active
+    /// note: session belongs to a different canonical workspace root than the active
     /// executor or HTTP authority (v1.188 P5 hotfix).
     ActiveWorkspaceMismatch {
         session_root: String,
@@ -167,7 +163,7 @@ impl fmt::Display for SessionError {
 }
 
 impl SessionError {
-    /// Append `suffix` to this error's message, preserving its variant.
+    /// note: append `suffix` to this error's message, preserving its variant.
     ///
     /// A staging failure must keep its original typed surface — callers and
     /// tests match the SHAPE ([`SessionError::Io`], [`SessionError::ManifestInvalid`])
@@ -184,7 +180,7 @@ impl SessionError {
             Self::ManifestInvalid(message) => Self::ManifestInvalid(join(&message, suffix)),
             Self::Database(message) => Self::Database(join(&message, suffix)),
             Self::CorruptSnapshot(message) => Self::CorruptSnapshot(join(&message, suffix)),
-            // Staging cannot produce an identifier- or root-carrying variant,
+            // why: staging cannot produce an identifier- or root-carrying variant,
             // and none of those fields is a message: leave them untouched
             // rather than rewriting a field that means something else.
             other => other,
@@ -192,18 +188,18 @@ impl SessionError {
     }
 }
 
-/// Contract-aligned change manifest types (v1.188 P3).
+/// note: contract-aligned change manifest types (v1.188 P3).
 pub use nexus_contracts::local::orchestration::{
     WorkspaceChangeEntry as ChangeEntry, WorkspaceChangeOp as ChangeOp,
 };
 
-/// Snapshot of files at session open time, keyed by relative path → SHA-256 hex.
+/// note: snapshot of files at session open time, keyed by relative path → SHA-256 hex.
 #[derive(Debug, Clone, Default)]
 pub struct FileSnapshots {
     pub hashes: std::collections::HashMap<String, String>,
 }
 
-/// Parse persisted snapshot hashes; fail closed on corrupt JSON.
+/// note: parse persisted snapshot hashes; fail closed on corrupt JSON.
 ///
 /// # Errors
 ///
@@ -224,9 +220,7 @@ pub fn parse_snapshot_hashes(
     Ok(map)
 }
 
-// ── Content hashing ─────────────────────────────────────────────────────────
-
-/// Canonicalize a workspace root path (V1.58 P0 T2 — R-V156P0-M002).
+/// note: canonicalize a workspace root path (V1.58 P0 T2 — R-V156P0-M002).
 ///
 /// Resolves symlinks and relative components via `std::fs::canonicalize` so
 /// the prefix-boundary check in [`enforce_path_boundary`] is robust. The
@@ -248,7 +242,7 @@ pub async fn canonicalize_workspace_root(root: &Path) -> Result<PathBuf, Session
         .map_err(|e| SessionError::Io(e.to_string()))
 }
 
-/// Enforce that `target` lies within the canonical `workspace_root` prefix
+/// note: enforce that `target` lies within the canonical `workspace_root` prefix
 /// (V1.58 P0 T2 — R-V156P0-M002).
 ///
 /// Both paths must already be canonical. Returns `Ok(())` if `target` starts
@@ -270,7 +264,7 @@ pub fn enforce_path_boundary(target: &Path, workspace_root: &Path) -> Result<(),
     }
 }
 
-/// Compute SHA-256 content hashes for all regular files under `root`.
+/// note: compute SHA-256 content hashes for all regular files under `root`.
 ///
 /// Walks the directory tree and returns a map of relative path → hex digest.
 /// Symlinks, directories, and non-regular files are skipped. Symlinks are
@@ -293,7 +287,7 @@ pub async fn compute_content_hashes(root: &Path) -> Result<FileSnapshots, Sessio
     Ok(FileSnapshots { hashes })
 }
 
-/// Recursive worker for [`compute_content_hashes`].
+/// note: recursive worker for [`compute_content_hashes`].
 async fn compute_content_hashes_inner(
     dir: &Path,
     root: &Path,
@@ -317,19 +311,19 @@ async fn compute_content_hashes_inner(
             Err(_) => continue,
         };
 
-        // V1.58 P0 T2: reject symlinks explicitly — do not follow them.
+        // why: V1.58 P0 T2: reject symlinks explicitly — do not follow them.
         // `symlink_metadata` does not traverse symlinks, so a symlink shows
         // up as a symlink rather than its target.
         let meta = tokio::fs::symlink_metadata(&path)
             .await
             .map_err(|e| SessionError::Io(e.to_string()))?;
         if meta.file_type().is_symlink() {
-            // Skip symlinks — they could escape the workspace root.
+            // note: skip symlinks — they could escape the workspace root.
             continue;
         }
 
         if meta.is_dir() {
-            // Recurse into subdirectories.
+            // note: recurse into subdirectories.
             Box::pin(compute_content_hashes_inner(&path, root, hashes)).await?;
         } else if meta.is_file() {
             let mut file = tokio::fs::File::open(&path)
@@ -355,9 +349,7 @@ async fn compute_content_hashes_inner(
     Ok(())
 }
 
-// ── Workspace session manager (DB-backed) ───────────────────────────────────
-
-/// The atomic close/admission boundary for one authority's recoverable
+/// note: the atomic close/admission boundary for one authority's recoverable
 /// mutations (durable commits AND recovery passes — both apply or roll back
 /// workspace bytes through this authority).
 ///
@@ -377,14 +369,14 @@ struct CommitAdmissions {
 
 #[derive(Debug, Default)]
 struct CommitAdmissionState {
-    /// Closed by the owning handle's close: no further commit may be admitted.
+    /// note: closed by the owning handle's close: no further commit may be admitted.
     closed: bool,
-    /// Admitted commits whose retained owner task has not finished yet.
+    /// note: admitted commits whose retained owner task has not finished yet.
     active: usize,
 }
 
 impl CommitAdmissions {
-    /// Register one durable commit, or refuse because the boundary is closed.
+    /// note: register one durable commit, or refuse because the boundary is closed.
     fn admit(self: &Arc<Self>) -> Result<CommitAdmission, SessionError> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.closed {
@@ -397,7 +389,7 @@ impl CommitAdmissions {
         })
     }
 
-    /// Close the boundary: every later admission fails closed.
+    /// note: close the boundary: every later admission fails closed.
     fn close(&self) {
         self.state
             .lock()
@@ -405,12 +397,12 @@ impl CommitAdmissions {
             .closed = true;
     }
 
-    /// Wait until every admitted commit has finished.
+    /// note: wait until every admitted commit has finished.
     async fn wait_idle(&self) {
         loop {
             let notified = self.idle.notified();
             tokio::pin!(notified);
-            // Register BEFORE the check: the release path uses
+            // why: register BEFORE the check: the release path uses
             // `notify_waiters`, which wakes only already-registered waiters,
             // so an unregistered check-then-await would sleep through it.
             notified.as_mut().enable();
@@ -428,7 +420,7 @@ impl CommitAdmissions {
     }
 }
 
-/// One admitted recoverable mutation's share of its authority's admission
+/// note: one admitted recoverable mutation's share of its authority's admission
 /// count.
 ///
 /// Held by the RETAINED OWNER TASK for that task's whole lifetime, so a
@@ -455,17 +447,17 @@ impl Drop for CommitAdmission {
     }
 }
 
-/// Recoverable commit configuration (v1.188 P3).
+/// note: recoverable commit configuration (v1.188 P3).
 pub struct RecoverableCommitConfig {
     pub db_path: PathBuf,
     pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
     pub authority_lease: Arc<WorkspaceAuthorityLease>,
-    /// The atomic close/admission boundary for this authority's durable
+    /// note: the atomic close/admission boundary for this authority's durable
     /// commits (see [`CommitAdmissions`]).
     admissions: Arc<CommitAdmissions>,
 }
 
-/// DB-backed workspace session manager.
+/// note: DB-backed workspace session manager.
 ///
 /// Replaces the V1.55 in-memory `WorkspaceSessionManager`.
 /// Sessions are persisted in `SQLite`, survive daemon restart, and expire per TTL.
@@ -503,10 +495,10 @@ impl Clone for WorkspaceSessionManager {
 }
 
 impl WorkspaceSessionManager {
-    /// Default session TTL (5 minutes).
+    /// note: default session TTL (5 minutes).
     pub const DEFAULT_TTL_SECS: i64 = 300;
 
-    /// Create a session manager for tests (validate+consume only).
+    /// note: create a session manager for tests (validate+consume only).
     #[must_use]
     pub const fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
@@ -515,7 +507,7 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Create a session manager with recoverable commit support (v1.188 P3).
+    /// note: create a session manager with recoverable commit support (v1.188 P3).
     ///
     /// # Errors
     ///
@@ -561,7 +553,7 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Admit one recoverable mutation against this authority's close boundary.
+    /// note: admit one recoverable mutation against this authority's close boundary.
     ///
     /// Fails CLOSED once the owning execution handle closed the boundary: a
     /// mutation that would land after a close must never apply beside that
@@ -577,7 +569,7 @@ impl WorkspaceSessionManager {
             .map_or_else(|| Ok(None), |cfg| cfg.admissions.admit().map(Some))
     }
 
-    /// Close the durable-commit admission boundary.
+    /// note: close the durable-commit admission boundary.
     ///
     /// The owner's close calls this BEFORE it releases the workspace
     /// authority: every later admission fails closed, and every mutation
@@ -589,7 +581,7 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Wait until every already-admitted recoverable mutation has finished.
+    /// note: wait until every already-admitted recoverable mutation has finished.
     ///
     /// The owner's close calls this before it releases the workspace
     /// authority, so the released lease can never outlive a mutation that is
@@ -600,7 +592,7 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Open a new workspace session.
+    /// note: open a new workspace session.
     ///
     /// Scans files under the target directory and computes SHA-256 content hashes.
     /// Creates a session row in the database with the snapshot.
@@ -614,10 +606,10 @@ impl WorkspaceSessionManager {
         relative_path: &str,
         existed: bool,
     ) -> Result<SessionId, SessionError> {
-        // Cleanup expired sessions first
+        // note: cleanup expired sessions first
         let _ = db::cleanup_expired_sessions(&self.pool).await;
 
-        // V1.58 P0 T2 (R-V156P0-M002): canonicalize the workspace root so the
+        // why: V1.58 P0 T2 (R-V156P0-M002): canonicalize the workspace root so the
         // prefix-boundary check is robust against symlinks and relative
         // components. Compute the canonical target and enforce it stays
         // within the workspace root before hashing anything.
@@ -628,14 +620,14 @@ impl WorkspaceSessionManager {
         let canonical_target = if target_path.exists() {
             canonicalize_workspace_root(&target_path).await?
         } else {
-            // Path may not exist yet (Create op) — enforce boundary on the
+            // why: path may not exist yet (Create op) — enforce boundary on the
             // logical join against the canonical root.
             target_path.clone()
         };
         enforce_path_boundary(&canonical_target, &canonical_root)?;
         let workspace_root_canonical = canonical_root.to_string_lossy().to_string();
 
-        // Compute content hashes if the path exists (async — V1.58 P0 T4).
+        // note: compute content hashes if the path exists (async — V1.58 P0 T4).
         let file_hashes = if existed && canonical_target.is_dir() {
             compute_content_hashes(&canonical_target).await?
         } else {
@@ -671,7 +663,7 @@ impl WorkspaceSessionManager {
         Ok(session_id)
     }
 
-    /// Validate that a session exists and is usable.
+    /// note: validate that a session exists and is usable.
     ///
     /// # Errors
     ///
@@ -702,7 +694,7 @@ impl WorkspaceSessionManager {
         Ok(row)
     }
 
-    /// Validate a v1.188 P3 contract manifest against the session snapshot.
+    /// note: validate a v1.188 P3 contract manifest against the session snapshot.
     ///
     /// # Errors
     ///
@@ -811,7 +803,7 @@ impl WorkspaceSessionManager {
         Ok(())
     }
 
-    /// Validate a `changes[]` manifest against the session snapshot.
+    /// note: validate a `changes[]` manifest against the session snapshot.
     ///
     /// For each change entry with `op: Modify`, verifies that the file's current
     /// content hash matches the hash stored in the session snapshot. For `Create`,
@@ -829,10 +821,10 @@ impl WorkspaceSessionManager {
     ) -> Result<(), SessionError> {
         let row = self.validate_session(session_id).await?;
 
-        // Parse stored file hashes
+        // note: parse stored file hashes
         let stored_hashes = parse_snapshot_hashes(&row.file_hashes_json)?;
 
-        // V1.58 P0 T2 (QC3 F-003 fix): canonicalize the workspace root ONCE
+        // why: V1.58 P0 T2 (QC3 F-003 fix): canonicalize the workspace root ONCE
         // per `validate_changes_manifest` call. Previously the root was
         // re-canonicalized inside the per-change loop, costing O(N) syscalls
         // for N changes plus an O(depth) traversal each time. The cached
@@ -842,7 +834,7 @@ impl WorkspaceSessionManager {
         for change in changes {
             let file_path = Path::new(workspace_root).join(&change.path);
 
-            // V1.58 P0 T2 (QC2 H-1 fix): the per-file `std::fs::canonicalize`
+            // why: V1.58 P0 T2 (QC2 H-1 fix): the per-file `std::fs::canonicalize`
             // (sync I/O on the async runtime) is replaced by a
             // non-traversing `tokio::fs::symlink_metadata` check. Symlinks
             // are rejected outright — mirrors the `compute_content_hashes_inner`
@@ -857,7 +849,7 @@ impl WorkspaceSessionManager {
                         workspace_root: row.workspace_root.clone(),
                     });
                 }
-                // Defense-in-depth: enforce the logical join of the change
+                // why: defense-in-depth: enforce the logical join of the change
                 // path against the canonical root stays within the boundary.
                 // With symlinks rejected above and the root already canonical,
                 // the joined path cannot escape the workspace.
@@ -866,7 +858,7 @@ impl WorkspaceSessionManager {
 
             match change.op {
                 ChangeOp::Modify => {
-                    // File must exist in the snapshot
+                    // why: file must exist in the snapshot
                     let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| {
                         SessionError::HashConflict {
                             session_id: session_id.clone(),
@@ -876,7 +868,7 @@ impl WorkspaceSessionManager {
                         }
                     })?;
 
-                    // Verify the current file hash matches the stored hash
+                    // note: verify the current file hash matches the stored hash
                     if !file_path.exists() {
                         return Err(SessionError::HashConflict {
                             session_id: session_id.clone(),
@@ -886,7 +878,7 @@ impl WorkspaceSessionManager {
                         });
                     }
 
-                    // V1.58 P0 T2 (QC2 H-2 fix): re-validate with
+                    // why: V1.58 P0 T2 (QC2 H-2 fix): re-validate with
                     // `symlink_metadata` IMMEDIATELY before opening the file
                     // for hashing. This closes the TOCTOU window between the
                     // boundary check above and `tokio::fs::File::open` inside
@@ -914,7 +906,7 @@ impl WorkspaceSessionManager {
                         });
                     }
 
-                    // Legacy manifest field (pre-P3): expected_hash on contract type
+                    // note: legacy manifest field (pre-P3): expected_hash on contract type
                     let provided = change.expected_hash.as_deref().unwrap_or("");
                     if provided != *stored_hash {
                         return Err(SessionError::HashConflict {
@@ -926,7 +918,7 @@ impl WorkspaceSessionManager {
                     }
                 }
                 ChangeOp::Create => {
-                    // File must NOT exist in the snapshot
+                    // why: file must NOT exist in the snapshot
                     if stored_hashes.contains_key(&change.path) {
                         return Err(SessionError::HashConflict {
                             session_id: session_id.clone(),
@@ -937,7 +929,7 @@ impl WorkspaceSessionManager {
                     }
                 }
                 ChangeOp::Delete => {
-                    // File must exist in the snapshot
+                    // why: file must exist in the snapshot
                     if !stored_hashes.contains_key(&change.path) {
                         return Err(SessionError::HashConflict {
                             session_id: session_id.clone(),
@@ -953,7 +945,7 @@ impl WorkspaceSessionManager {
         Ok(())
     }
 
-    /// Consume a session — mark it as committed.
+    /// note: consume a session — mark it as committed.
     ///
     /// Atomically validates and consumes the session. Two concurrent calls
     /// with the same session ID cannot both succeed — `SQLite`'s UPDATE WHERE
@@ -1001,7 +993,7 @@ impl WorkspaceSessionManager {
             }
             db::ConsumeResult::NotFound => Err(SessionError::NotFound(session_id.clone())),
             db::ConsumeResult::AlreadyConsumed => {
-                // V1.58 P0 T5/T6: OCC conflict — another writer committed this
+                // why: V1.58 P0 T5/T6: OCC conflict — another writer committed this
                 // session between our validate and consume. The atomic UPDATE
                 // in db::consume_session is the CAS; this branch is the
                 // single-consumer race outcome. Record it for observability.
@@ -1017,7 +1009,7 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Commit a workspace session — validate the changes manifest and consume
+    /// note: commit a workspace session — validate the changes manifest and consume
     /// the session in one atomic step (V1.58 P0 T5 — R-V156P0-M005).
     ///
     /// This closes the TOCTOU window between [`validate_changes_manifest`]
@@ -1081,7 +1073,7 @@ impl WorkspaceSessionManager {
         self.consume_session(session_id).await
     }
 
-    /// Durable commit returning revision metadata (v1.188 P3).
+    /// note: durable commit returning revision metadata (v1.188 P3).
     ///
     /// Delegates to [`Self::commit_session_durable_owned`], so this entrance
     /// runs on the SAME retained owner task as the handle/executor route and
@@ -1115,7 +1107,7 @@ impl WorkspaceSessionManager {
         .await
     }
 
-    /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    /// note: durable commit on an `Arc` manager; retains ownership through caller cancellation.
     ///
     /// Every recoverable commit entrance routes here — the handle/executor
     /// route, [`Self::commit_session_durable`] and the recoverable branch of
@@ -1147,7 +1139,7 @@ impl WorkspaceSessionManager {
         .await
     }
 
-    /// Run startup recovery for all unsettled intents (call before publishing executor).
+    /// note: run startup recovery for all unsettled intents (call before publishing executor).
     ///
     /// Runs on the retained owner task of
     /// `session_commit::startup_recovery_owned`: this authority's admission is
@@ -1170,7 +1162,7 @@ impl WorkspaceSessionManager {
         .await
     }
 
-    /// Run startup recovery for the unsettled work of ONE workspace root.
+    /// note: run startup recovery for the unsettled work of ONE workspace root.
     ///
     /// An authority admitted for a single canonical root must not settle, roll
     /// back or fail on another root's unsettled intents — their files and
@@ -1198,14 +1190,14 @@ impl WorkspaceSessionManager {
         .await
     }
 
-    /// Get the underlying database pool.
+    /// note: get the underlying database pool.
     #[must_use]
     pub fn pool(&self) -> Arc<SqlitePool> {
         Arc::clone(&self.pool)
     }
 }
 
-/// Compute SHA-256 hash for a single file.
+/// note: compute SHA-256 hash for a single file.
 ///
 /// Uses `tokio::fs` so the function is safe to call from async context
 /// (V1.58 P0 T4 — R-V156P0-M004).
@@ -1230,8 +1222,6 @@ pub(crate) async fn compute_single_file_hash(path: &Path) -> Result<String, Sess
     }
     Ok(hex::encode(sha.finalize()))
 }
-
-// ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1262,7 +1252,7 @@ mod tests {
         assert_eq!(result.hashes.len(), 1);
         assert!(result.hashes.contains_key("test.txt"));
 
-        // Verify SHA-256: "hello world" → b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+        // note: verify SHA-256: "hello world" → b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
         let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
         assert_eq!(result.hashes.get("test.txt").unwrap(), expected);
     }
@@ -1286,7 +1276,7 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), b"content A").expect("write");
         let result_a = compute_content_hashes(dir.path()).await.expect("compute");
 
-        // Rewrite with different content
+        // note: rewrite with different content
         std::fs::write(dir.path().join("a.txt"), b"content B").expect("write");
         let result_b = compute_content_hashes(dir.path()).await.expect("compute");
 
@@ -1297,15 +1287,13 @@ mod tests {
         );
     }
 
-    // ── V1.58 P0 T2 (R-V156P0-M002): symlink rejection + boundary ─────────
-
     #[tokio::test]
     #[cfg(unix)]
     async fn compute_content_hashes_skips_symlinks() {
         use std::os::unix::fs::symlink;
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("real.txt"), b"real").expect("write");
-        // Create a symlink inside the workspace that points to an outside file.
+        // note: create a symlink inside the workspace that points to an outside file.
         let outside = tempfile::tempdir().expect("tempdir");
         std::fs::write(outside.path().join("secret.txt"), b"secret").expect("write");
         symlink(
@@ -1315,7 +1303,7 @@ mod tests {
         .expect("symlink");
 
         let result = compute_content_hashes(dir.path()).await.expect("compute");
-        // real.txt is hashed; escape.txt (symlink) is skipped.
+        // note: real.txt is hashed; escape.txt (symlink) is skipped.
         assert!(result.hashes.contains_key("real.txt"));
         assert!(
             !result.hashes.contains_key("escape.txt"),

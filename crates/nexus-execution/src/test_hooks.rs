@@ -1,6 +1,6 @@
 //! Test-only seams for the workspace commit authority (v1.188 P3).
 //!
-//! Compiled ONLY for this package's own tests or with the `test-hooks`
+// why: compiled ONLY for this package's own tests or with the `test-hooks`
 //! feature; the production build contains none of this. Each seam injects a
 //! failure/race into a specific commit boundary so the recovery proofs are
 //! deterministic instead of timing-based.
@@ -11,10 +11,10 @@
 
 use std::sync::{Arc, Mutex};
 
-/// Crash-barrier labels understood by [`crash_point_is`].
+/// note: crash-barrier labels understood by [`crash_point_is`].
 static CRASH_POINT: Mutex<Option<&'static str>> = Mutex::new(None);
 
-/// Set the next commit crash point (`None` disables simulation).
+/// note: set the next commit crash point (`None` disables simulation).
 ///
 /// # Panics
 ///
@@ -23,7 +23,7 @@ pub fn set_crash_point(point: Option<&'static str>) {
     *CRASH_POINT.lock().expect("crash point lock") = point;
 }
 
-/// Clear any armed crash point (the retained owner does this at spawn).
+/// note: clear any armed crash point (the retained owner does this at spawn).
 pub fn clear_crash_point() {
     set_crash_point(None);
 }
@@ -32,11 +32,11 @@ pub(crate) fn crash_point_is(point: &str) -> bool {
     *CRASH_POINT.lock().expect("crash point lock") == Some(point)
 }
 
-/// Hook fired immediately after a delete captures the target name and before
+/// note: hook fired immediately after a delete captures the target name and before
 /// the delete is finalized.
 static AFTER_DELETE_CAPTURE: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 
-/// Install (or clear) the after-delete-capture hook.
+/// note: install (or clear) the after-delete-capture hook.
 ///
 /// # Panics
 ///
@@ -52,7 +52,7 @@ pub(crate) fn run_after_delete_capture_hook() {
     }
 }
 
-/// Rendezvous at the commit owner's admission boundary, scoped to ONE session.
+/// note: rendezvous at the commit owner's admission boundary, scoped to ONE session.
 ///
 /// Lets a test prove caller-cancellation safety deterministically: the owner
 /// signals `admitted` once it holds the claim, the test cancels the awaiting
@@ -62,18 +62,18 @@ pub(crate) fn run_after_delete_capture_hook() {
 /// parks another test's commit (unit tests run in parallel).
 #[derive(Debug)]
 pub struct OwnerGate {
-    /// The session whose owner participates in this rendezvous.
+    /// note: the session whose owner participates in this rendezvous.
     pub session_id: String,
-    /// Signalled when the owner has been admitted (claim held).
+    /// note: signalled when the owner has been admitted (claim held).
     pub admitted: Arc<tokio::sync::Notify>,
-    /// The owner waits for this before continuing past admission.
+    /// note: the owner waits for this before continuing past admission.
     pub proceed: Arc<tokio::sync::Notify>,
-    /// Signalled after the owner task settles.
+    /// note: signalled after the owner task settles.
     pub settled: Arc<tokio::sync::Notify>,
 }
 
 impl OwnerGate {
-    /// A gate governing `session_id`.
+    /// note: A gate governing `session_id`.
     #[must_use]
     pub fn for_session(session_id: impl Into<String>) -> Self {
         Self {
@@ -87,7 +87,7 @@ impl OwnerGate {
 
 static OWNER_GATE: Mutex<Option<Arc<OwnerGate>>> = Mutex::new(None);
 
-/// Install (or clear) the owner gate.
+/// note: install (or clear) the owner gate.
 ///
 /// # Panics
 ///
@@ -122,7 +122,7 @@ pub(crate) fn owner_gate_settled(session_id: &str) {
     }
 }
 
-/// Rendezvous at a recovery pass's settlement boundary.
+/// note: rendezvous at a recovery pass's settlement boundary.
 ///
 /// The commit seams above are keyed by session id; a recovery pass has no
 /// single session — it settles every unsettled intent of its scope — so this
@@ -134,16 +134,16 @@ pub(crate) fn owner_gate_settled(session_id: &str) {
 /// races.
 #[derive(Debug, Default)]
 pub struct RecoveryGate {
-    /// Signalled once the pass is admitted and about to settle an intent.
+    /// note: signalled once the pass is admitted and about to settle an intent.
     pub admitted: Arc<tokio::sync::Notify>,
-    /// The pass waits for this before touching that intent.
+    /// note: the pass waits for this before touching that intent.
     pub proceed: Arc<tokio::sync::Notify>,
-    /// Signalled after the retained pass task settles.
+    /// note: signalled after the retained pass task settles.
     pub settled: Arc<tokio::sync::Notify>,
 }
 
 impl RecoveryGate {
-    /// An armed gate for one recovery pass.
+    /// note: an armed gate for one recovery pass.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -152,7 +152,7 @@ impl RecoveryGate {
 
 static RECOVERY_GATE: Mutex<Option<Arc<RecoveryGate>>> = Mutex::new(None);
 
-/// Install (or clear) the recovery gate.
+/// note: install (or clear) the recovery gate.
 ///
 /// # Panics
 ///
@@ -182,7 +182,7 @@ pub(crate) fn recovery_gate_settled() {
     }
 }
 
-/// Rendezvous at a compute run's receipt-begin boundary (v1.207 P3).
+/// note: rendezvous at a compute run's receipt-begin boundary (v1.207 P3).
 ///
 /// Keyed by operation id, so an armed gate parks only the callers the arming
 /// test targets; every other test's run (its own id) is untouched even though
@@ -195,14 +195,14 @@ pub(crate) fn recovery_gate_settled() {
 /// nothing proceeds until every caller has arrived.
 #[derive(Debug)]
 pub struct ComputeBeginGate {
-    /// The operation id whose callers participate in this rendezvous.
+    /// note: the operation id whose callers participate in this rendezvous.
     pub operation_id: String,
-    /// Arrival barrier: the compute callers plus the arming test.
+    /// note: arrival barrier: the compute callers plus the arming test.
     pub barrier: Arc<tokio::sync::Barrier>,
 }
 
 impl ComputeBeginGate {
-    /// An armed gate for one operation id and `participants` total waiters
+    /// note: an armed gate for one operation id and `participants` total waiters
     /// (the callers plus the test).
     #[must_use]
     pub fn new(operation_id: impl Into<String>, participants: usize) -> Self {
@@ -215,7 +215,7 @@ impl ComputeBeginGate {
 
 static COMPUTE_BEGIN_GATE: Mutex<Option<Arc<ComputeBeginGate>>> = Mutex::new(None);
 
-/// Install (or clear) the compute begin gate.
+/// note: install (or clear) the compute begin gate.
 ///
 /// # Panics
 ///
@@ -239,7 +239,7 @@ pub async fn compute_begin_gate_wait(operation_id: &str) {
     }
 }
 
-/// Rendezvous at a compute run's in-flight registration boundary (v1.207 P3
+/// note: rendezvous at a compute run's in-flight registration boundary (v1.207 P3
 /// wave 4).
 ///
 /// The acquired owner signals `registered` once it holds the effect AND is
@@ -252,16 +252,16 @@ pub async fn compute_begin_gate_wait(operation_id: &str) {
 /// and no races.
 #[derive(Debug)]
 pub struct ComputeInFlightGate {
-    /// The operation id whose owner participates in this rendezvous.
+    /// note: the operation id whose owner participates in this rendezvous.
     pub operation_id: String,
-    /// Signalled once the owner has registered and is about to run the effect.
+    /// note: signalled once the owner has registered and is about to run the effect.
     pub registered: Arc<tokio::sync::Notify>,
-    /// The owner waits for this before continuing past registration.
+    /// note: the owner waits for this before continuing past registration.
     pub proceed: Arc<tokio::sync::Notify>,
 }
 
 impl ComputeInFlightGate {
-    /// An armed gate for one operation id.
+    /// note: an armed gate for one operation id.
     #[must_use]
     pub fn new(operation_id: impl Into<String>) -> Self {
         Self {
@@ -274,7 +274,7 @@ impl ComputeInFlightGate {
 
 static COMPUTE_IN_FLIGHT_GATE: Mutex<Option<Arc<ComputeInFlightGate>>> = Mutex::new(None);
 
-/// Install (or clear) the compute in-flight gate.
+/// note: install (or clear) the compute in-flight gate.
 ///
 /// # Panics
 ///
@@ -301,7 +301,7 @@ pub async fn compute_in_flight_gate_wait(operation_id: &str) {
     }
 }
 
-/// Rendezvous at the peer-control lane-resolution boundary (v1.244 fix round).
+/// note: rendezvous at the peer-control lane-resolution boundary (v1.244 fix round).
 ///
 /// Lets a test prove a lane replacement cannot straddle an in-flight
 /// `peer_control`: the call signals `admitted` before it resolves the
@@ -310,14 +310,14 @@ pub async fn compute_in_flight_gate_wait(operation_id: &str) {
 /// back and compared. No sleeps, no races.
 #[derive(Debug, Default)]
 pub struct PeerControlGate {
-    /// Signalled when a `peer_control` call is parked at the seam.
+    /// note: signalled when a `peer_control` call is parked at the seam.
     pub admitted: Arc<tokio::sync::Notify>,
-    /// The call waits for this before resolving the installed lane.
+    /// note: the call waits for this before resolving the installed lane.
     pub proceed: Arc<tokio::sync::Notify>,
 }
 
 impl PeerControlGate {
-    /// An armed gate for one parked `peer_control` call.
+    /// note: an armed gate for one parked `peer_control` call.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -326,7 +326,7 @@ impl PeerControlGate {
 
 static PEER_CONTROL_GATE: Mutex<Option<Arc<PeerControlGate>>> = Mutex::new(None);
 
-/// Install (or clear) the peer-control gate.
+/// note: install (or clear) the peer-control gate.
 ///
 /// # Panics
 ///

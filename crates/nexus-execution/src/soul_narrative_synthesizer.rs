@@ -1,6 +1,6 @@
 //! ACP-backed `SoulNarrativeSynthesizer` adapter (V1.81).
 //!
-//! v1.193 P2-T2 moved this production adapter out of the deleted daemon
+// note: v1.193 P2-T2 moved this production adapter out of the deleted daemon
 //! composition unchanged (technical contracts §4: core optional
 //! `execution`). It remains the ONE production owner; do not replace it
 //! with a fake fallback.
@@ -23,19 +23,19 @@ use nexus_creator_memory::MemoryError;
 use serde_json::json;
 use std::sync::Arc;
 
-/// ACP-backed synthesizer that dispatches through the capability registry.
+/// note: ACP-backed synthesizer that dispatches through the capability registry.
 pub struct AcpSoulNarrativeSynthesizer {
     registry: Arc<CapabilityRegistry>,
 }
 
 impl AcpSoulNarrativeSynthesizer {
-    /// Construct from a shared capability registry.
+    /// note: construct from a shared capability registry.
     #[must_use]
     pub const fn new(registry: Arc<CapabilityRegistry>) -> Self {
         Self { registry }
     }
 
-    /// Build the synthesis prompt from the capped input signal.
+    /// note: build the synthesis prompt from the capped input signal.
     ///
     /// `subject` is `"creator"` or `"character"`; for a Character bearer the
     /// prompt reflects that Character's own identity (never the owner
@@ -50,7 +50,7 @@ impl AcpSoulNarrativeSynthesizer {
 
         let mut prompt = String::new();
 
-        // Header. The subject-specific strings are selected by an exhaustive
+        // why: header. The subject-specific strings are selected by an exhaustive
         // branch so the Creator arm is byte-for-byte identical to the legacy
         // prompt (capitalized "Creator-SOUL", "as a writer", "this creator is
         // becoming"), and the Character arm never references the Creator.
@@ -79,7 +79,6 @@ impl AcpSoulNarrativeSynthesizer {
             "Do NOT produce a generic summary. Be specific and grounded in the data below.\n\n",
         );
 
-        // Stats
         let _ = write!(
             prompt,
             "Total fragments: {}\nDistinct keywords: {}\n",
@@ -93,7 +92,6 @@ impl AcpSoulNarrativeSynthesizer {
         }
         prompt.push_str("\n\n");
 
-        // Top keywords
         if !input.top_keywords.is_empty() {
             prompt.push_str("Top keywords (by frequency):\n");
             for (kw, count) in &input.top_keywords {
@@ -102,7 +100,6 @@ impl AcpSoulNarrativeSynthesizer {
             prompt.push('\n');
         }
 
-        // Temporal buckets
         if !input.temporal_buckets.is_empty() {
             prompt.push_str("Temporal evolution:\n");
             for bucket in &input.temporal_buckets {
@@ -117,7 +114,6 @@ impl AcpSoulNarrativeSynthesizer {
             prompt.push('\n');
         }
 
-        // Recent summaries
         if !input.recent_summaries.is_empty() {
             prompt.push_str("Recent fragment summaries:\n");
             for (i, summary) in input.recent_summaries.iter().enumerate() {
@@ -131,7 +127,7 @@ impl AcpSoulNarrativeSynthesizer {
         prompt
     }
 
-    /// Deterministic ACP worker session key for a reflection.
+    /// note: deterministic ACP worker session key for a reflection.
     ///
     /// `character_id` is `Some` for a Character bearer, `None` for the Creator
     /// arm. A Character reflection is namespaced as
@@ -156,7 +152,7 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         input: SoulNarrativeSynthesisInput,
         session_scope: Option<&str>,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
-        // Worker routing identity: the owner Creator whose ACP worker is
+        // why: worker routing identity: the owner Creator whose ACP worker is
         // registered. For a Character bearer this is `owner_creator_id`, NOT
         // the `chr_…` storage id (which would resolve to no worker or the
         // wrong worker). The Character identity is preserved as trusted
@@ -174,7 +170,7 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
 
         let prompt = Self::build_prompt(&input, subject);
 
-        // Namespace the ACP worker session by bearer identity (and binding
+        // why: namespace the ACP worker session by bearer identity (and binding
         // scope, where local) so a Character/binding reflection never resumes
         // another bearer's or scope's conversation. The Creator arm keeps the
         // legacy global `soul_narrative_reflect` key (its `_creator_id` is
@@ -246,13 +242,13 @@ mod tests {
         assert!(prompt.contains("Early (Apr-May)"));
         assert!(prompt.contains("Explored the moral dilemma"));
         assert!(prompt.contains("Developed a secondary character"));
-        // The prompt must include structure guidance.
+        // why: the prompt must include structure guidance.
         assert!(prompt.contains("theme keywords"));
         assert!(prompt.contains("shift or development"));
         assert!(prompt.contains("forward-looking"));
     }
 
-    /// The Creator arm prompt is byte-for-byte identical to the legacy
+    /// note: the Creator arm prompt is byte-for-byte identical to the legacy
     /// prompt (capitalized "Creator-SOUL", "as a writer", "this creator is
     /// becoming").
     #[test]
@@ -270,12 +266,12 @@ mod tests {
             "Now, write a reflective Creator-SOUL narrative (2-4 paragraphs) \
              synthesizing who this creator is becoming."
         ));
-        // No Character wording leaks into the Creator arm.
+        // note: no Character wording leaks into the Creator arm.
         assert!(!creator.contains("Character-SOUL"));
         assert!(!creator.contains("as a character"));
     }
 
-    /// The Character arm prompt is fully Character-subject-aware and carries
+    /// note: the Character arm prompt is fully Character-subject-aware and carries
     /// NO Creator-SOUL or "this creator" wording anywhere.
     #[test]
     fn character_prompt_has_no_creator_wording() {
@@ -294,7 +290,7 @@ mod tests {
             "Now, write a reflective Character-SOUL narrative (2-4 paragraphs) \
              synthesizing who this character is becoming."
         ));
-        // The Character instruction contains no Creator-SOUL or "this creator"
+        // why: the Character instruction contains no Creator-SOUL or "this creator"
         // wording (acceptance criterion).
         assert!(
             !character.contains("Creator-SOUL"),
@@ -307,7 +303,7 @@ mod tests {
         assert!(!character.contains("as a writer"));
     }
 
-    /// A Character bearer's synthesis is routed by its owner Creator id
+    /// note: A Character bearer's synthesis is routed by its owner Creator id
     /// (worker lookup) while the Character storage identity is preserved and
     /// never substituted into the worker routing slot.
     #[test]
@@ -325,7 +321,7 @@ mod tests {
         );
         assert_eq!(ident.character_id, Some(chr));
 
-        // Creator arm routes by itself and has no Character identity.
+        // note: creator arm routes by itself and has no Character identity.
         let bearer = MemoryBearerRef::Creator(owner);
         let ident = bearer.identity();
         assert_eq!(ident.creator_id, owner);
@@ -339,7 +335,7 @@ mod session_id_tests {
 
     #[test]
     fn session_id_is_namespaced_by_bearer_and_binding() {
-        // Creator arm keeps the legacy global key.
+        // note: creator arm keeps the legacy global key.
         assert_eq!(
             AcpSoulNarrativeSynthesizer::session_id(None, None),
             "soul_narrative_reflect"
@@ -350,18 +346,18 @@ mod session_id_tests {
             "Creator scope is not a binding namespace"
         );
 
-        // Character bearer is namespaced by character id.
+        // note: character bearer is namespaced by character id.
         assert_eq!(
             AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), None),
             "soul_narrative_reflect:chrA"
         );
-        // Binding-local reflection adds the binding scope.
+        // note: binding-local reflection adds the binding scope.
         assert_eq!(
             AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), Some("bind1")),
             "soul_narrative_reflect:chrA:bind1"
         );
 
-        // Distinctive both across bearers and across scopes.
+        // note: distinctive both across bearers and across scopes.
         assert_ne!(
             AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), None),
             AcpSoulNarrativeSynthesizer::session_id(Some("chrB"), None)
