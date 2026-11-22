@@ -1,5 +1,5 @@
 /**
- * World KB canvas conflict hosts composition (V1.74 A10 split).
+ * note: World KB canvas conflict hosts composition (V1.74 A10 split).
  *
  * Extracted from `world-kb-canvas.tsx` so the orchestrator facade stays under
  * the 250-line cap. Composes the entity, promotion, and relationship conflict

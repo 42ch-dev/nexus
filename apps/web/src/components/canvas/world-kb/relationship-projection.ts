@@ -1,5 +1,5 @@
 /**
- * World KB relationship edge projection (V1.74 A6).
+ * note: World KB relationship edge projection (V1.74 A6).
  *
  * Pure functions that convert the canonical `WorldKbRelationshipProjection[]`
  * into React Flow edges plus human-readable labels. Kept separate from the
@@ -62,7 +62,7 @@ export function deriveRelationshipEdges(
       source: rel.source,
     };
     const label = relationshipEdgeLabel(rel);
-    // V1.76: base stroke color by relation kind; the confidence band then
+    // note: V1.76: base stroke color by relation kind; the confidence band then
     // modulates stroke-width + opacity (PM-locked stepped bands). Suggested
     // (needs_review) edges render dashed regardless of band.
     const strokeColor = rel.relation_type === 'custom'
@@ -110,7 +110,7 @@ export function filterRelationshipEdgesByConfidence(
   if (threshold <= 0) return edges;
   return edges.filter((e) => {
     const data = e.data as WorldKbEdgeData | undefined;
-    // Suggested edges always show; manual (no confidence) always show.
+    // invariant: Suggested edges always show; manual (no confidence) always show.
     if (data?.needsReview) return true;
     if (data?.confidence == null) return true;
     return data.confidence >= threshold;

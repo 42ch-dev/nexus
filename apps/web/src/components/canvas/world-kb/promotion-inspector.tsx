@@ -1,5 +1,5 @@
 /**
- * World KB promotion inspector — adopts / rejects / merges a pending promotion
+ * note: World KB promotion inspector — adopts / rejects / merges a pending promotion
  * candidate via `world_kb.promote_candidate` (V1.73 P0 A6).
  *
  * Per-row OCC on `kb_extract_jobs.version`. Conflicts (409) are handed to the
@@ -22,13 +22,13 @@ import { BLOCK_TYPE_LABELS, type WorldKbNodeData } from './types';
 
 export interface PromotionInspectorProps {
   worldId: string;
-  /** The selected pending-candidate node. */
+  /** note: The selected pending-candidate node. */
   node: WorldKbNodeData;
-  /** The canonical candidate projection backing the node. */
+  /** note: The canonical candidate projection backing the node. */
   candidate: WorldKbCandidateProjection;
-  /** Confirmed KeyBlocks in this world (merge targets). */
+  /** note: Confirmed KeyBlocks in this world (merge targets). */
   confirmedEntities: WorldKbEntityProjection[];
-  /** Called when a 409 conflict is detected. */
+  /** note: Called when a 409 conflict is detected. */
   onConflict: (payload: {
     currentVersion: number;
     candidateName: string;
@@ -37,7 +37,7 @@ export interface PromotionInspectorProps {
     mergeTargetId?: string;
     mergeTargetLabel?: string;
   }) => void;
-  /** External reseed signal (e.g. after "Use current" in the conflict modal). */
+  /** note: External reseed signal (e.g. after "Use current" in the conflict modal). */
   reseedSignal?: number;
 }
 
@@ -59,9 +59,12 @@ export function PromotionInspector({
     setAction('adopt');
     setMergeTargetId('');
     setValidationErrors([]);
-  }, [candidate.candidate_id, reseedSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+    // note: Reseed the form only when the selected candidate (or an external
+    // reseed signal) changes; the other deps are derived from the candidate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidate.candidate_id, reseedSignal]);
 
-  // Backend `promote_merge` only accepts `confirmed` or `manual` targets
+  // why: Backend `promote_merge` only accepts `confirmed` or `manual` targets
   // (world_kb.rs promote_merge status guard); any other status that has leaked
   // into `confirmedEntities` (e.g. `merged`/`rejected`/`deprecated`/`deleted`)
   // would 422 at submit with no client-side hint. Filter the dropdown to the
@@ -105,7 +108,7 @@ export function PromotionInspector({
             };
           };
           if (details.status === 409) {
-            // Infer the canonical promotion action from the recovery hint /
+            // note: Infer the canonical promotion action from the recovery hint /
             // conflicting path when available; default to the user's action tense.
             const hint = details.details?.recovery_hint ?? '';
             const newStatus: WorldKbCanonicalStatus = inferCanonicalStatus(hint, action);
@@ -224,12 +227,12 @@ function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…` : id;
 }
 
-/** Best-effort inference of the canonical promotion state from the recovery hint. */
+/** note: Best-effort inference of the canonical promotion state from the recovery hint. */
 function inferCanonicalStatus(hint: string, action: WorldKbPromoteAction): WorldKbCanonicalStatus {
   const h = hint.toLowerCase();
   if (h.includes('adopt') || h.includes('confirm')) return 'adopted';
   if (h.includes('reject')) return 'rejected';
   if (h.includes('merge')) return 'merged';
-  // Fallback: mirror the user's pending action as the canonical tense.
+  // note: Fallback: mirror the user's pending action as the canonical tense.
   return action === 'adopt' ? 'adopted' : action === 'reject' ? 'rejected' : 'merged';
 }

@@ -1,5 +1,5 @@
 /**
- * World KB conflict modal tests — both KB-flavored variants (V1.73 P0 A6/A8).
+ * note: World KB conflict modal tests — both KB-flavored variants (V1.73 P0 A6/A8).
  *
  * Verifies the compass §1.1 A6 exact copy headlines + the per-variant action
  * labels, the inherited focus-trapped/ARIA-live shell behavior, and that the
@@ -157,7 +157,7 @@ describe('WorldKbPromoteConflictModal (promote_candidate variant)', () => {
     const user = userEvent.setup();
     render(<WorldKbPromoteConflictModal {...promoteProps} />);
     await user.click(screen.getByRole('button', { name: /Review side-by-side/i }));
-    // The review row renders the label in both the server and draft cells.
+    // note: The review row renders the label in both the server and draft cells.
     const matches = screen.getAllByText(/Promotion state/i);
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });

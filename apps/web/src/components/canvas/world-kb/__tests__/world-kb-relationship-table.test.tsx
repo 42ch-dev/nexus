@@ -1,5 +1,5 @@
 /**
- * World KB relationship table tests (V1.74 A6).
+ * note: World KB relationship table tests (V1.74 A6).
  *
  * Covers: render rows, sortable columns, selection (click + keyboard),
  * "New Relationship" button, delete confirmation, symmetric rows skipped.
@@ -58,7 +58,7 @@ describe('WorldKbRelationshipTable', () => {
         onCreate={vi.fn()}
       />,
     );
-    expect(screen.getAllByRole('row').length).toBe(2); // header + 1 stored
+    expect(screen.getAllByRole('row').length).toBe(2); // note: header + 1 stored
   });
 
   it('sorts by type ascending/descending', async () => {
@@ -77,9 +77,9 @@ describe('WorldKbRelationshipTable', () => {
     );
     const typeHeader = screen.getByRole('button', { name: /Type/i });
     const rows = () => screen.getAllByRole('row');
-    // default asc by type → Allied With first
+    // note: default asc by type → Allied With first
     expect(rows()[1]?.textContent).toContain('Allied With');
-    await user.click(typeHeader); // desc
+    await user.click(typeHeader); // note: desc
     expect(rows()[1]?.textContent).toContain('References');
   });
 

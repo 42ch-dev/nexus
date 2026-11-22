@@ -1,5 +1,5 @@
 /**
- * V1.76 γ confidence banding + suggested-edge rendering tests.
+ * note: V1.76 γ confidence banding + suggested-edge rendering tests.
  */
 import { describe, it, expect } from 'vitest';
 
@@ -113,7 +113,7 @@ describe('deriveRelationshipEdges (V1.76)', () => {
   });
 });
 
-// Regression for qc3-W3: the threshold filter compares the slider value
+// why: qc3-W3: the threshold filter compares the slider value
 // directly against `0.0`–`1.0` confidence (slider range 0.0–1.0, step 0.05).
 // An earlier revision stored the slider as 0–100 and compared it against 0–1
 // confidence, hiding every confirmed edge at the first non-zero step.
@@ -130,7 +130,7 @@ describe('filterRelationshipEdgesByConfidence (qc3-W3 regression)', () => {
   });
 
   it('hides a confirmed edge whose confidence is below the threshold', () => {
-    // confidence 0.5 vs threshold 0.7 → hidden (this is the qc3-W3 bug: under
+    // why: confidence 0.5 vs threshold 0.7 → hidden (this is the qc3-W3 bug: under
     // the old 0–100 slider, threshold 0.7 was stored as 70 and 0.5 >= 70 was
     // always false, so the edge vanished; with the 0.0–1.0 slider it correctly
     // hides only because 0.5 < 0.7).
@@ -154,7 +154,7 @@ describe('filterRelationshipEdgesByConfidence (qc3-W3 regression)', () => {
   });
 
   it('a threshold of 0.05 no longer wipes out a 0.5-confidence edge', () => {
-    // Direct regression: under the buggy 0–100 slider, step "0.05" (label) was
+    // why: direct regression: under the buggy 0–100 slider, step "0.05" (label) was
     // stored as 5, and confidence 0.5 >= 5 was false → edge hidden. With the
     // normalized 0.0–1.0 slider, 0.5 >= 0.05 is true → edge kept.
     const filtered = filterRelationshipEdgesByConfidence(edgesFor(0.5), 0.05);

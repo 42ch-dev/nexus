@@ -1,5 +1,5 @@
 /**
- * World KB relationship anchor picker (V1.74 A6 split).
+ * note: World KB relationship anchor picker (V1.74 A6 split).
  *
  * Multi-checkbox picker for source-anchor grounding, extracted from the
  * relationship inspector to keep each module under the 250-line cap.
