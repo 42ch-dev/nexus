@@ -1689,7 +1689,6 @@ impl ScheduleSupervisor {
     }
 }
 
-
 impl ScheduleSupervisor {
     /// note: Resume any Running schedules as Paused (daemon restart recovery).
     ///
@@ -1831,7 +1830,6 @@ impl ScheduleSupervisor {
         Ok(reconciled)
     }
 
-
     /// note: Pause a running (or pending) schedule.
     ///
     /// **R1+R4 — Consistent pause**: Updates the DB status to `paused` AND
@@ -1958,7 +1956,6 @@ impl ScheduleSupervisor {
             Some((status, None)) => ScheduleCancelDisposition::NotCancelled(status),
         })
     }
-
 
     /// note: Resume a paused schedule.
     ///
@@ -2545,7 +2542,6 @@ mod tests_t9 {
         );
     }
 
-
     #[tokio::test]
     async fn different_creators_serial_schedules_run_concurrently() {
         let sup = test_supervisor_with_db().await;
@@ -2592,7 +2588,6 @@ mod tests_t9 {
         );
     }
 
-
     #[tokio::test]
     async fn double_tick_does_not_duplicate_admission() {
         let sup = test_supervisor_with_db().await;
@@ -2612,8 +2607,6 @@ mod tests_t9 {
             "schedule should still be running after double tick"
         );
     }
-
-
 
     #[tokio::test]
     async fn r1_pause_running_schedule_updates_cache() {
@@ -2666,7 +2659,6 @@ mod tests_t9 {
         assert!(!sup.pause_schedule("R4-S2").await.unwrap());
         assert!(!sup.pause_schedule("R4-S3").await.unwrap());
     }
-
 
     #[tokio::test]
     async fn r2_duplicate_schedule_rejected() {
@@ -2745,7 +2737,6 @@ mod tests_t9 {
         sup.insert_pending(schedule_b).await.unwrap();
     }
 
-
     #[tokio::test]
     async fn r3_resume_paused_goes_directly_to_running_when_admitted() {
         let sup = test_supervisor_with_db().await;
@@ -2791,7 +2782,6 @@ mod tests_t9 {
             sup.status_of("R3-C1").await.unwrap(),
             ScheduleStatus::Running
         );
-
 
         insert_schedule(&sup, "R3-C2", "pending").await;
         sup.tick().await.unwrap();
@@ -2839,7 +2829,6 @@ mod tests_t9 {
             ScheduleStatus::Running
         );
     }
-
 
     #[tokio::test]
     async fn r5_delete_schedule_cancels_active_session() {
@@ -2994,8 +2983,6 @@ mod tests_t9 {
         );
     }
 
-
-
     #[tokio::test]
     async fn r1_cancel_pause_failure_does_not_block_cancel() {
         // note: This test verifies the R1 fix at the supervisor level: pause_schedule()
@@ -3074,7 +3061,6 @@ mod tests_t9 {
             "paused schedule should be cancellable"
         );
     }
-
 
     #[tokio::test]
     async fn r2_resume_toctou_race_returns_current_status() {

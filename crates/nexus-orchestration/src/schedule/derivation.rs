@@ -1161,7 +1161,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn user_edit_rejects_replace() {
         let (pool, _db) = fresh_pool().await;
@@ -1216,7 +1215,6 @@ mod tests {
             .unwrap();
         assert_eq!(record.version, CoreContextVersion(1));
     }
-
 
     /// note: Settle a schedule exactly as the supervisor does: the stored status is
     /// the lowercase `snake_case` name, and the three terminal values are the
@@ -1331,7 +1329,6 @@ mod tests {
         assert_eq!(merged["c"], 4);
     }
 
-
     /// note: Helper: name `session_id` as `schedule_id`'s owned run.
     ///
     /// `creator_schedules.current_session_id` is a real FK, so the session row
@@ -1416,7 +1413,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn r6_concurrent_apply_same_schedule_produces_sequential_versions() {
         let (pool, _db) = fresh_pool().await;
@@ -1472,7 +1468,6 @@ mod tests {
         assert_eq!(v_a, CoreContextVersion(1));
         assert_eq!(v_b, CoreContextVersion(1));
     }
-
 
     #[tokio::test]
     async fn llm_summarize_writes_version_with_correct_derivation_kind() {
@@ -1600,7 +1595,6 @@ mod tests {
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
         assert_eq!(snapshot.version, CoreContextVersion(3));
     }
-
 
     #[tokio::test]
     async fn cleanup_guard_removes_entry_and_allows_new_guard() {

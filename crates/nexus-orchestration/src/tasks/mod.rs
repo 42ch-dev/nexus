@@ -15,7 +15,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;
 
-
 /// note: Errors from Task execution.
 #[derive(Error, Debug)]
 pub enum TaskExecError {
@@ -28,7 +27,6 @@ pub enum TaskExecError {
     #[error("invalid input for task: {0}")]
     InvalidInput(String),
 }
-
 
 /// note: Resolves a capability by name, runs it, and stores the result.
 ///
@@ -101,7 +99,6 @@ impl Task for CapabilityTask {
     }
 }
 
-
 /// note: Pure function evaluation over Context.
 ///
 /// Reads `_rule` from context, evaluates a simple condition, and returns
@@ -146,7 +143,6 @@ impl Task for RuleCheckTask {
     }
 }
 
-
 /// note: Returns `NextAction::WaitForInput`. CLI `advance` resumes.
 pub struct ManualWaitTask;
 
@@ -166,7 +162,6 @@ impl Task for ManualWaitTask {
         ))
     }
 }
-
 
 /// note: Launches a child Session over a named inner graph (§3.4 graph-of-graphs).
 ///
@@ -446,7 +441,6 @@ impl Task for InnerGraphTask {
     }
 }
 
-
 /// note: Evaluates an LLM judge exit condition by invoking the `judge.llm`
 /// capability through the [`CapabilityRegistry`].
 ///
@@ -576,7 +570,6 @@ impl LlmJudgeTask {
         }
     }
 }
-
 
 /// Extract World KB candidates by invoking the `nexus.llm.extract` capability
 /// through the [`CapabilityRegistry`].
@@ -719,7 +712,6 @@ impl LlmExtractTask {
         .await)
     }
 }
-
 
 /// note: Millisecond clock source for bounded-join deadlines (DR-06).
 ///
@@ -1211,8 +1203,7 @@ impl StateCompositeTask {
                     Self::record_converge_arrival(context, target, &self.id)?;
                     return Ok(NextAction::GoTo(target.clone()));
                 }
-                Ok(false) => {
-                }
+                Ok(false) => {}
                 Err(e) => {
                     // note: M-006: propagate expression eval failures, don't swallow.
                     tracing::error!(
@@ -2154,9 +2145,7 @@ impl Task for StateCompositeTask {
                     }
                 }
             }
-            Some(ExitWhen::GraphComplete) => {
-                NextAction::Continue
-            }
+            Some(ExitWhen::GraphComplete) => NextAction::Continue,
             Some(ExitWhen::Timer { .. }) => {
                 // note: Timer not yet implemented for V1.4; treat as manual wait.
                 context.set(resume_key, true)?;
@@ -2193,7 +2182,6 @@ impl Task for StateCompositeTask {
         Ok(TaskResult::new(response, final_action))
     }
 }
-
 
 /// note: A task for a node within an inner graph.
 ///
@@ -2384,7 +2372,6 @@ impl Task for InnerGraphNodeTask {
         )))
     }
 }
-
 
 /// note: A task that sends a prompt to an ACP agent through the Host plane (A1).
 ///
@@ -2591,7 +2578,6 @@ impl Task for AcpPromptTask {
     }
 }
 
-
 /// note: Static Handlebars registry — avoids per-call allocation overhead.
 ///
 /// Uses `no_escape` mode to preserve plain-text fidelity in prompts
@@ -2750,7 +2736,6 @@ fn insert_nested(
     }
     current.insert(leaf.to_string(), value);
 }
-
 
 /// note: Type alias for the dispatch slot used by `HostToolCallTask`.
 /// Wraps an `Arc<Mutex<Option<Arc<dyn DaemonToolDispatch>>>>` for interior
@@ -2938,7 +2923,6 @@ impl Task for HostToolCallTask {
         ))
     }
 }
-
 
 /// note: Parse an ISO-8601 duration string (e.g. `"PT6H"`, `"PT1H30M"`) into a
 /// `chrono::Duration`.
@@ -3230,7 +3214,6 @@ mod tests {
         assert!(err.contains("not found"), "error: {err}");
     }
 
-
     /// note: Mock worker that returns a fixed JSON candidates payload for
     /// `nexus.llm.extract`. Used by the `LlmExtractTask` hermetic tests.
     struct MockExtractProvider {
@@ -3492,7 +3475,6 @@ mod tests {
         assert_eq!(payload["block_type"], "faction");
     }
 
-
     /// note: Mock worker provider whose response is controlled at runtime.
     struct ControlledMockProvider {
         response: std::sync::Mutex<String>,
@@ -3700,7 +3682,6 @@ mod tests {
         );
     }
 
-
     /// note: Proves that `with_resolved_template` loads actual file content from
     /// the embedded `novel-writing` preset bundle for `prompts/gathering-exit.md`.
     #[test]
@@ -3788,7 +3769,6 @@ mod tests {
             panic!("expected LlmJudge exit_when");
         }
     }
-
 
     #[test]
     fn parse_duration_hours() {
@@ -4132,7 +4112,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn core_context_template_repeated_renders_are_deterministic() {
         let payload = serde_json::json!({ "world": { "title": "Nexus" } });
@@ -4194,7 +4173,6 @@ mod tests {
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
-
 
     #[tokio::test]
     async fn sec_v131_01_state_composite_injects_trusted_identity_into_capability() {
@@ -4334,7 +4312,6 @@ mod tests {
             "untrusted _session_id must be stripped when trusted context is absent: {input}"
         );
     }
-
 
     /// note: Proves that `render_value_templates` renders string placeholders
     /// in a JSON object against the context payload.
@@ -4476,7 +4453,6 @@ mod tests {
         assert_eq!(cap_input["_session_id"], "sess_test");
     }
 
-
     fn make_composite_with_next(next: Option<NextTarget>) -> StateCompositeTask {
         StateCompositeTask {
             id: "test_judge".to_string(),
@@ -4555,7 +4531,6 @@ mod tests {
             NextAction::Continue
         ));
     }
-
 
     fn make_labeled_edges(labels: &[(&str, &str)]) -> Vec<LabeledNext> {
         labels
@@ -4701,7 +4676,6 @@ mod tests {
         assert!(err.contains("no label matched"), "error: {err}");
     }
 
-
     #[tokio::test]
     async fn merge_wait_all_default_enforced_when_merge_absent() {
         // note: A state with 2 incoming labeled edges but NO explicit `merge:`
@@ -4758,7 +4732,6 @@ mod tests {
             result.next_action
         );
     }
-
 
     /// note: Build a state with `Branches` next for expression routing.
     fn make_branches_task(
@@ -4973,7 +4946,6 @@ mod tests {
             result.next_action
         );
     }
-
 
     #[tokio::test]
     async fn workspace_no_conflict_continues() {

@@ -159,7 +159,6 @@ fn clear_step_effect_marker(root: &graph_flow::Session) {
     root.context.remove(EXTERNAL_EFFECT_MARKER);
 }
 
-
 // note: Session identity/status/summary types are owned by `nexus-session-storage`;
 // engine internals import them privately and consumers name the owner directly.
 use nexus_session_storage::{SessionId, SessionStatus, SessionSummary};
@@ -262,7 +261,6 @@ impl Default for Context {
     }
 }
 
-
 /// note: Anchor captured by [`EngineSharedState::run_step_internal`] for a failed
 /// step attempt.
 ///
@@ -349,7 +347,6 @@ impl FailureSettlementSummary {
         }
     }
 }
-
 
 /// note: Errors produced by the orchestration engine.
 #[derive(Error, Debug)]
@@ -475,7 +472,6 @@ impl From<StorageError> for EngineError {
         }
     }
 }
-
 
 /// note: Adapter layer over any graph-flow-like execution backend.
 ///
@@ -608,7 +604,6 @@ pub trait OrchestrationEngine: Send + Sync {
         creator_id: &str,
     ) -> Result<SessionId, EngineError>;
 }
-
 
 /// note: Shared state extracted from `GraphFlowEngine` for reuse by `EngineProxy` (WS3 R1).
 ///
@@ -3178,7 +3173,6 @@ fn build_step_state(
     }
 }
 
-
 /// note: Lightweight proxy engine that wraps `EngineSharedState`.
 ///
 /// Used by `start_session_with_preset` when we need `Arc<dyn OrchestrationEngine>`
@@ -3390,7 +3384,6 @@ impl OrchestrationEngine for EngineProxy {
         Err(EngineError::NoGraphLoaded)
     }
 }
-
 
 /// note: Concrete [`OrchestrationEngine`] backed by [`graph_flow::FlowRunner`].
 ///
@@ -5930,7 +5923,6 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::too_many_lines)] // note: deterministic race/settlement scenarios keep setup+assertions linear
@@ -6219,7 +6211,6 @@ mod tests {
         assert_eq!(seeded_session_id, session_id.0);
     }
 
-
     #[tokio::test]
     async fn r6_recovered_session_has_runner_no_graph_loaded_fix() {
         // note: Before the R6 fix, recover_sessions() only added summaries to the
@@ -6390,7 +6381,6 @@ mod tests {
             "terminal session should not have a reconstructed runner"
         );
     }
-
 
     /// note: Deterministic mark-step/cancel race (Finding 1): the step loop wins
     /// `mark_step_in_flight` immediately before the cancel fence commits.
@@ -6782,7 +6772,6 @@ mod tests {
         );
     }
 
-
     /// note: Deterministic faulted-shutdown proof (Finding 3): the first cancel
     /// yields `Interrupted` (cleanup unconfirmed), a subsequent cancel
     /// re-enters the cancel path as the owner-scoped cleanup retry, reaps
@@ -7001,7 +6990,6 @@ mod tests {
         assert_eq!(executor.calls(), 2, "both retries invoked finalize_run");
     }
 
-
     /// note: Deterministic continue-after-cancel-fence proof (Finding 1): once the
     /// durable cancel intent is committed, a matching Continue must be
     /// refused with a state conflict — the wait is never consumed, the
@@ -7140,7 +7128,6 @@ mod tests {
             "the wait must not be consumed by the refused continue"
         );
     }
-
 
     /// note: Deterministic Continue-wins-before-cancel proof (Finding 1, round 3):
     /// the run is waiting at revision R; Continue consumes the wait and
@@ -7422,7 +7409,6 @@ mod tests {
             "the terminal checkpoint must carry the Continue winner's context"
         );
     }
-
 
     /// note: Deterministic nested child/grandchild cancellation proof (Finding 2,
     /// round 3): a root with child A and grandchild A:child:* — the cancel
@@ -8269,7 +8255,6 @@ mod tests {
         drop(cancels);
     }
 
-
     /// note: Restart-shaped nested root/child/grandchild cancellation proof
     /// (Important 1, round 4): a root with child A and grandchild A:child:*
     /// is persisted, then a FRESH engine (restart) recovers ONLY the root
@@ -8659,7 +8644,6 @@ mod tests {
         drop(cancels);
     }
 
-
     /// note: Deterministic interruption-write CAS failure proof (Finding 2): the
     /// `Interrupted` commit loses a revision CAS to a competing transition;
     /// the bounded retry reloads and re-commits against the new revision.
@@ -8758,7 +8742,6 @@ mod tests {
             "in-memory summary must reflect the durable interrupted outcome"
         );
     }
-
 
     /// note: Deterministic child-wait cancellation proof (Finding 3): a child
     /// parked at a human wait (cached Host session, no active operation)
@@ -9245,7 +9228,6 @@ mod tests {
         );
         assert_eq!(record.status, SessionStatus::Running);
     }
-
 
     /// note: Descriptor of the recovery root a persisted child must match.
     fn recovery_root_descriptor() -> RunDescriptorV1 {

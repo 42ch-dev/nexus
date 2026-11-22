@@ -89,7 +89,6 @@ impl CronFireSummary {
     }
 }
 
-
 #[derive(Debug, Deserialize)]
 struct CronConfig {
     tz: String,
@@ -512,7 +511,6 @@ fn gate_reason(row: &nexus_local_db::works::WorkCronRow) -> Option<&'static str>
     None
 }
 
-
 /// note: In-process memoisation cache for parsed cron `Schedule`s. See the section
 /// doc above for the invalidation contract. Process-global because the daemon
 /// calls `evaluate_cron_fires` once per tick with no per-daemon state threaded
@@ -717,7 +715,6 @@ mod tests {
         )
     }
 
-
     /// note: R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1 S-001):
     /// `skipped_idempotency_check_error` must be a separate bucket so
     /// `total_evaluated()` reflects the work the sweep actually performed.
@@ -747,7 +744,6 @@ mod tests {
         assert_eq!(default.skipped_idempotency_check_error, 0);
         assert_eq!(default.total_evaluated(), 0);
     }
-
 
     #[test]
     fn cron_fires_every_minute_always_matches() {
@@ -1042,7 +1038,6 @@ mod tests {
         ));
     }
 
-
     /// note: R-V150P1CRONBW-03 (qc3 W-001): the cached path must parse the cron
     /// expression exactly once per `(work_id, role, cron_string)` triple; a
     /// content change on the same key, or a brand-new key, must trigger a
@@ -1154,7 +1149,6 @@ mod tests {
         assert_eq!(normalize_cron_fields("0 0 3 * * *"), "0 0 3 * * *");
     }
 
-
     use nexus_local_db::works::WorkCronRow;
 
     fn cron_row(intake: &str, lock: Option<&str>, completion: Option<&str>) -> WorkCronRow {
@@ -1197,7 +1191,6 @@ mod tests {
             Some("completion_locked")
         );
     }
-
 
     #[test]
     fn role_preset_maps_all_three_roles() {
