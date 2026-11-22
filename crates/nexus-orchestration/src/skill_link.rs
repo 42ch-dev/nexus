@@ -280,16 +280,7 @@ mod tests {
         )
         .expect("should succeed");
 
-        // On Unix this should recreate; the target dir is home_skills/correct-skill
-        // but we passed home_skills as the base, so it looks for home_skills/target-skill
-        // which doesn't exist — so it returns Ok(false). Let me fix this test.
-        // Actually, let's just test with a simpler approach: create a symlink manually
-        // pointing to wrong-skill, then call ensure with home_skills pointing to a dir
-        // that has target-skill as a subdir.
-
-        // Better approach: use the same home_skills_dir but ensure "target-skill" exists
-        // there and the initial symlink points to something else.
-        let _ = result; // We'll redo the test properly below.
+        let _ = result;
 
         if link_path.is_symlink() || link_path.exists() {
             let _ = fs::remove_file(&link_path);
