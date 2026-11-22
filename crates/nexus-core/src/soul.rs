@@ -985,8 +985,7 @@ impl CoreCharacterMind {
     }
 }
 
-impl CoreService {
-    /// note: wire-mapping failure carrier (same retained code the daemon emitted).
+/// note: wire-mapping failure carrier (same retained code the daemon emitted).
 fn wire_err(err: impl std::fmt::Display) -> CoreError {
     internal_err("character_tom_wire_invalid", err)
 }
