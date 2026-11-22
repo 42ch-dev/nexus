@@ -2,6 +2,7 @@
 //! and select a Creator and initialize only the chosen workspace (no
 //! provider/engine starts); invalid paths and foreign workspaces are denied;
 //! and a stale old selection cannot mutate.
+// note: the doc above names the home-control contract these cases pin.
 
 use nexus_cloud_sync::outbox::Outbox;
 use nexus_contracts::{
@@ -12,14 +13,14 @@ use nexus_core::{CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreSe
 use sqlx::Row;
 use tempfile::TempDir;
 
-#[allow(clippy::unused_async)] // the test helper mirrors the async service signature
+#[allow(clippy::unused_async)] // why: the test helper mirrors the async service signature
 async fn home() -> (TempDir, CoreHomeService) {
     let tmp = tempfile::tempdir().unwrap();
     let svc = CoreHomeService::open(tmp.path().to_path_buf()).expect("open home");
     (tmp, svc)
 }
 
-/// Materialize an operational workspace registration (creative root +
+/// note: Materialize an operational workspace registration (creative root +
 /// `meta.json`) the way the daemon create path lays it out — this is the
 /// on-disk existence the selection path validates; the guarded state-DB
 /// initialization itself is under test.
@@ -50,7 +51,7 @@ async fn register_named(home: &CoreHomeService, name: &str) -> String {
     assert!(detail.is_active);
     detail.creator_id
 }
-/// One mutation probe through the service — the observable "principal still
+/// note: One mutation probe through the service — the observable "principal still
 /// works" contract used by the stale-selection regressions.
 async fn probe_changes(
     core: &CoreService,
@@ -66,17 +67,17 @@ async fn probe_changes(
     .await
 }
 
-/// AC-P2-T0: `uninitialized_home_can_register_and_select_without_engine`
+/// note: AC-P2-T0: `uninitialized_home_can_register_and_select_without_engine`
 #[tokio::test]
 async fn uninitialized_home_can_register_and_select_without_engine() {
     let (tmp, svc) = home().await;
     let user_home = tmp.path().to_path_buf();
     let nexus_home = user_home.join(".nexus42");
 
-    // Nothing exists yet: registration happens with no selected workspace.
+    // note: Nothing exists yet: registration happens with no selected workspace.
     assert!(!nexus_home.exists());
 
-    // Register — minted persistent identity becomes the active creator.
+    // note: Register — minted persistent identity becomes the active creator.
     let detail = svc
         .register_creator(CoreRegisterCreatorRequest {
             display_name: Some("P2T0 Author".parse().unwrap()),
@@ -89,19 +90,19 @@ async fn uninitialized_home_can_register_and_select_without_engine() {
     assert!(detail.is_active);
     assert_eq!(detail.display_name.as_deref(), Some("P2T0 Author"));
 
-    // Stores after registration: global identity DB + config.toml only.
+    // note: Stores after registration: global identity DB + config.toml only.
     assert!(nexus_home.join("state.db").exists());
     let config = std::fs::read_to_string(nexus_home.join("config.toml")).unwrap();
     assert!(config.contains(&format!("active_creator_id = \"{creator_id}\"")));
-    // No workspace state DB was initialized by registration.
+    // note: No workspace state DB was initialized by registration.
     let creators_root = nexus_home.join("creators");
     assert!(!creators_root.exists());
 
-    // Discovery is empty before any workspace exists.
+    // note: Discovery is empty before any workspace exists.
     let listed = svc.list_workspaces().await.expect("list");
     assert!(listed.items.is_empty());
 
-    // Configuration reflects the selected creator, pre-workspace.
+    // note: Configuration reflects the selected creator, pre-workspace.
     let config = svc.configuration().await.expect("configuration");
     assert_eq!(
         config.active_creator_id.as_deref(),
@@ -109,7 +110,7 @@ async fn uninitialized_home_can_register_and_select_without_engine() {
     );
     assert_eq!(config.active_workspace_slug.as_deref(), Some("default"));
 
-    // Select the chosen workspace: initialize only it.
+    // note: Select the chosen workspace: initialize only it.
     materialize_operational_dir(&user_home, &creator_id, "default");
     let selected = svc
         .select_workspace(SetActiveWorkspaceRequest {
@@ -121,7 +122,7 @@ async fn uninitialized_home_can_register_and_select_without_engine() {
     assert_eq!(selected.creator_id, creator_id);
     assert_eq!(selected.workspace_slug, "default");
 
-    // Only the chosen workspace was initialized: guarded state DB + creators row.
+    // note: Only the chosen workspace was initialized: guarded state DB + creators row.
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator_id, "default");
     assert!(db_path.exists());
     let ro = nexus_local_db::open_pool_read_only(&db_path).await.unwrap();
@@ -137,23 +138,23 @@ async fn uninitialized_home_can_register_and_select_without_engine() {
     assert_eq!(creators, 1);
     assert_eq!(creator_rows.0, creator_id);
 
-    // No provider/engine started: the engine lock file for this DB is absent.
+    // note: No provider/engine started: the engine lock file for this DB is absent.
     let engine_lock =
         nexus_home_layout::workspace_state_db_path(&user_home, &creator_id, "default");
     let engine_lock = std::path::PathBuf::from(format!("{}.engine.lock", engine_lock.display()));
     assert!(!engine_lock.exists());
 
-    // Selection persisted per creator.
+    // note: Selection persisted per creator.
     let config = svc.configuration().await.expect("configuration after");
     assert_eq!(config.active_workspace_slug.as_deref(), Some("default"));
-    let _ = engine_lock; // silence unused on non-test cfg paths
+    let _ = engine_lock; // note: silence unused on non-test cfg paths
 }
 
 #[tokio::test]
 async fn register_display_name_is_validated_and_collision_checked() {
     let (tmp, svc) = home().await;
 
-    // Empty and over-long names are rejected at the front door.
+    // note: Empty and over-long names are rejected at the front door.
     let request = CoreRegisterCreatorRequest {
         display_name: Some("   ".parse().unwrap()),
         platform_creator_id: None,
@@ -173,7 +174,7 @@ async fn register_display_name_is_validated_and_collision_checked() {
         Err(CoreError::InvalidInput { field, .. }) if field == "display_name"
     ));
 
-    // Convergence: registering the same display name twice converges on the
+    // note: Convergence: registering the same display name twice converges on the
     // same persistent identity instead of minting a second one.
     let first = register_named(&svc, "Duplicate Author").await;
     let second = register_named(&svc, "Duplicate Author").await;
@@ -188,7 +189,7 @@ async fn select_denies_invalid_path_and_foreign_workspace() {
     let creator_a = register_named(&svc, "Owner Author").await;
     materialize_operational_dir(&user_home, &creator_a, "mine");
 
-    // Path traversal / non-segment slugs are invalid input.
+    // note: Path traversal / non-segment slugs are invalid input.
     for slug in ["a/b", "..", "."] {
         let request = SetActiveWorkspaceRequest {
             creator_id: Some(creator_a.clone()),
@@ -203,7 +204,7 @@ async fn select_denies_invalid_path_and_foreign_workspace() {
         );
     }
 
-    // A workspace registered to another creator is foreign: denied even
+    // note: A workspace registered to another creator is foreign: denied even
     // though a directory exists on disk.
     let creator_b = register_named(&svc, "Second Author").await;
     let foreign = SetActiveWorkspaceRequest {
@@ -217,7 +218,7 @@ async fn select_denies_invalid_path_and_foreign_workspace() {
         other => panic!("foreign workspace must be NotFound, got {other:?}"),
     }
 
-    // A nonexistent workspace stays NotFound (retained wording).
+    // note: A nonexistent workspace stays NotFound (retained wording).
     let missing = SetActiveWorkspaceRequest {
         creator_id: Some(creator_a.clone()),
         workspace_slug: "nonexistent_ws".to_string(),
@@ -243,7 +244,7 @@ async fn stale_old_selection_cannot_mutate() {
     .await
     .expect("select default");
 
-    // A CoreService opened against creator A's selection holds a working principal.
+    // note: A CoreService opened against creator A's selection holds a working principal.
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
@@ -254,11 +255,11 @@ async fn stale_old_selection_cannot_mutate() {
     let principal = core.active_principal().await.expect("principal");
     assert!(core.active_principal().await.is_ok());
 
-    // A successful identity change through the home entry invalidates the
+    // note: A successful identity change through the home entry invalidates the
     // old selection on disk.
     let _creator_b = register_named(&svc, "Second Author").await;
 
-    // The stale principal can no longer mutate (disk re-read rejects it).
+    // note: The stale principal can no longer mutate (disk re-read rejects it).
     let result = core
         .changes(
             &principal,
@@ -275,7 +276,7 @@ async fn stale_old_selection_cannot_mutate() {
     core.close().await.expect("close");
 }
 
-#[allow(clippy::too_many_lines)] // one end-to-end home-service scenario
+#[allow(clippy::too_many_lines)] // why: one end-to-end home-service scenario
 #[tokio::test]
 async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     let (tmp, svc) = home().await;
@@ -298,11 +299,11 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     .expect("open core");
     let principal = core.active_principal().await.expect("principal");
 
-    // Empty outbox reads as an empty entry list (not a faked zero-count).
+    // note: Empty outbox reads as an empty entry list (not a faked zero-count).
     let status = core.outbox_status(&principal).await.expect("status");
     assert!(status.entries.is_empty());
 
-    // Seed two stuck entries directly (fixture-level, mirroring a real
+    // note: Seed two stuck entries directly (fixture-level, mirroring a real
     // conflicted/failed queue left behind by an interrupted push).
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "default");
     let pool = nexus_cloud_sync::pool::OutboxPool::new(
@@ -328,7 +329,7 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     .await
     .unwrap();
 
-    // Status surfaces the stuck entries with their delivery state and error.
+    // note: Status surfaces the stuck entries with their delivery state and error.
     let status = core.outbox_status(&principal).await.expect("status");
     assert_eq!(status.entries.len(), 2);
     let conflicted = status
@@ -342,7 +343,7 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
         Some("conflict: version_mismatch")
     );
 
-    // Retry re-queues a stuck entry for delivery (ready, no retry time).
+    // note: Retry re-queues a stuck entry for delivery (ready, no retry time).
     core.resolve_outbox(
         &principal,
         CoreOutboxResolveRequest {
@@ -361,7 +362,7 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     assert_eq!(row.get::<String, _>(0), "ready");
     assert!(row.get::<Option<String>, _>(1).is_none());
 
-    // Discard drops a stuck entry from the send queue (permanent, no retry).
+    // note: Discard drops a stuck entry from the send queue (permanent, no retry).
     core.resolve_outbox(
         &principal,
         CoreOutboxResolveRequest {
@@ -381,11 +382,11 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     assert!(row.get::<Option<String>, _>(1).is_none());
     assert!(row.get::<String, _>(2).contains("discarded"));
 
-    // Discarded entries never re-enter replay (dropped from the send queue).
+    // note: Discarded entries never re-enter replay (dropped from the send queue).
     let pending = outbox.replay().await.expect("replay");
     assert!(pending.iter().all(|e| e.outbox_entry_id != "obx_failed"));
 
-    // Non-stuck entries are not resolvable: the now-`ready` entry is denied.
+    // note: Non-stuck entries are not resolvable: the now-`ready` entry is denied.
     core.resolve_outbox(
         &principal,
         CoreOutboxResolveRequest {
@@ -397,12 +398,12 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     .expect_err("ready entry must not be resolvable");
     core.close().await.expect("close");
 
-    // The daemon-side query shape used by the CLI status stays available.
+    // note: The daemon-side query shape used by the CLI status stays available.
     let query = ListWorkspacesQuery::default();
     assert!(query.creator_id.is_none());
 }
 
-/// Concurrent double-registration of the same display name: the loser of the
+/// note: Concurrent double-registration of the same display name: the loser of the
 /// mint race (TOCTOU unique violation) must surface the byte-exact collision
 /// error — never an internal storage failure — and the store must end with
 /// exactly one persistent identity for that name.
@@ -410,7 +411,7 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
 async fn concurrent_same_name_registration_surfaces_collision_not_internal_failure() {
     for _round in 0..3 {
         let (tmp, svc) = home().await;
-        // Warm the guarded init first: a single-threaded registration
+        // note: Warm the guarded init first: a single-threaded registration
         // migrates the global store, so the storm below races only the
         // display-name mint (the TOCTOU branch under test), not the
         // fresh-database migration bookkeeping.
@@ -443,7 +444,7 @@ async fn concurrent_same_name_registration_surfaces_collision_not_internal_failu
                         "byte-exact collision surface required, got: {reason}"
                     );
                 }
-                // Guarded-initialization contention is a pre-existing,
+                // note: Guarded-initialization contention is a pre-existing,
                 // unrelated outcome of racing inits.
                 Err(CoreError::OwnerBusy | CoreError::Busy) => {}
                 Err(other) => panic!(
@@ -452,7 +453,7 @@ async fn concurrent_same_name_registration_surfaces_collision_not_internal_failu
             }
         }
 
-        // Exactly one persistent identity won the race.
+        // note: Exactly one persistent identity won the race.
         assert_eq!(
             winner_ids.len(),
             1,
@@ -477,7 +478,7 @@ async fn concurrent_same_name_registration_surfaces_collision_not_internal_failu
     }
 }
 
-/// Failure-atomic selection: when the chosen workspace's guarded
+/// note: Failure-atomic selection: when the chosen workspace's guarded
 /// initialization fails, the previous selection stays committed and a
 /// principal minted under it keeps working.
 #[tokio::test]
@@ -493,7 +494,7 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
     .await
     .expect("select default");
 
-    // A principal minted under the old selection.
+    // note: A principal minted under the old selection.
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
@@ -503,7 +504,7 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
     .expect("open core");
     let principal = core.active_principal().await.expect("principal");
 
-    // The candidate workspace exists on disk but its state-DB path is a
+    // note: The candidate workspace exists on disk but its state-DB path is a
     // directory, so the guarded initialization cannot open it.
     materialize_operational_dir(&user_home, &creator, "broken");
     let broken_db = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "broken");
@@ -521,12 +522,12 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
         "broken initialization must fail as a mapped storage error"
     );
 
-    // The previous selection is still committed ...
+    // note: The previous selection is still committed ...
     let config = svc.configuration().await.expect("configuration");
     assert_eq!(config.active_creator_id.as_deref(), Some(creator.as_str()));
     assert_eq!(config.active_workspace_slug.as_deref(), Some("default"));
 
-    // ... and the old principal still mutates (no AuthRequired).
+    // note: ... and the old principal still mutates (no AuthRequired).
     let result = core
         .changes(
             &principal,
@@ -543,7 +544,7 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
     core.close().await.expect("close");
 }
 
-/// Stale-selection contract across BOTH switch kinds: a principal minted
+/// note: Stale-selection contract across BOTH switch kinds: a principal minted
 /// before a workspace switch or an identity switch is `AuthRequired` (disk
 /// re-read), and a fresh reopen against the new selection recovers.
 #[tokio::test]
@@ -570,7 +571,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     let principal = core.active_principal().await.expect("principal");
     assert!(probe_changes(&core, &principal).await.is_ok());
 
-    // Workspace switch: the old principal is AuthRequired on its next call.
+    // note: Workspace switch: the old principal is AuthRequired on its next call.
     svc.select_workspace(SetActiveWorkspaceRequest {
         creator_id: Some(creator_a.clone()),
         workspace_slug: "second".to_string(),
@@ -586,7 +587,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     );
     core.close().await.expect("close");
 
-    // Reopen against the new selection: a working principal again.
+    // note: Reopen against the new selection: a working principal again.
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
@@ -600,7 +601,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
         .expect("principal after reopen");
     assert!(probe_changes(&core, &principal).await.is_ok());
 
-    // Identity switch: the old principal is AuthRequired again.
+    // note: Identity switch: the old principal is AuthRequired again.
     let _creator_b = register_named(&svc, "Switch Successor").await;
     assert!(
         matches!(
@@ -611,7 +612,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     );
     core.close().await.expect("close");
 
-    // Recovery on reopen needs the new identity to hold a workspace first.
+    // note: Recovery on reopen needs the new identity to hold a workspace first.
     let creator_b = svc
         .configuration()
         .await
@@ -637,14 +638,14 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     core.close().await.expect("close");
 }
 
-/// `storage_status()` regressions: read-only diagnostics never initialize or
+/// note: `storage_status()` regressions: read-only diagnostics never initialize or
 /// migrate the store, and faults are reported instead of faking health.
 #[tokio::test]
 async fn storage_status_never_initializes_and_reports_faults_honestly() {
     let (tmp, svc) = home().await;
     let user_home = tmp.path().to_path_buf();
 
-    // No selection: Uninitialized, not a faked empty status.
+    // note: No selection: Uninitialized, not a faked empty status.
     assert!(matches!(
         svc.storage_status().await,
         Err(CoreError::Uninitialized)
@@ -660,7 +661,7 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
     .expect("select");
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "default");
 
-    // Selection resolves but the DB is missing: Uninitialized, and the
+    // note: Selection resolves but the DB is missing: Uninitialized, and the
     // diagnostics must NOT initialize/migrate the store into existence.
     std::fs::remove_file(&db_path).unwrap();
     assert!(matches!(
@@ -672,7 +673,7 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
         "storage_status must never initialize the DB"
     );
 
-    // A valid but never-migrated store (schema absent) degrades to an
+    // note: A valid but never-migrated store (schema absent) degrades to an
     // unhealthy status carrying the reason — versions are None, never a
     // faked zero-version healthy result.
     let empty = sqlx::sqlite::SqlitePoolOptions::new()
@@ -696,7 +697,7 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
         "unmigrated store has no versions"
     );
 
-    // A corrupt (non-sqlite) file is a hard diagnostic error, not a faked
+    // note: A corrupt (non-sqlite) file is a hard diagnostic error, not a faked
     // healthy/empty report.
     std::fs::write(&db_path, b"definitely not a sqlite database").unwrap();
     assert!(
@@ -705,7 +706,7 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
     );
 }
 
-/// A freshly registered creator reports an unprovisioned credential projection
+/// note: A freshly registered creator reports an unprovisioned credential projection
 /// (`creators_route_api.rs::post_creators_creates_row_and_returns_201_with_creator_detail`).
 ///
 /// The retired route's framework-404 / 405 / colon-verb-segment expectations and
@@ -735,7 +736,7 @@ async fn registration_reports_unprovisioned_credential_projection() {
     assert!(detail.is_active);
 }
 
-/// `storage_status()` on an initialized store: real versions, real health,
+/// note: `storage_status()` on an initialized store: real versions, real health,
 /// real tables.
 #[tokio::test]
 async fn storage_status_reports_healthy_initialized_store() {
@@ -766,7 +767,7 @@ async fn storage_status_reports_healthy_initialized_store() {
     assert!(status.foreign_keys.is_some());
 }
 
-/// F3 (I-000065): "is this still the active creator?" is decided on the
+/// note: F3 (I-000065): "is this still the active creator?" is decided on the
 /// document read *inside* the writer lock, so a switch to another creator
 /// that commits while the logout waits for the lock survives it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -778,7 +779,7 @@ async fn logout_does_not_clear_a_selection_switched_while_it_waited() {
     let (tmp, svc) = home().await;
     let creator_a = register_named(&svc, "Logout Alpha").await;
     let creator_b = register_named(&svc, "Logout Beta").await;
-    // The second registration is the active one; make the logged-out creator
+    // note: The second registration is the active one; make the logged-out creator
     // the current selection.
     let nexus_home = tmp.path().join(".nexus42");
     let config_path = nexus_home.join("config.toml");
@@ -788,7 +789,7 @@ async fn logout_does_not_clear_a_selection_switched_while_it_waited() {
     )
     .expect("seed selection");
 
-    // A foreign writer holds the lock; the logout must wait for it.
+    // note: A foreign writer holds the lock; the logout must wait for it.
     let lock_path = nexus_home.join("config.toml.lock");
     std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
 
@@ -810,7 +811,7 @@ async fn logout_does_not_clear_a_selection_switched_while_it_waited() {
         "logout must wait for config.toml.lock"
     );
 
-    // The selection switches to another creator while the logout waits. The
+    // note: The selection switches to another creator while the logout waits. The
     // logout must not clear it when it finally gets the lock.
     std::fs::write(
         &config_path,

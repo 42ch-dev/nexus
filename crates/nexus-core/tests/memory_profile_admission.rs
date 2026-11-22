@@ -12,6 +12,7 @@
 //!
 //! Profiles carry content kinds only: SOUL.md is the authored `personality`
 //! profile, and no governance/transfer/reflection document is ever fabricated.
+// note: the doc above names the three admission outcomes these cases keep distinct.
 
 use std::path::PathBuf;
 
@@ -57,7 +58,7 @@ fn dto<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid payload")
 }
 
-/// Project a port result onto one assertion shape: the payload, or the refusal
+/// note: Project a port result onto one assertion shape: the payload, or the refusal
 /// as the wire carries it (§14.1 — a refusal is never a success value).
 fn wire<T: Serialize>(result: &SpokeResult<T>) -> Value {
     match result {
@@ -106,12 +107,12 @@ async fn ensure(provider: &LocalMemoryProvider) {
     );
 }
 
-/// Author one profile kind; the document is the authored content, never policy.
+/// note: Author one profile kind; the document is the authored content, never policy.
 async fn author(provider: &LocalMemoryProvider, kind: &str, body: &str, key: &str) -> Value {
     author_document(provider, kind, "markdown", body, None, key).await
 }
 
-/// Author one profile document in an explicit representation; a
+/// note: Author one profile document in an explicit representation; a
 /// `expected_revision` re-authors an existing kind (create-only when `None`).
 async fn author_document(
     provider: &LocalMemoryProvider,
@@ -146,7 +147,7 @@ async fn read_profiles(provider: &LocalMemoryProvider, kinds: Option<&[&str]>) -
     wire(&provider.get_profile(&admin(), dto(request)).await)
 }
 
-/// The reject the admission gate raises, as a typed port value.
+/// note: The reject the admission gate raises, as a typed port value.
 async fn admission_rejection(provider: &LocalMemoryProvider) -> spoke_operations::SpokeReject {
     match provider.profile_admission(&admin(), SPACE, SUBJECT).await {
         SpokeResult::Reject(reject) => reject,
@@ -156,7 +157,7 @@ async fn admission_rejection(provider: &LocalMemoryProvider) -> spoke_operations
     }
 }
 
-/// Outcome 1: a required authored kind is absent ⇒ `PROFILE_INCOMPLETE` with
+/// note: Outcome 1: a required authored kind is absent ⇒ `PROFILE_INCOMPLETE` with
 /// `details.missing`, terminal, and a named recovery. A present *optional* kind
 /// never substitutes for the required one.
 #[tokio::test]
@@ -182,7 +183,7 @@ async fn required_profile_missing_fails_closed_with_profile_incomplete() {
         "a missing authored profile is not a missing capability (MEM-R005)"
     );
 
-    // Only the optional `preferences` kind is authored: the required one is
+    // note: Only the optional `preferences` kind is authored: the required one is
     // still missing, so the gate still fails closed.
     let authored = author(
         &provider,
@@ -202,7 +203,7 @@ async fn required_profile_missing_fails_closed_with_profile_incomplete() {
     );
 }
 
-/// Outcome 1b: an empty authored document is as incomplete as an absent one
+/// note: Outcome 1b: an empty authored document is as incomplete as an absent one
 /// (§4.2 — "absent or empty"), in either declared representation. Optional
 /// emptiness stays honest-empty and real content is still admitted.
 #[tokio::test]
@@ -211,7 +212,7 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // markdown: a whitespace-only body authors nothing.
+    // note: markdown: a whitespace-only body authors nothing.
     let authored = author_document(
         &provider,
         SOUL_PROFILE_KIND,
@@ -230,7 +231,7 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         "the empty required kind is named in details.missing"
     );
 
-    // json: a structurally empty body authors nothing either.
+    // note: json: a structurally empty body authors nothing either.
     let authored = author_document(
         &provider,
         SOUL_PROFILE_KIND,
@@ -256,7 +257,7 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         SpokeRejectCode::ProfileIncomplete
     );
 
-    // An empty *optional* kind neither substitutes for the required one nor
+    // note: An empty *optional* kind neither substitutes for the required one nor
     // becomes a failure of its own.
     let authored = author_document(
         &provider,
@@ -273,7 +274,7 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         SpokeRejectCode::ProfileIncomplete
     );
 
-    // Control: real content is admitted, and the empty optional kind stays
+    // note: Control: real content is admitted, and the empty optional kind stays
     // honest-empty rather than being listed as authored content.
     let authored = author_document(
         &provider,
@@ -295,7 +296,7 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
     );
 }
 
-/// Outcome 2: the required kind is authored and the optional kind is absent ⇒
+/// note: Outcome 2: the required kind is authored and the optional kind is absent ⇒
 /// honest-empty success. Nothing is invented for the absent kind.
 #[tokio::test]
 async fn optional_kind_absent_is_honest_empty_success() {
@@ -303,7 +304,7 @@ async fn optional_kind_absent_is_honest_empty_success() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // D-12: the Creator SOUL document is the authored `personality` profile.
+    // note: D-12: the Creator SOUL document is the authored `personality` profile.
     let authored = author(
         &provider,
         SOUL_PROFILE_KIND,
@@ -341,7 +342,7 @@ async fn optional_kind_absent_is_honest_empty_success() {
     );
 }
 
-/// Outcome 3: the capability is absent ⇒ `CAPABILITY_PORT_MISSING` at
+/// note: Outcome 3: the capability is absent ⇒ `CAPABILITY_PORT_MISSING` at
 /// selection, and neither code ever stands in for the other. Matrix-aware
 /// (N4-R): the served matrix admits the reflection family and answers its own
 /// verdict (the stale-CAS refusal, whose digest `details.current_state_digest`
@@ -403,7 +404,7 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     );
     assert_eq!(error_code(&transfer), "CAPABILITY_PORT_MISSING");
 
-    // The deliberately-unadvertised matrix keeps the selection refusal for the
+    // why: The deliberately-unadvertised matrix keeps the selection refusal for the
     // reflection family: the same capability-absence verdict as transfer.
     let unadvertised =
         LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
@@ -429,7 +430,7 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
         "an unserved family is a selection failure, not an admission verdict: {gated}"
     );
 
-    // Non-collapse, both directions.
+    // note: Non-collapse, both directions.
     assert_ne!(
         error_code(&reflection),
         "PROFILE_INCOMPLETE",
@@ -448,7 +449,7 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     );
 }
 
-/// Content-kind discipline: the provider fabricates no governance/transfer/
+/// note: Content-kind discipline: the provider fabricates no governance/transfer/
 /// reflection profile documents, before or after admission is refused.
 #[tokio::test]
 async fn no_fake_profile_documents_are_fabricated() {

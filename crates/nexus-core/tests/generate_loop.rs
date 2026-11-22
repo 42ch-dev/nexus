@@ -50,7 +50,7 @@ async fn setup() -> Setup {
     }
 }
 
-/// The stored row's revision, for the fail-closed probe: exhaustion must leave none.
+/// note: The stored row's revision, for the fail-closed probe: exhaustion must leave none.
 async fn stored_revision(pool: &SqlitePool, strategy_id: &str) -> Option<i64> {
     sqlx::query_scalar("SELECT revision FROM strategy_candidates WHERE strategy_id = ?")
         .bind(strategy_id)
@@ -59,7 +59,7 @@ async fn stored_revision(pool: &SqlitePool, strategy_id: &str) -> Option<i64> {
         .unwrap()
 }
 
-/// A document every lint layer accepts: one outer state wired to its terminal, one run intent.
+/// note: A document every lint layer accepts: one outer state wired to its terminal, one run intent.
 fn document(nodes: &Value, edges: &Value) -> Value {
     json!({
         "ir_version": 0,
@@ -107,7 +107,7 @@ fn legal_request() -> GenerateRequest {
     .expect("the legal fixture is a generate request")
 }
 
-/// The same graph, with one `depends_on` entry naming a node the document does not declare.
+/// note: The same graph, with one `depends_on` entry naming a node the document does not declare.
 fn dangling_request() -> GenerateRequest {
     let mut nodes = vec![node("start", "outer_state"), node("done", "terminal")];
     nodes[0]["depends_on"] = json!(["missing"]);
@@ -143,7 +143,7 @@ fn kinds(details: &Value) -> Vec<String> {
         .collect()
 }
 
-/// A corrector that answers every round with a document whose dangling dependency names the call,
+/// note: A corrector that answers every round with a document whose dangling dependency names the call,
 /// so the returned corrections identify which round they came from.
 struct NeverConverges {
     calls: Mutex<usize>,
@@ -171,7 +171,7 @@ impl PromptExecutor for NeverConverges {
     }
 }
 
-/// A corrector whose first answer is the legal document.
+/// note: A corrector whose first answer is the legal document.
 struct ConvergesOnce {
     calls: Mutex<usize>,
 }
@@ -188,7 +188,7 @@ impl PromptExecutor for ConvergesOnce {
     }
 }
 
-/// A corrector that returns the given document verbatim, claims and all.
+/// note: A corrector that returns the given document verbatim, claims and all.
 struct ReturnsDocument(Value);
 
 #[async_trait]
@@ -202,7 +202,7 @@ impl PromptExecutor for ReturnsDocument {
     }
 }
 
-/// The legal document as the corrector would return it: the same graph, the strategy's id.
+/// why: The legal document as the corrector would return it: the same graph, the strategy's id.
 fn legal_request_document() -> Value {
     document(
         &json!([node("start", "outer_state"), node("done", "terminal")]),
@@ -248,7 +248,7 @@ async fn a_clean_request_materializes_round_one_and_commits_revision_one() {
 #[tokio::test]
 async fn semantic_warnings_ride_a_passing_round_and_never_block() {
     let setup = setup().await;
-    // A second node marked terminal is a TerminalConsistency warning, not an error.
+    // note: A second node marked terminal is a TerminalConsistency warning, not an error.
     let request: GenerateRequest = serde_json::from_value(json!({
         "entry": "start",
         "terminal": ["done"],
@@ -317,7 +317,7 @@ async fn a_corrector_that_converges_commits_the_corrected_document() {
     setup.core.close().await.unwrap();
 }
 
-/// A corrector is not the document's origin. The drift guard reads `provenance.source == generate`,
+/// note: A corrector is not the document's origin. The drift guard reads `provenance.source == generate`,
 /// so a corrector that could set provenance, lineage or hash would falsify the assertion from the
 /// inside.
 #[tokio::test]
@@ -362,7 +362,7 @@ async fn a_corrector_cannot_claim_another_origin_lineage_hash_or_version() {
     setup.core.close().await.unwrap();
 }
 
-/// The IR grammar version is the contract's, not the corrector's: a response claiming a version
+/// note: The IR grammar version is the contract's, not the corrector's: a response claiming a version
 /// this kernel does not implement is normalized before lint, so it neither commits nor burns the
 /// remaining rounds on a buildability refusal the correction cannot address.
 #[tokio::test]
@@ -388,7 +388,7 @@ async fn a_corrector_cannot_claim_an_ir_version_the_kernel_does_not_implement() 
     setup.core.close().await.unwrap();
 }
 
-/// D8 bounds the field space at the request's. `GenerateRequest` exposes entry, terminal, nodes,
+/// note: D8 bounds the field space at the request's. `GenerateRequest` exposes entry, terminal, nodes,
 /// edges, nests and meta, so a corrector adding assets, signals, roles or an initial action is
 /// outside the contract and the commit carries none of them.
 #[tokio::test]
@@ -469,7 +469,7 @@ async fn the_ceiling_is_three_rounds_and_the_fourth_materialization_never_runs()
     assert_eq!(details["rounds_attempted"], 3);
     assert_eq!(details["persisted"], false);
 
-    // The returned violations are round 3's, never the union of the rounds.
+    // note: The returned violations are round 3's, never the union of the rounds.
     let corrections = details["violations"].as_array().unwrap();
     let dangling = corrections
         .iter()
@@ -605,7 +605,7 @@ async fn a_stale_base_refuses_before_any_round_runs() {
     setup.core.close().await.unwrap();
 }
 
-/// A request that pins a package the registry does not serve. Approve refuses exactly that pin, so
+/// note: A request that pins a package the registry does not serve. Approve refuses exactly that pin, so
 /// the generator must report it too: the round's refusal has to name the pin the corrector has to
 /// re-pin or drop, and nothing may persist. Without the pin findings in lint the payload carried
 /// only the unmappable-node correction and never mentioned the pin.

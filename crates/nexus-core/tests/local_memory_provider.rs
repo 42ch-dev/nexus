@@ -15,6 +15,7 @@
 //! `MemoryPort` vocabulary comes from `spoke_operations`, whose generated wire
 //! types are reachable through its `spoke_schemas` re-export, so this crate
 //! keeps exactly one spoke dependency edge.
+// note: the doc above names the provider protocol surface these cases pin.
 
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_memory_provider::LocalMemoryProvider;
@@ -59,7 +60,7 @@ async fn open_provider(env: &Env) -> LocalMemoryProvider {
         .expect("provider open")
 }
 
-/// Every file under `root`, recursively and sorted, so a test can assert a
+/// why: Every file under `root`, recursively and sorted, so a test can assert a
 /// refused write changed nothing on disk.
 fn files_under(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
@@ -86,7 +87,7 @@ fn dto<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid payload")
 }
 
-/// Project a port result onto ONE assertion shape: the success payload, or the
+/// note: Project a port result onto ONE assertion shape: the success payload, or the
 /// refusal as the wire carries it. Refusals must arrive as `SpokeResult::Reject`
 /// (§14.1), so both channels are readable here without encoding either as a
 /// success.
@@ -106,7 +107,7 @@ fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
     }
 }
 
-/// The success payload of a typed port result; a refusal panics with its code.
+/// note: The success payload of a typed port result; a refusal panics with its code.
 fn ok<T>(result: SpokeResult<T>) -> T {
     match result {
         SpokeResult::Ok(value) => value,
@@ -136,7 +137,7 @@ fn retry_class(body: &Value) -> &str {
         .unwrap_or_else(|| panic!("expected details.retry_class, got {body}"))
 }
 
-/// A committed receipt, as the wire sees it (§6.10).
+/// note: A committed receipt, as the wire sees it (§6.10).
 fn receipt(body: &Value) -> &Value {
     assert_eq!(
         body["status"], "committed",
@@ -154,7 +155,7 @@ fn grant_request(key: &str, capability: &str, grantee: &str) -> schemas::MemoryG
     }))
 }
 
-/// §6.5 unrestricted grant scoped to one subject.
+/// note: §6.5 unrestricted grant scoped to one subject.
 fn subject_grant(
     key: &str,
     capability: &str,
@@ -170,7 +171,7 @@ fn subject_grant(
     }))
 }
 
-/// §6.5 unrestricted subject grant that expires `expires_in_seconds` from now,
+/// note: §6.5 unrestricted subject grant that expires `expires_in_seconds` from now,
 /// for the read-admission clock regressions.
 fn subject_grant_until(
     key: &str,
@@ -190,7 +191,7 @@ fn subject_grant_until(
     }))
 }
 
-/// §6.5 context-restricted grant (the shape `context_ids` selects).
+/// note: §6.5 context-restricted grant (the shape `context_ids` selects).
 fn restricted_grant(
     key: &str,
     capability: &str,
@@ -272,7 +273,7 @@ fn list_grants(
     dto(request)
 }
 
-/// §7.1: the provider describes exactly what it serves, carries no space
+/// note: §7.1: the provider describes exactly what it serves, carries no space
 /// catalogue, and every advertised limit is a positive bound.
 #[tokio::test]
 async fn describe_reports_the_served_surface() {
@@ -289,7 +290,7 @@ async fn describe_reports_the_served_surface() {
             .any(|flag| flag == "spoke-memory"),
         "the served family is advertised: {body}"
     );
-    // Matrix-aware (N4-R): the default open genuinely serves the reflection
+    // note: Matrix-aware (N4-R): the default open genuinely serves the reflection
     // family, so the honest advertisement names it; the unadvertised shape
     // keeps the base family alone. `spoke-memory-transfer` stays gated in both.
     assert!(
@@ -356,7 +357,7 @@ async fn describe_reports_the_served_surface() {
     );
 }
 
-/// §7.2: the operator-provisioned local space is the only catalogue entry, and
+/// note: §7.2: the operator-provisioned local space is the only catalogue entry, and
 /// it reports the computed drain barrier.
 #[tokio::test]
 async fn spaces_list_shows_the_provisioned_space() {
@@ -381,7 +382,7 @@ async fn spaces_list_shows_the_provisioned_space() {
     assert_eq!(body.get("next_cursor"), None);
 }
 
-/// §7.3/§7.4/§7.0.5/§7.0.4: freeze is revision-checked, replaying the same
+/// note: §7.3/§7.4/§7.0.5/§7.0.4: freeze is revision-checked, replaying the same
 /// idempotency key + payload returns the ORIGINAL receipt without
 /// re-executing, a different payload under the same key is
 /// `IDEMPOTENCY_CONFLICT`, a stale revision is `REVISION_CONFLICT`, a frozen
@@ -453,7 +454,7 @@ async fn space_freeze_is_revision_checked_and_key_idempotent() {
         "grants.grant is outside the §8.2 allowlist"
     );
 
-    // §8.2: revoke stays admissible while frozen, so an incident can be contained.
+    // note: §8.2: revoke stays admissible while frozen, so an incident can be contained.
     let revoked = wire(
         &provider
             .revoke_grant(
@@ -481,7 +482,7 @@ async fn space_freeze_is_revision_checked_and_key_idempotent() {
     assert_eq!(receipt(&unfrozen)["result"]["revision"], 3);
 }
 
-/// §7.5/§7.6/§7.7: get-or-create keys off the subject id (kind is creation-only
+/// note: §7.5/§7.6/§7.7: get-or-create keys off the subject id (kind is creation-only
 /// metadata), and the fence state machine covers subject, context and the
 /// terminal archive.
 #[tokio::test]
@@ -591,7 +592,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
     assert_eq!(error_code(&resurrect), "INVALID_STATUS_TRANSITION");
 }
 
-/// §7.8/§7.9/§7.10: admin grants flow through non-amplification, self-view
+/// note: §7.8/§7.9/§7.10: admin grants flow through non-amplification, self-view
 /// exposes exactly the caller's own grants, and revoke is revision-checked and
 /// terminal.
 #[tokio::test]
@@ -686,7 +687,7 @@ async fn grants_grant_list_revoke_and_non_amplification() {
         "the revoked grant keeps its audit record with revoked_at: {after_revoke}"
     );
 
-    // Revocation is terminal for coverage, not for the ledger: the grantee can
+    // note: Revocation is terminal for coverage, not for the ledger: the grantee can
     // no longer run a `capture`-gated op.
     let denied = wire(
         &provider
@@ -696,7 +697,7 @@ async fn grants_grant_list_revoke_and_non_amplification() {
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED");
 }
 
-/// §14.1/§14.2: refusals travel `SpokeResult::Reject` — a domain refusal keeps
+/// note: §14.1/§14.2: refusals travel `SpokeResult::Reject` — a domain refusal keeps
 /// its memory code, and an unserved op is the dispatch-deny code upstream's
 /// responder serializes (`CAPABILITY_PORT_MISSING`), never a success payload.
 #[tokio::test]
@@ -723,7 +724,7 @@ async fn refusals_travel_the_reject_channel() {
         LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
             .await
             .expect("unadvertised provider open");
-    // Matrix-aware (N4-R): the advertised open serves the reflection family,
+    // note: Matrix-aware (N4-R): the advertised open serves the reflection family,
     // so the unserved-op refusal is asserted through the
     // deliberately-unadvertised constructor.
     let unsupported = unsupported
@@ -746,7 +747,7 @@ async fn refusals_travel_the_reject_channel() {
         }
         SpokeResult::Ok(_) => panic!("an unserved op must be rejected: {unsupported:?}"),
     }
-    // The envelope carries the code as-is and nothing that restates a mapping
+    // note: The envelope carries the code as-is and nothing that restates a mapping
     // belonging to the receiving side.
     let envelope = wire(&unsupported);
     assert!(
@@ -755,7 +756,7 @@ async fn refusals_travel_the_reject_channel() {
     );
 }
 
-/// The sub-capability gated families and the NXM-2 receipt read answer the
+/// note: The sub-capability gated families and the NXM-2 receipt read answer the
 /// dispatch-level denial instead of any success.
 #[tokio::test]
 async fn gated_families_refuse_with_the_unsupported_code() {
@@ -763,7 +764,7 @@ async fn gated_families_refuse_with_the_unsupported_code() {
     let provider = open_provider(&env).await;
     let p = principal(CREATOR);
 
-    // Matrix-aware (N4-R): the advertised open genuinely serves the reflection
+    // note: Matrix-aware (N4-R): the advertised open genuinely serves the reflection
     // family, so the dispatch-deny refusal is asserted through the
     // deliberately-unadvertised constructor; the advertised leg asserts the
     // honest success class below.
@@ -800,7 +801,7 @@ async fn gated_families_refuse_with_the_unsupported_code() {
     assert_eq!(error_code(&export), "CAPABILITY_PORT_MISSING");
 }
 
-/// §6.5/§7.7: fence authorization is bound to the target — a context fence needs
+/// note: §6.5/§7.7: fence authorization is bound to the target — a context fence needs
 /// coverage of THAT context, and a whole-subject fence/archive needs unrestricted
 /// coverage of the subject.
 #[tokio::test]
@@ -906,7 +907,7 @@ async fn fence_authorization_is_bound_to_the_fenced_target() {
     assert_eq!(receipt(&admin_archive)["result"]["status"], "archived");
 }
 
-/// §7.5/§7.7/§7.9: a fenced or archived subject rejects its writes — get-or-create
+/// note: §7.5/§7.7/§7.9: a fenced or archived subject rejects its writes — get-or-create
 /// and subject-scoped grants — while space-wide writes stay unaffected.
 #[tokio::test]
 async fn fenced_and_archived_subjects_reject_writes() {
@@ -988,7 +989,7 @@ async fn fenced_and_archived_subjects_reject_writes() {
     );
     assert_eq!(error_code(&grant_while_archived), "SUBJECT_FENCED");
 
-    // Space-wide issuance names no gated subject, so it still commits.
+    // why: Space-wide issuance names no gated subject, so it still commits.
     let space_wide = wire(
         &provider
             .grant(&admin, grant_request("k-space-wide", "capture", OTHER))
@@ -997,7 +998,7 @@ async fn fenced_and_archived_subjects_reject_writes() {
     assert_eq!(receipt(&space_wide)["result"]["revision"], 1);
 }
 
-/// §7.24/S-3: a content or profile write over a never-ensured subject is a
+/// note: §7.24/S-3: a content or profile write over a never-ensured subject is a
 /// `NOT_FOUND`, never an implicit creation — even for a principal whose
 /// space-wide grant would cover the placement. `subjects.ensure` is the op that
 /// creates the subject and keeps working for the same principal and grant.
@@ -1067,7 +1068,7 @@ async fn writes_over_an_un_ensured_subject_refuse_not_found() {
     );
     assert_eq!(receipt(&ensured)["result"]["created"], true);
 
-    // Same principal, same grant, subject now exists: the refusal was absence.
+    // note: Same principal, same grant, subject now exists: the refusal was absence.
     let after = wire(
         &provider
             .capture(&writer, capture_request("k-capture-present", None, TEXT))
@@ -1076,7 +1077,7 @@ async fn writes_over_an_un_ensured_subject_refuse_not_found() {
     assert_eq!(receipt(&after)["status"], "committed");
 }
 
-/// §7.9 non-amplification with the ISSUED scope: a subject-scoped admin delegates
+/// note: §7.9 non-amplification with the ISSUED scope: a subject-scoped admin delegates
 /// within its own subject only.
 #[tokio::test]
 async fn subject_scoped_admin_delegates_within_its_subject_only() {
@@ -1138,7 +1139,7 @@ async fn subject_scoped_admin_delegates_within_its_subject_only() {
     );
 }
 
-/// §7.0.5/MEM-R021: a same-key replay returns the stored receipt without
+/// note: §7.0.5/MEM-R021: a same-key replay returns the stored receipt without
 /// re-evaluating the freeze the original op preceded; a different payload under
 /// the same key is still `IDEMPOTENCY_CONFLICT`.
 #[tokio::test]
@@ -1207,7 +1208,7 @@ async fn replay_is_checked_before_fresh_effect_lifecycle_gates() {
     );
 }
 
-/// R3 (§7.0.5/MEM-R021): a replay is admitted by *current* coverage and then
+/// note: R3 (§7.0.5/MEM-R021): a replay is admitted by *current* coverage and then
 /// answered from its receipt — it never re-runs the §7.9 non-amplification the
 /// original issuance was checked against. An applicable admin grant acquired
 /// later tightens the expiry bound over that same set, which must not turn a
@@ -1218,7 +1219,7 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     let provider = open_provider(&env).await;
     let admin = principal(CREATOR);
 
-    // The provisioned admin grant never expires, so this non-expiring issuance
+    // why: The provisioned admin grant never expires, so this non-expiring issuance
     // is admitted and committed.
     let issued = wire(
         &provider
@@ -1227,7 +1228,7 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     );
     let receipt_id = receipt(&issued)["receipt_id"].as_str().unwrap().to_owned();
 
-    // An additional, expiring admin grant for the same principal: the §7.9
+    // note: An additional, expiring admin grant for the same principal: the §7.9
     // applicable set now carries a finite earliest expiry.
     let expiring_admin = dto::<schemas::MemoryGrantsGrantRequest>(json!({
         "space_id": SPACE,
@@ -1239,7 +1240,7 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     let tightened = wire(&provider.grant(&admin, expiring_admin).await);
     assert_eq!(receipt(&tightened)["result"]["revision"], 1);
 
-    // A *fresh* non-expiring issuance is now refused under that bound ...
+    // note: A *fresh* non-expiring issuance is now refused under that bound ...
     let fresh = wire(
         &provider
             .grant(&admin, grant_request("k-bound-fresh", "capture", OTHER))
@@ -1251,7 +1252,7 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
         "the bound really did tighten: {fresh}"
     );
 
-    // ... while the identical retry still returns its committed receipt.
+    // note: ... while the identical retry still returns its committed receipt.
     let replay = wire(
         &provider
             .grant(&admin, grant_request("k-bound-replay", "capture", OTHER))
@@ -1264,7 +1265,7 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     );
 }
 
-/// R2 (§6.5): the authorization clock is read when the write proceeds, not at the
+/// note: R2 (§6.5): the authorization clock is read when the write proceeds, not at the
 /// request boundary. A grant that expires while the write waits for its
 /// publication section cannot authorize it, even though it was valid when the
 /// request arrived. `park_next_publish` fixes the ordering — the write is parked
@@ -1317,7 +1318,7 @@ async fn a_grant_expiring_while_the_write_waits_does_not_authorize_it() {
     });
 
     entered.notified().await;
-    // The grant's 60s TTL elapses while the write is parked, before it reads the
+    // note: The grant's 60s TTL elapses while the write is parked, before it reads the
     // authorization clock.
     provider.advance_clock(120);
     release.wait().await;
@@ -1339,7 +1340,7 @@ async fn a_grant_expiring_while_the_write_waits_does_not_authorize_it() {
     assert_eq!(records, 0, "the expired grant authorized no effect");
 }
 
-/// §7.0.7/MEM-R026: a cursor is bound to principal + space + subject +
+/// note: §7.0.7/MEM-R026: a cursor is bound to principal + space + subject +
 /// principal filter + policy version + snapshot marker, and a grant write
 /// between pages invalidates it instead of silently re-filtering.
 #[tokio::test]
@@ -1431,7 +1432,7 @@ async fn cursors_bind_the_query_and_invalidate_on_change() {
         "a cursor is bound to the principal that minted it"
     );
 
-    // A grant write moves the marker, so the page-one cursor dies (§7.0.7).
+    // why: A grant write moves the marker, so the page-one cursor dies (§7.0.7).
     wire(
         &provider
             .grant(&admin, subject_grant("k-d", "capture", THIRD, SUBJECT))
@@ -1452,7 +1453,7 @@ async fn cursors_bind_the_query_and_invalidate_on_change() {
     );
 }
 
-/// §6.1 + plan Global Constraints: `payload_digest` is the SHA-256 of the JCS
+/// note: §6.1 + plan Global Constraints: `payload_digest` is the SHA-256 of the JCS
 /// canonicalization of `{op, payload}`. The vector below was computed
 /// independently (Python `json.dumps(..., sort_keys=True, separators=(",", ":"))`
 /// over `{"op": "memory.spaces.freeze", "payload": {...}}`) rather than read back
@@ -1484,7 +1485,7 @@ async fn payload_digest_binds_the_operation_and_the_canonical_payload() {
     );
 }
 
-/// §14.2/§14.3: a failure at or after `COMMIT` is `OUTCOME_UNCERTAIN`, never a
+/// note: §14.2/§14.3: a failure at or after `COMMIT` is `OUTCOME_UNCERTAIN`, never a
 /// clean retryable failure, and same-key replay/settlement resolves it.
 #[tokio::test]
 async fn commit_boundary_failures_are_outcome_uncertain() {
@@ -1492,7 +1493,7 @@ async fn commit_boundary_failures_are_outcome_uncertain() {
     let provider = open_provider(&env).await;
     let admin = principal(CREATOR);
 
-    // The COMMIT succeeded but the response was lost: the effect is committed.
+    // note: The COMMIT succeeded but the response was lost: the effect is committed.
     provider.inject_commit_fault(true);
     let lost = wire(
         &provider
@@ -1524,7 +1525,7 @@ async fn commit_boundary_failures_are_outcome_uncertain() {
         "the committed effect exists exactly once"
     );
 
-    // The COMMIT itself failed: the outcome is unknown, so it is not reported as
+    // why: The COMMIT itself failed: the outcome is unknown, so it is not reported as
     // a clean no-effect retryable either.
     provider.inject_commit_fault(false);
     let unknown = wire(
@@ -1543,7 +1544,7 @@ async fn commit_boundary_failures_are_outcome_uncertain() {
     assert_eq!(receipt(&retried)["result"]["revision"], 1);
 }
 
-/// §14.2: a storage failure raised strictly BEFORE `COMMIT` asserts no effect and
+/// note: §14.2: a storage failure raised strictly BEFORE `COMMIT` asserts no effect and
 /// stays a retryable `INTERNAL_ERROR`.
 #[tokio::test]
 async fn pre_commit_storage_failures_are_retryable_and_leave_no_effect() {
@@ -1552,7 +1553,7 @@ async fn pre_commit_storage_failures_are_retryable_and_leave_no_effect() {
     let admin = principal(CREATOR);
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
 
-    // A real storage error before COMMIT: the receipt insert always aborts.
+    // note: A real storage error before COMMIT: the receipt insert always aborts.
     sqlx::query(
         "CREATE TRIGGER test_fail_receipt BEFORE INSERT ON memory_receipts \
          BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END",
@@ -1598,7 +1599,7 @@ async fn pre_commit_storage_failures_are_retryable_and_leave_no_effect() {
     );
 }
 
-/// §7.3/§11: admission and effect are serialized with the freeze transition. A
+/// note: §7.3/§11: admission and effect are serialized with the freeze transition. A
 /// freeze transaction holding the write lock blocks the op's admission, so after
 /// it commits the op sees the frozen space and is refused — never admitted on the
 /// pre-freeze state and committed after the barrier.
@@ -1608,7 +1609,7 @@ async fn freeze_serializes_with_admitted_writes() {
     let provider = Arc::new(open_provider(&env).await);
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
 
-    // The uncommitted freeze holds the write lock for this whole block.
+    // note: The uncommitted freeze holds the write lock for this whole block.
     let mut freeze = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query(
         "UPDATE memory_spaces SET status = 'frozen', revision = revision + 1 WHERE space_id = ?",
@@ -1628,7 +1629,7 @@ async fn freeze_serializes_with_admitted_writes() {
             .await
     });
 
-    // The freeze transaction holds the write lock, so the op's `BEGIN IMMEDIATE`
+    // why: The freeze transaction holds the write lock, so the op's `BEGIN IMMEDIATE`
     // cannot complete until it commits: whenever the task is scheduled, the op is
     // admitted on the post-freeze state.
     freeze.commit().await.unwrap();
@@ -1653,7 +1654,7 @@ async fn freeze_serializes_with_admitted_writes() {
     );
 }
 
-/// §11: an op that is admitted before a competing writer performs its work is not
+/// note: §11: an op that is admitted before a competing writer performs its work is not
 /// lost — it completes and keeps its receipt once the writer releases the lock.
 #[tokio::test]
 async fn admitted_write_completes_after_a_competing_writer_releases() {
@@ -1673,7 +1674,7 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
             .await
     });
 
-    // The competing transaction holds the write lock, so the op's
+    // why: The competing transaction holds the write lock, so the op's
     // `BEGIN IMMEDIATE` cannot complete before it ends. The committed receipt
     // below is only reachable through that wait, whatever the scheduling.
     competing.rollback().await.unwrap();
@@ -1692,11 +1693,11 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
     );
 }
 
-// C-117: every memory migration advanced the schema version line (25 → 26 → 27
+// note: C-117: every memory migration advanced the schema version line (25 → 26 → 27
 // → 28 → 29).
 const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 29);
 
-/// Every table the memory migrations own. Writer admission is probed per table
+/// note: Every table the memory migrations own. Writer admission is probed per table
 /// in [`out_of_guard_writes_are_writer_fenced`]; the names are data here, never
 /// an assertion about trigger shapes.
 const MEMORY_TABLES: [&str; 9] = [
@@ -1711,7 +1712,7 @@ const MEMORY_TABLES: [&str; 9] = [
     "memory_journal",
 ];
 
-/// C-117: the control-, content- and provider-metadata migrations land once,
+/// note: C-117: the control-, content- and provider-metadata migrations land once,
 /// re-run as no-ops, register the provider's writer, and the
 /// `DB_SCHEMA_VERSION` line advanced with them.
 #[tokio::test]
@@ -1779,7 +1780,7 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
     );
 }
 
-/// C-110: a write outside the writer guard trips `WRITER_FENCED` — the
+/// note: C-110: a write outside the writer guard trips `WRITER_FENCED` — the
 /// control tables are admitted through the core writer protocol only.
 #[tokio::test]
 async fn out_of_guard_writes_are_writer_fenced() {
@@ -1790,7 +1791,7 @@ async fn out_of_guard_writes_are_writer_fenced() {
             .ensure_subject(&principal(CREATOR), ensure_request(SUBJECT))
             .await,
     );
-    // One committed intent, so the journal probes below have a row to attack.
+    // why: One committed intent, so the journal probes below have a row to attack.
     let created = wire(
         &provider
             .create_record(
@@ -1806,7 +1807,7 @@ async fn out_of_guard_writes_are_writer_fenced() {
     );
     assert!(receipt(&created)["result"]["record_id"].is_string());
 
-    // A connection with the protocol scalar functions installed but NO
+    // note: A connection with the protocol scalar functions installed but NO
     // `core_writer_registration` row: exactly the "outside the guard" writer the
     // C-110 fence exists for.
     let mut raw = sqlx::SqliteConnection::connect_with(
@@ -1828,7 +1829,7 @@ async fn out_of_guard_writes_are_writer_fenced() {
     .await
     .unwrap();
 
-    // Every memory table admits writes through the writer protocol only. The
+    // note: Every memory table admits writes through the writer protocol only. The
     // BEFORE INSERT guard runs ahead of the column constraints, so an
     // unregistered insert meets the fence on any of them.
     for table in MEMORY_TABLES {
@@ -1853,7 +1854,7 @@ async fn out_of_guard_writes_are_writer_fenced() {
         "expected WRITER_FENCED, got: {err}"
     );
 
-    // The journal carries the same admission, and its key is a real column:
+    // note: The journal carries the same admission, and its key is a real column:
     // without a rowid alias there is no `INSERT OR REPLACE …(seq, …)` /
     // `UPDATE … SET rowid` route around the delete guard (the must-fix).
     let err = sqlx::query("DELETE FROM memory_journal")
@@ -1873,7 +1874,7 @@ async fn out_of_guard_writes_are_writer_fenced() {
         "expected the journal to expose no rowid, got: {err}"
     );
 
-    // The outbox family publishes a change event for admitted mutations, on the
+    // note: The outbox family publishes a change event for admitted mutations, on the
     // existing retention/drain channel.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
     for kind in ["memory_subjects", "memory_records"] {
@@ -1930,7 +1931,7 @@ fn creator_memory_dir(user_home: &Path) -> PathBuf {
         .join("long-term")
 }
 
-// ── The content families ───────────────────────────────────────────────
+// note: ── The content families ───────────────────────────────────────────────
 
 const TEXT: &str = "Mira promised to return before the northern gate opens at dawn.";
 
@@ -2007,7 +2008,7 @@ fn recall_request(max_items: u64) -> schemas::MemoryRecallRequest {
     }))
 }
 
-/// §7.22 recall with the ranking and paging inputs the cursor binds.
+/// note: §7.22 recall with the ranking and paging inputs the cursor binds.
 fn recall_page(
     max_items: u64,
     query: Option<&str>,
@@ -2028,7 +2029,7 @@ fn recall_page(
     dto(request)
 }
 
-/// §7.11→§7.15→§7.22 end to end: capture produces a pending candidate, recall
+/// note: §7.11→§7.15→§7.22 end to end: capture produces a pending candidate, recall
 /// never returns it (MEM-R004), review consumes it into a record with the
 /// candidate's placement while scrubbing the body and keeping its digest
 /// (MEM-R009/§6.7), and recall then serves the record under current
@@ -2061,7 +2062,7 @@ async fn capture_review_promote_and_recall_round_trip() {
         "receipts are content-free (MEM-R022): {captured}"
     );
 
-    // §7.12: the pending candidate is listed with its body and advisory verdict.
+    // note: §7.12: the pending candidate is listed with its body and advisory verdict.
     let listed = wire(
         &provider
             .list_candidates(&admin, candidates_list_request(Some("pending")))
@@ -2075,7 +2076,7 @@ async fn capture_review_promote_and_recall_round_trip() {
     assert_eq!(prompt["classification"]["disposition"], "promote");
     assert_eq!(prompt["capture_scope"]["visibility"], "shared");
 
-    // MEM-R004: a candidate is never a recall result, and nothing is retained yet.
+    // note: MEM-R004: a candidate is never a recall result, and nothing is retained yet.
     let before_review = wire(&provider.recall(&admin, recall_request(10)).await);
     assert_eq!(before_review["total_authorized"], 0);
     assert_eq!(before_review["records"], json!([]));
@@ -2092,7 +2093,7 @@ async fn capture_review_promote_and_recall_round_trip() {
         .expect("a promoted candidate names its record")
         .to_owned();
 
-    // §6.7 scrub: the shell keeps the digest and the outcome, never the body.
+    // note: §6.7 scrub: the shell keeps the digest and the outcome, never the body.
     let shell = wire(
         &provider
             .get_candidate(&admin, candidate_get_request(&candidate_id))
@@ -2110,7 +2111,7 @@ async fn capture_review_promote_and_recall_round_trip() {
     assert_eq!(shell["consumed_by"]["receipt_id"], reviewed["receipt_id"]);
     assert_eq!(shell["consumed_by"]["record_ids"][0], record_id);
 
-    // §7.17: the record exists with the placement the candidate was captured under.
+    // note: §7.17: the record exists with the placement the candidate was captured under.
     let record = wire(
         &provider
             .get_record(&admin, record_get_request(&record_id))
@@ -2134,7 +2135,7 @@ async fn capture_review_promote_and_recall_round_trip() {
     );
 }
 
-/// §7.0.5/MEM-R008: a same-key same-payload capture replays its committed
+/// note: §7.0.5/MEM-R008: a same-key same-payload capture replays its committed
 /// receipt without inserting a second candidate; a different payload under the
 /// same key is `IDEMPOTENCY_CONFLICT`.
 #[tokio::test]
@@ -2198,7 +2199,7 @@ async fn duplicate_capture_replays_the_receipt() {
     assert_eq!(retry_class(&conflict), "terminal");
 }
 
-/// §6.7/S-9: an expired pending candidate leaves the list — the predicate is in
+/// note: §6.7/S-9: an expired pending candidate leaves the list — the predicate is in
 /// the list SQL, not a post-filter over every fetched row — and the retention
 /// sweep reclaims its body with the shell.
 #[tokio::test]
@@ -2212,7 +2213,7 @@ async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
             .await,
     );
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
-    // Two real captures (so content and provenance are the API's own shapes),
+    // note: Two real captures (so content and provenance are the API's own shapes),
     // then one is aged out: `memory.capture` never mints an expiring candidate.
     let mut candidate_ids = Vec::new();
     for key in ["k-expiring", "k-live"] {
@@ -2256,7 +2257,7 @@ async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
         "an expired candidate leaves the list: {listed}"
     );
 
-    // Every mutating entry point runs the retention sweep in its own committed
+    // note: Every mutating entry point runs the retention sweep in its own committed
     // transaction, which is where the expired row's body is dropped.
     wire(
         &provider
@@ -2275,7 +2276,7 @@ async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
     );
 }
 
-/// §6.7/MEM-R021: the retention sweep runs inside every mutating transaction, so
+/// note: §6.7/MEM-R021: the retention sweep runs inside every mutating transaction, so
 /// its two deletes must seek an index — the applied-age journal partial index and
 /// the pending-expiry candidate partial index — never scan tables that keep a
 /// whole retention window of rows.
@@ -2322,7 +2323,7 @@ async fn retention_sweeps_seek_their_partial_indexes() {
     );
 }
 
-/// §8.1/MEM-R007: review is revision-checked, and consumption is terminal —
+/// note: §8.1/MEM-R007: review is revision-checked, and consumption is terminal —
 /// a second decision on the shell is `CANDIDATE_CONSUMED`, not a second record.
 #[tokio::test]
 async fn review_is_revision_checked_and_consumption_is_terminal() {
@@ -2374,7 +2375,7 @@ async fn review_is_revision_checked_and_consumption_is_terminal() {
     );
 }
 
-/// §7.14: dismissal consumes the candidate without producing a record, and the
+/// note: §7.14: dismissal consumes the candidate without producing a record, and the
 /// outcome is atomic with the scrub (MEM-R009).
 #[tokio::test]
 async fn dismissing_a_candidate_consumes_it_without_a_record() {
@@ -2427,7 +2428,7 @@ async fn dismissing_a_candidate_consumes_it_without_a_record() {
     assert_eq!(recalled["total_authorized"], 0);
 }
 
-/// §7.18/§7.19/§7.20 + MEM-R007/R014: update is CAS-checked, delete keeps a
+/// note: §7.18/§7.19/§7.20 + MEM-R007/R014: update is CAS-checked, delete keeps a
 /// tombstone with no content, the tombstone is admin-only, and a tombstoned
 /// record leaves recall.
 #[tokio::test]
@@ -2588,7 +2589,7 @@ async fn record_update_and_delete_tombstone_the_content() {
     );
 }
 
-/// §7.21: promotion moves placement explicitly, and the new placement is what
+/// note: §7.21: promotion moves placement explicitly, and the new placement is what
 /// authorization applies — a context-limited reader loses the record once it
 /// becomes shared, and regains it when it is promoted back.
 #[tokio::test]
@@ -2689,7 +2690,7 @@ async fn promote_moves_placement_and_authorization_follows_it() {
     assert_eq!(regained["record"]["record_id"], record_id);
 }
 
-/// MEM-R006: candidate listing filters by coverage *before* it pages, and review
+/// note: MEM-R006: candidate listing filters by coverage *before* it pages, and review
 /// needs both `review` and `records_write` over the candidate's capture scope.
 #[tokio::test]
 async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
@@ -2721,7 +2722,7 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
         .unwrap()
         .to_owned();
 
-    // Only `review`, restricted to bnd_1.
+    // note: Only `review`, restricted to bnd_1.
     wire(
         &provider
             .grant(
@@ -2755,7 +2756,7 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
         "an uncovered candidate reads as absent"
     );
 
-    // §7.15 needs `records_write` over the same scope; this principal lacks it,
+    // note: §7.15 needs `records_write` over the same scope; this principal lacks it,
     // so the by-ID mutation hides the candidate exactly as an absent id does
     // (C-102/MEM-R026).
     let refused = wire(
@@ -2766,7 +2767,7 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
     assert_eq!(error_code(&refused), "NOT_FOUND");
     assert_eq!(retry_class(&refused), "terminal");
 
-    // A reader with no review grant sees nothing at all rather than an empty page.
+    // note: A reader with no review grant sees nothing at all rather than an empty page.
     let unprivileged = wire(
         &provider
             .list_candidates(&principal(THIRD), candidates_list_request(None))
@@ -2775,7 +2776,7 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
     assert_eq!(error_code(&unprivileged), "NOT_AUTHORIZED");
 }
 
-/// §6.5 single-grant rule + C-102 anti-oracle (N3 C8 I217/I226 regression):
+/// note: §6.5 single-grant rule + C-102 anti-oracle (N3 C8 I217/I226 regression):
 /// `review` and `records_write` issued as two same-scope grants never compose,
 /// one grant carrying both is admitted with the inherited placement, and a
 /// partially covered candidate is indistinguishable from an absent id.
@@ -2803,7 +2804,7 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         .unwrap()
         .to_owned();
 
-    // `review` alone is not enough.
+    // note: `review` alone is not enough.
     wire(
         &provider
             .grant(
@@ -2823,7 +2824,7 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     assert_eq!(error_code(&review_only), "NOT_FOUND");
     assert_eq!(retry_class(&review_only), "terminal");
 
-    // A SECOND same-scope grant carrying `records_write` never unions in.
+    // note: A SECOND same-scope grant carrying `records_write` never unions in.
     wire(
         &provider
             .grant(
@@ -2844,7 +2845,7 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     );
     assert_eq!(retry_class(&separate), "terminal");
 
-    // The refused reviews consumed nothing, and the shell is still pending.
+    // note: The refused reviews consumed nothing, and the shell is still pending.
     let shell = wire(
         &provider
             .get_candidate(&scoped, candidate_get_request(&candidate_id))
@@ -2856,7 +2857,7 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         0
     );
 
-    // The existing-but-partially-covered id and an id this store never held are
+    // note: The existing-but-partially-covered id and an id this store never held are
     // the same refusal (C-102): no existence oracle.
     let missing = wire(
         &provider
@@ -2878,7 +2879,7 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     .await;
 }
 
-/// ONE grant carrying both capabilities over the same scope is admitted, and the
+/// note: ONE grant carrying both capabilities over the same scope is admitted, and the
 /// created record inherits the candidate's placement.
 async fn dual_capability_grant_admits_with_inherited_placement(
     provider: &LocalMemoryProvider,
@@ -2914,7 +2915,7 @@ async fn dual_capability_grant_admits_with_inherited_placement(
     assert_eq!(record["record"]["scope"]["context_id"], "bnd_1");
 }
 
-/// MEM-R006: candidate pages carry authorized candidates only, so a reviewer
+/// why: MEM-R006: candidate pages carry authorized candidates only, so a reviewer
 /// restricted to one context gets dense pages — hidden rows neither consume a
 /// page nor skip a visible one across a boundary.
 #[tokio::test]
@@ -2928,7 +2929,7 @@ async fn restricted_candidate_pages_are_dense_and_skip_no_visible_row() {
             .ensure_subject(&admin, ensure_request(SUBJECT))
             .await,
     );
-    // Hidden rows lead the listing order, which is what used to empty the first
+    // note: Hidden rows lead the listing order, which is what used to empty the first
     // page; `created_at` is pinned so the order is the same on every run.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
     let mut covered = Vec::new();
@@ -3002,7 +3003,7 @@ async fn restricted_candidate_pages_are_dense_and_skip_no_visible_row() {
     );
 }
 
-/// §9: recall ranks deterministically, applies the byte budget as a hard limit,
+/// note: §9: recall ranks deterministically, applies the byte budget as a hard limit,
 /// and surfaces an oversized first item instead of dropping it.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
@@ -3080,7 +3081,7 @@ async fn recall_ranks_by_query_and_surfaces_budget_overflow() {
         "identical state + request + policy yields identical ordering (§9.2)"
     );
 
-    // One byte below the first item: the page is empty, so it is returned whole
+    // why: One byte below the first item: the page is empty, so it is returned whole
     // and named as the overflow (§9.3).
     let oversized = wire(
         &provider
@@ -3127,7 +3128,7 @@ async fn recall_ranks_by_query_and_surfaces_budget_overflow() {
     assert_eq!(page_two.get("next_cursor"), None);
 }
 
-/// §7.23/§7.24 + MEM-R005/D-12: profile reads are honest-empty, writes are
+/// note: §7.23/§7.24 + MEM-R005/D-12: profile reads are honest-empty, writes are
 /// CAS-checked with `null` meaning create-only, and the admission gate fails
 /// closed with `PROFILE_INCOMPLETE` when the required authored kind is missing.
 #[tokio::test]
@@ -3252,7 +3253,7 @@ async fn profile_admission_and_honest_empty_reads() {
     let admitted = ok(provider.profile_admission(&admin, SPACE, SUBJECT).await);
     assert_eq!(admitted.present, vec!["personality".to_string()]);
 
-    // The other subject still lacks the required kind, and nothing was copied.
+    // note: The other subject still lacks the required kind, and nothing was copied.
     let missing = provider
         .profile_admission(&admin, SPACE, OTHER_SUBJECT)
         .await;
@@ -3266,7 +3267,7 @@ async fn profile_admission_and_honest_empty_reads() {
     );
 }
 
-/// D-7: the nine-value Nexus taxonomy survives the protocol's open kind
+/// note: D-7: the nine-value Nexus taxonomy survives the protocol's open kind
 /// vocabulary losslessly — both directions, and nothing else is claimed.
 #[tokio::test]
 async fn nexus_kinds_round_trip_through_the_namespaced_mapping() {
@@ -3290,9 +3291,9 @@ async fn nexus_kinds_round_trip_through_the_namespaced_mapping() {
     assert_eq!(policy::memory_kind_of("nexus.unknown_kind"), None);
 }
 
-// ── Round B conformance regressions (C1–C5) ────────────────────────────
+// note: ── Round B conformance regressions (C1–C5) ────────────────────────────
 
-/// §7.22 (C1): execution-time recall demands the `recall` capability itself. A
+/// note: §7.22 (C1): execution-time recall demands the `recall` capability itself. A
 /// principal holding only `records_read` may list the very same records and is
 /// still refused at recall.
 #[tokio::test]
@@ -3369,7 +3370,7 @@ async fn recall_demands_the_recall_capability() {
     assert_eq!(recalled["records"][0]["record_id"], record_id);
 }
 
-/// §6.5/MEM-R006: every content read samples its authorization clock only after
+/// note: §6.5/MEM-R006: every content read samples its authorization clock only after
 /// it holds its connection, so a grant that expires while the read queues in the
 /// pool cannot authorize disclosure. Covered here: recall, a by-id record read
 /// and a profile read.
@@ -3425,7 +3426,7 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
             .await,
     );
 
-    // ── recall ──────────────────────────────────────────────────────────
+    // note: ── recall ──────────────────────────────────────────────────────────
     wire(
         &provider
             .grant(
@@ -3457,7 +3458,7 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
         "a recall grant that expired during the wait cannot authorize: {refused}"
     );
 
-    // ── by-id record ────────────────────────────────────────────────────
+    // note: ── by-id record ────────────────────────────────────────────────────
     wire(
         &provider
             .grant(
@@ -3490,7 +3491,7 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
         "an expired grant reads as an absent record: {refused}"
     );
 
-    // ── profile ─────────────────────────────────────────────────────────
+    // note: ── profile ─────────────────────────────────────────────────────────
     wire(
         &provider
             .grant(
@@ -3533,7 +3534,7 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
     );
 }
 
-/// §7.7/MEM-R024 (C2): a fenced context refuses the capture and authored-create
+/// note: §7.7/MEM-R024 (C2): a fenced context refuses the capture and authored-create
 /// placements into it, names the context on the wire, leaves sibling contexts
 /// and shared placement usable, and unfencing restores the write.
 #[tokio::test]
@@ -3596,7 +3597,7 @@ async fn context_fences_refuse_capture_and_create() {
     assert_eq!(error_code(&created), "SUBJECT_FENCED");
     assert_eq!(error_details(&created)["scope"], "context");
 
-    // MEM-R024: no collateral fencing — the sibling context and shared
+    // note: MEM-R024: no collateral fencing — the sibling context and shared
     // placement stay writable.
     let sibling = wire(
         &provider
@@ -3642,7 +3643,7 @@ async fn context_fences_refuse_capture_and_create() {
     );
 }
 
-/// §7.7/MEM-R024 (C2): row-scoped content writes resolve their placement from
+/// note: §7.7/MEM-R024 (C2): row-scoped content writes resolve their placement from
 /// the row, so review, update and promotion are refused when that placement —
 /// or, for promotion, either side of the move — is fenced.
 #[tokio::test]
@@ -3725,7 +3726,7 @@ async fn context_fences_refuse_review_update_and_promotion() {
     );
     assert_eq!(error_code(&updated), "SUBJECT_FENCED");
 
-    // A placement move writes both sides: out of the fenced context…
+    // note: A placement move writes both sides: out of the fenced context…
     let moved_out = wire(
         &provider
             .promote_record(
@@ -3742,7 +3743,7 @@ async fn context_fences_refuse_review_update_and_promotion() {
     );
     assert_eq!(error_code(&moved_out), "SUBJECT_FENCED");
 
-    // …and into it.
+    // note: …and into it.
     let moved_in = wire(
         &provider
             .promote_record(
@@ -3760,7 +3761,7 @@ async fn context_fences_refuse_review_update_and_promotion() {
     assert_eq!(error_code(&moved_in), "SUBJECT_FENCED");
     assert_eq!(error_details(&moved_in)["context_id"], "bnd_1");
 
-    // The sibling context keeps moving freely.
+    // note: The sibling context keeps moving freely.
     let sibling_move = wire(
         &provider
             .promote_record(
@@ -3778,7 +3779,7 @@ async fn context_fences_refuse_review_update_and_promotion() {
     assert_eq!(receipt(&sibling_move)["result"]["revision"], 2);
 }
 
-/// §7.7 (C3): an archived subject leaves recall and the default candidate list,
+/// note: §7.7 (C3): an archived subject leaves recall and the default candidate list,
 /// while its records, candidates and receipts stay readable through the audit
 /// routes the protocol still permits.
 #[tokio::test]
@@ -3847,7 +3848,7 @@ async fn archived_subjects_leave_recall_and_default_candidate_lists() {
         "archive hides the subject from the default candidate listing (§7.7): {default_listing}"
     );
 
-    // §7.7 keeps the retained state readable: an explicit status filter is an
+    // note: §7.7 keeps the retained state readable: an explicit status filter is an
     // audit read, and by-id/listing reads are unchanged.
     let audit_listing = wire(
         &provider
@@ -3879,7 +3880,7 @@ async fn archived_subjects_leave_recall_and_default_candidate_lists() {
     assert_eq!(listing["total_authorized"], 1);
 }
 
-/// §7.0.7/MEM-R026 (C4): the recall cursor binds the snapshot *and* the ranking
+/// note: §7.0.7/MEM-R026 (C4): the recall cursor binds the snapshot *and* the ranking
 /// input. Losing a redundant grant, swapping the visible rows for different
 /// rows at the same revision sum, and changing the query all make it
 /// `CURSOR_INVALID` instead of silently re-paging a different set.
@@ -3944,7 +3945,7 @@ async fn recall_cursors_bind_snapshot_and_query() {
         .unwrap()
         .to_owned();
 
-    // (a) A grant change that leaves every visible row untouched still changes
+    // note: (a) A grant change that leaves every visible row untouched still changes
     //     the authorization the page was cut under.
     let page_one = wire(&provider.recall(&reader, recall_page(1, None, None)).await);
     assert_eq!(page_one["records"].as_array().unwrap().len(), 1);
@@ -3986,7 +3987,7 @@ async fn recall_cursors_bind_snapshot_and_query() {
         "a redundant grant revoke invalidates the cursor even though the rows are unchanged"
     );
 
-    // (b) Two revision-1 rows out, two revision-1 rows in: the visible revision
+    // note: (b) Two revision-1 rows out, two revision-1 rows in: the visible revision
     //     sum stays 2 while the page would silently change identity.
     let page_one = wire(&provider.recall(&reader, recall_page(1, None, None)).await);
     let stale = page_one["next_cursor"]
@@ -4037,7 +4038,7 @@ async fn recall_cursors_bind_snapshot_and_query() {
         "equal visible revision sums do not identify the same page"
     );
 
-    // (c) The query orders the page, so it is part of the bound request.
+    // why: (c) The query orders the page, so it is part of the bound request.
     let ranked = wire(
         &provider
             .recall(&reader, recall_page(1, Some("eastern road"), None))
@@ -4071,7 +4072,7 @@ async fn recall_cursors_bind_snapshot_and_query() {
     );
 }
 
-/// §7.19/§7.7 (C5): deletion runs the same subject and placement gates as update
+/// note: §7.19/§7.7 (C5): deletion runs the same subject and placement gates as update
 /// and promote, so a fenced or archived subject cannot have its content
 /// irreversibly scrubbed.
 #[tokio::test]
@@ -4165,7 +4166,7 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
     assert_eq!(error_code(&archived), "SUBJECT_FENCED");
     assert_eq!(error_details(&archived)["status"], "archived");
 
-    // Every refusal left the content untouched: no scrub, no tombstone.
+    // note: Every refusal left the content untouched: no scrub, no tombstone.
     let record = wire(
         &provider
             .get_record(&admin, record_get_request(&record_id))
@@ -4179,14 +4180,14 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
     );
 }
 
-/// NXM-5 Task 2 fix round 2 (R2-F3): the provider itself — not only the
+/// note: NXM-5 Task 2 fix round 2 (R2-F3): the provider itself — not only the
 /// `CoreService` adapter — refuses a direct write on a read-only open, before the
 /// retention sweep, the admission transaction, or the publication section.
 #[tokio::test]
 async fn a_read_only_open_refuses_writes_before_their_machinery() {
     let env = seed_env();
 
-    // The counter is live, not dead instrumentation: a writable instance counts
+    // note: The counter is live, not dead instrumentation: a writable instance counts
     // its admission attempt (fix round 3, finding F5). Probed on a throwaway
     // workspace so this test's rows stay untouched.
     {
@@ -4220,7 +4221,7 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
     );
     let admin = principal(CREATOR);
 
-    // The normal transaction path (`begin_admission`).
+    // note: The normal transaction path (`begin_admission`).
     let refused = wire(
         &read_only
             .ensure_subject(&admin, ensure_request(SUBJECT))
@@ -4236,7 +4237,7 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "the refusal names the read-only open: {refused}"
     );
 
-    // The publication path (`begin_publication` → gate → workspace flock).
+    // note: The publication path (`begin_publication` → gate → workspace flock).
     let refused = wire(
         &read_only
             .create_record(
@@ -4259,7 +4260,7 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "the refusal names the read-only open: {refused}"
     );
 
-    // Zero lock attempts, observed directly (fix round 3, finding F5): neither
+    // note: Zero lock attempts, observed directly (fix round 3, finding F5): neither
     // refused write passed the read-only gate, so neither reached the admission
     // transaction, the retention sweep, the publication gate or the workspace
     // flock. The filename assertion below is corroboration, not the proof.
@@ -4269,7 +4270,7 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "a refused read-only write never reaches the admission/publication machinery"
     );
 
-    // No side effect: no subject, candidate, record, journal intent or receipt,
+    // note: No side effect: no subject, candidate, record, journal intent or receipt,
     // and no publication lock file or projection under the file root.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
     for table in [
@@ -4294,7 +4295,7 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
     );
 }
 
-/// NXM-5 Task 2 fix round 3 (R3-F1/R3-F5): the ordinary wire dismissal consumes
+/// note: NXM-5 Task 2 fix round 3 (R3-F1/R3-F5): the ordinary wire dismissal consumes
 /// a provider candidate only under the bearer's disposition section — the same
 /// section a legacy review drain holds — and the regression proves it with an
 /// observable lock attempt rather than a scheduling guess.
@@ -4318,7 +4319,7 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
         .unwrap()
         .to_owned();
 
-    // Another decision on this bearer holds the section.
+    // note: Another decision on this bearer holds the section.
     let section = provider
         .review_disposition(SUBJECT)
         .await
@@ -4341,7 +4342,7 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
             provider.dismiss_candidate(&admin, request).await
         }
     });
-    // The wait signal fires from inside the lock attempt, after the non-blocking
+    // note: The wait signal fires from inside the lock attempt, after the non-blocking
     // probe found the section held (fix round 4, finding R4-F3): the dismissal
     // is really blocked on the lock, not merely unscheduled.
     waiting.notified().await;
@@ -4365,7 +4366,7 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
     );
 }
 
-/// NXM-5 Task 2 fix round 3 (R3-F3): every direct read entry point of a
+/// note: NXM-5 Task 2 fix round 3 (R3-F3): every direct read entry point of a
 /// read-only provider opened over a workspace with no provider schema answers
 /// the space's absence (or an empty page), never a driver error.
 #[tokio::test]
@@ -4444,7 +4445,7 @@ async fn a_read_only_open_over_a_pre_provider_workspace_answers_absent_reads() {
     assert_eq!(spaces["spaces"], json!([]));
 }
 
-/// NXM-5 Task 2 fix round 3 (R3-F4): a subject id maps to exactly one safe
+/// note: NXM-5 Task 2 fix round 3 (R3-F4): a subject id maps to exactly one safe
 /// filename inside the lock directory — no escape past it and no alias between
 /// distinct ids.
 #[tokio::test]
@@ -4453,7 +4454,7 @@ async fn subject_ids_map_to_confined_unique_disposition_locks() {
     let provider = open_provider(&env).await;
     let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
 
-    // A traversing id is held under the encoded name, and it neither escapes
+    // note: A traversing id is held under the encoded name, and it neither escapes
     // the directory nor aliases the plain id.
     let escaping = provider
         .review_disposition("../escape")
@@ -4473,7 +4474,7 @@ async fn subject_ids_map_to_confined_unique_disposition_locks() {
         "no lock file is created outside the disposition directory"
     );
 
-    // Distinct raw ids never share a lock.
+    // note: Distinct raw ids never share a lock.
     let dotted = provider
         .review_disposition("bearer.a")
         .await
@@ -4506,7 +4507,7 @@ async fn subject_ids_map_to_confined_unique_disposition_locks() {
     }
 }
 
-/// NXM-5 Task 2 fix round 4 (R4-F1): a legacy dismissal holds the section of the
+/// note: NXM-5 Task 2 fix round 4 (R4-F1): a legacy dismissal holds the section of the
 /// stored candidate's owner — never a section the caller merely named — and a
 /// subject that does not own the row is refused before anything is consumed.
 #[tokio::test]
@@ -4529,7 +4530,7 @@ async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
         .unwrap()
         .to_owned();
 
-    // Another bearer's section is held: a dismissal that named it would consume
+    // why: Another bearer's section is held: a dismissal that named it would consume
     // this row behind the owner's back. It is refused instead, and nothing moves.
     let other = provider
         .review_disposition(OTHER_SUBJECT)
@@ -4569,7 +4570,7 @@ async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
     );
     drop(other);
 
-    // The owner's section is the one the dismissal really blocks on.
+    // note: The owner's section is the one the dismissal really blocks on.
     let section = provider
         .review_disposition(SUBJECT)
         .await
@@ -4603,7 +4604,7 @@ async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
     );
 }
 
-/// NXM-5 Task 2 fix round 5 (R5-F1): a dismissal never discloses the candidate's
+/// note: NXM-5 Task 2 fix round 5 (R5-F1): a dismissal never discloses the candidate's
 /// owner to a principal the candidate's coverage does not admit. The refusal is
 /// exactly the answer an id this store never held produces, so neither the
 /// wrong-subject nor the true-owner-subject call teaches the stranger anything.
@@ -4627,7 +4628,7 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
         .unwrap()
         .to_owned();
 
-    // The control answer: an id no row carries, from the same principal.
+    // note: The control answer: an id no row carries, from the same principal.
     let absent = wire(
         &provider
             .dismiss_legacy_candidate(
@@ -4642,7 +4643,7 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
     assert_eq!(error_code(&absent), "NOT_FOUND");
     let absent_message = absent["error"]["message"].as_str().unwrap();
 
-    // No grant at all, and the caller names the candidate: wrong subject, the
+    // note: No grant at all, and the caller names the candidate: wrong subject, the
     // true owner's subject, and a principal that holds nothing anywhere. All
     // three get the control answer, byte for byte after the id.
     for (caller, subject, key) in [
@@ -4690,7 +4691,7 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
         "the refused dismissals consume nothing: {still_pending}"
     );
 
-    // The same wrong subject from a principal the coverage admits still gets the
+    // note: The same wrong subject from a principal the coverage admits still gets the
     // informative mismatch refusal (round 4, R4-F1, unchanged).
     let informed = wire(
         &provider
@@ -4707,7 +4708,7 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
     );
 }
 
-/// NXM-5 Task 2 fix round 4 (R4-F2): the lock identity is a bounded digest, so
+/// note: NXM-5 Task 2 fix round 4 (R4-F2): the lock identity is a bounded digest, so
 /// ids differing only by ASCII case never alias on a case-insensitive volume and
 /// an arbitrarily long id still maps to a usable filename.
 #[tokio::test]
@@ -4716,7 +4717,7 @@ async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
     let provider = open_provider(&env).await;
     let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
 
-    // Two bears that differ only by case are two bearers: both sections can be
+    // note: Two bears that differ only by case are two bearers: both sections can be
     // held at once, which one shared file could not allow.
     let upper = provider
         .review_disposition("Bearer")
@@ -4734,7 +4735,7 @@ async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
     assert!(!provider.disposition_available("bearer"));
     drop((upper, lower));
 
-    // Far past the 255-byte component limit as a raw name, still one lock.
+    // note: Far past the 255-byte component limit as a raw name, still one lock.
     let long = "x".repeat(4096);
     let held = provider
         .review_disposition(&long)
@@ -4771,7 +4772,7 @@ async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
     }
 }
 
-/// I249: every content-bound refusal carries the published structured bound in
+/// note: I249: every content-bound refusal carries the published structured bound in
 /// `details.limit` — capture, create and update alike — while a page/budget
 /// bound names `max_page_size` and a shape refusal carries no limiter key at
 /// all (a shape error is not a limit error).
@@ -4798,13 +4799,13 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
 
     oversized_capture_is_refused_without_a_candidate(&provider, &admin, &over_bound).await;
 
-    // create: the exact bound is admitted and stored whole; one more byte refuses.
+    // note: create: the exact bound is admitted and stored whole; one more byte refuses.
     at_bound_create_and_oversize_update_bounds(&provider, &admin, &at_bound, &over_bound).await;
 
     page_recall_and_shape_refusals_name_their_own_limits(&provider, &admin).await;
 }
 
-/// An oversized capture is refused naming its bound and leaves no candidate.
+/// note: An oversized capture is refused naming its bound and leaves no candidate.
 async fn oversized_capture_is_refused_without_a_candidate(
     provider: &LocalMemoryProvider,
     admin: &schemas::Principal,
@@ -4835,7 +4836,7 @@ async fn oversized_capture_is_refused_without_a_candidate(
     );
 }
 
-/// The exact content bound is admitted and stored whole; one more byte refuses
+/// note: The exact content bound is admitted and stored whole; one more byte refuses
 /// without changing the stored record.
 async fn at_bound_create_and_oversize_update_bounds(
     provider: &LocalMemoryProvider,
@@ -4908,7 +4909,7 @@ async fn at_bound_create_and_oversize_update_bounds(
     record_id
 }
 
-/// Page and recall caps name `max_page_size`; a shape refusal invents no limiter.
+/// note: Page and recall caps name `max_page_size`; a shape refusal invents no limiter.
 async fn page_recall_and_shape_refusals_name_their_own_limits(
     provider: &LocalMemoryProvider,
     admin: &schemas::Principal,
@@ -4966,7 +4967,7 @@ async fn page_recall_and_shape_refusals_name_their_own_limits(
     );
 }
 
-/// I250: a same-kind/no-content update is a genuine no-op — the row keeps its
+/// note: I250: a same-kind/no-content update is a genuine no-op — the row keeps its
 /// revision, kind, content and timestamps and no record file is published —
 /// while the content-free receipt (and its same-key replay) still commits, a
 /// changed kind advances exactly once, and an explicit byte-identical content
@@ -5042,7 +5043,7 @@ async fn record_kind_only_update_is_a_replayable_noop() {
         "a no-op publishes no record file"
     );
 
-    // The no-op's receipt is committed and a same-key replay resolves to it.
+    // note: The no-op's receipt is committed and a same-key replay resolves to it.
     let receipt_id = no_op["receipt_id"].as_str().expect("receipt id").to_owned();
     let receipt_view = wire(
         &provider
@@ -5074,7 +5075,7 @@ async fn record_kind_only_update_is_a_replayable_noop() {
     stale_and_unauthorized_updates_change_nothing(&provider, &admin, &stranger, &record_id).await;
 }
 
-/// A changed kind is a real edit; an explicit byte-identical content update is
+/// note: A changed kind is a real edit; an explicit byte-identical content update is
 /// never a no-op either.
 async fn changed_kind_then_identical_content_advance(
     provider: &LocalMemoryProvider,
@@ -5114,7 +5115,7 @@ async fn changed_kind_then_identical_content_advance(
     assert_eq!(identical["result"]["revision"], 3);
 }
 
-/// A stale CAS and an unauthorized principal both change nothing.
+/// note: A stale CAS and an unauthorized principal both change nothing.
 async fn stale_and_unauthorized_updates_change_nothing(
     provider: &LocalMemoryProvider,
     admin: &schemas::Principal,
@@ -5162,9 +5163,9 @@ async fn stale_and_unauthorized_updates_change_nothing(
     assert_eq!(final_state["content"]["text"], TEXT);
 }
 
-// ── BUG-01 regression: order-insensitive set keys ──────────────────────
+// note: ── BUG-01 regression: order-insensitive set keys ──────────────────────
 
-/// The bound-query keys and the list narrowing treat the selection/filter ids
+/// note: The bound-query keys and the list narrowing treat the selection/filter ids
 /// as a set (§7.25): a permuted or duplicate-containing request is the same
 /// state digest and the same page, and a digest read under one order
 /// authorizes a generate under the reordered identical set.
@@ -5191,7 +5192,7 @@ async fn selection_and_filter_sets_are_order_insensitive() {
         "duplicates do not change the authorized set: {straight} vs {duplicated}"
     );
 
-    // The digest read under one order authorizes a generate under the
+    // note: The digest read under one order authorizes a generate under the
     // reordered identical set: the CAS matches, so the refusal is a later
     // gate (the empty basis fails sufficiency), never the stale-CAS conflict.
     let digest = straight["state_digest"].as_str().expect("digest");
@@ -5219,7 +5220,7 @@ async fn selection_and_filter_sets_are_order_insensitive() {
         "a reordered identical set must not invalidate the state digest: {generated}"
     );
 
-    // A reordered provenance filter names the same page.
+    // note: A reordered provenance filter names the same page.
     assert_eq!(
         reflections_list_with_filter(&provider, &["ctx-a", "ctx-b"]).await,
         reflections_list_with_filter(&provider, &["ctx-b", "ctx-a"]).await,
@@ -5227,7 +5228,7 @@ async fn selection_and_filter_sets_are_order_insensitive() {
     );
 }
 
-/// One `state` read over a `selected_contexts` selection, projected onto the
+/// note: One `state` read over a `selected_contexts` selection, projected onto the
 /// wire shape the assertions read.
 async fn reflection_state_with_selection(
     provider: &LocalMemoryProvider,
@@ -5251,7 +5252,7 @@ async fn reflection_state_with_selection(
     )
 }
 
-/// One `list` read over a provenance filter, projected onto the wire shape.
+/// note: One `list` read over a provenance filter, projected onto the wire shape.
 async fn reflections_list_with_filter(
     provider: &LocalMemoryProvider,
     source_context_ids: &[&str],

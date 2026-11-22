@@ -21,7 +21,7 @@ use nexus_workflow_ir::{WorkflowDocument, WorkflowNestBindingExpansion};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
-/// An embedded preset the static walk accepts (the same fixture the compose fence suite uses).
+/// note: An embedded preset the static walk accepts (the same fixture the compose fence suite uses).
 const STRATEGY: &str = "novel-project-init";
 
 struct Setup {
@@ -65,7 +65,7 @@ fn package(id: &str) -> PatternPackageRef {
     }
 }
 
-/// The IR fragment of a package whose only node is a slot.
+/// note: The IR fragment of a package whose only node is a slot.
 fn slot_fragment(id: &str, description: &str) -> serde_json::Value {
     serde_json::json!({
         "ir_version": 0,
@@ -92,7 +92,7 @@ fn slot_fragment(id: &str, description: &str) -> serde_json::Value {
     })
 }
 
-/// The IR fragment of a package that pins `next` in one nest and records no binding for it.
+/// note: The IR fragment of a package that pins `next` in one nest and records no binding for it.
 fn chain_fragment(id: &str, next: &str) -> serde_json::Value {
     serde_json::json!({
         "ir_version": 0,
@@ -125,12 +125,12 @@ fn chain_fragment(id: &str, next: &str) -> serde_json::Value {
     })
 }
 
-/// One package directory: `pattern.toml` declaring `slots` (TOML `[[slots]]` entries) plus the
+/// note: One package directory: `pattern.toml` declaring `slots` (TOML `[[slots]]` entries) plus the
 /// given IR fragment.
 fn write_declaring_package(home: &Path, id: &str, slots: &str, fragment: &serde_json::Value) {
     let directory = home.join("patterns").join(id);
     std::fs::create_dir_all(&directory).unwrap();
-    // The manifest schema requires `slots`; an empty declaration is a top-level key.
+    // note: The manifest schema requires `slots`; an empty declaration is a top-level key.
     let empty_slots = if slots.is_empty() {
         "slots = []\n\n"
     } else {
@@ -152,7 +152,7 @@ fn write_declaring_package(home: &Path, id: &str, slots: &str, fragment: &serde_
     .unwrap();
 }
 
-/// One package directory: `pattern.toml` plus the IR fragment it pins.
+/// note: One package directory: `pattern.toml` plus the IR fragment it pins.
 fn write_package(home: &Path, id: &str, description: &str) {
     write_declaring_package(home, id, "", &slot_fragment(id, description));
 }
@@ -163,7 +163,7 @@ async fn candidate(core: &CoreService, principal: &Principal) -> nexus_core::Str
         .unwrap()
 }
 
-/// Simulate the current candidate through the real route, so the approval evidence is the bytes
+/// why: Simulate the current candidate through the real route, so the approval evidence is the bytes
 /// the client would have received.
 async fn simulate(
     core: &CoreService,
@@ -248,7 +248,7 @@ async fn approve_freezes_one_snapshot_bound_to_the_simulated_content() {
 #[tokio::test]
 async fn a_resolved_fragment_with_a_dangling_edge_is_refused_by_approve() {
     let setup = setup().await;
-    // The candidate pins `outer`; `outer` pins `inner` without recording a hash, so rewriting
+    // note: The candidate pins `outer`; `outer` pins `inner` without recording a hash, so rewriting
     // `inner` is not a pin mismatch — it is a fragment bytes the approval has to read.
     write_declaring_package(
         &setup.home,
@@ -383,7 +383,7 @@ async fn a_changed_pinned_package_is_refused_naming_package_and_both_hashes() {
         .expect("the nest records the resolved pin");
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // Same id and version, different fragment bytes: the pin no longer identifies the bytes.
+    // note: Same id and version, different fragment bytes: the pin no longer identifies the bytes.
     write_package(&setup.home, "approve-step", "changed bytes");
 
     let error = setup
@@ -441,7 +441,7 @@ async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
         .expect("the nest records the resolved pin");
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // The package is gone, so the recorded hash names bytes no registry serves: there is no
+    // why: The package is gone, so the recorded hash names bytes no registry serves: there is no
     // scanned hash to compare, and the refusal must not pretend there is one.
     std::fs::remove_dir_all(setup.home.join("patterns").join("gone-step")).unwrap();
 
@@ -468,7 +468,7 @@ async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
     setup.core.close().await.unwrap();
 }
 
-/// A package the registry can no longer resolve still reports the slots its manifest declared, so
+/// note: A package the registry can no longer resolve still reports the slots its manifest declared, so
 /// the unbound-slot check could answer first and tell the user to bind a slot of a package that
 /// cannot be loaded. The pin is the root cause and must be the refusal.
 #[tokio::test]
@@ -499,7 +499,7 @@ async fn an_unresolvable_pin_refuses_before_the_slots_it_declares() {
     let revision = composed.candidate.revision;
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // The manifest still parses, so the package keeps its declared required slot; the body is gone,
+    // why: The manifest still parses, so the package keeps its declared required slot; the body is gone,
     // so the pin it recorded cannot be confirmed.
     std::fs::remove_file(
         setup
@@ -565,7 +565,7 @@ async fn a_repeat_approve_of_the_same_content_is_the_conflict_and_writes_nothing
     setup.core.close().await.unwrap();
 }
 
-/// The revision check and the freeze are one statement: a compose that commits in the window
+/// note: The revision check and the freeze are one statement: a compose that commits in the window
 /// between approve's read and its insert wins, and the approval is the typed conflict.
 ///
 /// The window is parked with SQLite's write lock (the shape the receipt store's racing insert
@@ -626,7 +626,7 @@ async fn a_compose_that_lands_in_the_insert_window_writes_no_snapshot() {
     setup.core.close().await.unwrap();
 }
 
-/// A required slot declared by a package the candidate pins *through* another package's body is
+/// note: A required slot declared by a package the candidate pins *through* another package's body is
 /// the same refusal: approve calls the compose path's one slot check, which walks the fragments.
 #[tokio::test]
 async fn a_required_slot_inside_a_nested_pattern_blocks_the_approval() {
@@ -696,7 +696,7 @@ async fn a_required_slot_inside_a_nested_pattern_blocks_the_approval() {
     setup.core.close().await.unwrap();
 }
 
-/// I-000423: the compose-only path end to end — two patterns nested into one candidate, the
+/// note: I-000423: the compose-only path end to end — two patterns nested into one candidate, the
 /// daemon-written edges carrying the walk to both slots, and an approval that is reachable because
 /// the committed document is the one that was simulated (no client-authored edge).
 #[tokio::test]

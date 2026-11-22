@@ -65,7 +65,7 @@ fn nest(nest_id: &str, parent_node: &str, id: &str, version: &str) -> ComposeOp 
     wired_nest(nest_id, parent_node, None, id, version)
 }
 
-/// A nest that wires the new slot after `attach_to`, so the walk reaches it.
+/// why: A nest that wires the new slot after `attach_to`, so the walk reaches it.
 fn wired_nest(
     nest_id: &str,
     parent_node: &str,
@@ -104,11 +104,11 @@ fn bind(nest_id: &str, slot: &str, value: Value) -> ComposeOp {
     })
 }
 
-/// Write one package directory: a manifest with the given slots and the IR fragment it pins.
+/// note: Write one package directory: a manifest with the given slots and the IR fragment it pins.
 fn write_package(home: &Path, id: &str, effect_class: &str, slots: &str, fragment: &Value) {
     let directory = home.join("patterns").join(id);
     std::fs::create_dir_all(&directory).unwrap();
-    // The manifest schema requires `slots`; an empty declaration is a top-level key.
+    // note: The manifest schema requires `slots`; an empty declaration is a top-level key.
     let empty_slots = if slots.is_empty() {
         "slots = []\n\n"
     } else {
@@ -130,7 +130,7 @@ fn write_package(home: &Path, id: &str, effect_class: &str, slots: &str, fragmen
     .unwrap();
 }
 
-/// A fragment whose single node declares `effect_class` and whose nests are `nests`.
+/// note: A fragment whose single node declares `effect_class` and whose nests are `nests`.
 fn fragment(id: &str, effect_class: &str, nodes: &Value, nests: &Value) -> Value {
     json!({
         "ir_version": 0,
@@ -161,7 +161,7 @@ fn fragment_node(effect_class: &str) -> Value {
     json!({ "id": "work", "kind": "inner_step", "effect_class": effect_class, "step_kind": "acp_prompt" })
 }
 
-/// A fragment that pins another package: one slot node and one collapsed nest.
+/// note: A fragment that pins another package: one slot node and one collapsed nest.
 fn chain_fragment(id: &str, next: &str) -> Value {
     let nests = json!([{
         "id": format!("{id}-nest"),
@@ -210,7 +210,7 @@ fn write_chain(home: &Path, id: &str, next: Option<&str>) {
     write_package(home, id, "pure", "", &body);
 }
 
-/// A fragment with two wired nodes, so flattening has to move a body, not one node. Every
+/// note: A fragment with two wired nodes, so flattening has to move a body, not one node. Every
 /// package reuses the ids `a`/`b`, which is what forces the second flatten to remap them.
 fn flow_fragment(id: &str, next: Option<&str>) -> Value {
     let nests = next.map_or_else(
@@ -257,7 +257,7 @@ fn write_flow(home: &Path, id: &str, next: Option<&str>) {
     write_package(home, id, "pure", "", &flow_fragment(id, next));
 }
 
-/// Nest then flatten, returning the committed documents of both operations.
+/// note: Nest then flatten, returning the committed documents of both operations.
 async fn nest_then_unnest(
     setup: &Setup,
     base: u64,
@@ -297,7 +297,7 @@ fn node_kind(document: &WorkflowDocument, id: &str) -> WorkflowNodeKind {
         .kind
 }
 
-/// The two-node body moved by a flatten, with its own edge.
+/// note: The two-node body moved by a flatten, with its own edge.
 fn assert_two_node_body(document: &WorkflowDocument, entry: &str, terminal: &str) {
     assert_eq!(node_kind(document, entry), WorkflowNodeKind::InnerStep);
     assert_eq!(node_kind(document, terminal), WorkflowNodeKind::PatternSlot);
@@ -310,7 +310,7 @@ fn assert_two_node_body(document: &WorkflowDocument, entry: &str, terminal: &str
     );
 }
 
-/// The registry a compose test reads: one external pattern with a required string slot, one
+/// note: The registry a compose test reads: one external pattern with a required string slot, one
 /// `write_candidate` pattern, and one `read` pattern with a required string and an optional asset
 /// slot.
 fn write_registry(home: &Path) {
@@ -351,7 +351,7 @@ fn write_registry(home: &Path) {
             &json!([]),
         ),
     );
-    // `topic` as an asset, so a value a string slot accepted cannot survive the swap.
+    // why: `topic` as an asset, so a value a string slot accepted cannot survive the swap.
     write_package(
         home,
         "asset-topic-step",
@@ -379,7 +379,7 @@ async fn stored_row(pool: &SqlitePool, strategy_id: &str) -> Option<StoredRow> {
     .unwrap()
 }
 
-/// The canonical refusal envelope carried by a refused compose.
+/// note: The canonical refusal envelope carried by a refused compose.
 fn refusal(error: CoreError) -> Value {
     match error {
         CoreError::InputValidation { details } => details,
@@ -395,7 +395,7 @@ async fn current(setup: &Setup) -> nexus_core::StrategyCandidate {
         .unwrap()
 }
 
-/// One node as JSON, so the assertions read the committed bytes rather than a Rust projection.
+/// why: One node as JSON, so the assertions read the committed bytes rather than a Rust projection.
 fn slot_node(document: &WorkflowDocument, id: &str) -> Value {
     let value = serde_json::to_value(document).unwrap();
     value["nodes"]
@@ -425,12 +425,12 @@ async fn nest_inserts_the_collapsed_slot_and_the_resolved_pin() {
         .await
         .unwrap();
 
-    // One revision, and the store owns the embedded mirror.
+    // note: One revision, and the store owns the embedded mirror.
     assert_eq!(outcome.candidate.revision, 1);
     assert_eq!(outcome.candidate.document.revision, 1);
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await.unwrap().2, 1);
 
-    // The slot is collapsed, carries the exact pin, and the package's class.
+    // note: The slot is collapsed, carries the exact pin, and the package's class.
     let node = slot_node(&outcome.candidate.document, "collect-sources");
     assert_eq!(node["kind"], "pattern_slot");
     assert_eq!(node["pattern"]["registry_id"], "prompt-step");
@@ -455,7 +455,7 @@ async fn nest_inserts_the_collapsed_slot_and_the_resolved_pin() {
         Some(resolved.as_str())
     );
 
-    // The package's required slot is named, never defaulted.
+    // note: The package's required slot is named, never defaulted.
     assert_eq!(
         outcome.diagnostics,
         vec![ComposeDiagnostic::UnboundRequiredSlot {
@@ -475,7 +475,7 @@ async fn nest_wires_each_slot_after_its_attach_target() {
     let before = current(&setup).await;
     let entry = before.document.entry.clone();
 
-    // Two patterns composed into one candidate: the second hangs off the first slot.
+    // note: Two patterns composed into one candidate: the second hangs off the first slot.
     let first = setup
         .core
         .compose_strategy_candidate(
@@ -618,7 +618,7 @@ async fn an_attach_target_that_names_the_new_slot_is_refused_before_any_write() 
     let details = refusal(error);
     assert_eq!(details["reason"], "self_attach");
     assert_eq!(details["attach_to"], "self-loop-slot");
-    // Refused before the write: the slot and its loop edge never reach the candidate.
+    // note: Refused before the write: the slot and its loop edge never reach the candidate.
     assert!(stored_row(setup.core.pool(), STRATEGY).await.is_none());
     let after = current(&setup).await;
     assert_eq!(after.revision, 0);
@@ -648,7 +648,7 @@ async fn a_nested_write_candidate_pattern_never_lowers_the_summary() {
         .await
         .unwrap();
 
-    // The base strategy already declares `external`, so the fence may only rise, never fall.
+    // why: The base strategy already declares `external`, so the fence may only rise, never fall.
     assert!(
         matches!(
             outcome.candidate.document.effect_summary,
@@ -663,7 +663,7 @@ async fn a_nested_write_candidate_pattern_never_lowers_the_summary() {
     );
     assert_eq!(outcome.diagnostics, []);
 
-    // Unnesting the region removes the write it contributed: the rollup is recomputed, not kept.
+    // note: Unnesting the region removes the write it contributed: the rollup is recomputed, not kept.
     let unnest = setup
         .core
         .compose_strategy_candidate(
@@ -713,7 +713,7 @@ async fn an_unavailable_package_is_refused_naming_id_and_version() {
         "{details}"
     );
 
-    // Nothing was written: no row, no revision, and the read still answers revision 0.
+    // note: Nothing was written: no row, no revision, and the read still answers revision 0.
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
     assert_eq!(current(&setup).await.revision, 0);
 
@@ -724,7 +724,7 @@ async fn an_unavailable_package_is_refused_naming_id_and_version() {
 async fn an_unloadable_package_is_refused_with_the_readers_reason() {
     let setup = setup().await;
     write_registry(&setup.home);
-    // The manifest loads, but its declared class disagrees with its own fragment.
+    // note: The manifest loads, but its declared class disagrees with its own fragment.
     write_package(
         &setup.home,
         "mismatched-step",
@@ -804,7 +804,7 @@ async fn a_nest_that_exceeds_depth_three_is_refused_at_the_offending_nest() {
     write_chain(&setup.home, "chain-d", None);
     let before = current(&setup).await;
 
-    // chain-b nests chain-c which nests chain-d: exactly three levels, accepted.
+    // note: chain-b nests chain-c which nests chain-d: exactly three levels, accepted.
     let accepted = setup
         .core
         .compose_strategy_candidate(
@@ -817,7 +817,7 @@ async fn a_nest_that_exceeds_depth_three_is_refused_at_the_offending_nest() {
         .unwrap();
     assert_eq!(accepted.candidate.revision, 1);
 
-    // chain-a adds one more level: refused, with the fourth level named.
+    // note: chain-a adds one more level: refused, with the fourth level named.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -888,7 +888,7 @@ async fn unnest_flattens_the_pinned_body_and_reports_the_dropped_binding() {
 
     assert_eq!(flattened.candidate.revision, 3);
 
-    // The collapsed slot is gone and the body it pinned is a candidate node at this level.
+    // note: The collapsed slot is gone and the body it pinned is a candidate node at this level.
     let document = &flattened.candidate.document;
     assert!(document
         .nests
@@ -919,7 +919,7 @@ async fn unnest_flattens_the_pinned_body_and_reports_the_dropped_binding() {
         "the flattened body keeps its declared class"
     );
 
-    // The binding the slot carried has no slot at this level: dropped, and named.
+    // note: The binding the slot carried has no slot at this level: dropped, and named.
     assert_eq!(
         flattened.diagnostics,
         vec![ComposeDiagnostic::DroppedSlotBinding {
@@ -946,7 +946,7 @@ async fn unnest_flattens_a_two_level_and_a_three_level_body_into_the_parent_leve
         "the import projection carries no nest"
     );
 
-    // Two levels: flattening the outer nest materializes its body and leaves the nest it carried.
+    // note: Two levels: flattening the outer nest materializes its body and leaves the nest it carried.
     let (nested, flat) = nest_then_unnest(&setup, 0, "two", "two-slot", "outer-two").await;
     assert_eq!(nested.document.nests.len(), 1);
     assert_eq!(
@@ -963,7 +963,7 @@ async fn unnest_flattens_a_two_level_and_a_three_level_body_into_the_parent_leve
         WorkflowNodeKind::PatternSlot
     );
 
-    // Flattening again keeps the second body's ids unique and retargets the edge that pointed at
+    // note: Flattening again keeps the second body's ids unique and retargets the edge that pointed at
     // its slot: the outer `a -> b` now enters the inner body at `a~2`.
     let inner = setup
         .core
@@ -986,7 +986,7 @@ async fn unnest_flattens_a_two_level_and_a_three_level_body_into_the_parent_leve
         "the outer edge now enters the flattened body"
     );
 
-    // Three levels: every flatten moves one level up and leaves the next pin behind.
+    // note: Three levels: every flatten moves one level up and leaves the next pin behind.
     let (_, flat) = nest_then_unnest(
         &setup,
         inner.candidate.revision,
@@ -1024,7 +1024,7 @@ async fn unnest_flattens_a_two_level_and_a_three_level_body_into_the_parent_leve
     setup.core.close().await.unwrap();
 }
 
-/// Wire the slot node as the document's entry and terminal, with one edge on each side.
+/// note: Wire the slot node as the document's entry and terminal, with one edge on each side.
 async fn wire_the_slot(
     setup: &Setup,
     base: u64,
@@ -1099,7 +1099,7 @@ async fn unnest_retargets_the_wiring_the_slot_owned() {
     assert!(document.nodes.iter().all(|node| node.id != "wired-slot"));
     assert_eq!(flattened.diagnostics, []);
 
-    // The wiring the slot owned now lands on the fragment's boundary nodes: the body's own edge
+    // note: The wiring the slot owned now lands on the fragment's boundary nodes: the body's own edge
     // names them, because both ends are nodes this flatten moved.
     let before_ids: Vec<&str> = before
         .document
@@ -1223,7 +1223,7 @@ async fn a_resolved_fragment_with_a_dangling_edge_is_refused_by_compose() {
     setup.core.close().await.unwrap();
 }
 
-/// A fragment whose node carries `role` and whose body declares it.
+/// note: A fragment whose node carries `role` and whose body declares it.
 fn role_fragment(id: &str, role: &str) -> Value {
     let mut body = fragment(
         id,
@@ -1310,12 +1310,12 @@ async fn an_available_duplicate_directory_wins_over_a_broken_one_in_either_order
         &json!([]),
     );
 
-    // A directory symlink scanned under another name resolves the same manifest, and its own name
+    // note: A directory symlink scanned under another name resolves the same manifest, and its own name
     // cannot match the manifest id, so the listing reports one pin twice with the alias unavailable.
     let patterns = setup.home.join("patterns");
     write_package(&setup.home, "dup-step", "pure", "", &body);
     std::os::unix::fs::symlink(patterns.join("dup-step"), patterns.join("aa-alias")).unwrap();
-    // The reverse order: the readable directory sorts first and must keep the pin.
+    // note: The reverse order: the readable directory sorts first and must keep the pin.
     write_package(&setup.home, "reversed-dup", "pure", "", &reversed);
     std::os::unix::fs::symlink(patterns.join("reversed-dup"), patterns.join("zz-alias")).unwrap();
 
@@ -1396,7 +1396,7 @@ async fn replace_subtree_changes_only_the_pin_of_that_region() {
 
     let before_value = serde_json::to_value(&bound.candidate.document).unwrap();
     let mut after_value = serde_json::to_value(&replaced.candidate.document).unwrap();
-    // The store owns the revision, so the diff covers content only.
+    // why: The store owns the revision, so the diff covers content only.
     after_value["revision"] = before_value["revision"].clone();
     let changed = changed_paths(&before_value, &after_value);
     assert!(
@@ -1406,7 +1406,7 @@ async fn replace_subtree_changes_only_the_pin_of_that_region() {
         "the region was re-pinned: {changed:?}"
     );
 
-    // A real document diff: nothing outside the re-pinned region and its slot pin moved.
+    // note: A real document diff: nothing outside the re-pinned region and its slot pin moved.
     let document = &replaced.candidate.document;
     let swap_index = document
         .nests
@@ -1427,7 +1427,7 @@ async fn replace_subtree_changes_only_the_pin_of_that_region() {
         );
     }
 
-    // The authored edits survive: the other region, its bindings and the graph are untouched.
+    // note: The authored edits survive: the other region, its bindings and the graph are untouched.
     assert_eq!(document.nests.len(), bound.candidate.document.nests.len());
     assert_eq!(document.nodes.len(), bound.candidate.document.nodes.len());
     assert_eq!(
@@ -1487,7 +1487,7 @@ async fn bind_slot_validates_the_value_against_the_manifest_declaration() {
     write_registry(&setup.home);
     let before = current(&setup).await;
 
-    // An asset the document carries, so the asset slot can be bound to a real id.
+    // why: An asset the document carries, so the asset slot can be bound to a real id.
     let with_asset = setup
         .core
         .commit_strategy_candidate(&setup.principal, STRATEGY, before.revision, |document| {
@@ -1516,7 +1516,7 @@ async fn bind_slot_validates_the_value_against_the_manifest_declaration() {
         .await
         .unwrap();
 
-    // A required string slot accepts a string and clears its diagnostic.
+    // note: A required string slot accepts a string and clears its diagnostic.
     let bound = setup
         .core
         .compose_strategy_candidate(
@@ -1529,7 +1529,7 @@ async fn bind_slot_validates_the_value_against_the_manifest_declaration() {
         .unwrap();
     assert_eq!(bound.diagnostics, []);
 
-    // The asset slot accepts a documented asset id...
+    // note: The asset slot accepts a documented asset id...
     let asset = setup
         .core
         .compose_strategy_candidate(
@@ -1542,7 +1542,7 @@ async fn bind_slot_validates_the_value_against_the_manifest_declaration() {
         .unwrap();
     assert_eq!(asset.diagnostics, []);
 
-    // ...and refuses a string that names no asset, without changing the document.
+    // note: ...and refuses a string that names no asset, without changing the document.
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
     let error = setup
         .core
@@ -1563,7 +1563,7 @@ async fn bind_slot_validates_the_value_against_the_manifest_declaration() {
     );
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
 
-    // A non-string value fails the same check.
+    // note: A non-string value fails the same check.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -1576,7 +1576,7 @@ async fn bind_slot_validates_the_value_against_the_manifest_declaration() {
         .unwrap_err();
     assert_eq!(refusal(error)["reason"], "slot_kind_mismatch");
 
-    // A slot the package does not declare is refused by name.
+    // note: A slot the package does not declare is refused by name.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -1656,7 +1656,7 @@ async fn a_package_that_changed_under_its_version_fails_closed() {
         .expect("the pin records the resolved hash")
         .to_owned();
 
-    // The package is edited in place under the same id and version: new bytes, new hash.
+    // note: The package is edited in place under the same id and version: new bytes, new hash.
     let mut reworked = fragment(
         "prompt-step",
         "external",
@@ -1673,7 +1673,7 @@ async fn a_package_that_changed_under_its_version_fails_closed() {
     );
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // A bind would validate against the new bytes while the document still identifies the old
+    // why: A bind would validate against the new bytes while the document still identifies the old
     // ones, so it is refused and names both hashes.
     let error = setup
         .core
@@ -1703,7 +1703,7 @@ async fn a_package_that_changed_under_its_version_fails_closed() {
     );
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
 
-    // `replace_subtree` is the one op allowed to establish a new pin: it adopts the new bytes.
+    // note: `replace_subtree` is the one op allowed to establish a new pin: it adopts the new bytes.
     let replaced = setup
         .core
         .compose_strategy_candidate(
@@ -1767,7 +1767,7 @@ async fn replace_subtree_refuses_a_retained_binding_its_pattern_no_longer_declar
         .unwrap();
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // `prompt-step` declares no `rubric`, so the retained binding would be a dangling slot.
+    // why: `prompt-step` declares no `rubric`, so the retained binding would be a dangling slot.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -1815,7 +1815,7 @@ async fn replace_subtree_refuses_a_retained_binding_whose_kind_the_pattern_chang
         .unwrap();
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // The replacement declares `topic` as an asset; the retained string is what `bind_slot`
+    // note: The replacement declares `topic` as an asset; the retained string is what `bind_slot`
     // would refuse for the identical value.
     let error = setup
         .core
@@ -1856,7 +1856,7 @@ async fn a_stale_base_is_refused_before_the_registry_is_scanned() {
         .await
         .unwrap();
 
-    // An unreadable registry would surface as an internal error; a stale base must not reach it.
+    // why: An unreadable registry would surface as an internal error; a stale base must not reach it.
     let patterns = setup.home.join("patterns");
     std::fs::remove_dir_all(&patterns).unwrap();
     std::fs::write(&patterns, b"not a directory").unwrap();
@@ -1882,7 +1882,7 @@ async fn a_stale_base_is_refused_before_the_registry_is_scanned() {
     setup.core.close().await.unwrap();
 }
 
-/// The shared walk reports a recorded pin whose package is absent instead of swallowing the
+/// note: The shared walk reports a recorded pin whose package is absent instead of swallowing the
 /// resolution error: nothing is consumed, and the carrier is named with the hash it recorded.
 #[cfg(feature = "execution")]
 #[test]
@@ -1946,7 +1946,7 @@ fn a_pin_whose_package_is_absent_is_reported_by_the_walk() {
     );
 }
 
-/// Every stale-pin diagnostic of one outcome, in document order.
+/// note: Every stale-pin diagnostic of one outcome, in document order.
 fn stale_pins(outcome: &ComposeOutcome) -> Vec<ComposeDiagnostic> {
     outcome
         .diagnostics
@@ -1956,7 +1956,7 @@ fn stale_pins(outcome: &ComposeOutcome) -> Vec<ComposeDiagnostic> {
         .collect()
 }
 
-/// Rewrite a package's fragment in place under the same id and version: new bytes, new hash.
+/// note: Rewrite a package's fragment in place under the same id and version: new bytes, new hash.
 fn rework_package(home: &Path, id: &str, effect_class: &str, slots: &str, description: &str) {
     let mut reworked = fragment(
         id,
@@ -1998,7 +1998,7 @@ async fn two_stale_pins_refuse_only_the_region_the_operation_uses() {
         .expect("the pin records the resolved hash")
         .to_owned();
 
-    // Both packages are edited in place under the same versions: two regions are stale at once.
+    // note: Both packages are edited in place under the same versions: two regions are stale at once.
     rework_package(
         &setup.home,
         "prompt-step",
@@ -2015,7 +2015,7 @@ async fn two_stale_pins_refuse_only_the_region_the_operation_uses() {
     );
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // The region the operation resolves refuses, naming both hashes.
+    // note: The region the operation resolves refuses, naming both hashes.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -2042,7 +2042,7 @@ async fn two_stale_pins_refuse_only_the_region_the_operation_uses() {
     );
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
 
-    // Re-pinning `first` is the remedy. It runs even though `second` is still stale, and that
+    // note: Re-pinning `first` is the remedy. It runs even though `second` is still stale, and that
     // other region is reported, never allowed to wedge every operation.
     let replaced = setup
         .core
@@ -2095,7 +2095,7 @@ async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
         .expect("the pin records the resolved hash")
         .to_owned();
 
-    // An outer package whose own fragment pins `prompt-step` at the bytes it had here.
+    // note: An outer package whose own fragment pins `prompt-step` at the bytes it had here.
     let mut outer = chain_fragment("outer", "prompt-step");
     outer["nests"][0]["child"]["content_hash"] = json!(recorded);
     write_package(&setup.home, "outer", "pure", "", &outer);
@@ -2119,7 +2119,7 @@ async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
         "prompt-step, reworked",
     );
 
-    // Re-pinning the direct region is allowed; the outer fragment records the same pin, and that
+    // note: Re-pinning the direct region is allowed; the outer fragment records the same pin, and that
     // carrier is reached only after the walk has de-duped `prompt-step` — so it is the one that
     // proves the hash is compared before the de-dupe.
     let replaced = setup
@@ -2158,7 +2158,7 @@ async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
 #[tokio::test]
 async fn unnest_refuses_a_body_declaration_the_parent_level_cannot_carry() {
     let setup = setup().await;
-    // `move_body` carries nodes and edges, not the body's own role declarations. The seed document
+    // note: `move_body` carries nodes and edges, not the body's own role declarations. The seed document
     // declares `writer` and `reviewer`, so the body uses a role the parent level does not declare.
     let mut body = fragment(
         "role-step",
@@ -2260,7 +2260,7 @@ async fn unnest_refuses_the_control_references_the_slot_node_owns() {
         .unwrap();
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // The slot node is removed by the flatten, so its own control references would go with it.
+    // why: The slot node is removed by the flatten, so its own control references would go with it.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -2284,7 +2284,7 @@ async fn unnest_refuses_the_control_references_the_slot_node_owns() {
     setup.core.close().await.unwrap();
 }
 
-/// Every JSON pointer that differs between two documents.
+/// note: Every JSON pointer that differs between two documents.
 fn changed_paths(before: &Value, after: &Value) -> Vec<String> {
     let mut paths = Vec::new();
     diff(before, after, "", &mut paths);

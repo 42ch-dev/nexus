@@ -4,6 +4,7 @@
 //! Every case drives the real core API on a temporary home: no daemon, no
 //! creator, no live provider. Credential fixtures are synthetic — no real auth
 //! material is read or logged.
+// note: the doc above names the selection/writer/loader surface these cases drive.
 
 #[cfg(unix)]
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
@@ -22,7 +23,7 @@ use tempfile::TempDir;
 const SPACE_ID: &str = "space_alpha";
 const CREDENTIAL_ID: &str = "cred_alpha-1";
 const PUBKEY_HEX: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-/// Synthetic seed; a distinctive value so a leak into an error is detectable.
+/// why: Synthetic seed; a distinctive value so a leak into an error is detectable.
 const SEED_HEX: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
 const OTHER_WRITER_TOML: &str =
     "active_creator_id = \"crt_alpha\"\n\n[agent_profile]\nmodel = \"m1\"\n";
@@ -162,7 +163,7 @@ if ($env:NEXUS_TEST_EVERYONE_READ -eq '1' -and -not ($rules | Where-Object { $_.
     );
 }
 
-/// Add one allow rule for an arbitrary SID to an already-trusted fixture.
+/// note: Add one allow rule for an arbitrary SID to an already-trusted fixture.
 ///
 /// The `SecurityIdentifier` is constructed from the exact environment SID and
 /// that `IdentityReference` object is passed to `FileSystemAccessRule`: the
@@ -267,7 +268,7 @@ fn windows_credential_acl_everyone_read_is_refused() {
     }
 }
 
-/// D43/I313: the read gate is SID-generic, not an Everyone special case. A
+/// note: D43/I313: the read gate is SID-generic, not an Everyone special case. A
 /// read grant to any principal beyond the file's owner, SYSTEM and
 /// Administrators — here Authenticated Users — refuses the credential with the
 /// same coded, secret-safe, deterministic refusal.
@@ -280,7 +281,7 @@ fn windows_credential_acl_other_untrusted_principal_read_is_refused() {
     assert_untrusted_grant_refused(home.path());
 }
 
-/// D43/F002: the policy rejects unrelated grants of any ordinary right, not
+/// note: D43/F002: the policy rejects unrelated grants of any ordinary right, not
 /// only read. `ChangePermissions` is the .NET name of `WRITE_DAC`: an
 /// unrelated principal holding it could rewrite the DACL and grant itself
 /// read later, so the gate must refuse it on its own. The fixture read-back
@@ -295,7 +296,7 @@ fn windows_credential_acl_unrelated_write_dac_grant_is_refused() {
     assert_untrusted_grant_refused(home.path());
 }
 
-/// The coded, seed-safe, deterministic refusal shape shared by the
+/// note: The coded, seed-safe, deterministic refusal shape shared by the
 /// unrelated-grant regressions: a static `memory_credential_invalid` error
 /// that leaks neither the seed nor file contents and repeats identically.
 #[cfg(windows)]
@@ -330,30 +331,30 @@ fn assert_untrusted_grant_refused(user_home: &Path) {
 fn missing_memory_provider_table_selects_local() {
     let home = home();
 
-    // Absent config file is the implicit local default, not an error.
+    // note: Absent config file is the implicit local default, not an error.
     assert_eq!(read_selection(home.path()), MemoryProviderSelection::Local);
     assert!(!config_path(home.path()).exists());
 
-    // A config owned by other writers without `[memory_provider]` stays local.
+    // note: A config owned by other writers without `[memory_provider]` stays local.
     std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
     std::fs::write(config_path(home.path()), OTHER_WRITER_TOML).expect("seed config");
     assert_eq!(read_selection(home.path()), MemoryProviderSelection::Local);
     assert!(config_path(home.path()).exists());
 }
 
-/// I-000304: only a genuinely absent `config.toml` is the implicit local
+/// note: I-000304: only a genuinely absent `config.toml` is the implicit local
 /// default. A metadata failure must reach the caller as an error, so a remote
 /// configured home can never silently fall through to the local provider.
 #[test]
 fn unreadable_provider_config_is_an_error_not_the_local_default() {
     let home = home();
 
-    // Genuine absence stays the documented default.
+    // note: Genuine absence stays the documented default.
     assert!(read_memory_provider_config(&nexus_dir(home.path()))
         .expect("an absent config is not an error")
         .is_none());
 
-    // A readable config still yields its remote selection.
+    // note: A readable config still yields its remote selection.
     std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
     let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
     let selection = MemoryProviderSelection::Remote(remote(
@@ -366,7 +367,7 @@ fn unreadable_provider_config_is_an_error_not_the_local_default() {
         .expect("write remote selection");
     assert_eq!(read_selection(home.path()), selection);
 
-    // The config path's parent is a regular file, so metadata fails with a
+    // note: The config path's parent is a regular file, so metadata fails with a
     // real non-`NotFound` error (ENOTDIR on Unix). `Path::exists()` used to
     // fold that into "absent", which pinned Local for a config the reader
     // could not inspect.
@@ -376,7 +377,7 @@ fn unreadable_provider_config_is_an_error_not_the_local_default() {
         .expect_err("an uninspectable config must not read as absent");
 }
 
-/// I-000304, consumer level: `CoreService::open` resolves the workspace from
+/// note: I-000304, consumer level: `CoreService::open` resolves the workspace from
 /// `config.toml` first and reads the `[memory_provider]` table afterwards, from
 /// the SAME document. When that document becomes uninspectable inside that
 /// window — the report's own "symlinked target becomes inaccessible between
@@ -417,14 +418,14 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         memory: None,
     };
 
-    // Hold the fresh store's public migration fence before the open runs: the
+    // note: Hold the fresh store's public migration fence before the open runs: the
     // open's first admission must take this exclusive lock, so a single poll
     // can only reach that wait — it can neither migrate, open a writer nor
     // select a provider while this test owns the lock.
     let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path)
         .expect("the fresh store has no live writer");
     let mut opened = Box::pin(CoreService::open(open(CoreAccess::EngineOwner)));
-    // One poll runs the synchronous workspace discovery and parks on the
+    // note: One poll runs the synchronous workspace discovery and parks on the
     // fenced admission, so the workspace snapshot has been read and the
     // provider selection has provably not run yet.
     let mut poll_once = std::task::Context::from_waker(std::task::Waker::noop());
@@ -435,7 +436,7 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         ),
         "the held migration fence keeps the open from finishing"
     );
-    // The window: the same `config.toml` turns uninspectable — the directory
+    // note: The window: the same `config.toml` turns uninspectable — the directory
     // entry stays, but its read fails with ELOOP — between the workspace
     // snapshot and the provider selection.
     std::fs::remove_file(&config).expect("drop the readable document");
@@ -453,7 +454,7 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         "the provider snapshot refused the document: {error:?}"
     );
 
-    // The failed pin released the engine admission it took: a real writer open
+    // note: The failed pin released the engine admission it took: a real writer open
     // acquires it once the document is readable again.
     std::fs::remove_file(&config).expect("drop the config symlink");
     std::fs::write(&config, &document).expect("restore config");
@@ -463,7 +464,7 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
     writer.close().await.expect("close");
 }
 
-/// I-000304, consumer level (R4): the same window as the ELOOP regression above,
+/// note: I-000304, consumer level (R4): the same window as the ELOOP regression above,
 /// but here the config path is an **existing symlink whose target is absent**.
 /// Following the final link answers `NotFound`, which is not proof that the
 /// config directory entry is missing: the reader must classify the entry
@@ -513,7 +514,7 @@ async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_loc
         ),
         "the held migration fence keeps the open from finishing"
     );
-    // The window: the config path stays a directory entry but becomes a
+    // note: The window: the config path stays a directory entry but becomes a
     // symlink whose target does not exist.
     std::fs::remove_file(&config).expect("drop the readable document");
     std::os::unix::fs::symlink("absent-config.toml", &config).expect("dangling config symlink");
@@ -530,7 +531,7 @@ async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_loc
         "the provider snapshot refused the dangling config link: {error:?}"
     );
 
-    // The failed pin released the engine admission it took: a real writer open
+    // note: The failed pin released the engine admission it took: a real writer open
     // acquires it once the document is readable again.
     std::fs::remove_file(&config).expect("drop the config symlink");
     std::fs::write(&config, &document).expect("restore config");
@@ -540,7 +541,7 @@ async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_loc
     writer.close().await.expect("close");
 }
 
-/// I-000304 (R5): the implicit legacy `config.json` migration shares the
+/// note: I-000304 (R5): the implicit legacy `config.json` migration shares the
 /// config-entry authority. A dangling `config.toml` link is an existing entry,
 /// not genuine absence: the open must refuse with `config_load` and never
 /// create the link's target, replace the entry or rename the legacy document.
@@ -612,7 +613,7 @@ async fn a_dangling_config_link_blocks_implicit_legacy_migration() {
     );
 }
 
-/// I-000304 (R5) control: genuine absence of the `config.toml` entry still
+/// note: I-000304 (R5) control: genuine absence of the `config.toml` entry still
 /// migrates a valid legacy document, and the migrated document keeps the
 /// implicit local provider selection.
 #[cfg(unix)]
@@ -736,7 +737,7 @@ fn malformed_credential_id_is_rejected_without_writing() {
 
 #[test]
 fn malformed_connect_endpoints_are_rejected() {
-    // Userinfo, query, fragment, wrong scheme and plain ws to a non-loopback
+    // note: Userinfo, query, fragment, wrong scheme and plain ws to a non-loopback
     // host are all refused (§3.2).
     for endpoint in [
         "https://example.com/ws",
@@ -744,12 +745,12 @@ fn malformed_connect_endpoints_are_rejected() {
         "wss://user:pass@example.com/ws",
         "wss://example.com/ws?token=x",
         "wss://example.com/ws#frag",
-        // Malformed authority and port, previously accepted by string splitting.
+        // note: Malformed authority and port, previously accepted by string splitting.
         "wss://:8420",
         "wss://host:bad",
         "ws://localhost:bad",
         "wss://[::1/ws",
-        // Empty authority, empty userinfo, an empty/invalid port and a host
+        // note: Empty authority, empty userinfo, an empty/invalid port and a host
         // outside the locked loopback set are all refused by the raw
         // transport grammar.
         "wss:///ws",
@@ -764,7 +765,7 @@ fn malformed_connect_endpoints_are_rejected() {
         assert_invalid_field(error, "connect_endpoint");
     }
 
-    // The shared writer refuses the same authorities before persisting them.
+    // note: The shared writer refuses the same authorities before persisting them.
     let home = home();
     let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
     for endpoint in [
@@ -786,7 +787,7 @@ fn malformed_connect_endpoints_are_rejected() {
         "a refused selection writes nothing"
     );
 
-    // Loopback ws:// (tests) and wss:// remain selectable, persisted verbatim.
+    // note: Loopback ws:// (tests) and wss:// remain selectable, persisted verbatim.
     for endpoint in [
         "ws://127.0.0.1:8420/memory",
         "ws://[::1]:8420",
@@ -871,7 +872,7 @@ fn malformed_provider_table_does_not_change_creator_or_workspace_resolution() {
     let home = home();
     std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
 
-    // Unknown `kind` and a remote table missing fields: both are malformed for
+    // note: Unknown `kind` and a remote table missing fields: both are malformed for
     // provider selection, and neither may disturb unrelated readers. The
     // configured workspace is deliberately non-default so a fallback to
     // `default` is observable.
@@ -947,7 +948,7 @@ fn oversized_credential_is_refused() {
 fn credential_errors_and_debug_never_echo_secret_material() {
     let home = home();
 
-    // A readable refusal (broad permissions) must not interpolate the seed.
+    // note: A readable refusal (broad permissions) must not interpolate the seed.
     write_credential(home.path(), CREDENTIAL_ID, &valid_credential_json(), 0o640);
     let error =
         MemoryCredential::load(home.path(), CREDENTIAL_ID).expect_err("0640 must be refused");
@@ -956,7 +957,7 @@ fn credential_errors_and_debug_never_echo_secret_material() {
         "credential error leaked the seed: {error}"
     );
 
-    // A parse refusal of a file carrying a seed-shaped value stays static.
+    // note: A parse refusal of a file carrying a seed-shaped value stays static.
     let malformed = format!(
         "{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": null, \"signature\": \"sig_{SEED_HEX}\"}}"
     );
@@ -973,7 +974,7 @@ fn credential_errors_and_debug_never_echo_secret_material() {
         "credential error leaked the signature: {text}"
     );
 
-    // Debug output of a successfully loaded credential is redacted.
+    // note: Debug output of a successfully loaded credential is redacted.
     write_credential(home.path(), CREDENTIAL_ID, &valid_credential_json(), 0o600);
     let credential = MemoryCredential::load(home.path(), CREDENTIAL_ID).expect("valid credential");
     let debug = format!("{credential:?}");
@@ -989,7 +990,7 @@ fn well_formed_credential_loads() {
 
     MemoryCredential::load(home.path(), CREDENTIAL_ID).expect("0600 credential must load");
 
-    // Missing and traversal-shaped ids are refused before any path join.
+    // note: Missing and traversal-shaped ids are refused before any path join.
     let missing = MemoryCredential::load(home.path(), "absent")
         .expect_err("missing credential file is refused");
     assert!(!missing.to_string().contains("absent"), "{missing}");
@@ -1024,7 +1025,7 @@ fn credential_uppercase_seed_hex_is_refused() {
 #[cfg(unix)]
 #[test]
 fn non_regular_credential_path_is_refused() {
-    // A socket stands in for a substituted special file: the descriptor decides
+    // note: A socket stands in for a substituted special file: the descriptor decides
     // the refusal, never a pathname pre-check. A short home keeps the socket
     // path within `SUN_LEN`.
     let home = tempfile::Builder::new()
@@ -1047,7 +1048,7 @@ fn non_regular_credential_path_is_refused() {
 fn capability_proof_must_be_the_published_shape() {
     let home = home();
 
-    // A non-null `capability_token` must deserialize as the published
+    // note: A non-null `capability_token` must deserialize as the published
     // `CapabilityTokenProof` (`{v, claims, sig}`) and `CapabilityClaims`:
     // required `iss`/`sub`/`aud` strings, string-array `capabilities`,
     // unsigned `exp`, typed optional `iat`/`jti`, unknown fields refused.
@@ -1094,7 +1095,7 @@ fn capability_proof_must_be_the_published_shape() {
         assert_credential_refused(error);
     }
 
-    // The published shape loads, with and without the optional typed claims.
+    // note: The published shape loads, with and without the optional typed claims.
     for proof in [
         concat!(
             "{\"v\": 1, \"claims\": {\"iss\": \"12D3KooWIss\", ",
@@ -1122,7 +1123,7 @@ fn capability_proof_must_be_the_published_shape() {
 #[test]
 fn missing_capability_token_field_is_refused() {
     let home = home();
-    // §3.1 declares the field; omitting it is a malformed document, not `null`.
+    // note: §3.1 declares the field; omitting it is a malformed document, not `null`.
     let content = format!("{{\"identity_seed_hex\": \"{SEED_HEX}\"}}");
     write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
 

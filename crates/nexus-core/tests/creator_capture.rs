@@ -11,6 +11,7 @@
 //!
 //! Explicit capture only: Host auto-`remember` stays refused (D-4 / C-115), and
 //! this target never sets it.
+// note: the doc above names the capture/review/promote path these cases drive.
 
 use nexus_contracts::generated::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
 use nexus_contracts::generated::daemon_api::memory::review_request::ReviewRequest;
@@ -40,7 +41,7 @@ fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid payload")
 }
 
-/// The wire body of the one capture this file performs.
+/// note: The wire body of the one capture this file performs.
 fn capture_body(pending_id: &str, creator_id: &str) -> CreatePendingReviewRequest {
     dto(json!({
         "pending_id": pending_id,
@@ -53,7 +54,7 @@ fn capture_body(pending_id: &str, creator_id: &str) -> CreatePendingReviewReques
     }))
 }
 
-/// Materialize the workspace shell and seed the creator row through one engine
+/// note: Materialize the workspace shell and seed the creator row through one engine
 /// pool, released before the cores open (mirroring the daemon boot).
 async fn seed_env() -> Env {
     let common::TestHome {
@@ -98,7 +99,7 @@ fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
     }
 }
 
-/// The single pending candidate the capture wrote, as the provider serves it.
+/// note: The single pending candidate the capture wrote, as the provider serves it.
 async fn pending_candidates(core: &CoreService) -> Vec<Value> {
     let provider = core.memory_provider_for_test().expect("pinned provider");
     let body = wire(
@@ -116,14 +117,14 @@ async fn pending_candidates(core: &CoreService) -> Vec<Value> {
     body["candidates"].as_array().cloned().unwrap_or_default()
 }
 
-/// Capture → review → promote: the captured digest becomes a promoted Creator
+/// note: Capture → review → promote: the captured digest becomes a promoted Creator
 /// record, and the pending row is consumed exactly once.
 #[tokio::test]
 async fn creator_capture_review_promote_round_trip() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // 1. capture: the typed Creator capability answers the retained DTO.
+    // note: 1. capture: the typed Creator capability answers the retained DTO.
     let response = core
         .create_pending_review(&principal, capture_body(PENDING, CREATOR))
         .await
@@ -131,7 +132,7 @@ async fn creator_capture_review_promote_round_trip() {
     assert!(response.success);
     assert_eq!(response.pending_id, PENDING);
 
-    // 2. the captured row is the Creator pending-review DTO's row, with every
+    // note: 2. the captured row is the Creator pending-review DTO's row, with every
     // captured field preserved.
     let pending = core
         .list_pending_reviews(&principal, None, 50)
@@ -151,7 +152,7 @@ async fn creator_capture_review_promote_round_trip() {
         1
     );
 
-    // 3. an exact retry replays the capture instead of queueing a second row.
+    // note: 3. an exact retry replays the capture instead of queueing a second row.
     let retry = core
         .create_pending_review(&principal, capture_body(PENDING, CREATOR))
         .await
@@ -162,7 +163,7 @@ async fn creator_capture_review_promote_round_trip() {
         1
     );
 
-    // 4. the capture is a provider candidate carrying the task-kind mapping
+    // note: 4. the capture is a provider candidate carrying the task-kind mapping
     // (`chapter` → the `story_summary` authored kind) and the world context.
     let candidates = pending_candidates(&core).await;
     assert_eq!(candidates.len(), 1, "one pending candidate");
@@ -183,7 +184,7 @@ async fn creator_capture_review_promote_round_trip() {
         "session_id is the source anchor"
     );
 
-    // 5. review + promote through the typed drain the `creator memory review`
+    // note: 5. review + promote through the typed drain the `creator memory review`
     // command runs. The captured candidate is what it consumes; `chapter` with
     // a high-signal digest classifies as `PromoteToLongTerm`.
     let reviewed = core
@@ -201,7 +202,7 @@ async fn creator_capture_review_promote_round_trip() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // 6. the promoted record is the Creator's long-term memory now, and the
+    // note: 6. the promoted record is the Creator's long-term memory now, and the
     // queue is consumed.
     let records = core
         .list_creator_memories(&principal)
@@ -223,7 +224,7 @@ async fn creator_capture_review_promote_round_trip() {
     );
     assert_eq!(pending_candidates(&core).await.len(), 0);
 
-    // 7. the review consumed the candidate, so a dismissal now is the retained
+    // why: 7. the review consumed the candidate, so a dismissal now is the retained
     // not-found answer — only a dismissal that itself consumed the row answers
     // success (fix round 4, F3).
     let late = core
@@ -233,11 +234,11 @@ async fn creator_capture_review_promote_round_trip() {
     assert!(matches!(late, CoreError::NotFound { .. }), "got {late:?}");
 }
 
-/// F1 (fix round 4): the count walks the provider's pages without materializing
+/// note: F1 (fix round 4): the count walks the provider's pages without materializing
 /// them, and still equals the listed length across multiple pages.
 #[tokio::test]
 async fn creator_pending_count_matches_the_listed_length_across_pages() {
-    // 101 rows: one full provider page of 100 plus a second page.
+    // note: 101 rows: one full provider page of 100 plus a second page.
     const TOTAL: usize = 101;
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
@@ -255,7 +256,7 @@ async fn creator_pending_count_matches_the_listed_length_across_pages() {
         "the count covers every provider page"
     );
 
-    // The listed length across two pages is the same number.
+    // note: The listed length across two pages is the same number.
     let mut listed: Vec<String> = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
@@ -281,7 +282,7 @@ async fn creator_pending_count_matches_the_listed_length_across_pages() {
     );
 }
 
-/// A capture retried without an explicit timestamp replays instead of failing.
+/// note: A capture retried without an explicit timestamp replays instead of failing.
 ///
 /// `nexus42 creator memory capture` never sends `--created-at` unless asked, so
 /// the retry after a lost response once regenerated the timestamp while reusing
@@ -321,7 +322,7 @@ async fn creator_capture_retry_without_timestamp_replays() {
     );
 }
 
-/// The capture refuses another creator's identity with the retained ownership
+/// note: The capture refuses another creator's identity with the retained ownership
 /// code and writes nothing.
 #[tokio::test]
 async fn creator_capture_refuses_a_foreign_creator() {
@@ -342,7 +343,7 @@ async fn creator_capture_refuses_a_foreign_creator() {
     );
 }
 
-/// The retained capture-field limits stay handler-owned: an empty digest and a
+/// note: The retained capture-field limits stay handler-owned: an empty digest and a
 /// reserved `run_` pending id are `invalid_input`, and nothing is queued.
 #[tokio::test]
 async fn creator_capture_validates_its_fields() {

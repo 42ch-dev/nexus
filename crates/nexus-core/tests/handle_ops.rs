@@ -14,6 +14,7 @@
 //! Each case drives a real engine-owner core over an admitted pool; the
 //! schedule supervisor is attached exactly as the daemon bundle attaches it,
 //! so the tests exercise the production insert path rather than its refusal.
+// note: the doc above names the behaviour classes these cases pin.
 
 #![cfg(feature = "execution")]
 #![allow(clippy::unwrap_used)]
@@ -36,7 +37,7 @@ const CREATOR: &str = "op_creator";
 const OTHER_CREATOR: &str = "intruder";
 const SLUG: &str = "default";
 
-/// Deterministic provider that never performs an effect.
+/// note: Deterministic provider that never performs an effect.
 struct NullProvider;
 
 #[async_trait]
@@ -65,7 +66,7 @@ impl ProviderPort for NullProvider {
     }
 }
 
-/// A prompt executor that never runs (the tests never drive a preset).
+/// note: A prompt executor that never runs (the tests never drive a preset).
 struct NullPromptExecutor;
 
 #[async_trait]
@@ -81,7 +82,7 @@ struct Fixture {
     tmp: TempDir,
 }
 
-/// Build a workspace home and seed the admitted creator, exactly as the daemon
+/// note: Build a workspace home and seed the admitted creator, exactly as the daemon
 /// does, so a `CoreService` can be opened over it.
 async fn fixture() -> Fixture {
     let tmp = TempDir::new().unwrap();
@@ -104,7 +105,7 @@ async fn fixture() -> Fixture {
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("engine pool init");
-    // The PRODUCTION creation path, so the Creator's holder registry row is
+    // why: The PRODUCTION creation path, so the Creator's holder registry row is
     // materialized with it: the compute seam reads its module input through the
     // admitted Creator `ActorView`, which resolves that stable holder
     // (`require_creator_holder`, fail-closed) before any invocation runs.
@@ -117,7 +118,7 @@ async fn fixture() -> Fixture {
     Fixture { tmp }
 }
 
-/// Open an engine-owner core and establish a handle over it.
+/// note: Open an engine-owner core and establish a handle over it.
 ///
 /// A schedule supervisor is attached over the coordinator's own pool, exactly
 /// as the daemon wires its runtime bundle. Without it `add_schedule` refuses
@@ -133,7 +134,7 @@ async fn open_handle(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
     (core, handle)
 }
 
-/// Same owner, but with NO schedule supervisor attached — the insertion
+/// note: Same owner, but with NO schedule supervisor attached — the insertion
 /// authority is absent, so `add_schedule` cannot reach the insert.
 async fn open_handle_bare(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
     let core = CoreService::open(CoreOpenOptions {
@@ -160,7 +161,7 @@ async fn open_handle_bare(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
     (core, handle)
 }
 
-/// A schedule request naming `creator`.
+/// note: A schedule request naming `creator`.
 fn request_for(creator: &str, preset: &str) -> AddScheduleRequest {
     AddScheduleRequest {
         creator_id: creator.to_string(),
@@ -177,7 +178,7 @@ fn request_for(creator: &str, preset: &str) -> AddScheduleRequest {
     }
 }
 
-/// `memory-augmented` declares an `acp_prompt` node, so the freeze requires a
+/// why: `memory-augmented` declares an `acp_prompt` node, so the freeze requires a
 /// binding for the `default` role. Supplying it explicitly keeps the success
 /// path reachable without a configured default provider.
 fn default_bindings() -> std::collections::HashMap<String, AgentBindingDto> {
@@ -192,7 +193,7 @@ fn default_bindings() -> std::collections::HashMap<String, AgentBindingDto> {
     bindings
 }
 
-/// 1. A foreign creator is refused before any write.
+/// note: 1. A foreign creator is refused before any write.
 #[tokio::test]
 #[serial_test::serial]
 async fn add_schedule_refuses_foreign_creator() {
@@ -210,7 +211,7 @@ async fn add_schedule_refuses_foreign_creator() {
     );
 }
 
-/// 2. A `force_gates` request without a reason is a validation refusal (the
+/// note: 2. A `force_gates` request without a reason is a validation refusal (the
 ///    bypass is audited, so it can never be silent).
 #[tokio::test]
 #[serial_test::serial]
@@ -229,7 +230,7 @@ async fn force_gates_requires_a_reason() {
     );
 }
 
-/// 3. A `force_gates` bypass leaves an audit row even when the insert never
+/// note: 3. A `force_gates` bypass leaves an audit row even when the insert never
 ///    runs.
 ///
 /// This is the ordering invariant: the audit row is written BEFORE every
@@ -253,7 +254,7 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
     request.force_gates = true;
     request.reason = Some("test bypass".to_string());
     request.agent_bindings = Some(default_bindings());
-    // No supervisor: the insert cannot run and the call is refused.
+    // note: No supervisor: the insert cannot run and the call is refused.
     let err = handle.add_schedule(&principal, request).await.unwrap_err();
     assert!(
         matches!(err, CoreError::NotFound { .. }),
@@ -268,7 +269,7 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
         "a refused bypass must still leave an audit row, got {rows:?}"
     );
 
-    // And the refused attempt published no schedule row.
+    // note: And the refused attempt published no schedule row.
     let scheduled: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
             .bind(CREATOR)
@@ -281,7 +282,7 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
     );
 }
 
-/// 4. The same invariant holds when the refusal comes from the OTHER fallible
+/// note: 4. The same invariant holds when the refusal comes from the OTHER fallible
 ///    precondition: an unresolvable preset.
 ///
 /// `resolve_preset` runs after the audit write, so a bypass naming a preset
@@ -313,7 +314,7 @@ async fn force_gates_bypass_is_audited_when_the_preset_cannot_resolve() {
     );
 }
 
-/// 5. The request's concurrency declaration reaches the durable row.
+/// note: 5. The request's concurrency declaration reaches the durable row.
 #[tokio::test]
 #[serial_test::serial]
 async fn add_schedule_preserves_parallel_with_concurrency() {
@@ -357,7 +358,7 @@ async fn add_schedule_preserves_parallel_with_concurrency() {
     );
 }
 
-/// 6. The caller's explicit bindings are frozen into the descriptor, so
+/// note: 6. The caller's explicit bindings are frozen into the descriptor, so
 ///    admission cannot silently rebind a run to a different provider.
 #[tokio::test]
 #[serial_test::serial]
@@ -385,7 +386,7 @@ async fn add_schedule_freezes_explicit_agent_bindings() {
     );
 }
 
-/// 7. A signal against a foreign schedule is refused (ownership is enforced
+/// note: 7. A signal against a foreign schedule is refused (ownership is enforced
 ///    before mutation, and a foreign row is indistinguishable from absent).
 #[tokio::test]
 #[serial_test::serial]
@@ -394,7 +395,7 @@ async fn signal_schedule_refuses_foreign_owner() {
     let (core, handle) = open_handle(&f).await;
     let principal = core.active_principal().await.unwrap();
 
-    // Seed a schedule owned by ANOTHER creator straight into the durable store.
+    // note: Seed a schedule owned by ANOTHER creator straight into the durable store.
     sqlx::query(
         "INSERT INTO creator_schedules \
          (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
@@ -423,7 +424,7 @@ async fn signal_schedule_refuses_foreign_owner() {
         "a foreign schedule must be refused, got {err:?}"
     );
 
-    // The foreign row is untouched.
+    // note: The foreign row is untouched.
     let status: String = sqlx::query_scalar(
         "SELECT status FROM creator_schedules WHERE schedule_id = 'SCH-foreign'",
     )
@@ -436,7 +437,7 @@ async fn signal_schedule_refuses_foreign_owner() {
     );
 }
 
-/// 8. Every entry point refuses once the owner has begun closing.
+/// note: 8. Every entry point refuses once the owner has begun closing.
 #[tokio::test]
 #[serial_test::serial]
 async fn closing_owner_fences_every_entry_point() {
@@ -498,7 +499,7 @@ async fn gated_preset_without_work_is_refused_before_any_write() {
     let (core, handle) = open_handle(&f).await;
     let principal = core.active_principal().await.unwrap();
 
-    // `research` declares gates; no `work_id` is supplied through input/seed.
+    // note: `research` declares gates; no `work_id` is supplied through input/seed.
     let mut request = request_for(CREATOR, "research");
     request.agent_bindings = Some(default_bindings());
     let err = handle.add_schedule(&principal, request).await.unwrap_err();
@@ -519,7 +520,7 @@ async fn gated_preset_without_work_is_refused_before_any_write() {
     );
 }
 
-/// 10. The `force_gates` audit reason refuses oversize text and control
+/// note: 10. The `force_gates` audit reason refuses oversize text and control
 ///     characters before anything is written.
 ///
 /// MIGRATED from `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`
@@ -565,8 +566,7 @@ async fn force_gates_reason_rejects_oversize_and_control_characters() {
     assert_eq!(scheduled, 0, "a refused bypass must publish no row");
 }
 
-// ---------------------------------------------------------------------------
-// v1.193 P2-T9 — the compute seam on `ExecutionHandle`.
+// note: v1.193 P2-T9 — the compute seam on `ExecutionHandle`.
 //
 // MIGRATED from `nexus-daemon-runtime/tests/compute_runs_api.rs`: the daemon's
 // compute routes resolved an engine/cache/serializer from the HTTP state and
@@ -588,7 +588,7 @@ mod compute_seam {
     const WORLD: &str = "wld_ops";
     const MODULE: &str = "basic-combat";
 
-    /// Seed a world owned by the fixture creator plus the two computable
+    /// note: Seed a world owned by the fixture creator plus the two computable
     /// combatants the embedded module needs.
     async fn seed_compute_world(pool: &sqlx::SqlitePool) {
         world_with(
@@ -600,7 +600,7 @@ mod compute_seam {
         seed_character(pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
     }
 
-    /// Seed one computable character entry.
+    /// note: Seed one computable character entry.
     async fn seed_character(
         pool: &sqlx::SqlitePool,
         entry_id: &str,
@@ -642,7 +642,7 @@ mod compute_seam {
             .unwrap();
     }
 
-    /// The defender's `current_hp`.
+    /// note: The defender's `current_hp`.
     async fn defender_hp(pool: &sqlx::SqlitePool) -> i64 {
         let raw: Option<String> =
             sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
@@ -655,7 +655,7 @@ mod compute_seam {
         body["state"]["character"]["current_hp"].as_i64().unwrap()
     }
 
-    /// Open an engine-owner core whose handle carries a real WASM engine and the
+    /// note: Open an engine-owner core whose handle carries a real WASM engine and the
     /// embedded module warmed — the collaborators the retired daemon bundle
     /// resolved from its own state.
     async fn open_handle_with_compute(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
@@ -701,7 +701,7 @@ mod compute_seam {
         serde_json::from_value(serde_json::json!({})).unwrap()
     }
 
-    /// A principal minted by a DIFFERENT core over another creator.
+    /// note: A principal minted by a DIFFERENT core over another creator.
     async fn foreign_principal(f: &Fixture) -> nexus_core::Principal {
         let other_home = f.tmp.path().join("other");
         let other_nexus = other_home.join(".nexus42");
@@ -738,7 +738,7 @@ mod compute_seam {
         other_core.active_principal().await.unwrap()
     }
 
-    /// The handle's own engine/cache resolve a real run, and its accept applies
+    /// note: The handle's own engine/cache resolve a real run, and its accept applies
     /// the proposals atomically.
     #[tokio::test]
     #[serial_test::serial]
@@ -758,7 +758,7 @@ mod compute_seam {
             MODULE
         );
 
-        // Proposals alone changed nothing.
+        // note: Proposals alone changed nothing.
         assert_eq!(defender_hp(core.pool()).await, 30);
 
         let accepted = handle
@@ -768,11 +768,11 @@ mod compute_seam {
         assert_eq!(accepted.applied.state_delta_count, 1);
         assert_eq!(accepted.applied.events_created, 1);
         assert_eq!(accepted.timeline_event_ids.len(), 1);
-        // damage = max(0, 20 − 5) = 15.
+        // note: damage = max(0, 20 − 5) = 15.
         assert_eq!(defender_hp(core.pool()).await, 15);
     }
 
-    /// The handle proves the principal belongs to THIS service before building
+    /// note: The handle proves the principal belongs to THIS service before building
     /// a context or touching the store.
     #[tokio::test]
     #[serial_test::serial]

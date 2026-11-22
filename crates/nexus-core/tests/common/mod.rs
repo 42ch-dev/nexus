@@ -7,8 +7,9 @@
 //!
 //! Every call creates its own tempdir and pool — there is no global pool,
 //! cache, or shared mutable state.
+// note: the doc above is the shared-bootstrap contract every suite depends on.
 
-#![allow(dead_code)] // one binary per test file; each uses a subset
+#![allow(dead_code)] // note: one binary per test file; each uses a subset
 
 use std::path::{Path, PathBuf};
 
@@ -18,17 +19,17 @@ use nexus_local_db::writer_protocol::{
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
-/// A fresh `$HOME` with the workspace DB path `nexus_home_layout` derives.
+/// note: A fresh `$HOME` with the workspace DB path `nexus_home_layout` derives.
 pub struct TestHome {
-    /// Keeps the tempdir alive for the fixture's lifetime.
+    /// note: Keeps the tempdir alive for the fixture's lifetime.
     pub _tmp: TempDir,
-    /// The `$HOME` handed to `CoreOpenOptions`.
+    /// note: The `$HOME` handed to `CoreOpenOptions`.
     pub user_home: PathBuf,
-    /// The workspace state DB inside `user_home`.
+    /// note: The workspace state DB inside `user_home`.
     pub db_path: PathBuf,
 }
 
-/// Create the `.nexus42` home, the operational workspace dir and `config.toml`
+/// note: Create the `.nexus42` home, the operational workspace dir and `config.toml`
 /// for `creator`'s `workspace_slug`, as a real `nexus42` install would.
 pub fn seed_home(creator: &str, workspace_slug: &str) -> TestHome {
     let tmp = TempDir::new().unwrap();
@@ -58,7 +59,7 @@ pub fn seed_home(creator: &str, workspace_slug: &str) -> TestHome {
     }
 }
 
-/// The engine-mode pool guarded by `creator`, as a daemon boot opens it.
+/// note: The engine-mode pool guarded by `creator`, as a daemon boot opens it.
 ///
 /// The caller keeps the guard: dropping it is what releases the writer
 /// admission, so the fixture decides when that happens.
@@ -68,12 +69,12 @@ pub async fn engine_pool(db_path: &Path, creator: &str) -> GuardedPool {
         .unwrap()
 }
 
-/// A plain pool over an initialized workspace DB.
+/// note: A plain pool over an initialized workspace DB.
 pub async fn plain_pool(db_path: &Path) -> SqlitePool {
     nexus_local_db::open_pool(db_path).await.unwrap()
 }
 
-/// A read-only pool over `creator`'s `workspace_slug` workspace DB.
+/// note: A read-only pool over `creator`'s `workspace_slug` workspace DB.
 pub async fn read_only_pool(user_home: &Path, creator: &str, workspace_slug: &str) -> SqlitePool {
     let db_path = nexus_home_layout::workspace_state_db_path(user_home, creator, workspace_slug);
     nexus_local_db::open_pool_read_only(&db_path)
@@ -81,7 +82,7 @@ pub async fn read_only_pool(user_home: &Path, creator: &str, workspace_slug: &st
         .expect("open read-only pool")
 }
 
-/// Join the live engine admission a booted core already holds.
+/// note: Join the live engine admission a booted core already holds.
 pub async fn live_write_pool(db_path: &Path) -> (GuardedPool, SqlitePool) {
     let engine = join_live_engine_pool(db_path, GuardedPoolOptions::default())
         .await

@@ -19,6 +19,7 @@
 //! `nexus-orchestration::capability::builtins::llm_extract` and the migrated
 //! executor-failure case in `capability_compute.rs`. No daemon boot
 //! expectation is re-pinned here.
+// note: the doc above states the Host-authority anchors these cases pin.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -76,7 +77,7 @@ async fn seed_env() -> Env {
     seed_env_as(CREATOR).await
 }
 
-/// Seed an environment bound to an explicit creator, so a foreign principal
+/// why: Seed an environment bound to an explicit creator, so a foreign principal
 /// really carries a different creator identity.
 async fn seed_env_as(creator: &str) -> Env {
     let common::TestHome {
@@ -133,7 +134,7 @@ async fn plain_pool(env: &Env) -> sqlx::SqlitePool {
     common::plain_pool(&env.db_path).await
 }
 
-/// Deterministic provider peer: counts every admitted call so a denial can be
+/// why: Deterministic provider peer: counts every admitted call so a denial can be
 /// proven to have produced no provider effect. `next` never carries events.
 struct CountingPort {
     calls: AtomicUsize,
@@ -213,7 +214,7 @@ fn registry_key(
     ActorSessionRegistry::key_for("mock-acp", home, None, None, ctx, knowledge).unwrap()
 }
 
-/// Old Actor epoch denies BEFORE the provider effect: after a material
+/// note: Old Actor epoch denies BEFORE the provider effect: after a material
 /// transition bumps the stored `lifecycle_epoch`, a prompt against the
 /// indexed old-epoch session is `actor_conflict actor_session_stale` and the
 /// counting provider peer observes zero calls.
@@ -224,7 +225,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     let port = CountingPort::new();
     let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
 
-    // Index one old-epoch Actor session without a live host create (the
+    // note: Index one old-epoch Actor session without a live host create (the
     // documented integration seam of the registry).
     let ctx = admit_character(&core, &principal, &env).await;
     let knowledge = admitted_knowledge(&core, &principal, &env).await.identity();
@@ -236,7 +237,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         nexus_agent_host::HostSessionId(session_id),
     );
 
-    // Material transition: bump the stored epoch behind the registry.
+    // note: Material transition: bump the stored epoch behind the registry.
     {
         let pool = plain_pool(&env).await;
         sqlx::query(
@@ -268,7 +269,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         "the stale denial happens before any provider effect"
     );
 
-    // --- Journal failure after a committed effect: success is refused, the
+    // note: --- Journal failure after a committed effect: success is refused, the
     // restart settles `interrupted`, and no provider work re-executes.
     core.journal_provider_write_internal("op-r", "sess-r", "mock-acp", "running")
         .await
@@ -281,7 +282,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         "a journal write after the service closed must fail, never fake success"
     );
 
-    // Restart: the orphan settles as interrupted and stays queryable without
+    // note: Restart: the orphan settles as interrupted and stays queryable without
     // re-executing provider work.
     let (restarted, principal2) = open_core(&env).await;
     let settled = restarted.settle_provider_orphans().await.unwrap();
@@ -301,7 +302,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         "restart settlement re-executes no provider work"
     );
 
-    // --- Close unconfirmed keeps guards: the authority drains its retired
+    // note: --- Close unconfirmed keeps guards: the authority drains its retired
     // ids against the Host, which cannot confirm an unknown id; the close
     // then reports interrupted/unconfirmed and the registry tombstone guard
     // survives the close.
@@ -314,7 +315,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     let sid2 = Uuid::new_v4();
     h2.actor_sessions()
         .insert_indexed_entry(key2, ctx2, nexus_agent_host::HostSessionId(sid2));
-    // Retire the id so the close drain attempts a Host shutdown the Host
+    // why: Retire the id so the close drain attempts a Host shutdown the Host
     // cannot confirm.
     let _retired = h2
         .actor_sessions()
@@ -331,7 +332,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     );
 }
 
-/// C1: a principal minted against a different creator/workspace is denied on
+/// note: C1: a principal minted against a different creator/workspace is denied on
 /// every `HostHandle` method, and a mid-session selection drift is denied by
 /// the disk re-read — with zero observable Host effect.
 #[tokio::test]
@@ -341,7 +342,7 @@ async fn host_authority_admits_only_verified_principals() {
     let port = CountingPort::new();
     let handle = core.open_host(port.clone()).await.unwrap();
 
-    // A foreign principal: a core opened against a genuinely different
+    // note: A foreign principal: a core opened against a genuinely different
     // creator identity, so verify_principal must reject it.
     let foreign = seed_env_as("ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").await;
     let (_, foreign_principal) = open_core(&foreign).await;
@@ -374,7 +375,7 @@ async fn host_authority_admits_only_verified_principals() {
             .await
             .unwrap_err(),
     );
-    // A foreign principal querying an operation owned by the open's creator
+    // note: A foreign principal querying an operation owned by the open's creator
     // is denied, never leaked through the live Host branch.
     denials.push(
         handle
@@ -391,7 +392,7 @@ async fn host_authority_admits_only_verified_principals() {
         );
     }
 
-    // Selection drift: the on-disk active slug no longer matches the open.
+    // note: Selection drift: the on-disk active slug no longer matches the open.
     let nexus_home = env.user_home.join(".nexus42");
     std::fs::write(
         nexus_home.join("config.toml"),
@@ -415,7 +416,7 @@ async fn host_authority_admits_only_verified_principals() {
         "selection drift is auth-required, got {err:?}"
     );
 
-    // Zero observable Host effect: no session was ever created.
+    // note: Zero observable Host effect: no session was ever created.
     std::fs::write(
         nexus_home.join("config.toml"),
         format!(
@@ -438,7 +439,7 @@ async fn host_authority_admits_only_verified_principals() {
     );
 }
 
-/// C2: the established-owner slot admits exactly one `open_host` per open
+/// note: C2: the established-owner slot admits exactly one `open_host` per open
 /// service; a second start is a typed busy rejection, and a confirmed close
 /// frees the slot.
 #[tokio::test]
@@ -454,13 +455,13 @@ async fn second_open_host_is_typed_rejected_until_confirmed_close() {
         matches!(err, CoreError::OwnerBusy),
         "second open is typed OwnerBusy, got {err:?}"
     );
-    // A confirmed close frees the slot; the first handle still closes cleanly.
+    // note: A confirmed close frees the slot; the first handle still closes cleanly.
     let report = first.close().await.unwrap();
     assert!(report.cleanup_confirmed);
     let _second = core.open_host(CountingPort::new()).await.unwrap();
 }
 
-/// I3: a status write never re-attributes the operation — the stored
+/// note: I3: a status write never re-attributes the operation — the stored
 /// `session_id/provider_id` are write-once at the first insert.
 #[tokio::test]
 async fn journal_status_update_preserves_stored_identity() {
@@ -469,7 +470,7 @@ async fn journal_status_update_preserves_stored_identity() {
     core.journal_provider_write_internal("op-i", "sess-i", "mock-acp", "running")
         .await
         .unwrap();
-    // A later status write carrying mismatched identity must not clobber the
+    // note: A later status write carrying mismatched identity must not clobber the
     // stored owner fields.
     core.journal_provider_write_internal("op-i", "sess-OTHER", "mock-OTHER", "cancelled")
         .await
@@ -493,7 +494,7 @@ async fn journal_status_update_preserves_stored_identity() {
 // matches stored state is retired through the existing tombstone machinery
 // instead of being reused, and a no-op leaves the key usable.
 
-/// The exact fingerprint the host records for one admission, read from the
+/// note: The exact fingerprint the host records for one admission, read from the
 /// stored revisions under the knowledge leases.
 async fn admitted_knowledge(
     core: &CoreService,
@@ -516,7 +517,7 @@ async fn admitted_knowledge(
     .expect("knowledge context admits")
 }
 
-/// A running effect holds the World/Character shared knowledge leases: the
+/// note: A running effect holds the World/Character shared knowledge leases: the
 /// disclosure edits (exclusive governance leases) refuse busy and only land
 /// after the effect drains.
 #[tokio::test]
@@ -527,7 +528,7 @@ async fn v1191_knowledge_fence_active_effect_blocks_governance_and_drains() {
         character_id: env.character_id.clone(),
     };
 
-    // The admitted knowledge context is what a running stream holds: the
+    // note: The admitted knowledge context is what a running stream holds: the
     // Character activity lease plus the World-then-Character shared knowledge
     // leases.
     let effect = admitted_knowledge(&core, &principal, &env).await;
@@ -557,7 +558,7 @@ async fn v1191_knowledge_fence_active_effect_blocks_governance_and_drains() {
     }
     drop(effect);
 
-    // Drained: the same edit lands on both subjects and is then releasable.
+    // note: Drained: the same edit lands on both subjects and is then releasable.
     let world_lease = core
         .acquire_knowledge_governance(
             &principal,
@@ -595,11 +596,11 @@ async fn v1191_knowledge_fence_active_effect_blocks_governance_and_drains() {
     );
 }
 
-/// Two independently opened cores compute the same fingerprint from stored
+/// note: Two independently opened cores compute the same fingerprint from stored
 /// state; a stored knowledge-revision bump (the governance edit) makes them
 /// diverge, and a stale session retires on its next use with the retained
 /// `actor_session_stale` refusal before any provider effect.
-#[allow(clippy::too_many_lines)] // one reuse round-trip asserted across cores
+#[allow(clippy::too_many_lines)] // why: one reuse round-trip asserted across cores
 #[tokio::test]
 async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
     let env = seed_env().await;
@@ -607,7 +608,7 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
     let port = CountingPort::new();
     let handle = core_a.open_host(port.clone()).await.unwrap();
 
-    // The session is indexed with the fingerprint admitted from stored state.
+    // note: The session is indexed with the fingerprint admitted from stored state.
     let ctx = admit_character(&core_a, &principal_a, &env).await;
     let admitted = admitted_knowledge(&core_a, &principal_a, &env).await;
     let identity = admitted.identity();
@@ -623,7 +624,7 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
         nexus_agent_host::HostSessionId(session_id),
     );
 
-    // A no-op reuse keeps the key usable, and a second, independently opened
+    // note: A no-op reuse keeps the key usable, and a second, independently opened
     // core derives the same fingerprint from the same stored state.
     let (core_b, principal_b) = open_core(&env).await;
     let same = admitted_knowledge(&core_b, &principal_b, &env).await;
@@ -645,7 +646,7 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
         "a reusable session stays indexed"
     );
 
-    // Governance edit: the stored Character knowledge revision moves.
+    // note: Governance edit: the stored Character knowledge revision moves.
     {
         let pool = plain_pool(&env).await;
         sqlx::query(
@@ -665,7 +666,7 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
     );
     drop(bumped);
 
-    // Next use of the stale session retires it and refuses before any provider
+    // note: Next use of the stale session retires it and refuses before any provider
     // effect.
     let request = serde_json::from_value::<
         nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
@@ -702,7 +703,7 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
         "the tombstone retains its owner for later authorization"
     );
 
-    // The retired id stays an Actor session: a second use is the same stale
+    // note: The retired id stays an Actor session: a second use is the same stale
     // refusal, never a legacy raw-prompt fallback.
     let request = serde_json::from_value::<
         nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
@@ -723,13 +724,13 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
     );
 }
 
-/// Migrated from the retired daemon `characters_api.rs`
+/// note: Migrated from the retired daemon `characters_api.rs`
 /// (`restore_same_state_cas_no_op_keeps_session_executable_without_shutdown`):
 /// a same-state lifecycle transition is a no-op — it moves neither the
 /// revision nor the stored `lifecycle_epoch`, so a session indexed under the
 /// current epoch stays reusable, and the post-restore prompt is still admitted
 /// and dispatched to the Host instead of being retired as stale.
-#[allow(clippy::too_many_lines)] // no-op invariants + the post-no-op operation are one path
+#[allow(clippy::too_many_lines)] // why: no-op invariants + the post-no-op operation are one path
 #[tokio::test]
 async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable() {
     let env = seed_env().await;
@@ -760,7 +761,7 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
         row
     };
 
-    // Restore-to-active on an already active Character: the retained no-op.
+    // note: Restore-to-active on an already active Character: the retained no-op.
     let request = nexus_contracts::generated::core::CoreCharacterTransitionRequest::builder()
         .character_id(env.character_id.clone())
         .expected_revision(revision)
@@ -794,7 +795,7 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
         "a no-op transition must not retire the current session generation"
     );
 
-    // The indexed session is still live and its reuse key still admits: the
+    // note: The indexed session is still live and its reuse key still admits: the
     // epoch-guarded staleness path (proved by
     // `stale_actor_and_journal_failure_never_redispatch`) can only fire once
     // the stored epoch actually moves, so nothing fabricates a shutdown for a
@@ -813,7 +814,7 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
         "a no-op transition leaves the reuse key usable, got {reuse:?}"
     );
 
-    // ── The operation half of the source assertion ────────────────────────
+    // note: ── The operation half of the source assertion ────────────────────────
     // The retired daemon case performed the post-restore prompt and asserted
     // exactly one execution (`host.execs == 1`) with a `200`. A no-op restore
     // must leave the session *executable*, so the post-restore prompt is
@@ -828,7 +829,7 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
     let dispatched = handle
         .execute(&principal, session_id.to_string(), prompt)
         .await;
-    // Observation point: this fixture indexes the session into the registry
+    // note: Observation point: this fixture indexes the session into the registry
     // without a Host create, so the single dispatch lands on the authority's
     // own Host plane and is refused there for the fixture's missing provider
     // mapping — the Host boundary, never an Actor refusal. The composed
@@ -848,7 +849,7 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
         "the authority dispatches through its own Host plane, not the composed port"
     );
 
-    // The dispatched prompt leaves no shadow: the authority released its
+    // note: The dispatched prompt leaves no shadow: the authority released its
     // Character operation reservation and its effect fences rather than
     // retiring the generation, so the id is neither tombstoned nor stale and
     // both shared knowledge leases are free again for an exclusive edit.
@@ -894,24 +895,24 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
 // session state or a coarse provider journal row. Character `remember:true` is
 // a typed pre-effect refusal because this Host has no run-capture writer.
 
-/// One item of a host exec stream.
+/// note: One item of a host exec stream.
 type HostItem = nexus_agent_host::HostResult<HostEvent>;
 
 /// The matching observations contract §5 classifies, as they reach the drain
 /// from a real provider stream.
 enum CharacterObservation {
-    /// `OpFinished` carrying the provider's stop reason.
+    /// note: `OpFinished` carrying the provider's stop reason.
     Finished(FinishReason),
     /// `OpFailed` carrying an error category (`max_tokens`, `max_turn_requests`,
     /// `refusal`, `provider_error`, `stream_closed`, …). Contract §5 classifies
     /// every one of them as the fault row; the category is carried so the case
     /// mirrors a real provider stream, never so the drain may reinterpret it.
     Failed(String),
-    /// A stream error item.
+    /// note: A stream error item.
     StreamError,
-    /// A session stop for this operation's session, before any terminal.
+    /// note: A session stop for this operation's session, before any terminal.
     SessionStopped,
-    /// EOF with no terminal at all.
+    /// note: EOF with no terminal at all.
     Eof,
 }
 
@@ -964,7 +965,7 @@ fn exec_stream(items: Vec<HostItem>) -> HostEventStream {
     ))
 }
 
-/// Reserve one Character operation the way `execute` does, drive the
+/// note: Reserve one Character operation the way `execute` does, drive the
 /// authority-owned drain over the events `build` produces for that exact
 /// `(session_id, operation_id)`, and return the settled owner-scoped outcome.
 ///
@@ -980,7 +981,7 @@ async fn settle_character_operation(
     build: impl FnOnce(&HostSessionId, &HostOperationId) -> Vec<HostItem>,
     fenced: Option<AdmittedKnowledgeContext>,
 ) -> (CharacterOperationResult, HostOperationId) {
-    // The snapshot carries only the identity fields the record consumes, so the
+    // why: The snapshot carries only the identity fields the record consumes, so the
     // admitted context is this fixture's own admission step (a plain data
     // read-back, no lease: the fences travel in `fenced`).
     let _admitted = admit_character(core, principal, env).await;
@@ -1017,7 +1018,7 @@ fn finished(
     })
 }
 
-/// A generated execute request from its JSON body.
+/// note: A generated execute request from its JSON body.
 fn execute_request(body: serde_json::Value) -> ExecuteOperationRequest {
     serde_json::from_value(body).expect("the request body is wire-valid")
 }
@@ -1025,7 +1026,7 @@ fn execute_request(body: serde_json::Value) -> ExecuteOperationRequest {
 /// Contract §5 table: every matching observation settles the run status and
 /// finish reason the table promises, every Character result stays uncaptured,
 /// and an unrelated observation never decides the outcome.
-#[allow(clippy::too_many_lines)] // one exhaustive terminal table + the filtering round
+#[allow(clippy::too_many_lines)] // why: one exhaustive terminal table + the filtering round
 #[tokio::test]
 async fn character_terminal_contract_table_settles_every_run_status() {
     let env = seed_env().await;
@@ -1045,7 +1046,7 @@ async fn character_terminal_contract_table_settles_every_run_status() {
             CharacterOperationResultRunStatus::Succeeded,
             Some(CharacterOperationResultFinishReason::EndTurn),
         ),
-        // The `incomplete` row is reachable ONLY through an explicit
+        // note: The `incomplete` row is reachable ONLY through an explicit
         // `OpFinished(MaxTokens | MaxTurnRequests | Refusal)` — the provider
         // named the stop reason in the finished event itself.
         (
@@ -1159,7 +1160,7 @@ async fn character_terminal_contract_table_settles_every_run_status() {
     }
     assert_eq!(port.call_count(), 0, "the drain settles no provider effect");
 
-    // An unrelated operation's terminal, another session's fault and a stop of
+    // note: An unrelated operation's terminal, another session's fault and a stop of
     // a different session never decide this operation's outcome.
     let other_op = HostOperationId(Uuid::new_v4());
     let other_session = HostSessionId(Uuid::new_v4());
@@ -1222,11 +1223,11 @@ async fn character_terminal_first_match_is_immutable_and_stops_the_drain() {
         |session_id, operation_id| {
             let other_op = HostOperationId(Uuid::new_v4());
             vec![
-                // Unrelated operations first: neither matches.
+                // note: Unrelated operations first: neither matches.
                 Ok(finished(session_id, &other_op, FinishReason::Refusal)),
-                // The first MATCHING observation is this operation's truth.
+                // note: The first MATCHING observation is this operation's truth.
                 Ok(finished(session_id, operation_id, FinishReason::MaxTokens)),
-                // Trailing duplicates/faults must not replace it, and must not
+                // note: Trailing duplicates/faults must not replace it, and must not
                 // even be consumed.
                 Ok(HostEvent::OpFailed(OperationFailedEvent {
                     session_id: session_id.clone(),
@@ -1250,7 +1251,7 @@ async fn character_terminal_first_match_is_immutable_and_stops_the_drain() {
         Some(CharacterOperationResultFinishReason::MaxTokens)
     );
 
-    // A later settlement of the same operation (a trailing producer fault or a
+    // note: A later settlement of the same operation (a trailing producer fault or a
     // cancel that lost the phase race) is a no-op: the settlement is immutable
     // and never re-enters the retention FIFO. The registry's own writer is
     // crate-visible, so this test build drives it through the authority's gated
@@ -1305,7 +1306,7 @@ async fn character_terminal_accepted_cancel_beats_the_provider_terminal() {
         .request_operation_cancel(principal.creator_id(), &operation_id)
         .expect("the cancel intent latches before the drain finalizes");
 
-    // The provider then reports a clean end of turn; the accepted local cancel
+    // note: The provider then reports a clean end of turn; the accepted local cancel
     // already won the race and stays the recorded outcome.
     handle
         .settle_character_stream(
@@ -1332,7 +1333,7 @@ async fn character_terminal_accepted_cancel_beats_the_provider_terminal() {
         Some(CharacterOperationResultFinishReason::Cancelled)
     );
 
-    // Once terminal, a later cancel is the 409 conflict, never an override.
+    // note: Once terminal, a later cancel is the 409 conflict, never an override.
     let err = handle
         .actor_sessions()
         .request_operation_cancel(principal.creator_id(), &operation_id)
@@ -1356,7 +1357,7 @@ async fn character_terminal_settlement_releases_the_knowledge_fences() {
     let port = CountingPort::new();
     let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
 
-    // The admitted context a running Character effect holds.
+    // note: The admitted context a running Character effect holds.
     let knowledge = admitted_knowledge(&core, &principal, &env).await;
     let busy = core
         .acquire_knowledge_governance(
@@ -1421,7 +1422,7 @@ async fn character_terminal_eviction_and_reopen_have_no_detailed_outcome() {
     let port = CountingPort::new();
     let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
 
-    // 1025 terminal settlements: the retention window keeps the newest 1024 and
+    // note: 1025 terminal settlements: the retention window keeps the newest 1024 and
     // drops the oldest instead of answering an evicted id from memory.
     let mut oldest = None;
     let mut newest = None;
@@ -1466,7 +1467,7 @@ async fn character_terminal_eviction_and_reopen_have_no_detailed_outcome() {
         CharacterOperationResultRunStatus::Succeeded
     );
 
-    // A fresh authority over the same open service has no detailed outcome for
+    // note: A fresh authority over the same open service has no detailed outcome for
     // a previous operation: nothing is replayed or inferred after reopen.
     let report = handle.close().await.expect("close returns a report");
     assert!(report.cleanup_confirmed, "{report:?}");
@@ -1480,7 +1481,7 @@ async fn character_terminal_eviction_and_reopen_have_no_detailed_outcome() {
         "reopen is not_found, got {err:?}"
     );
 
-    // Owner-scoped: a foreign principal cannot read an outcome at all.
+    // note: Owner-scoped: a foreign principal cannot read an outcome at all.
     let foreign = seed_env_as("ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").await;
     let (_, foreign_principal) = open_core(&foreign).await;
     let err = reopened
@@ -1536,7 +1537,7 @@ async fn character_terminal_remember_refusal_precedes_reservation_and_effects() 
         0,
         "the refusal precedes the operation reservation"
     );
-    // Zero memory effects: no activity or knowledge context was admitted, so
+    // note: Zero memory effects: no activity or knowledge context was admitted, so
     // the exclusive disclosure edit lands at once.
     let lease = core
         .acquire_knowledge_governance(
@@ -1548,7 +1549,7 @@ async fn character_terminal_remember_refusal_precedes_reservation_and_effects() 
         .expect("the refused prompt admitted no knowledge context");
     drop(lease);
 
-    // The non-Character refusal is unchanged: `remember` on a never-indexed
+    // note: The non-Character refusal is unchanged: `remember` on a never-indexed
     // session stays the 422 `invalid_input` refusal.
     let err = handle
         .execute(
@@ -1584,7 +1585,7 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
         .actor_sessions()
         .insert_indexed_entry(key, ctx, session_id.clone());
 
-    // A never-indexed (legacy/provider-only) row carries no Actor pair.
+    // note: A never-indexed (legacy/provider-only) row carries no Actor pair.
     assert!(
         matches!(
             handle
@@ -1651,13 +1652,13 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
 // closed identity, and the Actor drains it mints stay owned instead of being
 // detached and forgotten.
 
-/// The `max_sessions` the attach fixtures bake into their manager: a manager
+/// note: The `max_sessions` the attach fixtures bake into their manager: a manager
 /// started by `open_host_inner` would carry the on-disk default instead, so a
 /// matching value proves the supplied instance — not a fresh Host — is the one
 /// the authority acts on.
 const ATTACHED_MANAGER_MAX_SESSIONS: usize = 4242;
 
-/// The canonical agent-host config path the standalone `open_host` reads for
+/// note: The canonical agent-host config path the standalone `open_host` reads for
 /// this env: the Nexus root plus `agent-host/config.toml`, i.e. exactly what
 /// `agent_host_config_path` resolves from the raw user home the native boot
 /// passes it. The helper takes the HOME, so it is handed `env.user_home` once.
@@ -1665,7 +1666,7 @@ fn host_config_path(env: &Env) -> PathBuf {
     nexus_agent_host::config::agent_host_config_path(&env.user_home)
 }
 
-/// Start a native manager the way the native open composes one — the
+/// note: Start a native manager the way the native open composes one — the
 /// already-started manager an `attach_host` call must adopt rather than start
 /// again.
 async fn start_host_manager(env: &Env) -> Arc<HostManager> {
@@ -1709,7 +1710,7 @@ async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() 
     let attached = core
         .attach_host(manager.clone(), port.clone())
         .expect("an already-started manager attaches");
-    // The exact supplied instance is retained: same allocation, and the
+    // note: The exact supplied instance is retained: same allocation, and the
     // distinct configuration it was started with (not the on-disk default a
     // fresh `HostManager::start` would have loaded).
     assert!(
@@ -1726,7 +1727,7 @@ async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() 
         "the supplied manager was already started; attach starts no second Host"
     );
 
-    // One authority per open: a second attach and a standalone open are the
+    // note: One authority per open: a second attach and a standalone open are the
     // identical typed busy rejection.
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
@@ -1741,7 +1742,7 @@ async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() 
         .expect_err("a standalone open is rejected identically");
     assert!(matches!(err, CoreError::OwnerBusy), "second open: {err:?}");
 
-    // Neither rejected attempt freed the incumbent's claim: the slot is still
+    // note: Neither rejected attempt freed the incumbent's claim: the slot is still
     // held and the attached authority still answers over the supplied manager.
     let health = attached
         .query(
@@ -1761,7 +1762,7 @@ async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() 
     );
 }
 
-/// A construction that fails after claiming the shared admission releases it:
+/// note: A construction that fails after claiming the shared admission releases it:
 /// the standalone path's failed `open_host` leaves the slot free, so the
 /// attaching path still admits, and only a confirmed close frees it again.
 #[tokio::test]
@@ -1770,7 +1771,7 @@ async fn attached_host_failed_open_releases_the_shared_admission() {
     let (core, _principal) = open_core(&env).await;
     let manager = start_host_manager(&env).await;
 
-    // A malformed agent-host config fails `open_host_inner` AFTER the slot was
+    // note: A malformed agent-host config fails `open_host_inner` AFTER the slot was
     // claimed.
     let config_path = host_config_path(&env);
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
@@ -1784,7 +1785,7 @@ async fn attached_host_failed_open_releases_the_shared_admission() {
         "the failed start is an internal refusal, got {err:?}"
     );
 
-    // The claim did not survive the failure: attach still admits.
+    // note: The claim did not survive the failure: attach still admits.
     let attached = core
         .attach_host(manager.clone(), CountingPort::new())
         .expect("a failed open releases the shared admission");
@@ -1795,7 +1796,7 @@ async fn attached_host_failed_open_releases_the_shared_admission() {
     assert!(matches!(err, CoreError::OwnerBusy), "single owner: {err:?}");
 }
 
-/// The standalone `open_host` reads the ONE canonical agent-host config
+/// note: The standalone `open_host` reads the ONE canonical agent-host config
 /// (`<nexus root>/agent-host/config.toml`) once, at open: the Host's own
 /// manager carries that file's value, a conflicting config at the
 /// `.nexus42`-nested path no writer uses cannot win, a later edit never
@@ -1807,7 +1808,7 @@ async fn standalone_host_reads_canonical_config_once() {
     let (core, _principal) = open_core(&env).await;
 
     let canonical = host_config_path(&env);
-    // The path the standalone lookup must NOT resolve: applying the layout
+    // note: The path the standalone lookup must NOT resolve: applying the layout
     // helper to the already-canonical Nexus root nests `.nexus42` twice, and
     // nothing ever writes a config there.
     let nested = nexus_agent_host::config::agent_host_config_path(
@@ -1826,7 +1827,7 @@ async fn standalone_host_reads_canonical_config_once() {
         .open_host(CountingPort::new())
         .await
         .expect("the standalone authority opens over the canonical config");
-    // Observed through the manager the Host itself uses — not by comparing
+    // note: Observed through the manager the Host itself uses — not by comparing
     // path strings.
     assert_eq!(
         handle.manager().agent_config().await.max_sessions,
@@ -1834,7 +1835,7 @@ async fn standalone_host_reads_canonical_config_once() {
         "the canonical file is the one read; the nested decoy cannot win"
     );
 
-    // One read, at open: a later edit of the canonical file is not picked up
+    // note: One read, at open: a later edit of the canonical file is not picked up
     // by the running authority.
     std::fs::write(&canonical, "max_sessions = 11\n").unwrap();
     assert_eq!(
@@ -1843,7 +1844,7 @@ async fn standalone_host_reads_canonical_config_once() {
         "the config was read once, when the authority opened"
     );
 
-    // A confirmed close frees the slot; a malformed canonical file then fails
+    // note: A confirmed close frees the slot; a malformed canonical file then fails
     // the next open AFTER the claim, and a corrected file admits the retry —
     // so the failed open released the shared admission.
     handle.close().await.expect("close returns a report");
@@ -1868,7 +1869,7 @@ async fn standalone_host_reads_canonical_config_once() {
     );
 }
 
-/// An attaching open on a service that is already closing is refused BEFORE
+/// note: An attaching open on a service that is already closing is refused BEFORE
 /// any claim: attach has no `ensure_open` bypass, so it can never take the
 /// established-owner slot of a closing service.
 #[tokio::test]
@@ -1906,13 +1907,13 @@ async fn attached_host_confirmed_close_releases_slot_and_refuses_the_old_handle(
         "a settled close confirms cleanup: {report:?}"
     );
     assert_eq!(report.state, CoreCloseReportState::Closed);
-    // Idempotent: a repeated close reports the retained confirmed cleanup
+    // note: Idempotent: a repeated close reports the retained confirmed cleanup
     // rather than shutting the manager down a second time.
     let repeated = attached.close().await.expect("repeated close returns");
     assert!(repeated.cleanup_confirmed);
     assert_eq!(repeated.pending_operations, report.pending_operations);
 
-    // Refused on every authority method, with zero provider effects.
+    // note: Refused on every authority method, with zero provider effects.
     let create = serde_json::from_value::<
         nexus_contracts::generated::daemon_api::agent_host::CreateSessionRequest,
     >(serde_json::json!({ "provider_id": "mock-acp" }))
@@ -1941,7 +1942,7 @@ async fn attached_host_confirmed_close_releases_slot_and_refuses_the_old_handle(
     assert!(matches!(err, CoreError::Closing), "closed query: {err:?}");
     assert_eq!(port.call_count(), 0, "a closed handle has zero effects");
 
-    // A later authority over the same service is a DIFFERENT identity: it
+    // note: A later authority over the same service is a DIFFERENT identity: it
     // admits, while the old handle stays refused.
     let reopened = core
         .attach_host(manager.clone(), CountingPort::new())
@@ -1978,7 +1979,7 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
         .attach_host(manager.clone(), CountingPort::new())
         .expect("an already-started manager attaches");
 
-    // A live drain minted through the same authority-owned spawn path
+    // note: A live drain minted through the same authority-owned spawn path
     // `execute` uses (it holds the admitted knowledge leases for its whole
     // run).
     attached
@@ -1998,13 +1999,13 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
             .any(|pending| pending.starts_with("actor-drains:")),
         "the close reports the drain it still owns: {report:?}"
     );
-    // Retained, not forgotten: the authority still owns the live drain.
+    // note: Retained, not forgotten: the authority still owns the live drain.
     assert_eq!(
         attached.actor_sessions().prune_settled_drains(),
         1,
         "the unsettled drain stays owned by the authority"
     );
-    // Ownership retained ⇒ the slot is never freed for another authority.
+    // note: Ownership retained ⇒ the slot is never freed for another authority.
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("an unconfirmed close retains the authority slot");
@@ -2012,7 +2013,7 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
         matches!(err, CoreError::OwnerBusy),
         "slot retained: {err:?}"
     );
-    // And the handle that could not settle is itself closing.
+    // note: And the handle that could not settle is itself closing.
     let err = attached
         .query(
             &principal,
@@ -2032,7 +2033,7 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
 /// it cannot confirm. Once the operation has settled (here: it fails before
 /// creating a drain) and a drain has transferred to the registry, the
 /// repeated close owns that drain and still refuses.
-#[allow(clippy::too_many_lines)] // one admission/transfer/close lifecycle
+#[allow(clippy::too_many_lines)] // why: one admission/transfer/close lifecycle
 #[tokio::test]
 async fn attached_host_close_accounts_for_an_admitted_execute() {
     use std::future::Future;
@@ -2046,7 +2047,7 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
         .attach_host(manager.clone(), port.clone())
         .expect("an already-started manager attaches");
 
-    // An indexed Character session, so `execute` takes the admitted Actor path
+    // note: An indexed Character session, so `execute` takes the admitted Actor path
     // (knowledge re-admission before any Host effect) whose drain registration
     // is the transfer under test.
     let ctx = admit_character(&core, &principal, &env).await;
@@ -2064,7 +2065,7 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
         >(serde_json::json!({ "kind": "prompt", "content": "close races the admission" }))
         .unwrap();
 
-    // Poll the operation exactly once: it is admitted (the barrier is taken
+    // note: Poll the operation exactly once: it is admitted (the barrier is taken
     // before the first await, so no close can slip in ahead of it) and
     // suspended at its first await, i.e. the registered-drain view is still
     // empty — the exact window the finding describes.
@@ -2083,7 +2084,7 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
         "the admitted operation has registered no drain handle yet"
     );
 
-    // The concurrent close. An unaccounted admitted operation keeps BOTH the
+    // note: The concurrent close. An unaccounted admitted operation keeps BOTH the
     // cleanup ownership and the slot.
     let report = attached.close().await.expect("close returns a report");
     assert!(
@@ -2107,7 +2108,7 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
     );
     assert_eq!(port.call_count(), 0, "the race produced no provider effect");
 
-    // The admitted operation settles. Here it fails BEFORE creating a drain:
+    // note: The admitted operation settles. Here it fails BEFORE creating a drain:
     // this fixture indexes the session without a Host create, so the Host
     // plane refuses it — the accounted-for outcome the barrier must accept
     // instead of a fabricated success.
@@ -2117,7 +2118,7 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
         "the admitted operation settles against the closed authority: {settled:?}"
     );
 
-    // The transfer half: a drain registered through the same authority-owned
+    // note: The transfer half: a drain registered through the same authority-owned
     // spawn path `execute` uses, landing AFTER the closing latch. It is
     // retained, so it still owns the cleanup and still blocks the slot.
     attached
@@ -2170,50 +2171,50 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
 
 const CONTROL_PROVIDER: &str = "control-fixture";
 
-/// One in-process provider adapter for the control cases: a real manager
+/// note: One in-process provider adapter for the control cases: a real manager
 /// session plane whose events the test drives, so the cancel/terminal races are
 /// OBSERVED instead of timed.
 struct ControlProvider {
-    /// Negotiated cancellation capability (`false` is the DSH shape).
+    /// note: Negotiated cancellation capability (`false` is the DSH shape).
     cancellation: bool,
-    /// Advertises cancellation but fails the `cancel` call.
+    /// note: Advertises cancellation but fails the `cancel` call.
     cancel_fails: bool,
-    /// Events the provider publishes by itself at exec time (the observation-lag
+    /// note: Events the provider publishes by itself at exec time (the observation-lag
     /// case); always the same session-scoped status event.
     burst: usize,
-    /// Executions that reached the provider, i.e. that passed the manager's own
+    /// note: Executions that reached the provider, i.e. that passed the manager's own
     /// session lookup. The session-shutdown race parks one here: the operation
     /// is admitted and the manager resolved its session, while the authority
     /// has not registered a drain yet.
     executions: Arc<AtomicUsize>,
-    /// Park executing provider calls until [`Self::release_parked_executions`].
+    /// note: Park executing provider calls until [`Self::release_parked_executions`].
     park: Arc<AtomicBool>,
-    /// Fail executing provider calls instead of producing a stream: the shape of
+    /// note: Fail executing provider calls instead of producing a stream: the shape of
     /// an execution that reaches the provider and registers no drain at all.
     exec_fails: Arc<AtomicBool>,
     /// Publish the operation's own clean terminal while a `cancel` call is in
     /// flight, then refuse the cancel: the drain-settles-midflight race a
     /// refused cancel must survive (PR #335 Greptile P1).
     cancel_publishes_terminal: Arc<AtomicBool>,
-    /// The release signal for a parked execution.
+    /// note: The release signal for a parked execution.
     exec_gate: Arc<tokio::sync::Notify>,
-    /// Park `cancel` calls until [`Self::release_parked_cancels`]: the quiesce's
+    /// note: Park `cancel` calls until [`Self::release_parked_cancels`]: the quiesce's
     /// cancel loop is held at the provider for the operation it reached first,
     /// which is the rendezvous the finished-operation race needs — the caller
     /// has already taken its nonterminal snapshot and latched that operation.
     cancel_park: Arc<AtomicBool>,
-    /// The operation the parked `cancel` holds, so the test settles the OTHER
+    /// why: The operation the parked `cancel` holds, so the test settles the OTHER
     /// recorded operation inside the rendezvous.
     parked_cancel: Arc<parking_lot::Mutex<Option<HostOperationId>>>,
-    /// The release signal for a parked cancel.
+    /// note: The release signal for a parked cancel.
     cancel_gate: Arc<tokio::sync::Notify>,
-    /// Every `LaunchSpec.cwd` a launch actually received, in call order: the
+    /// note: Every `LaunchSpec.cwd` a launch actually received, in call order: the
     /// observable proof of WHICH root a session was launched at (P0-T2).
     launched_cwds: parking_lot::Mutex<Vec<PathBuf>>,
     cancels: Arc<AtomicUsize>,
     shutdowns: Arc<AtomicUsize>,
     polled: Arc<AtomicUsize>,
-    /// The EXECUTING operations' provider streams, keyed by the operation the
+    /// note: The EXECUTING operations' provider streams, keyed by the operation the
     /// manager dispatched. A case with more than one live operation drives
     /// exactly the stream it means; a single-slot fixture could only reach
     /// whichever operation started last.
@@ -2258,7 +2259,7 @@ impl ControlProvider {
         ProviderId::new(CONTROL_PROVIDER)
     }
 
-    /// Publish one event on the stream of the operation the event belongs to.
+    /// note: Publish one event on the stream of the operation the event belongs to.
     /// The event's own operation is the route, so a case with several live
     /// operations reaches the one it means; a stream-less event (a status
     /// burst) needs exactly one executing operation.
@@ -2291,7 +2292,7 @@ impl ControlProvider {
         sender.send(Ok(event)).expect("the drain is alive");
     }
 
-    /// End every executing stream without a terminal (stream loss).
+    /// note: End every executing stream without a terminal (stream loss).
     fn close_stream(&self) {
         self.outboxes.lock().clear();
     }
@@ -2300,47 +2301,47 @@ impl ControlProvider {
         self.cancels.load(Ordering::SeqCst)
     }
 
-    /// Park executing provider calls until [`Self::release_parked_executions`].
+    /// note: Park executing provider calls until [`Self::release_parked_executions`].
     fn park_executions(&self) {
         self.park.store(true, Ordering::SeqCst);
     }
 
-    /// Release the parked execution (later calls run unparked).
+    /// note: Release the parked execution (later calls run unparked).
     fn release_parked_executions(&self) {
         self.park.store(false, Ordering::SeqCst);
         self.exec_gate.notify_one();
     }
 
-    /// Make executing provider calls fail instead of producing a stream, so an
+    /// note: Make executing provider calls fail instead of producing a stream, so an
     /// admitted execution retires its admission while registering no drain.
     fn fail_executions(&self) {
         self.exec_fails.store(true, Ordering::SeqCst);
     }
 
-    /// Park `cancel` calls until [`Self::release_parked_cancels`].
+    /// note: Park `cancel` calls until [`Self::release_parked_cancels`].
     fn park_cancels(&self) {
         self.cancel_park.store(true, Ordering::SeqCst);
     }
 
-    /// Release the parked cancel (later calls run unparked).
+    /// note: Release the parked cancel (later calls run unparked).
     fn release_parked_cancels(&self) {
         self.cancel_park.store(false, Ordering::SeqCst);
         self.cancel_gate.notify_one();
     }
 
-    /// The operation the parked cancel is holding: the one the quiesce has
+    /// note: The operation the parked cancel is holding: the one the quiesce has
     /// already latched, so the test knows which operation it has NOT reached.
     fn parked_cancel(&self) -> Option<HostOperationId> {
         self.parked_cancel.lock().clone()
     }
 
-    /// Publish the operation's own clean terminal while the `cancel` call is
+    /// note: Publish the operation's own clean terminal while the `cancel` call is
     /// in flight, then refuse the cancel: the drain-settles-midflight race.
     fn publish_terminal_before_refusing_cancel(&self) {
         self.cancel_publishes_terminal.store(true, Ordering::SeqCst);
     }
 
-    /// Executions that reached the provider.
+    /// note: Executions that reached the provider.
     fn executions(&self) -> usize {
         self.executions.load(Ordering::SeqCst)
     }
@@ -2349,12 +2350,12 @@ impl ControlProvider {
         self.shutdowns.load(Ordering::SeqCst)
     }
 
-    /// Host events the provider actually produced (polled off its stream).
+    /// note: Host events the provider actually produced (polled off its stream).
     fn polled(&self) -> usize {
         self.polled.load(Ordering::SeqCst)
     }
 
-    /// The `cwd` every launch received, in call order.
+    /// note: The `cwd` every launch received, in call order.
     fn launched_cwds(&self) -> Vec<PathBuf> {
         self.launched_cwds.lock().clone()
     }
@@ -2396,14 +2397,14 @@ impl ProviderAdapter for ControlProvider {
         op: HostOperation,
     ) -> nexus_agent_host::HostResult<HostEventStream> {
         self.executions.fetch_add(1, Ordering::SeqCst);
-        // The operation this execution is for: the control cases execute
+        // note: The operation this execution is for: the control cases execute
         // prompts, the only variant that names one.
         let HostOperation::Prompt { op_id, .. } = &op else {
             return Err(nexus_agent_host::HostError::internal(
                 "the control fixture executes prompts only",
             ));
         };
-        // The session-shutdown race parks here: the manager has resolved this
+        // note: The session-shutdown race parks here: the manager has resolved this
         // session for the operation, and the authority has not returned from
         // `exec` yet, so no drain is registered.
         if self.park.load(Ordering::SeqCst) {
@@ -2443,7 +2444,7 @@ impl ProviderAdapter for ControlProvider {
         op_id: HostOperationId,
     ) -> nexus_agent_host::HostResult<()> {
         self.cancels.fetch_add(1, Ordering::SeqCst);
-        // The quiesce's cancel rendezvous: the operation is already latched and
+        // note: The quiesce's cancel rendezvous: the operation is already latched and
         // the caller is past its nonterminal snapshot, so the test may settle a
         // DIFFERENT recorded operation inside this window.
         if self.cancel_park.load(Ordering::SeqCst) {
@@ -2478,7 +2479,7 @@ impl ProviderAdapter for ControlProvider {
     }
 }
 
-/// Poll a condition until it holds, bounded by a generous deadline: the fixture
+/// note: Poll a condition until it holds, bounded by a generous deadline: the fixture
 /// waits for the observable effect the next assertion depends on instead of
 /// guessing with a sleep.
 async fn wait_until(mut condition: impl FnMut() -> bool, what: &str) {
@@ -2491,7 +2492,7 @@ async fn wait_until(mut condition: impl FnMut() -> bool, what: &str) {
     .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
 }
 
-/// Start a real manager whose single provider is the test-driven control
+/// note: Start a real manager whose single provider is the test-driven control
 /// adapter, the way the native open composes one (registered before start, so
 /// the registered candidate is admitted and probed available).
 async fn control_manager(env: &Env, provider: Arc<ControlProvider>) -> Arc<HostManager> {
@@ -2531,7 +2532,7 @@ async fn control_manager(env: &Env, provider: Arc<ControlProvider>) -> Arc<HostM
     host
 }
 
-/// Create the one control session through the manager's own create path.
+/// note: Create the one control session through the manager's own create path.
 async fn control_session(manager: &Arc<HostManager>, env: &Env) -> HostSessionId {
     let workspace_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
     manager
@@ -2553,7 +2554,7 @@ async fn control_session(manager: &Arc<HostManager>, env: &Env) -> HostSessionId
         .id
 }
 
-/// Create one control session through the manager's own create path and index
+/// note: Create one control session through the manager's own create path and index
 /// it as an Actor Character session of this authority.
 ///
 /// Calling it a second time indexes a SECOND session, because the manager's
@@ -2588,7 +2589,7 @@ async fn control_indexed_session(
     session_id
 }
 
-/// The full control fixture: one core authority attached to a real started
+/// note: The full control fixture: one core authority attached to a real started
 /// manager with one control provider, one created session on that same manager
 /// and that session indexed as an Actor Character session.
 async fn control_fixture(
@@ -2610,7 +2611,7 @@ async fn control_fixture(
     (core, principal, manager, handle, session_id)
 }
 
-/// Prompt the control session and return the operation the authority started.
+/// note: Prompt the control session and return the operation the authority started.
 async fn control_prompt(
     handle: &HostHandle,
     principal: &nexus_core::Principal,
@@ -2638,7 +2639,7 @@ async fn control_status(
         .expect("the recorded outcome is owner-readable")
 }
 
-/// The accepted cancel is the operation's truth (§5) and it is recorded ONCE:
+/// note: The accepted cancel is the operation's truth (§5) and it is recorded ONCE:
 /// the provider's later clean terminal cannot rewrite it, and a later cancel is
 /// the typed 409 conflict.
 #[tokio::test]
@@ -2649,7 +2650,7 @@ async fn actor_control_cancel_wins_the_phase_race_and_settles_once() {
         control_fixture(&env, Arc::clone(&provider)).await;
     let operation_id = control_prompt(&handle, &principal, &session_id).await;
 
-    // The cancel is accepted through the SAME manager the prompt ran on.
+    // note: The cancel is accepted through the SAME manager the prompt ran on.
     let cancel = handle
         .cancel_operation(&principal, operation_id.to_string())
         .await
@@ -2674,7 +2675,7 @@ async fn actor_control_cancel_wins_the_phase_race_and_settles_once() {
         Some(CharacterOperationResultFinishReason::Cancelled)
     );
 
-    // The provider then reports its own clean end of turn — and then ends the
+    // note: The provider then reports its own clean end of turn — and then ends the
     // stream. The accepted cancel already won the phase race, so the drain
     // settlement is a no-op rather than a second terminal.
     provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
@@ -2696,7 +2697,7 @@ async fn actor_control_cancel_wins_the_phase_race_and_settles_once() {
         "the cancel and the drain settled the operation exactly once"
     );
 
-    // A later cancel of a finished operation is the typed 409 conflict.
+    // note: A later cancel of a finished operation is the typed 409 conflict.
     let err = handle
         .cancel_operation(&principal, operation_id.to_string())
         .await
@@ -2709,7 +2710,7 @@ async fn actor_control_cancel_wins_the_phase_race_and_settles_once() {
     }
 }
 
-/// DSH: a provider whose session does not negotiate cancellation is refused
+/// note: DSH: a provider whose session does not negotiate cancellation is refused
 /// `not_supported` BEFORE any intent — the provider is never asked, no cancel
 /// intent is latched, and the run's own terminal decides the outcome.
 #[tokio::test]
@@ -2734,7 +2735,7 @@ async fn actor_control_unsupported_cancel_never_latches_intent() {
         "an unsupported request never reaches the provider"
     );
 
-    // No intent was latched: the provider's own terminal is the truth, not a
+    // note: No intent was latched: the provider's own terminal is the truth, not a
     // fabricated cancellation.
     provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
     provider.close_stream();
@@ -2755,7 +2756,7 @@ async fn actor_control_unsupported_cancel_never_latches_intent() {
     );
 }
 
-/// A provider that advertises cancellation but REFUSES the call: the refusal is
+/// note: A provider that advertises cancellation but REFUSES the call: the refusal is
 /// reported honestly, the latched intent is rolled back, and the operation's
 /// own terminal still decides.
 #[tokio::test]
@@ -2821,7 +2822,7 @@ async fn actor_control_refused_cancel_survives_the_drain_settling_midflight() {
     );
     assert_eq!(provider.cancels(), 1, "the provider was asked exactly once");
 
-    // The drain settled on the provider's own clean end of turn BEFORE the
+    // note: The drain settled on the provider's own clean end of turn BEFORE the
     // refusal arrived, and the rollback did not erase it into a cancellation.
     let outcome = control_status(&handle, &principal, &operation_id).await;
     assert_eq!(
@@ -2835,7 +2836,7 @@ async fn actor_control_refused_cancel_survives_the_drain_settling_midflight() {
     );
 }
 
-/// Owner scoping: a foreign principal is `auth_required` on every control
+/// note: Owner scoping: a foreign principal is `auth_required` on every control
 /// method, and a cross-session or unknown operation is `not_found` — never a
 /// leak of another session's work.
 #[tokio::test]
@@ -2875,7 +2876,7 @@ async fn actor_control_foreign_and_cross_session_requests_are_denied() {
         );
     }
 
-    // Cross-session: the operation exists, but not for the session the caller
+    // note: Cross-session: the operation exists, but not for the session the caller
     // claims, so observation is refused indistinguishably from unknown.
     let err = handle
         .next_events(
@@ -2889,7 +2890,7 @@ async fn actor_control_foreign_and_cross_session_requests_are_denied() {
         .expect_err("a cross-session observation is refused");
     assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
 
-    // Unknown operation, in both directions.
+    // note: Unknown operation, in both directions.
     let unknown = HostOperationId(Uuid::new_v4());
     let err = handle
         .next_events(
@@ -2935,7 +2936,7 @@ async fn actor_control_observation_settles_without_a_subscriber() {
         "one bounded observation reader per reserved Character operation"
     );
 
-    // No `next_events` call at all: the drain still observes and settles.
+    // note: No `next_events` call at all: the drain still observes and settles.
     provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
     provider.close_stream();
     wait_until(
@@ -2955,7 +2956,7 @@ async fn actor_control_observation_settles_without_a_subscriber() {
         "the authority's own exec stream was consumed exactly once"
     );
 
-    // The observation is a SEPARATE source: pulling it now still delivers this
+    // note: The observation is a SEPARATE source: pulling it now still delivers this
     // operation's own terminal without re-reading the exec stream.
     let batch = handle
         .next_events(
@@ -2987,7 +2988,7 @@ async fn actor_control_observation_settles_without_a_subscriber() {
     );
 }
 
-/// A cap overflow and a lost broadcast source are TYPED resync gaps: a consumer
+/// note: A cap overflow and a lost broadcast source are TYPED resync gaps: a consumer
 /// re-reads authoritative status instead of reading either as completion.
 #[tokio::test]
 async fn actor_control_observation_gaps_are_typed_and_never_complete() {
@@ -2997,7 +2998,7 @@ async fn actor_control_observation_gaps_are_typed_and_never_complete() {
         control_fixture(&env, Arc::clone(&provider)).await;
     let operation_id = control_prompt(&handle, &principal, &session_id).await;
 
-    // One session-scoped event, delivered to the observation source.
+    // note: One session-scoped event, delivered to the observation source.
     provider.push(HostEvent::Status(StatusEvent {
         session_id: Some(session_id.clone()),
         level: StatusLevel::Info,
@@ -3009,7 +3010,7 @@ async fn actor_control_observation_gaps_are_typed_and_never_complete() {
     )
     .await;
 
-    // A byte cap too small for a single event is the typed overflow gap.
+    // note: A byte cap too small for a single event is the typed overflow gap.
     let overflow = handle
         .next_events(
             &principal,
@@ -3038,12 +3039,12 @@ async fn actor_control_observation_gaps_are_typed_and_never_complete() {
     let _ = control_status(&handle, &principal, &operation_id).await;
 }
 
-/// A broadcast lag is the typed LAGGING gap: the observation never turns lost
+/// note: A broadcast lag is the typed LAGGING gap: the observation never turns lost
 /// data into a clean completion, and the authoritative status stays readable.
 #[tokio::test]
 async fn actor_control_observation_lag_is_a_resync_gap() {
     let env = seed_env().await;
-    // More events than the manager's broadcast capacity (1024): the idle
+    // note: More events than the manager's broadcast capacity (1024): the idle
     // observation subscriber falls behind and the channel reports the lag.
     let provider = control_provider(true, 2_100, false);
     let (_core, principal, _manager, handle, session_id) =
@@ -3087,7 +3088,7 @@ async fn actor_control_observation_lag_is_a_resync_gap() {
     .await;
 }
 
-/// A-1: the observation reader is retained BY its reserved Character operation
+/// note: A-1: the observation reader is retained BY its reserved Character operation
 /// record, so retention cannot escape the operation registry — an id with no
 /// reservation has no observation slot, the readers stay in lockstep with the
 /// records through every retirement path, and the terminal retention window
@@ -3099,7 +3100,7 @@ async fn actor_control_observation_retention_is_bounded_by_its_reserved_operatio
     let handle: HostHandle = core.open_host(CountingPort::new()).await.unwrap();
     let registry = handle.actor_sessions();
 
-    // An id with no reserved Character operation has no observation slot: an
+    // note: An id with no reserved Character operation has no observation slot: an
     // arbitrary caller-supplied id can no longer mint an orphaned reader.
     let orphan = HostOperationId(Uuid::new_v4());
     let err = registry
@@ -3109,7 +3110,7 @@ async fn actor_control_observation_retention_is_bounded_by_its_reserved_operatio
     assert_eq!(registry.observation_count(), 0);
     assert!(registry.observation(&orphan).is_none());
 
-    // A reserved Character operation takes one reader, one-for-one, and
+    // note: A reserved Character operation takes one reader, one-for-one, and
     // removing the unstarted reservation drops the reader with its record.
     let operation_id = HostOperationId(Uuid::new_v4());
     handle
@@ -3135,7 +3136,7 @@ async fn actor_control_observation_retention_is_bounded_by_its_reserved_operatio
     );
     assert!(registry.observation(&operation_id).is_none());
 
-    // The retention window is the records': past 1024 terminals the oldest
+    // note: The retention window is the records': past 1024 terminals the oldest
     // record is evicted with its reader, so readers never outnumber or outlive
     // the operations they belong to.
     let mut oldest = None;
@@ -3185,7 +3186,7 @@ async fn actor_control_observation_retention_is_bounded_by_its_reserved_operatio
     );
 }
 
-/// Session shutdown cancels the session's active work through the same manager,
+/// note: Session shutdown cancels the session's active work through the same manager,
 /// releases the session, and retires the Actor reuse state — reporting success
 /// only after the manager confirmed the release AND the session's own drain
 /// settled.
@@ -3197,7 +3198,7 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         control_fixture(&env, Arc::clone(&provider)).await;
     let operation_id = control_prompt(&handle, &principal, &session_id).await;
 
-    // The shutdown joins the session's own drain before it confirms, and this
+    // note: The shutdown joins the session's own drain before it confirms, and this
     // fixture's provider `shutdown` deliberately returns without ending its
     // exec stream, so the run ends when the test ends the stream — after the
     // cancel, so the accepted cancel still wins the phase race.
@@ -3245,7 +3246,7 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         "the released session is retired, not reusable"
     );
 
-    // The operation's session is gone from the manager: a later cancel is
+    // note: The operation's session is gone from the manager: a later cancel is
     // refused instead of reaching a nonexistent session.
     let err = handle
         .cancel_operation(&principal, operation_id.to_string())
@@ -3261,7 +3262,7 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
     assert_eq!(provider.cancels(), 1, "no second cancel was attempted");
 }
 
-/// B-1 regression: the manager release does NOT settle this authority's own
+/// note: B-1 regression: the manager release does NOT settle this authority's own
 /// drain of the session's exec stream — this fixture's provider `shutdown`
 /// returns `Ok` and leaves its stream open. A session shutdown must therefore
 /// join that drain before it retires the indexed session and before it reports
@@ -3281,7 +3282,7 @@ async fn actor_control_session_shutdown_joins_its_own_drain_before_success() {
         let session_id = session_id.to_string();
         async move { handle.shutdown_session(&principal, session_id).await }
     });
-    // The manager released the session and returned, while the authority's
+    // note: The manager released the session and returned, while the authority's
     // drain of that same exec stream is still live (nothing ended the stream).
     wait_until(|| provider.shutdowns() == 1, "the manager session release").await;
     wait_until(
@@ -3303,7 +3304,7 @@ async fn actor_control_session_shutdown_joins_its_own_drain_before_success() {
         "the shutdown confirmed a teardown while its session's drain was unsettled"
     );
 
-    // The run ends: the drain settles, and only then is the shutdown confirmed.
+    // note: The run ends: the drain settles, and only then is the shutdown confirmed.
     provider.close_stream();
     let response = tokio::time::timeout(std::time::Duration::from_secs(20), shutdown)
         .await
@@ -3333,7 +3334,7 @@ async fn actor_control_session_shutdown_joins_its_own_drain_before_success() {
     );
 }
 
-/// B-1 (remaining race): the registered drains are not the whole proof a
+/// note: B-1 (remaining race): the registered drains are not the whole proof a
 /// session shutdown needs. `execute` crosses asynchronous admission and Host
 /// execution BEFORE it registers its drain, so a shutdown that only joined the
 /// drains it could already see would retire the session — and report success —
@@ -3348,7 +3349,7 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
     let (_core, principal, _manager, handle, session_id) =
         control_fixture(&env, Arc::clone(&provider)).await;
 
-    // Park the admitted execute inside the provider's own `execute`: admitted,
+    // note: Park the admitted execute inside the provider's own `execute`: admitted,
     // past every registry gate and the manager's session lookup, with no drain
     // registered yet — the window the finding describes.
     provider.park_executions();
@@ -3380,7 +3381,7 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
         "the admitted execute has registered no drain yet"
     );
 
-    // The concurrent session shutdown releases the session at the manager while
+    // note: The concurrent session shutdown releases the session at the manager while
     // that admitted execute is still in flight.
     let shutdown = tokio::spawn({
         let handle = handle.clone();
@@ -3397,7 +3398,7 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
         "the shutdown retired the session while an admitted execute for it was still in flight"
     );
 
-    // The admitted execute registers its drain. The shutdown may confirm only
+    // note: The admitted execute registers its drain. The shutdown may confirm only
     // after that drain settles — it is the work this teardown owns.
     provider.release_parked_executions();
     let started = execute
@@ -3418,7 +3419,7 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
         "the shutdown confirmed a teardown before the drain its session registered had settled"
     );
 
-    // The run ends: the drain settles, and only then is the shutdown confirmed.
+    // note: The run ends: the drain settles, and only then is the shutdown confirmed.
     provider.close_stream();
     let response = tokio::time::timeout(std::time::Duration::from_secs(20), shutdown)
         .await
@@ -3446,7 +3447,7 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
     assert_eq!(provider.shutdowns(), 1, "the session was released once");
 }
 
-/// T3 residual: a session's live work can have MORE THAN ONE waiter — the
+/// note: T3 residual: a session's live work can have MORE THAN ONE waiter — the
 /// session shutdown's own join is one, and a concurrent join of the same
 /// session is another. The settlement of that session's last live unit must
 /// release ALL of them: a single-permit `notify_one`, or a `Notified` armed but
@@ -3466,7 +3467,7 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
         "the live Character operation owns one drain"
     );
 
-    // Cancellation boundary: a join that runs out of its own deadline loses
+    // note: Cancellation boundary: a join that runs out of its own deadline loses
     // nothing — the registry still owns the live work — so the retry below
     // joins the same unit instead of reporting a session it cannot confirm.
     let cancelled = tokio::time::timeout(
@@ -3479,7 +3480,7 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
         "the join parked on the session's live work instead of reporting it settled"
     );
 
-    // Waiter one is the real session shutdown. This fixture's provider
+    // note: Waiter one is the real session shutdown. This fixture's provider
     // `shutdown` returns without ending the exec stream, so observing the
     // manager release while the drain is still live proves the shutdown is past
     // the release and parked in its own session join.
@@ -3496,7 +3497,7 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
         "the session's drain is still the work its shutdown joined"
     );
 
-    // Waiter two is a concurrent join of the SAME session. Its counters are the
+    // note: Waiter two is a concurrent join of the SAME session. Its counters are the
     // rendezvous, not a sleep: `entered` is published in the same task poll that
     // enters the join and `completed` only once the join returns, so
     // `entered == 1 && completed == 0` holds only while that joiner is parked
@@ -3539,7 +3540,7 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
         "the shutdown retired the session before the work it owns settled"
     );
 
-    // ONE settlement: the session's last live unit — its drain — retires as the
+    // note: ONE settlement: the session's last live unit — its drain — retires as the
     // stream ends. That single retirement must wake BOTH waiters.
     provider.close_stream();
 
@@ -3586,7 +3587,7 @@ async fn assert_session_shutdown_settled(
         "the shutdown's accepted cancel is still the operation's truth"
     );
 
-    // Already-settled boundary: a join of a session whose live work is gone
+    // note: Already-settled boundary: a join of a session whose live work is gone
     // returns instead of waiting for a settlement that already happened.
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -3607,7 +3608,7 @@ async fn actor_control_quiesce_is_actor_only_and_joins_drains() {
         control_fixture(&env, Arc::clone(&provider)).await;
     let operation_id = control_prompt(&handle, &principal, &session_id).await;
 
-    // Quiesce blocks on the retained drain until it settles: end the stream
+    // note: Quiesce blocks on the retained drain until it settles: end the stream
     // from the fixture while the quiesce is running.
     let quiescing = tokio::spawn({
         let handle = handle.clone();
@@ -3648,7 +3649,7 @@ async fn actor_control_quiesce_is_actor_only_and_joins_drains() {
         recorded.run_status,
         CharacterOperationResultRunStatus::Cancelled
     );
-    // The Host authority slot is still held: the ordered close owns its
+    // note: The Host authority slot is still held: the ordered close owns its
     // release, not the quiesce.
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
@@ -3659,7 +3660,7 @@ async fn actor_control_quiesce_is_actor_only_and_joins_drains() {
     );
 }
 
-/// F-001 (plan QC): the quiesce's zero registered-drain count is NOT proof of
+/// note: F-001 (plan QC): the quiesce's zero registered-drain count is NOT proof of
 /// quiescence. `execute` takes this authority's admission before its first await
 /// and retires it only after the drain has been transferred, so an operation
 /// admitted before the quiesce latched is still about to own a drain while the
@@ -3673,7 +3674,7 @@ async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms(
     let (_core, principal, _manager, handle, session_id) =
         control_fixture(&env, Arc::clone(&provider)).await;
 
-    // Park the admitted execute inside the provider's own `execute`: admitted,
+    // note: Park the admitted execute inside the provider's own `execute`: admitted,
     // past every registry gate and the manager's session lookup, with no drain
     // registered yet — the window the finding describes.
     provider.park_executions();
@@ -3705,7 +3706,7 @@ async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms(
         "the admitted execute has registered no drain yet"
     );
 
-    // The quiesce meets that admission. A correct quiesce joins it and therefore
+    // note: The quiesce meets that admission. A correct quiesce joins it and therefore
     // cannot finish on the zero drain count; an incorrect one confirms at once
     // and gets the whole observation window to prove it.
     let quiesce = tokio::spawn({
@@ -3718,7 +3719,7 @@ async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms(
         "the quiesce confirmed on a zero registered-drain count while an admitted execute had not transferred its drain"
     );
 
-    // Release the parked execute: it registers the drain the join must account
+    // note: Release the parked execute: it registers the drain the join must account
     // for, the quiesce cancels the operation it can now see, and the Actor side
     // confirms only once that drain settles.
     provider.release_parked_executions();
@@ -3754,7 +3755,7 @@ async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms(
     );
 }
 
-/// R-V1196-QUIESCE-409-PENDING (v1.196-4): the nonterminal snapshot is taken
+/// note: R-V1196-QUIESCE-409-PENDING (v1.196-4): the nonterminal snapshot is taken
 /// before any cancel is latched, so an operation that FINISHES in that window is
 /// answered with the typed `actor_operation_finished` conflict instead of a
 /// cancel intent. That refusal latches nothing and is accounted work — its
@@ -3778,7 +3779,7 @@ async fn actor_control_quiesce_finished_race() {
     let (core, principal, manager, handle, session_id) =
         control_fixture(&env, Arc::clone(&provider)).await;
 
-    // TWO operations execute at once — one per indexed session — each with its
+    // note: TWO operations execute at once — one per indexed session — each with its
     // own recorded operation and its own registered drain: this is the
     // nonterminal work the quiesce's snapshot must account for.
     let second_session = control_indexed_session(&core, &handle, &manager, &principal, &env).await;
@@ -3790,7 +3791,7 @@ async fn actor_control_quiesce_finished_race() {
     )
     .await;
 
-    // Park the quiesce's FIRST cancel at the provider.
+    // note: Park the quiesce's FIRST cancel at the provider.
     provider.park_cancels();
     let quiescing = tokio::spawn({
         let handle = handle.clone();
@@ -3808,7 +3809,7 @@ async fn actor_control_quiesce_finished_race() {
         parked == first || parked == second,
         "the parked cancel names one of the two executing operations: {parked:?}"
     );
-    // The loop is suspended INSIDE that cancel, so only one cancel was ever
+    // note: The loop is suspended INSIDE that cancel, so only one cancel was ever
     // attempted and the other operation is untouched and still running.
     let (finishing, finishing_session, parked_session) = if parked == first {
         (second.clone(), second_session.clone(), session_id.clone())
@@ -3824,7 +3825,7 @@ async fn actor_control_quiesce_finished_race() {
     )
     .await;
 
-    // Release the barrier: the parked cancel is accepted, and the loop then
+    // note: Release the barrier: the parked cancel is accepted, and the loop then
     // reaches the already-FINISHED operation, whose cancel is refused with the
     // typed conflict.
     provider.release_parked_cancels();
@@ -3833,7 +3834,7 @@ async fn actor_control_quiesce_finished_race() {
         "the accepted cancel to settle the parked operation's record",
     )
     .await;
-    // Everything the cancel loop owed is settled; the only work left is the
+    // note: Everything the cancel loop owed is settled; the only work left is the
     // join of the parked operation's REGISTERED drain, which is still live.
     assert_eq!(
         handle.actor_sessions().unsettled_drain_count(),
@@ -3844,7 +3845,7 @@ async fn actor_control_quiesce_finished_race() {
         !quiescing.is_finished(),
         "the quiesce confirmed over a registered drain it had not joined"
     );
-    // Settle that drain from the provider's own stream, and only then may the
+    // note: Settle that drain from the provider's own stream, and only then may the
     // quiesce confirm.
     provider.push(finished(&parked_session, &parked, FinishReason::EndTurn));
     let report = tokio::time::timeout(std::time::Duration::from_secs(20), quiescing)
@@ -3898,7 +3899,7 @@ async fn assert_finishing_operation_settled(
         "the other operation is still executing inside the window"
     );
 
-    // The window: the other operation terminates through its OWN provider
+    // note: The window: the other operation terminates through its OWN provider
     // stream, and the registered drain that observes it settles the record.
     provider.push(finished(
         finishing_session,
@@ -3927,7 +3928,7 @@ async fn assert_finishing_operation_settled(
     );
 }
 
-/// The accounted refusals are exactly the ones that latch no intent. A provider
+/// note: The accounted refusals are exactly the ones that latch no intent. A provider
 /// that advertised cancellation and then FAILED the call leaves real unaccounted
 /// work behind, so the quiesce keeps reporting it pending instead of confirming
 /// a cleanup over it.
@@ -3966,7 +3967,7 @@ async fn actor_control_quiesce_keeps_a_refused_cancel_pending() {
         0,
         "the drain settled; only the refusal keeps the report unconfirmed"
     );
-    // The refused cancel latched no intent, so the provider's own stream end
+    // why: The refused cancel latched no intent, so the provider's own stream end
     // decides the operation's terminal — never a fabricated cancellation.
     let outcome = control_status(&handle, &principal, &operation_id).await;
     assert_eq!(
@@ -3976,7 +3977,7 @@ async fn actor_control_quiesce_keeps_a_refused_cancel_pending() {
     );
 }
 
-/// W-005 (plan QC fix round 2): the authority-wide admission join is entered by
+/// note: W-005 (plan QC fix round 2): the authority-wide admission join is entered by
 /// EVERY concurrent quiesce on one authority, so the final admission retirement
 /// must wake all of them. A single-permit `notify_one` handoff wakes one joiner
 /// to recheck zero while the other stays suspended — and no further retirement
@@ -3994,7 +3995,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_admitted_retirement() {
     let (_core, principal, _manager, handle, session_id) =
         control_fixture(&env, Arc::clone(&provider)).await;
 
-    // Park the admitted execution inside the provider's own `execute`: admitted,
+    // note: Park the admitted execution inside the provider's own `execute`: admitted,
     // past the registry gates and the manager's session lookup, with no drain
     // registered yet. Releasing it then fails the call, so the admission retires
     // with nothing transferred.
@@ -4028,7 +4029,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_admitted_retirement() {
         "the admitted execute has registered no drain yet"
     );
 
-    // Both quiesces meet that one admission and wait for it to retire.
+    // note: Both quiesces meet that one admission and wait for it to retire.
     let first = tokio::spawn({
         let handle = handle.clone();
         async move { handle.quiesce_actor_sessions().await }
@@ -4043,7 +4044,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_admitted_retirement() {
         "both quiesces wait on the one in-flight admission"
     );
 
-    // Retire the admission: the refused execution has failed, so this
+    // why: Retire the admission: the refused execution has failed, so this
     // retirement is the only settlement either joiner will observe.
     provider.release_parked_executions();
     let failed = execute.await.expect("the execute task joins");
@@ -4080,7 +4081,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_admitted_retirement() {
     );
 }
 
-/// W-005 (plan QC fix round 2), second join of the same quiesce: the
+/// note: W-005 (plan QC fix round 2), second join of the same quiesce: the
 /// authority-wide DRAIN join is entered by every concurrent quiesce too, and a
 /// settling drain is the last settlement in play. A single-permit handoff would
 /// leave the second joiner waiting for a drain that already settled — the same
@@ -4101,7 +4102,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_actor_drain() {
         "the live Character operation owns one drain"
     );
 
-    // Both quiesces meet that ONE live drain. With no admission in flight the
+    // note: Both quiesces meet that ONE live drain. With no admission in flight the
     // admission join returns at once, so the drain join is the only place either
     // can wait — which is what the window below proves.
     let first = tokio::spawn({
@@ -4117,7 +4118,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_actor_drain() {
         "a quiesce to request cancellation",
     )
     .await;
-    // The window lets the second quiesce finish its own cancel round-trip (or
+    // note: The window lets the second quiesce finish its own cancel round-trip (or
     // read the recorded terminal) and register at the drain join.
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     assert_eq!(
@@ -4130,7 +4131,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_actor_drain() {
         "both quiesces wait on the one live drain"
     );
 
-    // End the operation: the drain settles, and it is the only settlement either
+    // note: End the operation: the drain settles, and it is the only settlement either
     // joiner will observe.
     provider.push(finished(
         &session_id,
@@ -4160,7 +4161,7 @@ async fn actor_control_concurrent_quiesces_join_the_same_actor_drain() {
     );
 }
 
-/// F-002 (plan QC): the established-owner slot is released at most ONCE per
+/// note: F-002 (plan QC): the established-owner slot is released at most ONCE per
 /// authority epoch. Two clones of one authority closing concurrently can both
 /// pass the retained-report check before either publishes a report and both run a
 /// confirmed settle; a second release then clears a successor's claim and lets
@@ -4198,7 +4199,7 @@ async fn actor_control_concurrent_confirmed_closes_release_the_slot_once() {
         "the retired authority may free the established-owner slot at most once"
     );
 
-    // The consequence the one-shot release protects: the freed slot admits
+    // note: The consequence the one-shot release protects: the freed slot admits
     // exactly one successor, whose claim the retired authority cannot clear.
     let _successor: HostHandle = core
         .open_host(CountingPort::new())
@@ -4221,7 +4222,7 @@ async fn actor_control_retained_close_before_retries_after_the_service_closed() 
     let (core, _principal, manager, handle, _session_id) =
         control_fixture(&env, Arc::clone(&provider)).await;
 
-    // A live drain the authority still owns.
+    // note: A live drain the authority still owns.
     handle
         .actor_sessions()
         .spawn_actor_drain(HostSessionId::new(), std::future::pending::<()>());
@@ -4249,7 +4250,7 @@ async fn actor_control_retained_close_before_retries_after_the_service_closed() 
         "slot retained: {err:?}"
     );
 
-    // The native owner closes the core service BEFORE the Host settlement, so
+    // note: The native owner closes the core service BEFORE the Host settlement, so
     // the retry must not turn into a `closing` refusal.
     core.close().await.expect("the core service closes");
     let retried = handle
@@ -4290,7 +4291,7 @@ async fn actor_control_close_before_settles_once_after_the_service_closed() {
     );
 }
 
-// ── v1.197 P0-T2 — a Character session's cwd is the admitted creative root ──
+// note: ── v1.197 P0-T2 — a Character session's cwd is the admitted creative root ──
 //
 // §A2: the engine-owner admission pins the selected workspace's canonical
 // creative root ONCE at open, and a Character Actor create may only run at
@@ -4303,7 +4304,7 @@ async fn actor_control_close_before_settles_once_after_the_service_closed() {
 // creative root (the operational `meta.json` the daemon/CLI writers emit) and
 // a real manager bounded to that pin — no fake pin, no production setter.
 
-/// Register `local_root` in the selected workspace's operational `meta.json`
+/// note: Register `local_root` in the selected workspace's operational `meta.json`
 /// BEFORE the core opens, so the engine-owner admission pins a real registered
 /// creative root. Returns that root's canonical form.
 fn register_creative_root(env: &Env, local_root: &Path) -> PathBuf {
@@ -4317,7 +4318,7 @@ fn register_creative_root(env: &Env, local_root: &Path) -> PathBuf {
     std::fs::canonicalize(local_root).unwrap()
 }
 
-/// A real manager whose workspace boundary IS the pin, with the test-driven
+/// note: A real manager whose workspace boundary IS the pin, with the test-driven
 /// control provider registered before start (the native composition order), so
 /// a Character create at the pin is a launch the provider actually receives.
 async fn pin_control_manager(
@@ -4360,7 +4361,7 @@ async fn pin_control_manager(
     host
 }
 
-/// The §A2 fixture: a real registered creative root already pinned at open, a
+/// note: The §A2 fixture: a real registered creative root already pinned at open, a
 /// real manager bounded to that pin, and the core authority attached to it.
 async fn pinned_character_fixture(
     env: &Env,
@@ -4385,7 +4386,7 @@ async fn pinned_character_fixture(
     (core, principal, manager, handle)
 }
 
-/// The Character Actor create body a caller posts, with the optional explicit
+/// note: The Character Actor create body a caller posts, with the optional explicit
 /// `cwd` the case is about.
 fn character_create(
     character_id: &str,
@@ -4405,7 +4406,7 @@ fn character_create(
     serde_json::from_value(body).expect("the Character create body is schema-valid")
 }
 
-/// The Creator Actor create body: no binding, because the Creator carries no
+/// why: The Creator Actor create body: no binding, because the Creator carries no
 /// binding-local viewpoint.
 fn creator_actor_create(
     model: &str,
@@ -4423,7 +4424,7 @@ fn creator_actor_create(
     serde_json::from_value(body).expect("the Creator Actor create body is schema-valid")
 }
 
-/// The legacy provider-only create body: no actor pair at all.
+/// note: The legacy provider-only create body: no actor pair at all.
 fn legacy_create(
     model: &str,
     cwd: Option<&Path>,
@@ -4446,12 +4447,12 @@ async fn memory_candidates(env: &Env) -> i64 {
         .unwrap()
 }
 
-/// A cwd refusal is the typed `invalid_input` naming `cwd`.
+/// note: A cwd refusal is the typed `invalid_input` naming `cwd`.
 fn is_cwd_refusal(err: &CoreError) -> bool {
     matches!(err, CoreError::InvalidInput { field, .. } if field == "cwd")
 }
 
-/// A Character create at the admitted pin is admitted, and the root the
+/// note: A Character create at the admitted pin is admitted, and the root the
 /// provider is actually launched at is that pin — for an omitted cwd, for the
 /// pin spelled explicitly, and for a symlink alias of it. The non-Character
 /// lanes keep their pre-existing cwd boundary.
@@ -4466,7 +4467,7 @@ async fn character_cwd_uses_admitted_pin() {
     let (core, principal, manager, handle) =
         pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
 
-    // (1) An omitted cwd uses the pin: the launch observes exactly that root.
+    // note: (1) An omitted cwd uses the pin: the launch observes exactly that root.
     let created = handle
         .create_session(
             &principal,
@@ -4482,7 +4483,7 @@ async fn character_cwd_uses_admitted_pin() {
         "an omitted cwd launches at the admitted pin"
     );
 
-    // (2) The pin spelled explicitly is the SAME root (exact equality, not a
+    // note: (2) The pin spelled explicitly is the SAME root (exact equality, not a
     // string alias).
     handle
         .create_session(
@@ -4493,7 +4494,7 @@ async fn character_cwd_uses_admitted_pin() {
         .expect("the canonical pin is an admissible explicit cwd");
     assert_eq!(provider.launched_cwds(), vec![pin.clone(), pin.clone()]);
 
-    // (3) A symlink alias resolves to the pin, so it is the same root.
+    // why: (3) A symlink alias resolves to the pin, so it is the same root.
     let alias = env.user_home.join("creative-alias");
     std::os::unix::fs::symlink(&pin, &alias).unwrap();
     handle
@@ -4509,7 +4510,7 @@ async fn character_cwd_uses_admitted_pin() {
         "a symlink alias canonicalizes to the pin"
     );
 
-    // (4) The Creator Actor and legacy lanes keep the pre-existing boundary: a
+    // note: (4) The Creator Actor and legacy lanes keep the pre-existing boundary: a
     // descendant root is accepted for both, so the pin rule is Character-only.
     let descendant = pin.join("sub");
     std::fs::create_dir_all(&descendant).unwrap();
@@ -4538,7 +4539,7 @@ async fn character_cwd_uses_admitted_pin() {
         "the non-Character lanes still launch at the caller's own root"
     );
 
-    // Each distinct create launched its own session; only the three Character
+    // note: Each distinct create launched its own session; only the three Character
     // creates were pinned to the creative root.
     assert_eq!(
         handle.actor_sessions().len(),
@@ -4549,7 +4550,7 @@ async fn character_cwd_uses_admitted_pin() {
     assert_eq!(core.admission_creative_root(), Some(pin.as_path()));
 }
 
-/// Every non-pin Character cwd is refused as `invalid_input` on `cwd`, before
+/// note: Every non-pin Character cwd is refused as `invalid_input` on `cwd`, before
 /// any Host session, launch, registry entry or memory candidate exists; and
 /// the stored Actor/binding admission keeps deciding identity refusals.
 #[tokio::test]
@@ -4563,7 +4564,7 @@ async fn character_cwd_refuses_non_pin_before_effects() {
     let (_core, principal, manager, handle) =
         pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
 
-    // The baseline a refused create must leave untouched.
+    // note: The baseline a refused create must leave untouched.
     let baseline_sessions = manager.list_sessions().await.unwrap().len();
     let baseline_indexed = handle.actor_sessions().len();
     let baseline_candidates = memory_candidates(&env).await;
@@ -4576,7 +4577,7 @@ async fn character_cwd_refuses_non_pin_before_effects() {
     assert_eq!(baseline_indexed, 0);
     assert_eq!(baseline_candidates, 0);
 
-    // A real descendant exists at the pin and is still not the pin.
+    // note: A real descendant exists at the pin and is still not the pin.
     std::fs::create_dir_all(pin.join("sub")).unwrap();
     let sibling = env.user_home.join("sibling");
     std::fs::create_dir_all(&sibling).unwrap();
@@ -4604,7 +4605,7 @@ async fn character_cwd_refuses_non_pin_before_effects() {
         );
     }
 
-    // The cwd IS the pin here, so any refusal is the stored Actor/binding
+    // note: The cwd IS the pin here, so any refusal is the stored Actor/binding
     // admission still owning the decision — and still preceding every effect.
     let unowned_character = "chr_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
     let missing_binding = "awb_ffffffffffffffffffffffffffffffff";
@@ -4628,7 +4629,7 @@ async fn character_cwd_refuses_non_pin_before_effects() {
         );
     }
 
-    // No refusal reached the Host plane, the registry, or the capture queue.
+    // note: No refusal reached the Host plane, the registry, or the capture queue.
     assert_eq!(
         provider.launched_cwds(),
         Vec::<PathBuf>::new(),
@@ -4642,7 +4643,7 @@ async fn character_cwd_refuses_non_pin_before_effects() {
     assert_eq!(memory_candidates(&env).await, baseline_candidates);
 }
 
-/// A Character create requires an admitted pin: an unregistered workspace, a
+/// note: A Character create requires an admitted pin: an unregistered workspace, a
 /// pin whose directory is removed after open, and a selection that MOVES after
 /// open are all refused or still bound to the ORIGINAL pin — never silently
 /// rebound to whatever the metadata says now.
@@ -4653,7 +4654,7 @@ async fn character_cwd_requires_admitted_pin() {
     deleted_pin_is_refused().await;
 }
 
-/// (A) A workspace registering no creative root pins nothing: both the omitted
+/// note: (A) A workspace registering no creative root pins nothing: both the omitted
 /// and the explicit cwd are refused instead of falling back.
 async fn unregistered_workspace_pins_no_cwd() {
     let env = seed_env().await;
@@ -4690,7 +4691,7 @@ async fn unregistered_workspace_pins_no_cwd() {
     assert_eq!(handle.actor_sessions().len(), 0);
 }
 
-/// (B) A metadata selection that MOVES after open never silently rebinds the
+/// note: (B) A metadata selection that MOVES after open never silently rebinds the
 /// session to the new root.
 async fn moved_selection_never_rebinds_the_session() {
     let env = seed_env().await;
@@ -4747,7 +4748,7 @@ async fn moved_selection_never_rebinds_the_session() {
     );
 }
 
-/// (C) A pin whose directory is removed after open is refused rather than
+/// note: (C) A pin whose directory is removed after open is refused rather than
 /// launched at a root that no longer exists.
 async fn deleted_pin_is_refused() {
     let env = seed_env().await;
@@ -4776,7 +4777,7 @@ async fn deleted_pin_is_refused() {
     );
 }
 
-/// A pin whose pathname has been retargeted is refused, not followed.
+/// note: A pin whose pathname has been retargeted is refused, not followed.
 ///
 /// The stored pin is the canonical root resolved ONCE at admission, so
 /// re-canonicalising it must reproduce the SAME path. Renaming the admitted
@@ -4809,7 +4810,7 @@ async fn character_cwd_refuses_a_retargeted_pin() {
         "boot launches no session"
     );
 
-    // Rename the admitted root away and leave a symlink in its place, pointing
+    // note: Rename the admitted root away and leave a symlink in its place, pointing
     // at a DIFFERENT directory that really exists.
     let moved = env.user_home.join("creative-moved");
     std::fs::rename(&pin, &moved).unwrap();
@@ -4827,7 +4828,7 @@ async fn character_cwd_refuses_a_retargeted_pin() {
         "the old pathname now resolves to the new target"
     );
 
-    // Only the stored pin pathname is the exact-match authority: the omitted
+    // note: Only the stored pin pathname is the exact-match authority: the omitted
     // cwd, the new symlink target, the retargeted old pathname and the renamed
     // original directory are all refused.
     let cases: Vec<(&str, Option<&Path>)> = vec![
@@ -4850,7 +4851,7 @@ async fn character_cwd_refuses_a_retargeted_pin() {
         );
     }
 
-    // No refusal reached the Host plane, the registry, a provider launch or the
+    // note: No refusal reached the Host plane, the registry, a provider launch or the
     // capture queue.
     assert_eq!(
         provider.launched_cwds(),

@@ -11,11 +11,12 @@
 //! `kb_extract_jobs` is guarded to a migration/engine writer at the schema
 //! level, so the enqueue is exercised over the engine-owned admission the
 //! CLI leaf now takes.
+// note: the doc above names the extract-queue authority these cases pin.
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal, QueueKbExtractParams,
 };
 
-/// Creator + workspace the fixture materializes and selects.
+/// note: Creator + workspace the fixture materializes and selects.
 const CREATOR: &str = "author";
 const SLUG: &str = "default";
 
@@ -29,7 +30,7 @@ fn select_creator(home: &std::path::Path) {
     .unwrap();
 }
 
-/// Materialize the fixture workspace, its creator row and its schema, then
+/// note: Materialize the fixture workspace, its creator row and its schema, then
 /// release the seed writer so a later open can take its own admission.
 ///
 /// `foreign_job` additionally inserts one job owned by another creator behind
@@ -87,7 +88,7 @@ async fn open_core(home: &std::path::Path, access: CoreAccess) -> (CoreService, 
     (core, principal)
 }
 
-/// The engine-owned admission the enqueue leaf takes (the queue table is
+/// note: The engine-owned admission the enqueue leaf takes (the queue table is
 /// guarded to a migration/engine writer).
 async fn core_with_creator(home: &std::path::Path) -> (CoreService, Principal) {
     seed_workspace(home, false).await;
@@ -103,7 +104,7 @@ fn params(work_entry_id: &str, world_id: &str) -> QueueKbExtractParams {
     }
 }
 
-/// Queue → get → list round trip: the row lands under the principal's
+/// note: Queue → get → list round trip: the row lands under the principal's
 /// creator/workspace binding and a re-queue returns the same job.
 #[tokio::test]
 async fn queue_get_and_list_round_trip() {
@@ -117,7 +118,7 @@ async fn queue_get_and_list_round_trip() {
     assert!(job.job_id.starts_with("xj_"), "{}", job.job_id);
     assert_eq!(job.status, "queued");
     assert_eq!(job.creator_id, CREATOR);
-    // The operational workspace binding is the admitted principal's slug.
+    // note: The operational workspace binding is the admitted principal's slug.
     assert_eq!(job.workspace_id, SLUG);
     assert_eq!(job.work_entry_id, "kb_alpha");
     assert_eq!(job.world_id, "wld_1");
@@ -127,7 +128,7 @@ async fn queue_get_and_list_round_trip() {
     assert!(job.work_id.is_none());
     assert_ne!(job.created_at, "");
 
-    // Idempotent on `(creator, work_entry_id, world_id)`: the existing
+    // note: Idempotent on `(creator, work_entry_id, world_id)`: the existing
     // non-failed job comes back unchanged.
     let again = core
         .queue_kb_extract(&principal, params("kb_alpha", "wld_1"))
@@ -152,7 +153,7 @@ async fn queue_get_and_list_round_trip() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].job_id, job.job_id);
 
-    // The bound is the caller's, as the CLI's 100-job default is.
+    // note: The bound is the caller's, as the CLI's 100-job default is.
     assert_eq!(
         core.list_kb_extract_jobs(&principal, 1)
             .await
@@ -164,7 +165,7 @@ async fn queue_get_and_list_round_trip() {
     core.close().await.unwrap();
 }
 
-/// `--chapter N` derives the artifact locator triple; a chapter below 1 and an
+/// note: `--chapter N` derives the artifact locator triple; a chapter below 1 and an
 /// unsafe entry id are refused as invalid input.
 #[tokio::test]
 async fn chapter_sugar_and_input_refusals() {
@@ -210,7 +211,7 @@ async fn chapter_sugar_and_input_refusals() {
     core.close().await.unwrap();
 }
 
-/// A job owned by another creator is refused with the work-index ownership
+/// note: A job owned by another creator is refused with the work-index ownership
 /// classification, never reported absent, and a foreign job is not listed.
 #[tokio::test]
 async fn foreign_job_is_forbidden_not_absent() {
@@ -234,7 +235,7 @@ async fn foreign_job_is_forbidden_not_absent() {
     core.close().await.unwrap();
 }
 
-/// Read-only core access refuses the enqueue, while the status read stays
+/// note: Read-only core access refuses the enqueue, while the status read stays
 /// available (the CLI's `extract-status` leaf only reads).
 #[tokio::test]
 async fn read_only_access_refuses_the_enqueue() {

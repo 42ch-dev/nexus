@@ -9,6 +9,7 @@
 //!    never auto-re-driven;
 //! 4. a direct authorized domain writer still commits without starting any
 //!    engine, and a domain-only core open starts no execution task.
+// note: the doc above states the single-owner execution contract these cases pin.
 #![cfg(feature = "execution")]
 
 use async_trait::async_trait;
@@ -32,18 +33,18 @@ use tokio::sync::Notify;
 const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
 
-/// The embedded preset the seeded runs are frozen against.
+/// note: The embedded preset the seeded runs are frozen against.
 ///
 /// A REAL preset (not a placeholder id) so recovery's frozen-source
 /// verification actually runs: reconstruction re-resolves the identity from
 /// this id and refuses on a hash/version mismatch, so a fabricated descriptor
 /// would only ever exercise the `reconstruction_unavailable` path.
 const SEED_PRESET: &str = "memory-augmented";
-/// `SEED_PRESET`'s initial state — the persisted position a seeded run holds
+/// note: `SEED_PRESET`'s initial state — the persisted position a seeded run holds
 /// at a clean boundary.
 const SEED_PRESET_INITIAL: &str = "recall";
 
-/// Deterministic, no-model provider port. It never performs an effect; the
+/// note: Deterministic, no-model provider port. It never performs an effect; the
 /// tests here exercise ownership/recovery, not provider behaviour.
 struct NullProvider {
     calls: AtomicUsize,
@@ -61,7 +62,7 @@ impl NullProvider {
 impl ProviderPort for NullProvider {
     async fn call(&self, _request: ProviderCall) -> ProviderResult<ProviderReply> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        // The wire `CoreError` is a struct (`code`/`message`/`details`/
+        // note: The wire `CoreError` is a struct (`code`/`message`/`details`/
         // `http_status`), not an enum with an `Internal` variant — mirror the
         // canonical mapping in `nexus_agent_host::providers::port`.
         Err(WireCoreError {
@@ -92,7 +93,7 @@ struct Fixture {
     db_path: std::path::PathBuf,
 }
 
-/// Build a workspace home and initialize the engine-owned pool exactly like
+/// note: Build a workspace home and initialize the engine-owned pool exactly like
 /// the daemon does, then release the guard so a test can re-acquire cleanly.
 async fn fixture() -> Fixture {
     let tmp = TempDir::new().unwrap();
@@ -115,7 +116,7 @@ async fn fixture() -> Fixture {
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("engine pool init");
-    // P0 verified-admission: `create_world` validates the caller's creator
+    // note: P0 verified-admission: `create_world` validates the caller's creator
     // against the stored `creators` row (`narrative_write::create_world` →
     // `FkNotFound`), so the fixture must seed it exactly as production does —
     // through an ADMITTED pool, because `guard_creators_insert` aborts any
@@ -148,7 +149,7 @@ async fn open_engine_owner(f: &Fixture) -> CoreService {
         .expect("engine-owner core open")
 }
 
-/// A fully retired owner releases both the home admission and the per-DB
+/// note: A fully retired owner releases both the home admission and the per-DB
 /// execution reservation, allowing a new generation to start.
 async fn assert_fresh_owner_can_start(f: &Fixture) {
     let fresh = open_engine_owner(f).await;
@@ -162,7 +163,7 @@ async fn assert_fresh_owner_can_start(f: &Fixture) {
     fresh.close().await.unwrap();
 }
 
-/// Seed a durable v1 run through the REAL store API, not hand-written SQL.
+/// note: Seed a durable v1 run through the REAL store API, not hand-written SQL.
 ///
 /// `start_run` is the single path that writes an authoritative v1 row: the
 /// `execution_version = 1` record together with the frozen
@@ -192,7 +193,7 @@ async fn seed_run(
     seed_run_at(db_path, session_id, creator, state, SEED_PRESET_INITIAL).await;
 }
 
-/// Same admission seam as [`seed_run`], at an explicit persisted position.
+/// note: Same admission seam as [`seed_run`], at an explicit persisted position.
 async fn seed_run_at(
     db_path: &Path,
     session_id: &str,
@@ -232,7 +233,7 @@ async fn seed_run_at(
         applied: None,
         intake_mode: None,
     };
-    // The persisted position is the preset's initial state, so reconstruction
+    // note: The persisted position is the preset's initial state, so reconstruction
     // rebuilds a runner whose position is a real task in the frozen graph.
     let root = graph_flow::Session::new_from_task(session_id.to_string(), initial);
     root.context
@@ -251,7 +252,7 @@ async fn seed_run_at(
     nexus_local_db::writer_protocol::release_retained_writer_guards(db_path);
 }
 
-/// Seed a committed, non-terminal v1 run at a clean boundary: no wait, no
+/// note: Seed a committed, non-terminal v1 run at a clean boundary: no wait, no
 /// in-flight prompt, no unfinished step. Recovery classifies it
 /// `SafeBoundary` — a committed run, not an uncertain one.
 async fn seed_committed_run(db_path: &Path, session_id: &str, creator: &str) {
@@ -264,7 +265,7 @@ async fn seed_committed_run(db_path: &Path, session_id: &str, creator: &str) {
     .await;
 }
 
-/// Mark an in-flight step so A7 classifies the run `Interrupted`.
+/// note: Mark an in-flight step so A7 classifies the run `Interrupted`.
 async fn seed_in_flight_run(db_path: &Path, session_id: &str, creator: &str) {
     seed_run(
         db_path,
@@ -278,18 +279,18 @@ async fn seed_in_flight_run(db_path: &Path, session_id: &str, creator: &str) {
     .await;
 }
 
-/// AC-P3-T1: a competing `EngineOwner` is refused, a committed run is
+/// note: AC-P3-T1: a competing `EngineOwner` is refused, a committed run is
 /// recovered exactly once, an unconfirmed operation is `Interrupted`, and a
 /// direct authorized domain writer still commits without starting an engine.
 #[tokio::test]
 async fn second_owner_and_restart_are_fenced() {
     let f = fixture().await;
 
-    // ── 1. A committed non-terminal run exists on disk (pre-restart). ──
+    // note: ── 1. A committed non-terminal run exists on disk (pre-restart). ──
     seed_committed_run(&f.db_path, "test-preset:committed", CREATOR).await;
     seed_in_flight_run(&f.db_path, "test-preset:uncertain", CREATOR).await;
 
-    // ── 2. First owner: acquires the engine lock and recovers. ──
+    // note: ── 2. First owner: acquires the engine lock and recovers. ──
     let owner_a = open_engine_owner(&f).await;
     let providers = NullProvider::new();
     let handle = owner_a
@@ -305,7 +306,7 @@ async fn second_owner_and_restart_are_fenced() {
         handle.engine_epoch()
     );
 
-    // Recovery classified both rows: the committed run is re-driven (its
+    // note: Recovery classified both rows: the committed run is re-driven (its
     // runner is reconstructed), the in-flight run is NOT (Interrupted).
     //
     // Read back through the live owner's OWN admitted pool. A bare second
@@ -333,7 +334,7 @@ async fn second_owner_and_restart_are_fenced() {
         "an unconfirmed in-flight operation must classify Interrupted (never auto-replayed)"
     );
 
-    // ── 3. A competing EngineOwner core is refused (no second engine). ──
+    // note: ── 3. A competing EngineOwner core is refused (no second engine). ──
     let competitor = CoreService::open(open_options(&f, CoreAccess::EngineOwner)).await;
     let refused = match competitor {
         Ok(core) => core
@@ -343,7 +344,7 @@ async fn second_owner_and_restart_are_fenced() {
             )
             .await
             .is_err(),
-        // The OS admission lock itself refusing the live owner is the same
+        // note: The OS admission lock itself refusing the live owner is the same
         // contract: a second effect owner is never established.
         Err(_) => true,
     };
@@ -352,7 +353,7 @@ async fn second_owner_and_restart_are_fenced() {
         "a competing EngineOwner must be refused while a live owner holds the engine"
     );
 
-    // ── 4. A duplicate start on the SAME owner also refuses. ──
+    // note: ── 4. A duplicate start on the SAME owner also refuses. ──
     assert!(
         owner_a
             .start_execution(
@@ -364,7 +365,7 @@ async fn second_owner_and_restart_are_fenced() {
         "duplicate start must not create a second engine"
     );
 
-    // ── 5. A direct authorized domain writer still commits, no engine. ──
+    // note: ── 5. A direct authorized domain writer still commits, no engine. ──
     let direct = CoreService::open(open_options(&f, CoreAccess::DirectWriter))
         .await
         .expect("direct-writer core opens beside a live engine owner");
@@ -382,7 +383,7 @@ async fn second_owner_and_restart_are_fenced() {
         .expect("direct domain write commits without any engine");
     assert_ne!(world.world_id, "");
 
-    // ── 6. Close settles the owner; no provider effect ever ran. ──
+    // note: ── 6. Close settles the owner; no provider effect ever ran. ──
     direct.close().await.unwrap();
     let report = handle.close().await.unwrap();
     assert!(report.cleanup_confirmed);
@@ -394,7 +395,7 @@ async fn second_owner_and_restart_are_fenced() {
     owner_a.close().await.unwrap();
 }
 
-/// R-V1186P3-T1-002 (A7 rule 6, P3 T1 rereview P1): the safe-boundary re-drive
+/// note: R-V1186P3-T1-002 (A7 rule 6, P3 T1 rereview P1): the safe-boundary re-drive
 /// regression must be driven by the real restart, never the coordinator seam
 /// alone. The v1.186 case called `WorkflowRunCoordinator::recover_persisted`
 /// directly on a live runtime; its legacy harness (`LiveDaemon` and the daemon
@@ -434,7 +435,7 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
         .await
         .expect("owner starts");
 
-    // Deterministic hold: the safe-boundary run was reconstructed and
+    // note: Deterministic hold: the safe-boundary run was reconstructed and
     // re-driven into its prompt step by the boot recovery.
     gate.wait_entered().await;
     gate.release();
@@ -449,20 +450,20 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
 // tells which graph the reconstructed runner holds.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The user preset whose applied document the restart test installs.
+/// note: The user preset whose applied document the restart test installs.
 const RESTART_PRESET: &str = "restart-applied-identity";
-/// The same bundle with NO apply: the no-apply side of the same restart.
+/// note: The same bundle with NO apply: the no-apply side of the same restart.
 const RESTART_NO_APPLY_PRESET: &str = "restart-no-apply";
-/// The entry node BOTH documents declare — the position the killed run held.
+/// note: The entry node BOTH documents declare — the position the killed run held.
 const SHARED_ENTRY_NODE: &str = "open_probe";
-/// Node id that exists ONLY in the applied document.
+/// note: Node id that exists ONLY in the applied document.
 const APPLIED_ONLY_NODE: &str = "applied_only_probe";
-/// Node id that exists ONLY in the descriptor bundle.
+/// note: Node id that exists ONLY in the descriptor bundle.
 const PRESET_ONLY_NODE: &str = "preset_only_probe";
-/// Node id that exists ONLY in the superseding apply's document.
+/// note: Node id that exists ONLY in the superseding apply's document.
 const SUPERSEDING_ONLY_NODE: &str = "superseding_only_probe";
 
-/// The descriptor bundle: shared entry → the preset-only node, which is a
+/// note: The descriptor bundle: shared entry → the preset-only node, which is a
 /// manual wait so the recovered position is durable instead of transient.
 fn restart_preset_yaml(preset_id: &str) -> String {
     format!(
@@ -488,7 +489,7 @@ states:
     )
 }
 
-/// The applied document: the same entry node, and `probe` where the bundle has
+/// note: The applied document: the same entry node, and `probe` where the bundle has
 /// `preset_only_probe`. No node id of the bundle's second state appears anywhere
 /// in it.
 fn restart_applied_document(preset_id: &str, probe: &str) -> String {
@@ -530,10 +531,10 @@ fn restart_applied_document(preset_id: &str, probe: &str) -> String {
     )
 }
 
-/// The package the pinned restart fixtures nest, and the nest it is bound through.
+/// note: The package the pinned restart fixtures nest, and the nest it is bound through.
 const RESTART_PINNED_PACKAGE: &str = "restart-pinned-step";
 
-/// [`restart_applied_document`] plus one exact pattern pin on the shared entry
+/// note: [`restart_applied_document`] plus one exact pattern pin on the shared entry
 /// node: the shape a real approval freezes when its document nests a pattern.
 /// `pin_hash: None` is the hashless carrier — a nest whose body is decided at
 /// Apply, so the document itself records nothing to compare.
@@ -556,7 +557,7 @@ fn restart_pinned_applied_document(preset_id: &str, pin_hash: Option<&str>) -> S
     serde_json::to_string(&document).expect("the pinned document encodes")
 }
 
-/// One package directory under `<nexus_home>/patterns`: the registry the
+/// note: One package directory under `<nexus_home>/patterns`: the registry the
 /// recovery-side pin check reads. Two calls with different bodies are the same
 /// pin serving different bytes — the case the document hash cannot catch.
 fn write_restart_package(nexus_home: &Path, description: &str) {
@@ -568,7 +569,7 @@ fn write_restart_package(nexus_home: &Path, description: &str) {
     );
 }
 
-/// [`write_restart_package`] for any id, with the nests its own fragment carries.
+/// note: [`write_restart_package`] for any id, with the nests its own fragment carries.
 fn write_restart_package_with(
     nexus_home: &Path,
     id: &str,
@@ -616,11 +617,11 @@ fn write_restart_package_with(
     .expect("pattern fragment");
 }
 
-/// The package [`RESTART_PINNED_PACKAGE`]'s own fragment nests: the pin a
+/// note: The package [`RESTART_PINNED_PACKAGE`]'s own fragment nests: the pin a
 /// hashless carrier hides from its document.
 const RESTART_NESTED_PACKAGE: &str = "restart-nested-step";
 
-/// Write the carrier's fragment so it pins [`RESTART_NESTED_PACKAGE`] by hash,
+/// why: Write the carrier's fragment so it pins [`RESTART_NESTED_PACKAGE`] by hash,
 /// and return the nested hash it froze.
 fn write_restart_nested_fixture(nexus_home: &Path, nested: &str, outer: &str) -> String {
     write_restart_package_with(
@@ -650,7 +651,7 @@ fn write_restart_nested_fixture(nexus_home: &Path, nested: &str, outer: &str) ->
     nested_hash
 }
 
-/// The hash the registry serves for `id` right now.
+/// note: The hash the registry serves for `id` right now.
 fn restart_package_hash(nexus_home: &Path, id: &str) -> String {
     nexus_pattern::scan_pattern_packages(
         &nexus_home.join("patterns"),
@@ -675,7 +676,7 @@ fn write_restart_bundle(nexus_home: &Path, preset_id: &str) -> std::path::PathBu
     bundle
 }
 
-/// Open the admitted writer pool a seeding window writes through. [`fixture`]
+/// note: Open the admitted writer pool a seeding window writes through. [`fixture`]
 /// already migrated this DB, so a test that seeds several rows opens the pool
 /// once and hands the same `&SqlitePool` to each seed.
 async fn open_seed_pool(db_path: &Path) -> nexus_local_db::GuardedPool {
@@ -684,14 +685,14 @@ async fn open_seed_pool(db_path: &Path) -> nexus_local_db::GuardedPool {
         .expect("seed engine pool init")
 }
 
-/// Close a seeding window's pool and hand its retained writer guards back, so an
+/// note: Close a seeding window's pool and hand its retained writer guards back, so an
 /// owner can boot on the same DB afterwards.
 async fn close_seed_pool(db_path: &Path, guarded: nexus_local_db::GuardedPool) {
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(db_path);
 }
 
-/// Seed the current apply of `preset_id` through the caller's admitted writer
+/// note: Seed the current apply of `preset_id` through the caller's admitted writer
 /// pool (`open_seed_pool`): the approval freeze, then the apply row naming it — the same rows, in
 /// the same shapes, the approve and apply paths write (the
 /// `pinned_approval_strategy_applies_insert` trigger requires exactly this
@@ -708,7 +709,7 @@ async fn seed_restart_apply(
     seed_apply(pool, preset_id, &document, "[]").await
 }
 
-/// The same seeded apply carrying ONE recorded pattern pin: the applied
+/// note: The same seeded apply carrying ONE recorded pattern pin: the applied
 /// document nests the package and `pins_json` freezes the hash the registry
 /// served when the row was seeded.
 async fn seed_pinned_restart_apply(
@@ -725,7 +726,7 @@ async fn seed_pinned_restart_apply(
     seed_apply(pool, preset_id, &document, &pins.to_string()).await
 }
 
-/// The same seeded apply, with a hashless carrier and NOTHING recorded: the
+/// note: The same seeded apply, with a hashless carrier and NOTHING recorded: the
 /// shape an approval writes when the nest was never resolved.
 async fn seed_hashless_restart_apply(
     pool: &sqlx::SqlitePool,
@@ -735,7 +736,7 @@ async fn seed_hashless_restart_apply(
     seed_apply(pool, preset_id, &document, "[]").await
 }
 
-/// Write the approval, the apply row and the schedule precondition an apply
+/// note: Write the approval, the apply row and the schedule precondition an apply
 /// requires, all through the caller's admitted pool.
 async fn seed_apply(
     pool: &sqlx::SqlitePool,
@@ -747,7 +748,7 @@ async fn seed_apply(
         serde_json::from_str(document_json).expect("the applied-side document decodes");
     let hash = nexus_workflow_ir::content_hash(&document).expect("the fixture document hashes");
 
-    // An apply requires the strategy to own a schedule. A pre-seed row is inert
+    // note: An apply requires the strategy to own a schedule. A pre-seed row is inert
     // (it carries no version-0 core-context record), so nothing ever admits it.
     sqlx::query(
         "INSERT INTO creator_schedules \
@@ -801,7 +802,7 @@ async fn seed_apply(
     }
 }
 
-/// Seed a SECOND apply for `preset_id`, superseding the one [`seed_restart_apply`]
+/// note: Seed a SECOND apply for `preset_id`, superseding the one [`seed_restart_apply`]
 /// installed — the re-apply a restart after admission must notice (I-000464).
 /// Its document reaches a different probe node, so a recovery that rebuilt from
 /// it instead of refusing would land somewhere only this document defines.
@@ -854,7 +855,7 @@ async fn seed_superseding_apply(
     }
 }
 
-/// Seed the durable v1 row a killed daemon leaves behind: a non-terminal run of
+/// note: Seed the durable v1 row a killed daemon leaves behind: a non-terminal run of
 /// `preset_id` parked at the shared entry node, written through the REAL store
 /// API with the on-disk bundle's frozen source identity (exactly what admission
 /// persists for this run — an applied run's descriptor names the strategy's
@@ -916,7 +917,7 @@ async fn seed_restart_run(
         .expect("seed start_run");
 }
 
-/// The run's durable record, read through the owner's own admitted pool.
+/// note: The run's durable record, read through the owner's own admitted pool.
 async fn read_restart_session(
     pool: &sqlx::SqlitePool,
     session_id: &str,
@@ -928,7 +929,7 @@ async fn read_restart_session(
         .expect("read the run row")
 }
 
-/// Wait until the run's durable position is `node`.
+/// note: Wait until the run's durable position is `node`.
 async fn wait_for_position(pool: &sqlx::SqlitePool, session_id: &str, node: &str, what: &str) {
     wait_until(what, || {
         let pool = pool.clone();
@@ -942,7 +943,7 @@ async fn wait_for_position(pool: &sqlx::SqlitePool, session_id: &str, node: &str
     .await;
 }
 
-/// The run's authoritative record: status, durable state, frozen descriptor.
+/// note: The run's authoritative record: status, durable state, frozen descriptor.
 async fn read_restart_record(
     pool: &sqlx::SqlitePool,
     session_id: &str,
@@ -954,7 +955,7 @@ async fn read_restart_record(
         .expect("the run record exists")
 }
 
-/// Wait until the run's durable record satisfies `cond`, answering the record the
+/// note: Wait until the run's durable record satisfies `cond`, answering the record the
 /// satisfied poll read: one read per tick, never a second one after the wait.
 async fn wait_for_record<F>(
     pool: &sqlx::SqlitePool,
@@ -978,7 +979,7 @@ where
     .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
 }
 
-/// Wait until the admitted run parks on the applied document's manual wait and
+/// note: Wait until the admitted run parks on the applied document's manual wait and
 /// answer the durable wait id that parking transition wrote.
 async fn wait_for_applied_manual_wait(pool: &sqlx::SqlitePool, session_id: &str) -> String {
     wait_for_record(
@@ -1001,7 +1002,7 @@ async fn wait_for_applied_manual_wait(pool: &sqlx::SqlitePool, session_id: &str)
     .wait_id
 }
 
-/// Boot recovery re-drives the seeded run past its shared entry node, then the
+/// note: Boot recovery re-drives the seeded run past its shared entry node, then the
 /// durable record names the node the reconstructed graph reached.
 async fn recovered_position(owner: &CoreService, session_id: &str) -> graph_flow::Session {
     let pool: sqlx::SqlitePool = owner.pool().clone();
@@ -1022,7 +1023,7 @@ async fn recovered_position(owner: &CoreService, session_id: &str) -> graph_flow
         .expect("the recovered run row exists")
 }
 
-/// Generation 1 of a restart test: admit `preset_id` through the `start_session`
+/// note: Generation 1 of a restart test: admit `preset_id` through the `start_session`
 /// seam on a fresh owner, check the identity its descriptor froze, park the run
 /// on the applied document's manual wait, then retire the owner. Answers the run
 /// and the durable wait admission left behind.
@@ -1070,7 +1071,7 @@ async fn admit_and_park(
     (session_id, wait_id)
 }
 
-/// P4 Task 2: a restart during an in-flight applied run recovers into the
+/// note: P4 Task 2: a restart during an in-flight applied run recovers into the
 /// APPLIED graph.
 ///
 /// The strategy has a current apply whose document reaches `applied_only_probe`
@@ -1128,7 +1129,7 @@ async fn a_restart_during_an_applied_run_recovers_into_the_applied_graph() {
     owner.close().await.unwrap();
 }
 
-/// P4 Task 2: a strategy with NO apply still recovers exactly as before — the
+/// note: P4 Task 2: a strategy with NO apply still recovers exactly as before — the
 /// descriptor bundle's graph — which is what the same seeded position proves
 /// from the other side.
 #[tokio::test]
@@ -1167,9 +1168,9 @@ async fn a_restart_with_no_apply_still_recovers_the_descriptor_graph() {
     owner.close().await.unwrap();
 }
 
-// ── Applied identity frozen on the run (Task 4, I-000464) ──────────────────
+// note: ── Applied identity frozen on the run (Task 4, I-000464) ──────────────────
 
-/// P4 Task 4 (I-000464): a re-apply between admission and a restart is refused.
+/// note: P4 Task 4 (I-000464): a re-apply between admission and a restart is refused.
 ///
 /// Recovery resolves the strategy's CURRENT apply, so without the identity
 /// frozen on the descriptor it rebuilds this run from the superseding document —
@@ -1197,7 +1198,7 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
         None,
     )
     .await;
-    // The re-apply lands AFTER the run was admitted, which is the whole window
+    // note: The re-apply lands AFTER the run was admitted, which is the whole window
     // the frozen identity exists to close.
     let superseding = seed_superseding_apply(seed.pool(), RESTART_PRESET, &admitted.apply_id).await;
     close_seed_pool(&f.db_path, seed).await;
@@ -1211,7 +1212,7 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
         .await
         .expect("owner starts");
 
-    // The A7 reattach seam — what Continue/Resume run before any transition —
+    // note: The A7 reattach seam — what Continue/Resume run before any transition —
     // refuses the run its admitted graph instead of rebuilding a newer one.
     let refusal = handle
         .coordinator()
@@ -1235,7 +1236,7 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
         "the refusal must name the apply that replaced it: {reason}"
     );
 
-    // Not a recovered graph: the durable position never left the shared entry
+    // note: Not a recovered graph: the durable position never left the shared entry
     // node, so neither the superseding document's node nor the descriptor's ran.
     let pool: sqlx::SqlitePool = owner.pool().clone();
     let session = read_restart_session(&pool, &session_id)
@@ -1252,7 +1253,7 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
     owner.close().await.unwrap();
 }
 
-/// P4 Task 4: the recorded identity is not a prohibition — a run restarted while
+/// note: P4 Task 4: the recorded identity is not a prohibition — a run restarted while
 /// its admitted apply is still the strategy's current one recovers into the
 /// applied graph exactly as before.
 #[tokio::test]
@@ -1293,9 +1294,9 @@ async fn a_restart_of_an_unchanged_applied_run_still_recovers_the_applied_graph(
     owner.close().await.unwrap();
 }
 
-// ── The frozen pin snapshot re-compared at recovery (P6) ──────────────────
+// note: ── The frozen pin snapshot re-compared at recovery (P6) ──────────────────
 
-/// P6: a pattern body edited between apply and restart is refused at recovery.
+/// note: P6: a pattern body edited between apply and restart is refused at recovery.
 ///
 /// The applied document's own bytes still hash to the recorded identity — the
 /// edit moved the package, not the document — so only the frozen `pins_json`
@@ -1323,7 +1324,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     .await;
     close_seed_pool(&f.db_path, seed).await;
 
-    // Same id and version, different bytes.
+    // note: Same id and version, different bytes.
     write_restart_package(&nexus_home, "changed bytes");
     assert_ne!(
         restart_package_hash(&nexus_home, RESTART_PINNED_PACKAGE),
@@ -1380,7 +1381,7 @@ async fn a_restart_after_a_pinned_body_moved_refuses_naming_the_pin() {
     owner.close().await.unwrap();
 }
 
-/// I-000506: BOTH routes compare the pins in the OWNER's home, never a caller's.
+/// note: I-000506: BOTH routes compare the pins in the OWNER's home, never a caller's.
 ///
 /// The pins are compared against `<nexus_home>/patterns`. Admission once took
 /// the home from its caller while recovery could only read the home
@@ -1417,11 +1418,11 @@ async fn a_restart_compares_pins_in_the_owners_home_not_the_callers() {
     let admitted = seed_pinned_restart_apply(seed.pool(), RESTART_PRESET, &recorded).await;
     close_seed_pool(&f.db_path, seed).await;
 
-    // ── Generation 1: admit with the OTHER home as the caller home. The pin
+    // note: ── Generation 1: admit with the OTHER home as the caller home. The pin
     //    still matches in the owner home, so the run admits. ──
     let (session_id, _wait_id) = admit_and_park(&f, &caller_home, &admitted).await;
 
-    // ── Generation 2: the owner home's pinned body moved. Recovery must refuse
+    // note: ── Generation 2: the owner home's pinned body moved. Recovery must refuse
     //    naming the hash the apply froze, not the caller home's untouched one. ──
     write_restart_package(&owner_home, "owner bytes moved");
     assert_ne!(
@@ -1452,7 +1453,7 @@ async fn a_restart_compares_pins_in_the_owners_home_not_the_callers() {
         "a refused reconstruction must not advance the run past its applied wait"
     );
 
-    // ── Generation 3: moving the CALLER home's pin changes nothing — the same
+    // note: ── Generation 3: moving the CALLER home's pin changes nothing — the same
     //    run over a fresh owner is refused for the same reason. ──
     write_restart_package(&caller_home, "caller bytes moved");
     let (again, _) = restart_pin_refusal(&f, &session_id).await;
@@ -1462,7 +1463,7 @@ async fn a_restart_compares_pins_in_the_owners_home_not_the_callers() {
     );
 }
 
-/// Boot one owner generation and signal a parked applied run at it: the
+/// note: Boot one owner generation and signal a parked applied run at it: the
 /// reconstruction refusal reason plus the position the run was left on.
 async fn restart_pin_refusal(
     f: &Fixture,
@@ -1476,7 +1477,7 @@ async fn restart_pin_refusal(
         )
         .await
         .expect("owner starts");
-    // Reconstruction refuses before the wait is resolved; the neighbouring
+    // note: Reconstruction refuses before the wait is resolved; the neighbouring
     // moved-pin test signals the same placeholder for that reason.
     let refusal = handle
         .coordinator()
@@ -1500,7 +1501,7 @@ async fn restart_pin_refusal(
     (reason, position)
 }
 
-/// P6: an empty pin snapshot cannot clear a carrier whose body it never recorded.
+/// note: P6: an empty pin snapshot cannot clear a carrier whose body it never recorded.
 ///
 /// The applied document names the carrier by id and version with no
 /// `content_hash`, and the approval recorded no pin at all. What the carrier
@@ -1527,7 +1528,7 @@ async fn a_restart_with_a_hashless_carrier_and_no_recorded_pin_refuses() {
     .await;
     close_seed_pool(&f.db_path, seed).await;
 
-    // The nested body moved after the freeze, and no row records what it was.
+    // note: The nested body moved after the freeze, and no row records what it was.
     write_restart_package_with(
         &nexus_home,
         RESTART_NESTED_PACKAGE,
@@ -1584,7 +1585,7 @@ async fn a_restart_with_a_hashless_carrier_and_no_recorded_pin_refuses() {
     owner.close().await.unwrap();
 }
 
-/// P6: unchanged pins recover the applied graph exactly as before — the new
+/// note: P6: unchanged pins recover the applied graph exactly as before — the new
 /// check must admit every applied identity whose bodies still hash to the
 /// frozen snapshot.
 #[tokio::test]
@@ -1628,9 +1629,9 @@ async fn a_restart_with_unchanged_pins_recovers_the_applied_graph() {
     owner.close().await.unwrap();
 }
 
-// ── The YAML run seam freezes the apply it runs (P6, I-000443) ─────────────
+// note: ── The YAML run seam freezes the apply it runs (P6, I-000443) ─────────────
 
-/// P6: `start_session` resolves the strategy's current apply before it builds,
+/// note: P6: `start_session` resolves the strategy's current apply before it builds,
 /// under the intake mode the home config selects.
 ///
 /// An applied strategy under the default `ir-only` runs the applied document —
@@ -1665,7 +1666,7 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
     let coordinator = handle.coordinator();
     let pool: sqlx::SqlitePool = owner.pool().clone();
 
-    // Default (no config key): the applied strategy runs the applied document
+    // note: Default (no config key): the applied strategy runs the applied document
     // and freezes the identity AND the intake mode.
     let applied_run = coordinator
         .start_session(
@@ -1710,7 +1711,7 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
         "the default arm is ir-only and must be recorded"
     );
 
-    // The default no-apply refusal: a user bundle with no current apply
+    // note: The default no-apply refusal: a user bundle with no current apply
     // refuses before graph construction, and no run row is minted.
     let refusal = coordinator
         .start_session(
@@ -1744,7 +1745,7 @@ async fn start_session_freezes_and_runs_the_strategy_apply() {
     owner.close().await.unwrap();
 }
 
-/// P6 Task 3: an `ir-only` descriptor that records no applied identity is the
+/// note: P6 Task 3: an `ir-only` descriptor that records no applied identity is the
 /// no-apply admission refusal resurfaced at recovery: a typed, non-replayable
 /// refusal — never a YAML rebuild, even though the strategy has since gained
 /// a current apply (recovery under ir-only does not fall back).
@@ -1755,7 +1756,7 @@ async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
     let bundle = write_restart_bundle(&nexus_home, RESTART_PRESET);
     let session_id = format!("{RESTART_PRESET}:in-flight");
     let seed = open_seed_pool(&f.db_path).await;
-    // The strategy has a current apply NOW; the descriptor records none, the
+    // note: The strategy has a current apply NOW; the descriptor records none, the
     // state a tampered or partially-written ir-only row can reach.
     seed_restart_apply(seed.pool(), RESTART_PRESET).await;
     seed_restart_run(
@@ -1778,7 +1779,7 @@ async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
         .await
         .expect("owner starts");
 
-    // The A7 reattach seam refuses instead of rebuilding from YAML or from
+    // note: The A7 reattach seam refuses instead of rebuilding from YAML or from
     // the strategy's current apply.
     let refusal = handle
         .coordinator()
@@ -1798,7 +1799,7 @@ async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
         "the refusal must carry the stable intake text: {reason}"
     );
 
-    // Not a recovered graph: the durable position never left the shared
+    // note: Not a recovered graph: the durable position never left the shared
     // entry node.
     let pool: sqlx::SqlitePool = owner.pool().clone();
     let session = read_restart_session(&pool, &session_id)
@@ -1814,7 +1815,7 @@ async fn an_ir_only_descriptor_without_an_apply_refuses_recovery() {
     owner.close().await.unwrap();
 }
 
-/// P6 Task 2: a run ADMITTED through `start_session` refuses to restart once the
+/// note: P6 Task 2: a run ADMITTED through `start_session` refuses to restart once the
 /// strategy gained a successor apply.
 ///
 /// Admission froze apply A on the descriptor; while the daemon was down the
@@ -1835,17 +1836,17 @@ async fn a_restart_after_a_successor_apply_refuses_the_admitted_run() {
     let admitted = seed_restart_apply(seed.pool(), RESTART_PRESET).await;
     close_seed_pool(&f.db_path, seed).await;
 
-    // ── Generation 1: admit through the seam, freeze A, park on the applied
+    // note: ── Generation 1: admit through the seam, freeze A, park on the applied
     //    document's manual wait. ──
     let (session_id, wait_id) = admit_and_park(&f, &nexus_home, &admitted).await;
 
-    // ── The successor lands while no daemon owns the DB: the re-apply window
+    // note: ── The successor lands while no daemon owns the DB: the re-apply window
     //    the frozen identity exists to close. ──
     let seed = open_seed_pool(&f.db_path).await;
     let superseding = seed_superseding_apply(seed.pool(), RESTART_PRESET, &admitted.apply_id).await;
     close_seed_pool(&f.db_path, seed).await;
 
-    // ── Generation 2: boot recovery cannot rebuild this run, and the A7
+    // note: ── Generation 2: boot recovery cannot rebuild this run, and the A7
     //    reattach seam surfaces that as the typed refusal. ──
     let owner = open_engine_owner(&f).await;
     let handle = owner
@@ -1877,7 +1878,7 @@ async fn a_restart_after_a_successor_apply_refuses_the_admitted_run() {
         "the refusal must name the apply that replaced it: {reason}"
     );
 
-    // The refusal advances nothing: same node, same human wait, same identity.
+    // note: The refusal advances nothing: same node, same human wait, same identity.
     let pool: sqlx::SqlitePool = owner.pool().clone();
     let record = read_restart_record(&pool, &session_id.0).await;
     assert_eq!(
@@ -1912,7 +1913,7 @@ async fn a_restart_after_a_successor_apply_refuses_the_admitted_run() {
     owner.close().await.unwrap();
 }
 
-/// P6 Task 2: the same seam admitted with NO successor restarts into the
+/// note: P6 Task 2: the same seam admitted with NO successor restarts into the
 /// document it froze.
 ///
 /// The kill left the run parked on `applied_only_probe` — a node id only the
@@ -1929,10 +1930,10 @@ async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
     let admitted = seed_restart_apply(seed.pool(), RESTART_PRESET).await;
     close_seed_pool(&f.db_path, seed).await;
 
-    // ── Generation 1: admit through the seam and park on the applied wait. ──
+    // note: ── Generation 1: admit through the seam and park on the applied wait. ──
     let (session_id, wait_id) = admit_and_park(&f, &nexus_home, &admitted).await;
 
-    // ── Generation 2: the current apply is still the admitted one, so the
+    // why: ── Generation 2: the current apply is still the admitted one, so the
     //    restart reconstructs the applied document and re-drives the run. ──
     let owner = open_engine_owner(&f).await;
     let handle = owner
@@ -1989,19 +1990,19 @@ async fn a_restart_of_an_admitted_applied_run_recovers_the_applied_document() {
 // identity, and a restart re-enters through the ONE resolution route.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// An embedded preset with NO roles and a manual-wait ENTRY: a run admitted for
+/// note: An embedded preset with NO roles and a manual-wait ENTRY: a run admitted for
 /// it parks immediately, so neither admission nor recovery performs a provider
 /// effect.
 const EMBEDDED_RUN_PRESET: &str = "novel-review-master";
-/// [`EMBEDDED_RUN_PRESET`]'s entry state — a manual wait.
+/// note: [`EMBEDDED_RUN_PRESET`]'s entry state — a manual wait.
 const EMBEDDED_ENTRY_NODE: &str = "present";
-/// The manual wait [`EMBEDDED_ENTRY_NODE`] advances to once continued.
+/// note: The manual wait [`EMBEDDED_ENTRY_NODE`] advances to once continued.
 const EMBEDDED_NEXT_NODE: &str = "await_decision";
-/// The input [`EMBEDDED_RUN_PRESET`]'s entry capabilities render (strict mode):
+/// note: The input [`EMBEDDED_RUN_PRESET`]'s entry capabilities render (strict mode):
 /// every `preset.input.*` the first two manual states read.
 const EMBEDDED_RUN_INPUT: &str = r#"{"work_ref":"wrk-embedded-execution","topic":"embedded execution","work_id":"wrk_embedded_execution","open_findings":"[]"}"#;
 
-/// The identity an embedded bundle resolves — `apply_id = "embedded:<preset_id>"`
+/// note: The identity an embedded bundle resolves — `apply_id = "embedded:<preset_id>"`
 /// and the canonical hash of the document `embedded_workflow_document`
 /// constructs. Written here the way `resolve_applied_document` writes it: the
 /// test pins the production value, it does not replace the production route.
@@ -2017,7 +2018,7 @@ fn embedded_run_identity(preset_id: &str) -> nexus_session_storage::run_state::A
     }
 }
 
-/// Wait until an admitted run parks on a manual wait at `node`, answering that
+/// note: Wait until an admitted run parks on a manual wait at `node`, answering that
 /// wait's durable id.
 async fn wait_for_manual_wait(pool: &sqlx::SqlitePool, session_id: &str, node: &str) -> String {
     wait_for_record(
@@ -2040,7 +2041,7 @@ async fn wait_for_manual_wait(pool: &sqlx::SqlitePool, session_id: &str, node: &
     .wait_id
 }
 
-/// Admit `preset_id` through the production seam and park it on its entry manual
+/// note: Admit `preset_id` through the production seam and park it on its entry manual
 /// wait, asserting the frozen descriptor carries the embedded identity and the
 /// run was positioned by the resolved document.
 async fn admit_embedded_and_park(
@@ -2057,7 +2058,7 @@ async fn admit_embedded_and_park(
         .await
         .expect("owner starts");
     let caps = handle.capability_holder();
-    // The entry capability renders `preset.input.*` in strict mode, so the run is
+    // why: The entry capability renders `preset.input.*` in strict mode, so the run is
     // admitted with exactly the input its document's first two manual states read.
     let session_id = handle
         .coordinator()
@@ -2110,7 +2111,7 @@ async fn admit_embedded_and_park(
     (session_id, wait_id)
 }
 
-/// The run input is the embedded document, and a restart resumes on the SAME
+/// note: The run input is the embedded document, and a restart resumes on the SAME
 /// identity: recovery re-resolves the compiled-in bundle, re-constructs the
 /// document and compares its identity against the frozen one before rebuilding.
 ///
@@ -2123,10 +2124,10 @@ async fn an_embedded_run_recovers_on_the_identity_admission_froze() {
     let f = fixture().await;
     let nexus_home = f.tmp.path().join(".nexus42");
 
-    // ── Generation 1: admit through the seam, park on the entry manual wait. ──
+    // note: ── Generation 1: admit through the seam, park on the entry manual wait. ──
     let (session_id, wait_id) = admit_embedded_and_park(&f, &nexus_home, EMBEDDED_RUN_PRESET).await;
 
-    // ── Generation 2: restart, then continue past the entry wait. ──
+    // note: ── Generation 2: restart, then continue past the entry wait. ──
     let owner = open_engine_owner(&f).await;
     let handle = owner
         .start_execution(
@@ -2171,7 +2172,7 @@ async fn an_embedded_run_recovers_on_the_identity_admission_froze() {
     owner.close().await.unwrap();
 }
 
-/// A changed embedded byte flips the document hash and the run stays
+/// note: A changed embedded byte flips the document hash and the run stays
 /// non-replayable — never rebuilt from the YAML descriptor.
 ///
 /// The frozen identity is rewritten to a hash the compiled-in document no longer
@@ -2186,7 +2187,7 @@ async fn a_changed_embedded_document_refuses_recovery_instead_of_the_yaml_graph(
     let (session_id, wait_id) = admit_embedded_and_park(&f, &nexus_home, EMBEDDED_RUN_PRESET).await;
     let frozen = embedded_run_identity(EMBEDDED_RUN_PRESET);
 
-    // ── The bytes moved while no daemon owned the DB. ──
+    // note: ── The bytes moved while no daemon owned the DB. ──
     let seed = open_seed_pool(&f.db_path).await;
     let bytes: Vec<u8> = sqlx::query_scalar(
         "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
@@ -2207,7 +2208,7 @@ async fn a_changed_embedded_document_refuses_recovery_instead_of_the_yaml_graph(
         .expect("rewrite the frozen descriptor");
     close_seed_pool(&f.db_path, seed).await;
 
-    // ── Generation 2: the re-resolved identity no longer matches. ──
+    // note: ── Generation 2: the re-resolved identity no longer matches. ──
     let owner = open_engine_owner(&f).await;
     let handle = owner
         .start_execution(
@@ -2242,7 +2243,7 @@ async fn a_changed_embedded_document_refuses_recovery_instead_of_the_yaml_graph(
         "the refusal names the identity recovery re-resolved: {reason}"
     );
 
-    // The refusal advances nothing: same node, same human wait, same descriptor.
+    // note: The refusal advances nothing: same node, same human wait, same descriptor.
     let pool: sqlx::SqlitePool = owner.pool().clone();
     let record = read_restart_record(&pool, &session_id.0).await;
     assert_eq!(
@@ -2263,9 +2264,9 @@ async fn a_changed_embedded_document_refuses_recovery_instead_of_the_yaml_graph(
     owner.close().await.unwrap();
 }
 
-// ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
+// note: ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
 
-/// Poll `cond` until it holds, failing the test instead of hanging.
+/// note: Poll `cond` until it holds, failing the test instead of hanging.
 async fn wait_until<F, Fut>(what: &str, mut cond: F)
 where
     F: FnMut() -> Fut,
@@ -2283,7 +2284,7 @@ where
     .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
 }
 
-/// A prompt executor that parks the drive INSIDE an LLM step until the test
+/// note: A prompt executor that parks the drive INSIDE an LLM step until the test
 /// releases it. Holds `close()`'s drain deterministically: `abort_all_drives`
 /// cannot finish while the executor is parked, so the "closing" window is
 /// observable.
@@ -2315,12 +2316,12 @@ impl GatedPromptExecutor {
 #[async_trait]
 impl PromptExecutor for GatedPromptExecutor {
     async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError> {
-        // Signal entry FIRST (the test's deterministic hold depends on it),
+        // note: Signal entry FIRST (the test's deterministic hold depends on it),
         // then park until the test releases. `Notify::notify_one` stores a
         // permit when no waiter is registered yet, so the signal is never
         // lost to a scheduling race.
         self.entered.notify_one();
-        // Hold past the drive-loop cancellation deliberately: the drain must
+        // why: Hold past the drive-loop cancellation deliberately: the drain must
         // remain in flight until the TEST releases it, so the mid-close
         // registry fence is observable.
         let () = self.release.notified().await;
@@ -2329,14 +2330,14 @@ impl PromptExecutor for GatedPromptExecutor {
     }
 }
 
-/// C1: while close is draining (closing, not yet settled), the per-DB
+/// note: C1: while close is draining (closing, not yet settled), the per-DB
 /// registry must hold the fence — a competing `EngineOwner` is refused and
 /// cannot build a second engine. Only AFTER the drives join is the slot
 /// released and a replacement admitted.
 #[tokio::test]
 async fn draining_close_holds_the_db_fence_until_drives_join() {
     let f = fixture().await;
-    // A run parked inside the `generate` LLM step: recovery re-drives it and
+    // note: A run parked inside the `generate` LLM step: recovery re-drives it and
     // the gated executor holds the drive loop open.
     seed_run_at(
         &f.db_path,
@@ -2360,10 +2361,10 @@ async fn draining_close_holds_the_db_fence_until_drives_join() {
         .await
         .expect("owner starts");
 
-    // Deterministic hold: the recovery re-drive is parked inside the prompt.
+    // note: Deterministic hold: the recovery re-drive is parked inside the prompt.
     gate.wait_entered().await;
 
-    // Close begins: drains (fenced admission) and joins the parked drive —
+    // note: Close begins: drains (fenced admission) and joins the parked drive —
     // in the background, so the drain window is observable.
     let closer = {
         let handle = Arc::clone(&handle);
@@ -2376,7 +2377,7 @@ async fn draining_close_holds_the_db_fence_until_drives_join() {
         "close must settle only after every drive has joined"
     );
 
-    // The fence is released AFTER settle: a replacement is now admitted.
+    // note: The fence is released AFTER settle: a replacement is now admitted.
     let competitor = open_engine_owner(&f).await;
     competitor
         .start_execution(
@@ -2389,7 +2390,7 @@ async fn draining_close_holds_the_db_fence_until_drives_join() {
     owner_a.close().await.unwrap();
 }
 
-/// C1 (mid-drain window): while close is draining, a competing `EngineOwner`
+/// note: C1 (mid-drain window): while close is draining, a competing `EngineOwner`
 /// must be REFUSED — the fence is held until settle, never merely until
 /// close starts.
 #[tokio::test]
@@ -2423,7 +2424,7 @@ async fn competing_owner_refused_while_close_is_draining() {
         let handle = Arc::clone(&handle);
         tokio::spawn(async move { handle.close().await })
     };
-    // Deterministic barrier: hold until close has ARMED the admission fence
+    // note: Deterministic barrier: hold until close has ARMED the admission fence
     // (`begin_shutdown` → `draining`, observable as `is_closed()`) before the
     // competitor runs. Without this the refusal below could equally be
     // produced by a merely-LIVE owner, so the test would pass even with the
@@ -2437,7 +2438,7 @@ async fn competing_owner_refused_while_close_is_draining() {
     })
     .await;
 
-    // The drain is in flight (the parked drive has not joined). While the
+    // note: The drain is in flight (the parked drive has not joined). While the
     // handle is NOT settled, the registry must refuse a replacement — the
     // C1 fence, not merely a live-owner collision.
     let competitor = open_engine_owner(&f).await;
@@ -2464,7 +2465,7 @@ async fn competing_owner_refused_while_close_is_draining() {
     owner_a.close().await.unwrap();
 }
 
-/// C2: close fences new drive admission — no drive may start after close
+/// note: C2: close fences new drive admission — no drive may start after close
 /// began, and the fence is observable through the coordinator's public
 /// admission primitive.
 #[tokio::test]
@@ -2481,7 +2482,7 @@ async fn close_fences_new_drive_admission() {
         .expect("owner starts");
     handle.close().await.unwrap();
 
-    // C2: after close, admission is fenced. Before the fix a drive could be
+    // note: C2: after close, admission is fenced. Before the fix a drive could be
     // registered AFTER close returned `cleanup_confirmed: true`.
     let err = handle
         .coordinator()
@@ -2494,7 +2495,7 @@ async fn close_fences_new_drive_admission() {
     owner_a.close().await.unwrap();
 }
 
-/// Build-phase barrier for the C3 race (`RunnerDeps::build_observer`).
+/// note: Build-phase barrier for the C3 race (`RunnerDeps::build_observer`).
 ///
 /// Holds `start_execution` at the exact window between "build complete" and
 /// "install into the per-service slot", and reports when a close has arrived
@@ -2531,14 +2532,14 @@ impl BuildGate {
 #[async_trait]
 impl ExecutionBuildObserver for BuildGate {
     async fn built(&self) {
-        // Signal entry (Notify stores the permit if the waiter is not
+        // note: Signal entry (Notify stores the permit if the waiter is not
         // registered yet), then hold the build open until the test releases.
         self.entered.notify_one();
         let () = self.release.notified().await;
     }
 }
 
-/// C3: a close that arrives WHILE `start_execution` is mid-build must not let
+/// note: C3: a close that arrives WHILE `start_execution` is mid-build must not let
 /// the build install an owner into the closed service. Either close observes
 /// the installed owner and settles it, or the build abandons it — never an
 /// orphan owner, and never an owner surviving the close.
@@ -2552,7 +2553,7 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
     let f = fixture().await;
     seed_committed_run(&f.db_path, "test-preset:c3", CREATOR).await;
 
-    // Repeat so the barrier is exercised across scheduling orders, but every
+    // why: Repeat so the barrier is exercised across scheduling orders, but every
     // round is deterministically forced into the mid-build window.
     for round in 0..8u32 {
         let owner = Arc::new(open_engine_owner(&f).await);
@@ -2572,14 +2573,14 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
                 .await
         });
 
-        // The build is complete but NOT installed. Close now — this is the
+        // note: The build is complete but NOT installed. Close now — this is the
         // interleaving the pre-fix code lost.
         gate.wait_entered().await;
         let close = tokio::spawn({
             let owner = Arc::clone(&owner);
             async move { owner.close().await }
         });
-        // `closing` is raised by the close in the caller's own step, so seeing
+        // note: `closing` is raised by the close in the caller's own step, so seeing
         // it proves this close has begun. Finishing, though, requires the drain
         // — and the drain takes the start fence exclusively, which this
         // registered build still holds. So "not finished" is not a race here:
@@ -2607,7 +2608,7 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
             report.unwrap().cleanup_confirmed,
             "round {round}: close must report a confirmed cleanup"
         );
-        // The build was refused by the install-time double check — it may not
+        // note: The build was refused by the install-time double check — it may not
         // have installed anything into the closed service.
         assert!(
             matches!(started, Err(ExecutionOpenError::Closing)),
@@ -2621,7 +2622,7 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
     }
 }
 
-/// C3 (canceled build): a start whose caller is cancelled must not leave that
+/// note: C3 (canceled build): a start whose caller is cancelled must not leave that
 /// build's LIVE drives behind a confirmed close.
 ///
 /// `build_execution` spawns the hosted clock and the drives `recovery`
@@ -2638,7 +2639,7 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
 #[tokio::test]
 async fn close_waits_for_a_canceled_builds_live_drives() {
     let f = fixture().await;
-    // A run parked inside the `generate` LLM step: recovery re-drives it and
+    // note: A run parked inside the `generate` LLM step: recovery re-drives it and
     // the gated executor holds that drive open.
     seed_run_at(
         &f.db_path,
@@ -2650,7 +2651,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
     .await;
 
     let owner = Arc::new(open_engine_owner(&f).await);
-    // A second core over the same DB (the daemon's co-host shape): it JOINS the
+    // note: A second core over the same DB (the daemon's co-host shape): it JOINS the
     // live engine admission, so it can observe the per-DB owner reservation
     // without disturbing the owner under test.
     let competitor = open_engine_owner(&f).await;
@@ -2674,7 +2675,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
         }
     });
 
-    // The build is complete (recovery ran, the drive is parked) and nothing has
+    // note: The build is complete (recovery ran, the drive is parked) and nothing has
     // been published into the per-service slot yet.
     build_gate.wait_entered().await;
     gate.wait_entered().await;
@@ -2694,7 +2695,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
         "close must stay fenced behind the registered build"
     );
 
-    // Cancel the caller: it stops waiting, and the retained start task is now
+    // note: Cancel the caller: it stops waiting, and the retained start task is now
     // the only owner of what the build produced.
     start.abort();
     let _ = start.await;
@@ -2703,11 +2704,11 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
         "an abandoned build must not publish an owner into the closed service"
     );
 
-    // Let the retained start finish its build: with no caller waiting, it
+    // note: Let the retained start finish its build: with no caller waiting, it
     // refuses the install and settles the owner it built — which joins the
     // parked drive, so its settlement is the ONLY thing left to finish.
     build_gate.release();
-    // `wait_until` on a positive observable would need a probe inside the
+    // why: `wait_until` on a positive observable would need a probe inside the
     // settlement; the negative observation below is what the fence guarantees:
     // while the drive is parked, neither the close nor the DB may be released.
     assert!(
@@ -2725,7 +2726,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
         "the abandoned owner must hold the per-DB reservation until its drives join"
     );
 
-    // Release the parked drive: NOW the abandoned owner settles, and only then
+    // note: Release the parked drive: NOW the abandoned owner settles, and only then
     // does the close confirm the cleanup and the DB open again.
     gate.release();
     let report = tokio::time::timeout(Duration::from_secs(10), close)
@@ -2738,7 +2739,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
         "the canceled build must not strand the close"
     );
     competitor.close().await.unwrap();
-    // The DB is genuinely free: a fresh owner is admitted and can start.
+    // note: The DB is genuinely free: a fresh owner is admitted and can start.
     let fresh = open_engine_owner(&f).await;
     fresh
         .start_execution(
@@ -2751,7 +2752,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
     owner.close().await.unwrap();
 }
 
-/// C3 (unreceived hand-off): a caller dropped AFTER the owner was published but
+/// note: C3 (unreceived hand-off): a caller dropped AFTER the owner was published but
 /// BEFORE it ever polled the hand-off must leave no live owner behind.
 ///
 /// A queued value is not a hand-over: the retained start publishes the owner and
@@ -2772,7 +2773,7 @@ async fn close_waits_for_a_canceled_builds_live_drives() {
 async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
     let f = fixture().await;
     let owner = Arc::new(open_engine_owner(&f).await);
-    // The caller side of the start: a local future, not a task, so this test
+    // why: The caller side of the start: a local future, not a task, so this test
     // alone decides when — and whether — it is polled.
     let caller_core = (*owner).clone();
     let build_gate = BuildGate::new();
@@ -2804,7 +2805,7 @@ async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
     })
     .await;
 
-    // Drop the caller without ever taking the owner the start wanted to hand it.
+    // note: Drop the caller without ever taking the owner the start wanted to hand it.
     drop(caller);
     let withdrawn = Arc::clone(&owner);
     wait_until("the unreceived owner is withdrawn and settled", move || {
@@ -2813,7 +2814,7 @@ async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
     })
     .await;
 
-    // The settlement is what the close waited for, and the DB is free again.
+    // note: The settlement is what the close waited for, and the DB is free again.
     assert!(
         owner.close().await.unwrap().cleanup_confirmed,
         "a settled unreceived owner must not block a confirmed close"
@@ -2821,7 +2822,7 @@ async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
     assert_fresh_owner_can_start(&f).await;
 }
 
-/// P1 (retired owner during the receipt wait): an owner RETIRED while the
+/// note: P1 (retired owner during the receipt wait): an owner RETIRED while the
 /// retained start was still waiting for its receipt must keep the close fenced
 /// until its drives really joined.
 ///
@@ -2847,7 +2848,7 @@ async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
 #[tokio::test(flavor = "current_thread")]
 async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     let f = fixture().await;
-    // A run parked inside the `generate` LLM step: recovery re-drives it and
+    // note: A run parked inside the `generate` LLM step: recovery re-drives it and
     // the gated executor holds the drive open.
     seed_run_at(
         &f.db_path,
@@ -2859,13 +2860,13 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     .await;
 
     let owner = Arc::new(open_engine_owner(&f).await);
-    // A second core over the same DB (the daemon's co-host shape): it JOINS the
+    // note: A second core over the same DB (the daemon's co-host shape): it JOINS the
     // live engine admission, so it can probe the per-DB owner reservation
     // without disturbing the owner under test.
     let competitor = open_engine_owner(&f).await;
     let gate = GatedPromptExecutor::new();
     let build_gate = BuildGate::new();
-    // The caller side of the start: a local future, not a task, so this test
+    // why: The caller side of the start: a local future, not a task, so this test
     // alone decides when — and whether — it is polled. Its next poll would
     // acknowledge receipt, so it is never polled again.
     let caller_core = (*owner).clone();
@@ -2887,7 +2888,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     build_gate.wait_entered().await;
     gate.wait_entered().await;
 
-    // Install: release the build so the retained start publishes the owner and
+    // why: Install: release the build so the retained start publishes the owner and
     // parks on the receipt nobody will ever send.
     build_gate.release();
     let published = Arc::clone(&owner);
@@ -2897,7 +2898,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     })
     .await;
 
-    // Retire it. The caller is still unpolled, so the ONLY taker of the slot is
+    // why: Retire it. The caller is still unpolled, so the ONLY taker of the slot is
     // the retirement — and its shutdown parks on the gated drive.
     let retire = tokio::spawn({
         let owner = Arc::clone(&owner);
@@ -2910,7 +2911,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     })
     .await;
 
-    // Drop the caller: the receipt can never come, so the retained start
+    // why: Drop the caller: the receipt can never come, so the retained start
     // settles the owner it published — the very handle the retirement took.
     drop(caller);
 
@@ -2925,7 +2926,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     })
     .await;
 
-    // Outlast the interleaving this regression is about. Every task involved
+    // note: Outlast the interleaving this regression is about. Every task involved
     // runs on THIS runtime, so a drain that could still run (the pre-fix
     // retirement held no fence; the pre-fix withdrawal returned the fence
     // early) reaches `Pool::close` — and raises `is_closed` — well inside this
@@ -2947,7 +2948,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
         !retire.is_finished(),
         "the retirement must still be joining the parked drive (deterministic hold)"
     );
-    // The per-DB OWNER fence is still held: the retired owner is not settled.
+    // note: The per-DB OWNER fence is still held: the retired owner is not settled.
     let refused = competitor
         .start_execution(
             Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
@@ -2959,7 +2960,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
         "a retired-but-unsettled owner must keep the per-DB reservation"
     );
 
-    // Release the parked drive: the retirement settles, the retained start's
+    // note: Release the parked drive: the retirement settles, the retained start's
     // settlement returns, and ONLY THEN may the close confirm.
     gate.release();
     let report = tokio::time::timeout(Duration::from_secs(10), close)
@@ -2975,14 +2976,14 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
 
     competitor.close().await.unwrap();
     owner.close().await.unwrap();
-    // The fence is genuinely released: a fresh owner over the same home is
+    // note: The fence is genuinely released: a fresh owner over the same home is
     // admitted and can start.
     assert_fresh_owner_can_start(&f).await;
 }
 
-// ── Close / admission ownership (v1.195 P0-T5 close findings) ───────────────
+// note: ── Close / admission ownership (v1.195 P0-T5 close findings) ───────────────
 
-/// The durable engine epoch this open's admission was granted.
+/// note: The durable engine epoch this open's admission was granted.
 ///
 /// `nexus_engine_epoch()` is installed per connection by the writer protocol
 /// from the admitting context, so it reports the generation THIS pool was
@@ -2995,7 +2996,7 @@ async fn admission_engine_epoch(core: &CoreService) -> i64 {
     epoch.expect("an admitted engine pool reports a non-null epoch")
 }
 
-/// A confirmed close gives up the closing core's OWN admitted-pool handle.
+/// note: A confirmed close gives up the closing core's OWN admitted-pool handle.
 ///
 /// A cooperative `EngineOwner` joiner holds a CLONE of the creator's
 /// `WorkspaceWriterGuard`, so that guard — and the `state.db.engine.lock` file
@@ -3009,11 +3010,11 @@ async fn admission_engine_epoch(core: &CoreService) -> i64 {
 async fn closed_joiner_does_not_keep_the_engine_admission_alive() {
     let f = fixture().await;
 
-    // ── The creator takes the engine admission. ──
+    // note: ── The creator takes the engine admission. ──
     let creator = open_engine_owner(&f).await;
     let epoch = admission_engine_epoch(&creator).await;
 
-    // ── A cooperating open JOINS that live admission: a live peer still fences
+    // note: ── A cooperating open JOINS that live admission: a live peer still fences
     //    a duplicate, so the joiner is the SAME generation, never a second
     //    owner admitted with a new epoch. ──
     let joiner = open_engine_owner(&f).await;
@@ -3023,13 +3024,13 @@ async fn closed_joiner_does_not_keep_the_engine_admission_alive() {
         "a live peer still fences a new admission"
     );
 
-    // ── Close the JOINER first, then the CREATOR. Both closed values stay
+    // note: ── Close the JOINER first, then the CREATOR. Both closed values stay
     //    referenced for the rest of the test. ──
     joiner.close().await.expect("close the joiner");
     creator.close().await.expect("close the creator");
     assert!(joiner.is_closing() && creator.is_closing());
 
-    // ── A fresh owner over the same home must genuinely RE-ADMIT: a new engine
+    // note: ── A fresh owner over the same home must genuinely RE-ADMIT: a new engine
     //    epoch, not the settled generation's. ──
     let fresh = CoreService::open(open_options(&f, CoreAccess::EngineOwner))
         .await

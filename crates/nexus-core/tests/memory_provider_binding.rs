@@ -6,6 +6,7 @@
 //! open, the remote selection's refusal in whichever `memory-remote` mode this
 //! build selects, close idempotence, and the guard release a failed open owes
 //! the next one.
+// note: the doc above names the binding lifecycle these cases drive.
 
 use std::fs;
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-/// The provider's private file root and the publication lease inside it, which
+/// note: The provider's private file root and the publication lease inside it, which
 /// every provisioning path must take before it may write. Spelled here because
 /// the provider keeps them private; the stage assertion below fails loudly if
 /// either name ever stops naming the lease the open actually waits on.
@@ -56,7 +57,7 @@ fn remote_selection() -> MemoryProviderSelection {
     })
 }
 
-/// The refusal a remote selection produces in the mode this build selects.
+/// note: The refusal a remote selection produces in the mode this build selects.
 ///
 /// Feature off: the static `memory_remote_disabled` refusal, returned before
 /// any credential access. Feature on: the same factory runs for real, and these
@@ -126,7 +127,7 @@ fn local_provider(core: &CoreService) -> std::sync::Arc<LocalMemoryProvider> {
         .expect("pinned local provider")
 }
 
-/// A home with no `[memory_provider]` table keeps the byte-equivalent local
+/// note: A home with no `[memory_provider]` table keeps the byte-equivalent local
 /// default, and that local binding really serves the memory family.
 #[tokio::test]
 async fn absent_provider_table_pins_the_local_default() {
@@ -154,7 +155,7 @@ async fn absent_provider_table_pins_the_local_default() {
     assert!(report.cleanup_confirmed);
 }
 
-/// `Some(Local)` is an open-only override: it beats a remote disk selection for
+/// note: `Some(Local)` is an open-only override: it beats a remote disk selection for
 /// this open and never writes configuration, so the next open still sees the
 /// disk's refusal for the selected mode.
 #[tokio::test]
@@ -176,7 +177,7 @@ async fn explicit_local_overrides_a_remote_disk_selection() {
     );
 }
 
-/// `Some(...)` never reads the provider table, so a malformed one cannot change
+/// why: `Some(...)` never reads the provider table, so a malformed one cannot change
 /// an explicit open.
 #[tokio::test]
 async fn explicit_local_never_reads_the_provider_table() {
@@ -188,7 +189,7 @@ async fn explicit_local_never_reads_the_provider_table() {
     core.close().await.expect("close");
 }
 
-/// The disk table is read once per open: a live binding never re-reads or
+/// note: The disk table is read once per open: a live binding never re-reads or
 /// retargets, while the next open resolves the current table. A sibling open
 /// that fails on that reread releases only its own admissions.
 #[tokio::test]
@@ -258,7 +259,7 @@ async fn provider_selection_is_pinned_for_the_open_and_reread_between_opens() {
     );
 }
 
-/// A remote selection is refused with this mode's real code — the
+/// note: A remote selection is refused with this mode's real code — the
 /// `memory_remote_disabled` refusal before any credential access when the
 /// feature is off, the loader's `memory_credential_invalid` when it is on — and
 /// the failed open releases the writer admission it took, so the next open
@@ -295,7 +296,7 @@ async fn remote_selection_is_refused_and_releases_its_own_guards() {
     assert!(reopened.close().await.expect("close").cleanup_confirmed);
 }
 
-/// Close is idempotent: every caller observes the ONE settled report, memory
+/// note: Close is idempotent: every caller observes the ONE settled report, memory
 /// access refuses through the closing barrier, and the home opens again.
 #[tokio::test]
 async fn close_is_idempotent_and_releases_the_binding() {
@@ -321,7 +322,7 @@ async fn close_is_idempotent_and_releases_the_binding() {
     reopened.close().await.expect("close");
 }
 
-/// The public `Some(Remote(..))` override is refused exactly like the disk path
+/// note: The public `Some(Remote(..))` override is refused exactly like the disk path
 /// although no credential file exists: feature-off refuses before any
 /// credential access, feature-on reaches the real loader and refuses its
 /// missing credential — no fake connection and no silent local fallback in
@@ -339,7 +340,7 @@ async fn explicit_remote_selection_is_refused_without_a_local_fallback() {
     );
 }
 
-/// The local provider opens its own direct admission, so a confirmed close must
+/// why: The local provider opens its own direct admission, so a confirmed close must
 /// release it with the binding: no shared writer lock may survive the close, and
 /// repeated opens must not accumulate claimed admissions.
 #[tokio::test]
@@ -359,7 +360,7 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
         );
         assert!(core.close().await.expect("close").cleanup_confirmed);
 
-        // The exclusive migration fence is the real OS-lock probe: it succeeds
+        // note: The exclusive migration fence is the real OS-lock probe: it succeeds
         // only when no writer admission — the core's or the dropped provider's
         // — still holds the shared migration lock.
         let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&env.db_path())
@@ -368,7 +369,7 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
     }
 }
 
-/// F10/F17: the measured provider open is cancelled at a real stage boundary —
+/// note: F10/F17: the measured provider open is cancelled at a real stage boundary —
 /// after its own seed write committed and while it is blocked inside
 /// `provision`'s journal-recovery step on the workspace publication lease — so
 /// the required provisioning write has provably not run and the open cannot
@@ -390,7 +391,7 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     let db_path = env.db_path();
     let home = env.user_home.clone();
 
-    // Migrate and seed the workspace *without* provisioning it, so whatever is
+    // note: Migrate and seed the workspace *without* provisioning it, so whatever is
     // in `memory_spaces` later is the measured open's own required write.
     let bootstrap = init_guarded_pool(&db_path, CREATOR)
         .await
@@ -400,10 +401,10 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         eventual_fence(&db_path).await,
         "the bootstrap admission is fully released before the measured open"
     );
-    // Only an id outside this set can belong to the measured open.
+    // note: Only an id outside this set can belong to the measured open.
     let known_writers = writer_ids(&db_path).await;
 
-    // The publication lease the open must take inside `provision` before it may
+    // note: The publication lease the open must take inside `provision` before it may
     // write, held here from before the spawn. Its descriptor conflicts with the
     // open's exactly as another process's would.
     let publish_root = db_path
@@ -429,16 +430,16 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
             async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await },
         );
 
-    // Step 1: the measured open registers a writer id that did not exist before
+    // note: Step 1: the measured open registers a writer id that did not exist before
     // the spawn, so every following observation is about this invocation. A
     // finished task here means the lease did not hold it, which must fail.
     let measured_writer = open_registered_writer(&mut observer, &opening, &known_writers).await;
 
-    // Step 2: the seed write, proven by the change row only this writer id
+    // note: Step 2: the seed write, proven by the change row only this writer id
     // produces for workspace_meta.
     opened_seed_write(&mut observer, &opening, &measured_writer).await;
 
-    // Step 3 — the stage itself, by construction. The seeded open cannot pass
+    // note: Step 3 — the stage itself, by construction. The seeded open cannot pass
     // `provision`'s publication-lease wait while this test holds it, so the
     // provisioning transaction cannot run. Give it an unambiguous opportunity
     // to do so anyway: while the lease is held no duration can let it through,
@@ -475,7 +476,7 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the task was really cancelled, not completed"
     );
 
-    // Releasing the lease lets the abandoned native wait end; it takes the
+    // note: Releasing the lease lets the abandoned native wait end; it takes the
     // lease only to give it straight back, so the workspace lease is free again.
     // The cancelled open's own OS admission ends with it, proved while this
     // process is still alive.
@@ -493,7 +494,7 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the cancelled open never reached its required provisioning write"
     );
 
-    // The abandoned wait released the workspace publication gate: a fresh open
+    // note: The abandoned wait released the workspace publication gate: a fresh open
     // on the same workspace still completes, so no wait or lease leaked.
     let reopened = tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -510,7 +511,7 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     );
 }
 
-/// Poll the registry until the measured open registers a writer id that did not
+/// note: Poll the registry until the measured open registers a writer id that did not
 /// exist before the spawn. A finished task here means the lease did not hold it.
 async fn open_registered_writer(
     observer: &mut sqlx::SqliteConnection,
@@ -540,7 +541,7 @@ async fn open_registered_writer(
     panic!("the measured open registered itself")
 }
 
-/// Poll the change log for the seed write only `measured_writer` produces.
+/// note: Poll the change log for the seed write only `measured_writer` produces.
 async fn opened_seed_write(
     observer: &mut sqlx::SqliteConnection,
     opening: &tokio::task::JoinHandle<
@@ -568,7 +569,7 @@ async fn opened_seed_write(
     panic!("the measured open reached its own seed write (writer {measured_writer})")
 }
 
-/// Every writer id registered in this workspace.
+/// note: Every writer id registered in this workspace.
 ///
 /// The read fails loudly: a swallowed baseline error would make a bootstrap
 /// writer look like the measured one and destroy the attribution this test
@@ -593,7 +594,7 @@ async fn raw_pool(db_path: &std::path::Path) -> sqlx::SqlitePool {
         .expect("raw pool")
 }
 
-/// Bounded wait for the store-reset fence; only the expected contention is
+/// note: Bounded wait for the store-reset fence; only the expected contention is
 /// accepted, anything else is a real failure.
 async fn eventual_fence(db_path: &std::path::Path) -> bool {
     for _ in 0..200_000 {
@@ -609,7 +610,7 @@ async fn eventual_fence(db_path: &std::path::Path) -> bool {
     false
 }
 
-/// F10: a real vision of compose/provision failing after the pool and seed
+/// note: F10: a real vision of compose/provision failing after the pool and seed
 /// exist — a valid migrated workspace whose provider grant insert is rejected
 /// makes provisioning fail for real, and only its own undelivered claim ends.
 #[tokio::test]
@@ -617,7 +618,7 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
     let env = Env::new(None);
     let db_path = env.db_path();
 
-    // A live adopted user: the engine owner keeps the workspace and its memory.
+    // note: A live adopted user: the engine owner keeps the workspace and its memory.
     let engine = CoreService::open(env.options(None))
         .await
         .expect("live engine owner");
@@ -631,7 +632,7 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         0
     );
 
-    // A valid SQLite fixture that makes the provisioning write fail while every
+    // note: A valid SQLite fixture that makes the provisioning write fail while every
     // read still works: a trigger on the grant table rejects the bootstrap
     // grant insert. The workspace stays migrated and readable.
     let raw = raw_pool(&db_path).await;
@@ -654,7 +655,7 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the failure is the real provisioning write, got {rendered}"
     );
 
-    // The failed open took nothing from the adopted user: it still reads and
+    // note: The failed open took nothing from the adopted user: it still reads and
     // still holds its own admission.
     assert_eq!(
         engine
@@ -670,7 +671,7 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the adopted engine admission is still held"
     );
 
-    // Settle the real user, then the fence must become free: nothing of the
+    // note: Settle the real user, then the fence must become free: nothing of the
     // failed open may still hold the workspace.
     assert!(engine.close().await.expect("close").cleanup_confirmed);
     assert!(
@@ -679,7 +680,7 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
     );
 }
 
-/// A normal provider close settles the provider's own pool, so a genuinely
+/// why: A normal provider close settles the provider's own pool, so a genuinely
 /// pending guarded migration runs afterwards instead of waiting on a pool no
 /// one can use.
 #[tokio::test]
@@ -698,7 +699,7 @@ async fn pending_guarded_migration_runs_after_a_normal_provider_close() {
     );
     assert!(core.close().await.expect("close").cleanup_confirmed);
 
-    // Make a real migration pending: drop one applied row the embedded
+    // note: Make a real migration pending: drop one applied row the embedded
     // migrator re-applies (its SQL is idempotent).
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", env.db_path().display()))
         .await
@@ -717,7 +718,7 @@ async fn pending_guarded_migration_runs_after_a_normal_provider_close() {
         .expect("a pending guarded migration runs after the provider closed");
 }
 
-/// A failed `DirectWriter` pin must release only what that open owned: the
+/// note: A failed `DirectWriter` pin must release only what that open owned: the
 /// live `EngineOwner`'s retained admission stays in the process registry, so
 /// the creator remains joinable afterwards.
 #[tokio::test]
@@ -777,7 +778,7 @@ async fn failed_direct_writer_pin_keeps_a_live_engine_owner_joinable() {
     assert!(engine.close().await.expect("close").cleanup_confirmed);
 }
 
-/// A confirmed `DirectWriter` close ends only that open's claim: the live
+/// note: A confirmed `DirectWriter` close ends only that open's claim: the live
 /// `EngineOwner`'s retained admission (and a later creator join) survives.
 #[tokio::test]
 async fn successful_direct_writer_close_keeps_a_live_engine_owner_joinable() {
@@ -829,7 +830,7 @@ async fn successful_direct_writer_close_keeps_a_live_engine_owner_joinable() {
     assert!(engine.close().await.expect("close").cleanup_confirmed);
 }
 
-/// An engine creator that goes away after another open joined must leave that
+/// note: An engine creator that goes away after another open joined must leave that
 /// adopter's admission — and further joins — intact, and the last claim must
 /// release the registry entry instead of leaking it.
 #[tokio::test]
@@ -851,7 +852,7 @@ async fn creator_close_keeps_a_joined_adopter_and_a_third_join() {
         0
     );
 
-    // The creator's open ends here — a failed pin takes the same release.
+    // note: The creator's open ends here — a failed pin takes the same release.
     assert!(creator.close().await.expect("close").cleanup_confirmed);
 
     let third = CoreService::open(env.options(None))
@@ -882,7 +883,7 @@ async fn creator_close_keeps_a_joined_adopter_and_a_third_join() {
     assert!(reopened.close().await.expect("close").cleanup_confirmed);
 }
 
-/// A failed OPEN THAT JOINED the live engine admission (it owns no retained
+/// note: A failed OPEN THAT JOINED the live engine admission (it owns no retained
 /// entry) must leave the creator joinable as well.
 #[tokio::test]
 async fn failed_joined_engine_pin_keeps_the_creator_joinable() {

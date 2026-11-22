@@ -14,6 +14,7 @@
 //! - **A real error for an unknown or unavailable operation.** A pool-less or
 //!   engine-less context reports a typed refusal; it never silently succeeds
 //!   and never reports a fabricated result.
+// note: the doc above summarises the compute/peer surface and its acceptance anchor.
 
 #![cfg(all(feature = "execution", feature = "compute"))]
 #![allow(clippy::unwrap_used)]
@@ -53,15 +54,15 @@ const MODULE: &str = "basic-combat";
 
 struct Fixture {
     tmp: TempDir,
-    /// The engine-owner core the family APIs are driven through.
+    /// note: The engine-owner core the family APIs are driven through.
     core: CoreService,
-    /// A tool context over the same pool for the capability entry points.
+    /// note: A tool context over the same pool for the capability entry points.
     context: ToolContext,
-    /// The compute context (engine + cache + serializer) for run/accept.
+    /// note: The compute context (engine + cache + serializer) for run/accept.
     compute: ComputeContext,
 }
 
-/// An engine + cache with the embedded module warmed, plus any extra modules
+/// note: An engine + cache with the embedded module warmed, plus any extra modules
 /// the sandbox-limit fixtures need. `sandbox` overrides the engine defaults
 /// (the wall-time watchdog cases).
 fn engine_with(
@@ -81,7 +82,7 @@ fn engine_with(
             Arc::new(CachedModule {
                 module,
                 manifest: manifest.clone(),
-                // The cache identity is (id, bytes_hash, manifest_hash) —
+                // note: The cache identity is (id, bytes_hash, manifest_hash) —
                 // the entry must record the exact artifacts it was compiled
                 // from.
                 bytes_hash: nexus_wasm_host::hash_module_bytes(bytes),
@@ -94,12 +95,12 @@ fn engine_with(
     (engine, cache)
 }
 
-/// Seed a workspace with the embedded combat module warmed.
+/// note: Seed a workspace with the embedded combat module warmed.
 async fn fixture() -> Fixture {
     fixture_with_compute(&[], None).await
 }
 
-/// The same fixture with extra cached modules and/or a sandbox override.
+/// note: The same fixture with extra cached modules and/or a sandbox override.
 async fn fixture_with_compute(
     extra: &[(&str, ModuleManifest, Vec<u8>)],
     sandbox: Option<SandboxConfig>,
@@ -121,7 +122,7 @@ async fn fixture_with_compute(
     .unwrap();
 
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
-    // The seeding guard must be fully DROPPED before the owner opens: the
+    // note: The seeding guard must be fully DROPPED before the owner opens: the
     // writer protocol's engine admission is a process-wide registry keyed by
     // DB path, so opening a second engine while this pool still holds the
     // guard is an `OwnerBusy` refusal (the fixture is not racing another
@@ -130,7 +131,7 @@ async fn fixture_with_compute(
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("engine pool init");
-        // The PRODUCTION creation path, which materializes the Creator's holder
+        // note: The PRODUCTION creation path, which materializes the Creator's holder
         // registry row in the same transaction. The compute lane reads its input
         // through the admitted Creator `ActorView`, and that selection resolves
         // the stable holder (`require_creator_holder`, fail-closed), so a
@@ -154,7 +155,7 @@ async fn fixture_with_compute(
 
     let (engine, cache) = engine_with(extra, sandbox);
 
-    // Exactly one computable character, so a run against this world produces
+    // why: Exactly one computable character, so a run against this world produces
     // one deterministic delta and one event.
     seed_character(core.pool(), WORLD, "kb_atk", "Striker", 20, 3, 100, 100).await;
     seed_character(core.pool(), WORLD, "kb_def", "Guardian", 10, 5, 30, 50).await;
@@ -188,7 +189,7 @@ async fn fixture_with_compute(
     }
 }
 
-/// Seed a world owned by `owner`.
+/// note: Seed a world owned by `owner`.
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
     nexus_local_db::kb_store::seed::world_with(
         pool,
@@ -203,7 +204,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
     .await;
 }
 
-/// Seed a second world owned by a DIFFERENT creator, plus a KB entry in it —
+/// note: Seed a second world owned by a DIFFERENT creator, plus a KB entry in it —
 /// the ownership-gate and foreign-delta-target fixture.
 async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     nexus_local_db::ensure_creator_row(pool, "intruder", "Other")
@@ -223,8 +224,8 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     .await;
 }
 
-/// Seed one computable character entry in `world_id`.
-#[allow(clippy::too_many_arguments)] // fixture helper: the four combat stats mirror the seeded schema columns
+/// note: Seed one computable character entry in `world_id`.
+#[allow(clippy::too_many_arguments)] // why: fixture helper: the four combat stats mirror the seeded schema columns
 async fn seed_character(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -267,7 +268,7 @@ async fn seed_character(
         .unwrap();
 }
 
-/// Read a character's `current_hp`.
+/// note: Read a character's `current_hp`.
 async fn defender_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
     let raw: Option<String> =
         sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
@@ -280,7 +281,7 @@ async fn defender_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
     body["state"]["character"]["current_hp"].as_i64().unwrap()
 }
 
-/// Count timeline events in the world.
+/// note: Count timeline events in the world.
 async fn timeline_event_count(pool: &sqlx::SqlitePool) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?")
         .bind(WORLD)
@@ -289,7 +290,7 @@ async fn timeline_event_count(pool: &sqlx::SqlitePool) -> i64 {
         .unwrap()
 }
 
-/// Run a successful compute and return its run id.
+/// note: Run a successful compute and return its run id.
 async fn run_succeeded(f: &Fixture, context: &ComputeContext) -> String {
     let request: RunRequest = serde_json::from_value(json!({
         "world_id": WORLD,
@@ -300,12 +301,12 @@ async fn run_succeeded(f: &Fixture, context: &ComputeContext) -> String {
     let response = nexus_core::owner::compute::compute_run(&f.core, context, request)
         .await
         .expect("compute run succeeds");
-    // The generated status enum carries Display but not PartialEq.
+    // note: The generated status enum carries Display but not PartialEq.
     assert_eq!(response.status.to_string(), "succeeded");
     response.run_id
 }
 
-/// Deterministic provider that never performs an effect.
+/// note: Deterministic provider that never performs an effect.
 struct NullProvider;
 
 #[async_trait::async_trait]
@@ -337,7 +338,7 @@ impl nexus_provider_ports::ProviderPort for NullProvider {
     }
 }
 
-/// The acceptance anchor: accept applies the proposal AND creates its events,
+/// note: The acceptance anchor: accept applies the proposal AND creates its events,
 /// atomically, under the owner's authority.
 #[tokio::test]
 #[serial_test::serial]
@@ -346,7 +347,7 @@ async fn accept_happy_path_applies_atomically_and_creates_events() {
     let run_id = run_succeeded(&f, &f.compute).await;
     let principal = f.core.active_principal().await.unwrap();
 
-    // Proposals alone changed nothing.
+    // note: Proposals alone changed nothing.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
 
@@ -356,18 +357,18 @@ async fn accept_happy_path_applies_atomically_and_creates_events() {
             .await
             .expect("accept succeeds");
 
-    // The typed response reports exactly what the transaction did.
+    // note: The typed response reports exactly what the transaction did.
     assert_eq!(response.applied.state_delta_count, 1);
     assert_eq!(response.applied.events_created, 1);
     assert_eq!(response.timeline_event_ids.len(), 1);
 
-    // And the domain really changed: damage = max(0, 20 − 5) = 15.
+    // note: And the domain really changed: damage = max(0, 20 − 5) = 15.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
     assert_eq!(defender_hp(f.core.pool(), "kb_atk").await, 100);
     assert_eq!(timeline_event_count(f.core.pool()).await, 1);
 }
 
-/// A second accept of the same run is refused, and the domain is NOT applied
+/// note: A second accept of the same run is refused, and the domain is NOT applied
 /// twice — the CAS makes the write idempotent at the domain level.
 #[tokio::test]
 #[serial_test::serial]
@@ -392,7 +393,7 @@ async fn accept_is_refused_twice_and_double_apply_is_impossible() {
         "a second accept must be a coded conflict, got {second:?}"
     );
 
-    // The domain is untouched by the refused accept.
+    // note: The domain is untouched by the refused accept.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, hp_after_first);
     assert_eq!(
         timeline_event_count(f.core.pool()).await,
@@ -400,7 +401,7 @@ async fn accept_is_refused_twice_and_double_apply_is_impossible() {
     );
 }
 
-/// Every `key_block_id` currently in `kb_key_blocks`, sorted — the count +
+/// note: Every `key_block_id` currently in `kb_key_blocks`, sorted — the count +
 /// id set snapshot the rollback assertions compare.
 async fn kb_block_rows(pool: &sqlx::SqlitePool) -> Vec<String> {
     use sqlx::Row;
@@ -413,7 +414,7 @@ async fn kb_block_rows(pool: &sqlx::SqlitePool) -> Vec<String> {
         .collect()
 }
 
-/// A World-owned `new_key_blocks` proposal entry, built through the same
+/// note: A World-owned `new_key_blocks` proposal entry, built through the same
 /// record → spoke conversion seam the production proposals ride.
 fn world_block_proposal(entry_id: &str, world_id: &str) -> serde_json::Value {
     use nexus_contracts::BlockType;
@@ -432,7 +433,7 @@ fn world_block_proposal(entry_id: &str, world_id: &str) -> serde_json::Value {
     serde_json::to_value(knowledge_record_to_spoke(&kb)).expect("spoke conversion")
 }
 
-/// An accept with `new_key_blocks` writes the settlement rows through the
+/// note: An accept with `new_key_blocks` writes the settlement rows through the
 /// store seam inside the accept transaction: the owner carrier
 /// (`extensions.nexus`) is populated, `revision` stays NULL, and every other
 /// column keeps the pre-convergence shape.
@@ -463,14 +464,14 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
     .fetch_one(f.core.pool())
     .await
     .expect("settlement row exists");
-    // The recorded delta: the store seam populates the World owner carrier.
+    // note: The recorded delta: the store seam populates the World owner carrier.
     assert_eq!(
         row.get::<Option<String>, _>("extensions_nexus_json")
             .as_deref(),
         Some(r#"{"world_id":"wld_combat"}"#),
     );
     assert_eq!(row.get::<Option<i64>, _>("revision"), None);
-    // The pre-convergence shape: every other column unchanged.
+    // note: The pre-convergence shape: every other column unchanged.
     assert_eq!(row.get::<String, _>("owner_kind"), "world");
     assert_eq!(
         row.get::<Option<String>, _>("world_id").as_deref(),
@@ -495,7 +496,7 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
         Some(r#"{"summary":"Forged by compute","attributes":{"sigil":"ember"}}"#),
     );
     assert_eq!(row.get::<Option<String>, _>("source_anchor_json"), None);
-    // Pre-convergence shape: the old raw INSERT bound created_at and
+    // note: Pre-convergence shape: the old raw INSERT bound created_at and
     // updated_at to the same `now`; the store seam stamps both on the record.
     let created_at = row.get::<Option<String>, _>("created_at");
     let updated_at = row.get::<Option<String>, _>("updated_at");
@@ -503,7 +504,7 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
     assert_eq!(updated_at, created_at);
 }
 
-/// The settlement lane carries no governance: a wire proposal naming an
+/// note: The settlement lane carries no governance: a wire proposal naming an
 /// `owner` + `disclosure` (and a `revision`) still lands as a World-shared
 /// row — `holder_entry_id`/`disclosure`/`revision` normalised to `NULL`.
 #[tokio::test]
@@ -544,7 +545,7 @@ async fn accept_settles_a_governance_carrying_block_as_shared() {
     assert_eq!(row.get::<Option<i64>, _>("revision"), None);
 }
 
-/// A block the store refuses to validate is the caller's input fault: the
+/// note: A block the store refuses to validate is the caller's input fault: the
 /// accept refuses with the coded `invalid_input` taxonomy, not an internal
 /// error, and writes nothing.
 #[tokio::test]
@@ -552,7 +553,7 @@ async fn accept_settles_a_governance_carrying_block_as_shared() {
 async fn accept_refuses_a_store_invalid_block_as_invalid_input() {
     let f = fixture().await;
     let mut proposals = crafted_proposals(&[], &[], None);
-    // The wire canonical-name newtype only enforces a non-empty string; the
+    // note: The wire canonical-name newtype only enforces a non-empty string; the
     // store's own 256-byte limit is what refuses this one.
     let mut proposal = world_block_proposal("kb_overlong", WORLD);
     proposal["canonical_name"] = json!("x".repeat(300));
@@ -572,7 +573,7 @@ async fn accept_refuses_a_store_invalid_block_as_invalid_input() {
     assert_eq!(kb_block_rows(f.core.pool()).await, rows_before);
 }
 
-/// A `new_key_blocks` entry owned by another World refuses the whole accept
+/// note: A `new_key_blocks` entry owned by another World refuses the whole accept
 /// before any row is written.
 #[tokio::test]
 #[serial_test::serial]
@@ -595,7 +596,7 @@ async fn accept_refuses_a_foreign_world_block_before_any_write() {
     assert_eq!(kb_block_rows(f.core.pool()).await, rows_before);
 }
 
-/// The run-row CAS still decides the commit. Deterministic fixture: a
+/// note: The run-row CAS still decides the commit. Deterministic fixture: a
 /// test-only `AFTER INSERT` trigger on `kb_key_blocks` flips the run row away
 /// from 'succeeded' the moment the accept writes its block, so the later CAS
 /// (`WHERE status = 'succeeded'`) updates zero rows AFTER the insert — and
@@ -609,7 +610,7 @@ async fn aborted_accept_rolls_back_key_block_inserts() {
     let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
     let principal = f.core.active_principal().await.unwrap();
 
-    // The block insert itself moves the run row: the CAS is guaranteed to
+    // note: The block insert itself moves the run row: the CAS is guaranteed to
     // lose strictly after the insert ran inside the accept transaction.
     let mut builder = sqlx::QueryBuilder::new(
         "CREATE TRIGGER test_qc_flip_run_after_kb_insert \
@@ -629,21 +630,21 @@ async fn aborted_accept_rolls_back_key_block_inserts() {
         .await
         .expect_err("the zero-row CAS must abort the accept");
 
-    // The inserted block is gone and the pre-existing id set is unchanged:
+    // note: The inserted block is gone and the pre-existing id set is unchanged:
     // the insert (and the trigger's update) stayed inside the rolled-back
     // transaction. These assertions are what a self-committing insert fails.
     let rows_after = kb_block_rows(f.core.pool()).await;
     assert_eq!(rows_after, rows_before, "the aborted accept left zero rows");
     assert!(!rows_after.iter().any(|id| id == "kb_sigil_race"));
 
-    // The refusal is the CAS conflict, not the ownership or status gate.
+    // note: The refusal is the CAS conflict, not the ownership or status gate.
     assert!(
         matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "conflict"),
         "the aborted accept must be a coded conflict, got {err:?}"
     );
 }
 
-/// An unknown tool is refused with the retained code and ZERO domain effect.
+/// note: An unknown tool is refused with the retained code and ZERO domain effect.
 #[tokio::test]
 #[serial_test::serial]
 async fn unknown_tool_is_refused_with_zero_domain_effect() {
@@ -672,7 +673,7 @@ async fn unknown_tool_is_refused_with_zero_domain_effect() {
     );
 }
 
-/// Stage an admitted user-capability trio (AR-35 layout) at
+/// note: Stage an admitted user-capability trio (AR-35 layout) at
 /// `<scan_root>/<name>/`: a hash-consistent `capability.json` +
 /// `manifest.json` + `<module-id>.wasm` bundle so the AR-43 admission gates
 /// pass inside the scan — the ONLY user-capability admission path. The bytes
@@ -723,7 +724,7 @@ fn write_user_capability_trio(scan_root: &Path, name: &str, input_schema: &str) 
     std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
 }
 
-/// A user capability's declared schema gates its arguments: a call missing a
+/// note: A user capability's declared schema gates its arguments: a call missing a
 /// required property is refused BEFORE the capability runs.
 ///
 /// The capability is written to a scan directory (the only admission path —
@@ -735,7 +736,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
-    // The descriptor contract (AR-34) requires a `wasm` module ref: without it
+    // note: The descriptor contract (AR-34) requires a `wasm` module ref: without it
     // the scanner skips the directory rather than admitting a capability with
     // no executor. The scan is also the ONLY admission path — user
     // capabilities are never injected directly — so this fixture writes the
@@ -781,7 +782,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 
     let request = ToolsApi {
         tool_name: "t3.requires.thing".to_string(),
-        // `thing` is missing, so the declared schema refuses the call before
+        // why: `thing` is missing, so the declared schema refuses the call before
         // the capability's `run` is ever reached.
         parameters: json!({}),
         session_id: None,
@@ -797,7 +798,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     );
 }
 
-/// The dispatch spine resolves through the LIVE published registry: after a
+/// note: The dispatch spine resolves through the LIVE published registry: after a
 /// hot reload drops a capability from the holder, the next dispatch of that
 /// name is refused exactly like an unknown id (the retained `not_supported`
 /// code) with zero domain effect, while its admitted sibling keeps
@@ -850,7 +851,7 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 
     let before = timeline_event_count(f.core.pool()).await;
 
-    // Both admitted names resolve through the published holder: the
+    // note: Both admitted names resolve through the published holder: the
     // engine-less stub reports its honest no-executor failure, never the
     // unknown-id `not_supported`.
     for name in ["hot.kept", "hot.removed"] {
@@ -863,7 +864,7 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
         );
     }
 
-    // The hot reload itself: the directory is deleted and a fresh registry
+    // note: The hot reload itself: the directory is deleted and a fresh registry
     // generation is swapped into the SAME holder — what the retired watcher
     // did on a changed digest.
     std::fs::remove_dir_all(scan_root.join("hot.removed")).unwrap();
@@ -881,7 +882,7 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
     );
     holder.swap(Arc::new(rebuilt));
 
-    // The removed name is refused like any unknown id, with the retained code
+    // note: The removed name is refused like any unknown id, with the retained code
     // and zero domain effect…
     let err = execute_tool(&context, &tool_request("hot.removed", json!({})))
         .await
@@ -890,7 +891,7 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
         matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
         "a hot-removed capability must be refused as not_supported, got {err:?}"
     );
-    // …while the admitted sibling keeps dispatching through the same context.
+    // note: …while the admitted sibling keeps dispatching through the same context.
     let sibling = execute_tool(&context, &tool_request("hot.kept", json!({})))
         .await
         .unwrap_err();
@@ -906,7 +907,7 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
     );
 }
 
-/// A canonical builtin this build binds no handler for refuses in the spine —
+/// note: A canonical builtin this build binds no handler for refuses in the spine —
 /// the peer and user lanes are never even consulted for a reserved id.
 ///
 /// The competing callable is real and observable: a user capability carrying
@@ -938,7 +939,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
 
     let f = fixture().await;
 
-    // The colliding user callable: a real scanned bundle named exactly the
+    // note: The colliding user callable: a real scanned bundle named exactly the
     // canonical id. The scan admits it (the engine builtin set does not own the
     // name), so the user lane the spine consults holds it under this id.
     let scan_root = f.tmp.path().join("colliding_usercaps");
@@ -969,7 +970,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "the competing callable must exist in the user lane for this case to mean anything"
     );
 
-    // Canonical but unbound: the catalog reserves the id, the registry has no row.
+    // note: Canonical but unbound: the catalog reserves the id, the registry has no row.
     assert!(
         lookup_host_tool(TOOL).is_some(),
         "{TOOL} must stay a canonical host tool"
@@ -1000,7 +1001,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
         "an unbound canonical id must be not_supported, got {err:?}"
     );
-    // The discriminating assertion: the lanes are not even CONSULTED. With the
+    // note: The discriminating assertion: the lanes are not even CONSULTED. With the
     // canonical reservation removed, `dispatch` reaches the peer/user branch and
     // this count rises to 1 (the user lane's own reservation then still refuses,
     // so the returned error alone would not detect it).
@@ -1019,7 +1020,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "a refused canonical dispatch must have zero domain effect"
     );
 
-    // The admission entry (Gate 1's allowlist resolver) makes the SAME decision
+    // note: The admission entry (Gate 1's allowlist resolver) makes the SAME decision
     // and therefore must not consult the lanes either — same counter, no reset
     // in between.
     assert!(
@@ -1032,7 +1033,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "the allowlist path must not reach the peer/user lanes for a canonical id"
     );
 
-    // Non-vacuity of the probe on the allowlist path: a NON-canonical miss does
+    // note: Non-vacuity of the probe on the allowlist path: a NON-canonical miss does
     // consult the lanes there.
     assert!(
         !unbound.spine_resolves(&context, "not.a.canonical.tool"),
@@ -1044,7 +1045,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "the allowlist path must record a real fallback consultation"
     );
 
-    // Non-vacuity on the dispatch path: the same registry records that too.
+    // note: Non-vacuity on the dispatch path: the same registry records that too.
     let unknown = unbound
         .dispatch(
             &tool_request("not.a.canonical.tool", json!({})),
@@ -1063,7 +1064,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "the dispatch path must record a real fallback consultation"
     );
 
-    // Bind the same real builtin: its existing handler still runs, on the same
+    // note: Bind the same real builtin: its existing handler still runs, on the same
     // context that still holds the colliding user capability.
     let value = host_tool_registry()
         .dispatch(&request, &context, CREATOR)
@@ -1073,7 +1074,7 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
     assert_eq!(value["workspace_slug"], SLUG);
 }
 
-/// `Access` — not a second name roster — decides which grant admits a real
+/// note: `Access` — not a second name roster — decides which grant admits a real
 /// handler, and the decision is exercised in both directions.
 ///
 /// The workspace policy grants only `nexus.*.read` (with `default = "ask"`, so an
@@ -1090,7 +1091,7 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
     let work_id = seed_work(&f).await;
     let principal = f.core.active_principal().await.unwrap();
 
-    // The policy lives with the workspace the context resolves.
+    // note: The policy lives with the workspace the context resolves.
     let workspace = nexus_home_layout::operational_workspace_dir(f.tmp.path(), CREATOR, SLUG);
     std::fs::create_dir_all(workspace.join(".nexus42")).unwrap();
     std::fs::write(
@@ -1113,7 +1114,7 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
         None,
     );
 
-    // A read is admitted by the read grant.
+    // note: A read is admitted by the read grant.
     let info = execute_tool(&context, &tool_request("nexus.workspace.info", json!({})))
         .await
         .expect("a read grant must admit a read tool");
@@ -1126,7 +1127,7 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
         .unwrap()
         .title;
 
-    // The same grant does NOT admit a write; the handler never runs.
+    // note: The same grant does NOT admit a write; the handler never runs.
     let err = execute_tool(
         &context,
         &tool_request(
@@ -1148,7 +1149,7 @@ async fn read_grant_admits_reads_and_refuses_a_write() {
     );
 }
 
-/// A capability never fabricates success when its prompt executor fails: the
+/// note: A capability never fabricates success when its prompt executor fails: the
 /// executor's typed error is surfaced out of `run()` verbatim.
 ///
 /// MIGRATED (v1.193 P2-T11) from
@@ -1180,7 +1181,7 @@ async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
         }
     }
 
-    // The run identity must have a registered coordinator token (the
+    // note: The run identity must have a registered coordinator token (the
     // fail-closed contract); a fresh token would be uncancellable.
     let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::from([(
         "extract-run".to_string(),
@@ -1205,7 +1206,7 @@ async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
             "chapter_prose": "Lin Xia drew her blade.",
             "_creator_id": "test_creator",
             "_session_id": "extract-run",
-            // The trusted target/source the orchestration caller resolves
+            // note: The trusted target/source the orchestration caller resolves
             // from stored state before the model runs.
             "_extract_target": {
                 "world_id": "wld_wiring",
@@ -1224,7 +1225,7 @@ async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
     }
 }
 
-/// An engine-less compute context reports a real error, never a fabricated
+/// note: An engine-less compute context reports a real error, never a fabricated
 /// success.
 #[tokio::test]
 #[serial_test::serial]
@@ -1237,7 +1238,7 @@ async fn compute_without_an_engine_reports_a_real_error() {
     }))
     .unwrap();
 
-    // A context with no engine: the run must refuse, not pretend.
+    // note: A context with no engine: the run must refuse, not pretend.
     let bare = ComputeContext {
         creator_id: CREATOR.to_string(),
         engine: None,
@@ -1252,16 +1253,15 @@ async fn compute_without_an_engine_reports_a_real_error() {
         "compute without an engine must be a real internal refusal, got {err:?}"
     );
 
-    // And the world is untouched.
+    // note: And the world is untouched.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
 }
 
-// ---------------------------------------------------------------------------
-// L2 review regressions (C1/C2/C3)
+// note: L2 review regressions (C1/C2/C3)
 // ---------------------------------------------------------------------------
 
-/// C1: a principal from ANOTHER core must be refused before any dispatch
+/// note: C1: a principal from ANOTHER core must be refused before any dispatch
 /// effect.
 ///
 /// The two halves of the authority (a principal, and a handle) are
@@ -1284,7 +1284,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
         .await
         .expect("owner starts");
 
-    // A SECOND core over a DIFFERENT creator: its principal is well-formed but
+    // note: A SECOND core over a DIFFERENT creator: its principal is well-formed but
     // was minted by another service, so this handle must not accept it.
     let other_home = f.tmp.path().join("other");
     let other_nexus = other_home.join(".nexus42");
@@ -1335,7 +1335,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
         "a foreign principal must be refused as AuthRequired, got {err:?}"
     );
 
-    // The refusal precedes every effect: no audit row was written.
+    // note: The refusal precedes every effect: no audit row was written.
     let audits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acp_tool_audit_log")
         .fetch_one(f.core.pool())
         .await
@@ -1343,7 +1343,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
     assert_eq!(audits, 0, "a refused principal must leave no audit row");
 }
 
-/// The owner's OWN principal still dispatches (the binding must not be a
+/// note: The owner's OWN principal still dispatches (the binding must not be a
 /// blanket refusal).
 #[tokio::test]
 #[serial_test::serial]
@@ -1376,7 +1376,7 @@ async fn execute_tool_accepts_the_owners_own_principal() {
     assert!(response.success);
 }
 
-/// The retired `nexus.reference.refresh` write entrance is no longer admitted.
+/// note: The retired `nexus.reference.refresh` write entrance is no longer admitted.
 ///
 /// The capability row and the orchestration builtin were removed with the
 /// reference store, so the id no longer resolves at the allowlist gate: the
@@ -1403,8 +1403,7 @@ async fn reference_refresh_is_not_admitted() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// v1.193 P2-T9 — MIGRATED from `nexus-daemon-runtime/tests/agent_tool_api.rs`
+// note: v1.193 P2-T9 — MIGRATED from `nexus-daemon-runtime/tests/agent_tool_api.rs`
 // and `agent_tool_production_wiring.rs`.
 //
 // The daemon's `HostToolExecutor` was a thin adapter: it built this crate's
@@ -1415,7 +1414,7 @@ async fn reference_refresh_is_not_admitted() {
 // composition retires with the host.
 // ---------------------------------------------------------------------------
 
-/// A `nexus.*` dispatch request with no session/request identity.
+/// note: A `nexus.*` dispatch request with no session/request identity.
 fn tool_request(tool_name: &str, parameters: serde_json::Value) -> ToolsApi {
     ToolsApi {
         tool_name: tool_name.to_string(),
@@ -1426,7 +1425,7 @@ fn tool_request(tool_name: &str, parameters: serde_json::Value) -> ToolsApi {
     }
 }
 
-/// A tool context over the fixture pool that also carries the owner core —
+/// note: A tool context over the fixture pool that also carries the owner core —
 /// the `nexus.work.patch` handler needs the family authority.
 fn context_with_core(f: &Fixture) -> ToolContext {
     ToolContext::new(
@@ -1444,7 +1443,7 @@ fn context_with_core(f: &Fixture) -> ToolContext {
     )
 }
 
-/// Create a Work owned by the fixture creator, bound to the fixture world.
+/// note: Create a Work owned by the fixture creator, bound to the fixture world.
 async fn seed_work(f: &Fixture) -> String {
     let principal = f.core.active_principal().await.unwrap();
     let request: CreateWorkRequest = serde_json::from_value(json!({
@@ -1461,7 +1460,7 @@ async fn seed_work(f: &Fixture) -> String {
         .work_id
 }
 
-/// Audit outcomes for one tool, oldest first.
+/// note: Audit outcomes for one tool, oldest first.
 async fn audit_outcomes(pool: &sqlx::SqlitePool, tool_name: &str) -> Vec<String> {
     sqlx::query_scalar("SELECT outcome FROM acp_tool_audit_log WHERE tool_name = ? ORDER BY id")
         .bind(tool_name)
@@ -1470,7 +1469,7 @@ async fn audit_outcomes(pool: &sqlx::SqlitePool, tool_name: &str) -> Vec<String>
         .unwrap()
 }
 
-/// `nexus.context.whoami` and `nexus.workspace.info` report the active
+/// note: `nexus.context.whoami` and `nexus.workspace.info` report the active
 /// creator/workspace and the honest runtime mode.
 ///
 /// MIGRATED from `agent_tool_api.rs::whoami_returns_active_creator_id` and
@@ -1491,12 +1490,12 @@ async fn nexus_tool_surface_reports_the_active_creator_and_workspace() {
         .expect("workspace info succeeds");
     assert_eq!(info["creator_id"], CREATOR);
     assert_eq!(info["workspace_slug"], SLUG);
-    // The fixture supplies no more than `is_initialized`, so the honest mode is
+    // why: The fixture supplies no more than `is_initialized`, so the honest mode is
     // the local-only default — never a fabricated running host.
     assert_eq!(info["runtime_mode"], "local_only");
 }
 
-/// `nexus.work.get` returns the stored stage fields for the caller's OWN work,
+/// note: `nexus.work.get` returns the stored stage fields for the caller's OWN work,
 /// and collapses a foreign or unknown work into the SAME `forbidden` refusal
 /// (existence is never leaked), while a missing parameter is `invalid_input`.
 ///
@@ -1518,16 +1517,16 @@ async fn nexus_work_get_is_creator_scoped() {
     .expect("the owner reads its own work");
     assert_eq!(value["work_id"], work_id);
     assert_eq!(value["title"], "Test Work");
-    // The stored stage fields, not a fabricated default.
+    // note: The stored stage fields, not a fabricated default.
     assert_eq!(value["current_stage"], "intake");
     assert_eq!(value["stage_status"], "pending");
-    // The Work DTO carries no `creator_id` (privacy filter).
+    // note: The Work DTO carries no `creator_id` (privacy filter).
     assert!(
         value.get("creator_id").is_none(),
         "the Work DTO must not leak creator_id: {value}"
     );
 
-    // A row that EXISTS but belongs to another creator is indistinguishable
+    // note: A row that EXISTS but belongs to another creator is indistinguishable
     // from a missing one — both are `forbidden`, never `not_found`.
     sqlx::query("UPDATE works SET creator_id = 'intruder' WHERE work_id = ?")
         .bind(&work_id)
@@ -1563,7 +1562,7 @@ async fn nexus_work_get_is_creator_scoped() {
     );
 }
 
-/// `nexus.work.patch` appends inspiration, accepts only the declared field
+/// note: `nexus.work.patch` appends inspiration, accepts only the declared field
 /// allowlist, and refuses a stage-control field, an unknown field, an unknown
 /// `stage_metadata` sub-key or a non-object `stage_metadata`.
 ///
@@ -1599,7 +1598,7 @@ async fn nexus_work_patch_enforces_the_declared_field_allowlist() {
         "Agent had an idea"
     );
 
-    // The allowed `stage_metadata` sub-keys are stored as a metadata note.
+    // note: The allowed `stage_metadata` sub-keys are stored as a metadata note.
     execute_tool(
         &context,
         &tool_request(
@@ -1616,7 +1615,7 @@ async fn nexus_work_patch_enforces_the_declared_field_allowlist() {
     .await
     .expect("allowed stage_metadata keys are admitted");
 
-    // A stage-control field is refused as invalid_input — the work-patch lane
+    // note: A stage-control field is refused as invalid_input — the work-patch lane
     // must never advance the stage.
     for refused in [
         json!({ "work_id": work_id, "current_stage": "writing" }),
@@ -1635,7 +1634,7 @@ async fn nexus_work_patch_enforces_the_declared_field_allowlist() {
     }
 }
 
-/// `nexus.orchestration.schedule_status` returns the Work's linked schedules —
+/// note: `nexus.orchestration.schedule_status` returns the Work's linked schedules —
 /// including while the Work is completion-locked, because that lock gates
 /// WRITES and a read-only tool must not be blocked by it.
 ///
@@ -1661,7 +1660,7 @@ async fn nexus_schedule_status_reads_a_completion_locked_work() {
         .await
         .expect("link one schedule to the work");
 
-    // Completion-lock the Work at the store (the create path hardcodes NULL).
+    // note: Completion-lock the Work at the store (the create path hardcodes NULL).
     let now = chrono::Utc::now().to_rfc3339();
     nexus_local_db::works::patch_work(
         f.core.pool(),
@@ -1689,7 +1688,7 @@ async fn nexus_schedule_status_reads_a_completion_locked_work() {
     assert_eq!(status["count"], 1);
     assert_eq!(status["schedule_ids"][0], "SCH001");
 
-    // A foreign work is refused, not silently reported as zero schedules.
+    // note: A foreign work is refused, not silently reported as zero schedules.
     let err = execute_tool(
         &f.context,
         &tool_request(
@@ -1705,7 +1704,7 @@ async fn nexus_schedule_status_reads_a_completion_locked_work() {
     );
 }
 
-/// `nexus.context.assemble` is `policy_blocked` when the caller asks for a
+/// note: `nexus.context.assemble` is `policy_blocked` when the caller asks for a
 /// platform-only assembly in local-only mode, and still assembles locally
 /// without that flag.
 ///
@@ -1740,7 +1739,7 @@ async fn nexus_context_assemble_is_policy_blocked_in_local_only_mode() {
     assert_eq!(local["creator_id"], CREATOR);
 }
 
-/// Every dispatch writes exactly ONE audit row — a success as `success`, and
+/// note: Every dispatch writes exactly ONE audit row — a success as `success`, and
 /// every refusal as `denied:<code>` with the code the caller received.
 ///
 /// MIGRATED from `agent_tool_api.rs::audit_log_written_on_success`,
@@ -1763,7 +1762,7 @@ async fn tool_dispatch_audits_success_and_every_refusal() {
         ["success"]
     );
 
-    // Unknown tool → `not_supported`, audited with that code.
+    // note: Unknown tool → `not_supported`, audited with that code.
     let unknown = execute_tool(&f.context, &tool_request("nexus.unknown.tool", json!({}))).await;
     assert!(
         matches!(unknown, Err(CoreError::Coded { ref code, .. }) if code == "not_supported"),
@@ -1774,7 +1773,7 @@ async fn tool_dispatch_audits_success_and_every_refusal() {
         ["denied:not_supported"]
     );
 
-    // Cross-creator read → `forbidden`; missing parameter → `invalid_input`.
+    // note: Cross-creator read → `forbidden`; missing parameter → `invalid_input`.
     sqlx::query("UPDATE works SET creator_id = 'intruder' WHERE work_id = ?")
         .bind(&work_id)
         .execute(f.core.pool())
@@ -1792,7 +1791,7 @@ async fn tool_dispatch_audits_success_and_every_refusal() {
         ["denied:forbidden", "denied:invalid_input"]
     );
 
-    // Policy refusal → `policy_blocked`.
+    // note: Policy refusal → `policy_blocked`.
     let _ = execute_tool(
         &f.context,
         &tool_request(
@@ -1808,15 +1807,14 @@ async fn tool_dispatch_audits_success_and_every_refusal() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// v1.193 P2-T9 — MIGRATED from `nexus-daemon-runtime/tests/compute_runs_api.rs`.
+// note: v1.193 P2-T9 — MIGRATED from `nexus-daemon-runtime/tests/compute_runs_api.rs`.
 //
 // The daemon's compute routes were HTTP envelopes over this crate's compute
 // lane; the lane itself (ownership gate, sandbox taxonomy, atomic accept,
 // discard, list/detail) is what these cases keep.
 // ---------------------------------------------------------------------------
 
-/// A run request against `world_id`/`module_id` with the fixture combatants.
+/// note: A run request against `world_id`/`module_id` with the fixture combatants.
 fn run_request(world_id: &str, module_id: &str) -> RunRequest {
     serde_json::from_value(json!({
         "world_id": world_id,
@@ -1826,7 +1824,7 @@ fn run_request(world_id: &str, module_id: &str) -> RunRequest {
     .unwrap()
 }
 
-/// A run request scoped to a named branch.
+/// note: A run request scoped to a named branch.
 fn run_request_on_branch(world_id: &str, module_id: &str, branch_id: &str) -> RunRequest {
     serde_json::from_value(json!({
         "world_id": world_id,
@@ -1837,12 +1835,12 @@ fn run_request_on_branch(world_id: &str, module_id: &str, branch_id: &str) -> Ru
     .unwrap()
 }
 
-/// An accept request from its wire JSON.
+/// note: An accept request from its wire JSON.
 fn accept_request(value: serde_json::Value) -> RunAcceptRequest {
     serde_json::from_value(value).unwrap()
 }
 
-/// `(run_id, status, error_json)` of the most recent run row of the world.
+/// note: `(run_id, status, error_json)` of the most recent run row of the world.
 async fn latest_run_row(pool: &sqlx::SqlitePool) -> (String, String, Option<String>) {
     sqlx::query_as::<_, (String, String, Option<String>)>(
         "SELECT run_id, status, error_json FROM compute_sessions \
@@ -1854,7 +1852,7 @@ async fn latest_run_row(pool: &sqlx::SqlitePool) -> (String, String, Option<Stri
     .unwrap()
 }
 
-/// `(branch_id, event_type, status, provenance_json, affected_ids_json)` for
+/// note: `(branch_id, event_type, status, provenance_json, affected_ids_json)` for
 /// the fixture world's timeline, in sequence order.
 type TimelineRow = (String, String, String, Option<String>, Option<String>);
 
@@ -1870,7 +1868,7 @@ async fn timeline_rows(pool: &sqlx::SqlitePool) -> Vec<TimelineRow> {
     .unwrap()
 }
 
-/// A module that exports the V1 ABI but whose `compute` loops forever.
+/// note: A module that exports the V1 ABI but whose `compute` loops forever.
 fn loop_wasm() -> Vec<u8> {
     wat::parse_str(
         r#"(module
@@ -1891,7 +1889,7 @@ fn loop_wasm() -> Vec<u8> {
     .expect("valid wat")
 }
 
-/// The infinite-loop module manifest (`max_wall_time_ms` omitted).
+/// note: The infinite-loop module manifest (`max_wall_time_ms` omitted).
 fn loop_manifest() -> ModuleManifest {
     serde_json::from_str(
         r#"{"module_id":"loop","name":"Loop","version":"0.1.0","nexus_abi_version":1,
@@ -1901,7 +1899,7 @@ fn loop_manifest() -> ModuleManifest {
     .unwrap()
 }
 
-/// Two staggered-budget loop manifests: the long run may execute for 1500 ms,
+/// note: Two staggered-budget loop manifests: the long run may execute for 1500 ms,
 /// the short one only 300 ms.
 fn staggered_loop_manifests() -> [(&'static str, ModuleManifest); 2] {
     let long = serde_json::from_str(
@@ -1919,7 +1917,7 @@ fn staggered_loop_manifests() -> [(&'static str, ModuleManifest); 2] {
     [("loop_long", long), ("loop_short", short)]
 }
 
-/// Insert a direct-lane run row and flip it to `succeeded` with crafted
+/// note: Insert a direct-lane run row and flip it to `succeeded` with crafted
 /// proposals (bypasses the module, so the accept path can be driven with
 /// arbitrary proposal payloads).
 async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: serde_json::Value) -> String {
@@ -1940,7 +1938,7 @@ async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: serde_json::Val
     run_id
 }
 
-/// Craft a `ComputeOutput` envelope with the given state deltas and event
+/// note: Craft a `ComputeOutput` envelope with the given state deltas and event
 /// titles; `affected_ids`, when `Some`, is stamped onto every event.
 fn crafted_proposals(
     state_delta: &[serde_json::Value],
@@ -1978,7 +1976,7 @@ fn crafted_proposals(
     })
 }
 
-/// Seed a timeline event on a named branch (the durable branch registry is the
+/// note: Seed a timeline event on a named branch (the durable branch registry is the
 /// set of `branch_id`s materialized on the timeline).
 async fn seed_branch_event(pool: &sqlx::SqlitePool, world_id: &str, branch_id: &str) {
     sqlx::query(
@@ -1994,7 +1992,7 @@ async fn seed_branch_event(pool: &sqlx::SqlitePool, world_id: &str, branch_id: &
     .unwrap();
 }
 
-/// Seed a computable character whose `state.character.current_hp` violates the
+/// note: Seed a computable character whose `state.character.current_hp` violates the
 /// `basic-combat` manifest schema (it must be an integer) — the per-entry
 /// validation case.
 async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
@@ -2030,7 +2028,7 @@ async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
         .unwrap();
 }
 
-/// A run refuses a foreign World as an ownership denial, an unknown module as
+/// note: A run refuses a foreign World as an ownership denial, an unknown module as
 /// `not_found`, and a World with no computable entry as `invalid_input` — and
 /// none of the three leaves a run row or a timeline event behind.
 ///
@@ -2051,7 +2049,7 @@ async fn compute_run_refusals_are_typed_and_leave_no_state() {
         "a foreign world must be an ownership denial, got {foreign:?}"
     );
 
-    // Ownership is checked BEFORE module resolution, so the unknown module is
+    // why: Ownership is checked BEFORE module resolution, so the unknown module is
     // only reached on an owned world.
     let unknown_module =
         compute_run(&f.core, &f.compute, run_request(WORLD, "no-such-module")).await;
@@ -2084,7 +2082,7 @@ async fn compute_run_refusals_are_typed_and_leave_no_state() {
     );
 }
 
-/// A sandbox trap is refused with its retained code, the failed run is
+/// note: A sandbox trap is refused with its retained code, the failed run is
 /// persisted with honest detail, and the direct lane writes NO timeline event.
 ///
 /// MIGRATED from `compute_runs_api.rs::run_fuel_exhaustion_returns_422_with_honest_code`
@@ -2118,14 +2116,14 @@ async fn compute_run_fuel_exhaustion_is_persisted_as_a_failed_run() {
     );
 }
 
-/// The wall-time watchdog traps first when fuel cannot be exhausted, and the
+/// note: The wall-time watchdog traps first when fuel cannot be exhausted, and the
 /// refusal keeps its own honest code.
 ///
 /// MIGRATED from `compute_runs_api.rs::run_wall_time_exceeded_returns_422_with_honest_code`.
 #[tokio::test]
 #[serial_test::serial]
 async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
-    // Huge fuel so the loop cannot exhaust it; a 300 ms wall-time watchdog
+    // why: Huge fuel so the loop cannot exhaust it; a 300 ms wall-time watchdog
     // traps first via epoch interruption.
     let config = SandboxConfig {
         fuel: 100_000_000_000,
@@ -2157,7 +2155,7 @@ async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
     );
 }
 
-/// Two concurrent runs against the shared engine execute SERIALLY through the
+/// note: Two concurrent runs against the shared engine execute SERIALLY through the
 /// compute serializer, so the long run (1500 ms budget) survives the short
 /// run's (300 ms) watchdog.
 ///
@@ -2170,9 +2168,9 @@ async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
 async fn concurrent_compute_runs_serialize_on_the_engine() {
     let manifests = staggered_loop_manifests();
     let config = SandboxConfig {
-        fuel: 100_000_000_000, // the loops cannot exhaust fuel
+        fuel: 100_000_000_000, // note: the loops cannot exhaust fuel
         max_memory_bytes: 64 * 1024 * 1024,
-        wall_time: Duration::from_secs(5), // host ceiling above both manifests
+        wall_time: Duration::from_secs(5), // note: host ceiling above both manifests
     };
     let f = fixture_with_compute(
         &[
@@ -2199,7 +2197,7 @@ async fn concurrent_compute_runs_serialize_on_the_engine() {
         );
     }
 
-    // Serialization proof: back-to-back execution is 300 ms + 1500 ms in either
+    // note: Serialization proof: back-to-back execution is 300 ms + 1500 ms in either
     // order, so both complete in >= 1500 ms; cross-tripping would finish in
     // ~300 ms.
     assert!(
@@ -2221,7 +2219,7 @@ async fn concurrent_compute_runs_serialize_on_the_engine() {
     }
 }
 
-/// An entry that violates the manifest schema poisons the run: the refusal
+/// note: An entry that violates the manifest schema poisons the run: the refusal
 /// carries per-entry detail, the row is persisted `failed` with the SAME
 /// structured detail, no event is written, and the detail read still serves the
 /// failed run instead of failing to serialize it.
@@ -2253,7 +2251,7 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
         "reason explains the violation: {reason}"
     );
 
-    // The persisted row and the refusal carry the same detail by construction.
+    // note: The persisted row and the refusal carry the same detail by construction.
     let (run_id, status, error_json) = latest_run_row(f.core.pool()).await;
     assert_eq!(status, "failed");
     let error: serde_json::Value =
@@ -2274,7 +2272,7 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
         ); 0]
     );
 
-    // The detail read must serve this failed run (a top-level `invalid_entries`
+    // note: The detail read must serve this failed run (a top-level `invalid_entries`
     // key would break its deserialization).
     let detail = get_compute_run(&f.core, &principal, &run_id)
         .await
@@ -2288,7 +2286,7 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
     );
 }
 
-/// Accept persists the proposals' `affected_key_block_ids` onto the appended
+/// note: Accept persists the proposals' `affected_key_block_ids` onto the appended
 /// events — the column the compute inspector resolves "Affected knowledge"
 /// from.
 ///
@@ -2330,7 +2328,7 @@ async fn accept_persists_affected_key_block_ids() {
     assert_eq!(affected, vec!["kb_def".to_string(), "kb_atk".to_string()]);
 }
 
-/// Discard drops the proposals and flips the row: the World is untouched and
+/// note: Discard drops the proposals and flips the row: the World is untouched and
 /// the detail reflects the discarded status.
 ///
 /// MIGRATED from `compute_runs_api.rs::discard_marks_run_discarded_and_leaves_world_unchanged`.
@@ -2364,7 +2362,7 @@ async fn discard_marks_the_run_discarded_and_leaves_the_world_unchanged() {
     assert_eq!(detail["status"], "discarded");
 }
 
-/// Accept refuses a run that never succeeded, at the status guard.
+/// note: Accept refuses a run that never succeeded, at the status guard.
 ///
 /// MIGRATED from `compute_runs_api.rs::accept_on_failed_run_returns_422_invalid_state`.
 #[tokio::test]
@@ -2386,7 +2384,7 @@ async fn accept_refuses_a_failed_run_as_invalid_state() {
     );
 }
 
-/// Accept and discard both refuse a run that is already terminal, and the
+/// note: Accept and discard both refuse a run that is already terminal, and the
 /// terminal transitions are exclusive: an applied run cannot be discarded and
 /// a discarded run cannot be accepted.
 ///
@@ -2398,7 +2396,7 @@ async fn accept_and_discard_refuse_an_already_terminal_run() {
     let f = fixture().await;
     let principal = f.core.active_principal().await.unwrap();
 
-    // Applied → a second accept AND a discard are both conflicts.
+    // note: Applied → a second accept AND a discard are both conflicts.
     let applied = run_succeeded(&f, &f.compute).await;
     accept_compute_run(&f.core, &principal, &applied, accept_request(json!({})))
         .await
@@ -2416,7 +2414,7 @@ async fn accept_and_discard_refuse_an_already_terminal_run() {
         "discarding an applied run must conflict, got {discard_applied:?}"
     );
 
-    // Discarded → accept is a conflict.
+    // note: Discarded → accept is a conflict.
     let discarded = run_succeeded(&f, &f.compute).await;
     discard_compute_run(&f.core, &principal, &discarded)
         .await
@@ -2431,7 +2429,7 @@ async fn accept_and_discard_refuse_an_already_terminal_run() {
     );
 }
 
-/// The run list is scoped to the creator's OWNED worlds and cursor-paginated;
+/// note: The run list is scoped to the creator's OWNED worlds and cursor-paginated;
 /// a run on a foreign world never appears.
 ///
 /// MIGRATED from `compute_runs_api.rs::list_paginates_and_scopes_to_owned_worlds`.
@@ -2511,7 +2509,7 @@ async fn list_compute_runs_pages_and_scopes_to_owned_worlds() {
     }
 }
 
-/// The list walks newest-first, and the cursor continues that order.
+/// note: The list walks newest-first, and the cursor continues that order.
 ///
 /// MIGRATED from `compute_runs_api.rs::list_orders_newest_first`.
 #[tokio::test]
@@ -2523,7 +2521,7 @@ async fn list_compute_runs_orders_newest_first() {
     let b = run_succeeded(&f, &f.compute).await;
     let c = run_succeeded(&f, &f.compute).await;
 
-    // Pin distinct created_at values so ordering does not depend on clock
+    // note: Pin distinct created_at values so ordering does not depend on clock
     // precision within the same second.
     for (run_id, ts) in [
         (&a, "2026-07-31T10:00:00.000Z"),
@@ -2580,7 +2578,7 @@ async fn list_compute_runs_orders_newest_first() {
     assert_eq!(page2["has_more"], false);
 }
 
-/// Extract the `resource` of a `NotFound` refusal — the shared-shape assertion
+/// note: Extract the `resource` of a `NotFound` refusal — the shared-shape assertion
 /// used by the run-ID opacity pins (V1.206 P2 site 4).
 fn not_found_resource(err: &CoreError) -> &str {
     match err {
@@ -2589,7 +2587,7 @@ fn not_found_resource(err: &CoreError) -> &str {
     }
 }
 
-/// The detail read returns the proposals and invocation params of a succeeded
+/// note: The detail read returns the proposals and invocation params of a succeeded
 /// run, refuses an unknown run as `not_found`, and closes EVERY operation on a
 /// foreign-world run with that SAME `not_found` shape (existence opacity,
 /// V1.206 D4), so no lifecycle state and no run/World ownership fact leaks.
@@ -2642,7 +2640,7 @@ async fn run_detail_and_foreign_run_refusals() {
         accept_compute_run(&f.core, &principal, &foreign, accept_request(json!({}))).await;
     let foreign_discard = discard_compute_run(&f.core, &principal, &foreign).await;
 
-    // Existence opacity (V1.206 D4 / compass D4): an unknown run id and a run
+    // note: Existence opacity (V1.206 D4 / compass D4): an unknown run id and a run
     // of a foreign World close with the SAME 404 `not_found` shape, so a probe
     // cannot split run existence from World ownership. `WorldOwnerDenied` stays
     // reserved for the world-scoped routes (invoke / list / clear).
@@ -2666,12 +2664,12 @@ async fn run_detail_and_foreign_run_refusals() {
         "an unknown id and a foreign id must close with the same refusal"
     );
 
-    // QC F-001: the internal Absent / ForeignDenied / Visible distinction is
+    // note: QC F-001: the internal Absent / ForeignDenied / Visible distinction is
     // pinned inside the crate (`execution::compute::tests`) — keeping the
     // helper (and its SQL pool) off the public surface is the point of that
     // move, so this test asserts only the outward opacity shape above.
 
-    // The foreign row survived every refused operation.
+    // note: The foreign row survived every refused operation.
     assert!(
         nexus_local_db::compute_runs::get_run(f.core.pool(), &foreign)
             .await
@@ -2680,7 +2678,7 @@ async fn run_detail_and_foreign_run_refusals() {
     );
 }
 
-/// A delta targeting another World rejects the WHOLE accept and rolls back
+/// note: A delta targeting another World rejects the WHOLE accept and rolls back
 /// everything already applied in that transaction — including a valid first
 /// delta.
 ///
@@ -2697,14 +2695,14 @@ async fn accept_rolls_back_when_a_delta_targets_another_world() {
         f.core.pool(),
         crafted_proposals(
             &[
-                // 1st delta: valid, applies inside the TX (def 30 → 15).
+                // note: 1st delta: valid, applies inside the TX (def 30 → 15).
                 json!({
                     "op": "sub",
                     "path": "character.current_hp",
                     "target_key_block_id": "kb_def",
                     "value": 15,
                 }),
-                // 2nd delta: foreign target → InputInvalid mid-loop.
+                // note: 2nd delta: foreign target → InputInvalid mid-loop.
                 json!({
                     "op": "sub",
                     "path": "character.current_hp",
@@ -2726,7 +2724,7 @@ async fn accept_rolls_back_when_a_delta_targets_another_world() {
         "a foreign delta target must refuse as invalid_input, got {err:?}"
     );
 
-    // FULL rollback: the first delta is not visible, no event was appended, and
+    // note: FULL rollback: the first delta is not visible, no event was appended, and
     // the run is still `succeeded` (nothing was partially applied).
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(defender_hp(f.core.pool(), "kb_foreign").await, 777);
@@ -2747,7 +2745,7 @@ async fn accept_rolls_back_when_a_delta_targets_another_world() {
     assert_eq!(row.status, "succeeded");
 }
 
-/// A run scoped to a named branch snapshots that branch, accept lands its
+/// note: A run scoped to a named branch snapshots that branch, accept lands its
 /// events on the SNAPSHOT, and an unknown or other-world branch is refused at
 /// run time.
 ///
@@ -2798,7 +2796,7 @@ async fn compute_run_branches_are_world_scoped() {
         "compute_result must land on the snapshotted branch"
     );
 
-    // An unknown branch is refused.
+    // note: An unknown branch is refused.
     let unknown = compute_run(
         &f.core,
         &f.compute,
@@ -2810,7 +2808,7 @@ async fn compute_run_branches_are_world_scoped() {
         "an unknown branch must be invalid_input, got {unknown:?}"
     );
 
-    // Membership is WORLD-scoped: a branch that is event-bearing in ANOTHER
+    // note: Membership is WORLD-scoped: a branch that is event-bearing in ANOTHER
     // world is still unreachable here.
     seed_foreign_world(f.core.pool()).await;
     seed_branch_event(f.core.pool(), FOREIGN_WORLD, "fbk_other").await;
@@ -2826,7 +2824,7 @@ async fn compute_run_branches_are_world_scoped() {
     );
 }
 
-/// `timeline_event_ids_to_accept` appends ONLY the referenced proposed events
+/// note: `timeline_event_ids_to_accept` appends ONLY the referenced proposed events
 /// (the state delta stays all-or-nothing), an unknown id refuses the whole
 /// accept before any write, and an explicit JSON `null` accepts all.
 ///
@@ -2847,7 +2845,7 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
         })]
     };
 
-    // Subset: only `evt_0` is appended, the state delta still applies.
+    // note: Subset: only `evt_0` is appended, the state delta still applies.
     let subset = craft_succeeded_run(
         f.core.pool(),
         crafted_proposals(&delta(), &["First", "Second"], None),
@@ -2867,7 +2865,7 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
     assert_eq!(rows.len(), 1, "only the referenced event is appended");
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
 
-    // Unknown id: the whole accept is refused BEFORE any write.
+    // note: Unknown id: the whole accept is refused BEFORE any write.
     let unknown =
         craft_succeeded_run(f.core.pool(), crafted_proposals(&delta(), &["Only"], None)).await;
     let err = accept_compute_run(
@@ -2888,7 +2886,7 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
         .unwrap();
     assert_eq!(row.status, "succeeded", "the refused accept wrote nothing");
 
-    // Explicit null behaves exactly like an absent field: accept all.
+    // note: Explicit null behaves exactly like an absent field: accept all.
     let all = craft_succeeded_run(
         f.core.pool(),
         crafted_proposals(&delta(), &["First", "Second"], None),
@@ -2912,7 +2910,7 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
     );
 }
 
-/// The installed-module registry lists the embedded module, returns its
+/// note: The installed-module registry lists the embedded module, returns its
 /// detail, and reports an unknown module as `not_found`.
 ///
 /// MIGRATED from `compute_modules.rs::list_modules_includes_basic_combat`,
@@ -2943,11 +2941,10 @@ async fn compute_module_registry_lists_embedded_modules() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// v1.195 P2-T2 — terminal history clear (C8 / S2-5)
+// note: v1.195 P2-T2 — terminal history clear (C8 / S2-5)
 // ---------------------------------------------------------------------------
 
-/// Whether a direct-lane run row is still durable.
+/// note: Whether a direct-lane run row is still durable.
 ///
 /// Clear DELETES rows, so an absence claim is read back through the
 /// authority's own point lookup instead of being inferred from a list page.
@@ -2958,7 +2955,7 @@ async fn run_row_survives(pool: &sqlx::SqlitePool, run_id: &str) -> bool {
         .is_some()
 }
 
-/// Clear removes a World's TERMINAL run rows — and nothing else.
+/// note: Clear removes a World's TERMINAL run rows — and nothing else.
 ///
 /// The three ways a clear can go wrong are each asserted:
 ///
@@ -2981,26 +2978,26 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     let principal = f.core.active_principal().await.unwrap();
     seed_foreign_world(f.core.pool()).await;
 
-    // ACCEPTED: terminal, and its effect is committed World truth.
+    // note: ACCEPTED: terminal, and its effect is committed World truth.
     let applied = run_succeeded(&f, &f.compute).await;
     accept_compute_run(&f.core, &principal, &applied, accept_request(json!({})))
         .await
         .expect("accept succeeds");
-    // Damage = max(0, 20 − 5); the event is canon.
+    // note: Damage = max(0, 20 − 5); the event is canon.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
     let effects_before = timeline_rows(f.core.pool()).await;
     assert_eq!(effects_before.len(), 1);
 
-    // DISCARDED: terminal and clearable, but it never had an effect.
+    // note: DISCARDED: terminal and clearable, but it never had an effect.
     let discarded = run_succeeded(&f, &f.compute).await;
     discard_compute_run(&f.core, &principal, &discarded)
         .await
         .expect("discard succeeds");
 
-    // SUCCEEDED: terminal-capable only after review — never clearable yet.
+    // note: SUCCEEDED: terminal-capable only after review — never clearable yet.
     let pending = run_succeeded(&f, &f.compute).await;
 
-    // RUNNING: not terminal.
+    // note: RUNNING: not terminal.
     let running = nexus_local_db::compute_runs::insert_run(
         f.core.pool(),
         WORLD,
@@ -3013,7 +3010,7 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     .await
     .unwrap();
 
-    // Another creator's World, holding a TERMINAL row of its own.
+    // note: Another creator's World, holding a TERMINAL row of its own.
     let foreign = nexus_local_db::compute_runs::insert_run(
         f.core.pool(),
         FOREIGN_WORLD,
@@ -3032,7 +3029,7 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
         .await
         .unwrap();
 
-    // A terminal filter matches only its own state: nothing here is `failed`,
+    // note: A terminal filter matches only its own state: nothing here is `failed`,
     // and the applied/discarded rows are still standing afterwards.
     let none_failed = clear_compute_runs(
         &f.core,
@@ -3048,7 +3045,7 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert!(run_row_survives(f.core.pool(), &applied).await);
     assert!(run_row_survives(f.core.pool(), &discarded).await);
 
-    // The `discarded` filter takes exactly that row.
+    // note: The `discarded` filter takes exactly that row.
     let cleared_discarded = clear_compute_runs(
         &f.core,
         &principal,
@@ -3063,7 +3060,7 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert!(!run_row_survives(f.core.pool(), &discarded).await);
     assert!(run_row_survives(f.core.pool(), &applied).await);
 
-    // Unfiltered: every terminal row of the World goes — and only those.
+    // note: Unfiltered: every terminal row of the World goes — and only those.
     let cleared = clear_compute_runs(
         &f.core,
         &principal,
@@ -3092,11 +3089,11 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
         "another World's terminal row is out of scope"
     );
 
-    // The accepted effect outlived the run row that produced it.
+    // note: The accepted effect outlived the run row that produced it.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
     assert_eq!(timeline_rows(f.core.pool()).await, effects_before);
 
-    // The pending run is still readable AS the succeeded run it was, with its
+    // note: The pending run is still readable AS the succeeded run it was, with its
     // proposals intact.
     let detail = get_compute_run(&f.core, &principal, &pending)
         .await
@@ -3105,7 +3102,7 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert_eq!(detail["status"], "succeeded");
     assert!(detail["proposals"].is_object());
 
-    // The owner door reaches the same authority: nothing terminal is left for
+    // note: The owner door reaches the same authority: nothing terminal is left for
     // this World, and the pending/foreign rows still survive it.
     let handle = open_compute_handle(&f).await;
     let door = handle
@@ -3122,7 +3119,7 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert!(run_row_survives(f.core.pool(), &pending).await);
     assert!(run_row_survives(f.core.pool(), &foreign).await);
 
-    // ... and is refused for a World the creator does not own; that World's
+    // note: ... and is refused for a World the creator does not own; that World's
     // terminal row is untouched.
     let refused = handle
         .clear_compute_runs(
@@ -3141,11 +3138,10 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert!(run_row_survives(f.core.pool(), &foreign).await);
 }
 
-// ---------------------------------------------------------------------------
-// Generated-DTO facade on the execution owner (v1.195 P2-T1)
+// note: Generated-DTO facade on the execution owner (v1.195 P2-T1)
 // ---------------------------------------------------------------------------
 
-/// Establish the real execution owner over the fixture's core, with compute
+/// note: Establish the real execution owner over the fixture's core, with compute
 /// wired from the SAME engine, cache and serializer the free authority uses —
 /// so a facade call and a direct authority call are two doors into ONE owner.
 async fn open_compute_handle(f: &Fixture) -> Arc<nexus_core::owner::ExecutionHandle> {
@@ -3164,7 +3160,7 @@ async fn open_compute_handle(f: &Fixture) -> Arc<nexus_core::owner::ExecutionHan
         .expect("execution owner starts")
 }
 
-/// The facade's discovery surface serves the REAL registry: the same module
+/// note: The facade's discovery surface serves the REAL registry: the same module
 /// rows, the same manifest detail (including the invocation schema Run Studio
 /// renders) and the same `not_found` for an unknown module.
 ///
@@ -3235,7 +3231,7 @@ async fn compute_facade_discovery_serves_the_real_module_registry() {
     );
 }
 
-/// The facade's run detail is the authority's own row: the run produced
+/// note: The facade's run detail is the authority's own row: the run produced
 /// through the owner is returned with the SAME id, status and stored
 /// proposals, and it is listed under its World/module/status filters.
 #[tokio::test]
@@ -3251,7 +3247,7 @@ async fn compute_facade_run_detail_and_history_are_the_authority_rows() {
         .expect("the owner runs the module")
         .run_id;
 
-    // Running is not accepting: the proposals are persisted, the World is not
+    // note: Running is not accepting: the proposals are persisted, the World is not
     // touched.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
@@ -3294,7 +3290,7 @@ async fn compute_facade_run_detail_and_history_are_the_authority_rows() {
     );
 }
 
-/// History scope and query validation: another creator's World is neither
+/// note: History scope and query validation: another creator's World is neither
 /// readable nor listable through the facade, and the generated query's integer
 /// bound is validated rather than coerced into a page size nobody asked for.
 #[tokio::test]
@@ -3321,7 +3317,7 @@ async fn compute_facade_history_scopes_to_owned_worlds_and_validates_limit() {
         .get_compute_run(&principal, foreign.clone())
         .await
         .unwrap_err();
-    // Existence opacity (V1.206 D4): a foreign-World run closes with the same
+    // note: Existence opacity (V1.206 D4): a foreign-World run closes with the same
     // `not_found` shape as an unknown id, never a distinguishable ownership
     // denial.
     match refused {
@@ -3365,7 +3361,7 @@ async fn compute_facade_history_scopes_to_owned_worlds_and_validates_limit() {
     );
 }
 
-/// The facade's discard returns the generated response, consumes the SAME CAS
+/// note: The facade's discard returns the generated response, consumes the SAME CAS
 /// the authority uses, and leaves the World exactly as it was.
 #[tokio::test]
 #[serial_test::serial]
@@ -3382,11 +3378,11 @@ async fn compute_facade_discard_uses_the_shared_cas_and_touches_no_world_state()
     assert_eq!(response.run_id, run_id);
     assert_eq!(response.status.to_string(), "discarded");
 
-    // The World keeps the pre-run state and gains no timeline event.
+    // note: The World keeps the pre-run state and gains no timeline event.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
 
-    // The durable row is the authority's row, flipped by the shared CAS.
+    // note: The durable row is the authority's row, flipped by the shared CAS.
     let detail = handle
         .get_compute_run(&principal, run_id.clone())
         .await
@@ -3402,7 +3398,7 @@ async fn compute_facade_discard_uses_the_shared_cas_and_touches_no_world_state()
     );
 }
 
-/// The facade honours the owner fence: a draining owner refuses every entry
+/// note: The facade honours the owner fence: a draining owner refuses every entry
 /// point instead of reading beside its own drain.
 #[tokio::test]
 #[serial_test::serial]
@@ -3450,11 +3446,10 @@ async fn compute_facade_is_fenced_once_the_owner_closes() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// v1.207 P3 — durable operation receipts on the compute Run write path
+// note: v1.207 P3 — durable operation receipts on the compute Run write path
 // ---------------------------------------------------------------------------
 
-/// The receipt shadowing a stuck run row is reachable from the run row alone
+/// note: The receipt shadowing a stuck run row is reachable from the run row alone
 /// (spec §B.2 `subject_id`), which is the handle boot recovery asks with.
 async fn receipt_for_run(f: &Fixture, run_id: &str) -> Option<nexus_local_db::OperationReceipt> {
     nexus_local_db::operation_receipts::get_operation_receipt_by_subject(
@@ -3466,7 +3461,7 @@ async fn receipt_for_run(f: &Fixture, run_id: &str) -> Option<nexus_local_db::Op
     .expect("receipt read")
 }
 
-/// Seed a direct-lane run row left `running` (the crash trace boot recovery
+/// note: Seed a direct-lane run row left `running` (the crash trace boot recovery
 /// scans for), and optionally its receipt.
 async fn seed_stuck_run(f: &Fixture, with_receipt: Option<&str>) -> String {
     let run_id = nexus_local_db::compute_runs::insert_run(
@@ -3494,7 +3489,7 @@ async fn seed_stuck_run(f: &Fixture, with_receipt: Option<&str>) -> String {
     run_id
 }
 
-/// The run's durable receipt shadows the `compute_sessions` transitions: the
+/// note: The run's durable receipt shadows the `compute_sessions` transitions: the
 /// `running` receipt is written before the effect and settled terminally with
 /// the run, carrying the SAME payload the run row does (spec §B.2).
 #[tokio::test]
@@ -3523,7 +3518,7 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
         .await
         .unwrap()
         .expect("the run row");
-    // The finished receipt stores the run's EXACT answer (a `RunResponse`), so a
+    // why: The finished receipt stores the run's EXACT answer (a `RunResponse`), so a
     // replay is reconstructable from the receipt alone — it must survive Clear
     // deleting the run row. Its proposals are the run row's own proposals.
     let stored: serde_json::Value = serde_json::from_str(
@@ -3546,7 +3541,7 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
         "the receipt's answer carries the run's own proposals"
     );
 
-    // A failed run shadows the other terminal transition.
+    // note: A failed run shadows the other terminal transition.
     let _ = compute_run(&f.core, &f.compute, run_request(WORLD, "loop"))
         .await
         .expect_err("an exhausted-fuel module fails the run");
@@ -3573,7 +3568,7 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
     assert!(failed_receipt.result_json.is_none());
 }
 
-/// §B.3 item 4, the guard: a run stuck `running` with no terminal receipt is
+/// note: §B.3 item 4, the guard: a run stuck `running` with no terminal receipt is
 /// refused as the typed `uncertain` answer — never re-applied, and no terminal
 /// is fabricated for it. Both ambiguous shapes are covered: a receipt-less run
 /// and a `running` receipt whose owner is gone.
@@ -3617,7 +3612,7 @@ async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
         }
     }
 
-    // Nothing was re-applied and no terminal was fabricated: both rows are
+    // note: Nothing was re-applied and no terminal was fabricated: both rows are
     // byte-identical to the state the crash left behind.
     for run_id in [&no_receipt, &with_receipt] {
         let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
@@ -3627,7 +3622,7 @@ async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
         assert_eq!(row.status, "running", "recovery never settles a stuck row");
         assert!(row.error_json.is_none());
     }
-    // The orphaned receipt is untouched too — an orphan is never settled.
+    // note: The orphaned receipt is untouched too — an orphan is never settled.
     let stored = nexus_local_db::operation_receipts::get_operation_receipt(
         f.core.pool(),
         &with_receipt_operation,
@@ -3641,7 +3636,7 @@ async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
     );
 }
 
-/// §B.3 step 3's other half: when the stuck run's receipt is TERMINAL the
+/// note: §B.3 step 3's other half: when the stuck run's receipt is TERMINAL the
 /// replay is answered **from the receipt** — the complete stored answer
 /// travels out with the decision (success payload and non-success reason
 /// verbatim), and the effect is never re-applied.
@@ -3728,7 +3723,7 @@ async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
         }
     }
 
-    // The replay was answered, not applied: both stuck rows are exactly as the
+    // note: The replay was answered, not applied: both stuck rows are exactly as the
     // crash left them — recovery settles nothing and runs no module.
     for run_id in [&finished_run, &failed_run] {
         let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
@@ -3741,7 +3736,7 @@ async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
     }
 }
 
-/// The boot wiring is real, not just a callable: an execution start over a
+/// note: The boot wiring is real, not just a callable: an execution start over a
 /// workspace holding a stuck run records the receipt-first decision on the
 /// owner, and the handle reports it. Recovery never re-applies, so a decided
 /// run is still exactly as the crash left it.
@@ -3750,7 +3745,7 @@ async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
 async fn execution_start_runs_the_compute_receipt_recovery_pass() {
     let f = fixture().await;
     let run_id = seed_stuck_run(&f, None).await;
-    // A second stuck run whose receipt already settled terminally: its replay
+    // note: A second stuck run whose receipt already settled terminally: its replay
     // answer must be served from the receipt through the startup surface.
     let settled_operation = format!("op_{}", "f".repeat(32));
     let settled_run = seed_stuck_run(&f, Some(&settled_operation)).await;
@@ -3810,7 +3805,7 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
     assert!(settled_row.proposals_json.is_none());
 }
 
-/// v1.214 S3: a boot recovery READ failure must be distinguishable from
+/// note: v1.214 S3: a boot recovery READ failure must be distinguishable from
 /// "no stuck run" on the handle.
 ///
 /// The receipt-first pass decides nothing when its stuck-run read fails — the
@@ -3820,7 +3815,7 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
 #[tokio::test]
 #[serial_test::serial]
 async fn boot_recovery_read_failure_is_reported_on_the_handle() {
-    // A clean boot over zero stuck runs: empty decisions AND no failure.
+    // note: A clean boot over zero stuck runs: empty decisions AND no failure.
     let clean = fixture().await;
     let clean_handle = open_compute_handle(&clean).await;
     assert!(clean_handle.compute_run_recoveries().is_empty());
@@ -3829,7 +3824,7 @@ async fn boot_recovery_read_failure_is_reported_on_the_handle() {
         "a pass that read successfully is not a failure"
     );
 
-    // Break the read the pass performs (`compute_sessions` is the only table
+    // note: Break the read the pass performs (`compute_sessions` is the only table
     // it scans), then boot: the decisions are still empty, but the failure is
     // now explicit rather than silently looking like "nothing was stuck".
     let broken = fixture().await;
@@ -3851,7 +3846,7 @@ async fn boot_recovery_read_failure_is_reported_on_the_handle() {
     );
 }
 
-/// Number of direct-lane compute runs the world holds.
+/// note: Number of direct-lane compute runs the world holds.
 ///
 /// The module is executed only after its run row is inserted, so this count is
 /// the observable proxy for "how many times did the module run": a retry that
@@ -3891,7 +3886,7 @@ async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_req
         "the first call runs the module exactly once"
     );
 
-    // Simulated lost response: the caller retries the IDENTICAL request (same
+    // note: Simulated lost response: the caller retries the IDENTICAL request (same
     // caller-supplied id). The receipt answers it; the module does not re-run.
     let replay = compute_run(&f.core, &f.compute, request)
         .await
@@ -3907,7 +3902,7 @@ async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_req
         "the retry must not execute the module again"
     );
 
-    // A DIFFERENT logical request under the same id is a first-writer-wins
+    // note: A DIFFERENT logical request under the same id is a first-writer-wins
     // conflict, not a replay.
     let mut conflicting = run_request(WORLD, MODULE);
     conflicting.operation_id = Some(op);
@@ -3948,7 +3943,7 @@ async fn finished_receipt_replay_survives_clearing_the_run_history() {
         .expect("the first call runs the module");
     assert_eq!(first.status.to_string(), "succeeded");
 
-    // Accept (the row becomes `applied`, terminal) then Clear the World's
+    // note: Accept (the row becomes `applied`, terminal) then Clear the World's
     // terminal history: the run row is deleted, the receipt is not.
     accept_compute_run(
         &f.core,
@@ -4009,7 +4004,7 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     first.operation_id = Some(op.clone());
     let mut second = run_request(WORLD, MODULE);
     second.operation_id = Some(op.clone());
-    // A different logical request => a different fingerprint => a genuine
+    // note: A different logical request => a different fingerprint => a genuine
     // first-writer-wins conflict (not a replay).
     second.invocation_params = serde_json::Map::from_iter([
         ("attacker_id".to_string(), json!("kb_atk")),
@@ -4017,7 +4012,7 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
         ("variant".to_string(), json!(2)),
     ]);
 
-    // Deterministic rendezvous: the seam parks each caller AFTER its run-row
+    // note: Deterministic rendezvous: the seam parks each caller AFTER its run-row
     // insert and the receipt pre-check and BEFORE `begin_operation`. The test is
     // the barrier's third participant, so NEITHER caller proceeds until BOTH
     // arrived — the loser's `OperationIdConflict` is therefore always the
@@ -4045,7 +4040,7 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
         }
     }
 
-    // Durable end state. Contract: the loser's own run row is SETTLED LOCALLY as
+    // note: Durable end state. Contract: the loser's own run row is SETTLED LOCALLY as
     // `failed` (present, not deleted) — never the winner's receipt, never left
     // `running` for boot recovery to misreport or Clear to miss.
     let (succeeded, failed, running): (i64, i64, i64) = sqlx::query_as(
@@ -4076,7 +4071,7 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
 }
 
-/// How long a test waits for a `ComputeInFlightGate` registration signal.
+/// note: How long a test waits for a `ComputeInFlightGate` registration signal.
 ///
 /// Bounded on purpose: if an owner ever returns BEFORE the seam (a wire-shape
 /// refusal, a missing module), the gate never fires, and an unbounded wait
@@ -4084,7 +4079,7 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
 /// timeout is ALWAYS a failure — never treated as a registration.
 const GATE_WAIT: Duration = Duration::from_secs(30);
 
-/// Await a `ComputeInFlightGate` registration signal, failing loudly when it
+/// note: Await a `ComputeInFlightGate` registration signal, failing loudly when it
 /// never arrives.
 async fn await_registered(gate: &nexus_execution::test_hooks::ComputeInFlightGate) {
     if tokio::time::timeout(GATE_WAIT, gate.registered.notified())
@@ -4098,7 +4093,7 @@ async fn await_registered(gate: &nexus_execution::test_hooks::ComputeInFlightGat
     }
 }
 
-/// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", live branch): the
+/// note: v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", live branch): the
 /// §B.3 Busy answer requires an ACTUAL live owner.
 ///
 /// A retry issued while THIS process is executing the operation (its id is in
@@ -4114,7 +4109,7 @@ async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
     let mut request = run_request(WORLD, MODULE);
     request.operation_id = Some(op.clone());
 
-    // The owner registers in the process in-flight registry and parks at the
+    // note: The owner registers in the process in-flight registry and parks at the
     // seam BEFORE the module executes; the second caller is a retry of the
     // identical request (same id, same fingerprint), so the receipt is the only
     // thing that can answer it.
@@ -4140,7 +4135,7 @@ async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
     );
 }
 
-/// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", owner-dead
+/// note: v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", owner-dead
 /// branch): a `running` receipt whose owner is gone is `uncertain` — never the
 /// Busy refusal (which would tell the caller to wait for work that has
 /// stopped), and never a re-run.
@@ -4161,7 +4156,7 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
 
     let gate = Arc::new(ComputeInFlightGate::new(op));
     set_compute_in_flight_gate(Some(Arc::clone(&gate)));
-    // Selecting on `registered` DROPS the parked owner before the module runs.
+    // note: Selecting on `registered` DROPS the parked owner before the module runs.
     // The bounded wait keeps a never-parked owner from hanging the serial group,
     // and a fired timeout is an explicit FAILURE — never a silent registration.
     let registration = tokio::time::timeout(GATE_WAIT, gate.registered.notified());
@@ -4178,7 +4173,7 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
     }
     set_compute_in_flight_gate(None);
 
-    // The crash trace: the run row is still `running` and its receipt is still
+    // note: The crash trace: the run row is still `running` and its receipt is still
     // `running`, but no live owner remains.
     let (run_id, status): (String, String) = sqlx::query_as(
         "SELECT run_id, status FROM compute_sessions \
@@ -4214,7 +4209,7 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
     );
 }
 
-/// v1.207 P3 wave 4 review W4-I1 (a): the §B.3 live-owner signal is scoped to
+/// note: v1.207 P3 wave 4 review W4-I1 (a): the §B.3 live-owner signal is scoped to
 /// the receipt STORE, not to the operation id alone.
 ///
 /// One process serves independent homes/DBs (the two-home fixtures below, an
@@ -4227,7 +4222,7 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
 async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     use nexus_execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
 
-    // Two independent homes served by ONE process.
+    // note: Two independent homes served by ONE process.
     let a = fixture().await;
     let b = fixture().await;
     let op = format!("op_{}", "0".repeat(32));
@@ -4235,7 +4230,7 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     let mut b_request = run_request(WORLD, MODULE);
     b_request.operation_id = Some(op.clone());
 
-    // (1) Store B's receipt is left `running` with NO live owner: its caller is
+    // note: (1) Store B's receipt is left `running` with NO live owner: its caller is
     // dropped at the in-flight seam (a crash — the process-local claim goes, the
     // durable receipt stays).
     let gate_b = Arc::new(ComputeInFlightGate::new(op.clone()));
@@ -4254,7 +4249,7 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     }
     set_compute_in_flight_gate(None);
 
-    // (2) Store A holds a LIVE owner for the SAME caller-supplied id. Store B's
+    // note: (2) Store A holds a LIVE owner for the SAME caller-supplied id. Store B's
     // retry must be `uncertain` (B's own owner is gone) — never store A's Busy.
     let gate_a = Arc::new(ComputeInFlightGate::new(op.clone()));
     set_compute_in_flight_gate(Some(Arc::clone(&gate_a)));
@@ -4282,7 +4277,7 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     );
 }
 
-/// v1.207 P3 wave 4 review W4-I1 (b): dropping one store's in-flight guard must
+/// note: v1.207 P3 wave 4 review W4-I1 (b): dropping one store's in-flight guard must
 /// not erase another store's claim for the SAME caller-supplied id.
 ///
 /// Both directions in one test: store B holds a parked live owner while store A
@@ -4302,7 +4297,7 @@ async fn in_flight_claim_drops_are_store_scoped() {
         ("holder=B, dropper=A", false),
         ("holder=A, dropper=B", true),
     ] {
-        // A fresh id per direction: the same caller-supplied id in BOTH stores
+        // note: A fresh id per direction: the same caller-supplied id in BOTH stores
         // (the collision an id-only key would suffer). 32 lowercase hex
         // characters, the wire shape `validate_operation_id` enforces.
         let op = format!("op_{}", if holder_is_a { "1" } else { "2" }.repeat(32));
@@ -4319,7 +4314,7 @@ async fn in_flight_claim_drops_are_store_scoped() {
             compute_run(&holder.core, &holder.compute, holder_request.clone()),
             async {
                 await_registered(&gate).await;
-                // Disarm: the OTHER store's call for the same id must not park
+                // note: Disarm: the OTHER store's call for the same id must not park
                 // on this store's seam — it registers and drops its own claim.
                 set_compute_in_flight_gate(None);
                 compute_run(&dropper.core, &dropper.compute, dropper_request)
@@ -4342,7 +4337,7 @@ async fn in_flight_claim_drops_are_store_scoped() {
     }
 }
 
-/// v1.207 P3 wave 4 (Greptile P1 "Retried errors lose details"): a failed
+/// note: v1.207 P3 wave 4 (Greptile P1 "Retried errors lose details"): a failed
 /// request's replay restores the ORIGINAL structured refusal from the receipt.
 ///
 /// The first call fails manifest validation with `InputValidation` carrying
@@ -4380,11 +4375,10 @@ async fn failed_request_replay_restores_the_structured_refusal() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// v1.224 P1 T3 — the compute-side settlement fault, driven through compute_run
+// note: v1.224 P1 T3 — the compute-side settlement fault, driven through compute_run
 // ---------------------------------------------------------------------------
 
-/// A deterministic fault at the receipt store's settlement boundary: a
+/// note: A deterministic fault at the receipt store's settlement boundary: a
 /// test-installed `BEFORE UPDATE` trigger over `operation_receipts` that aborts
 /// every terminal transition with `TEST_SETTLE_FAULT`.
 ///
@@ -4407,7 +4401,7 @@ async fn install_settle_fault(pool: &sqlx::SqlitePool) {
     .expect("install the settlement-fault trigger");
 }
 
-/// I-000031 item 2 — `compute_run` driven into its settle failure
+/// note: I-000031 item 2 — `compute_run` driven into its settle failure
 /// (`compute.rs:593-601`) and answered with the typed
 /// [`effect_committed_refusal`] refusal, not a helper-level return.
 ///
@@ -4464,7 +4458,7 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
         "the refusal must carry the store fault verbatim: {category}"
     );
 
-    // 2. The effect committed and stayed committed. The receipt the run wrote is
+    // note: 2. The effect committed and stayed committed. The receipt the run wrote is
     //    still `running` — it shadows the run's own id, which is how the run row
     //    is located without trusting the refused answer.
     let receipt =
@@ -4499,7 +4493,7 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
     );
     assert!(row.error_json.is_none());
 
-    // 3. With the fault gone, a retry of the same operation id is the typed
+    // note: 3. With the fault gone, a retry of the same operation id is the typed
     //    `uncertain` refusal (a `running` receipt whose owner is gone) and the
     //    module is never executed a second time.
     sqlx::query("DROP TRIGGER test_settle_fault")
@@ -4526,13 +4520,13 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
     );
 }
 
-// ── Retained tool-registry integrity ──────────────────────────────────────
+// note: ── Retained tool-registry integrity ──────────────────────────────────────
 //
 // Moved here (v1.244 task 2) from `retained_peer_contracts.rs`: the assertion
 // reads core's own `host_tool_registry`, so it cannot live with the peer
 // contracts in `nexus-connect` — connect has no core edge by design.
 
-/// The 27 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
+/// note: The 27 shipped `nexus.*` host-tool ids (V1.59 P0 roster, minus the retired
 /// `nexus.reference.refresh` and `nexus.research.query`, plus the v1.247 P6
 /// `nexus.strategy.generate`).
 const NEXUS_TOOL_IDS: &[&str] = &[
@@ -4542,7 +4536,7 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.work.patch",
     "nexus.orchestration.schedule_status",
     "nexus.context.assemble",
-    // v1.247 P6: the generate kernel's agent-tool surface.
+    // note: v1.247 P6: the generate kernel's agent-tool surface.
     "nexus.strategy.generate",
     "nexus.world.snapshot.get",
     "nexus.timeline.recent.get",
@@ -4556,7 +4550,7 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.finding.resolve",
     "nexus.pool.entry.manage",
     "nexus.registry.refresh",
-    // V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
+    // note: V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
     "nexus.manuscript.list",
     "nexus.manuscript.read_range",
     "nexus.manuscript.write",
@@ -4567,7 +4561,7 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.trace.correlation",
 ];
 
-/// MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
+/// note: MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
 /// and `::test_profile_sets_are_not_action_capabilities`.
 ///
 /// Preserved: the canonical catalog declares exactly the declared `nexus.*`
@@ -4602,7 +4596,7 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
         );
     }
 
-    // The live registry binds every canonical row, fs/* included.
+    // note: The live registry binds every canonical row, fs/* included.
     let registry = host_tool_registry();
     let catalog = host_tool_catalog();
     for row in catalog {
