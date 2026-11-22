@@ -3,71 +3,72 @@
 //! Implements `nexus42 acp permission list/grant/deny/ask/revoke/reset` for
 //! managing per-agent permission rules in `.nexus42/permissions.toml`.
 //! Uses `toml_edit` to preserve unknown fields and comments.
+// note: the module doc above is this file's scope contract
 
 use crate::config::find_workspace_root;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_acp_host::PermissionPolicy;
 
-/// Permission management commands (agent-scoped rules)
+/// note: Permission management commands (agent-scoped rules)
 #[derive(Debug, Subcommand)]
 pub enum PermissionCommand {
-    /// List permission rules, optionally filtered by agent
+    /// note: List permission rules, optionally filtered by agent
     List {
-        /// Filter by agent ID
+        /// note: Filter by agent ID
         #[arg(long)]
         agent: Option<String>,
 
-        /// Output format (text or json)
+        /// note: Output format (text or json)
         #[arg(short = 'o', long = "output", default_value = "text")]
         output_format: String,
     },
 
-    /// Grant a capability for an agent
+    /// note: Grant a capability for an agent
     Grant {
-        /// Agent ID
+        /// note: Agent ID
         agent: String,
 
-        /// Capability name (e.g., "terminal.create")
+        /// note: Capability name (e.g., "terminal.create")
         capability: String,
     },
 
-    /// Deny a capability for an agent
+    /// note: Deny a capability for an agent
     Deny {
-        /// Agent ID
+        /// note: Agent ID
         agent: String,
 
-        /// Capability name (e.g., "terminal.kill")
+        /// note: Capability name (e.g., "terminal.kill")
         capability: String,
     },
 
-    /// Require user confirmation (ask) for a capability
+    /// note: Require user confirmation (ask) for a capability
     Ask {
-        /// Agent ID
+        /// note: Agent ID
         agent: String,
 
-        /// Capability name (e.g., "`file_system.write`")
+        /// note: Capability name (e.g., "`file_system.write`")
         capability: String,
     },
 
-    /// Revoke a specific rule for an agent+capability
+    /// note: Revoke a specific rule for an agent+capability
     Revoke {
-        /// Agent ID
+        /// note: Agent ID
         agent: String,
 
-        /// Capability name
+        /// note: Capability name
         capability: String,
     },
 
-    /// Reset all rules for an agent (or all agents)
+    /// note: Reset all rules for an agent (or all agents)
     Reset {
-        /// Reset rules for a specific agent only
+        /// note: Reset rules for a specific agent only
         #[arg(long)]
         agent: Option<String>,
     },
 }
 
-/// Run permission management commands.
+/// note: Run permission management commands.
 ///
 /// # Errors
 ///
@@ -110,7 +111,7 @@ fn run_list(
 ) -> Result<()> {
     let policy = PermissionPolicy::load(workspace_root)?;
 
-    // Validate TOML keys and print warnings for unknown keys
+    // note: Validate TOML keys and print warnings for unknown keys
     if let Ok(doc) = PermissionPolicy::load_toml_edit(workspace_root) {
         let warnings = PermissionPolicy::validate_toml_keys(&doc);
         for warning in &warnings {
@@ -131,7 +132,7 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
     println!("Permission Rules");
     println!("================\n");
 
-    // Global rules
+    // note: Global rules
     let (global_granted, global_denied) = policy.list_permissions();
     if !global_granted.is_empty() || !global_denied.is_empty() {
         println!("Global Rules (default: {:?}):", policy.default);
@@ -150,7 +151,7 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
         println!();
     }
 
-    // Agent rules
+    // note: Agent rules
     let agents: Vec<&str> = agent_filter.map_or_else(
         || policy.list_agents(),
         |filter| {
@@ -206,7 +207,7 @@ fn print_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> Res
     Ok(())
 }
 
-/// Build the JSON value for the `permission list --output json` command.
+/// note: Build the JSON value for the `permission list --output json` command.
 fn build_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> serde_json::Value {
     let mut agents_json = serde_json::Map::new();
 
@@ -236,7 +237,7 @@ fn build_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> ser
         serde_json::Value::String(format!("{:?}", policy.default).to_lowercase()),
     );
 
-    // Include global rules when they exist
+    // note: Include global rules when they exist
     let (global_granted, global_denied) = policy.list_permissions();
     if !global_granted.is_empty() || !global_denied.is_empty() {
         let mut global = serde_json::Map::new();
@@ -260,7 +261,7 @@ fn run_grant(workspace_root: &std::path::Path, agent: &str, capability: &str) ->
     PermissionPolicy::ensure_agent_action_table_doc(&mut doc, agent, "grant");
     PermissionPolicy::set_agent_capability_doc(&mut doc, agent, "grant", capability, true);
 
-    // Remove from deny/ask if present
+    // note: Remove from deny/ask if present
     PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "deny", capability);
     PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "ask", capability);
 
@@ -277,7 +278,7 @@ fn run_deny(workspace_root: &std::path::Path, agent: &str, capability: &str) -> 
     PermissionPolicy::ensure_agent_action_table_doc(&mut doc, agent, "deny");
     PermissionPolicy::set_agent_capability_doc(&mut doc, agent, "deny", capability, true);
 
-    // Remove from grant/ask if present
+    // note: Remove from grant/ask if present
     PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "grant", capability);
     PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "ask", capability);
 
@@ -294,7 +295,7 @@ fn run_ask(workspace_root: &std::path::Path, agent: &str, capability: &str) -> R
     PermissionPolicy::ensure_agent_action_table_doc(&mut doc, agent, "ask");
     PermissionPolicy::set_agent_capability_doc(&mut doc, agent, "ask", capability, true);
 
-    // Remove from grant/deny if present
+    // note: Remove from grant/deny if present
     PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "grant", capability);
     PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "deny", capability);
 
@@ -308,7 +309,7 @@ fn run_revoke(workspace_root: &std::path::Path, agent: &str, capability: &str) -
     let policy = PermissionPolicy::load(workspace_root)?;
     let (_, _, asked) = policy.list_agent_rules(agent);
 
-    // Check if there's a rule to revoke in any category
+    // note: Check if there's a rule to revoke in any category
     let has_rule = policy
         .list_agent_rules(agent)
         .0
@@ -377,7 +378,7 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
     Ok(())
 }
 
-// -- toml_edit helpers are now in policy.rs as PermissionPolicy methods --
+// note: the toml_edit helpers live in policy.rs as PermissionPolicy methods
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -407,7 +408,7 @@ mod tests {
         let ws = make_workspace();
         run_grant(ws.path(), "test-agent", "terminal.create").expect("grant failed");
         run_list(ws.path(), None, "text").expect("list failed");
-        // The list command ran without error; verified by I/O
+        // note: The list command ran without error; verified by I/O
     }
 
     #[test]
@@ -466,21 +467,21 @@ mod tests {
     #[test]
     fn test_preserves_existing_global_rules() {
         let ws = make_workspace();
-        // Set up global rules first
+        // note: Set up global rules first
         let mut policy = PermissionPolicy::new();
         policy.grant_permission("file_system.read".to_string());
         policy.save_toml_edit(ws.path()).expect("save failed");
 
-        // Add agent rule
+        // note: Add agent rule
         run_grant(ws.path(), "test-agent", "terminal.create").expect("grant failed");
 
         let loaded = PermissionPolicy::load(ws.path()).expect("load failed");
-        // Global rule still intact
+        // note: Global rule still intact
         assert_eq!(
             loaded.evaluate("file_system.read"),
             nexus_acp_host::PermissionDecision::Grant
         );
-        // Agent rule exists
+        // note: Agent rule exists
         assert_eq!(
             loaded.evaluate_for_agent("test-agent", "terminal.create"),
             nexus_acp_host::PermissionDecision::Grant
@@ -494,7 +495,7 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create dir failed");
         }
-        // Write a file with a comment
+        // note: Write a file with a comment
         std::fs::write(&path, "# My custom comment\ndefault = \"ask\"\n").expect("write failed");
 
         run_grant(ws.path(), "test-agent", "terminal.create").expect("grant failed");
@@ -534,7 +535,7 @@ mod tests {
         let ws = make_workspace();
         run_grant(ws.path(), "test-agent", "terminal.create").expect("grant failed");
         run_list(ws.path(), None, "json").expect("list json failed");
-        // Verified by successful execution
+        // note: Verified by successful execution
     }
 
     #[test]
@@ -543,7 +544,7 @@ mod tests {
         run_grant(ws.path(), "agent-a", "cap-a").expect("grant failed");
         run_deny(ws.path(), "agent-b", "cap-b").expect("deny failed");
 
-        // Listing only agent-a should not show agent-b
+        // note: Listing only agent-a should not show agent-b
         let loaded = PermissionPolicy::load(ws.path()).expect("load failed");
         let (granted, _, _) = loaded.list_agent_rules("agent-a");
         assert_eq!(granted, vec!["cap-a"]);
@@ -559,7 +560,7 @@ mod tests {
         let json_val = build_list_json(&policy, None);
         let parsed = json_val.as_object().expect("should be object");
 
-        // Should have global key with grant/deny
+        // note: Should have global key with grant/deny
         assert!(
             parsed.contains_key("global"),
             "JSON should contain 'global' key"
@@ -570,7 +571,7 @@ mod tests {
         assert!(global.contains_key("grant"));
         assert!(global.contains_key("deny"));
 
-        // Should have agents key
+        // note: Should have agents key
         assert!(
             parsed.contains_key("agents"),
             "JSON should contain 'agents' key"
@@ -589,7 +590,7 @@ mod tests {
         let json_val = build_list_json(&policy, None);
         let parsed = json_val.as_object().expect("should be object");
 
-        // Should NOT have global key when no global rules exist
+        // note: Should NOT have global key when no global rules exist
         assert!(
             !parsed.contains_key("global"),
             "JSON should NOT contain 'global' key when no global rules exist. Got: {parsed:?}"
@@ -603,10 +604,10 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create dir failed");
         }
-        // Write a file with an unknown top-level key
+        // note: Write a file with an unknown top-level key
         std::fs::write(&path, "default = \"ask\"\nfuture_key = \"value\"\n").expect("write failed");
 
-        // run_list should succeed (warnings are informational only)
+        // note: run_list should succeed (warnings are informational only)
         run_list(ws.path(), None, "text").expect("list should succeed");
     }
 }

@@ -4,19 +4,20 @@
 //! As of V1.20 they are no longer available in the local daemon API
 //! (platform concern; not local daemon API per delivery compass §3).
 //! Users should call the platform API directly.
+// note: the module doc above is this file's scope contract
 
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
-    /// Fork a new world from a parent world at a timeline event (platform API)
+    /// note: Fork a new world from a parent world at a timeline event (platform API)
     Fork,
-    /// Request a read-only world snapshot cursor from the platform
+    /// note: Request a read-only world snapshot cursor from the platform
     Snapshot,
 }
 
-/// Run world subcommands.
+/// note: Run world subcommands.
 ///
 /// # Errors
 ///

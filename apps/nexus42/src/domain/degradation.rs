@@ -13,13 +13,14 @@
 //!
 //! The [`DegradationGuard`] monitors platform health and triggers automatic
 //! degradation when consecutive failures exceed the configured threshold.
+// note: the module doc above is this file's scope contract
 
 use super::errors::DomainError;
 use super::runtime_guard::check_operation;
 use super::runtime_mode::DomainRuntimeMode;
 use nexus_contracts::local::domain::RuntimeMode;
 
-/// Degradation policy for runtime mode fallback behavior.
+/// note: Degradation policy for runtime mode fallback behavior.
 ///
 /// When platform becomes unavailable, the system gracefully degrades
 /// from `cloud_enhanced` → `local_first` → `local_only`.
@@ -27,23 +28,23 @@ use nexus_contracts::local::domain::RuntimeMode;
 /// Spec reference: `local-first-runtime-policy-v1.md` §5.3, §6
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DegradationPolicy {
-    /// Timeout for platform health check (milliseconds).
+    /// note: Timeout for platform health check (milliseconds).
     /// Default: 5000ms
     pub health_check_timeout_ms: u64,
 
-    /// Number of consecutive failures before triggering degradation.
+    /// note: Number of consecutive failures before triggering degradation.
     /// Default: 3
     pub failure_threshold: u32,
 
-    /// Time window for counting failures (seconds).
+    /// note: Time window for counting failures (seconds).
     /// Default: 60s
     pub failure_window_secs: u64,
 
-    /// Cooldown period before attempting upgrade (seconds).
+    /// note: Cooldown period before attempting upgrade (seconds).
     /// Default: 300s (5 minutes)
     pub upgrade_cooldown_secs: u64,
 
-    /// Maximum degradation depth (how many levels can degrade).
+    /// note: Maximum degradation depth (how many levels can degrade).
     /// 0 = no degradation allowed, 1 = one level down, 2 = two levels down.
     /// Default: 2 (`cloud_enhanced` → `local_first` → `local_only`)
     pub max_degradation_depth: u32,
@@ -63,7 +64,7 @@ impl Default for DegradationPolicy {
 
 impl DegradationPolicy {
     #[must_use]
-    /// Create a policy with all fields explicitly specified.
+    /// note: Create a policy with all fields explicitly specified.
     pub const fn new(
         health_check_timeout_ms: u64,
         failure_threshold: u32,
@@ -80,7 +81,7 @@ impl DegradationPolicy {
         }
     }
 
-    /// Create a policy that disables degradation entirely.
+    /// note: Create a policy that disables degradation entirely.
     #[must_use]
     pub fn no_degradation() -> Self {
         Self {
@@ -90,21 +91,21 @@ impl DegradationPolicy {
     }
 }
 
-/// Current degradation state.
+/// note: Current degradation state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DegradationState {
-    /// Operating at configured mode (no degradation).
+    /// note: Operating at configured mode (no degradation).
     Normal,
-    /// Degraded one level (e.g., `cloud_enhanced` → `local_first`).
+    /// note: Degraded one level (e.g., `cloud_enhanced` → `local_first`).
     DegradedLevel1,
-    /// Degraded two levels (e.g., `cloud_enhanced` → `local_only`).
+    /// note: Degraded two levels (e.g., `cloud_enhanced` → `local_only`).
     DegradedLevel2,
-    /// Platform unreachable, forced to `local_only`.
+    /// note: Platform unreachable, forced to `local_only`.
     ForcedLocalOnly,
 }
 
 impl DegradationState {
-    /// Returns the numeric depth of this degradation state.
+    /// note: Returns the numeric depth of this degradation state.
     /// 0 = Normal, 1 = `DegradedLevel1`, 2 = DegradedLevel2/ForcedLocalOnly.
     #[must_use]
     pub const fn depth(&self) -> u32 {
@@ -115,18 +116,18 @@ impl DegradationState {
         }
     }
     #[must_use]
-    /// Check if further degradation is possible given the max depth.
+    /// note: Check if further degradation is possible given the max depth.
     pub const fn can_degrade_more(&self, max_depth: u32) -> bool {
         self.depth() < max_depth
     }
 
-    /// Whether this state represents any form of degradation.
+    /// note: Whether this state represents any form of degradation.
     #[must_use]
     pub const fn is_degraded(&self) -> bool {
         !matches!(self, Self::Normal)
     }
 
-    /// Human-readable label for CLI output.
+    /// note: Human-readable label for CLI output.
     #[must_use]
     pub const fn display_label(&self) -> &'static str {
         match self {
@@ -149,21 +150,21 @@ impl std::fmt::Display for DegradationState {
     }
 }
 
-/// Record of platform health check result.
+/// note: Record of platform health check result.
 #[derive(Debug, Clone)]
 pub struct HealthCheckResult {
-    /// Whether platform responded successfully.
+    /// note: Whether platform responded successfully.
     pub is_healthy: bool,
-    /// Response time in milliseconds (if healthy).
+    /// note: Response time in milliseconds (if healthy).
     pub response_time_ms: Option<u64>,
-    /// Error message (if unhealthy).
+    /// note: Error message (if unhealthy).
     pub error_message: Option<String>,
-    /// Timestamp of the check.
+    /// note: Timestamp of the check.
     pub checked_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl HealthCheckResult {
-    /// Create a healthy check result.
+    /// note: Create a healthy check result.
     #[must_use]
     pub fn healthy(response_time_ms: u64) -> Self {
         Self {
@@ -174,7 +175,7 @@ impl HealthCheckResult {
         }
     }
 
-    /// Create an unhealthy check result.
+    /// note: Create an unhealthy check result.
     pub fn unhealthy(error: impl Into<String>) -> Self {
         Self {
             is_healthy: false,
@@ -185,7 +186,7 @@ impl HealthCheckResult {
     }
 }
 
-/// Serializable snapshot of degradation guard state for config persistence.
+/// note: Serializable snapshot of degradation guard state for config persistence.
 ///
 /// This lightweight struct captures the display-relevant degradation state
 /// and can be stored inline in `config.json` (V1.2 MVP strategy).
@@ -193,29 +194,29 @@ impl HealthCheckResult {
 /// and mutable state not suitable for simple persistence.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DegradationSnapshot {
-    /// Current degradation state.
+    /// note: Current degradation state.
     pub state: DegradationState,
-    /// Number of consecutive platform failures.
+    /// note: Number of consecutive platform failures.
     pub failure_count: u32,
-    /// Last health check result (if any).
+    /// note: Last health check result (if any).
     pub last_health_check: Option<HealthCheckSnapshot>,
-    /// ISO 8601 timestamp of last upgrade attempt (for cooldown persistence across restarts).
+    /// note: ISO 8601 timestamp of last upgrade attempt (for cooldown persistence across restarts).
     /// Old snapshots without this field deserialize as `None`.
     #[serde(default)]
     pub last_upgrade_attempt: Option<String>,
 }
 
-/// Serializable record of a platform health check for config persistence.
+/// note: Serializable record of a platform health check for config persistence.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct HealthCheckSnapshot {
-    /// Whether the platform responded successfully.
+    /// note: Whether the platform responded successfully.
     pub is_healthy: bool,
-    /// ISO 8601 timestamp of the check.
+    /// note: ISO 8601 timestamp of the check.
     pub checked_at: String,
 }
 
 impl DegradationSnapshot {
-    /// Create a new snapshot with the given state and failure count.
+    /// note: Create a new snapshot with the given state and failure count.
     #[must_use]
     pub const fn new(state: DegradationState, failure_count: u32) -> Self {
         Self {
@@ -226,7 +227,7 @@ impl DegradationSnapshot {
         }
     }
 
-    /// Create a new snapshot with an explicit `last_upgrade_attempt`.
+    /// note: Create a new snapshot with an explicit `last_upgrade_attempt`.
     #[must_use]
     pub const fn with_upgrade_attempt(
         state: DegradationState,
@@ -241,7 +242,7 @@ impl DegradationSnapshot {
         }
     }
 
-    /// Create a snapshot from a live [`DegradationGuard`].
+    /// note: Create a snapshot from a live [`DegradationGuard`].
     #[must_use]
     pub fn from_guard(guard: &DegradationGuard) -> Self {
         Self {
@@ -256,7 +257,7 @@ impl DegradationSnapshot {
     }
 }
 
-/// Guard that monitors platform health and triggers degradation.
+/// note: Guard that monitors platform health and triggers degradation.
 ///
 /// S-003: `DegradationGuard` is Send + Sync because all its fields are
 /// thread-safe: `DegradationPolicy` (primitive types), `DomainRuntimeMode` (Copy),
@@ -267,13 +268,13 @@ pub struct DegradationGuard {
     policy: DegradationPolicy,
     current_mode: DomainRuntimeMode,
     degradation_state: DegradationState,
-    /// Individual failure timestamps for correct window-based counting.
+    /// note: Individual failure timestamps for correct window-based counting.
     failure_timestamps: Vec<chrono::DateTime<chrono::Utc>>,
     last_health_check: Option<HealthCheckResult>,
     last_upgrade_attempt: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-// S-003: Compile-time verification that DegradationGuard is Send + Sync.
+// note: S-003: Compile-time verification that DegradationGuard is Send + Sync.
 // This will fail to compile if the struct holds non-thread-safe types.
 const _: () = {
     const fn assert_send_sync<T: Send + Sync>() {}
@@ -281,7 +282,7 @@ const _: () = {
 };
 
 impl DegradationGuard {
-    /// Create a new guard with the given policy and initial runtime mode.
+    /// note: Create a new guard with the given policy and initial runtime mode.
     #[must_use]
     pub const fn new(policy: DegradationPolicy, initial_mode: DomainRuntimeMode) -> Self {
         Self {
@@ -294,13 +295,13 @@ impl DegradationGuard {
         }
     }
 
-    /// Create a new guard with default policy and the given initial mode.
+    /// note: Create a new guard with default policy and the given initial mode.
     #[must_use]
     pub fn with_defaults(initial_mode: DomainRuntimeMode) -> Self {
         Self::new(DegradationPolicy::default(), initial_mode)
     }
 
-    /// Restore a guard directly from a persisted snapshot.
+    /// note: Restore a guard directly from a persisted snapshot.
     ///
     /// Sets the degradation state and effective mode without replaying
     /// failures, avoiding unintended re-degradation (C-001).
@@ -322,7 +323,7 @@ impl DegradationGuard {
             }
         }
 
-        // Cap synthetic timestamps to failure_threshold - 1 so that restored
+        // note: Cap synthetic timestamps to failure_threshold - 1 so that restored
         // failures alone can never trigger immediate re-degradation. Only NEW
         // real failures should push past the threshold.
         let capped_count = snap.failure_count.min(
@@ -335,7 +336,7 @@ impl DegradationGuard {
             policy: DegradationPolicy::default(),
             current_mode: effective_mode,
             degradation_state: snap.state,
-            // Replicate failure_count as synthetic timestamps so window logic works.
+            // note: Replicate failure_count as synthetic timestamps so window logic works.
             // Place them at "now" so they'll expire naturally via the window.
             failure_timestamps: (0..capped_count).map(|_| chrono::Utc::now()).collect(),
             last_health_check: None,
@@ -347,43 +348,43 @@ impl DegradationGuard {
         }
     }
 
-    /// Access the current runtime mode (may have been downgraded by degradation).
+    /// note: Access the current runtime mode (may have been downgraded by degradation).
     #[must_use]
     pub const fn current_mode(&self) -> &DomainRuntimeMode {
         &self.current_mode
     }
 
-    /// Access the current degradation state.
+    /// note: Access the current degradation state.
     #[must_use]
     pub const fn degradation_state(&self) -> DegradationState {
         self.degradation_state
     }
 
-    /// Access the current degradation state (convenience alias).
+    /// note: Access the current degradation state (convenience alias).
     #[must_use]
     pub const fn state(&self) -> DegradationState {
         self.degradation_state
     }
 
-    /// Access the degradation policy.
+    /// note: Access the degradation policy.
     #[must_use]
     pub const fn policy(&self) -> &DegradationPolicy {
         &self.policy
     }
 
-    /// Access the last health check result (if any).
+    /// note: Access the last health check result (if any).
     #[must_use]
     pub const fn last_health_check(&self) -> Option<&HealthCheckResult> {
         self.last_health_check.as_ref()
     }
 
-    /// Access the last upgrade attempt timestamp (if any).
+    /// note: Access the last upgrade attempt timestamp (if any).
     #[must_use]
     pub const fn last_upgrade_attempt(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.last_upgrade_attempt
     }
 
-    /// Access the current failure count (number of timestamps in window).
+    /// note: Access the current failure count (number of timestamps in window).
     ///
     /// The count is the length of the in-memory failure-timestamp buffer,
     /// which is bounded in practice; a value beyond `u32` saturates to
@@ -394,7 +395,7 @@ impl DegradationGuard {
     }
     ///
     /// # Errors
-    /// Returns `Err(DomainError::...)` if validation fails.
+    /// note: Returns `Err(DomainError::...)` if validation fails.
     /// Check if operation requires platform and if degradation allows it.
     /// Returns error if operation is blocked by degradation state.
     ///
@@ -405,7 +406,7 @@ impl DegradationGuard {
         check_operation(&self.current_mode, operation)
     }
 
-    /// Record a platform operation result.
+    /// note: Record a platform operation result.
     /// Updates failure timestamps and potentially triggers degradation.
     pub fn record_platform_result(&mut self, success: bool, error: Option<String>) {
         if success {
@@ -421,7 +422,7 @@ impl DegradationGuard {
         }
     }
 
-    /// Record a health check result directly.
+    /// note: Record a health check result directly.
     /// Updates the last health check and may trigger degradation.
     pub fn record_health_check(&mut self, result: HealthCheckResult) {
         let is_healthy = result.is_healthy;
@@ -436,7 +437,7 @@ impl DegradationGuard {
         }
     }
 
-    /// Check if we should degrade based on failure threshold within the window.
+    /// note: Check if we should degrade based on failure threshold within the window.
     ///
     /// Prunes timestamps older than `failure_window_secs`, then checks if
     /// the remaining count meets or exceeds `failure_threshold`.
@@ -459,7 +460,7 @@ impl DegradationGuard {
         false
     }
 
-    /// Perform degradation (move one level down).
+    /// note: Perform degradation (move one level down).
     fn degrade(&mut self) {
         let next_state = match self.degradation_state {
             DegradationState::Normal => {
@@ -484,25 +485,25 @@ impl DegradationGuard {
             if let Some(downgraded) = self.current_mode.downgrade() {
                 self.current_mode = downgraded;
             }
-            self.failure_timestamps.clear(); // Reset after degradation
+            self.failure_timestamps.clear(); // note: Reset after degradation
         }
     }
 
-    /// Force immediate degradation to `local_only` regardless of threshold.
+    /// note: Force immediate degradation to `local_only` regardless of threshold.
     pub fn force_local_only(&mut self) {
         self.degradation_state = DegradationState::ForcedLocalOnly;
         self.current_mode = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
         self.failure_timestamps.clear();
     }
 
-    /// Try to upgrade back to original mode.
+    /// note: Try to upgrade back to original mode.
     /// Returns true if upgrade succeeded.
     ///
     /// Upgrade requires:
     /// 1. Cooldown period has elapsed since last upgrade attempt
     /// 2. Platform is currently healthy (last health check succeeded)
     pub fn try_upgrade(&mut self) -> bool {
-        // Check cooldown
+        // note: Check cooldown
         if let Some(last) = self.last_upgrade_attempt {
             let elapsed = chrono::Utc::now().signed_duration_since(last).num_seconds();
             if elapsed < i64::try_from(self.policy.upgrade_cooldown_secs).unwrap_or(i64::MAX) {
@@ -510,7 +511,7 @@ impl DegradationGuard {
             }
         }
 
-        // Only upgrade if platform is healthy
+        // note: Only upgrade if platform is healthy
         if self
             .last_health_check
             .as_ref()
@@ -545,7 +546,7 @@ impl DegradationGuard {
         false
     }
 
-    /// Reset the guard to normal state with the given mode.
+    /// note: Reset the guard to normal state with the given mode.
     pub fn reset(&mut self, mode: DomainRuntimeMode) {
         self.current_mode = mode;
         self.degradation_state = DegradationState::Normal;
@@ -553,7 +554,7 @@ impl DegradationGuard {
         self.last_upgrade_attempt = None;
     }
 
-    /// Set degradation state directly for testing purposes.
+    /// note: Set degradation state directly for testing purposes.
     #[cfg(test)]
     pub(crate) const fn set_state_for_testing(&mut self, state: DegradationState) {
         self.degradation_state = state;
@@ -578,7 +579,6 @@ impl DegradationGuard {
 mod tests {
     use super::*;
 
-    // ── DegradationPolicy tests ─────────────────────────────────────────
 
     #[test]
     fn default_policy_has_expected_values() {
@@ -594,7 +594,7 @@ mod tests {
     fn no_degradation_policy_disables_fallback() {
         let policy = DegradationPolicy::no_degradation();
         assert_eq!(policy.max_degradation_depth, 0);
-        // Other fields should still have defaults
+        // note: Other fields should still have defaults
         assert_eq!(policy.failure_threshold, 3);
     }
 
@@ -616,7 +616,6 @@ mod tests {
         assert_eq!(policy, deserialized);
     }
 
-    // ── DegradationState tests ─────────────────────────────────────────
 
     #[test]
     fn degradation_state_depths() {
@@ -678,7 +677,6 @@ mod tests {
         }
     }
 
-    // ── HealthCheckResult tests ─────────────────────────────────────────
 
     #[test]
     fn healthy_check_result() {
@@ -696,7 +694,6 @@ mod tests {
         assert_eq!(result.error_message, Some("connection refused".to_string()));
     }
 
-    // ── DegradationGuard tests ─────────────────────────────────────────
 
     #[test]
     fn guard_starts_in_normal_state() {
@@ -713,7 +710,7 @@ mod tests {
         let policy = DegradationPolicy::new(5000, 3, 60, 300, 2);
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Record failures up to threshold
+        // note: Record failures up to threshold
         guard.record_platform_result(false, Some("error 1".into()));
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
 
@@ -721,7 +718,7 @@ mod tests {
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
 
         guard.record_platform_result(false, Some("error 3".into()));
-        // Third failure should trigger degradation
+        // note: Third failure should trigger degradation
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
         assert_eq!(
             *guard.current_mode(),
@@ -735,13 +732,13 @@ mod tests {
         let policy = DegradationPolicy::new(5000, 3, 60, 300, 2);
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // First degradation: cloud_enhanced → local_first
+        // note: First degradation: cloud_enhanced → local_first
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
 
-        // Second degradation: local_first → local_only
+        // note: Second degradation: local_first → local_only
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
@@ -763,7 +760,7 @@ mod tests {
         guard.record_platform_result(true, None);
         assert_eq!(guard.failure_count(), 0);
 
-        // Two more failures shouldn't trigger degradation (not at threshold)
+        // note: Two more failures shouldn't trigger degradation (not at threshold)
         guard.record_platform_result(false, Some("fail".into()));
         guard.record_platform_result(false, Some("fail".into()));
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
@@ -775,17 +772,17 @@ mod tests {
         let policy = DegradationPolicy::new(5000, 3, 60, 300, 2);
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // sync is platform-required: should be allowed in cloud_enhanced
+        // note: sync is platform-required: should be allowed in cloud_enhanced
         assert!(guard.check_operation("sync").is_ok());
 
-        // Degrade to local_first (still allows platform)
+        // note: Degrade to local_first (still allows platform)
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
         assert!(guard.check_operation("sync").is_ok());
 
-        // Degrade to local_only (blocks platform)
+        // note: Degrade to local_only (blocks platform)
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
@@ -796,21 +793,21 @@ mod tests {
     #[test]
     fn upgrade_requires_healthy_platform() {
         let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
-        let policy = DegradationPolicy::new(5000, 3, 60, 0, 2); // no cooldown
+        let policy = DegradationPolicy::new(5000, 3, 60, 0, 2); // note: no cooldown
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Degrade to level 1
+        // note: Degrade to level 1
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
 
-        // Try upgrade without healthy check — should fail
+        // note: Try upgrade without healthy check — should fail
         assert!(!guard.try_upgrade());
 
-        // Record healthy result
+        // note: Record healthy result
         guard.record_platform_result(true, None);
-        // Now upgrade should succeed
+        // note: Now upgrade should succeed
         assert!(guard.try_upgrade());
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
     }
@@ -818,26 +815,26 @@ mod tests {
     #[test]
     fn upgrade_respects_cooldown() {
         let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
-        let policy = DegradationPolicy::new(5000, 3, 60, 300, 2); // 300s cooldown
+        let policy = DegradationPolicy::new(5000, 3, 60, 300, 2); // note: 300s cooldown
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Degrade to level 1
+        // note: Degrade to level 1
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         guard.record_platform_result(true, None);
 
-        // First upgrade succeeds
+        // note: First upgrade succeeds
         assert!(guard.try_upgrade());
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
 
-        // Immediately degrade again
+        // note: Immediately degrade again
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         guard.record_platform_result(true, None);
 
-        // Second upgrade should fail due to cooldown
+        // note: Second upgrade should fail due to cooldown
         assert!(!guard.try_upgrade());
     }
 
@@ -876,7 +873,7 @@ mod tests {
         let policy = DegradationPolicy::no_degradation();
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Even with many failures, no degradation should occur
+        // note: Even with many failures, no degradation should occur
         for _ in 0..10 {
             guard.record_platform_result(false, Some("fail".into()));
         }
@@ -909,19 +906,18 @@ mod tests {
         let policy = DegradationPolicy::new(5000, 3, 60, 300, 2);
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Cannot degrade further from local_only
+        // note: Cannot degrade further from local_only
         for _ in 0..10 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
-        // Mode stays local_only because downgrade() returns None
+        // note: Mode stays local_only because downgrade() returns None
         assert_eq!(
             *guard.current_mode(),
             DomainRuntimeMode::new(RuntimeMode::LocalOnly)
         );
     }
 
-    // ── DegradationSnapshot tests ──────────────────────────────────────
 
     #[test]
     fn snapshot_new_creates_default() {
@@ -936,12 +932,12 @@ mod tests {
         let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
         let mut guard = DegradationGuard::with_defaults(mode);
 
-        // Record some failures to get non-trivial state
+        // note: Record some failures to get non-trivial state
         guard.record_platform_result(false, Some("err".into()));
         guard.record_platform_result(false, Some("err".into()));
 
         let snap = DegradationSnapshot::from_guard(&guard);
-        assert_eq!(snap.state, DegradationState::Normal); // not yet at threshold
+        assert_eq!(snap.state, DegradationState::Normal);
         assert_eq!(snap.failure_count, 2);
         assert!(snap.last_health_check.is_some());
         assert!(!snap.last_health_check.as_ref().unwrap().is_healthy);
@@ -960,7 +956,6 @@ mod tests {
         assert_eq!(snap, back);
     }
 
-    // ── DegradationState::display_label tests ──────────────────────────
 
     #[test]
     fn display_label_returns_human_readable() {
@@ -979,7 +974,7 @@ mod tests {
         );
     }
 
-    // ── T6.10: Degradation Behavior Tests ────────────────────────────────
+    // note: T6.10: Degradation Behavior Tests
 
     #[test]
     fn degradation_guard_triggers_after_threshold() {
@@ -991,7 +986,7 @@ mod tests {
         let mut guard =
             DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
 
-        // Record 3 failures within window
+        // note: Record 3 failures within window
         guard.record_platform_result(false, Some("timeout".into()));
         guard.record_platform_result(false, Some("timeout".into()));
         guard.record_platform_result(false, Some("timeout".into()));
@@ -1013,14 +1008,14 @@ mod tests {
         guard.record_platform_result(false, Some("err".into()));
         assert_eq!(guard.state(), DegradationState::DegradedLevel1);
 
-        // Success resets failure count
+        // note: Success resets failure count
         guard.record_platform_result(true, None);
         assert_eq!(guard.failure_count(), 0);
     }
 
     #[test]
     fn upgrade_blocked_without_cooldown() {
-        // When cooldown is 0, upgrade is blocked if no healthy platform check
+        // note: When cooldown is 0, upgrade is blocked if no healthy platform check
         let policy = DegradationPolicy {
             upgrade_cooldown_secs: 0,
             ..Default::default()
@@ -1029,7 +1024,7 @@ mod tests {
             DegradationGuard::new(policy, DomainRuntimeMode::parse("local_first").unwrap());
         guard.set_state_for_testing(DegradationState::DegradedLevel1);
 
-        // Try upgrade without healthy check - blocked
+        // note: Try upgrade without healthy check - blocked
         // (upgrade_cooldown_secs is 0 but last_upgrade_attempt is None, so this passes)
         // Then it checks last_health_check which is None - so no upgrade
         // Actually with cooldown=0, the upgrade will proceed if health is healthy
@@ -1041,7 +1036,7 @@ mod tests {
     #[test]
     fn max_degradation_depth_respects_policy() {
         let policy = DegradationPolicy {
-            max_degradation_depth: 1, // Only one level allowed
+            max_degradation_depth: 1, // note: Only one level allowed
             failure_threshold: 1,
             ..Default::default()
         };
@@ -1051,12 +1046,12 @@ mod tests {
         guard.record_platform_result(false, Some("err".into()));
         assert_eq!(guard.state(), DegradationState::DegradedLevel1);
 
-        // Cannot degrade further (policy depth = 1)
+        // note: Cannot degrade further (policy depth = 1)
         guard.record_platform_result(false, Some("err".into()));
-        assert_ne!(guard.state(), DegradationState::DegradedLevel2); // stays at level 1
+        assert_ne!(guard.state(), DegradationState::DegradedLevel2);
     }
 
-    // ── R3: last_upgrade_attempt persistence tests ─────────────────────
+    // note: R3: last_upgrade_attempt persistence tests
 
     #[test]
     fn snapshot_from_guard_preserves_last_upgrade_attempt() {
@@ -1067,17 +1062,17 @@ mod tests {
         };
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Degrade and then upgrade to set last_upgrade_attempt
+        // note: Degrade and then upgrade to set last_upgrade_attempt
         for _ in 0..3 {
             guard.record_platform_result(false, Some("fail".into()));
         }
         guard.record_platform_result(true, None);
         assert!(guard.try_upgrade());
 
-        // Verify the guard has a last_upgrade_attempt
+        // note: Verify the guard has a last_upgrade_attempt
         assert!(guard.last_upgrade_attempt().is_some());
 
-        // Snapshot should capture it
+        // note: Snapshot should capture it
         let snap = DegradationSnapshot::from_guard(&guard);
         assert!(snap.last_upgrade_attempt.is_some());
     }
@@ -1095,7 +1090,7 @@ mod tests {
 
         let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
 
-        // last_upgrade_attempt should be restored
+        // note: last_upgrade_attempt should be restored
         let restored = guard
             .last_upgrade_attempt()
             .expect("last_upgrade_attempt should be restored");
@@ -1104,7 +1099,7 @@ mod tests {
 
     #[test]
     fn snapshot_without_last_upgrade_attempt_deserializes_as_none() {
-        // Old-format JSON without last_upgrade_attempt field
+        // note: Old-format JSON without last_upgrade_attempt field
         let json = r#"{"state":"DegradedLevel1","failure_count":2}"#;
         let snap: DegradationSnapshot = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(snap.state, DegradationState::DegradedLevel1);
@@ -1129,7 +1124,7 @@ mod tests {
         );
     }
 
-    // ── R1: Window-based failure timestamp tests ───────────────────────
+    // note: R1: Window-based failure timestamp tests
 
     #[test]
     fn three_failures_within_window_triggers_degradation() {
@@ -1148,13 +1143,13 @@ mod tests {
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
 
         guard.record_platform_result(false, Some("fail 3".into()));
-        // All 3 failures within 5s window → should degrade
+        // note: All 3 failures within 5s window → should degrade
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
     }
 
     #[test]
     fn failure_outside_window_does_not_count() {
-        // Use a very short window (2s) so we can reliably test time-based expiry
+        // note: Use a very short window (2s) so we can reliably test time-based expiry
         let policy = DegradationPolicy {
             failure_threshold: 3,
             failure_window_secs: 2,
@@ -1163,19 +1158,19 @@ mod tests {
         let mut guard =
             DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
 
-        // Record 2 failures now
+        // note: Record 2 failures now
         guard.record_platform_result(false, Some("fail 1".into()));
         guard.record_platform_result(false, Some("fail 2".into()));
         assert_eq!(guard.failure_count(), 2);
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
 
-        // Wait for the window to expire
+        // note: Wait for the window to expire
         std::thread::sleep(std::time::Duration::from_millis(2100));
 
-        // Record 1 more failure. The 2 old failures are now outside the window.
+        // note: Record 1 more failure. The 2 old failures are now outside the window.
         guard.record_platform_result(false, Some("fail 3".into()));
 
-        // Only 1 failure within the window → should NOT degrade
+        // note: Only 1 failure within the window → should NOT degrade
         assert_eq!(
             guard.degradation_state(),
             DegradationState::Normal,
@@ -1185,7 +1180,7 @@ mod tests {
 
     #[test]
     fn failure_just_at_window_boundary_counts() {
-        // Use a 1s window. 3 rapid failures should all be within window.
+        // note: Use a 1s window. 3 rapid failures should all be within window.
         let policy = DegradationPolicy {
             failure_threshold: 3,
             failure_window_secs: 1,
@@ -1198,7 +1193,7 @@ mod tests {
         guard.record_platform_result(false, Some("fail 2".into()));
         guard.record_platform_result(false, Some("fail 3".into()));
 
-        // All 3 within 1s window → degrades
+        // note: All 3 within 1s window → degrades
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
     }
 
@@ -1216,16 +1211,16 @@ mod tests {
         guard.record_platform_result(false, Some("fail 2".into()));
         assert_eq!(guard.failure_count(), 2);
 
-        // Success clears all timestamps
+        // note: Success clears all timestamps
         guard.record_platform_result(true, None);
         assert_eq!(guard.failure_count(), 0);
 
-        // Need a full 3 new failures to trigger degradation
+        // note: Need a full 3 new failures to trigger degradation
         guard.record_platform_result(false, Some("fail 3".into()));
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
     }
 
-    // ── S-003: Send + Sync verification tests ───────────────────────────
+    // note: S-003: Send + Sync verification tests
 
     #[test]
     fn degradation_guard_is_send() {
@@ -1239,24 +1234,24 @@ mod tests {
         assert_sync::<DegradationGuard>();
     }
 
-    // ── QC1-W1: restored failures at threshold do not trigger immediate re-degradation ─
+    // note: QC1-W1: restored failures at threshold do not trigger immediate re-degradation
 
     #[test]
     fn restored_failures_at_threshold_do_not_trigger_immediate_degradation() {
         let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
         let threshold = DegradationPolicy::default().failure_threshold;
 
-        // Restore with exactly failure_threshold failures
+        // note: Restore with exactly failure_threshold failures
         let snap = DegradationSnapshot::new(DegradationState::Normal, threshold);
         let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
 
-        // The guard should NOT want to degrade immediately
+        // note: The guard should NOT want to degrade immediately
         assert!(
             !guard.should_degrade(),
             "restored guard with failure_threshold failures should not trigger immediate degradation"
         );
 
-        // Verify the failure count is capped to threshold - 1
+        // note: Verify the failure count is capped to threshold - 1
         assert_eq!(
             guard.failure_count(),
             threshold - 1,
@@ -1268,7 +1263,7 @@ mod tests {
     fn restored_failures_below_threshold_preserved() {
         let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
 
-        // Restore with fewer failures than threshold
+        // note: Restore with fewer failures than threshold
         let snap = DegradationSnapshot::new(DegradationState::Normal, 1);
         let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
 

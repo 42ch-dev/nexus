@@ -10,6 +10,7 @@
 //! 3. **Number word conversion** — map English words to digits
 //! 4. **Math extraction** — extract `{n1, op, n2}` from cleaned text
 //! 5. **Evaluation** — compute result, guard division by zero, ensure non-negative
+// note: the module doc above is this file's scope contract
 
 pub mod eval;
 pub mod noise;
@@ -19,34 +20,34 @@ pub mod parser;
 use eval::evaluate;
 use thiserror::Error;
 
-/// Errors that can occur during challenge solving.
+/// note: Errors that can occur during challenge solving.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ChallengeError {
-    /// Challenge text is empty or contains only whitespace.
+    /// note: Challenge text is empty or contains only whitespace.
     #[error("challenge text is empty")]
     InvalidInput,
 
-    /// Could not extract a math problem from the text.
+    /// note: Could not extract a math problem from the text.
     #[error("could not parse math problem from challenge text")]
     ParseError,
 
-    /// Division by zero attempted.
+    /// note: Division by zero attempted.
     #[error("division by zero")]
     DivisionByZero,
 
-    /// Subtraction produced a negative result.
+    /// note: Subtraction produced a negative result.
     #[error("negative result: {n1} - {n2}")]
     NegativeResult { n1: u32, n2: u32 },
 
-    /// Division produced a non-integer result.
+    /// note: Division produced a non-integer result.
     #[error("non-integer division result: {dividend} / {divisor}")]
     NonIntegerResult { dividend: u32, divisor: u32 },
 }
 
-/// Result type alias for challenge solving.
+/// note: Result type alias for challenge solving.
 pub type Result<T> = std::result::Result<T, ChallengeError>;
 
-/// Solve a challenge text and return the numeric answer as a string.
+/// note: Solve a challenge text and return the numeric answer as a string.
 ///
 /// This is the main entry point. It runs the full processing pipeline:
 /// noise removal → case normalization → number word conversion →
@@ -84,19 +85,14 @@ pub fn solve_challenge(text: &str) -> Result<String> {
         return Err(ChallengeError::InvalidInput);
     }
 
-    // Step 1: Remove noise symbols
     let cleaned = noise::strip_noise(trimmed);
 
-    // Step 2: Normalize to lowercase
     let lower = cleaned.to_lowercase();
 
-    // Step 3: Convert English number words to digits
     let with_numbers = numbers::convert_number_words(&lower);
 
-    // Step 4: Extract math problem
     let problem = parser::extract_math_problem(&with_numbers).ok_or(ChallengeError::ParseError)?;
 
-    // Step 5: Evaluate
     let result = evaluate(&problem)?;
 
     Ok(result.to_string())

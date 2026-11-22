@@ -2,40 +2,41 @@
 //!
 //! Wraps the `RuntimeMode` enum (defined in `nexus-contracts::enum_conversions`)
 //! with domain-level convenience methods for mode-aware operation checks.
+// note: the module doc above is this file's scope contract
 
 use super::errors::DomainError;
 use nexus_contracts::local::domain::RuntimeMode;
 use std::fmt;
 use std::str::FromStr as _;
 
-/// Domain wrapper for `RuntimeMode` with additional constraint queries.
+/// note: Domain wrapper for `RuntimeMode` with additional constraint queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DomainRuntimeMode(pub RuntimeMode);
 
 impl DomainRuntimeMode {
-    /// V1.2 default runtime mode.
+    /// note: V1.2 default runtime mode.
     pub const DEFAULT: Self = Self(RuntimeMode::LocalOnly);
     #[must_use]
-    /// Create from generated enum.
+    /// note: Create from generated enum.
     pub const fn new(mode: RuntimeMode) -> Self {
         Self(mode)
     }
 
-    /// Access the inner generated enum.
+    /// note: Access the inner generated enum.
     #[must_use]
     pub const fn inner(&self) -> &RuntimeMode {
         &self.0
     }
 
-    /// Whether this mode completely prohibits platform HTTP dependencies.
+    /// note: Whether this mode completely prohibits platform HTTP dependencies.
     /// Only `local_only` returns true.
     #[must_use]
     pub const fn is_local_only(&self) -> bool {
         matches!(self.0, RuntimeMode::LocalOnly)
     }
     #[must_use]
-    /// Whether this mode allows optional platform use.
+    /// note: Whether this mode allows optional platform use.
     /// `local_first` and `cloud_enhanced` return true.
     pub const fn allows_platform(&self) -> bool {
         !self.is_local_only()
@@ -49,7 +50,7 @@ impl DomainRuntimeMode {
     }
     ///
     /// # Errors
-    /// Returns `Err(DomainError::...)` if validation fails.
+    /// note: Returns `Err(DomainError::...)` if validation fails.
     /// Parse from string (matches JSON Schema enum values).
     pub fn parse(s: &str) -> Result<Self, DomainError> {
         RuntimeMode::from_str(s)
@@ -57,7 +58,7 @@ impl DomainRuntimeMode {
             .map_err(DomainError::ValidationError)
     }
 
-    /// Downgrade to a more local-first mode.
+    /// note: Downgrade to a more local-first mode.
     /// Chain: `cloud_enhanced` → `local_first` → `local_only`
     /// Returns None if already at `local_only` (cannot downgrade further).
     #[must_use]
@@ -69,7 +70,7 @@ impl DomainRuntimeMode {
         }
     }
 
-    /// Upgrade to a more cloud-enhanced mode.
+    /// note: Upgrade to a more cloud-enhanced mode.
     /// Chain: `local_only` → `local_first` → `cloud_enhanced`
     /// Returns None if already at `cloud_enhanced` (cannot upgrade further).
     #[must_use]
@@ -81,10 +82,10 @@ impl DomainRuntimeMode {
         }
     }
 
-    /// Calculate degradation depth from a target mode.
+    /// note: Calculate degradation depth from a target mode.
     /// 0 = same mode, 1 = one level down, 2 = two levels down.
     #[must_use]
-    // Or-patterns group the mode-pairs that share a depth value; the grouped
+    // note: Or-patterns group the mode-pairs that share a depth value; the grouped
     // arms are the only way to express the depth table without duplicate
     // match-arm bodies, and no further nesting is possible for these tuples.
     #[allow(clippy::unnested_or_patterns)]
@@ -193,7 +194,7 @@ mod tests {
         let local_only = local_first.downgrade().unwrap();
         assert_eq!(local_only, DomainRuntimeMode::new(RuntimeMode::LocalOnly));
 
-        // Cannot downgrade from local_only
+        // note: Cannot downgrade from local_only
         assert!(local_only.downgrade().is_none());
     }
 
@@ -206,7 +207,7 @@ mod tests {
         let cloud = local_first.upgrade().unwrap();
         assert_eq!(cloud, DomainRuntimeMode::new(RuntimeMode::CloudEnhanced));
 
-        // Cannot upgrade from cloud_enhanced
+        // note: Cannot upgrade from cloud_enhanced
         assert!(cloud.upgrade().is_none());
     }
 
@@ -256,11 +257,11 @@ mod tests {
     fn degradation_depth_upgrade_returns_zero() {
         let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
         let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
-        // Upgrading (reverse direction) should return 0
+        // note: Upgrading (reverse direction) should return 0
         assert_eq!(local_only.degradation_depth_to(&cloud), 0);
     }
 
-    // ── T6.9: Mode Switch Test Cases ─────────────────────────────────────
+    // note: T6.9: Mode Switch Test Cases
 
     #[test]
     fn mode_switch_chain_cloud_to_local_only() {
@@ -269,7 +270,7 @@ mod tests {
         assert_eq!(local_first.to_string(), "local_first");
         let local_only = local_first.downgrade().unwrap();
         assert_eq!(local_only.to_string(), "local_only");
-        assert!(local_only.downgrade().is_none()); // floor
+        assert!(local_only.downgrade().is_none());
     }
 
     #[test]
@@ -279,7 +280,7 @@ mod tests {
         assert_eq!(local_first.to_string(), "local_first");
         let cloud = local_first.upgrade().unwrap();
         assert_eq!(cloud.to_string(), "cloud_enhanced");
-        assert!(cloud.upgrade().is_none()); // ceiling
+        assert!(cloud.upgrade().is_none());
     }
 
     #[test]
@@ -296,17 +297,17 @@ mod tests {
 
     #[test]
     fn mode_switch_preserves_constraints() {
-        // Cloud enhanced: allows platform + allows LLM
+        // note: Cloud enhanced: allows platform + allows LLM
         let cloud = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         assert!(cloud.allows_platform());
         assert!(cloud.allows_platform_llm());
 
-        // Local first: allows platform, denies LLM
+        // note: Local first: allows platform, denies LLM
         let degraded = cloud.downgrade().unwrap();
         assert!(degraded.allows_platform());
         assert!(!degraded.allows_platform_llm());
 
-        // Local only: denies both
+        // note: Local only: denies both
         let floor = degraded.downgrade().unwrap();
         assert!(!floor.allows_platform());
         assert!(!floor.allows_platform_llm());

@@ -7,6 +7,7 @@
 //! Compiled only for the `cli` cohort (the `nexus42` bin's required feature).
 //! The optional `connect-host` feature adds the `connect` group to this same
 //! parser — it never replaces it.
+// note: the module doc above is this file's scope contract
 
 #[cfg(feature = "connect-host")]
 use crate::commands::connect::ConnectCommand;
@@ -18,7 +19,7 @@ use crate::commands::{
 };
 use clap::{Parser, Subcommand};
 
-/// Nexus CLI — creative world-building command-line interface
+/// note: Nexus CLI — creative world-building command-line interface
 #[derive(Parser, Debug)]
 #[command(
     name = "nexus42",
@@ -37,11 +38,11 @@ pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Enable verbose logging
+    /// note: Enable verbose logging
     #[arg(short, long, global = true)]
     verbose: bool,
 
-    /// Output format (text or json)
+    /// note: Output format (text or json)
     // NOTE (qc1 S-3): this GLOBAL flag is a hard text|json gate for every
     // command — clap rejects any other value before dispatch. Future
     // commands needing a different output vocabulary must use a LOCAL arg
@@ -58,25 +59,25 @@ pub struct Cli {
 }
 
 impl Cli {
-    /// Returns whether verbose logging is enabled.
+    /// note: Returns whether verbose logging is enabled.
     #[must_use]
     pub const fn verbose(&self) -> bool {
         self.verbose
     }
 
-    /// Returns the output format string.
+    /// note: Returns the output format string.
     #[must_use]
     pub fn output_format(&self) -> &str {
         &self.output_format
     }
 
-    /// Consumes `self` and returns the inner `Commands` enum, if any.
+    /// note: Consumes `self` and returns the inner `Commands` enum, if any.
     #[must_use]
     pub fn into_command(self) -> Option<Commands> {
         self.command
     }
 
-    /// Commands whose stdout is machine-readable data (`ops inspect --output
+    /// note: Commands whose stdout is machine-readable data (`ops inspect --output
     /// json`): tracing must be routed to stderr so diagnostics never corrupt
     /// the data stream.
     #[must_use]
@@ -86,15 +87,15 @@ impl Cli {
 }
 
 #[derive(Debug, Subcommand)]
-#[allow(clippy::large_enum_variant)] // clap derive requires non-boxed subcommands for flatten
+#[allow(clippy::large_enum_variant)] // why: clap derive requires non-boxed subcommands for flatten
 pub enum Commands {
-    /// Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
+    /// note: Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
     Creator {
         #[command(subcommand)]
         command: CreatorCommand,
     },
 
-    /// Connect Host — peer surface for third-party reasoners (world-scoped ops,
+    /// note: Connect Host — peer surface for third-party reasoners (world-scoped ops,
     /// gated compute, host-level reads)
     ///
     /// Runs a `spoke-connect` node in a separate OS process: signed-hello
@@ -114,13 +115,13 @@ pub enum Commands {
         command: ConnectCommand,
     },
 
-    /// ACP capability plane (agents, registry, connectivity)
+    /// note: ACP capability plane (agents, registry, connectivity)
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
     },
 
-    /// Compute module authoring loop (V1.170 P0, AR-9) — build, validate,
+    /// note: Compute module authoring loop (V1.170 P0, AR-9) — build, validate,
     /// and install WASM compute modules.
     ///
     /// `build`, `validate`, and `install` are daemon-free (the author loop
@@ -149,19 +150,19 @@ pub enum Commands {
         command: CapabilityCommand,
     },
 
-    /// Manage the Electron desktop bundle (unsigned macOS packaging)
+    /// note: Manage the Electron desktop bundle (unsigned macOS packaging)
     Desktop {
         #[command(subcommand)]
         command: DesktopCommand,
     },
 
-    /// Platform interaction (auth, context, **sync**)
+    /// note: Platform interaction (auth, context, **sync**)
     Platform {
         #[command(subcommand)]
         command: PlatformCommand,
     },
 
-    /// System management (diagnostics, config, identity, completion, etc.)
+    /// note: System management (diagnostics, config, identity, completion, etc.)
     System {
         #[command(subcommand)]
         command: SystemCommand,
@@ -183,7 +184,7 @@ pub enum Commands {
         command: PresetCommand,
     },
 
-    /// Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
+    /// note: Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
     /// reads the workspace checkpoint store read-only; the V1.35 cli-spec §6
     /// visible-group lock forces hiding (same posture as `preset`).
     #[command(hide = true)]
@@ -193,7 +194,7 @@ pub enum Commands {
     },
 }
 
-/// Build the full `nexus42` clap `Command` for completion generation.
+/// note: Build the full `nexus42` clap `Command` for completion generation.
 ///
 /// This is used by `system completion` to produce shell completion scripts.
 #[must_use]

@@ -7,5 +7,6 @@
 //! `nexus-moment-context-assembly` (`Stage0Assembly` / `TwoStageAssembly`).
 //! The daemon `POST /v1/daemon/context/assemble` route is retired; no daemon
 //! proxy is used.
+// note: the module doc above is this file's scope contract
 
 pub mod types;

@@ -6,8 +6,9 @@
 //!
 //! v1.193 P2-T13 cohort gates: the authoring/operator modules belong to
 //! `cli`; `connect` belongs to `connect-host` (it never implies `cli`).
+// note: the module doc above is this file's scope contract
 
-// Enforce no `.unwrap()` in production command code.
+// note: Enforce no `.unwrap()` in production command code.
 // Each sub-module inherits this deny via the module-level attribute below.
 #[cfg(feature = "cli")]
 #[deny(clippy::unwrap_used)]
@@ -52,7 +53,7 @@ pub mod compute;
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod connect;
-// v1.193 P2-T2: the `daemon` and `daemon_run` command modules (and their
+// note: v1.193 P2-T2: the `daemon` and `daemon_run` command modules (and their
 // parser routing) are deleted with the legacy daemon composition — Electron/
 // TS owns service lifecycle.
 #[cfg(feature = "cli")]

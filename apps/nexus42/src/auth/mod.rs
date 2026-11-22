@@ -3,6 +3,7 @@
 //! Supports both User authentication (device flow OAuth) and Creator API key management.
 //! User auth state (platform JWT from device flow) is stored locally in `~/.nexus42/auth.json`.
 //! Creator auth state remains file-based for V1.x (will migrate to daemon in V1.2).
+// note: the module doc above is this file's scope contract
 
 pub mod creator_auth;
 pub mod user_auth;
@@ -14,25 +15,25 @@ use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-/// Platform user token obtained via RFC 8628 device flow.
+/// note: Platform user token obtained via RFC 8628 device flow.
 ///
 /// Stored in `AuthStore.user_token` and persisted to `~/.nexus42/auth.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserTokenState {
-    /// Platform JWT access token.
+    /// note: Platform JWT access token.
     pub access_token: String,
-    /// Token type (always "Bearer" for device flow).
+    /// note: Token type (always "Bearer" for device flow).
     #[serde(default = "default_token_type")]
     pub token_type: String,
-    /// ISO 8601 expiry timestamp.
+    /// note: ISO 8601 expiry timestamp.
     pub expires_at: String,
-    /// Platform user ID extracted from JWT claims (`sub` / `userId`).
+    /// note: Platform user ID extracted from JWT claims (`sub` / `userId`).
     pub user_id: String,
-    /// `OAuth2` refresh token (optional — present when platform delivers it).
+    /// note: `OAuth2` refresh token (optional — present when platform delivers it).
     /// `#[serde(default)]` ensures backward compat with existing auth.json files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
-    /// ISO 8601 expiry timestamp for the refresh token (optional).
+    /// note: ISO 8601 expiry timestamp for the refresh token (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_expires_at: Option<String>,
 }
@@ -41,36 +42,36 @@ fn default_token_type() -> String {
     "Bearer".to_string()
 }
 
-/// Auth store — persisted to `$HOME/.nexus42/auth.json`
+/// note: Auth store — persisted to `$HOME/.nexus42/auth.json`
 ///
 /// Contains both user auth (platform JWT from device flow) and creator API key cache.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthStore {
-    /// Platform user token from device flow login.
+    /// note: Platform user token from device flow login.
     /// `#[serde(default)]` ensures backward compat — existing auth.json files
     /// without this field parse correctly (field defaults to `None`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_token: Option<UserTokenState>,
 
-    /// Creator authentication states (keyed by `creator_id`)
+    /// note: Creator authentication states (keyed by `creator_id`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creators: Option<std::collections::HashMap<String, CreatorAuthState>>,
 }
 
-/// Creator authentication state (short-lived token cached from platform)
+/// note: Creator authentication state (short-lived token cached from platform)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatorAuthState {
     pub creator_id: String,
     pub access_token: String,
-    pub expires_at: String, // ISO 8601
-    /// Pending or activated API key for the creator.
+    pub expires_at: String, // note: ISO 8601
+    /// note: Pending or activated API key for the creator.
     /// Stored locally after successful registration/verification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator_api_key: Option<String>,
 }
 
 impl AuthStore {
-    /// Load auth store from disk
+    /// note: Load auth store from disk
     ///
     /// # Errors
     ///
@@ -85,7 +86,7 @@ impl AuthStore {
         Ok(serde_json::from_str(&content)?)
     }
 
-    /// Save auth store to disk (owner-only: 0600 on Unix).
+    /// note: Save auth store to disk (owner-only: 0600 on Unix).
     ///
     /// # Errors
     ///
@@ -108,7 +109,7 @@ impl AuthStore {
         Ok(())
     }
 
-    /// Check if a specific creator is authenticated
+    /// note: Check if a specific creator is authenticated
     #[must_use]
     pub fn is_creator_authenticated(&self, creator_id: &str) -> bool {
         self.creators
@@ -117,7 +118,7 @@ impl AuthStore {
             .is_some_and(|c| !c.access_token.is_empty())
     }
 
-    /// Store a creator API key.
+    /// note: Store a creator API key.
     ///
     /// If an entry already exists for the given `creator_id`, the API key field
     /// is updated in place. Otherwise, a new entry is created with the API key
@@ -153,7 +154,7 @@ impl AuthStore {
         self.save()
     }
 
-    /// Get a stored creator API key.
+    /// note: Get a stored creator API key.
     ///
     /// Checks in-memory state first. If the creator entry exists in memory
     /// but has no API key set, returns `None` immediately (no disk fallback).
@@ -166,15 +167,15 @@ impl AuthStore {
     /// Returns I/O errors (other than `NotFound`) when reloading from disk.
     #[allow(dead_code)]
     pub fn get_creator_api_key(&self, creator_id: &str) -> Result<Option<String>> {
-        // Check in-memory state
+        // note: Check in-memory state
         if let Some(creators) = &self.creators {
             if let Some(state) = creators.get(creator_id) {
-                // Entry exists in memory — return whatever is there (may be None)
+                // note: Entry exists in memory — return whatever is there (may be None)
                 return Ok(state.creator_api_key.clone());
             }
         }
 
-        // Entry not in memory — fall back to disk.
+        // note: Entry not in memory — fall back to disk.
         // Only treat NotFound as "key not found"; propagate other errors.
         match Self::load() {
             Ok(store) => Ok(store
@@ -191,7 +192,7 @@ impl AuthStore {
         }
     }
 
-    /// Store a platform user token from device flow login.
+    /// note: Store a platform user token from device flow login.
     ///
     /// # Errors
     ///
@@ -201,7 +202,7 @@ impl AuthStore {
         self.save()
     }
 
-    /// Clear the platform user token (logout).
+    /// note: Clear the platform user token (logout).
     ///
     /// # Errors
     ///
@@ -211,7 +212,7 @@ impl AuthStore {
         self.save()
     }
 
-    /// Check if a user is authenticated (has a non-expired user token).
+    /// note: Check if a user is authenticated (has a non-expired user token).
     ///
     /// Returns `true` only if a `user_token` exists, has a non-empty `access_token`,
     /// AND the token has not yet expired according to its `expires_at` timestamp.
@@ -223,7 +224,7 @@ impl AuthStore {
             if t.access_token.is_empty() {
                 return false;
             }
-            // Parse ISO 8601 expiry; treat unparseable dates as expired.
+            // note: Parse ISO 8601 expiry; treat unparseable dates as expired.
             DateTime::parse_from_rfc3339(&t.expires_at).is_ok_and(|expiry| expiry > Utc::now())
         })
     }
@@ -272,7 +273,7 @@ mod tests {
             .store_creator_api_key("crt_test", "nexus_live_test_key")
             .expect("store");
 
-        // In-memory retrieval
+        // note: In-memory retrieval
         let key = store.get_creator_api_key("crt_test").expect("get");
         assert_eq!(key, Some("nexus_live_test_key".to_string()));
     }
@@ -322,7 +323,7 @@ mod tests {
         let creators = store.creators.as_ref().expect("creators map");
         let state = creators.get("crt_existing").expect("entry exists");
         assert_eq!(state.creator_api_key, Some("new_key".to_string()));
-        // Other fields should be preserved
+        // note: Other fields should be preserved
         assert_eq!(state.access_token, "old_token");
         assert_eq!(state.expires_at, "2026-01-01T00:00:00Z");
     }
@@ -366,18 +367,18 @@ mod tests {
     #[test]
     fn store_and_get_roundtrip_with_file() {
         let _home = crate::testutil::isolated_home();
-        // store_creator_api_key calls self.save() which persists to disk.
+        // note: store_creator_api_key calls self.save() which persists to disk.
         // We verify the in-memory portion works regardless of whether
         // file persistence succeeds (depends on test environment).
         let mut store = AuthStore::default();
         let _ = store.store_creator_api_key("crt_file_test", "nexus_live_file_key");
 
-        // In-memory retrieval should always work after store
+        // note: In-memory retrieval should always work after store
         let key = store.get_creator_api_key("crt_file_test").expect("get");
         assert_eq!(key, Some("nexus_live_file_key".to_string()));
     }
 
-    // ── User token tests (T2) ───────────────────────────────────────
+    // note: User token tests (T2)
 
     #[test]
     fn user_token_serialization_roundtrip() {
@@ -455,7 +456,7 @@ mod tests {
 
     #[test]
     fn auth_store_backward_compat_without_user_token() {
-        // Existing auth.json without user_token field must parse correctly
+        // note: Existing auth.json without user_token field must parse correctly
         let json = r#"{
             "creators": {
                 "crt_123": {
@@ -485,11 +486,11 @@ mod tests {
         assert!(!store.is_user_authenticated());
     }
 
-    // ── Refresh token backward compat tests (T1) ──────────────────────
+    // note: Refresh token backward compat tests (T1)
 
     #[test]
     fn user_token_backward_compat_without_refresh_fields() {
-        // Pre-V1.11 auth.json without refresh_token fields must deserialize
+        // note: Pre-V1.11 auth.json without refresh_token fields must deserialize
         let json = r#"{
             "access_token": "old_tok",
             "token_type": "Bearer",

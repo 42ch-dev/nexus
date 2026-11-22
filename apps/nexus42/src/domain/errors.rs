@@ -2,115 +2,104 @@
 //!
 //! Domain-level error types for all Nexus aggregates.
 //! Uses `thiserror` for ergonomic error handling.
+// note: the module doc above is this file's scope contract
 
 use thiserror::Error;
 
-/// Domain error type covering all aggregate validation and state transition errors.
+/// note: Domain error type covering all aggregate validation and state transition errors.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainError {
-    // ── Permission errors ────────────────────────────────────────────
-    /// Initiator lacks required permission for the operation.
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 
-    /// Creator is not paired with a user (requires active pairing).
+    /// note: Creator is not paired with a user (requires active pairing).
     #[error("creator is not paired with any user")]
     CreatorNotPaired,
 
-    // ── State transition errors ──────────────────────────────────────
-    /// Attempted an invalid state transition.
     #[error("invalid state transition: {from} → {to}")]
     InvalidTransition { from: String, to: String },
 
-    /// Cannot modify an immutable confirmed state.
+    /// note: Cannot modify an immutable confirmed state.
     #[error("cannot modify confirmed immutable state")]
     ImmutableConfirmedState,
 
-    /// Entity is already in the target state.
+    /// note: Entity is already in the target state.
     #[error("entity is already in state: {0}")]
     AlreadyInState(String),
 
-    /// Entity is not in the expected state.
+    /// note: Entity is not in the expected state.
     #[error("entity is not in expected state: expected {expected}, got {actual}")]
     InvalidState { expected: String, actual: String },
 
-    // ── Conflict errors ──────────────────────────────────────────────
-    /// Unresolved hard conflict prevents the operation.
     #[error("unresolved hard conflict: {0}")]
     UnresolvedConflict(String),
 
-    /// Timeline conflict would reorder canon sequence.
+    /// note: Timeline conflict would reorder canon sequence.
     #[error("timeline conflict: {0}")]
     TimelineConflict(String),
 
-    /// Causality violation: cross-world causal reference.
+    /// note: Causality violation: cross-world causal reference.
     #[error("causality violation: {0}")]
     CausalityViolation(String),
 
-    /// Version mismatch between client and server.
+    /// note: Version mismatch between client and server.
     #[error("revision mismatch: expected {expected}, got {actual}")]
     RevisionMismatch { expected: u64, actual: u64 },
 
-    // ── Validation errors ────────────────────────────────────────────
-    /// A required field is missing or invalid.
     #[error("validation error: {0}")]
     ValidationError(String),
 
-    /// Excerpt exceeds maximum allowed length.
+    /// note: Excerpt exceeds maximum allowed length.
     #[error("excerpt exceeds maximum length: {actual} > {max}")]
     ExcerptTooLong { actual: usize, max: usize },
 
-    /// Invalid manuscript storage configuration.
+    /// note: Invalid manuscript storage configuration.
     #[error("invalid storage configuration: {0}")]
     InvalidStorageConfig(String),
 
-    /// Invalid fork write scope.
+    /// note: Invalid fork write scope.
     #[error("invalid fork write scope: {0}")]
     InvalidForkWriteScope(String),
 
-    /// Invalid URI format for the source type.
+    /// note: Invalid URI format for the source type.
     #[error("invalid URI for source_type '{source_type}': {reason}")]
     InvalidUri { source_type: String, reason: String },
 
-    /// Invalid phase transition.
+    /// note: Invalid phase transition.
     #[error("invalid phase transition: {from} → {to}")]
     InvalidPhaseTransition { from: String, to: String },
 
-    /// Provisional records still exist before gate.
+    /// note: Provisional records still exist before gate.
     #[error("provisional records exist: {count} outstanding")]
     ProvisionalRecordsExist { count: usize },
 
-    /// Creator quota exceeded.
+    /// note: Creator quota exceeded.
     // V1.1: wire into ID validation and quota checks
     #[allow(dead_code)]
     #[error("creator quota exceeded: {0}")]
     CreatorQuotaExceeded(String),
 
-    /// Invalid ID format.
+    /// note: Invalid ID format.
     // V1.1: wire into ID validation and quota checks
     #[allow(dead_code)]
     #[error("invalid ID format: {0}")]
     InvalidIdFormat(String),
 
-    /// Unknown or invalid local identity type string.
+    /// note: Unknown or invalid local identity type string.
     #[error("invalid identity type: {0}")]
     InvalidIdentityType(String),
 
-    // ── Runtime mode errors ───────────────────────────────────────────
-    /// Operation requires platform connectivity but current mode prohibits it.
     #[error("operation '{operation}' is not available in {mode} mode")]
     PlatformOperationProhibited { mode: String, operation: String },
 
-    // ── SOUL errors ─────────────────────────────────────────────────────
-    /// SOUL.md file not found at expected path.
     #[error("SOUL.md not found for creator '{creator_id}' at {path}")]
     SoulNotFound { creator_id: String, path: String },
 
-    /// SOUL.md is missing a required H2 section.
+    /// note: SOUL.md is missing a required H2 section.
     #[error("SOUL.md is missing required section '{section}'")]
     SoulMissingSection { section: String },
 
-    /// SOUL.md frontmatter is invalid.
+    /// note: SOUL.md frontmatter is invalid.
     #[error("SOUL.md frontmatter error: {0}")]
     SoulFrontmatterError(String),
 }

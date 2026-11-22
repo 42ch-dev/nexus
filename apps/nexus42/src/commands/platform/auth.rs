@@ -1,4 +1,5 @@
 //! Auth Command — User and Creator authentication
+// note: the module doc above is this file's scope contract
 
 use crate::auth;
 use crate::config::CliConfig;
@@ -8,10 +9,10 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Login via device flow (OAuth)
+    /// note: Login via device flow (OAuth)
     Login,
 
-    /// Set access token directly (development/testing)
+    /// note: Set access token directly (development/testing)
     ///
     /// Hidden from `platform auth` to avoid exposing tokens as positional
     /// CLI arguments (visible in shell history / process listings).
@@ -19,24 +20,24 @@ pub enum AuthCommand {
     /// or environment-based auth instead.
     #[command(hide = true)]
     Token {
-        /// Access token
+        /// note: Access token
         access_token: String,
-        /// Expiry time in seconds (default: 3600)
+        /// note: Expiry time in seconds (default: 3600)
         #[arg(long, default_value_t = 3600)]
         expires_in: u64,
-        /// User ID (prefix: "usr_")
+        /// note: User ID (prefix: "usr_")
         #[arg(long)]
         user_id: Option<String>,
     },
 
-    /// Logout and clear credentials
+    /// note: Logout and clear credentials
     Logout,
 
-    /// Show authentication status
+    /// note: Show authentication status
     Status,
 }
 
-/// Run auth command
+/// note: Run auth command
 ///
 /// # Errors
 ///

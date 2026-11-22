@@ -7,24 +7,25 @@
 //! Note (KCA-002 B2): These are wire types for the platform API contract.
 //! The daemon `POST /v1/daemon/context/assemble` route is retired; context
 //! assembly runs CLI in-process via `nexus-moment-context-assembly`.
+// note: the module doc above is this file's scope contract
 
-// Re-export generated types from nexus-contracts
+// note: Re-export generated types from nexus-contracts
 pub use nexus_contracts::generated::platform::http_bff::context_assembly_v1::ContextAssembleRequestV1;
 pub use nexus_contracts::generated::platform::http_bff::context_assembly_v1::ContextAssembleResponseV1;
 
-// Re-export MemoryKind from domain for CLI use
+// note: Re-export MemoryKind from domain for CLI use
 #[cfg(test)]
 pub use nexus_creator_memory::memory_item::MemoryKind;
 
-/// Backward-compatible type alias.
+/// note: Backward-compatible type alias.
 #[allow(dead_code)]
 pub type ContextAssembleRequest = ContextAssembleRequestV1;
 
-/// Backward-compatible type alias.
+/// note: Backward-compatible type alias.
 #[allow(dead_code)]
 pub type ContextAssembleResponse = ContextAssembleResponseV1;
 
-/// Helper: check whether a context assembly response indicates an error.
+/// note: Helper: check whether a context assembly response indicates an error.
 #[cfg(test)]
 #[inline]
 #[must_use]
@@ -32,7 +33,7 @@ pub const fn is_error(resp: &ContextAssembleResponse) -> bool {
     !resp.success
 }
 
-/// Helper: get the error code from a context assembly response, if any.
+/// note: Helper: get the error code from a context assembly response, if any.
 #[cfg(test)]
 #[inline]
 #[must_use]
@@ -40,7 +41,7 @@ pub fn error_code(resp: &ContextAssembleResponse) -> Option<&str> {
     resp.error_code.as_deref()
 }
 
-/// Helper: get the error message from a context assembly response, if any.
+/// note: Helper: get the error message from a context assembly response, if any.
 #[cfg(test)]
 #[inline]
 #[must_use]
@@ -77,7 +78,7 @@ mod tests {
         }"#;
         let req: ContextAssembleRequestV1 =
             serde_json::from_str(json).expect("deserialization should succeed");
-        // Schema defaults: include_* flags default to true; memory_kinds has a non-empty default.
+        // note: Schema defaults: include_* flags default to true; memory_kinds has a non-empty default.
         assert!(req.include_memory);
         assert!(req.include_timeline);
         assert!(req.include_story_summaries);

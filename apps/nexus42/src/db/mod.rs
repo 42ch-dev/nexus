@@ -5,19 +5,20 @@
 //! Schema initialization is delegated to `nexus-local-db` module.
 //!
 //! **No duplicated DDL** - all shared table definitions are in `nexus-local-db`.
+// note: the module doc above is this file's scope contract
 
 use std::path::Path;
 
 use nexus_local_db::SqlitePool;
 
-/// Schema initializer for CLI-side database access.
+/// note: Schema initializer for CLI-side database access.
 ///
 /// Delegates to `nexus-local-db` for shared tables (migrations).
 /// Safe to call on an existing database — migrations are idempotent.
 pub struct Schema;
 
 impl Schema {
-    /// Initialize CLI-side database schema.
+    /// note: Initialize CLI-side database schema.
     ///
     /// Opens a pool via nexus-local-db, runs migrations, and seeds version keys.
     /// Safe to call on an existing database — migrations are idempotent.
@@ -26,7 +27,7 @@ impl Schema {
     ///
     /// Returns a `LocalDbError` if pool creation, migrations, or seeding fails.
     pub async fn init(db_path: &Path) -> Result<SqlitePool, nexus_local_db::LocalDbError> {
-        // Ensure parent directory exists before opening SQLite connection.
+        // note: Ensure parent directory exists before opening SQLite connection.
         if let Some(parent) = db_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
                 nexus_local_db::LocalDbError::IoWithPath {
@@ -35,7 +36,7 @@ impl Schema {
                 }
             })?;
         }
-        // P2 QC3 F-001: delegate to `init_pool` so the runtime/CLI boot path
+        // note: P2 QC3 F-001: delegate to `init_pool` so the runtime/CLI boot path
         // shares the co-boot migration retry/backoff (open pool + migrations
         // with transient-retry + seed versions, in one call).
         nexus_local_db::init_pool(db_path).await
@@ -68,7 +69,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("test.db");
         Schema::init(&db_path).await.unwrap();
-        Schema::init(&db_path).await.unwrap(); // second call should not fail
+        Schema::init(&db_path).await.unwrap(); // note: second call should not fail
     }
 
     #[tokio::test]
@@ -78,10 +79,10 @@ mod tests {
 
         let pool = Schema::init(&path).await.unwrap();
 
-        // Verify file exists
+        // note: Verify file exists
         assert!(path.exists());
 
-        // Verify schema initialized
+        // note: Verify schema initialized
         let tables_raw: Vec<Option<String>> =
             sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&pool)

@@ -46,17 +46,18 @@
 //! shared with the creator-facing `nexus42` app; shared-DB write access is
 //! governed by `SQLite` `WAL` (not the per-Work `runtime_lock`), per the P2
 //! spec § Coexistence.
+// note: the module doc above is this file's scope contract
 
 use clap::Parser;
 use nexus42::commands::connect;
 use nexus42::errors::Result;
 use std::path::{Path, PathBuf};
 
-/// Default listen multiaddr when `--listen` is not given — loopback only,
+/// note: Default listen multiaddr when `--listen` is not given — loopback only,
 /// identical to `nexus42 connect start`.
 const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 
-/// Headless Connect runtime CLI (mirrors the `nexus42 connect start`
+/// note: Headless Connect runtime CLI (mirrors the `nexus42 connect start`
 /// surface; spec-locked in the P2 spec § CLI surface).
 #[derive(Debug, Parser)]
 #[command(
@@ -72,16 +73,16 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
                   router, no embedded Web UI, no Setup/Canvas/Control Room."
 )]
 struct RuntimeCli {
-    /// Listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
+    /// note: Listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
     #[arg(long, value_name = "MULTIADDR", default_value = DEFAULT_LISTEN)]
     listen: Vec<String>,
 
-    /// Peer IDs to allowlist for this run (repeatable; unioned with
+    /// note: Peer IDs to allowlist for this run (repeatable; unioned with
     /// `~/.nexus42/connect/allowlist.json`).
     #[arg(long = "allow-peer", value_name = "PEER_ID")]
     allow_peer: Vec<String>,
 
-    /// Nexus home override (default: `$NEXUS42_HOME`, else the user home).
+    /// note: Nexus home override (default: `$NEXUS42_HOME`, else the user home).
     ///
     /// The home is the parent of the `.nexus42` layout dir: `/foo` →
     /// `/foo/.nexus42`.
@@ -104,7 +105,7 @@ fn main() {
     }
 }
 
-/// Resolve the nexus home: `--home` > `$NEXUS42_HOME` > the user home.
+/// note: Resolve the nexus home: `--home` > `$NEXUS42_HOME` > the user home.
 #[must_use]
 fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
     let overridden = cli_home
@@ -119,7 +120,7 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
             }
         },
         |home| {
-            // The shared config/workspace resolution in this crate reads
+            // note: The shared config/workspace resolution in this crate reads
             // `dirs::home_dir()` directly (there is no central home
             // indirection), so an override re-points the platform home env
             // BEFORE any downstream read — the same mechanism
@@ -143,7 +144,7 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
     )
 }
 
-/// The headless boot: shared home layout + the exact `connect start` host
+/// note: The headless boot: shared home layout + the exact `connect start` host
 /// assembly ([`connect::build_host_config`] — the full invoke dispatch
 /// handler, compute included) + node start + stdout readiness. `run_daemon`
 /// is never called.
@@ -151,11 +152,11 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
 /// # Errors
 /// [`CliError`] on layout/identity/allowlist/workspace-DB/node failures.
 async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<()> {
-    // Shared `~/.nexus42` skeleton (idempotent; no-op on an existing home).
+    // note: Shared `~/.nexus42` skeleton (idempotent; no-op on an existing home).
     let nexus_home = nexus_home_layout::nexus_root_from_home(home);
     nexus_home_layout::ensure_system_layout(&nexus_home).map_err(nexus42::errors::CliError::Io)?;
 
-    // The full host boot shared with `nexus42 connect start`:
+    // note: The full host boot shared with `nexus42 connect start`:
     // persisted identity + device-id host_id + allowlist (fail-closed) +
     // honest manifest + active-workspace WAL pool + per-process
     // NexusAdapter + the invoke dispatch handler (writes, reads, compute,
@@ -169,7 +170,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
             nexus42::errors::CliError::Config(format!("connect node start failed: {e}"))
         })?;
     let peer_tools_shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
-    // The static half of the peer admission reserved set: this composition's
+    // note: The static half of the peer admission reserved set: this composition's
     // own host-tool roster (the protocol crate names no core registry).
     let builtin_tool_ids: std::collections::HashSet<String> =
         nexus_core::tool_catalog::reserved_host_tool_ids()
@@ -190,7 +191,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
         }
     };
 
-    // Liveness = stdout readiness (the ONLY liveness surface — no HTTP
+    // note: Liveness = stdout readiness (the ONLY liveness surface — no HTTP
     // health endpoint; the daemon router never boots in this process).
     println!("nexus-runtime: Connect Host (N-C2 E2) ready");
     println!("  peer_id: {}", node.local_peer_id());
@@ -198,7 +199,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     for addr in node.listen_addrs() {
         println!("  listen: {addr}");
     }
-    // v1.210 P3: the event lane's own readiness disclosure — the address it
+    // note: v1.210 P3: the event lane's own readiness disclosure — the address it
     // ACTUALLY bound (never the config echo); absent when the lane
     // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {

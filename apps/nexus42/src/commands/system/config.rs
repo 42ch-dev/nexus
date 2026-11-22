@@ -2,6 +2,7 @@
 //!
 //! Provides commands to view and modify the CLI configuration file.
 //! MVP: only supports top-level fields listed in `config::VALID_CONFIG_KEYS`.
+// note: the module doc above is this file's scope contract
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -9,31 +10,31 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// Get a configuration value
+    /// note: Get a configuration value
     Get {
-        /// Configuration key (e.g., `runtime_mode`, `platform_url`)
+        /// note: Configuration key (e.g., `runtime_mode`, `platform_url`)
         key: String,
     },
 
-    /// Set a configuration value
+    /// note: Set a configuration value
     Set {
-        /// Configuration key (e.g., `runtime_mode`, `platform_url`)
+        /// note: Configuration key (e.g., `runtime_mode`, `platform_url`)
         key: String,
-        /// Configuration value
+        /// note: Configuration value
         value: String,
     },
 
-    /// Unset (reset to default) a configuration key
+    /// note: Unset (reset to default) a configuration key
     Unset {
-        /// Configuration key to reset
+        /// note: Configuration key to reset
         key: String,
     },
 
-    /// Show the configuration file path
+    /// note: Show the configuration file path
     Path,
 }
 
-/// Run config command
+/// note: Run config command
 ///
 /// # Errors
 ///
@@ -97,7 +98,7 @@ mod tests {
     fn config_command_get_reads_platform_url() {
         let config = CliConfig::default();
         let value = config.get("platform_url").unwrap();
-        // Default CliConfig has empty platform_url, but get() returns the default value
+        // note: Default CliConfig has empty platform_url, but get() returns the default value
         assert_eq!(value, "https://api.nexus42.io");
     }
 
@@ -140,7 +141,7 @@ mod tests {
 
     #[test]
     fn valid_keys_match_config_module_constant() {
-        // Ensure we're using the same valid keys list
+        // note: Ensure we're using the same valid keys list
         assert!(VALID_CONFIG_KEYS.contains(&"runtime_mode"));
         assert!(VALID_CONFIG_KEYS.contains(&"platform_url"));
         assert!(VALID_CONFIG_KEYS.contains(&"daemon_url"));

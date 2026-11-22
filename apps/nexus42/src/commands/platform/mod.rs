@@ -9,6 +9,7 @@
 //! neither ever performed work (the first always returned `CliError::Config`,
 //! the second printed a coming-soon notice and returned `Ok`). Platform content
 //! browsing is served by the platform HTTP API directly, not by a local leaf.
+// note: the module doc above is this file's scope contract
 
 pub mod auth;
 pub mod context;
@@ -21,28 +22,28 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum PlatformCommand {
-    /// Authentication (login/logout/status)
+    /// note: Authentication (login/logout/status)
     Auth {
         #[command(subcommand)]
         command: auth::AuthCommand,
     },
 
-    /// Context assembly
+    /// note: Context assembly
     Context {
-        // ContextCommand is large (many `Option<String>` flags, incl. `--stage`);
+        // note: ContextCommand is large (many `Option<String>` flags, incl. `--stage`);
         // boxed to keep `PlatformCommand` small (type-size hygiene; no behavior).
         #[command(subcommand)]
         command: Box<context::ContextCommand>,
     },
 
-    /// Synchronize workspace with platform (pull, push, status, resolve, world, retry)
+    /// note: Synchronize workspace with platform (pull, push, status, resolve, world, retry)
     Sync {
         #[command(subcommand)]
         command: SyncCommand,
     },
 }
 
-/// Run platform command.
+/// note: Run platform command.
 ///
 /// # Errors
 ///

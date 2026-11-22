@@ -1,4 +1,5 @@
 //! Nexus CLI Configuration
+// note: the module doc above is this file's scope contract
 
 #[cfg(feature = "cli")]
 use crate::domain::DegradationSnapshot;
@@ -7,20 +8,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Default nexus42 home directory name
+/// note: Default nexus42 home directory name
 const NEXUS_DIR: &str = ".nexus42";
 
-/// Default daemon port
+/// note: Default daemon port
 pub const DAEMON_PORT: u16 = 8420;
 
-/// CLI configuration file structure
+/// note: CLI configuration file structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
-    /// Active workspace path
+    /// note: Active workspace path
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<PathBuf>,
 
-    /// Currently active creator ID
+    /// note: Currently active creator ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_creator_id: Option<String>,
 
@@ -28,11 +29,11 @@ pub struct CliConfig {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub active_workspace_slug_by_creator: HashMap<String, String>,
 
-    /// Platform API base URL
+    /// note: Platform API base URL
     #[serde(default = "default_platform_url")]
     pub platform_url: String,
 
-    /// Daemon API base URL
+    /// note: Daemon API base URL
     #[serde(default = "default_daemon_url")]
     pub daemon_url: String,
 
@@ -41,12 +42,12 @@ pub struct CliConfig {
     #[serde(default = "default_runtime_mode")]
     pub runtime_mode: DomainRuntimeMode,
 
-    /// Whether the desktop setup wizard has been completed.
+    /// note: Whether the desktop setup wizard has been completed.
     /// Absent or `false` = first-launch wizard; `true` = skip wizard.
     #[serde(default)]
     pub setup_completed: Option<bool>,
 
-    /// Persisted degradation guard state (inline in config.toml for V1.2 MVP).
+    /// note: Persisted degradation guard state (inline in config.toml for V1.2 MVP).
     /// Written by the runtime when degradation occurs; read-only for CLI display.
     ///
     /// v1.193 P2-T13: `cli`-only (the sole remaining producer/consumer); the
@@ -57,12 +58,12 @@ pub struct CliConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degradation_snapshot: Option<DegradationSnapshot>,
 
-    /// Persistent machine identifier (UUID v4) for rate-limiting and device tracking.
+    /// note: Persistent machine identifier (UUID v4) for rate-limiting and device tracking.
     /// Not serialized to config.toml — resolved at startup from `~/.nexus42/device-id`.
     #[serde(skip)]
     pub device_id: String,
 
-    /// Keys of `config.toml` this type does not own.
+    /// note: Keys of `config.toml` this type does not own.
     ///
     /// `agent_profile` belongs to the service, `entrance` and
     /// `workspace_path_by_creator` to the desktop main. Flattened so every
@@ -102,10 +103,10 @@ fn default_runtime_mode() -> DomainRuntimeMode {
     DomainRuntimeMode::default()
 }
 
-/// Default workspace slug when none is stored for a creator.
+/// note: Default workspace slug when none is stored for a creator.
 pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
-/// Resolve the effective workspace root path.
+/// note: Resolve the effective workspace root path.
 ///
 /// Returns [`CliConfig.workspace_path`] when it is set. Otherwise falls back to
 /// `dirs::document_dir().join("nexus").join("default")`, matching the desktop
@@ -127,7 +128,7 @@ pub fn resolve_default_workspace_path() -> PathBuf {
         .join("default")
 }
 
-/// Valid configuration keys for `nexus42 config` commands.
+/// note: Valid configuration keys for `nexus42 config` commands.
 /// MVP: only top-level fields with simple types; nested keys are not supported.
 pub const VALID_CONFIG_KEYS: &[&str] = &[
     "workspace_path",
@@ -139,7 +140,7 @@ pub const VALID_CONFIG_KEYS: &[&str] = &[
 ];
 
 impl CliConfig {
-    /// Resolve the effective workspace root path.
+    /// note: Resolve the effective workspace root path.
     ///
     /// Returns the configured [`workspace_path`](Self::workspace_path) if set,
     /// otherwise the cross-platform default (`~/Documents/nexus/default/`).
@@ -150,7 +151,7 @@ impl CliConfig {
             .unwrap_or_else(resolve_default_workspace_path)
     }
 
-    /// Load configuration from the standard location.
+    /// note: Load configuration from the standard location.
     ///
     /// Migration: if `config.toml`'s entry is genuinely absent but
     /// `config.json` does, the JSON file is read, converted to TOML, and the
@@ -166,7 +167,7 @@ impl CliConfig {
         Self::load_from_nexus_home(&nexus)
     }
 
-    /// Load configuration from an explicit user home directory.
+    /// note: Load configuration from an explicit user home directory.
     ///
     /// This is the path-aware counterpart to [`Self::load`]. It preserves the
     /// same TOML and legacy JSON migration behavior without consulting the
@@ -180,7 +181,7 @@ impl CliConfig {
         Self::load_from_nexus_home(&nexus)
     }
 
-    /// Load configuration from an explicit Nexus root (`~/.nexus42`).
+    /// note: Load configuration from an explicit Nexus root (`~/.nexus42`).
     ///
     /// Path-taking counterpart to [`Self::load`]: same legacy migration and
     /// reader, without a platform home lookup. The CLI startup seam uses it so
@@ -193,14 +194,14 @@ impl CliConfig {
         Self::load_from_nexus_home(nexus)
     }
 
-    /// Path to `config.toml` under an explicit Nexus root.
+    /// note: Path to `config.toml` under an explicit Nexus root.
     #[must_use]
     pub fn path_in(nexus: &Path) -> PathBuf {
         nexus.join("config.toml")
     }
 
     fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
-        // Migration writes `config.toml`, so it takes the writer lock. Probe
+        // note: Migration writes `config.toml`, so it takes the writer lock. Probe
         // first so a plain read does not contend with the other writers.
         if toml_entry_absent(&nexus.join("config.toml"))? && nexus.join("config.json").exists() {
             Self::migrate_legacy_json(nexus)?;
@@ -208,7 +209,7 @@ impl CliConfig {
         Self::read_document(nexus)
     }
 
-    /// Read `config.toml` as typed config (absent/empty → defaults).
+    /// note: Read `config.toml` as typed config (absent/empty → defaults).
     ///
     /// Reads stay unlocked — the lock only excludes writers from each other.
     /// Unknown keys are retained by the flattened [`Self::extra`] table, so a
@@ -247,7 +248,7 @@ impl CliConfig {
         }
     }
 
-    /// Read the document a mutation would modify, under the writer lock.
+    /// note: Read the document a mutation would modify, under the writer lock.
     ///
     /// Unlike the unlocked plain read, an existing directory entry that
     /// cannot be read — a dangling config link, or the entry vanishing under
@@ -272,7 +273,7 @@ impl CliConfig {
         Self::parse_document(&config_path, &content)
     }
 
-    /// The admission read a bootstrap preflight runs (I-000339): the same
+    /// note: The admission read a bootstrap preflight runs (I-000339): the same
     /// [`Self::read_document_for_mutation`] refusal rule [`Self::mutate`]
     /// applies, under the same writer lock, without writing anything. One
     /// rule, two readers: a refusal rule added to the mutation path cannot
@@ -288,12 +289,12 @@ impl CliConfig {
         })
     }
 
-    /// Migrate a legacy `config.json` to `config.toml` under the writer lock.
+    /// note: Migrate a legacy `config.json` to `config.toml` under the writer lock.
     fn migrate_legacy_json(nexus: &Path) -> anyhow::Result<()> {
         Self::with_writer_lock(nexus, || Self::migrate_legacy_json_locked(nexus))
     }
 
-    /// Re-checks the TOML's existence after the lock is taken: a
+    /// note: Re-checks the TOML's existence after the lock is taken: a
     /// service/desktop commit that landed first wins over the legacy snapshot
     /// instead of being overwritten. Caller holds the writer lock.
     fn migrate_legacy_json_locked(nexus: &Path) -> anyhow::Result<()> {
@@ -308,7 +309,7 @@ impl CliConfig {
             Err(error) => return Err(error.into()),
         };
         if content.trim().is_empty() {
-            // Empty JSON file — just rename it and fall back to defaults
+            // note: Empty JSON file — just rename it and fall back to defaults
             std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
             return Ok(());
         }
@@ -334,7 +335,7 @@ impl CliConfig {
         Ok(())
     }
 
-    /// Run `run` while holding the daemon-home `config.toml` writer lock.
+    /// note: Run `run` while holding the daemon-home `config.toml` writer lock.
     ///
     /// The protocol lives in `nexus-core` (one implementation for the core,
     /// the service, the desktop and this CLI); this adapter keeps the CLI's
@@ -344,7 +345,7 @@ impl CliConfig {
         nexus: &Path,
         run: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
-        // `with_config_lock` runs the closure at most once, right after the
+        // note: `with_config_lock` runs the closure at most once, right after the
         // lock is taken; `None` therefore means it never ran it.
         let mut outcome: Option<anyhow::Result<T>> = None;
         nexus_core::with_config_lock(nexus, || {
@@ -354,7 +355,7 @@ impl CliConfig {
         outcome.ok_or_else(|| anyhow::anyhow!("config lock released without running the writer"))?
     }
 
-    /// Mutate and persist the configuration under the writer lock.
+    /// note: Mutate and persist the configuration under the writer lock.
     ///
     /// The document is read *inside* the lock, so a concurrent commit by the
     /// service, the desktop or the daemon core is either seen by this read or
@@ -377,7 +378,7 @@ impl CliConfig {
             Self::migrate_legacy_json_locked(&nexus)?;
             let mut config = Self::read_document_for_mutation(&nexus)?;
             let outcome = run(&mut config)?;
-            // Atomic publication: a concurrent lock-free reader (the Core
+            // note: Atomic publication: a concurrent lock-free reader (the Core
             // `ReadOnly` snapshot, I-000291) must never see a truncated
             // document and read "no `[memory_provider]`" as the local default.
             nexus_home_layout::config_lock::publish_document(
@@ -388,20 +389,20 @@ impl CliConfig {
         })
     }
 
-    /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
+    /// note: Current runtime mode (defaults to `local_only` for V1.2 MVP).
     #[must_use]
     pub const fn runtime_mode(&self) -> DomainRuntimeMode {
         self.runtime_mode
     }
 
-    /// Persisted degradation guard snapshot, if available.
+    /// note: Persisted degradation guard snapshot, if available.
     #[cfg(feature = "cli")]
     #[must_use]
     pub const fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
         self.degradation_snapshot.as_ref()
     }
 
-    /// Path to the configuration file.
+    /// note: Path to the configuration file.
     ///
     /// # Errors
     ///
@@ -410,7 +411,7 @@ impl CliConfig {
         Ok(Self::path_in(&nexus_home()?))
     }
 
-    /// Public path to the configuration file (for `config path` command).
+    /// note: Public path to the configuration file (for `config path` command).
     ///
     /// # Errors
     ///
@@ -419,7 +420,7 @@ impl CliConfig {
         Self::config_path()
     }
 
-    /// Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
+    /// note: Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
     #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> &str {
         self.active_workspace_slug_by_creator
@@ -429,7 +430,7 @@ impl CliConfig {
             .unwrap_or(DEFAULT_WORKSPACE_SLUG)
     }
 
-    /// Get a configuration value by key name.
+    /// note: Get a configuration value by key name.
     /// Returns the value as a JSON string representation.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
     /// For fields with defaults (`platform_url`, `daemon_url`), returns the default if empty.
@@ -461,7 +462,7 @@ impl CliConfig {
         }
     }
 
-    /// Set a configuration value by key name.
+    /// note: Set a configuration value by key name.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
     ///
     /// # Errors
@@ -511,7 +512,7 @@ impl CliConfig {
         Ok(())
     }
 
-    /// Unset (remove) a configuration key.
+    /// note: Unset (remove) a configuration key.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
     /// For string fields, clears to empty/default.
     ///
@@ -544,7 +545,7 @@ impl CliConfig {
         Ok(())
     }
 
-    /// Validate that a key is in the allowed set.
+    /// note: Validate that a key is in the allowed set.
     fn validate_key(key: &str) -> anyhow::Result<()> {
         if VALID_CONFIG_KEYS.contains(&key) {
             Ok(())
@@ -558,7 +559,7 @@ impl CliConfig {
     }
 }
 
-/// Whether `config.toml`'s directory entry is genuinely absent.
+/// note: Whether `config.toml`'s directory entry is genuinely absent.
 ///
 /// `Path::exists` follows the final link, so a dangling config link also reads
 /// as absent and would let the implicit legacy migration fill its target. Only
@@ -571,7 +572,7 @@ fn toml_entry_absent(toml_path: &Path) -> anyhow::Result<bool> {
     }
 }
 
-/// Get the nexus42 home directory (`$HOME/.nexus42`).
+/// note: Get the nexus42 home directory (`$HOME/.nexus42`).
 ///
 /// # Errors
 ///
@@ -582,7 +583,7 @@ pub fn nexus_home() -> anyhow::Result<PathBuf> {
     Ok(home.join(NEXUS_DIR))
 }
 
-/// User home directory (`$HOME`).
+/// note: User home directory (`$HOME`).
 ///
 /// # Errors
 ///
@@ -603,7 +604,7 @@ pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     resolve_state_db_path_from_home(config, &user_home)
 }
 
-/// Resolve workspace `state.db` from an explicit user home directory.
+/// note: Resolve workspace `state.db` from an explicit user home directory.
 ///
 /// # Errors
 ///
@@ -621,7 +622,7 @@ pub fn resolve_state_db_path_from_home(
     Ok(crate::paths::state_db_path(user_home, cid, slug))
 }
 
-/// Load config and resolve the local `SQLite` database path.
+/// note: Load config and resolve the local `SQLite` database path.
 ///
 /// # Errors
 ///
@@ -632,7 +633,7 @@ pub fn state_db_path() -> anyhow::Result<PathBuf> {
     resolve_state_db_path(&CliConfig::load()?)
 }
 
-/// Get the path to the auth storage file.
+/// note: Get the path to the auth storage file.
 ///
 /// # Errors
 ///
@@ -641,7 +642,7 @@ pub fn auth_store_path() -> anyhow::Result<PathBuf> {
     Ok(nexus_home()?.join("auth.json"))
 }
 
-/// Check if the current directory (or any parent) contains a workspace
+/// note: Check if the current directory (or any parent) contains a workspace
 #[must_use]
 pub fn find_workspace_root() -> Option<PathBuf> {
     let mut current = std::env::current_dir().ok()?;
@@ -656,13 +657,13 @@ pub fn find_workspace_root() -> Option<PathBuf> {
     }
 }
 
-/// Get the workspace directory path for a given root
+/// note: Get the workspace directory path for a given root
 #[must_use]
 pub fn workspace_nexus_dir(workspace_root: &Path) -> PathBuf {
     workspace_root.join(NEXUS_DIR)
 }
 
-/// Get workspace config file path
+/// note: Get workspace config file path
 #[must_use]
 pub fn workspace_config_path(workspace_root: &Path) -> PathBuf {
     workspace_nexus_dir(workspace_root).join("workspace.json")
@@ -1012,7 +1013,7 @@ mod tests {
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        // Write a legacy config.json with non-default values
+        // note: Write a legacy config.json with non-default values
         let json_content = r#"{
   "active_creator_id": "ctr_test",
   "platform_url": "https://custom.api.io",
@@ -1023,23 +1024,23 @@ mod tests {
 
         let result = CliConfig::load().expect("load should succeed");
 
-        // Verify values were loaded correctly
+        // note: Verify values were loaded correctly
         assert_eq!(result.active_creator_id.as_deref(), Some("ctr_test"));
         assert_eq!(result.platform_url, "https://custom.api.io");
         assert_eq!(result.daemon_url, "http://127.0.0.1:9999");
 
-        // Verify config.toml was created
+        // note: Verify config.toml was created
         assert!(
             nexus_dir.join("config.toml").exists(),
             "config.toml should be created"
         );
 
-        // Verify config.toml content is valid TOML
+        // note: Verify config.toml content is valid TOML
         let toml_content = std::fs::read_to_string(nexus_dir.join("config.toml")).unwrap();
         let loaded: CliConfig = toml::from_str(&toml_content).unwrap();
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_test"));
 
-        // Verify config.json was renamed to config.json.migrated
+        // note: Verify config.json was renamed to config.json.migrated
         assert!(
             !nexus_dir.join("config.json").exists(),
             "config.json should be renamed"
@@ -1058,15 +1059,15 @@ mod tests {
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        // Write an empty config.json
+        // note: Write an empty config.json
         std::fs::write(nexus_dir.join("config.json"), "").expect("write empty json");
 
         let result = CliConfig::load().expect("load should succeed");
 
-        // Should return defaults
+        // note: Should return defaults
         assert_eq!(result.active_creator_id, None);
 
-        // config.json should be renamed
+        // note: config.json should be renamed
         assert!(nexus_dir.join("config.json.migrated").exists());
     }
 
@@ -1078,7 +1079,7 @@ mod tests {
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        // Write a config.toml directly
+        // note: Write a config.toml directly
         let toml_content = r#"active_creator_id = "ctr_direct"
 platform_url = "https://direct.api.io"
 "#;
@@ -1199,7 +1200,7 @@ platform_url = "https://direct.api.io"
         assert_eq!(loaded.platform_url, "https://save.test.io");
     }
 
-    /// I-000065: the CLI is the fourth daemon-home `config.toml` writer, so its
+    /// note: I-000065: the CLI is the fourth daemon-home `config.toml` writer, so its
     /// whole read-modify-write takes the same `config.toml.lock` protocol as
     /// the core/service/desktop.
     #[test]
@@ -1210,7 +1211,7 @@ platform_url = "https://direct.api.io"
 
         let (_home, nexus_dir) = isolated_nexus_dir();
         let lock_path = nexus_dir.join("config.toml.lock");
-        // A foreign process holds the lock: created out of band, never through
+        // note: A foreign process holds the lock: created out of band, never through
         // this writer's helper.
         std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
 
@@ -1236,7 +1237,7 @@ platform_url = "https://direct.api.io"
         assert!(!lock_path.exists(), "the writer released its own lock");
     }
 
-    /// F1 regression: the CLI reads the document *inside* the lock, so a
+    /// note: F1 regression: the CLI reads the document *inside* the lock, so a
     /// foreign commit that lands while this CLI waits for the lock is seen,
     /// not overwritten — and the foreign keys it carried survive.
     #[test]
@@ -1270,7 +1271,7 @@ platform_url = "https://direct.api.io"
             "the CLI write must wait for config.toml.lock"
         );
 
-        // The service/desktop commit while the CLI waits for the lock: both
+        // note: The service/desktop commit while the CLI waits for the lock: both
         // its selection and its `agent_profile` table must survive the CLI's
         // write that follows.
         std::fs::write(
@@ -1296,7 +1297,7 @@ platform_url = "https://direct.api.io"
         );
     }
 
-    /// F1: keys owned by other writers round-trip through [`CliConfig::extra`]
+    /// note: F1: keys owned by other writers round-trip through [`CliConfig::extra`]
     /// instead of being dropped by typed serialization.
     #[test]
     fn mutate_preserves_keys_other_writers_own() {
@@ -1331,7 +1332,7 @@ platform_url = "https://direct.api.io"
         }
     }
 
-    /// F2 regression: the legacy-JSON migration writes `config.toml`, so it
+    /// note: F2 regression: the legacy-JSON migration writes `config.toml`, so it
     /// takes the writer lock and re-checks the TOML after acquiring it — a
     /// foreign writer that committed the TOML first is not overwritten.
     #[test]
@@ -1360,7 +1361,7 @@ platform_url = "https://direct.api.io"
             "the migration must not write config.toml while the lock is held"
         );
 
-        // A concurrent writer commits the TOML first; the migration must leave
+        // note: A concurrent writer commits the TOML first; the migration must leave
         // that document (and its foreign table) alone.
         std::fs::write(
             &config_path,
@@ -1387,7 +1388,7 @@ platform_url = "https://direct.api.io"
         );
     }
 
-    /// I-000304 (R5): an existing dangling `config.toml` link is not a
+    /// note: I-000304 (R5): an existing dangling `config.toml` link is not a
     /// migration-eligible absence. The implicit legacy migration must not
     /// create the link's target or rename the JSON; the CLI reader keeps its
     /// documented defaults for the unreadable entry.
@@ -1439,7 +1440,7 @@ platform_url = "https://direct.api.io"
         );
     }
 
-    /// I-000304 (R6): a mutation over an existing dangling `config.toml`
+    /// note: I-000304 (R6): a mutation over an existing dangling `config.toml`
     /// link must fail closed instead of manufacturing a provider-free
     /// defaults document through the creatable target. The link, its
     /// destination, and the retained legacy JSON stay untouched.
@@ -1495,7 +1496,7 @@ platform_url = "https://direct.api.io"
         );
     }
 
-    /// The valid-symlink control: a mutation through a readable config link
+    /// note: The valid-symlink control: a mutation through a readable config link
     /// still updates the intended fields through the link's target while the
     /// link destination and foreign tables other writers own survive.
     #[cfg(unix)]
@@ -1536,7 +1537,7 @@ platform_url = "https://direct.api.io"
         );
     }
 
-    /// I-000339: the bootstrap preflight and the real mutation share one
+    /// note: I-000339: the bootstrap preflight and the real mutation share one
     /// admission rule — every document the mutation refuses, the preflight
     /// refuses too, with the same refusal, and what both accept stays
     /// accepted. Since the preflight IS `read_document_for_mutation`, a rule
@@ -1546,13 +1547,13 @@ platform_url = "https://direct.api.io"
     fn preflight_acceptance_is_mutation_acceptance() {
         let (_home, nexus_dir) = isolated_nexus_dir();
 
-        // Absent document: both accept (first-time configuration keeps
+        // note: Absent document: both accept (first-time configuration keeps
         // working).
         CliConfig::preflight_document(&nexus_dir)
             .expect("the preflight accepts an absent document");
         CliConfig::mutate(|_| Ok(())).expect("the mutation accepts an absent document");
 
-        // A corrupt document: both refuse through the same parse rule, with
+        // note: A corrupt document: both refuse through the same parse rule, with
         // the same refusal.
         std::fs::write(nexus_dir.join("config.toml"), "not toml {{{{").expect("seed corrupt");
         let preflight = CliConfig::preflight_document(&nexus_dir)
@@ -1565,7 +1566,7 @@ platform_url = "https://direct.api.io"
             "one refusal rule means one refusal text"
         );
 
-        // An existing entry that cannot be read — a directory at the
+        // note: An existing entry that cannot be read — a directory at the
         // document path, the portable dangling-link stand-in — refuses both
         // with the same read refusal.
         std::fs::remove_file(nexus_dir.join("config.toml")).expect("drop the corrupt document");

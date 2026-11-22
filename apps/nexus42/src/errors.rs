@@ -1,14 +1,15 @@
 //! Nexus CLI Error Types
+// note: the module doc above is this file's scope contract
 
 use std::fmt;
 
 #[cfg(feature = "cli")]
 use nexus_acp_host::AcpError;
 
-/// Nexus CLI result type
+/// note: Nexus CLI result type
 pub type Result<T> = std::result::Result<T, CliError>;
 
-/// Nexus CLI errors
+/// note: Nexus CLI errors
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum CliError {
@@ -40,166 +41,166 @@ pub enum CliError {
     #[cfg(feature = "cli")]
     Acp(AcpError),
 
-    /// Operation requires platform connectivity but current mode prohibits it.
+    /// note: Operation requires platform connectivity but current mode prohibits it.
     PlatformOperationProhibited {
-        /// Runtime mode that blocked the operation (e.g. "`local_only`")
+        /// note: Runtime mode that blocked the operation (e.g. "`local_only`")
         mode: String,
-        /// Operation that was blocked (e.g. "sync push")
+        /// note: Operation that was blocked (e.g. "sync push")
         operation: String,
     },
 
-    /// Challenge solving failed during creator registration.
+    /// note: Challenge solving failed during creator registration.
     ChallengeFailed {
-        /// Human-readable reason for the failure.
+        /// note: Human-readable reason for the failure.
         reason: String,
     },
 
-    /// Creator registration failed on the platform.
+    /// note: Creator registration failed on the platform.
     CreatorRegistrationFailed {
-        /// HTTP status code (if available).
+        /// note: HTTP status code (if available).
         status: u16,
-        /// Human-readable message.
+        /// note: Human-readable message.
         message: String,
     },
 
-    /// Creator verification failed.
+    /// note: Creator verification failed.
     CreatorVerificationFailed {
-        /// Verification status from the platform (e.g. "`wrong_answer`", "expired", "locked").
+        /// note: Verification status from the platform (e.g. "`wrong_answer`", "expired", "locked").
         status: String,
-        /// Human-readable message with next steps.
+        /// note: Human-readable message with next steps.
         message: String,
     },
 
-    /// Challenge has expired before solving could complete.
+    /// note: Challenge has expired before solving could complete.
     ChallengeExpired {
-        /// Expiry timestamp.
+        /// note: Expiry timestamp.
         expires_at: String,
     },
 
-    /// Invalid creator handle format.
+    /// note: Invalid creator handle format.
     InvalidHandle {
-        /// The invalid handle value.
+        /// note: The invalid handle value.
         handle: String,
-        /// Human-readable reason.
+        /// note: Human-readable reason.
         reason: String,
     },
 
-    /// Agent not found with ID
+    /// note: Agent not found with ID
     AgentNotFound {
-        /// Agent ID that was requested
+        /// note: Agent ID that was requested
         agent_id: String,
-        /// User-friendly message
+        /// note: User-friendly message
         message: String,
-        /// Suggested fix
+        /// note: Suggested fix
         suggestion: String,
     },
 
-    /// Session expired
+    /// note: Session expired
     SessionExpired {
-        /// Session ID that expired
+        /// note: Session ID that expired
         session_id: String,
-        /// User-friendly message
+        /// note: User-friendly message
         message: String,
-        /// Suggested fix
+        /// note: Suggested fix
         suggestion: String,
     },
 
-    /// Permission denied for tool execution
+    /// note: Permission denied for tool execution
     PermissionDenied {
-        /// Tool that was blocked
+        /// note: Tool that was blocked
         tool: String,
-        /// Reason for denial
+        /// note: Reason for denial
         reason: String,
-        /// User-friendly message
+        /// note: User-friendly message
         message: String,
-        /// Suggested fix
+        /// note: Suggested fix
         suggestion: String,
     },
 
-    /// Extract mode requires a World-bound Work (DF-69, spec §3.2).
+    /// note: Extract mode requires a World-bound Work (DF-69, spec §3.2).
     WorldRequiredForExtract {
-        /// Work ID that is worldless
+        /// note: Work ID that is worldless
         work_id: String,
     },
 
-    /// V1.176 P0 T2 (AR-89): the display name matches one or more existing
+    /// note: V1.176 P0 T2 (AR-89): the display name matches one or more existing
     /// persistent local identities — never silently take over another
     /// identity's id/row. Exit 1 via the default mapping (F-6); no new
     /// exit-code vocabulary.
     CreatorNameCollision {
-        /// The trimmed display name that collided.
+        /// note: The trimmed display name that collided.
         display_name: String,
-        /// Creator IDs of the existing persistent identities sharing the name.
+        /// note: Creator IDs of the existing persistent identities sharing the name.
         matches: Vec<String>,
     },
 
-    /// An advisory file lock is held by another process (V1.51 T-B P0).
+    /// note: An advisory file lock is held by another process (V1.51 T-B P0).
     /// Exit code 75 (`EX_TEMPFAIL`) — temporary failure, retry later.
     Locked {
-        /// OS process ID of the lock holder.
+        /// note: OS process ID of the lock holder.
         holder_pid: u32,
-        /// Human-readable holder identity.
+        /// note: Human-readable holder identity.
         holder_name: String,
-        /// Whether the lock is stale (>60 s without heartbeat).
+        /// note: Whether the lock is stale (>60 s without heartbeat).
         stale: bool,
     },
 
-    /// An I/O error occurred during advisory file lock acquisition (V1.51 T-B P0).
+    /// note: An I/O error occurred during advisory file lock acquisition (V1.51 T-B P0).
     /// Exit code 78 (`EX_CONFIG`) — configuration or environment error, not temporary.
     /// Distinguished from `Locked` (exit 75, temporary contention) to avoid
     /// misleading users with "work is held by unknown pid=0" on permission-denied.
     LockIo(std::io::Error),
 
-    /// V1.51 T-B P1: OCC version conflict — the row's version changed between
+    /// note: V1.51 T-B P1: OCC version conflict — the row's version changed between
     /// the caller's read and its UPDATE (CAS check failed).
     /// Exit code 76 — row was modified by another writer; retry.
     VersionConflict {
-        /// Table where the conflict occurred.
+        /// note: Table where the conflict occurred.
         table: String,
-        /// Row identifier.
+        /// note: Row identifier.
         row_id: String,
-        /// Version the caller expected.
+        /// note: Version the caller expected.
         expected_version: i64,
-        /// Current version in the database (if readable).
+        /// note: Current version in the database (if readable).
         actual_version: Option<i64>,
     },
 
-    /// V1.189 P1-T3: World KB per-row OCC conflict on the direct-core path —
+    /// note: V1.189 P1-T3: World KB per-row OCC conflict on the direct-core path —
     /// the 409 `world_kb_conflict` family. Same exit code as
     /// [`CliError::VersionConflict`] (76: retry), but carries the structured
     /// conflict payload the route contract promises (`current_version`,
     /// caller `expected_version`, `entity_id`, `conflicting_path`,
     /// `recovery_hint`) so a stale CAS names the exact fields to act on.
     WorldKbConflict {
-        /// Row version the core reports now.
+        /// note: Row version the core reports now.
         current_version: u64,
-        /// Version the caller supplied (differs from `current_version` when stale).
+        /// note: Version the caller supplied (differs from `current_version` when stale).
         expected_version: u64,
-        /// Entity whose row lost the CAS.
+        /// note: Entity whose row lost the CAS.
         entity_id: String,
-        /// Field that conflicted (e.g. `version`).
+        /// note: Field that conflicted (e.g. `version`).
         conflicting_path: String,
-        /// Operator guidance (refetch + reapply).
+        /// note: Operator guidance (refetch + reapply).
         recovery_hint: String,
     },
 
-    /// V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
+    /// note: V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
     /// vocabulary does not fit the CLI-wide 1/75/76/78 mapping, so the compute
     /// group returns this variant with its own code: 1 = build/toolchain or
     /// install I/O failure, 2 = manifest/descriptor validation failure,
     /// 3 = `wasm_sha256` pairing mismatch. The code-4 daemon-unreachable arm
     /// retired with the daemon client (v1.193 P2-T13).
     ComputeExit {
-        /// AR-9 exit code (1 | 2 | 3).
+        /// note: AR-9 exit code (1 | 2 | 3).
         code: i32,
-        /// User-facing message (validation, pairing, and I/O failures verbatim).
+        /// note: User-facing message (validation, pairing, and I/O failures verbatim).
         message: String,
     },
 
     Other(String),
 }
 
-// Implement std::error::Error for CliError
+// note: Implement std::error::Error for CliError
 impl std::error::Error for CliError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -216,7 +217,7 @@ impl std::error::Error for CliError {
     }
 }
 
-// Custom Display for enhanced error variants with suggestions
+// note: Custom Display for enhanced error variants with suggestions
 // V1.51 T-B P1: added VersionConflict arm (+8 lines). The enum has ~20
 // variants with user-facing suggestion text; splitting would scatter the
 // display logic without reducing the variant count.
@@ -224,12 +225,12 @@ impl std::error::Error for CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Use default #[error] messages for simple variants
+            // note: Use default #[error] messages for simple variants
             Self::WorkspaceNotInitialized => write!(f, "Workspace not initialized.\n\n  Suggestion: Run `nexus42 creator workspace init workspace` first."),
             Self::AuthenticationRequired => write!(f, "Authentication required.\n\n  Suggestion: Run `nexus42 platform auth login` first."),
             Self::CreatorNotSelected => write!(f, "Creator not selected.\n\n  Suggestion: Run `nexus42 creator use <creator-ref>` first."),
 
-            // Enhanced error variants with suggestions
+            // note: Enhanced error variants with suggestions
             Self::ChallengeFailed { reason } => {
                 write!(
                     f,
@@ -338,7 +339,7 @@ impl fmt::Display for CliError {
                 )
             }
 
-            // World KB direct-core conflict: the same structured surface the
+            // note: World KB direct-core conflict: the same structured surface the
             // daemon route emitted (`[world_kb_conflict]` + named fields), so
             // the CLI contract is preserved across the transport change.
             Self::WorldKbConflict {
@@ -359,7 +360,7 @@ impl fmt::Display for CliError {
                 )
             }
 
-            // Use #[error] messages for other variants
+            // note: Use #[error] messages for other variants
             #[cfg(feature = "cli")]
             Self::Network(err) => write!(f, "Network error: {err}"),
             #[cfg(feature = "cli")]
@@ -384,9 +385,9 @@ impl fmt::Display for CliError {
     }
 }
 
-// Helper constructors for enhanced error variants
+// note: Helper constructors for enhanced error variants
 impl CliError {
-    /// Create an `AgentNotFound` error with agent ID
+    /// note: Create an `AgentNotFound` error with agent ID
     #[allow(dead_code)]
     pub fn agent_not_found(agent_id: impl Into<String>) -> Self {
         let agent_id = agent_id.into();
@@ -397,7 +398,7 @@ impl CliError {
         }
     }
 
-    /// Create a `SessionExpired` error with session ID
+    /// note: Create a `SessionExpired` error with session ID
     #[allow(dead_code)]
     pub fn session_expired(session_id: impl Into<String>) -> Self {
         let session_id = session_id.into();
@@ -409,7 +410,7 @@ impl CliError {
         }
     }
 
-    /// Create a `PermissionDenied` error for tool execution
+    /// note: Create a `PermissionDenied` error for tool execution
     #[allow(dead_code)]
     pub fn permission_denied(tool: impl Into<String>, reason: impl Into<String>) -> Self {
         let tool = tool.into();
@@ -457,7 +458,7 @@ impl From<nexus_creator_memory::errors::MemoryError> for CliError {
 #[cfg(feature = "cli")]
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
-        // v1.193 P2-T13: the reqwest connect/timeout → `DaemonNotRunning`
+        // note: v1.193 P2-T13: the reqwest connect/timeout → `DaemonNotRunning`
         // fold retired with the daemon client. Remaining reqwest callers are
         // platform/cloud clients, whose connection failures are ordinary
         // network errors — never daemon-start guidance.
@@ -517,7 +518,7 @@ impl From<nexus_cloud_sync::errors::SyncError> for CliError {
 
 #[cfg(feature = "cli")]
 impl CliError {
-    /// Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
+    /// note: Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
     ///
     /// Use this instead of `SyncError::into()` when the error occurs during
     /// the verification step (as opposed to registration), so callers can

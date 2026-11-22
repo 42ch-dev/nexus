@@ -40,6 +40,7 @@
 //! The read/authoring leaves open the direct-writer core and await
 //! `finish_direct` **before** printing, so no row is reported ahead of a
 //! close that did not settle.
+// note: the module doc above is this file's scope contract
 
 #![allow(clippy::print_literal)]
 
@@ -48,14 +49,14 @@ use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-// The preset profile family is generated one type per module; the lane de-duplicates
+// note: The preset profile family is generated one type per module; the lane de-duplicates
 // every `$ref` target to its standalone module, so import each type from the module
 // that owns it.
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_exit_when::PresetProfileExitWhen;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_lanes::PresetProfileLanes;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_next::PresetProfileNext;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::PresetProfileResponse;
-// Same family note as above, for the grouped listing: the core returns the
+// note: Same family note as above, for the grouped listing: the core returns the
 // generated `preset_management` response (its `source` enum displays the real
 // `embedded` / `system` / `user` label), so the CLI reads that type directly
 // instead of the retired daemon client's private copy.
@@ -68,77 +69,77 @@ use nexus_workflow_ir::Violation;
 
 pub mod patch;
 
-/// Newest Workflow IR document version this build can validate — the v0 draft
+/// note: Newest Workflow IR document version this build can validate — the v0 draft
 /// `nexus_preset::workflow_ir` emits. A schema bump has to move both.
 const SUPPORTED_IR_VERSION: u64 = 0;
 
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
-    /// List all discoverable presets (embedded + user + system)
+    /// note: List all discoverable presets (embedded + user + system)
     List {
-        /// Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
+        /// note: Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
         #[arg(long)]
         intent: Option<String>,
-        /// Emit machine-readable JSON
+        /// note: Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Print the profile for a preset (lanes + orchestration fields)
+    /// note: Print the profile for a preset (lanes + orchestration fields)
     Show {
-        /// Preset ID (embedded, user, or `_system.` qualified)
+        /// note: Preset ID (embedded, user, or `_system.` qualified)
         id: String,
-        /// Emit the daemon profile DTO verbatim (camelCase)
+        /// note: Emit the daemon profile DTO verbatim (camelCase)
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Validate a preset YAML/bundle at a given path (local, in process)
+    /// note: Validate a preset YAML/bundle at a given path (local, in process)
     Validate {
-        /// Path to preset.yaml (or bundle directory)
+        /// note: Path to preset.yaml (or bundle directory)
         path: String,
-        /// Emit machine-readable JSON
+        /// note: Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Rewrite a bundle's preset.yaml from its workflow.json (the only export)
+    /// note: Rewrite a bundle's preset.yaml from its workflow.json (the only export)
     Export {
-        /// Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
+        /// note: Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
         path: String,
     },
-    /// Write a bundle's Workflow IR twin (the committed `ir-twins/<id>.workflow.ir.json`)
+    /// note: Write a bundle's Workflow IR twin (the committed `ir-twins/<id>.workflow.ir.json`)
     ExportIr {
-        /// Bundle directory holding `preset.yaml`
+        /// note: Bundle directory holding `preset.yaml`
         path: String,
-        /// File the imported `WorkflowDocument` is written to
+        /// note: File the imported `WorkflowDocument` is written to
         #[arg(long)]
         out: String,
     },
-    /// Generate a strategy bundle from templates
+    /// note: Generate a strategy bundle from templates
     Scaffold {
-        /// Name for the new user preset
+        /// note: Name for the new user preset
         name: String,
-        /// Emit machine-readable JSON
+        /// note: Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Import an external bundle as this workspace's strategy candidate
+    /// note: Import an external bundle as this workspace's strategy candidate
     ///
     /// Reads `preset.yaml` and its assets through the one bundle converter,
     /// validates and simulates the prospective revision-1 document, and commits
     /// it through the same CAS every compose operation uses. Prints the
     /// candidate together with the trajectory Approve accepts verbatim.
     Import {
-        /// Path to the bundle directory that holds `preset.yaml`
+        /// note: Path to the bundle directory that holds `preset.yaml`
         dir: String,
     },
-    /// Print trigger-lane classification only (never cron authoring)
+    /// note: Print trigger-lane classification only (never cron authoring)
     Trigger {
-        /// Preset ID (embedded, user, or `_system.` qualified)
+        /// note: Preset ID (embedded, user, or `_system.` qualified)
         id: String,
-        /// Emit machine-readable JSON
+        /// note: Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Generate a strategy candidate from a declarative request
+    /// note: Generate a strategy candidate from a declarative request
     ///
     /// Runs the same lint-correct kernel the agent tool and the daemon route
     /// call — three transports, one implementation. The CLI attaches no model,
@@ -151,19 +152,19 @@ pub enum PresetCommand {
     /// semantic warnings instead — never a live strategy: validate, simulate
     /// and approve are separate steps.
     Generate {
-        /// Strategy id the candidate belongs to (also the document id)
+        /// note: Strategy id the candidate belongs to (also the document id)
         strategy_id: String,
-        /// Candidate revision you last read; the commit is `base-revision + 1`
+        /// note: Candidate revision you last read; the commit is `base-revision + 1`
         #[arg(long, default_value_t = 0)]
         base_revision: u64,
-        /// File holding the request JSON (the `GenerateRequest` contract)
+        /// note: File holding the request JSON (the `GenerateRequest` contract)
         #[arg(long)]
         request: String,
-        /// Emit the D20 payload or the committed candidate as JSON
+        /// note: Emit the D20 payload or the committed candidate as JSON
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Patch a strategy canvas node (state, transition, or prompt template)
+    /// note: Patch a strategy canvas node (state, transition, or prompt template)
     ///
     /// CAS-guarded direct-core writes over the strategy canvas seam
     /// (V1.175 P1 Task 2, group 1). Every leaf takes `--base-revision`;
@@ -179,7 +180,7 @@ pub enum PresetCommand {
     },
 }
 
-/// Run the `nexus42 preset` command group.
+/// note: Run the `nexus42 preset` command group.
 ///
 /// # Errors
 ///
@@ -204,7 +205,7 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// List all discoverable presets (embedded + user + system).
+/// note: List all discoverable presets (embedded + user + system).
 ///
 /// Moved from `system preset list` (V1.153) — the shared listing job, not
 /// re-implemented (AR-24).
@@ -221,7 +222,7 @@ async fn list_presets(
     let core = open_direct_core(config).await?;
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
-        // A failure here is a real core refusal — surface it instead of
+        // note: A failure here is a real core refusal — surface it instead of
         // silently degrading the list to no presets (F-001 reliability nit).
         let response = core
             .list_presets(&principal)
@@ -265,7 +266,7 @@ async fn list_presets(
     Ok(())
 }
 
-/// Flatten the grouped core listing into display rows
+/// note: Flatten the grouped core listing into display rows
 /// `(id, source, run_intents)`, optionally filtered by `run_intent`
 /// (W-002/F-001). Pure over the core DTO — hermetically testable.
 fn build_preset_rows(
@@ -291,7 +292,7 @@ fn build_preset_rows(
     presets
 }
 
-/// Print the AR-20 profile for a preset (`CoreService::get_preset_profile`).
+/// note: Print the AR-20 profile for a preset (`CoreService::get_preset_profile`).
 ///
 /// `--json` serializes the core DTO verbatim (camelCase, AR-25). Text
 /// output names lanes + orchestration fields; declared signals are labeled
@@ -315,7 +316,7 @@ async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Generate one committed candidate from a request file.
+/// note: Generate one committed candidate from a request file.
 ///
 /// The kernel is [`nexus_core::CoreService::generate_strategy_candidate`] with **no** corrector:
 /// the CLI attaches no model, so a request that fails its first lint round is an exhaustion naming
@@ -354,7 +355,7 @@ async fn generate_candidate(
     Ok(())
 }
 
-/// The human rendering of a committed candidate.
+/// note: The human rendering of a committed candidate.
 ///
 /// The document is the machine payload (`--json`), so the summary names it instead of reprinting
 /// it: what was generated, at which revision, from which provenance, how many warnings the passing
@@ -375,7 +376,7 @@ fn render_generate_summary(outcome: &nexus_core::GenerateOutcome) -> String {
     )
 }
 
-/// Render a generate refusal: the D20 payload on exhaustion, the ordinary mapping otherwise.
+/// note: Render a generate refusal: the D20 payload on exhaustion, the ordinary mapping otherwise.
 ///
 /// Exhaustion is the one failure a caller acts on, so it is never flattened into a status line:
 /// the payload's own `code`, round count, `persisted` flag, every violation's
@@ -397,7 +398,7 @@ fn render_generate_refusal(error: nexus_core::CoreError, json_output: bool) -> C
     CliError::Other(render_lint_exhaustion(details))
 }
 
-/// The human rendering of the `lint_exhausted` payload.
+/// note: The human rendering of the `lint_exhausted` payload.
 ///
 /// One header naming the code, the rounds and the `persisted` flag; one line per violation as
 /// `[kind] location: observed → correction`; then the payload's own message. Nothing the payload
@@ -449,7 +450,7 @@ fn render_lint_exhaustion(payload: &serde_json::Value) -> String {
     text
 }
 
-/// Print trigger-lane classification only (AR-25) — never cron authoring,
+/// note: Print trigger-lane classification only (AR-25) — never cron authoring,
 /// never a runner.
 async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
     let core = open_direct_core(config).await?;
@@ -470,7 +471,7 @@ async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> 
     Ok(())
 }
 
-/// Scaffold a user preset bundle from templates
+/// note: Scaffold a user preset bundle from templates
 /// (`CoreService::scaffold_preset`).
 async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<()> {
     let core = open_direct_core(config).await?;
@@ -496,7 +497,7 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
     Ok(())
 }
 
-/// Import an external bundle as this workspace's revision-1 strategy candidate.
+/// note: Import an external bundle as this workspace's revision-1 strategy candidate.
 ///
 /// The printed trajectory is the simulation of the bytes that were stored, so it can be handed to
 /// the Approve route unchanged: recomputing it at the call site is how a candidate and its
@@ -516,7 +517,7 @@ async fn import_bundle(config: &CliConfig, dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// Regenerate `<dir>/preset.yaml` from `<dir>/workflow.json`.
+/// note: Regenerate `<dir>/preset.yaml` from `<dir>/workflow.json`.
 ///
 /// The written bytes are [`nexus_preset::export_preset`]'s projection and
 /// nothing else, so a committed manifest is reproducible by this command
@@ -543,7 +544,7 @@ fn export_bundle_preset(path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Write `<out>` as the bundle's imported [`WorkflowDocument`] — its IR twin.
+/// note: Write `<out>` as the bundle's imported [`WorkflowDocument`] — its IR twin.
 ///
 /// The bytes are [`nexus_preset::import_preset_bundle`]'s document at
 /// [`nexus_preset::canonical_twin_json`], so a committed twin is this command's output instead of a
@@ -566,7 +567,7 @@ fn export_ir_twin(path: &str, out: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validate a preset YAML/bundle or Workflow IR document at a given path.
+/// note: Validate a preset YAML/bundle or Workflow IR document at a given path.
 ///
 /// Validation runs in process through [`validate_preset_local`] — the sole
 /// validator behind this command (v1.193 P1-T1). There is no daemon leg and
@@ -605,7 +606,7 @@ fn validate_preset(path: &str, json_output: bool) -> Result<()> {
     }
 }
 
-/// Print the human-readable verdict for a validate response
+/// note: Print the human-readable verdict for a validate response
 /// (`{valid, id, version, state_count, errors, warnings}` — the shape
 /// [`validate_preset_local`] returns).
 fn print_validate_verdict(resp: &serde_json::Value) {
@@ -639,7 +640,7 @@ fn print_validate_verdict(resp: &serde_json::Value) {
     }
 }
 
-/// Run preset validation in process — the sole validator behind
+/// note: Run preset validation in process — the sole validator behind
 /// `nexus42 preset validate <path>` (v1.193 P1-T1).
 ///
 /// The composition mirrors the retired daemon handler
@@ -672,7 +673,7 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 
     let file_path = std::path::Path::new(path);
 
-    // An explicit `*.ir.json` file selects direct IR validation; every other
+    // note: An explicit `*.ir.json` file selects direct IR validation; every other
     // path form keeps resolving through the YAML bundle rules below.
     if file_path
         .file_name()
@@ -687,7 +688,7 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
         return validate_workflow_ir_file(file_path);
     }
 
-    // Resolve the target file + optional bundle root (mirrors the daemon's
+    // note: Resolve the target file + optional bundle root (mirrors the daemon's
     // `infer_bundle_root`: only a file literally named `preset.yaml` has a
     // bundle root; a directory argument points at its preset.yaml).
     let (preset_yaml_path, bundle_root) = if file_path.is_dir() {
@@ -711,12 +712,12 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
         )));
     }
 
-    // Size limit (same 1 MiB limit the loader/daemon enforce).
+    // note: Size limit (same 1 MiB limit the loader/daemon enforce).
     ensure_document_size(&preset_yaml_path, "Preset YAML")?;
 
     let yaml = std::fs::read_to_string(&preset_yaml_path)?;
 
-    // Parse + depth check (same path as `load_preset_from_str_with_limits`).
+    // note: Parse + depth check (same path as `load_preset_from_str_with_limits`).
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml)
         .map_err(|e| CliError::Other(format!("preset YAML parse error: {e}")))?;
     let depth = yaml_value_depth(&yaml_value);
@@ -733,13 +734,13 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
-    // C2: loader-equivalent structural checks (same defects the runtime
+    // note: C2: loader-equivalent structural checks (same defects the runtime
     //     loader would reject).
     for problem in loader_validate_manifest_compat(&manifest, &caps) {
         errors.push(format!("{}: {}", problem.path, problem.error));
     }
 
-    // C3 + A5 + A3: shared validation facade. Bundle asset checks only run
+    // note: C3 + A5 + A3: shared validation facade. Bundle asset checks only run
     //     when the target resolves to a bundle root.
     let asset_result = bundle_root
         .as_deref()
@@ -768,7 +769,7 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     ))
 }
 
-/// Validate a Workflow IR document directly (`... .ir.json`).
+/// note: Validate a Workflow IR document directly (`... .ir.json`).
 ///
 /// The document is parsed as IR and the same checks the YAML path runs are
 /// applied to it, so both formats report the same diagnostics for the same
@@ -784,7 +785,7 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     let document: WorkflowDocument = serde_json::from_str(&json)
         .map_err(|e| CliError::Other(format!("workflow IR parse error: {e}")))?;
 
-    // A document from a newer IR version cannot be interpreted here, so no
+    // note: A document from a newer IR version cannot be interpreted here, so no
     // check below it is trustworthy: refuse it instead of letting the
     // exporter's refusal fall silent (the wording mirrors `export_preset`).
     if document.ir_version > SUPPORTED_IR_VERSION {
@@ -803,7 +804,7 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
-    // Q2 structural checks the semantic facade cannot see (dangling edge and
+    // note: Q2 structural checks the semantic facade cannot see (dangling edge and
     // dependency targets, duplicate node ids, nest bindings, nest depth). They
     // run on every IR document, including the IR-only shapes that have no
     // manifest projection for the loader-level checks to inspect.
@@ -813,7 +814,7 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
 
     let caps = CapabilityRegistry::with_builtins();
 
-    // C2 is a manifest-level contract, so a manifest-expressible document is
+    // note: C2 is a manifest-level contract, so a manifest-expressible document is
     // projected back to run the same check the YAML path always runs; IR-only
     // shapes (joins, nest groups, pattern slots) have no manifest projection.
     if let Ok(manifest) = export_preset(&document) {
@@ -839,7 +840,7 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     ))
 }
 
-/// States the YAML verdict counts: outer states and terminals. Inner steps are
+/// note: States the YAML verdict counts: outer states and terminals. Inner steps are
 /// graph children of a state, not states of their own.
 fn outer_state_count(document: &WorkflowDocument) -> usize {
     document
@@ -854,7 +855,7 @@ fn outer_state_count(document: &WorkflowDocument) -> usize {
         .count()
 }
 
-/// Q2 structural violations worth reporting for one document.
+/// note: Q2 structural violations worth reporting for one document.
 ///
 /// `GraphCycle` is deliberately dropped: outer-state loops are legal for
 /// imported presets, so rejecting them would refuse valid workflows. Every
@@ -869,7 +870,7 @@ fn structural_violations(document: &WorkflowDocument) -> Vec<Violation> {
         .collect()
 }
 
-/// Location prefix for a structural violation, in the same `path: message`
+/// note: Location prefix for a structural violation, in the same `path: message`
 /// shape the loader and facade diagnostics use.
 fn violation_path(violation: &Violation) -> String {
     match violation {
@@ -883,7 +884,7 @@ fn violation_path(violation: &Violation) -> String {
             format!("nests.{nest}.parent_node")
         }
         Violation::IncompleteNestChild { nest, .. } => format!("nests.{nest}.child"),
-        // The message carries the nest id / cycle path / depth, so one prefix
+        // note: The message carries the nest id / cycle path / depth, so one prefix
         // suffices for the document-wide nest violations.
         Violation::EmptyNestId { .. }
         | Violation::NestCycle { .. }
@@ -892,7 +893,7 @@ fn violation_path(violation: &Violation) -> String {
     }
 }
 
-/// Enforce the loader's document size limit before reading a preset file.
+/// note: Enforce the loader's document size limit before reading a preset file.
 ///
 /// `label` names the document kind in the error, so both input formats share
 /// one gate without changing the message the YAML path already emitted.
@@ -908,7 +909,7 @@ fn ensure_document_size(path: &std::path::Path, label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Fold one facade diagnostic into the verdict's error/warning strings.
+/// note: Fold one facade diagnostic into the verdict's error/warning strings.
 fn push_diagnostic(
     diagnostic: &nexus_preset::ValidationDiagnostic,
     errors: &mut Vec<String>,
@@ -924,7 +925,7 @@ fn push_diagnostic(
     }
 }
 
-/// Build the verdict both input formats return — same shape as the daemon
+/// note: Build the verdict both input formats return — same shape as the daemon
 /// endpoint (warnings omitted when empty, matching the daemon's
 /// `skip_serializing_if`).
 fn validation_response(
@@ -946,11 +947,9 @@ fn validation_response(
     serde_json::Value::Object(resp)
 }
 
-// ---------------------------------------------------------------------------
-// Text renderers (pure over the daemon DTO — hermetically testable)
-// ---------------------------------------------------------------------------
+// note: text renderers are pure over the daemon DTO — hermetically testable
 
-/// Render the human-readable profile text for `preset show`.
+/// note: Render the human-readable profile text for `preset show`.
 ///
 /// Declared signals are labeled **Declared, not delivered** (AR-25, locked
 /// trigger-lane vocabulary).
@@ -1030,7 +1029,7 @@ fn format_profile_text(profile: &PresetProfileResponse) -> String {
     out
 }
 
-/// Render the trigger-lane classification only (AR-25) — never cron
+/// note: Render the trigger-lane classification only (AR-25) — never cron
 /// authoring.
 fn format_trigger_text(id: &str, lanes: &PresetProfileLanes) -> String {
     use std::fmt::Write as _;
@@ -1040,7 +1039,7 @@ fn format_trigger_text(id: &str, lanes: &PresetProfileLanes) -> String {
     out
 }
 
-/// Write the four locked trigger-lane rows (PL-3 vocabulary).
+/// note: Write the four locked trigger-lane rows (PL-3 vocabulary).
 fn write_lanes(out: &mut String, lanes: &PresetProfileLanes) {
     use std::fmt::Write as _;
     let _ = writeln!(out, "  cron:        {}", yes_no(lanes.cron));
@@ -1057,7 +1056,7 @@ const fn yes_no(b: bool) -> &'static str {
     }
 }
 
-/// Render one exit condition (`llm_judge` / `rule` / `graph_complete` /
+/// note: Render one exit condition (`llm_judge` / `rule` / `graph_complete` /
 /// `manual` / `timer`).
 fn format_exit_when(exit_when: &PresetProfileExitWhen) -> String {
     match exit_when.kind.as_str() {
@@ -1082,7 +1081,7 @@ fn format_exit_when(exit_when: &PresetProfileExitWhen) -> String {
     }
 }
 
-/// Render one next-transition form (`linear` / `goNogo` / `labeled` /
+/// note: Render one next-transition form (`linear` / `goNogo` / `labeled` /
 /// `conditional` / `branches`).
 fn format_next(next: &PresetProfileNext) -> String {
     match next.kind.as_str() {
@@ -1120,9 +1119,7 @@ fn format_next(next: &PresetProfileNext) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+// note: tests
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -1132,7 +1129,7 @@ mod tests {
     use nexus_contracts::generated::core::orchestration_presets::preset_profile_signal::PresetProfileSignal;
     use nexus_contracts::generated::core::orchestration_presets::preset_profile_state::PresetProfileState;
 
-    /// Wrapper for parsing `PresetCommand` in tests.
+    /// note: Wrapper for parsing `PresetCommand` in tests.
     #[derive(Debug, clap::Parser)]
     #[command(subcommand_required = true, name = "preset")]
     struct PresetCli {
@@ -1204,7 +1201,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── V1.175 P1 Task 2: strategy patch leaves ────────────────────────
+    // note: V1.175 P1 Task 2: strategy patch leaves
 
     #[test]
     fn preset_patch_state_parses() {
@@ -1338,9 +1335,9 @@ mod tests {
         }
     }
 
-    // ── W-002/F-001: list rows from the grouped core listing ────────────
+    // note: W-002/F-001: list rows from the grouped core listing
 
-    /// Grouped core-listing fixture with all three sources.
+    /// note: Grouped core-listing fixture with all three sources.
     fn grouped_fixture() -> ListPresetsResponse {
         use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
             NexusPresetSummary, NexusPresetSummarySource,
@@ -1379,7 +1376,7 @@ mod tests {
 
     #[test]
     fn list_rows_include_user_presets_with_real_source_labels() {
-        // W-002/F-001: user presets must appear and each row must carry its
+        // note: W-002/F-001: user presets must appear and each row must carry its
         // real source (not a blanket "embedded").
         let rows = build_preset_rows(&grouped_fixture(), None);
         assert_eq!(rows.len(), 3);
@@ -1402,7 +1399,7 @@ mod tests {
 
     #[test]
     fn list_rows_intent_filter_applies_across_groups() {
-        // W-002/F-001: `--intent` filtering must work across all groups.
+        // note: W-002/F-001: `--intent` filtering must work across all groups.
         let rows = build_preset_rows(&grouped_fixture(), Some("work_continue"));
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "my-strategy");
@@ -1412,7 +1409,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "novel-writing");
 
-        // No match → empty.
+        // note: No match → empty.
         let rows = build_preset_rows(&grouped_fixture(), Some("nonexistent-intent"));
         assert_eq!(
             rows,
@@ -1424,7 +1421,7 @@ mod tests {
         );
     }
 
-    /// Minimal profile fixture for the text renderers.
+    /// note: Minimal profile fixture for the text renderers.
     fn sample_profile() -> PresetProfileResponse {
         PresetProfileResponse {
             id: "novel-writing".to_string(),
@@ -1471,7 +1468,7 @@ mod tests {
     #[test]
     fn show_text_omits_absent_manifest_fields() {
         let profile = sample_profile();
-        // No roles, no enter actions, no exit_when/next → no invented rows.
+        // note: No roles, no enter actions, no exit_when/next → no invented rows.
         let text = format_profile_text(&profile);
         assert!(text.contains("(single-agent mode)"));
         assert!(!text.contains("exit_when:"));
@@ -1493,7 +1490,7 @@ mod tests {
         assert!(text.contains("wall-clock:  yes"));
         assert!(text.contains("session:     no"));
         assert!(text.contains("direct:      yes"));
-        // Lanes only — no orchestration sections, no cron authoring.
+        // note: Lanes only — no orchestration sections, no cron authoring.
         assert!(!text.contains("States:"));
         assert!(!text.contains("Declared"));
         assert!(!text.contains("cron add"));
@@ -1503,7 +1500,7 @@ mod tests {
     fn show_json_serializes_dto_verbatim_camel_case() {
         let profile = sample_profile();
         let json = serde_json::to_value(&profile).unwrap();
-        // camelCase wire keys (AR-25: no CLI-local renaming).
+        // note: camelCase wire keys (AR-25: no CLI-local renaming).
         assert!(json.get("sourceHash").is_some());
         assert!(json.get("source_hash").is_none());
         assert!(json.get("requiredCapabilities").is_some());
@@ -1513,7 +1510,7 @@ mod tests {
         assert!(lanes.get("wall_clock").is_none());
     }
 
-    /// Minimal preset that passes the shared validation facade (semantic +
+    /// note: Minimal preset that passes the shared validation facade (semantic +
     /// assets + path safety). The bundle directory name must equal
     /// `preset.id` (`check_bundle_id_vs_directory`).
     const LOCAL_VALID_YAML: &str = r"
@@ -1536,7 +1533,7 @@ states:
     terminal: true
 ";
 
-    /// Broken copy: `initial` names a state that does not exist (structural
+    /// note: Broken copy: `initial` names a state that does not exist (structural
     /// error caught by `loader_validate_manifest_compat`).
     const LOCAL_BROKEN_YAML: &str = r"
 preset:
@@ -1596,7 +1593,7 @@ states:
 
     #[test]
     fn local_validate_accepts_standalone_yaml_file() {
-        // A standalone YAML file (not named preset.yaml) skips asset checks.
+        // note: A standalone YAML file (not named preset.yaml) skips asset checks.
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("strategy.yaml");
         std::fs::write(&file, LOCAL_VALID_YAML).unwrap();
@@ -1608,7 +1605,7 @@ states:
         );
     }
 
-    /// The P0 golden IR and its YAML sample must reach the same verdict through
+    /// note: The P0 golden IR and its YAML sample must reach the same verdict through
     /// this one command: `*.ir.json` selects direct IR validation, YAML imports
     /// first, so a divergence means the two input formats disagree on a defect.
     #[test]
@@ -1628,7 +1625,7 @@ states:
         }
     }
 
-    /// The same defect injected into a YAML sample and its golden IR must not
+    /// note: The same defect injected into a YAML sample and its golden IR must not
     /// disagree: the IR leg projects manifest-expressible documents back for
     /// the loader-level checks, exactly as YAML runs them, and may add the
     /// IR-native structural detail for the same defect.
@@ -1682,7 +1679,7 @@ states:
                 "IR is missing the YAML diagnostic `{error}`: {ir_errors:?}"
             );
         }
-        // The IR leg additionally names the dangling edge itself.
+        // note: The IR leg additionally names the dangling edge itself.
         assert!(
             ir_errors
                 .iter()
@@ -1691,7 +1688,7 @@ states:
         );
     }
 
-    /// An IR-only document has no manifest projection, so the Q2 structural
+    /// note: An IR-only document has no manifest projection, so the Q2 structural
     /// checks are the only thing that can report its broken references.
     #[test]
     fn local_validate_ir_reports_structural_defects_without_manifest_projection() {
@@ -1737,7 +1734,7 @@ states:
         );
     }
 
-    /// Outer-state loops are legal for imported presets: the Q2 graph-cycle
+    /// note: Outer-state loops are legal for imported presets: the Q2 graph-cycle
     /// check must not turn a legal cycle into a validation error.
     #[test]
     fn local_validate_ir_allows_outer_state_cycles() {
@@ -1749,7 +1746,7 @@ states:
             .unwrap(),
         )
         .unwrap();
-        // scheduled_sweep -> sweep_extract already exists; close the loop.
+        // note: scheduled_sweep -> sweep_extract already exists; close the loop.
         ir["edges"].as_array_mut().unwrap().push(serde_json::json!({
             "id": "sweep_extract->scheduled_sweep",
             "from": "sweep_extract",
@@ -1774,7 +1771,7 @@ states:
         );
     }
 
-    /// A document from a newer IR version must fail closed instead of letting
+    /// note: A document from a newer IR version must fail closed instead of letting
     /// the exporter's refusal fall silent, and the verdict must keep the
     /// non-zero exit `validate_preset` maps it to.
     #[test]
@@ -1809,7 +1806,7 @@ states:
         );
     }
 
-    /// The IR leg applies the same document size gate as the YAML leg.
+    /// note: The IR leg applies the same document size gate as the YAML leg.
     #[test]
     fn local_validate_ir_rejects_oversize_document() {
         let tmp = tempfile::tempdir().unwrap();

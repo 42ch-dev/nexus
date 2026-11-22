@@ -2,6 +2,7 @@
 //!
 //! Implements `nexus42 acp policy grant/deny/list` commands for managing
 //! permission policies (ACP-R7).
+// note: the module doc above is this file's scope contract
 
 use crate::config::find_workspace_root;
 use crate::errors::Result;
@@ -9,39 +10,39 @@ use clap::Subcommand;
 use nexus_acp_host::{DefaultPolicy, PermissionPolicy};
 use std::path::PathBuf;
 
-/// Policy management commands
+/// note: Policy management commands
 #[derive(Debug, Subcommand)]
 pub enum PolicyCommand {
-    /// Grant a permission for ACP agents
+    /// note: Grant a permission for ACP agents
     Grant {
-        /// Permission name (e.g., "`file_system.read`")
+        /// note: Permission name (e.g., "`file_system.read`")
         permission: String,
     },
 
-    /// Deny a permission for ACP agents
+    /// note: Deny a permission for ACP agents
     Deny {
-        /// Permission name (e.g., "terminal.kill")
+        /// note: Permission name (e.g., "terminal.kill")
         permission: String,
     },
 
-    /// List all configured permissions
+    /// note: List all configured permissions
     List {
-        /// Output format (text or json)
+        /// note: Output format (text or json)
         #[arg(short = 'o', long = "output", default_value = "text")]
         output_format: String,
     },
 
-    /// Set the default policy for unknown permissions
+    /// note: Set the default policy for unknown permissions
     Default {
-        /// Default policy: "ask", "grant", or "deny"
+        /// note: Default policy: "ask", "grant", or "deny"
         policy: String,
     },
 
-    /// Show current policy configuration
+    /// note: Show current policy configuration
     Show,
 }
 
-/// Run policy management commands.
+/// note: Run policy management commands.
 ///
 /// # Errors
 ///
@@ -150,7 +151,7 @@ pub fn run(command: PolicyCommand) -> Result<()> {
     Ok(())
 }
 
-// Helper to expose policy_path publicly
+// note: Helper to expose policy_path publicly
 fn get_policy_path(workspace_root: &std::path::Path) -> PathBuf {
     workspace_root.join(".nexus42").join("permissions.toml")
 }

@@ -1,4 +1,5 @@
 //! Operational filesystem paths (ADR-014). Shared implementation: [`nexus_home_layout`].
+// note: the module doc above is this file's scope contract
 
 pub use nexus_home_layout::{
     creator_workspaces_root, operational_workspace_dir, sanitize_entry_id,

@@ -10,6 +10,7 @@
 //! - **Push**: builds a bundle via `delta_bundle`, uploads via `SyncClient::push_bundle`
 //! - **Pull**: fetches bundles via `SyncClient::pull_bundles`
 //! - **Status/Resolve**: reads/writes the local outbox (`Outbox` backed by `state.db`)
+// note: the module doc above is this file's scope contract
 
 pub mod world;
 
@@ -20,17 +21,17 @@ use clap::Subcommand;
 use nexus_cloud_sync::delta_bundle::BundleBuilder;
 use nexus_cloud_sync::sync_client::SyncClient;
 
-/// Supported conflict resolution strategies.
+/// note: Supported conflict resolution strategies.
 ///
 /// Mirrors `nexus_cloud_sync::conflict::ConflictResolution` for CLI use,
 /// avoiding a direct dependency on the sync crate in the CLI layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ResolutionStrategy {
-    /// Accept server state, discard local changes.
+    /// note: Accept server state, discard local changes.
     AutoAccept,
-    /// Keep local state, discard server changes (destructive).
+    /// note: Keep local state, discard server changes (destructive).
     AutoReject,
-    /// Present conflict to user for manual resolution.
+    /// note: Present conflict to user for manual resolution.
     ManualReview,
 }
 
@@ -46,69 +47,68 @@ impl std::fmt::Display for ResolutionStrategy {
 
 #[derive(Debug, Subcommand)]
 pub enum SyncCommand {
-    /// Push local changes to platform
+    /// note: Push local changes to platform
     Push {
-        /// Workspace ID for the bundle
+        /// note: Workspace ID for the bundle
         #[arg(long)]
         workspace_id: Option<String>,
 
-        /// World ID for the bundle
+        /// note: World ID for the bundle
         #[arg(long)]
         world_id: Option<String>,
 
-        /// Creator ID submitting the bundle
+        /// note: Creator ID submitting the bundle
         #[arg(long)]
         creator_id: Option<String>,
 
-        /// Force push even if precheck would fail
+        /// note: Force push even if precheck would fail
         #[arg(long)]
         force: bool,
     },
 
-    /// Pull platform bundles into the local outbox (requires platform URL/token on daemon)
+    /// note: Pull platform bundles into the local outbox (requires platform URL/token on daemon)
     Pull {
-        /// World ID to pull (must match workspace sync binding when configured)
+        /// note: World ID to pull (must match workspace sync binding when configured)
         #[arg(long)]
         world_id: Option<String>,
 
-        /// Incremental cursor: only bundles after this server confirmed delta sequence
+        /// note: Incremental cursor: only bundles after this server confirmed delta sequence
         #[arg(long)]
         after_sequence: Option<u64>,
     },
 
-    /// Show sync status
+    /// note: Show sync status
     Status,
 
-    /// Resolve a sync conflict with a specific strategy
+    /// note: Resolve a sync conflict with a specific strategy
     Resolve {
-        /// Outbox entry ID to resolve
+        /// note: Outbox entry ID to resolve
         outbox_entry_id: String,
 
-        /// Resolution strategy to apply
+        /// note: Resolution strategy to apply
         #[arg(long, value_enum)]
         resolution: ResolutionStrategy,
 
-        /// Skip confirmation prompt (for automation/scripts)
+        /// note: Skip confirmation prompt (for automation/scripts)
         #[arg(long)]
         force: bool,
     },
 
-    /// World fork and snapshot (migrated from `nexus42 world`)
+    /// note: World fork and snapshot (migrated from `nexus42 world`)
     World {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
 
-    /// Retry a failed sync operation (coming soon)
+    /// note: Retry a failed sync operation (coming soon)
     Retry {
-        /// Bundle ID to retry
+        /// note: Bundle ID to retry
         bundle_id: Option<String>,
     },
 }
 
-// ── Local models (used for outbox status display) ──────────────────
 
-/// Sync status from the local outbox.
+/// note: Sync status from the local outbox.
 #[derive(Debug)]
 pub struct SyncStatusInfo {
     pub staged_count: usize,
@@ -119,9 +119,8 @@ pub struct SyncStatusInfo {
     pub conflicted_count: usize,
 }
 
-// ── Confirmation prompt ───────────────────────────────────────────
 
-/// Check whether the user confirms a destructive auto-reject action.
+/// note: Check whether the user confirms a destructive auto-reject action.
 ///
 /// Returns `true` if the user confirms or if `force` is set.
 /// Returns `false` if the user declines.
@@ -134,7 +133,7 @@ pub fn confirm_auto_reject(force: bool) -> bool {
         return true;
     }
 
-    // dialoguer::Confirm returns Err when there is no TTY (non-interactive).
+    // note: dialoguer::Confirm returns Err when there is no TTY (non-interactive).
     // In that case, default to false (reject the destructive action).
     dialoguer::Confirm::new()
         .with_prompt("Auto-reject will discard all conflicting server changes. Continue?")
@@ -146,7 +145,6 @@ pub fn confirm_auto_reject(force: bool) -> bool {
         })
 }
 
-// ── Command runner ────────────────────────────────────────────────
 
 /// Run sync command.
 ///
@@ -189,13 +187,13 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 "unknown".to_string()
             });
 
-            // Obtain auth token
+            // note: Obtain auth token
             let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
-            // Build a minimal bundle
+            // note: Build a minimal bundle
             let bundle = BundleBuilder::new(&workspace_id, &world_id, &creator_id).build()?;
 
-            // Push directly to platform via cloud-sync
+            // note: Push directly to platform via cloud-sync
             let sync_client = SyncClient::new(&config.platform_url, &auth_token)?;
             match sync_client.push_bundle(&bundle).await {
                 Ok(response) => {
@@ -228,7 +226,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 ));
             };
 
-            // Obtain auth token
+            // note: Obtain auth token
             let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
             let parsed_world_id = world_id.as_str().try_into().map_err(|e| {
@@ -241,7 +239,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 after_confirmed_delta_sequence: after_sequence,
             };
 
-            // Pull directly from platform via cloud-sync
+            // note: Pull directly from platform via cloud-sync
             let sync_client = SyncClient::new(&config.platform_url, &auth_token)?;
             match sync_client.pull_bundles(&request).await {
                 Ok(resp) => {
@@ -263,7 +261,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             }
         }
         SyncCommand::Status => {
-            // Query local outbox for status
+            // note: Query local outbox for status
             match get_local_outbox_status(config).await {
                 Ok(status) => {
                     println!("Sync Status (local outbox):");
@@ -309,13 +307,13 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
         } => {
             runtime_guard::require_platform(&config.runtime_mode(), "sync resolve")?;
 
-            // Safety prompt for auto-reject (SYNC-R13)
+            // note: Safety prompt for auto-reject (SYNC-R13)
             if resolution == ResolutionStrategy::AutoReject && !confirm_auto_reject(force) {
                 println!("Auto-reject cancelled.");
                 return Ok(());
             }
 
-            // Resolve via local outbox
+            // note: Resolve via local outbox
             match resolve_outbox_entry(config, &outbox_entry_id, &resolution).await {
                 Ok(()) => {
                     println!("Resolved entry {outbox_entry_id} with strategy: {resolution}");
@@ -342,9 +340,8 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-// ── Local outbox helpers ─────────────────────────────────────────
 
-/// Get local outbox status by opening the CLI's state.db.
+/// note: Get local outbox status by opening the CLI's state.db.
 async fn get_local_outbox_status(config: &CliConfig) -> Result<SyncStatusInfo> {
     let db_path = crate::config::resolve_state_db_path(config)?;
     let outbox = nexus_cloud_sync::outbox::Outbox::new(&db_path).await?;
@@ -366,7 +363,7 @@ async fn get_local_outbox_status(config: &CliConfig) -> Result<SyncStatusInfo> {
     })
 }
 
-/// Resolve an outbox entry by updating its state in the local outbox.
+/// note: Resolve an outbox entry by updating its state in the local outbox.
 async fn resolve_outbox_entry(
     config: &CliConfig,
     outbox_entry_id: &str,
@@ -377,17 +374,17 @@ async fn resolve_outbox_entry(
 
     match resolution {
         ResolutionStrategy::AutoAccept => {
-            // Mark as acked — accept server state
+            // note: Mark as acked — accept server state
             outbox.mark_acked(outbox_entry_id).await?;
         }
         ResolutionStrategy::AutoReject => {
-            // Mark as failed — keep local state (destructive for server changes)
+            // note: Mark as failed — keep local state (destructive for server changes)
             outbox
                 .mark_failed(outbox_entry_id, "auto_reject: discarded server changes")
                 .await?;
         }
         ResolutionStrategy::ManualReview => {
-            // No state change — just log for user awareness
+            // note: No state change — just log for user awareness
             println!("  Entry {outbox_entry_id} left in conflicted state for manual review.");
         }
     }
@@ -412,20 +409,20 @@ mod tests {
 
     #[test]
     fn test_confirm_auto_reject_force_bypasses_prompt() {
-        // When force is true, confirmation should always succeed
+        // note: When force is true, confirmation should always succeed
         assert!(confirm_auto_reject(true));
     }
 
     #[test]
     fn test_confirm_auto_reject_without_force_in_no_tty() {
-        // In test environments there is no TTY, so dialoguer returns Err.
+        // note: In test environments there is no TTY, so dialoguer returns Err.
         // confirm_auto_reject should return false (reject the destructive action).
         assert!(!confirm_auto_reject(false));
     }
 
     #[test]
     fn test_resolution_strategy_from_str() {
-        // Verify clap ValueEnum parsing works
+        // note: Verify clap ValueEnum parsing works
         let auto_accept: ResolutionStrategy =
             clap::ValueEnum::from_str("auto-accept", true).expect("parse auto-accept");
         assert_eq!(auto_accept, ResolutionStrategy::AutoAccept);

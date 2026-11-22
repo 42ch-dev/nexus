@@ -2,11 +2,12 @@
 //!
 //! Strips the 8 noise symbols used by the platform to obfuscate challenge text:
 //! `]`, `^`, `*`, `|`, `-`, `~`, `/`, `[`
+// note: the module doc above is this file's scope contract
 
-/// Noise symbols to remove from challenge text.
+/// note: Noise symbols to remove from challenge text.
 const NOISE_SYMBOLS: &[char] = &[']', '^', '*', '|', '-', '~', '/', '['];
 
-/// Strip all noise symbols from the given text.
+/// note: Strip all noise symbols from the given text.
 ///
 /// Returns a new string with all 8 noise characters removed.
 /// This is the first step in the challenge-solving pipeline.
@@ -35,7 +36,7 @@ mod tests {
             result,
             "A bAsKeT hAs tHiRtY fIvE ApPlEs aNd sOmEoNe AdDs TwElVe MoRe"
         );
-        // None of the noise symbols should remain
+        // note: None of the noise symbols should remain
         for sym in NOISE_SYMBOLS {
             assert!(!result.contains(*sym), "noise symbol '{sym}' still present");
         }
@@ -53,7 +54,7 @@ mod tests {
 
     #[test]
     fn strips_only_noise_symbols_leaving_punctuation() {
-        // Comma and period should be preserved
+        // note: Comma and period should be preserved
         assert_eq!(strip_noise("hello, world."), "hello, world.");
     }
 

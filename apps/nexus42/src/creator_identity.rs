@@ -3,37 +3,38 @@
 //! Stores display/alias metadata keyed by canonical `creator_id` in
 //! `~/.nexus42/creator-identities.json`. Pre-1.0 disposable — no
 //! generated contract changes.
+// note: the module doc above is this file's scope contract
 
 use crate::config::nexus_home;
 use crate::errors::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Single creator identity entry in the CLI-local cache.
+/// note: Single creator identity entry in the CLI-local cache.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreatorIdentityEntry {
-    /// Canonical creator ID (e.g. `ctr_abc123`).
+    /// note: Canonical creator ID (e.g. `ctr_abc123`).
     pub creator_id: String,
-    /// Handle if provided during registration (e.g. `alpha`).
+    /// note: Handle if provided during registration (e.g. `alpha`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
-    /// Display name from platform response or registration input.
+    /// note: Display name from platform response or registration input.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }
 
-/// CLI-local cache of creator identities, persisted as JSON.
+/// note: CLI-local cache of creator identities, persisted as JSON.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct CreatorIdentityCache {
-    /// Keyed by canonical `creator_id`.
+    /// note: Keyed by canonical `creator_id`.
     #[serde(default)]
     pub creators: HashMap<String, CreatorIdentityEntry>,
 }
 
-/// File name for the identity cache, next to `auth.json` and `config.toml`.
+/// note: File name for the identity cache, next to `auth.json` and `config.toml`.
 const FILENAME: &str = "creator-identities.json";
 
-/// Return the path to `~/.nexus42/creator-identities.json`.
+/// note: Return the path to `~/.nexus42/creator-identities.json`.
 ///
 /// # Errors
 ///
@@ -42,7 +43,7 @@ pub fn cache_path() -> Result<PathBuf> {
     Ok(nexus_home()?.join(FILENAME))
 }
 
-/// Load the creator identity cache from disk.
+/// note: Load the creator identity cache from disk.
 ///
 /// Returns an empty cache if the file is missing or cannot be parsed.
 #[must_use]
@@ -65,7 +66,7 @@ pub fn load_creator_identity_cache() -> CreatorIdentityCache {
 
     let mut cache: CreatorIdentityCache = serde_json::from_str(&content).unwrap_or_default();
 
-    // C-001: Validate all creator_id values loaded from disk.
+    // note: C-001: Validate all creator_id values loaded from disk.
     // A corrupt cache may contain entries with unsafe IDs (path traversal, etc.)
     // that bypass the write-time validate_creator_id_safe() check.
     let invalid_ids: Vec<String> = cache
@@ -83,7 +84,7 @@ pub fn load_creator_identity_cache() -> CreatorIdentityCache {
     cache
 }
 
-/// Save the creator identity cache to disk atomically with advisory file locking.
+/// note: Save the creator identity cache to disk atomically with advisory file locking.
 ///
 /// Uses an advisory lock file (`creator-identities.json.lock`) to prevent
 /// data loss from concurrent CLI invocations. The lock is best-effort —
@@ -98,12 +99,12 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Advisory file lock — best-effort guard against concurrent RMW races.
+    // note: Advisory file lock — best-effort guard against concurrent RMW races.
     let lock_path = path.with_extension("json.lock");
     let _lock_guard = AdvisoryLock::acquire(&lock_path);
 
     let json = serde_json::to_string_pretty(cache)?;
-    // Use a unique temp path per call to avoid rename races when multiple
+    // note: Use a unique temp path per call to avoid rename races when multiple
     // threads/processes write concurrently. Each writer gets its own tmp file
     // so one thread's rename cannot remove another's tmp prematurely.
     let unique = std::time::SystemTime::now()
@@ -115,17 +116,17 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
     Ok(())
 }
 
-/// Advisory file lock using a `.lock` file. Best-effort — logs a warning on
+/// note: Advisory file lock using a `.lock` file. Best-effort — logs a warning on
 /// failure and proceeds without locking (better than blocking the CLI).
 struct AdvisoryLock {
     _lock_file: std::fs::File,
 }
 
 impl AdvisoryLock {
-    /// Try to acquire an exclusive advisory lock. Returns `None` (with a warning)
+    /// note: Try to acquire an exclusive advisory lock. Returns `None` (with a warning)
     /// if the lock cannot be acquired — the write proceeds without locking.
     fn acquire(lock_path: &std::path::Path) -> Option<Self> {
-        // Try exclusive creation — if the lock file exists, another process holds it.
+        // note: Try exclusive creation — if the lock file exists, another process holds it.
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -138,12 +139,12 @@ impl AdvisoryLock {
 
 impl Drop for AdvisoryLock {
     fn drop(&mut self) {
-        // Lock file is removed on drop, releasing the advisory lock.
+        // note: Lock file is removed on drop, releasing the advisory lock.
         // The File handle is closed when _lock_file is dropped.
     }
 }
 
-/// Look up a creator identity by exact `creator_id`.
+/// note: Look up a creator identity by exact `creator_id`.
 #[must_use]
 pub fn get_creator_identity<'a>(
     cache: &'a CreatorIdentityCache,
@@ -165,7 +166,7 @@ pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
     save_creator_identity_cache(&cache)
 }
 
-/// Resolve a user-provided `creator_ref` to a canonical `creator_id`.
+/// note: Resolve a user-provided `creator_ref` to a canonical `creator_id`.
 ///
 /// Resolution order:
 /// 1. Exact match on `creator_id` in the cache → return that ID.
@@ -180,24 +181,24 @@ pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
 pub fn resolve_creator_ref(input: &str) -> Result<String> {
     let cache = load_creator_identity_cache();
 
-    // 1. Exact creator_id match
+    // note: 1. Exact creator_id match
     if cache.creators.contains_key(input) {
         return Ok(input.to_string());
     }
 
-    // 2. Handle match
+    // note: 2. Handle match
     for entry in cache.creators.values() {
         if entry.handle.as_deref() == Some(input) {
             return Ok(entry.creator_id.clone());
         }
     }
 
-    // 3. Path-safe fallback (backward compat)
+    // note: 3. Path-safe fallback (backward compat)
     if crate::paths::validate_creator_id_safe(input).is_ok() {
         return Ok(input.to_string());
     }
 
-    // 4. Unsafe input — error
+    // note: 4. Unsafe input — error
     Err(crate::errors::CliError::Other(format!(
         "Unknown creator reference {input:?}. \
          Use `nexus42 creator list` to see available creators, \
@@ -267,14 +268,13 @@ mod tests {
 
     #[test]
     fn resolve_exact_creator_id() {
-        // Build cache in-memory, test the matching logic directly.
+        // note: Build cache in-memory, test the matching logic directly.
         let mut cache = CreatorIdentityCache::default();
         cache.creators.insert(
             "ctr_alpha".to_string(),
             sample_entry("ctr_alpha", Some("alpha"), None),
         );
 
-        // Step 1: exact creator_id match
         assert!(cache.creators.contains_key("ctr_alpha"));
         let matched = cache.creators.get("ctr_alpha").expect("entry");
         assert_eq!(matched.creator_id, "ctr_alpha");
@@ -288,7 +288,6 @@ mod tests {
             sample_entry("ctr_alpha", Some("alpha"), None),
         );
 
-        // Step 2: handle match — loop through entries
         let found = cache
             .creators
             .values()
@@ -308,7 +307,7 @@ mod tests {
         );
         save_creator_identity_cache(&cache).expect("save");
 
-        // "alpha_handle_unique" should resolve to "ctr_alpha"
+        // note: "alpha_handle_unique" should resolve to "ctr_alpha"
         let result = resolve_creator_ref("alpha_handle_unique").expect("resolve handle");
         assert_eq!(result, "ctr_alpha");
     }
@@ -317,7 +316,7 @@ mod tests {
     fn resolve_path_safe_unknown_passthrough() {
         let _home = crate::testutil::isolated_home();
 
-        // Empty cache — unknown but path-safe input should pass through
+        // note: Empty cache — unknown but path-safe input should pass through
         let cache = CreatorIdentityCache::default();
         save_creator_identity_cache(&cache).expect("save");
 
@@ -338,7 +337,7 @@ mod tests {
         assert!(err.contains("Unknown creator reference"));
     }
 
-    // ── R-CREATOR-002: Concurrent write safety test ────────────────────
+    // note: R-CREATOR-002: Concurrent write safety test
 
     #[test]
     fn concurrent_writes_dont_corrupt_file() {
@@ -347,7 +346,7 @@ mod tests {
 
         let _home = crate::testutil::isolated_home();
 
-        // Pre-populate so threads race on read-modify-write
+        // note: Pre-populate so threads race on read-modify-write
         let mut initial = CreatorIdentityCache::default();
         initial
             .creators
@@ -380,21 +379,21 @@ mod tests {
             h.join().expect("thread should not panic");
         }
 
-        // At least some writes should succeed
+        // note: At least some writes should succeed
         let successes = success_count.load(Ordering::Relaxed);
         assert!(
             successes > 0,
             "At least one concurrent write should succeed"
         );
 
-        // The final cache should be valid JSON and parseable
+        // note: The final cache should be valid JSON and parseable
         let final_cache = load_creator_identity_cache();
-        // Base entry should survive
+        // note: Base entry should survive
         assert!(
             final_cache.creators.contains_key("ctr_base"),
             "base entry should survive concurrent writes"
         );
-        // At least one thread entry should be present
+        // note: At least one thread entry should be present
         assert!(
             final_cache
                 .creators

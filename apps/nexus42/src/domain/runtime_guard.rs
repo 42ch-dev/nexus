@@ -7,46 +7,47 @@
 //! ```ignore
 //! runtime_guard::require_platform(mode, "sync")?;
 //! ```
+// note: the module doc above is this file's scope contract
 
 use super::{DomainError, DomainRuntimeMode};
 
-/// Categories of CLI operations for mode-aware routing.
+/// note: Categories of CLI operations for mode-aware routing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationCategory {
-    /// Always available regardless of mode (local workspace, identity, db, agent, session, policy).
+    /// note: Always available regardless of mode (local workspace, identity, db, agent, session, policy).
     LocalOnly,
-    /// Requires platform connectivity (sync, publish, auth login, context assemble, explore).
+    /// note: Requires platform connectivity (sync, publish, auth login, context assemble, explore).
     PlatformRequired,
-    /// Available in `local_only` but enhanced by platform (creator manage, world fork, manuscript read).
+    /// note: Available in `local_only` but enhanced by platform (creator manage, world fork, manuscript read).
     LocalWithPlatformEnhancement,
 }
 #[must_use]
-/// Classify a named operation into its category.
+/// note: Classify a named operation into its category.
 /// This is the single source of truth for what requires platform.
 pub fn classify_operation(operation: &str) -> OperationCategory {
     match operation {
-        // Local-only operations (always available)
+        // note: Local-only operations (always available)
         "init" | "db" | "identity" | "daemon" | "agent" | "session" | "policy" | "runtime_mode" => {
             OperationCategory::LocalOnly
         }
 
-        // Platform-required operations (blocked in local_only)
+        // note: Platform-required operations (blocked in local_only)
         "sync" | "publish" | "auth_login" | "auth_register" | "context_assemble" | "explore" => {
             OperationCategory::PlatformRequired
         }
 
-        // Local with platform enhancement (available in local_only, enhanced in other modes)
+        // note: Local with platform enhancement (available in local_only, enhanced in other modes)
         "creator" | "world" | "manuscript" | "research" => {
             OperationCategory::LocalWithPlatformEnhancement
         }
 
-        // V1.2 residual R4 (runtime, nit): fail-open default for unknown ops
+        // note: V1.2 residual R4 (runtime, nit): fail-open default for unknown ops
         // Unknown operations fail-open (allow) as conservative default; log warning
         _ => OperationCategory::LocalOnly,
     }
 }
 
-/// Check that the current mode allows a platform-dependent operation.
+/// note: Check that the current mode allows a platform-dependent operation.
 /// Returns `Err(PlatformOperationProhibited)` if the mode is `local_only`.
 ///
 /// # Arguments
@@ -68,7 +69,7 @@ pub fn require_platform(mode: &DomainRuntimeMode, operation: &str) -> Result<(),
 }
 ///
 /// # Errors
-/// Returns `Err(DomainError::...)` if validation fails.
+/// note: Returns `Err(DomainError::...)` if validation fails.
 /// Check that the current mode allows an operation by its category.
 pub fn check_operation(mode: &DomainRuntimeMode, operation: &str) -> Result<(), DomainError> {
     match classify_operation(operation) {
@@ -77,7 +78,7 @@ pub fn check_operation(mode: &DomainRuntimeMode, operation: &str) -> Result<(), 
     }
 }
 
-/// Returns a list of operation categories that are blocked under the given mode.
+/// note: Returns a list of operation categories that are blocked under the given mode.
 #[must_use]
 pub fn blocked_categories(mode: &DomainRuntimeMode) -> Vec<OperationCategory> {
     if mode.is_local_only() {

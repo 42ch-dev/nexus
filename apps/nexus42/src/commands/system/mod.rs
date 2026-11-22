@@ -9,6 +9,7 @@
 //! - `db` — Database status and management
 //! - `identity` — Local identity management
 //! - `runtime-mode` — Runtime mode management
+// note: the module doc above is this file's scope contract
 
 #![allow(clippy::print_literal)]
 
@@ -25,50 +26,50 @@ use clap_complete::Shell;
 
 #[derive(Debug, Subcommand)]
 pub enum SystemCommand {
-    /// Print CLI version info
+    /// note: Print CLI version info
     Version,
 
-    /// Diagnostic health checks
+    /// note: Diagnostic health checks
     Doctor,
 
-    /// Generate shell completion script
+    /// note: Generate shell completion script
     Completion {
-        /// Shell type (bash, zsh, fish, elvish, powershell)
+        /// note: Shell type (bash, zsh, fish, elvish, powershell)
         shell: String,
     },
 
-    /// Configuration file management
+    /// note: Configuration file management
     Config {
         #[command(subcommand)]
         command: config::ConfigCommand,
     },
 
-    /// Internal debugging utilities
+    /// note: Internal debugging utilities
     Debug {
         #[command(subcommand)]
         command: debug::DebugCommand,
     },
 
-    /// Database status and management
+    /// note: Database status and management
     Db {
         #[command(subcommand)]
         command: db::DbCommand,
     },
 
-    /// Local identity management
+    /// note: Local identity management
     Identity {
         #[command(subcommand)]
         command: identity::IdentityCommand,
     },
 
-    /// Runtime mode management
+    /// note: Runtime mode management
     RuntimeMode {
         #[command(subcommand)]
         command: runtime_mode::RuntimeModeCommand,
     },
 }
 
-/// Run the system command (extended).
+/// note: Run the system command (extended).
 ///
 /// # Errors
 ///
@@ -89,7 +90,7 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Generate shell completion script for the given shell.
+/// note: Generate shell completion script for the given shell.
 ///
 /// Parses the shell name case-insensitively and generates a completion
 /// script for the full `nexus42` CLI.
@@ -111,7 +112,7 @@ fn print_completion(shell_str: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run combined diagnostics: ACP registry + home directory.
+/// note: Run combined diagnostics: ACP registry + home directory.
 ///
 /// This is the `nexus42 system doctor` implementation — a unified diagnostic
 /// that combines infrastructure checks in a single pass. Both checks are local
@@ -122,7 +123,7 @@ async fn run_combined_doctor() -> Result<()> {
 
     let mut issues = 0u32;
 
-    // Check 1: ACP registry reachability
+    // note: Check 1: ACP registry reachability
     print!("  [1/2] ACP registry reachability... ");
     match nexus_acp_host::registry::RegistryClient::new() {
         Ok(reg_client) => match reg_client.get_registry().await {
@@ -144,7 +145,7 @@ async fn run_combined_doctor() -> Result<()> {
         }
     }
 
-    // Check 2: Home directory health
+    // note: Check 2: Home directory health
     print!("  [2/2] Home directory (~/.nexus42/)... ");
     match crate::config::nexus_home() {
         Ok(home) => {
@@ -171,9 +172,7 @@ async fn run_combined_doctor() -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+// note: tests
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -182,7 +181,7 @@ mod tests {
 
     #[test]
     fn print_completion_valid_shell_bash() {
-        // Should not error for a valid shell name
+        // note: Should not error for a valid shell name
         assert!(print_completion("bash").is_ok());
     }
 

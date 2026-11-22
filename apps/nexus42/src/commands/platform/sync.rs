@@ -3,12 +3,13 @@
 //! Delegates to the existing `commands::sync` module handlers.
 //! This is the V1.35 canonical location; the top-level `sync` group
 //! is deprecated and forwards here with a stderr warning.
+// note: the module doc above is this file's scope contract
 
 use crate::commands::sync::{self, SyncCommand};
 use crate::config::CliConfig;
 use crate::errors::Result;
 
-/// Run platform sync command by delegating to the top-level sync handlers.
+/// note: Run platform sync command by delegating to the top-level sync handlers.
 ///
 /// # Errors
 ///

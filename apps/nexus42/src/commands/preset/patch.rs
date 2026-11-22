@@ -24,6 +24,7 @@
 //! command awaits [`finish_direct`] **before** printing, so a command never
 //! reports an outcome its core could not settle — on success and on refusal
 //! alike.
+// note: the module doc above is this file's scope contract
 
 use crate::commands::creator::work_utils::read_file_bounded;
 use crate::config::CliConfig;
@@ -38,124 +39,124 @@ use nexus_contracts::{
 };
 use nexus_core::{CoreService, Principal};
 
-/// Client-side cap for `--file` prompt reads (qc3 S-002). Mirrors the
+/// note: Client-side cap for `--file` prompt reads (qc3 S-002). Mirrors the
 /// preset YAML size cap (`PRESET_MAX_YAML_SIZE`, 1 MiB in the core strategy
 /// seam) so an accidentally oversized template file is rejected before the
 /// unbounded read.
 const PROMPT_FILE_MAX_BYTES: usize = 1024 * 1024;
 
-/// `preset patch` subcommands.
+/// note: `preset patch` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum PatchCommand {
-    /// Patch a state node (rename via --label, or update --description).
+    /// note: Patch a state node (rename via --label, or update --description).
     ///
     /// CAS-guarded: `--base-revision` must match the Strategy's current
     /// revision. On 409 `strategy_conflict`, re-read the Strategy and
     /// reapply with the new revision.
     State {
-        /// Strategy / user preset ID (bundle directory name).
+        /// note: Strategy / user preset ID (bundle directory name).
         strategy_id: String,
-        /// State ID to patch.
+        /// note: State ID to patch.
         state_id: String,
-        /// Revision observed on the last canonical read (CAS). On a 409
+        /// note: Revision observed on the last canonical read (CAS). On a 409
         /// `strategy_conflict`, re-read the Strategy (e.g. `preset show`)
         /// and reapply with the new revision.
         #[arg(long, value_name = "N")]
         base_revision: u64,
-        /// New state id — renames the state and rewrites all references
+        /// note: New state id — renames the state and rewrites all references
         /// (next targets, initial, branches).
         #[arg(long)]
         label: Option<String>,
-        /// New state description.
+        /// note: New state description.
         #[arg(long)]
         description: Option<String>,
-        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
+        /// note: Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Rewire a transition (create or update).
+    /// note: Rewire a transition (create or update).
     ///
     /// CAS-guarded: `--base-revision` must match the Strategy's current
     /// revision. On 409 `strategy_conflict`, re-read the Strategy and
     /// reapply with the new revision.
     Transition {
-        /// Strategy / user preset ID (bundle directory name).
+        /// note: Strategy / user preset ID (bundle directory name).
         strategy_id: String,
-        /// Revision observed on the last canonical read (CAS). On a 409
+        /// note: Revision observed on the last canonical read (CAS). On a 409
         /// `strategy_conflict`, re-read the Strategy (e.g. `preset show`)
         /// and reapply with the new revision.
         #[arg(long, value_name = "N")]
         base_revision: u64,
-        /// Source state ID whose outgoing transition is patched.
+        /// note: Source state ID whose outgoing transition is patched.
         #[arg(long, value_name = "STATE_ID")]
         source_state: String,
-        /// Operation: `create` or `update` (default: `update`).
+        /// note: Operation: `create` or `update` (default: `update`).
         #[arg(long, value_enum, default_value_t = TransitionOpArg::Update)]
         op: TransitionOpArg,
-        /// Old target state (required for `--op update`).
+        /// note: Old target state (required for `--op update`).
         #[arg(long, value_name = "STATE_ID")]
         old_target: Option<String>,
-        /// New target state (required for `--op create`).
+        /// note: New target state (required for `--op create`).
         #[arg(long, value_name = "STATE_ID")]
         new_target: Option<String>,
-        /// Branch condition expression (e.g. `_context._judge_result == true`).
+        /// note: Branch condition expression (e.g. `_context._judge_result == true`).
         #[arg(long)]
         condition: Option<String>,
-        /// Create form: `next` (linear), `branch` (conditional rule), or
+        /// note: Create form: `next` (linear), `branch` (conditional rule), or
         /// `default` (conditional default target).
         #[arg(long, value_enum)]
         transition_kind: Option<TransitionKindArg>,
-        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
+        /// note: Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Patch a state's prompt template.
+    /// note: Patch a state's prompt template.
     ///
     /// CAS-guarded: `--base-revision` must match the Strategy's current
     /// revision. On 409 `strategy_conflict`, re-read the Strategy and
     /// reapply with the new revision.
     Prompt {
-        /// Strategy / user preset ID (bundle directory name).
+        /// note: Strategy / user preset ID (bundle directory name).
         strategy_id: String,
-        /// State ID whose prompt template is patched.
+        /// note: State ID whose prompt template is patched.
         state_id: String,
-        /// Revision observed on the last canonical read (CAS). On a 409
+        /// note: Revision observed on the last canonical read (CAS). On a 409
         /// `strategy_conflict`, re-read the Strategy (e.g. `preset show`)
         /// and reapply with the new revision.
         #[arg(long, value_name = "N")]
         base_revision: u64,
-        /// Template path inside the bundle (e.g. `prompts/start.md`).
+        /// note: Template path inside the bundle (e.g. `prompts/start.md`).
         #[arg(long, value_name = "PATH")]
         template_ref: String,
-        /// Template body source: a file path, or `-` to read stdin.
+        /// note: Template body source: a file path, or `-` to read stdin.
         #[arg(long, value_name = "PATH")]
         file: String,
-        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
+        /// note: Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-/// `--op` value for transition patches.
+/// note: `--op` value for transition patches.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum TransitionOpArg {
-    /// Insert a new outgoing transition.
+    /// note: Insert a new outgoing transition.
     Create,
-    /// Rewire an existing outgoing transition.
+    /// note: Rewire an existing outgoing transition.
     Update,
 }
 
-/// `--transition-kind` value for transition creates.
+/// note: `--transition-kind` value for transition creates.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum TransitionKindArg {
-    /// Linear scalar `next` target.
+    /// note: Linear scalar `next` target.
     Next,
-    /// Conditional `rules` branch.
+    /// note: Conditional `rules` branch.
     Branch,
-    /// Conditional `default` target.
+    /// note: Conditional `default` target.
     Default,
 }
 
@@ -178,7 +179,7 @@ impl TransitionKindArg {
     }
 }
 
-/// Run a `preset patch` subcommand over the direct-writer core.
+/// note: Run a `preset patch` subcommand over the direct-writer core.
 ///
 /// The leaf returns its rendered text; the command prints it only after
 /// [`finish_direct`] released the writer.
@@ -267,7 +268,7 @@ pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// `preset patch state <strategy_id> <state_id> --base-revision N
+/// note: `preset patch state <strategy_id> <state_id> --base-revision N
 /// [--label <id>] [--description <text>]` — patch a state node
 /// (`CoreService::patch_strategy_state`).
 ///
@@ -277,7 +278,7 @@ pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
 /// `--description` is given, or the mapped core refusal (409
 /// `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
 /// 400 `bad_request` for other 400s).
-#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
+#[allow(clippy::too_many_arguments)] // why: CLI param plumbing — house pattern
 async fn patch_state(
     core: &CoreService,
     principal: &Principal,
@@ -320,7 +321,7 @@ async fn patch_state(
     ))
 }
 
-/// `preset patch transition <strategy_id> --base-revision N --source-state
+/// note: `preset patch transition <strategy_id> --base-revision N --source-state
 /// <id> [--op create|update] [--old-target <id>] [--new-target <id>]
 /// [--condition <expr>] [--transition-kind next|branch|default]` — rewire
 /// a transition (`CoreService::patch_strategy_transition`).
@@ -331,7 +332,7 @@ async fn patch_state(
 /// `--op` is missing, or the mapped core refusal (409 `strategy_conflict`,
 /// 404 `not_found`, 422 `strategy_validation_failed`, 400 `bad_request` for
 /// other 400s).
-#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
+#[allow(clippy::too_many_arguments)] // why: CLI param plumbing — house pattern
 async fn patch_transition(
     core: &CoreService,
     principal: &Principal,
@@ -345,7 +346,7 @@ async fn patch_transition(
     transition_kind: Option<TransitionKindArg>,
     json: bool,
 ) -> Result<String> {
-    // CLI-side required-flag checks mirror the core seam's field errors so
+    // note: CLI-side required-flag checks mirror the core seam's field errors so
     // scripts fail fast with named messages (PL-5).
     match op {
         TransitionOpArg::Create => {
@@ -386,7 +387,7 @@ async fn patch_transition(
     ))
 }
 
-/// `preset patch prompt <strategy_id> <state_id> --base-revision N
+/// note: `preset patch prompt <strategy_id> <state_id> --base-revision N
 /// --template-ref <path> --file <path>|'-'` — patch a state's prompt
 /// template (`CoreService::patch_strategy_prompt_template`).
 ///
@@ -395,7 +396,7 @@ async fn patch_transition(
 /// Returns a named `CliError::Other` when `--file` cannot be read, or the
 /// mapped core refusal (409 `strategy_conflict`, 404 `not_found`, 422
 /// `strategy_validation_failed`, 400 `bad_request` for other 400s).
-#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
+#[allow(clippy::too_many_arguments)] // why: CLI param plumbing — house pattern
 async fn patch_prompt(
     core: &CoreService,
     principal: &Principal,
@@ -440,7 +441,7 @@ async fn patch_prompt(
     ))
 }
 
-/// Render a `CoreStrategyPatchResponse` for human output (trailing newline
+/// note: Render a `CoreStrategyPatchResponse` for human output (trailing newline
 /// excluded — the caller's `println!` supplies it).
 fn render_patch_response(resp: &CoreStrategyPatchResponse) -> String {
     let mut lines = vec![format!("  new_revision: {}", resp.new_revision)];

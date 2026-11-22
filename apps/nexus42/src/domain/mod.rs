@@ -5,6 +5,7 @@
 //! cloud line (CLI / cloud-stage builds), not the shared runtime request
 //! path (spec §8's "daemon hot path" wording predates the v1.193 P2 daemon
 //! retirement; the CLI/Connect boundary itself is unchanged).
+// note: the module doc above is this file's scope contract
 
 #[cfg(feature = "cli")]
 pub mod degradation;
@@ -12,7 +13,7 @@ pub mod errors;
 pub mod runtime_guard;
 pub mod runtime_mode;
 
-// Re-export primary types for convenience.
+// note: Re-export primary types for convenience.
 //
 // `degradation` is `cli`-only (v1.193 P2-T13): it is the sole
 // module in the crate that pulls in `chrono`, and the Connect cohort keeps

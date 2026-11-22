@@ -47,6 +47,7 @@
 //! - Slice boundary: read-only inspect; the CLI never implies resume can be
 //!   triggered from here (re-drive is driven from the persisted session state
 //!   by the retained resume caller, not by a boot scanner).
+// note: the module doc above is this file's scope contract
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
@@ -58,14 +59,14 @@ use serde_json::Value;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-/// Operator-facing daemon-free inspection commands (hidden group).
+/// note: Operator-facing daemon-free inspection commands (hidden group).
 #[derive(Debug, Subcommand)]
 pub enum OpsCommand {
-    /// Inspect checkpointed orchestration sessions (daemon-free, read-only)
+    /// note: Inspect checkpointed orchestration sessions (daemon-free, read-only)
     Inspect {
-        /// Session (run) id for the detail view; omit for the list view
+        /// note: Session (run) id for the detail view; omit for the list view
         session_id: Option<String>,
-        /// Emit the CLI-local inspect DTO verbatim (`snake_case`)
+        /// note: Emit the CLI-local inspect DTO verbatim (`snake_case`)
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -79,24 +80,24 @@ struct InspectDto {
     creator_id: String,
     preset_id: String,
     preset_version: i64,
-    /// Raw DB status column — authoritative for v1 rows, diagnostic for v0.
+    /// note: Raw DB status column — authoritative for v1 rows, diagnostic for v0.
     db_status: String,
-    /// Execution version: `0` = legacy/unverified, `1` = v1 authoritative
+    /// note: Execution version: `0` = legacy/unverified, `1` = v1 authoritative
     /// (A2); negative/forward versions are unsupported (unreadable).
     execution_version: i64,
-    /// State revision (CAS anchor; `0` on v0 rows).
+    /// note: State revision (CAS anchor; `0` on v0 rows).
     state_revision: i64,
-    /// Canonical A7 recovery class (v1.186 P0, Task 2) — shared with the
+    /// note: Canonical A7 recovery class (v1.186 P0, Task 2) — shared with the
     /// retained resume driver; always present (`unreadable` covers
     /// corrupt/unsupported rows, `legacy_unverified` covers v0 rows).
     recovery_class: RecoveryClass,
-    /// Durable human-wait token (A4) for v1 `waiting_for_input` rows.
+    /// note: Durable human-wait token (A4) for v1 `waiting_for_input` rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_id: Option<String>,
-    /// Legal operator actions for the canonical recovery class (shared A2
+    /// note: Legal operator actions for the canonical recovery class (shared A2
     /// projection; tri-QC P1-B).
     allowed_actions: Vec<String>,
-    /// Stable machine reason for an uncertain/blocked outcome (e.g. a human
+    /// note: Stable machine reason for an uncertain/blocked outcome (e.g. a human
     /// wait whose frozen source can no longer be reconstructed).
     #[serde(skip_serializing_if = "Option::is_none")]
     reason_code: Option<String>,
@@ -114,7 +115,7 @@ struct InspectDto {
     context_readable: Option<bool>,
 }
 
-/// Typed run-failure record from context `_run_status` / `_run_error`.
+/// note: Typed run-failure record from context `_run_status` / `_run_error`.
 #[derive(Debug, Clone, Serialize)]
 struct RunFailure {
     run_status: Option<String>,
@@ -133,7 +134,7 @@ struct ResumableVerdict {
     explanation: String,
 }
 
-/// Stable resumable verdict word (contract `verdict` field).
+/// note: Stable resumable verdict word (contract `verdict` field).
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Verdict {
@@ -152,7 +153,7 @@ impl std::fmt::Display for Verdict {
     }
 }
 
-/// Stable verdict rule (contract `rule` field) — the shared
+/// note: Stable verdict rule (contract `rule` field) — the shared
 /// [`ResumeClass`] projected into the DTO ([`From<ResumeClass>`]); v1.186
 /// adds the A7 recovery-class rules used when the row's durable v1 state is
 /// authoritative.
@@ -161,7 +162,7 @@ impl std::fmt::Display for Verdict {
 enum ResumeRule {
     TerminalStatus,
     ContextUnreadable,
-    /// A7: v1 run-state metadata is corrupt/unsupported (non-replayable).
+    /// note: A7: v1 run-state metadata is corrupt/unsupported (non-replayable).
     /// Distinct from [`ResumeRule::ContextUnreadable`] — the session
     /// `context_json` may be perfectly readable while the v1 durable
     /// metadata is not.
@@ -169,11 +170,11 @@ enum ResumeRule {
     TypedFailure,
     NotConvergeMergeClass,
     ChainClassNoFailure,
-    /// A7: interrupted/uncertain in-flight work; never auto-retried.
+    /// note: A7: interrupted/uncertain in-flight work; never auto-retried.
     Interrupted,
-    /// A7: human wait; token preserved, never stepped automatically.
+    /// note: A7: human wait; token preserved, never stepped automatically.
     HumanWait,
-    /// A7: fully committed step boundary; may reconstruct, not auto-driven.
+    /// note: A7: fully committed step boundary; may reconstruct, not auto-driven.
     SafeBoundary,
 }
 
@@ -189,7 +190,7 @@ impl From<ResumeClass> for ResumeRule {
     }
 }
 
-/// Runner availability — NEVER part of the verdict (it is in-memory runtime
+/// note: Runner availability — NEVER part of the verdict (it is in-memory runtime
 /// state, not derivable from persisted rows; `boot_time` is the frozen
 /// inspect-contract serialized token for "runner status is a runtime
 /// concern").
@@ -200,7 +201,7 @@ enum RunnerCheck {
     NotApplicable,
 }
 
-/// Why a context could not be projected — corrupt bytes vs parseable-but-
+/// note: Why a context could not be projected — corrupt bytes vs parseable-but-
 /// unexpected schema (distinct honest wording, qc3 S1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnreadableKind {
@@ -208,7 +209,7 @@ enum UnreadableKind {
     UnexpectedShape,
 }
 
-/// Dispatch entry for the `ops` group.
+/// note: Dispatch entry for the `ops` group.
 ///
 /// # Errors
 ///
@@ -239,11 +240,11 @@ async fn inspect(session_id: Option<String>, json: bool, config: &CliConfig) -> 
 }
 
 enum InspectOutcome {
-    /// No workspace db at all — honest empty state, exit 0.
+    /// note: No workspace db at all — honest empty state, exit 0.
     NoDatabase(String),
-    /// Detail view for one row (bare DTO object).
+    /// note: Detail view for one row (bare DTO object).
     Detail(Box<InspectDto>),
-    /// List view over non-terminal rows (bounded) + honest full total.
+    /// note: List view over non-terminal rows (bounded) + honest full total.
     List { rows: Vec<InspectDto>, total: i64 },
 }
 
@@ -307,7 +308,7 @@ async fn inspect_inner(session_id: Option<String>, config: &CliConfig) -> Result
     Ok(InspectOutcome::List { rows: dtos, total })
 }
 
-/// Parse the durable v1 run state blob from a checkpoint row.
+/// note: Parse the durable v1 run state blob from a checkpoint row.
 ///
 /// `None` for v0 rows (no blob, legacy/unverified) and for corrupt/absent/
 /// type-invalid blobs (surfaced as `recovery_class: unreadable` under A7,
@@ -326,7 +327,7 @@ fn descriptor_is_valid(bytes: Option<&[u8]>) -> bool {
     })
 }
 
-/// Compute the canonical A7 recovery class from the authoritative status +
+/// note: Compute the canonical A7 recovery class from the authoritative status +
 /// durable state (shared by detail and list projection).
 ///
 /// Exact execution-version contract (A7 / `load_run`): only `0` (legacy,
@@ -349,14 +350,14 @@ fn recovery_class_for(
             if !descriptor_valid {
                 return RecoveryClass::Unreadable;
             }
-            // A v1 row's status must be a known A2 status; anything else is
+            // note: A v1 row's status must be a known A2 status; anything else is
             // corrupt/ambiguous and non-replayable (mirrors `load_run`).
             let Some(status) = nexus_session_storage::SessionStatus::from_db_str(status) else {
                 return RecoveryClass::Unreadable;
             };
             resume_rules::classify_recovery(&status, state, gate_park_live)
         }
-        // Negative or forward (>= 2) execution versions are unsupported.
+        // note: Negative or forward (>= 2) execution versions are unsupported.
         _ => RecoveryClass::Unreadable,
     }
 }
@@ -399,7 +400,7 @@ fn project(row: &CheckpointRow) -> InspectDto {
         ),
     };
 
-    // Canonical A7 recovery class (v1.186 P0, Task 2): the durable v1
+    // note: Canonical A7 recovery class (v1.186 P0, Task 2): the durable v1
     // status/state are the authority for v1 rows; v0 rows are legacy.
     // Terminal status wins over absent/corrupt state via the shared
     // classifier (A7 rule 1). `parse_run_state` returns `None` for v0 rows
@@ -418,18 +419,18 @@ fn project(row: &CheckpointRow) -> InspectDto {
         descriptor_is_valid(row.run_descriptor_json.as_deref()),
         gate_park,
     );
-    // Durable human-wait token (A4): exposed ONLY when the canonical class
+    // note: Durable human-wait token (A4): exposed ONLY when the canonical class
     // is `HumanWait`. A terminal/interrupted/unreadable row carrying stale
     // wait bytes must not advertise a usable wait token (round-2 Minor).
     let wait_id = (recovery_class == RecoveryClass::HumanWait)
         .then_some(run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
-    // Read-only frozen-source verification (A7): a human wait whose source
+    // note: Read-only frozen-source verification (A7): a human wait whose source
     // can no longer be reconstructed must not advertise continue.
     let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
-    // For v1 rows the resumable verdict is projected from the canonical A7
+    // note: For v1 rows the resumable verdict is projected from the canonical A7
     // class (authoritative status/state) — the legacy context-key cascade
     // stays the v0 projection only, so durable interrupted evidence is never
     // hidden. `LegacyUnverified` routes through the legacy `resumable` above.
@@ -461,7 +462,7 @@ fn project(row: &CheckpointRow) -> InspectDto {
     }
 }
 
-/// Project a lean list row into the inspect DTO. The storage layer already
+/// note: Project a lean list row into the inspect DTO. The storage layer already
 /// evaluated the legacy resume-rule predicates in SQL (no `context_json`
 /// loaded) for the v0 verdict, and projects the v1 durable state RAW
 /// (`run_state_json`). The canonical A7 recovery class is computed by the
@@ -481,7 +482,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         .as_deref()
         .map_or_default(|comma| comma.split(',').map(str::to_string).collect());
     let has_live_join_keys = !live_join_keys.is_empty();
-    // Same corrupt-vs-shape honesty as detail mode, from the SQL flags.
+    // note: Same corrupt-vs-shape honesty as detail mode, from the SQL flags.
     let unreadable_kind = if !row.context_valid_json {
         Some(UnreadableKind::CorruptJson)
     } else if !row.context_data_is_object {
@@ -496,7 +497,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let context_readable =
         unreadable_kind.map(|kind| matches!(kind, UnreadableKind::UnexpectedShape));
 
-    // Canonical A7 recovery class (v1.186 P0, Task 2): the exact same
+    // note: Canonical A7 recovery class (v1.186 P0, Task 2): the exact same
     // deserialization + version contract as detail mode. v1 state blobs are
     // validated structurally here (equivalent to `RunStateV1`
     // deserialization), so `json_valid` alone never labels corrupt evidence
@@ -511,13 +512,13 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         descriptor_is_valid(row.run_descriptor_json.as_deref()),
         row.gate_park_live,
     );
-    // Durable human-wait token (A4): exposed ONLY when the canonical class
+    // note: Durable human-wait token (A4): exposed ONLY when the canonical class
     // is `HumanWait` (round-2 Minor — list must agree with detail).
     let wait_id = (recovery_class == RecoveryClass::HumanWait)
         .then_some(run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
-    // Read-only frozen-source verification (A7): a human wait whose source
+    // note: Read-only frozen-source verification (A7): a human wait whose source
     // can no longer be reconstructed must not advertise continue.
     let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
@@ -531,7 +532,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         ),
         unreadable_kind,
     );
-    // For v1 rows the verdict is projected from the canonical A7 class
+    // note: For v1 rows the verdict is projected from the canonical A7 class
     // (authoritative status/state) — the legacy context-key cascade stays
     // the v0 projection only, so durable interrupted evidence is never
     // hidden. `LegacyUnverified` routes through the legacy cascade above.
@@ -563,7 +564,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     }
 }
 
-/// Build the resumable verdict for a canonical A7 recovery class (v1.186
+/// note: Build the resumable verdict for a canonical A7 recovery class (v1.186
 /// P0, Task 2). v1 rows carry authoritative status/state, so the verdict
 /// comes from [`RecoveryClass`], never from the legacy context-key cascade.
 /// For `LegacyUnverified` (v0) the caller falls back to `verdict_for`.
@@ -574,7 +575,7 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
             verdict: Verdict::Unknown,
             rule: ResumeRule::UnreadableMetadata,
             runner_check: RunnerCheck::NotApplicable,
-            // The v1 durable run-state metadata is corrupt/unsupported (or
+            // note: The v1 durable run-state metadata is corrupt/unsupported (or
             // the execution version is negative/forward) — an explicit
             // non-replayable metadata reason, never the legacy
             // context_unreadable wording. The session `context_json` being
@@ -619,7 +620,7 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
     }
 }
 
-/// Build the resumable verdict for a classification. `unreadable_kind` is
+/// note: Build the resumable verdict for a classification. `unreadable_kind` is
 /// `Some` only for the `ContextUnreadable` class and selects the honest
 /// wording (corrupt bytes vs unexpected schema). Rule-4 caveat:
 /// `runner_check` is `boot_time` exactly when the verdict is `yes`.
@@ -681,7 +682,7 @@ fn verdict_for(
     }
 }
 
-/// Render unix epoch seconds as `YYYY-MM-DD HH:MM:SS UTC`.
+/// note: Render unix epoch seconds as `YYYY-MM-DD HH:MM:SS UTC`.
 fn render_ts(secs: i64) -> String {
     chrono::DateTime::from_timestamp(secs, 0).map_or_else(
         || format!("{secs} (unix)"),
@@ -689,7 +690,7 @@ fn render_ts(secs: i64) -> String {
     )
 }
 
-/// Stable human word for a [`RecoveryClass`] (same wording as detail and
+/// note: Stable human word for a [`RecoveryClass`] (same wording as detail and
 /// list output; the DTO `serde` name stays the machine contract).
 /// Read-only frozen-source verification (A7): the persisted descriptor's
 /// source must still resolve and hash-match at its frozen version. No runner
@@ -720,7 +721,7 @@ fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
     }
 }
 
-/// Capability registry for the daemon-free verification: built-ins plus the
+/// note: Capability registry for the daemon-free verification: built-ins plus the
 /// user-installed capabilities under `$HOME/.nexus42/capabilities`, so a
 /// user preset that requires a user capability still verifies (Greptile P1).
 fn ops_capability_registry() -> nexus_capability::CapabilityRegistry {
@@ -761,12 +762,12 @@ const fn recovery_class_str(class: RecoveryClass) -> &'static str {
     }
 }
 
-/// Legal operator actions for the canonical recovery class — the same A2
+/// note: Legal operator actions for the canonical recovery class — the same A2
 /// projection mapping (tri-QC P1-B).
 fn allowed_actions_for(class: RecoveryClass, source_reconstructable: bool) -> Vec<String> {
     let actions: &[&str] = match class {
         RecoveryClass::Terminal => &["new_run"],
-        // A human wait whose frozen source no longer verifies must not
+        // note: A human wait whose frozen source no longer verifies must not
         // advertise continue (tri-QC P1-C).
         RecoveryClass::HumanWait if !source_reconstructable => &["cancel", "new_run"],
         RecoveryClass::HumanWait => &["continue", "cancel"],
@@ -800,7 +801,7 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "updated_at:     {}", render_ts(dto.updated_at));
 
     match &dto.run_failure {
-        // Human output MAY truncate the error to one line — and must mark
+        // note: Human output MAY truncate the error to one line — and must mark
         // the cut (qc2 F-001); `--json` stays DTO-verbatim.
         Some(failure) => {
             let status = failure.run_status.as_deref().unwrap_or("failed");
@@ -872,7 +873,7 @@ fn render_list(rows: &[InspectDto], total: i64) -> String {
     if shown >= total {
         let _ = writeln!(out, "{total} checkpointed session(s).");
     } else {
-        // Honest truncated total (qc3 W2): the LIMIT hides no rows silently.
+        // note: Honest truncated total (qc3 W2): the LIMIT hides no rows silently.
         let _ = writeln!(out, "{shown} of {total}+ checkpointed session(s).");
     }
     out
@@ -939,7 +940,7 @@ mod tests {
 
     #[test]
     fn terminal_status_forces_no_even_with_live_join_keys() {
-        // schedule-cancel writer (schedules.rs:1226): status='cancelled'
+        // note: schedule-cancel writer (schedules.rs:1226): status='cancelled'
         // with context untouched — live join keys + no typed failure.
         let ctx = serde_json::json!({"data": {
             "_converge_arrivals_j1": ["a"],
@@ -995,7 +996,7 @@ mod tests {
 
     #[test]
     fn shape_anomaly_is_readable_but_unexpected_shape() {
-        // Parseable JSON, `data` not an object — schema-shape anomaly, not
+        // note: Parseable JSON, `data` not an object — schema-shape anomaly, not
         // byte corruption (qc3 S1). Byte-readable → `context_readable: true`;
         // the shape anomaly is carried in the classification/explanation.
         let dto = project(&row(br#"{"data": "not-an-object"}"#));
@@ -1016,7 +1017,7 @@ mod tests {
 
     #[test]
     fn context_readable_serializes_two_class_flag() {
-        // Fully readable row → field absent.
+        // note: Fully readable row → field absent.
         let ctx = serde_json::json!({"data": {"_merge_j1": ["x"]}}).to_string();
         let readable = serde_json::to_value(project(&row(ctx.as_bytes()))).unwrap();
         assert!(readable.get("context_readable").is_none());
@@ -1030,7 +1031,7 @@ mod tests {
             serde_json::json!("boot_time")
         );
 
-        // Corrupt bytes → `false` (bytes-level unreadable).
+        // note: Corrupt bytes → `false` (bytes-level unreadable).
         let corrupt = serde_json::to_value(project(&row(b"\xff"))).unwrap();
         assert_eq!(corrupt["context_readable"], serde_json::json!(false));
         assert_eq!(
@@ -1046,7 +1047,7 @@ mod tests {
             serde_json::json!("not_applicable")
         );
 
-        // Valid JSON, unexpected `data` shape → `true` (byte-readable; the
+        // note: Valid JSON, unexpected `data` shape → `true` (byte-readable; the
         // shape anomaly lives in the classification/explanation).
         let shape = serde_json::to_value(project(&row(br#"{"data": "not-an-object"}"#))).unwrap();
         assert_eq!(shape["context_readable"], serde_json::json!(true));
@@ -1063,7 +1064,7 @@ mod tests {
 
     #[test]
     fn summary_shape_anomaly_is_readable_but_unexpected_shape() {
-        // List-mode projection: same two-class flag from the SQL flags —
+        // note: List-mode projection: same two-class flag from the SQL flags —
         // valid JSON with non-object `data` → `context_readable: true`.
         let summary = CheckpointSummary {
             session_id: "ses_t".to_string(),
@@ -1103,7 +1104,7 @@ mod tests {
 
     #[test]
     fn summary_corrupt_context_is_bytes_unreadable() {
-        // List-mode projection: corrupt bytes → `context_readable: false`.
+        // note: List-mode projection: corrupt bytes → `context_readable: false`.
         let summary = CheckpointSummary {
             session_id: "ses_t".to_string(),
             creator_id: "cr_t".to_string(),

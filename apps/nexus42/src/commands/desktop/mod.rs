@@ -4,16 +4,17 @@
 //! Electron packaging entry (root `package.json` → `build:desktop`), so the
 //! packaging pipeline stays in one place instead of being reimplemented in
 //! Rust.
+// note: the module doc above is this file's scope contract
 
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use std::path::PathBuf;
 use std::process::Stdio;
 
-/// Desktop shell subcommands.
+/// note: Desktop shell subcommands.
 #[derive(Debug, Subcommand)]
 pub enum DesktopCommand {
-    /// Build the unsigned Electron desktop bundle.
+    /// note: Build the unsigned Electron desktop bundle.
     ///
     /// Delegates to the repository packaging driver
     /// (`pnpm build:desktop -- --arch <arch>`), which requires a
@@ -23,7 +24,7 @@ pub enum DesktopCommand {
     /// The lane is unsigned: signing, notarization and Apple credentials are
     /// not supported.
     Bundle {
-        /// Target architecture to package (`arm64` or `x64`).
+        /// note: Target architecture to package (`arm64` or `x64`).
         ///
         /// Defaults to this host's architecture. The packaging driver accepts
         /// only a native-architecture runner.
@@ -32,7 +33,7 @@ pub enum DesktopCommand {
     },
 }
 
-/// Run a desktop shell command.
+/// note: Run a desktop shell command.
 ///
 /// # Errors
 ///
@@ -44,7 +45,7 @@ pub async fn run(command: DesktopCommand) -> Result<()> {
     }
 }
 
-/// Build the unsigned Electron desktop bundle through the root packaging
+/// note: Build the unsigned Electron desktop bundle through the root packaging
 /// entry, forwarding the target architecture.
 ///
 /// # Errors
@@ -83,7 +84,7 @@ async fn bundle_desktop(arch: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Translate this host's architecture into the packaging driver's vocabulary.
+/// note: Translate this host's architecture into the packaging driver's vocabulary.
 ///
 /// # Errors
 ///
@@ -99,7 +100,7 @@ fn native_arch() -> Result<&'static str> {
     }
 }
 
-/// Resolve the repository root from `CARGO_MANIFEST_DIR`.
+/// note: Resolve the repository root from `CARGO_MANIFEST_DIR`.
 ///
 /// `apps/nexus42` lives two levels below the repository root.
 fn repo_root() -> Result<PathBuf> {
@@ -126,7 +127,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
-    /// A `pnpm` stand-in that records its working directory and argv into
+    /// note: A `pnpm` stand-in that records its working directory and argv into
     /// `<stub dir>/invocation` and exits with `exit_code`.
     ///
     /// Tests therefore spawn a real child process through the production
@@ -150,7 +151,7 @@ mod tests {
             .collect()
     }
 
-    /// Prepends a stub directory to this process's `PATH` until dropped.
+    /// note: Prepends a stub directory to this process's `PATH` until dropped.
     struct StubPath(Option<OsString>);
 
     impl StubPath {

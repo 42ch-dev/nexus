@@ -2,13 +2,14 @@
 //!
 //! Maps English number words (0-100) to digit strings.
 //! Supports compound numbers like "thirty five" → "35".
+// note: the module doc above is this file's scope contract
 
 use std::collections::HashMap;
 
-/// Build the static lookup table for number words.
+/// note: Build the static lookup table for number words.
 fn build_number_map() -> HashMap<&'static str, u32> {
     let mut m = HashMap::new();
-    // Units
+    // note: Units
     m.insert("zero", 0);
     m.insert("one", 1);
     m.insert("two", 2);
@@ -19,7 +20,7 @@ fn build_number_map() -> HashMap<&'static str, u32> {
     m.insert("seven", 7);
     m.insert("eight", 8);
     m.insert("nine", 9);
-    // Teens
+    // note: Teens
     m.insert("ten", 10);
     m.insert("eleven", 11);
     m.insert("twelve", 12);
@@ -30,7 +31,7 @@ fn build_number_map() -> HashMap<&'static str, u32> {
     m.insert("seventeen", 17);
     m.insert("eighteen", 18);
     m.insert("nineteen", 19);
-    // Tens
+    // note: Tens
     m.insert("twenty", 20);
     m.insert("thirty", 30);
     m.insert("forty", 40);
@@ -39,19 +40,19 @@ fn build_number_map() -> HashMap<&'static str, u32> {
     m.insert("seventy", 70);
     m.insert("eighty", 80);
     m.insert("ninety", 90);
-    // Hundred
+    // note: Hundred
     m.insert("hundred", 100);
     m
 }
 
-/// Get the static number word map.
+/// note: Get the static number word map.
 fn number_map() -> &'static HashMap<&'static str, u32> {
     use std::sync::LazyLock;
     static MAP: LazyLock<HashMap<&'static str, u32>> = LazyLock::new(build_number_map);
     &MAP
 }
 
-/// Convert all English number words in the text to digit strings.
+/// note: Convert all English number words in the text to digit strings.
 ///
 /// Handles:
 /// - Simple words: "twelve" → "12"
@@ -67,11 +68,11 @@ pub fn convert_number_words(text: &str) -> String {
 
     while i < words.len() {
         if let Some(&val) = map.get(words[i]) {
-            // Check if next word is a units digit that could form a compound number
+            // note: Check if next word is a units digit that could form a compound number
             if (20..=90).contains(&val) && i + 1 < words.len() {
                 if let Some(&next_val) = map.get(words[i + 1]) {
                     if (1..=9).contains(&next_val) {
-                        // Compound: "thirty five" → 35
+                        // note: Compound: "thirty five" → 35
                         result.push((val + next_val).to_string());
                         i += 2;
                         continue;

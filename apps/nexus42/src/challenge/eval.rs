@@ -2,8 +2,9 @@
 //!
 //! Computes the result of a parsed math problem.
 //! Guards against division by zero and ensures non-negative integer result.
+// note: the module doc above is this file's scope contract
 
-/// The four supported arithmetic operations.
+/// note: The four supported arithmetic operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
     Add,
@@ -12,7 +13,7 @@ pub enum Operation {
     Divide,
 }
 
-/// A parsed math problem: two operands and one operation.
+/// note: A parsed math problem: two operands and one operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MathProblem {
     pub n1: u32,
@@ -20,7 +21,7 @@ pub struct MathProblem {
     pub n2: u32,
 }
 
-/// Evaluate a math problem, returning the result as a non-negative integer.
+/// note: Evaluate a math problem, returning the result as a non-negative integer.
 ///
 /// # Errors
 ///

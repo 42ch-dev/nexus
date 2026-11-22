@@ -14,6 +14,7 @@
 //!     ├─► show   ──► SessionManager::load_sessions() + find by ID
 //!     └─► delete ──► SessionManager::delete_session()
 //! ```
+// note: the module doc above is this file's scope contract
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -21,33 +22,31 @@ use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use nexus_acp_host::{SessionEntry, SessionManager};
 
-// ── Command definitions ────────────────────────────────────────────
 
 #[derive(Debug, Subcommand)]
 pub enum SessionCommand {
-    /// List persisted ACP sessions
+    /// note: List persisted ACP sessions
     List {
-        /// Show all sessions including expired ones (don't auto-cleanup)
+        /// note: Show all sessions including expired ones (don't auto-cleanup)
         #[arg(long)]
         all: bool,
     },
 
-    /// Show details for a specific session
+    /// note: Show details for a specific session
     Show {
-        /// Session ID (or partial match)
+        /// note: Session ID (or partial match)
         session_id: String,
     },
 
-    /// Delete a session
+    /// note: Delete a session
     Delete {
-        /// Session ID to delete
+        /// note: Session ID to delete
         session_id: String,
     },
 }
 
-// ── Command runner ──────────────────────────────────────────────────
 
-/// Run a session command.
+/// note: Run a session command.
 ///
 /// # Errors
 ///
@@ -66,10 +65,9 @@ pub fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
     }
 }
 
-// ── Individual command implementations ──────────────────────────────
 
 fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
-    // Auto-cleanup expired sessions unless --all flag is set
+    // note: Auto-cleanup expired sessions unless --all flag is set
     if !show_all {
         let removed = manager.cleanup_expired()?;
         if !removed.is_empty() {
@@ -84,14 +82,14 @@ fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Print table header
+    // note: Print table header
     println!(
         "{:<40} {:<15} {:<30} {:<20}",
         "SESSION ID", "AGENT", "WORKSPACE", "LAST USED"
     );
     println!("{}", "-".repeat(105));
 
-    // Print sessions sorted by last_used_at (most recent first)
+    // note: Print sessions sorted by last_used_at (most recent first)
     let mut sorted_sessions = sessions;
     sorted_sessions.sort_by_key(|b| std::cmp::Reverse(b.last_used_at));
 
@@ -123,7 +121,7 @@ fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
 fn run_show(manager: &SessionManager, session_id: &str) -> Result<()> {
     let sessions = manager.load_sessions()?;
 
-    // Find session by exact or partial match
+    // note: Find session by exact or partial match
     let session = sessions
         .iter()
         .find(|s| {
@@ -139,7 +137,7 @@ fn run_show(manager: &SessionManager, session_id: &str) -> Result<()> {
 }
 
 fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
-    // Find the session first to show what we're deleting
+    // note: Find the session first to show what we're deleting
     let sessions = manager.load_sessions()?;
     let session = sessions.iter().find(|s| {
         s.session_id.0.as_ref() == session_id || s.session_id.0.as_ref().starts_with(session_id)
@@ -154,7 +152,7 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
 
     let actual_session_id = session.session_id.clone();
 
-    // Delete the session
+    // note: Delete the session
     let deleted = manager.delete_session(&actual_session_id)?;
 
     match deleted {
@@ -170,9 +168,8 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── Helper functions ────────────────────────────────────────────────
 
-/// Print detailed session information.
+/// note: Print detailed session information.
 fn print_session_details(session: &SessionEntry) {
     println!("Session ID:    {}", session.session_id.0.as_ref());
     println!("Agent:         {}", session.agent_id);
@@ -185,12 +182,12 @@ fn print_session_details(session: &SessionEntry) {
     );
 }
 
-/// Format a datetime for display.
+/// note: Format a datetime for display.
 fn format_datetime(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
-/// Format the age of a session (e.g., "2 hours ago", "1 day ago").
+/// note: Format the age of a session (e.g., "2 hours ago", "1 day ago").
 fn format_age(dt: DateTime<Utc>) -> String {
     let now = Utc::now();
     let duration = now.signed_duration_since(dt);

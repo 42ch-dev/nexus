@@ -1,4 +1,5 @@
 //! Runtime mode management command.
+// note: the module doc above is this file's scope contract
 
 use crate::config::CliConfig;
 use crate::domain::runtime_mode::DomainRuntimeMode;
@@ -7,16 +8,16 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum RuntimeModeCommand {
-    /// Show current runtime mode
+    /// note: Show current runtime mode
     Show,
-    /// Set runtime mode (`local_only`, `local_first`, `cloud_enhanced`)
+    /// note: Set runtime mode (`local_only`, `local_first`, `cloud_enhanced`)
     Set {
-        /// Target runtime mode
+        /// note: Target runtime mode
         mode: String,
     },
 }
 
-/// Run `runtime_mode` command.
+/// note: Run `runtime_mode` command.
 ///
 /// # Errors
 ///
@@ -54,14 +55,14 @@ fn show(config: &CliConfig) {
         }
     );
 
-    // Display degradation policy info (if available)
+    // note: Display degradation policy info (if available)
     if let Some(snapshot) = config.degradation_snapshot() {
         println!();
         println!("--- Degradation Status ---");
         println!("State: {}", snapshot.state.display_label());
         println!("Failure count: {}", snapshot.failure_count);
         if let Some(hc) = &snapshot.last_health_check {
-            // Parse ISO 8601 back to a displayable time; fall back to raw string on parse error.
+            // note: Parse ISO 8601 back to a displayable time; fall back to raw string on parse error.
             let time_str = chrono::DateTime::parse_from_rfc3339(&hc.checked_at).map_or_else(
                 |_| hc.checked_at.clone(),
                 |dt| dt.format("%H:%M:%S").to_string(),
@@ -87,7 +88,7 @@ fn show(config: &CliConfig) {
 }
 
 fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
-    // NOTE (S-007): Not warning about the daemon when setting runtime mode is an
+    // note: NOTE (S-007): Not warning about the daemon when setting runtime mode is an
     // intentional UX choice. Users who run `nexus42 system runtime-mode set` are expected
     // to manage the daemon lifecycle themselves — they either restart the daemon
     // to pick up the new mode, or they understand that the daemon uses the mode
@@ -105,12 +106,12 @@ fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
 
     println!("Switching runtime mode: {old_mode} → {new_mode}");
 
-    // Warn about platform requirements
+    // note: Warn about platform requirements
     if new_mode.allows_platform() {
         println!("Note: {new_mode} mode requires platform connectivity for some operations.");
     }
 
-    // Persist
+    // note: Persist
     CliConfig::mutate(|config| {
         config.runtime_mode = new_mode;
         Ok(())
@@ -125,7 +126,7 @@ mod tests {
     use super::*;
     use crate::domain::degradation::{DegradationSnapshot, DegradationState, HealthCheckSnapshot};
 
-    /// Helper: build a `CliConfig` with a degradation snapshot.
+    /// note: Helper: build a `CliConfig` with a degradation snapshot.
     fn config_with_degradation(
         state: DegradationState,
         failure_count: u32,
@@ -148,7 +149,7 @@ mod tests {
     #[test]
     fn show_without_degradation_outputs_basic_info() {
         let config = CliConfig::default();
-        // Capture stdout
+        // note: Capture stdout
         let mut buf = Vec::new();
         show_to(&config, &mut buf).expect("show_to");
         let output = String::from_utf8(buf).expect("utf8 output");
@@ -189,11 +190,11 @@ mod tests {
         show_to(&config, &mut buf).expect("show_to");
         let output = String::from_utf8(buf).expect("utf8 output");
         assert!(output.contains("State: Forced local_only"));
-        // No last health check line when None
+        // note: No last health check line when None
         assert!(!output.contains("Last health check:"));
     }
 
-    /// Write `show()` output to a `dyn Write` instead of stdout (for testing).
+    /// note: Write `show()` output to a `dyn Write` instead of stdout (for testing).
     fn show_to(config: &CliConfig, w: &mut dyn std::io::Write) -> Result<()> {
         let mode = config.runtime_mode();
         writeln!(w, "Runtime mode: {mode}")?;
