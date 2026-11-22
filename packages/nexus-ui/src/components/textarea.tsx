@@ -17,9 +17,9 @@ import { cn } from '../lib/cn';
  * - Helper text, error text, and required/optional copy are app-owned.
  */
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
-  /** Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
+  /** note: Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
   invalid?: boolean;
-  /** DOM ref forwarded to the underlying textarea (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the underlying textarea (React 19 ref-as-prop). */
   ref?: Ref<HTMLTextAreaElement>;
 }
 

@@ -4,37 +4,37 @@ import { Label } from './label';
 import { Select } from './select';
 
 /**
- * One selectable entity in an EntityPickerField (e.g. a character
+ * note: One selectable entity in an EntityPickerField (e.g. a character
  * KnowledgeEntry in the selected World). Caller maps domain entries into
  * this shape; the picker never queries data itself.
  */
 export interface EntityPickerEntry {
   id: string;
   title: string;
-  /** Optional secondary line (e.g. type or stats hint). */
+  /** note: Optional secondary line (e.g. type or stats hint). */
   subtitle?: string;
 }
 
 export interface EntityPickerFieldProps {
-  /** Control id — caller-owned (label/control association). */
+  /** note: Control id — caller-owned (label/control association). */
   id?: string;
-  /** Field label copy — caller-owned. */
+  /** note: Field label copy — caller-owned. */
   label: string;
-  /** Entries offered for selection. Empty renders the empty-state block. */
+  /** note: Entries offered for selection. Empty renders the empty-state block. */
   entries: EntityPickerEntry[];
-  /** Currently selected entry id, or null for none. */
+  /** note: Currently selected entry id, or null for none. */
   value: string | null;
   onChange: (id: string) => void;
-  /** Placeholder option copy shown when value is null — caller-owned. */
+  /** note: Placeholder option copy shown when value is null — caller-owned. */
   placeholder?: string;
   required?: boolean;
   disabled?: boolean;
   invalid?: boolean;
-  /** Helper copy under the control — caller-owned; wired via aria-describedby. */
+  /** note: Helper copy under the control — caller-owned; wired via aria-describedby. */
   helperText?: string;
-  /** Empty-state headline when entries is empty — caller-owned. */
+  /** note: Empty-state headline when entries is empty — caller-owned. */
   emptyTitle?: string;
-  /** Empty-state body when entries is empty — caller-owned. */
+  /** note: Empty-state body when entries is empty — caller-owned. */
   emptyDescription?: string;
   className?: string;
 }

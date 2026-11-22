@@ -5,19 +5,16 @@ import '@testing-library/jest-dom/vitest';
 import { Button } from './button';
 
 describe('Button', () => {
-  // --- variant rendering ---
 
 
 
 
 
-  // --- size rendering ---
 
 
 
 
 
-  // --- asChild prop (Radix Slot delegation) ---
 
   it('renders as a <button> element by default', () => {
     render(<Button>Click</Button>);
@@ -37,14 +34,12 @@ describe('Button', () => {
     expect(link).toHaveAttribute('href', '/settings');
   });
 
-  // --- disabled state ---
 
   it('exposes the native disabled state', () => {
     render(<Button disabled>Blocked</Button>);
     expect(screen.getByRole('button', { name: 'Blocked' })).toBeDisabled();
   });
 
-  // --- className merge (cn integration) ---
 
   it('merges custom className with variant classes', () => {
     render(
@@ -56,7 +51,6 @@ describe('Button', () => {
     expect(btn).toHaveClass('custom-extra');
   });
 
-  // --- ref-as-prop ---
 
   it('passes the ref to the underlying button element', () => {
     let ref: HTMLButtonElement | null = null;

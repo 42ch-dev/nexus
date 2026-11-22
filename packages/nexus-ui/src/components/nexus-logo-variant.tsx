@@ -1,5 +1,5 @@
 /**
- * Studio-only timeline mark specimens — palette-driven theme moods.
+ * why: Studio-only timeline mark specimens — palette-driven theme moods.
  *
  * Renders the same wide timeline geometry as `<NexusMark>` with a left→right
  * gradient from palette props (or `logoVariantPalettes` defaults). No SVG/PNG
@@ -22,16 +22,16 @@ export type { LogoVariantPalette, LogoVariantTheme };
 
 export interface NexusLogoVariantProps {
   /**
-   * Specimen mood id. Selects a default palette from `logoVariantPalettes`
+   * note: Specimen mood id. Selects a default palette from `logoVariantPalettes`
    * unless `palette` is provided. Not a product theme preference.
    */
   theme?: LogoVariantTheme;
-  /** Explicit gradient stops; overrides `theme` defaults when set. */
+  /** note: Explicit gradient stops; overrides `theme` defaults when set. */
   palette?: LogoVariantPalette;
-  /** Accessible label for the mark. Defaults to the product name. */
+  /** note: Accessible label for the mark. Defaults to the product name. */
   label?: string;
   className?: string;
-  /** Rendered height in px. Width follows the timeline aspect ratio. */
+  /** note: Rendered height in px. Width follows the timeline aspect ratio. */
   size?: number;
 }
 

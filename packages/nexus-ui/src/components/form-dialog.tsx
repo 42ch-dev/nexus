@@ -5,7 +5,7 @@ import { Dialog, DialogContent } from './dialog';
 import { Spinner } from './states';
 
 /**
- * FormDialog — DESIGN.md §Component Primitives/FormDialog.
+ * why: FormDialog — DESIGN.md §Component Primitives/FormDialog.
  *
  * V1.149 P1 — L2 pattern component: the form-in-modal pattern over the
  * promoted Dialog + Button primitives. Pure presentational: the caller owns
@@ -21,17 +21,17 @@ export interface FormDialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
-  /** Caller-owned field controls; rendered inside the native form. */
+  /** note: Caller-owned field controls; rendered inside the native form. */
   children: ReactNode;
-  /** Native form submit; the caller prevents default and runs its mutation. */
+  /** note: Native form submit; the caller prevents default and runs its mutation. */
   onSubmit?: FormEventHandler<HTMLFormElement>;
   submitLabel: string;
   cancelLabel: string;
-  /** Accessible name for the header dismiss control; defaults to "Close dialog". */
+  /** note: Accessible name for the header dismiss control; defaults to "Close dialog". */
   closeLabel?: string;
-  /** Caller mutation busy state: disables both actions and shows the spinner. */
+  /** note: Caller mutation busy state: disables both actions and shows the spinner. */
   pending?: boolean;
-  /** Inline error copy (e.g. a failed mutation message); renders the error slot. */
+  /** note: Inline error copy (e.g. a failed mutation message); renders the error slot. */
   error?: ReactNode;
 }
 
@@ -49,8 +49,8 @@ export function FormDialog({
   error,
 }: FormDialogProps) {
   return (
-    // Guard dismissal at the Root: while pending, the X control, Escape, and
-    // overlay click all funnel through onOpenChange and must not fire.
+    // why: guard dismissal at the Root — while pending, the X control, Escape,
+    // and overlay click all funnel through onOpenChange and must not fire.
     <Dialog
       open={open}
       onOpenChange={(next) => {
@@ -58,9 +58,10 @@ export function FormDialog({
       }}
     >
       <DialogContent title={title} description={description} closeLabel={closeLabel}>
-        {/* Always preventDefault: implicit submit (Enter key, requestSubmit)
-            must never fall through to native navigation/reload, and pending
-            intercepts the event before it reaches the caller's handler. */}
+        {/* why: always preventDefault — implicit submit (Enter key,
+            requestSubmit) must never fall through to native
+            navigation/reload, and pending intercepts the event before it
+            reaches the caller's handler. */}
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {

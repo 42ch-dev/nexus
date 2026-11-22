@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { SettingRow, SettingsSection } from './settings-section';
 
 /**
- * V1.150 P2 — L2 pattern family (DESIGN.md components.settings-section).
+ * why: V1.150 P2 — L2 pattern family (DESIGN.md components.settings-section).
  *
  * Pins caller-visible behavior: caller-owned copy (title/description, row
  * label/hint) renders, absent optional copy leaves no trace, SettingRow wires

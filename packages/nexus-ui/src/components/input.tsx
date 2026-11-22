@@ -3,7 +3,7 @@ import { type InputHTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Input — DESIGN.md §Component Primitives/Input.
+ * why: Input — DESIGN.md §Component Primitives/Input.
  *
  * Height 40px, background-100, gray-1000 text, gray-500 border,
  * radius-control. Error variant uses red-700 border. Disabled (v0.4
@@ -19,9 +19,9 @@ import { cn } from '../lib/cn';
  * - Helper text, error text, and required/optional copy are app-owned.
  */
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  /** Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
+  /** note: Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
   invalid?: boolean;
-  /** DOM ref forwarded to the underlying input (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the underlying input (React 19 ref-as-prop). */
   ref?: Ref<HTMLInputElement>;
 }
 

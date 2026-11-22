@@ -5,8 +5,8 @@ import '@testing-library/jest-dom/vitest';
 import type { LogoVariantName } from '../tokens';
 import { NexusLogo, type Variant, VARIANT_FILENAMES } from './nexus-logo';
 
-// Compile-time guard: the re-exported Variant alias must be identical to the
-// canonical LogoVariantName from tokens.ts.
+// why: compile-time guard — the re-exported Variant alias must be identical to
+// the canonical LogoVariantName from tokens.ts.
 type AssertVariantAlias = [Variant] extends [LogoVariantName]
   ? [LogoVariantName] extends [Variant]
     ? true

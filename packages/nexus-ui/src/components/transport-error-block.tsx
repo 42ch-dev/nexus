@@ -4,14 +4,14 @@ import { AlertCircle } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 /**
- * Compact text-link CTA styling (V1.136 P2 — ErrorState-aligned; V1.137 L2 quiet link).
+ * why: Compact text-link CTA styling (V1.136 P2 — ErrorState-aligned; V1.137 L2 quiet link).
  * Both primary and secondary actions use this recipe — not filled `Button`.
  */
 const CTA_LINK_CLASS =
   'text-label-12 font-normal text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700';
 
 /**
- * Transport-failure sub-classification mirror of the apps/web
+ * why: Transport-failure sub-classification mirror of the apps/web
  * {@code TransportErrorKind} (V1.129 P0 — `apps/web/src/lib/nexus/errors.ts`).
  *
  * The package cannot import from `apps/web`, so the literal-union is mirrored
@@ -23,21 +23,21 @@ const CTA_LINK_CLASS =
  * non-wire location so the mirror is unnecessary.
  */
 export type TransportErrorKind =
-  /** TCP refuse, DNS failure, offline, or undifferentiated fetch throw. */
+  /** note: TCP refuse, DNS failure, offline, or undifferentiated fetch throw. */
   | 'network'
-  /** Certificate failure (best-effort). Browsers hide the precise reason. */
+  /** note: Certificate failure (best-effort). Browsers hide the precise reason. */
   | 'tls'
-  /** Explicit abort / timeout (AbortError, AbortSignal.timeout). */
+  /** note: Explicit abort / timeout (AbortError, AbortSignal.timeout). */
   | 'timeout'
-  /** Daemon returned `text/html` with HTTP 200 — release-mode SPA fallback. */
+  /** note: Daemon returned `text/html` with HTTP 200 — release-mode SPA fallback. */
   | 'http_fallback'
-  /** Local-mode daemon is not running (browser-tab client with empty baseUrl). */
+  /** note: Local-mode daemon is not running (browser-tab client with empty baseUrl). */
   | 'daemon_down'
-  /** No classifier matched; recovery copy stays generic. */
+  /** note: No classifier matched; recovery copy stays generic. */
   | 'unknown';
 
 /**
- * Locked CTA set (spec § Interfaces · Dialog UX contract).
+ * note: Locked CTA set (spec § Interfaces · Dialog UX contract).
  *
  * - `retry` → caller-supplied `onRetry`
  * - `openConnectionSettings` → caller-supplied `onOpenSettings`
@@ -48,7 +48,7 @@ export type TransportErrorKind =
 type TransportCtaKind = 'retry' | 'openConnectionSettings' | 'useDesktopApp';
 
 /**
- * CTA visibility matrix per spec § Dialog UX contract.
+ * why: CTA visibility matrix per spec § Dialog UX contract.
  *
  * Every kind surfaces a primary CTA. The secondary is omitted (`undefined`)
  * when the spec table lists only one CTA for that kind. Final visibility also
@@ -72,7 +72,7 @@ const SECONDARY_CTA: Partial<Record<TransportErrorKind, TransportCtaKind>> = {
 };
 
 /**
- * Built-in English copy table (V1.129 ship baseline).
+ * why: Built-in English copy table (V1.129 ship baseline).
  *
  * Boundary: the primitive does NOT import `react-i18next`. These constants
  * are the **fallback** copy — Studio (English-only) renders them directly.
@@ -95,8 +95,9 @@ const BODY_COPY: Record<TransportErrorKind, string> = {
   daemon_down: 'Start it with `nexus42 daemon start`, then try again.',
   network:
     'Check the URL and port in Connection settings, or confirm the network can reach that host.',
-  // `tls` has no callback-driven primary CTA — the desktop-app instruction
-  // is informational and lives in the body copy (QC1-F-002: no no-op button).
+  // why: `tls` has no callback-driven primary CTA — the desktop-app
+  // instruction is informational and lives in the body copy (QC1-F-002: no
+  // no-op button).
   tls:
     'The web app cannot trust a remote self-signed certificate. Use the Nexus desktop app — it can store trust in the OS keychain.',
   http_fallback:
@@ -114,42 +115,42 @@ const CTA_LABEL: Record<TransportCtaKind, string> = {
 
 export interface TransportErrorBlockProps
   extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
-  /** Transport-failure sub-classification; drives copy + CTA matrix. */
+  /** note: Transport-failure sub-classification; drives copy + CTA matrix. */
   kind: TransportErrorKind;
-  /** Retry callback. Omit to hide the Retry CTA. */
+  /** note: Retry callback. Omit to hide the Retry CTA. */
   onRetry?: () => void;
-  /** "Open Connection Settings" callback. Omit to hide that CTA. */
+  /** note: "Open Connection Settings" callback. Omit to hide that CTA. */
   onOpenSettings?: () => void;
   /**
-   * Optional caller-supplied detail line (e.g., the daemon's last detail
+   * note: Optional caller-supplied detail line (e.g., the daemon's last detail
    * string). Rendered below the body copy when present.
    */
   detail?: string;
-  /** Optional headline override (rare; defaults to per-kind headline). */
+  /** note: Optional headline override (rare; defaults to per-kind headline). */
   title?: string;
   /**
-   * Optional caller-supplied body copy. Falls back to the package's per-kind
+   * note: Optional caller-supplied body copy. Falls back to the package's per-kind
    * default (used by the English-only Studio fixture). App surfaces pass a
    * localized `t()` string here (QC1-F-001).
    */
   body?: string;
   /**
-   * Optional caller-supplied primary CTA label. Falls back to the package's
+   * note: Optional caller-supplied primary CTA label. Falls back to the package's
    * per-kind default. App surfaces pass a localized `t()` string here.
    */
   primaryCtaLabel?: string;
   /**
-   * Optional caller-supplied secondary CTA label. Falls back to the package's
+   * note: Optional caller-supplied secondary CTA label. Falls back to the package's
    * per-kind default. App surfaces pass a localized `t()` string here.
    * `undefined` is equivalent to "use the default".
    */
   secondaryCtaLabel?: string;
-  /** DOM ref forwarded to the underlying section (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the underlying section (React 19 ref-as-prop). */
   ref?: Ref<HTMLDivElement>;
 }
 
 /**
- * `<TransportErrorBlock>` — locked presentational primitive for transport-
+ * why: `<TransportErrorBlock>` — locked presentational primitive for transport-
  * failure UX (V1.129 P1).
  *
  * Renders the per-kind headline + body + CTA matrix. The CTA visibility and
@@ -255,7 +256,7 @@ export function TransportErrorBlock({
 }
 
 /**
- * Resolve a callback-driven CTA's `onClick`. `useDesktopApp` has no callback
+ * why: Resolve a callback-driven CTA's `onClick`. `useDesktopApp` has no callback
  * (informational) and is never rendered as a button — see {@link isCtaVisible}.
  */
 function ctaOnClick(
@@ -269,7 +270,7 @@ function ctaOnClick(
 }
 
 /**
- * A callback-driven CTA is visible iff (a) the matrix lists it AND (b) the
+ * why: A callback-driven CTA is visible iff (a) the matrix lists it AND (b) the
  * caller supplied the matching callback. `useDesktopApp` is informational —
  * it never renders as a button (QC1-F-002: a keyboard-focusable no-op button
  * is misleading and inaccessible). The desktop-app instruction is carried by

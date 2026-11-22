@@ -9,7 +9,7 @@ import {
 } from './card';
 
 /**
- * ListPageLayout — DESIGN.md §Component Primitives/ListPageLayout.
+ * why: ListPageLayout — DESIGN.md §Component Primitives/ListPageLayout.
  *
  * V1.150 P1 — L2 pattern component: the shared list-page chrome behind
  * findings/works/chapters/sessions/schedule/capabilities/strategies/modules/
@@ -22,17 +22,17 @@ import {
  * prop tunneling). No query, router, or i18n imports.
  */
 export interface ListPageLayoutProps {
-  /** Page headline copy (CardTitle). */
+  /** note: Page headline copy (CardTitle). */
   title: string;
-  /** Page description copy (CardDescription). */
+  /** note: Page description copy (CardDescription). */
   description?: string;
-  /** Filter/toolbar row; Selects/Inputs and their state stay caller-owned. */
+  /** note: Filter/toolbar row; Selects/Inputs and their state stay caller-owned. */
   filters?: ReactNode;
-  /** Header actions slot (e.g. a refresh Button). */
+  /** note: Header actions slot (e.g. a refresh Button). */
   actions?: ReactNode;
-  /** Results region; the caller composes ListStateContainer/Table here. */
+  /** note: Results region; the caller composes ListStateContainer/Table here. */
   children: ReactNode;
-  /** Pagination/load-more slot (e.g. LoadMore). */
+  /** note: Pagination/load-more slot (e.g. LoadMore). */
   footer?: ReactNode;
   className?: string;
 }

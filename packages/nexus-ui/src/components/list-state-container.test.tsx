@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { ListStateContainer } from './list-state-container';
 
 /**
- * V1.149 P1 — L2 pattern component (DESIGN.md components.list-state-container).
+ * why: V1.149 P1 — L2 pattern component (DESIGN.md components.list-state-container).
  *
  * Pins: the four-branch status switch (loading/error/empty/ready), retry
  * callback wiring into the promoted ErrorState, caller-owned empty copy vs
@@ -37,7 +37,7 @@ describe('ListStateContainer', () => {
     expect(screen.getByText('Scanning for agents…')).toBeInTheDocument();
     const spinner = container.querySelector('svg');
     expect(spinner).not.toBeNull();
-    // Theme parity inherited from the promoted Spinner recipe.
+    // why: theme parity inherited from the promoted Spinner recipe.
     expect(spinner!.getAttribute('class')).toMatch(/\btext-blue-1000\b/);
     expect(spinner!.getAttribute('class')).toMatch(/\bdark:text-blue-700\b/);
   });
@@ -85,7 +85,7 @@ describe('ListStateContainer', () => {
     expect(screen.getByText('No agents yet')).toBeInTheDocument();
     expect(screen.getByText('Install an agent to start the local loop.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create agent' })).toBeInTheDocument();
-    // Empty-state content voice inherited from the promoted EmptyState.
+    // why: empty-state content voice inherited from the promoted EmptyState.
     expect(screen.getByText('No agents yet').className).toMatch(/\bfont-display\b/);
   });
 

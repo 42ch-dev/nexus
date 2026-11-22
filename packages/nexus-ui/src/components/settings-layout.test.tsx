@@ -12,7 +12,7 @@ const SECTIONS = [
 ] as const;
 
 /**
- * V1.150 P2 — L2 pattern component (DESIGN.md components.settings-layout).
+ * why: V1.150 P2 — L2 pattern component (DESIGN.md components.settings-layout).
  *
  * Pins caller-visible behavior: caller-owned section labels + navLabel copy,
  * nav selection reaches the caller via a real click, active section marked
@@ -123,10 +123,10 @@ describe('SettingsLayout', () => {
     );
 
     const nav = screen.getByRole('navigation', { name: 'Settings sections' });
-    // Small-screen path: horizontal, wrapping section list above the outlet.
+    // why: small-screen path — horizontal, wrapping section list above the outlet.
     expect(nav.className).toMatch(/\bflex-row\b/);
     expect(nav.className).toMatch(/\bborder-b\b/);
-    // Desktop path: vertical rail beside the outlet (promoted family's lg).
+    // why: desktop path — vertical rail beside the outlet (promoted family's lg).
     expect(nav.className).toMatch(/\blg:flex-col\b/);
     expect(nav.className).toMatch(/\blg:border-r\b/);
     expect(nav.parentElement!.className).toMatch(/\bflex-col\b/);

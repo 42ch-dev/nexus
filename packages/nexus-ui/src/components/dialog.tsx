@@ -5,7 +5,7 @@ import { type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Dialog — DESIGN.md §Component Primitives/Dialog.
+ * why: Dialog — DESIGN.md §Component Primitives/Dialog.
  *
  * V1.148 P1 — promoted presentational primitive (from apps/web
  * components/ui/dialog.tsx). Built on @radix-ui/react-dialog for accessibility
@@ -25,14 +25,14 @@ export const DialogClose = DialogPrimitive.Close;
 export interface DialogContentProps {
   children: ReactNode;
   className?: string;
-  /** Optional override for the scrollable body wrapper (e.g. full-height modal frames). */
+  /** note: Optional override for the scrollable body wrapper (e.g. full-height modal frames). */
   bodyClassName?: string;
   title: string;
   description?: string;
   /**
-   * Accessible name for the dismiss control — caller-owned copy. Falls back
-   * to the app `en` locale string ("Close dialog"); apps/web overrides with
-   * its i18n default through the wrapper.
+   * note: Accessible name for the dismiss control — caller-owned copy. Falls
+   * back to the app `en` locale string ("Close dialog"); apps/web overrides
+   * with its i18n default through the wrapper.
    */
   closeLabel?: string;
 }

@@ -11,7 +11,7 @@ import {
 } from './states';
 
 /**
- * V1.148 P1 — promoted States primitives (DESIGN.md components.states).
+ * why: V1.148 P1 — promoted States primitives (DESIGN.md components.states).
  *
  * Pins: caller-owned copy (labels/titles/retry), the v0.4 token recipes
  * (Spinner blue-1000/blue-700 dark hook, ErrorState error-surface tokens,

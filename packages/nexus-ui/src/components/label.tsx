@@ -3,7 +3,7 @@ import { type LabelHTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Label — DESIGN.md §Component Primitives. label-14 weight 500; uses
+ * why: Label — DESIGN.md §Component Primitives. label-14 weight 500; uses
  * gray-1000 text and is wired to its control via the standard `htmlFor`.
  *
  * Per the V1.100 form-field contract:
@@ -15,7 +15,7 @@ import { cn } from '../lib/cn';
  *   composition pattern uses explicit `htmlFor` + `id` association.
  */
 export type LabelProps = LabelHTMLAttributes<HTMLLabelElement> & {
-  /** DOM ref forwarded to the underlying label (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the underlying label (React 19 ref-as-prop). */
   ref?: Ref<HTMLLabelElement>;
 };
 

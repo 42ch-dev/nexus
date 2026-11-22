@@ -27,8 +27,8 @@ describe('TransportErrorBlock', () => {
       const region = screen.getByTestId('transport-error-block');
       expect(region).toHaveAttribute('data-kind', kind);
       expect(region).toHaveAttribute('role', 'alert');
-      // Headline + body render text (snapshot-free assertions on stable substrings
-      // drawn from the V1.129 P0 spec copy table).
+      // why: headline + body render text (snapshot-free assertions on stable
+      // substrings drawn from the V1.129 P0 spec copy table).
       expect(region.textContent).toBeTruthy();
     });
 
@@ -56,8 +56,9 @@ describe('TransportErrorBlock', () => {
 
     it('omits the detail line when no detail is supplied', () => {
       render(<TransportErrorBlock kind="daemon_down" onRetry={() => {}} />);
-      // No `<p>` children beyond headline + body — detail renders as its own
-      // text node, so absence is verified by testid absence on a stricter query.
+      // why: no `<p>` children beyond headline + body — detail renders as its
+      // own text node, so absence is verified by testid absence on a stricter
+      // query.
       const region = screen.getByTestId('transport-error-block');
       expect(region.textContent).not.toContain('exit code');
     });
@@ -119,18 +120,20 @@ describe('TransportErrorBlock', () => {
       );
 
       const region = screen.getByTestId('transport-error-block');
-      // QC1-F-002: `useDesktopApp` is informational — it must NOT render as a
-      // keyboard-focusable button. The desktop-app instruction rides the body.
+      // why: QC1-F-002 — `useDesktopApp` is informational; it must NOT render
+      // as a keyboard-focusable button. The desktop-app instruction rides the
+      // body.
       expect(screen.queryByTestId('transport-error-primary')).not.toBeInTheDocument();
       expect(region.textContent).toMatch(/desktop app/i);
 
-      // Secondary (Open Connection Settings) still renders when its callback
-      // is supplied.
+      // why: secondary (Open Connection Settings) still renders when its
+      // callback is supplied.
       const secondary = screen.getByTestId('transport-error-secondary');
       expect(secondary).toHaveAttribute('data-cta', 'openConnectionSettings');
       fireEvent.click(secondary);
       expect(onOpenSettings).toHaveBeenCalledTimes(1);
-      // No primary button → no path to fire either callback via a primary click.
+      // why: no primary button → no path to fire either callback via a primary
+      // click.
       expect(onRetry).not.toHaveBeenCalled();
     });
 
@@ -194,7 +197,7 @@ describe('TransportErrorBlock', () => {
         'data-cta',
         'openConnectionSettings',
       );
-      // Secondary was Retry per matrix; omitting onRetry hides it.
+      // why: secondary was Retry per matrix; omitting onRetry hides it.
       expect(screen.queryByTestId('transport-error-secondary')).not.toBeInTheDocument();
     });
 
@@ -216,8 +219,8 @@ describe('TransportErrorBlock', () => {
     });
 
     it('tls with no callbacks renders headline + body only (no Use Desktop App button)', () => {
-      // QC1-F-002: `useDesktopApp` is informational and never renders a button.
-      // The body copy carries the desktop-app instruction.
+      // why: QC1-F-002 — `useDesktopApp` is informational and never renders a
+      // button. The body copy carries the desktop-app instruction.
       render(<TransportErrorBlock kind="tls" />);
       const region = screen.getByTestId('transport-error-block');
       expect(region).toBeInTheDocument();
@@ -267,11 +270,9 @@ describe('TransportErrorBlock', () => {
 
     it('falls back to package defaults when overrides are omitted (Studio case)', () => {
       render(<TransportErrorBlock kind="daemon_down" onRetry={() => {}} />);
-      // Package default body for daemon_down.
       expect(
         screen.getByText('Start it with `nexus42 daemon start`, then try again.'),
       ).toBeInTheDocument();
-      // Package default Retry label.
       expect(screen.getByTestId('transport-error-primary')).toHaveTextContent('Retry');
     });
   });

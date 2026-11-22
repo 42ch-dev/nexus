@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 /**
- * SettingsLayout — DESIGN.md §Component Primitives (settings-layout).
+ * why: SettingsLayout — DESIGN.md §Component Primitives (settings-layout).
  *
  * V1.150 P2 — L2 pattern component: the settings section nav rail + outlet
  * region promoted from the app frame (`settings-section-frame.tsx`).
@@ -14,28 +14,28 @@ import { cn } from '../lib/cn';
  */
 export interface SettingsLayoutSection {
   id: string;
-  /** Caller-owned (i18n resolution stays app-side). */
+  /** note: Caller-owned (i18n resolution stays app-side). */
   label: string;
   icon: LucideIcon;
 }
 
-/** Stable default for `hiddenIds` — avoids a fresh array allocation per render. */
+/** why: Stable default for `hiddenIds` — avoids a fresh array allocation per render. */
 const NO_HIDDEN_IDS: readonly string[] = [];
 
 export interface SettingsLayoutProps {
-  /** Replaces the app-side SETTINGS_SECTION_DESCRIPTORS import. */
+  /** note: Replaces the app-side SETTINGS_SECTION_DESCRIPTORS import. */
   sections: readonly SettingsLayoutSection[];
   activeId: string;
   onNavigate: (id: string) => void;
-  /** Entrance hide-table (AR-15 precedent). */
+  /** note: Entrance hide-table (AR-15 precedent). */
   hiddenIds?: readonly string[];
-  /** Nav aria-label copy (replaces useTranslation). */
+  /** note: Nav aria-label copy (replaces useTranslation). */
   navLabel: string;
-  /** Optional page-chrome heading (replaces showPageChrome mode). */
+  /** note: Optional page-chrome heading (replaces showPageChrome mode). */
   title?: string;
-  /** Optional page-chrome helper copy. */
+  /** note: Optional page-chrome helper copy. */
   helper?: string;
-  /** Section outlet content. */
+  /** note: Section outlet content. */
   children: ReactNode;
   className?: string;
 }

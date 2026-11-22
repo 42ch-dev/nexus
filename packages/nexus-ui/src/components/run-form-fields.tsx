@@ -8,7 +8,7 @@ import { Label } from './label';
 import { Select } from './select';
 
 /**
- * JSON Schema fragment for one invocation property (manifest
+ * note: JSON Schema fragment for one invocation property (manifest
  * `schemas.invocation.properties.*`). Structural — compatible with the
  * generated ModuleDetail manifest shape without importing wire DTOs.
  */
@@ -20,12 +20,12 @@ export interface InvocationSchemaProperty {
   minimum?: number;
   maximum?: number;
   default?: unknown;
-  /** Other JSON Schema keywords (items, format, …) pass through untyped. */
+  /** note: Other JSON Schema keywords (items, format, …) pass through untyped. */
   [keyword: string]: unknown;
 }
 
 /**
- * JSON Schema fragment for a module invocation form (manifest
+ * note: JSON Schema fragment for a module invocation form (manifest
  * `schemas.invocation`).
  */
 export interface InvocationSchema {
@@ -36,33 +36,33 @@ export interface InvocationSchema {
 
 /** Caller-owned copy for the schema-driven form (i18n lives in the app). */
 export interface RunFormCopy {
-  /** Headline when the manifest has no usable invocation schema. */
+  /** note: Headline when the manifest has no usable invocation schema. */
   emptyTitle: string;
-  /** Body when the manifest has no usable invocation schema. */
+  /** note: Body when the manifest has no usable invocation schema. */
   emptyDescription: string;
-  /** Note for a property kind the guided form cannot render (Advanced JSON path). */
+  /** note: Note for a property kind the guided form cannot render (Advanced JSON path). */
   unsupportedFieldNote: string;
-  /** Placeholder for entity pickers. */
+  /** note: Placeholder for entity pickers. */
   entityPlaceholder: string;
-  /** Placeholder for enum selects. */
+  /** note: Placeholder for enum selects. */
   selectPlaceholder: string;
-  /** Entity picker empty-state copy (e.g. no characters in the World). */
+  /** note: Entity picker empty-state copy (e.g. no characters in the World). */
   entityEmptyTitle: string;
   entityEmptyDescription: string;
 }
 
 export interface RunFormFieldsProps {
-  /** Manifest invocation schema fragment; missing/empty renders the empty state. */
+  /** note: Manifest invocation schema fragment; missing/empty renders the empty state. */
   schema: InvocationSchema | null | undefined;
-  /** Module `required_key_block_types` — gates `*_id` → entity picker derivation. */
+  /** note: Module `required_key_block_types` — gates `*_id` → entity picker derivation. */
   requiredKeyBlockTypes?: string[];
-  /** Current field values keyed by property name. */
+  /** note: Current field values keyed by property name. */
   values: Record<string, unknown>;
   onChange: (name: string, value: unknown) => void;
-  /** Entity entries per picker field name (fixture/app supplies; picker stays pure). */
+  /** note: Entity entries per picker field name (fixture/app supplies; picker stays pure). */
   entityEntries?: Record<string, EntityPickerEntry[]>;
   copy: RunFormCopy;
-  /** Id prefix for label/control association — caller-owned. */
+  /** note: Id prefix for label/control association — caller-owned. */
   idPrefix?: string;
   disabled?: boolean;
   className?: string;
@@ -77,7 +77,7 @@ function includesType(type: string | string[] | undefined, wanted: string[]): bo
 }
 
 /**
- * Field derivation per the V1.147 form contract (behavior spec §3):
+ * note: Field derivation per the V1.147 form contract (behavior spec §3):
  * `*_id` + required_key_block_types → entity picker; enum → select;
  * boolean → checkbox; number/integer → number input; string → text input;
  * anything else → unsupported note (Advanced raw-JSON path stays in the app).
@@ -179,8 +179,8 @@ export function RunFormFields({
         return (
           <div key={name} className="flex flex-col gap-1.5" data-field={name}>
             {kind === 'boolean' ? (
-              // Single label owning both the text and the checkbox (a11y —
-              // two labels targeting one control would double the announcement).
+              // why: a single label owns both the text and the checkbox — two
+              // labels targeting one control would double the announcement.
               <label className="flex h-10 items-center gap-2" htmlFor={id}>
                 {label} {requiredMark}
                 <input

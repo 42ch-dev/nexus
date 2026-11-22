@@ -10,7 +10,7 @@ import {
 import { cn } from '../lib/cn';
 
 /**
- * FieldRow — DESIGN.md §Component Primitives/detail-parts family.
+ * why: FieldRow — DESIGN.md §Component Primitives/detail-parts family.
  *
  * V1.150 P3 — read-only detail row (label/value pair) behind the app-side
  * work-timeline-inspector / timeline-moment-inspector / modules-page
@@ -19,9 +19,9 @@ import { cn } from '../lib/cn';
  * without guarding each row. Pure presentational: caller owns the copy.
  */
 export interface FieldRowProps {
-  /** Row label copy. */
+  /** note: Row label copy. */
   label: string;
-  /** Row value copy; null/undefined/'' hides the row. */
+  /** note: Row value copy; null/undefined/'' hides the row. */
   value?: ReactNode;
   className?: string;
 }
@@ -45,11 +45,11 @@ export function FieldRow({ label, value, className }: FieldRowProps) {
  * copy and FieldRow groups or any caller content in the body.
  */
 export interface DetailCardProps {
-  /** Panel headline copy (CardTitle). */
+  /** note: Panel headline copy (CardTitle). */
   title: string;
-  /** Panel helper copy (CardDescription). */
+  /** note: Panel helper copy (CardDescription). */
   description?: ReactNode;
-  /** FieldRow groups / caller content. */
+  /** note: FieldRow groups / caller content. */
   children: ReactNode;
   className?: string;
 }

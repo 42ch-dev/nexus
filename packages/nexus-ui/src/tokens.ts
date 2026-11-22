@@ -1,5 +1,5 @@
 /**
- * Nexus brand token constants — V1.83 foundation slice.
+ * why: Nexus brand token constants — V1.83 foundation slice.
  * Normative cross-application values are defined in root DESIGN.md (P1);
  * this module exposes machine-consumable brand primitives for package consumers.
  *
@@ -14,15 +14,15 @@ export { brandColors };
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Plain primary timeline mark — bright cyan gradient, no plate (`logo-primary.png` mark geometry) */
+  /** note: Plain primary timeline mark — bright cyan gradient, no plate (`logo-primary.png` mark geometry) */
   primary: 'logo-primary.svg',
-  /** Plain white-bg gradient mark — no plate; use on light surfaces when a plate is wrong */
+  /** note: Plain white-bg gradient mark — no plate; use on light surfaces when a plate is wrong */
   whiteBg: 'logo-white-bg.svg',
-  /** Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
+  /** note: Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
   white: 'logo-white.svg',
-  /** Timeline mark — light-gray→black gradient (static asset; tintable form is `<NexusMark>`) */
+  /** note: Timeline mark — light-gray→black gradient (static asset; tintable form is `<NexusMark>`) */
   mono: 'logo-mono.svg',
-  /** Wordmark — lowercase `nexus`; inherits via currentColor */
+  /** note: Wordmark — lowercase `nexus`; inherits via currentColor */
   text: 'logo-text.svg',
 } as const;
 
@@ -30,9 +30,9 @@ export type LogoVariantName = keyof typeof logoVariants;
 
 /** Square plate lockups — separate asset contract from plain wide marks. */
 export const logoSquareVariants = {
-  /** Primary lockup — bright mark on brand deep-blue plate (matches `logo-primary.png`) */
+  /** note: Primary lockup — bright mark on brand deep-blue plate (matches `logo-primary.png`) */
   primary: 'logo-primary-square.svg',
-  /** Lockup on white plate — only when a light/white surface is required (`logo-white-bg.png`) */
+  /** note: Lockup on white plate — only when a light/white surface is required (`logo-white-bg.png`) */
   whiteBg: 'logo-white-bg-square.svg',
 } as const;
 

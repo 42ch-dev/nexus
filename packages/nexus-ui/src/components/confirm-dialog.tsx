@@ -3,7 +3,7 @@ import { Dialog, DialogContent } from './dialog';
 import { Spinner } from './states';
 
 /**
- * ConfirmDialog — DESIGN.md §Component Primitives/ConfirmDialog.
+ * why: ConfirmDialog — DESIGN.md §Component Primitives/ConfirmDialog.
  *
  * V1.149 P1 — L2 pattern component: the destructive/irreversible-action
  * confirmation over the promoted Dialog + Button primitives. Pure
@@ -21,10 +21,10 @@ export interface ConfirmDialogProps {
   description?: string;
   confirmLabel: string;
   cancelLabel: string;
-  /** Accessible name for the header dismiss control; defaults to "Close dialog". */
+  /** note: Accessible name for the header dismiss control; defaults to "Close dialog". */
   closeLabel?: string;
   destructive?: boolean;
-  /** Caller mutation busy state: disables both actions and shows the spinner. */
+  /** note: Caller mutation busy state: disables both actions and shows the spinner. */
   pending?: boolean;
   onConfirm: () => void;
 }
@@ -42,8 +42,8 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return (
-    // Guard dismissal at the Root: while pending, the X control, Escape, and
-    // overlay click all funnel through onOpenChange and must not fire.
+    // why: guard dismissal at the Root — while pending, the X control, Escape,
+    // and overlay click all funnel through onOpenChange and must not fire.
     <Dialog
       open={open}
       onOpenChange={(next) => {

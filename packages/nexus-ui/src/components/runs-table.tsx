@@ -4,7 +4,7 @@ import { Button } from './button';
 import { RunStatusBadge, type RunStatus } from './run-status-badge';
 
 /**
- * One row in the Runs history table. Caller maps RunSummary wire rows into
+ * note: One row in the Runs history table. Caller maps RunSummary wire rows into
  * this shape (preformatted local-time strings, resolved module/world
  * titles, i18n status label) — the table never formats or fetches.
  */
@@ -14,9 +14,9 @@ export interface RunTableRow {
   moduleVersion: string;
   worldTitle: string;
   status: RunStatus;
-  /** Caller-owned product label (Needs review / Applied / Discarded / Failed / Running). */
+  /** note: Caller-owned product label (Needs review / Applied / Discarded / Failed / Running). */
   statusLabel: string;
-  /** Preformatted local-time strings. */
+  /** note: Preformatted local-time strings. */
   startedAt: string;
   finishedAt?: string;
 }
@@ -29,19 +29,19 @@ export interface RunsTableCopy {
   startedColumn: string;
   finishedColumn: string;
   runIdColumn: string;
-  /** Row action opening the Run result inspector. */
+  /** note: Row action opening the Run result inspector. */
   openRunLabel: string;
-  /** aria-label for the copy-correlation-id affordance. */
+  /** note: aria-label for the copy-correlation-id affordance. */
   copyIdLabel: string;
   emptyTitle: string;
   emptyDescription: string;
 }
 
 export interface RunsTableProps {
-  /** Newest-first rows. Empty renders the empty-state block. */
+  /** note: Newest-first rows. Empty renders the empty-state block. */
   rows: RunTableRow[];
   copy: RunsTableCopy;
-  /** Row action — opens the Run inspector (re-review or read-only). */
+  /** note: Row action — opens the Run inspector (re-review or read-only). */
   onOpenRun?: (runId: string) => void;
   className?: string;
 }
@@ -128,7 +128,7 @@ export function RunsTable({ rows, copy, onOpenRun, className }: RunsTableProps) 
                     aria-label={copy.copyIdLabel}
                     className="text-label-12 text-gray-700 underline decoration-gray-alpha-500 underline-offset-2 hover:text-gray-1000"
                     onClick={() => {
-                      // Clipboard is a fire-and-forget affordance; failures
+                      // why: clipboard is a fire-and-forget affordance; failures
                       // leave the visible mono id as the fallback.
                       void navigator.clipboard?.writeText(row.runId).catch(() => {});
                     }}

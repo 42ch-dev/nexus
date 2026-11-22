@@ -1,5 +1,5 @@
 /**
- * @42ch/nexus-ui — brand assets, tokens, theme helpers, React brand components,
+ * why: @42ch/nexus-ui — brand assets, tokens, theme helpers, React brand components,
  * and promoted pure presentational primitives.
  * V1.87 ships: `<NexusLogo>` and `<NexusMark>`.
  * V1.99 P0 ships: `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives).
@@ -21,7 +21,7 @@
  * `<FormDialog>` (+ `<FormSection>`).
  */
 
-// Class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
+// why: class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
 // Consumers (apps/web, apps/design-studio) import or re-export from here;
 // deep imports from @42ch/nexus-ui/src/* are forbidden.
 export { cn } from './lib/cn';
@@ -52,7 +52,7 @@ export {
   type NexusLogoVariantProps,
 } from './components/nexus-logo-variant';
 
-// V1.99 P0 — promoted presentational primitives
+// why: V1.99 P0 — promoted presentational primitives
 export { Button, type ButtonProps } from './components/button';
 export { Badge, type BadgeProps } from './components/badge';
 export {
@@ -61,20 +61,21 @@ export {
   CardTitle,
   CardDescription,
   CardContent,
-  // V1.121 P1 — v0.4 additive opt-ins (interactive elevation recipe; title voice)
+  // why: V1.121 P1 — v0.4 additive opt-ins (interactive elevation recipe;
+  // title voice)
   type CardProps,
   type CardTitleProps,
 } from './components/card';
 
-// V1.100 P2 — promoted form-field presentational primitives
+// why: V1.100 P2 — promoted form-field presentational primitives
 export { Input, type InputProps } from './components/input';
 export { Label, type LabelProps } from './components/label';
 export { Textarea, type TextareaProps } from './components/textarea';
 
-// V1.101 P2 — promoted native Select presentational primitive
+// why: V1.101 P2 — promoted native Select presentational primitive
 export { Select, type SelectProps } from './components/select';
 
-// V1.106 P0 — promoted Toast presentational primitive (Studio Surfaces fixtures)
+// why: V1.106 P0 — promoted Toast presentational primitive (Studio Surfaces fixtures)
 export {
   ToastProvider,
   Toaster,
@@ -83,7 +84,7 @@ export {
   type ToastVariant,
 } from './components/toast';
 
-// V1.129 P1 — promoted transport-error presentational primitive
+// why: V1.129 P1 — promoted transport-error presentational primitive
 // (Studio fixture → app wiring across gates + toasts + settings).
 export {
   TransportErrorBlock,
@@ -91,7 +92,7 @@ export {
   type TransportErrorKind,
 } from './components/transport-error-block';
 
-// V1.137 P2 — promoted Tabs presentational primitive (React context compound).
+// why: V1.137 P2 — promoted Tabs presentational primitive (React context compound).
 export {
   Tabs,
   TabsList,
@@ -102,7 +103,8 @@ export {
   type TabsContentProps,
 } from './components/tabs';
 
-// V1.148 P1 — promoted Dialog presentational primitive (Radix dialog; caller-owned copy).
+// why: V1.148 P1 — promoted Dialog presentational primitive (Radix dialog;
+// caller-owned copy).
 export {
   Dialog,
   DialogTrigger,
@@ -111,7 +113,8 @@ export {
   type DialogContentProps,
 } from './components/dialog';
 
-// V1.148 P1 — promoted Sheet presentational primitive (end-rail drawer; caller-owned copy).
+// why: V1.148 P1 — promoted Sheet presentational primitive (end-rail drawer;
+// caller-owned copy).
 export {
   Sheet,
   SheetTrigger,
@@ -120,7 +123,7 @@ export {
   type SheetContentProps,
 } from './components/sheet';
 
-// V1.148 P1 — promoted Table presentational primitives (native table recipe).
+// why: V1.148 P1 — promoted Table presentational primitives (native table recipe).
 export {
   Table,
   TableHeader,
@@ -130,7 +133,8 @@ export {
   TableCell,
 } from './components/table';
 
-// V1.148 P1 — promoted States presentational primitives (Spinner/Loading/Empty/Unavailable/Error).
+// why: V1.148 P1 — promoted States presentational primitives
+// (Spinner/Loading/Empty/Unavailable/Error).
 export {
   Spinner,
   LoadingState,
@@ -139,11 +143,12 @@ export {
   ErrorState,
 } from './components/states';
 
-// V1.148 P1 — promoted EmptyCreateCard presentational primitive (empty-list create affordance).
+// why: V1.148 P1 — promoted EmptyCreateCard presentational primitive
+// (empty-list create affordance).
 export { EmptyCreateCard } from './components/empty-create-card';
 
-// V1.149 P1 — promoted L2 pattern components (compose promoted Dialog/States/Button;
-// caller-owned copy; no query/router/i18n deps).
+// why: V1.149 P1 — promoted L2 pattern components (compose promoted
+// Dialog/States/Button; caller-owned copy; no query/router/i18n deps).
 export {
   ListStateContainer,
   type ListStateContainerProps,
@@ -151,12 +156,13 @@ export {
 export { ConfirmDialog, type ConfirmDialogProps } from './components/confirm-dialog';
 export { FormDialog, type FormDialogProps } from './components/form-dialog';
 export { FormSection, type FormSectionProps } from './components/form-section';
-// V1.150 P1 — promoted ListPageLayout L2 pattern (list-page chrome over the
-// promoted Card primitives; caller-owned copy + slots; no query/router/i18n deps).
+// why: V1.150 P1 — promoted ListPageLayout L2 pattern (list-page chrome over
+// the promoted Card primitives; caller-owned copy + slots; no query/router/i18n
+// deps).
 export { ListPageLayout, type ListPageLayoutProps } from './components/list-page-layout';
-// V1.150 P2 — promoted settings family: SettingsSection + SettingRow (section
-// chrome and label/control/hint rows) and SettingsLayout (section nav rail +
-// outlet; caller-owned registry/labels, hiddenIds entrance filter).
+// why: V1.150 P2 — promoted settings family: SettingsSection + SettingRow
+// (section chrome and label/control/hint rows) and SettingsLayout (section nav
+// rail + outlet; caller-owned registry/labels, hiddenIds entrance filter).
 export {
   SettingsSection,
   type SettingsSectionProps,
@@ -168,7 +174,7 @@ export {
   type SettingsLayoutProps,
   type SettingsLayoutSection,
 } from './components/settings-layout';
-// V1.150 P3 — promoted master/detail family: ListDetailShell (fixed-width
+// why: V1.150 P3 — promoted master/detail family: ListDetailShell (fixed-width
 // responsive split, caller-owned regions, no open/close state) and the
 // read-only detail parts (FieldRow null-hide rows + DetailCard over the
 // promoted Card primitives). HubCard stays app-side per plan D5 decision.
@@ -183,7 +189,7 @@ export {
   type FieldRowProps,
 } from './components/detail-parts';
 
-// V1.147 P1 — promoted Compute Run Studio presentational primitives.
+// why: V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
 // no wire-contract imports (structural mirrors only), no routing.
 export {
@@ -218,7 +224,7 @@ export {
   type RunsTableProps,
   type RunTableRow,
 } from './components/runs-table';
-// V1.147 P2 — compute-on-Timeline primitives (Studio fixture:
+// why: V1.147 P2 — compute-on-Timeline primitives (Studio fixture:
 // `timeline-compute.tsx`, Components → Compute Timeline).
 export {
   ComputeResultNodeChrome,

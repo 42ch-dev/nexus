@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table';
 
 /**
- * V1.148 P1 — promoted Table primitives (DESIGN.md components.table).
+ * why: V1.148 P1 — promoted Table primitives (DESIGN.md components.table).
  *
  * Pins: native table semantics, the v0.4 recipes (header background-200 well,
  * label-12 head, background-200 row hover with token-driven reduced-motion-safe

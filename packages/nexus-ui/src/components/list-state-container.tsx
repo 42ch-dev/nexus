@@ -4,7 +4,7 @@ import { cn } from '../lib/cn';
 import { EmptyState, ErrorState, LoadingState } from './states';
 
 /**
- * ListStateContainer — DESIGN.md §Component Primitives/ListStateContainer.
+ * why: ListStateContainer — DESIGN.md §Component Primitives/ListStateContainer.
  *
  * V1.149 P1 — L2 pattern component: the single four-branch container behind
  * list/query surfaces (loading / error / empty / ready). Composes the
@@ -17,19 +17,19 @@ import { EmptyState, ErrorState, LoadingState } from './states';
  */
 export interface ListStateContainerProps {
   status: 'loading' | 'error' | 'empty' | 'ready';
-  /** Retry callback for the error branch (promoted ErrorState `onRetry`). */
+  /** note: Retry callback for the error branch (promoted ErrorState `onRetry`). */
   retry?: () => void;
-  /** Empty-branch action slot (e.g. an EmptyCreateCard affordance). */
+  /** note: Empty-branch action slot (e.g. an EmptyCreateCard affordance). */
   emptyAction?: ReactNode;
-  /** Empty-branch hint copy (promoted EmptyState description). */
+  /** note: Empty-branch hint copy (promoted EmptyState description). */
   emptyHint?: string;
-  /** Empty-branch headline copy (promoted EmptyState title; English fallback). */
+  /** note: Empty-branch headline copy (promoted EmptyState title; English fallback). */
   emptyTitle?: string;
-  /** Loading-branch copy (promoted LoadingState label; fallback "Loading…"). */
+  /** note: Loading-branch copy (promoted LoadingState label; fallback "Loading…"). */
   loadingLabel?: string;
-  /** Error-branch headline copy (promoted ErrorState title; fallback set there). */
+  /** note: Error-branch headline copy (promoted ErrorState title; fallback set there). */
   errorTitle?: string;
-  /** Retry control copy (promoted ErrorState retryLabel; fallback "Try again"). */
+  /** note: Retry control copy (promoted ErrorState retryLabel; fallback "Try again"). */
   retryLabel?: string;
   children: ReactNode;
   className?: string;

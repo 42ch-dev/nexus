@@ -5,8 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { Textarea } from './textarea';
 
 describe('Textarea', () => {
-  // --- base rendering ---
-
   it('renders a textarea element', () => {
     render(<Textarea data-testid="test-textarea" />);
     const textarea = screen.getByTestId('test-textarea');
@@ -14,7 +12,6 @@ describe('Textarea', () => {
   });
 
 
-  // --- className merge (cn integration) ---
 
   it('merges custom className with base classes', () => {
     render(<Textarea className="custom-class" data-testid="test-textarea" />);
@@ -22,7 +19,6 @@ describe('Textarea', () => {
     expect(textarea).toHaveClass('custom-class');
   });
 
-  // --- invalid prop → aria-invalid + visual state ---
 
   it('sets aria-invalid="true" when invalid is true', () => {
     render(<Textarea invalid data-testid="test-textarea" />);
@@ -44,7 +40,6 @@ describe('Textarea', () => {
 
 
 
-  // --- ref-as-prop ---
 
   it('passes the ref to the underlying textarea element', () => {
     let ref: HTMLTextAreaElement | null = null;
@@ -57,7 +52,6 @@ describe('Textarea', () => {
     expect(ref).toBe(screen.getByTestId('test-textarea'));
   });
 
-  // --- accessibility-relevant attributes ---
 
   it('passes through standard aria-describedby', () => {
     render(<Textarea aria-describedby="helper-1 error-1" data-testid="test-textarea" />);

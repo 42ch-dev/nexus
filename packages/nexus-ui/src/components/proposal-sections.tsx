@@ -5,7 +5,7 @@ import { cn } from '../lib/cn';
 import { Badge } from './badge';
 
 /**
- * Structural mirror of the compute proposals envelope (state_delta,
+ * why: Structural mirror of the compute proposals envelope (state_delta,
  * timeline_events, new_key_blocks, battle_report). All-optional/subset
  * fields keep the primitive compatible with the generated DTOs via
  * structural typing — the package never imports wire contracts.
@@ -42,23 +42,23 @@ export interface ProposalSectionsCopy {
   knowledgeUpdatesTitle: string;
   timelineEventsTitle: string;
   newKnowledgeTitle: string;
-  /** Note shown when the run response was truncated (full detail via the Run). */
+  /** note: Note shown when the run response was truncated (full detail via the Run). */
   truncatedNote: string;
-  /** Fallback for a timeline event proposal without a title. */
+  /** note: Fallback for a timeline event proposal without a title. */
   untitledEventLabel: string;
-  /** Label formatting affected entries per event — caller-owned for i18n plurals. */
+  /** note: Label formatting affected entries per event — caller-owned for i18n plurals. */
   affectedEntriesLabel: (count: number) => string;
-  /** Fallback caption for one new-knowledge entry without a recognizable title. */
+  /** note: Fallback caption for one new-knowledge entry without a recognizable title. */
   newEntryLabel: string;
 }
 
 export interface ProposalSectionsProps {
   proposals: ComputeProposals;
-  /** True when the response payload was truncated — renders the truncated note. */
+  /** note: True when the response payload was truncated — renders the truncated note. */
   truncated?: boolean;
   copy: ProposalSectionsCopy;
   /**
-   * Optional per-event selection (behavior spec §2 opt-in): when
+   * note: Optional per-event selection (behavior spec §2 opt-in): when
    * `onToggleEvent` is supplied, each timeline event renders a checkbox
    * keyed by its stable id `evt_<index>`; `selectedEventIds` drives state.
    */
@@ -73,7 +73,7 @@ function formatValue(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
-    // Circular structures only — module output is JSON by contract.
+    // why: circular structures only — module output is JSON by contract.
     return '[unserializable value]';
   }
 }
@@ -95,7 +95,7 @@ function Section({
   );
 }
 
-/** Picks a display title for a new-knowledge entry proposal. */
+/** note: Picks a display title for a new-knowledge entry proposal. */
 function newEntryTitle(entry: Record<string, unknown>, fallback: string): string {
   const candidate = entry.title ?? entry.name;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : fallback;

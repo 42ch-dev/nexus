@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { ListPageLayout } from './list-page-layout';
 
 /**
- * V1.150 P1 — L2 pattern component (DESIGN.md components.list-page-layout).
+ * why: V1.150 P1 — L2 pattern component (DESIGN.md components.list-page-layout).
  *
  * Pins caller-visible behavior: caller-owned copy (title/description) and
  * slot content render, slots appear in page order (relative document order,
@@ -31,7 +31,8 @@ describe('ListPageLayout', () => {
     expect(screen.getByText('Review findings for the selected work.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
 
-    // Relative document order only — no assumptions about direct parents or counts.
+    // invariant: relative document order only — no assumptions about direct
+    // parents or counts.
     const order = [
       screen.getByTestId('filters'),
       screen.getByTestId('results'),

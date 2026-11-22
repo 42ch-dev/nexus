@@ -3,7 +3,7 @@ import { Cpu } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 /**
- * Compute result node body chrome (V1.147 P2) — pure presentational extract
+ * why: Compute result node body chrome (V1.147 P2) — pure presentational extract
  * for a Narrative-layer Timeline node produced by an accepted compute Run
  * (behavior spec §5 Timeline citizenship).
  *
@@ -28,26 +28,26 @@ import { cn } from '../lib/cn';
  */
 export interface ComputeResultNodeChromeProps {
   /**
-   * Resolved node title. Per spec §5: the module event summary when present
+   * note: Resolved node title. Per spec §5: the module event summary when present
    * (e.g. the damage line), else the module name. Caller-owned fallback.
    */
   title: string;
   /**
-   * Kind pill label — "Compute result" (caller-owned; i18n lives in the app).
+   * note: Kind pill label — "Compute result" (caller-owned; i18n lives in the app).
    * Distinguishes compute nodes from manual Event nodes at a glance.
    */
   kindLabel: string;
   /**
-   * Provenance chip label — "From module run" (direct lane) vs "From preset"
+   * note: Provenance chip label — "From module run" (direct lane) vs "From preset"
    * (preset path), caller-resolved when distinguishable (spec §5).
    */
   provenanceLabel: string;
-  /** Module display name (product vocabulary — never protocol jargon). */
+  /** note: Module display name (product vocabulary — never protocol jargon). */
   moduleName: string;
-  /** Module version string, e.g. "1.0.0" (rendered as `v{moduleVersion}`). */
+  /** note: Module version string, e.g. "1.0.0" (rendered as `v{moduleVersion}`). */
   moduleVersion: string;
   /**
-   * Optional short run correlation id. Rendered as a mono suffix on the meta
+   * note: Optional short run correlation id. Rendered as a mono suffix on the meta
    * line. Absent for the preset path (no direct Run row exists).
    */
   runId?: string;

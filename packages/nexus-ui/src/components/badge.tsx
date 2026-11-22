@@ -4,7 +4,7 @@ import { type HTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Badge / Status Pill — DESIGN.md §Component Primitives/Badge.
+ * why: Badge / Status Pill — DESIGN.md §Component Primitives/Badge.
  *
  * Height 24px, px-2 (8px), radius-pill, label-12. Soft tone keeps tinted fills
  * with strengthened borders (raised to 16% alpha in FB-V1106-001 so each hue
@@ -36,7 +36,6 @@ const badgeVariants = cva(
       },
     },
     compoundVariants: [
-      // ── soft (default): tinted fill + semantic text; strengthened borders ──
       {
         tone: 'soft',
         variant: 'neutral',
@@ -72,11 +71,11 @@ const badgeVariants = cva(
         class:
           'bg-nexus-ui-badge-soft-preset-bg text-nexus-ui-badge-soft-preset-text border-nexus-ui-badge-soft-preset-border',
       },
-      // ── solid (opt-in): semantic fill + high-contrast text; no visible border ──
-      // Light: white on dark fills. Dark: deep-blue on bright semantic fills
-      // (Button Contrast Invariant); neutral keeps white on dark gray-200.
-      // Light fills sit at -800 (white text clears AA, v1.183 P0 AR-3);
-      // `dark:bg-*-700` pins keep the bright dark-theme fills unchanged.
+      // why: solid (opt-in) — semantic fill + high-contrast text; no visible
+      // border. Light: white on dark fills. Dark: deep-blue on bright semantic
+      // fills (Button Contrast Invariant); neutral keeps white on dark
+      // gray-200. Light fills sit at -800 (white text clears AA, v1.183 P0
+      // AR-3); `dark:bg-*-700` pins keep the bright dark-theme fills unchanged.
       {
         tone: 'solid',
         variant: 'neutral',
@@ -115,7 +114,7 @@ const badgeVariants = cva(
 export interface BadgeProps
   extends HTMLAttributes<HTMLSpanElement>,
     VariantProps<typeof badgeVariants> {
-  /** DOM ref forwarded to the underlying span (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the underlying span (React 19 ref-as-prop). */
   ref?: Ref<HTMLSpanElement>;
 }
 

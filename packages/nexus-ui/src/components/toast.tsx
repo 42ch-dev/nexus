@@ -1,5 +1,5 @@
 /**
- * Toast system — DESIGN.md §Component Primitives/Toast.
+ * why: Toast system — DESIGN.md §Component Primitives/Toast.
  *
  * Minimal context-driven toast queue (no external dependency): show +
  * auto-dismiss, manual dismiss, and a `<Toaster />` portal that renders the
@@ -31,9 +31,9 @@ export interface Toast {
   variant: ToastVariant;
   title: string;
   description?: string;
-  /** Auto-dismiss delay (ms). 0 keeps the toast until dismissed. */
+  /** note: Auto-dismiss delay (ms). 0 keeps the toast until dismissed. */
   duration?: number;
-  /** Optional test id for the rendered toast item (used by fixtures). */
+  /** note: Optional test id for the rendered toast item (used by fixtures). */
   testId?: string;
 }
 
@@ -63,9 +63,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (prev.length < MAX_TOASTS) return [...prev, next];
       const evictIndex = prev.findIndex((t) => t.duration !== 0);
       if (evictIndex === -1) {
-        // All existing toasts are persistent; keep them and allow the queue
-        // to temporarily exceed MAX_TOASTS rather than silently drop either
-        // the new toast or a persistent one.
+        // why: all existing toasts are persistent — keep them and allow the
+        // queue to temporarily exceed MAX_TOASTS rather than silently drop
+        // either the new toast or a persistent one.
         return [...prev, next];
       }
       const nextQueue = [...prev];
@@ -131,7 +131,7 @@ export function Toaster() {
   );
 }
 
-// Keep in sync with the `--duration-exit` token
+// why: keep in sync with the `--duration-exit` token
 // (tooling/design-tokens/src/tokens.css) — this JS removal timer must land on
 // the same tick as the CSS exit transition, and toast.test.tsx advances 140ms.
 const TOAST_EXIT_MS = 140;

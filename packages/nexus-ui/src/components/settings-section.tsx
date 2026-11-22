@@ -4,7 +4,7 @@ import { cn } from '../lib/cn';
 import { Label } from './label';
 
 /**
- * SettingsSection — DESIGN.md §Component Primitives (settings-section family).
+ * why: SettingsSection — DESIGN.md §Component Primitives (settings-section family).
  *
  * V1.150 P2 — L2 pattern component: the section chrome behind settings
  * surfaces (appearance/connection/workspace/…). Parallel to V1.149
@@ -12,11 +12,11 @@ import { Label } from './label';
  * caller owns the cards/forms inside and all copy.
  */
 export interface SettingsSectionProps {
-  /** Section headline copy. */
+  /** note: Section headline copy. */
   title: string;
-  /** Helper paragraph copy under the headline. */
+  /** note: Helper paragraph copy under the headline. */
   description?: ReactNode;
-  /** Cards/forms stay caller-owned. */
+  /** note: Cards/forms stay caller-owned. */
   children: ReactNode;
   className?: string;
 }
@@ -37,20 +37,20 @@ export function SettingsSection({
 }
 
 /**
- * SettingRow — label/control/hint row inside a SettingsSection card.
+ * note: SettingRow — label/control/hint row inside a SettingsSection card.
  *
  * `htmlFor` wires the promoted Label to the caller's control (the app
  * useId pattern); `hint` renders the helper copy under the control — the
  * caller owns the control's aria-describedby wiring to their hint id.
  */
 export interface SettingRowProps {
-  /** Control label copy. */
+  /** note: Control label copy. */
   label: string;
-  /** Wires Label → control a11y (appearance-section useId pattern). */
+  /** note: Wires Label → control a11y (appearance-section useId pattern). */
   htmlFor?: string;
-  /** Helper copy under the control. */
+  /** note: Helper copy under the control. */
   hint?: ReactNode;
-  /** The control (Select/Input/Button), caller-owned. */
+  /** note: The control (Select/Input/Button), caller-owned. */
   children: ReactNode;
   className?: string;
 }

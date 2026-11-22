@@ -3,7 +3,7 @@ import { type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * ListDetailShell — DESIGN.md §Component Primitives/ListDetailShell.
+ * why: ListDetailShell — DESIGN.md §Component Primitives/ListDetailShell.
  *
  * V1.150 P3 — L2 pattern component: the fixed-width responsive master/detail
  * split behind findings-page and modules-page (stack below lg, 360px detail
@@ -14,9 +14,9 @@ import { cn } from '../lib/cn';
  * query, router, or i18n imports.
  */
 export interface ListDetailShellProps {
-  /** Master list region. */
+  /** note: Master list region. */
   list: ReactNode;
-  /** Detail region — the caller renders the panel or a "no selection" EmptyState. */
+  /** note: Detail region — the caller renders the panel or a "no selection" EmptyState. */
   detail: ReactNode;
   className?: string;
 }

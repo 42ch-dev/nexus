@@ -3,7 +3,7 @@ import { type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * FormSection — DESIGN.md §Component Primitives/FormSection.
+ * why: FormSection — DESIGN.md §Component Primitives/FormSection.
  *
  * V1.149 P1 — L2 pattern component: the field-group layout behind form
  * dialogs and settings surfaces. Native fieldset/legend group semantics;
@@ -14,7 +14,7 @@ import { cn } from '../lib/cn';
 export interface FormSectionProps {
   title: string;
   description?: ReactNode;
-  /** Inline error copy for the whole group; renders the error-surface slot. */
+  /** note: Inline error copy for the whole group; renders the error-surface slot. */
   error?: ReactNode;
   children: ReactNode;
   className?: string;

@@ -98,8 +98,8 @@ describe('ComputeInspectorSections', () => {
       />,
     );
 
-    // The chip lives in the Module card in every state, so the inspector can
-    // tell which path produced the node even when no direct Run exists.
+    // why: the chip lives in the Module card in every state, so the inspector
+    // can tell which path produced the node even when no direct Run exists.
     expect(screen.getByTestId('compute-inspector-provenance')).toHaveTextContent('From preset');
     expect(screen.queryByTestId('compute-inspector-section-run')).not.toBeInTheDocument();
     expect(screen.queryByTestId('compute-inspector-open-run')).not.toBeInTheDocument();

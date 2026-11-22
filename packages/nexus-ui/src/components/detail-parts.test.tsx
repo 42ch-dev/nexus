@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { DetailCard, FieldRow } from './detail-parts';
 
 /**
- * V1.150 P3 — L2 pattern family (DESIGN.md §Component Primitives/detail-parts).
+ * why: V1.150 P3 — L2 pattern family (DESIGN.md §Component Primitives/detail-parts).
  *
  * Pins caller-visible behavior: FieldRow renders caller label/value copy and
  * hides the row entirely on null/undefined/'' values (shared null-hide
@@ -90,8 +90,9 @@ describe('DetailCard', () => {
       </DetailCard>,
     );
 
-    // Card family: rounded border surface; header title + optional description
-    // ride the Card token recipe (background-100 fill, gray-alpha-400 border).
+    // why: Card family — rounded border surface; header title + optional
+    // description ride the Card token recipe (background-100 fill,
+    // gray-alpha-400 border).
     const surface = container.firstElementChild!;
     expect(surface.className).toMatch(/\brounded-card\b/);
     expect(surface.className).toMatch(/\bborder-gray-alpha-400\b/);

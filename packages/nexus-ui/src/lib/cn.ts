@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { extendTailwindMerge } from 'tailwind-merge';
 
 /**
- * Custom tailwind-merge instance.
+ * why: Custom tailwind-merge instance.
  *
  * DESIGN.md defines custom typography tokens under `fontSize` (e.g.
  * `text-button-14`, `text-heading-32`). tailwind-merge does not know these are
@@ -46,10 +46,11 @@ const customTwMerge = extendTailwindMerge({
         'text-label-12-mono',
         'text-copy-13-mono',
       ],
-      // V1.121 v0.4: content-voice serif family utility (DESIGN.md typography.font-display).
+      // why: V1.121 v0.4 — content-voice serif family utility
+      // (DESIGN.md typography.font-display).
       'font-family': ['font-display'],
-      // V1.121 v0.4: named box-shadow tokens — elevation scale + legacy aliases
-      // (DESIGN.md §Elevation). Registering the aliases too keeps
+      // why: V1.121 v0.4 — named box-shadow tokens (elevation scale + legacy
+      // aliases, DESIGN.md §Elevation). Registering the aliases too keeps
       // `cn('shadow-elevation-2', 'shadow-card')` collapsing to one class.
       shadow: [
         'shadow-elevation-0',
@@ -61,15 +62,15 @@ const customTwMerge = extendTailwindMerge({
         'shadow-popover',
         'shadow-modal',
       ],
-      // V1.121 v0.4: directional motion pair (DESIGN.md §Motion).
+      // why: V1.121 v0.4 — directional motion pair (DESIGN.md §Motion).
       // V1.121 P1: `duration-state` / `duration-popover` complete the DESIGN.md
       // motion token set (state transitions; menus/popovers — card.tsx in this
       // package consumes `duration-popover` through cn()).
       duration: ['duration-enter', 'duration-exit', 'duration-state', 'duration-popover'],
-      // V1.121 v0.4: canvas node width family (DESIGN.md components.canvas.node-width;
-      // registered in P0 alongside the `--canvas-node-width-*` structural CSS
-      // vars + preset minWidth keys, verified/consumed by P2's sweep, applied
-      // to node components in P3).
+      // why: V1.121 v0.4 — canvas node width family (DESIGN.md
+      // components.canvas.node-width; registered in P0 alongside the
+      // `--canvas-node-width-*` structural CSS vars + preset minWidth keys,
+      // verified/consumed by P2's sweep, applied to node components in P3).
       'min-w': [
         'min-w-canvas-node-strategy-root',
         'min-w-canvas-node-strategy-primary',
@@ -77,11 +78,12 @@ const customTwMerge = extendTailwindMerge({
         'min-w-canvas-node-outline-scene-beat',
         'min-w-canvas-node-default',
       ],
-      // V1.121 P1: dialog/sheet overlay sizing tokens (DESIGN.md
+      // why: V1.121 P1 — dialog/sheet overlay sizing tokens (DESIGN.md
       // components.dialog/sheet), consumed by apps/web dialog.tsx + sheet.tsx.
       w: ['w-dialog', 'w-sheet'],
       'max-w': ['max-w-dialog'],
-      // V1.113 P1: DESIGN.md custom token-backed utilities so cn() does not drop them.
+      // why: V1.113 P1 — DESIGN.md custom token-backed utilities so cn() does
+      // not drop them.
       opacity: ['opacity-disabled'],
       'max-h': ['max-h-listbox', 'max-h-dialog'],
     },

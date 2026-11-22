@@ -7,7 +7,7 @@ import { cn } from '../lib/cn';
 import { Button } from './button';
 
 /**
- * Compute inspector content sections (V1.147 P2) — pure presentational
+ * why: Compute inspector content sections (V1.147 P2) — pure presentational
  * inspector content for a Narrative-layer Compute result node (behavior spec
  * §5 Inspector row).
  *
@@ -32,9 +32,9 @@ import { Button } from './button';
  * compatibility with generated DTOs is via structural typing.
  */
 export interface ComputeAffectedEntry {
-  /** KnowledgeEntry id (mono). */
+  /** note: KnowledgeEntry id (mono). */
   id: string;
-  /** Resolved display title (caller-owned i18n fallback). */
+  /** note: Resolved display title (caller-owned i18n fallback). */
   title: string;
 }
 
@@ -45,28 +45,28 @@ export interface ComputeInspectorSectionsCopy {
   affectedTitle: string;
   runTitle: string;
   paramsTitle: string;
-  /** Open Run affordance label — e.g. "Open Run". */
+  /** note: Open Run affordance label — e.g. "Open Run". */
   openRunLabel: string;
 }
 
 export interface ComputeInspectorSectionsProps {
-  /** Module display name. */
+  /** note: Module display name. */
   moduleName: string;
-  /** Module version string (rendered as `v{moduleVersion}`). */
+  /** note: Module version string (rendered as `v{moduleVersion}`). */
   moduleVersion: string;
-  /** Module event summary — the report digest (damage line etc.). */
+  /** note: Module event summary — the report digest (damage line etc.). */
   reportDigest?: string;
-  /** Affected KnowledgeEntries surfaced by the event. */
+  /** note: Affected KnowledgeEntries surfaced by the event. */
   affectedEntries?: ComputeAffectedEntry[];
-  /** Short run correlation id. Absent → no Run section (preset path). */
+  /** note: Short run correlation id. Absent → no Run section (preset path). */
   runId?: string;
-  /** Resolved parameters digest (e.g. "attacker: Aria · defender: Brann"). */
+  /** note: Resolved parameters digest (e.g. "attacker: Aria · defender: Brann"). */
   paramsDigest?: string;
-  /** Provenance chip label — "From module run" / "From preset". */
+  /** note: Provenance chip label — "From module run" / "From preset". */
   provenanceLabel: string;
   copy: ComputeInspectorSectionsCopy;
   /**
-   * Open Run hand-off — the caller navigates to the Run inspector
+   * note: Open Run hand-off — the caller navigates to the Run inspector
    * (`/modules?module=&run=` in the app). Rendered only when `runId`
    * is present. Optional: read-only inspections omit it.
    */
