@@ -1868,9 +1868,7 @@ fn make_dummy_value(
     let type_val = prop_def.get("type");
     let type_str = match type_val {
         Some(Value::String(s)) => Some(s.as_str()),
-        Some(Value::Array(arr)) => {
-            arr.iter().filter_map(|v| v.as_str()).find(|s| *s != "null")
-        }
+        Some(Value::Array(arr)) => arr.iter().filter_map(|v| v.as_str()).find(|s| *s != "null"),
         _ => None,
     };
 
@@ -1888,16 +1886,14 @@ fn make_dummy_value(
         }
         Some("number") => Value::Number(serde_json::Number::from_f64(1.0).unwrap()),
         Some("boolean") => Value::Bool(false),
-        Some("array") => {
-            prop_def.get("items").map_or_else(
-                || Value::Array(vec![]),
-                |items| {
-                    let item_val =
-                        make_dummy_value(items, schema_cache, current_dir, current_schema_path);
-                    Value::Array(vec![item_val])
-                },
-            )
-        }
+        Some("array") => prop_def.get("items").map_or_else(
+            || Value::Array(vec![]),
+            |items| {
+                let item_val =
+                    make_dummy_value(items, schema_cache, current_dir, current_schema_path);
+                Value::Array(vec![item_val])
+            },
+        ),
         Some("object") => {
             prop_def
                 .get("properties")
