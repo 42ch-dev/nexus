@@ -46,8 +46,8 @@ use nexus_module_sdk::{
     nexus_entry, ComputeInput, ComputeOutput, DeltaOp, ModuleError, StateDeltaOp,
 };
 
-/// note: resolves one attack into damage, a state delta, a timeline event, and
-/// the report.
+/// note: resolve a single attack between two characters and build the output
+/// envelope.
 fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let key_blocks = &input.key_blocks;
     if key_blocks.is_empty() {
@@ -182,8 +182,9 @@ mod tests {
     /// why: the `nexus-spoke-adapter` conversion emits attribute values as
     /// f64-backed JSON numbers in the flat form (`body.attributes.base_atk` =
     /// `20.0`; the spoke `BodyAttributeValue` number variant is an f64).
-    /// `read_attr_int` must accept them on the flat path like the array path
-    /// does — the flat branch previously read floats as 0 → damage 0.
+    /// `read_attr_int` must accept them on the flat path exactly like the array
+    /// path already did (L2 review Minor-1: the flat branch previously read
+    /// floats as 0 → damage 0).
     #[test]
     fn flat_object_attributes_accept_f64_values() {
         let kb = serde_json::json!({
@@ -209,8 +210,8 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
     }
 
-    /// note: the canonical ERC721-array form accepts both int and float
-    /// values (regression pin).
+    /// note: the canonical ERC721-array form still accepts both int and float
+    /// values (unchanged behavior — regression pin).
     #[test]
     fn array_attributes_accept_int_and_float_values() {
         let kb = serde_json::json!({

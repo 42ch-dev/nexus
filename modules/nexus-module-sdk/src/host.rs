@@ -36,8 +36,11 @@ pub const RET_OVERFLOW: i64 = -2;
 /// ABI §6.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostError {
+    /// note: `-1` — the lookup yielded nothing.
     NotFound,
+    /// note: `-2` — the caller's output buffer was too small.
     OutputTooSmall,
+    /// note: any other negative return value.
     Unknown(i64),
 }
 
@@ -64,6 +67,7 @@ pub fn kb_read(id: &str, out_cap: u32) -> Result<Vec<u8>, HostError> {
     )
 }
 
+/// note: queries narrative context.
 pub fn narrative_query(query: &str, out_cap: u32) -> Result<Vec<u8>, HostError> {
     call_host(
         |ptr, len, out_ptr| unsafe { raw::narrative_query(ptr, len, out_ptr, out_cap) },

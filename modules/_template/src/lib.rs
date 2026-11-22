@@ -37,21 +37,22 @@ use nexus_module_sdk::{
     nexus_entry, ComputeInput, ComputeOutput, DeltaOp, ModuleError, StateDeltaOp,
 };
 
-/// why: a six-sided die is the classic default when the invocation omits `sides`.
+/// note: default die sides when `invocation.sides` is absent.
 const DEFAULT_SIDES: i64 = 6;
 
-/// note: fragment of the computable state path `<block_type>.dice`.
+/// note: computable state path fragment under the target block's state:
+/// `<block_type>.dice`.
 const DICE_STATE_KEY: &str = "dice";
 
-/// note: prefers spoke `entry_type` (canonical since V1.139), falls back to
-/// legacy domain `block_type`.
+/// note: resolve the block's type name — spoke `entry_type` (canonical since
+/// V1.139) with legacy domain `block_type` fallback.
 fn block_type_of(kb: &Value) -> Option<&str> {
     kb.get("entry_type")
         .and_then(Value::as_str)
         .or_else(|| kb.get("block_type").and_then(Value::as_str))
 }
 
-/// note: 64-bit FNV-1a hash of the roll seed — wasm32 has no RNG.
+/// note: deterministic 64-bit FNV-1a over the roll seed (no RNG on wasm32).
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
@@ -150,7 +151,8 @@ mod tests {
     use super::*;
     use nexus_module_sdk::WorldRef;
 
-    /// note: one character block with `dice.ticks` state.
+    /// note: build a synthetic input — one character block with `dice.ticks`
+    /// state.
     fn tick_input(world_id: &str, ticks: i64, sides: Option<i64>) -> ComputeInput {
         ComputeInput {
             schema_version: 1,

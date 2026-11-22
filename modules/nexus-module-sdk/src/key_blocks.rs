@@ -3,8 +3,8 @@
 
 use serde_json::Value;
 
-/// note: resolves a key block's identity — spoke `entry_id` (canonical since
-/// V1.139), falling back to legacy domain `key_block_id`.
+/// note: resolve a key block's identity — spoke `entry_id` (canonical since
+/// V1.139) with legacy domain `key_block_id` fallback.
 pub fn entry_id_of(kb: &Value) -> Option<&str> {
     kb.get("entry_id")
         .and_then(Value::as_str)
@@ -12,8 +12,8 @@ pub fn entry_id_of(kb: &Value) -> Option<&str> {
 }
 
 /// note: whether a key block is of the given kind — spoke `entry_type`
-/// (canonical since V1.139), falling back to legacy domain `block_type`.
-/// Replaces the basic-combat `is_character` helper (`is_kind(kb, "character")`).
+/// (canonical since V1.139) with legacy domain `block_type` fallback. Replaces
+/// the basic-combat `is_character` helper (`is_kind(kb, "character")`).
 pub fn is_kind(kb: &Value, kind: &str) -> bool {
     kb.get("entry_type")
         .and_then(Value::as_str)
@@ -146,8 +146,8 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
     }
 
-    /// note: the canonical ERC721-array form accepts both int and float
-    /// values (regression pin).
+    /// note: the canonical ERC721-array form still accepts both int and float
+    /// values (unchanged behavior — regression pin).
     #[test]
     fn array_attributes_accept_int_and_float_values() {
         let kb = json!({

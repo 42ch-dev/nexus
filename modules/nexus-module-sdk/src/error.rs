@@ -6,9 +6,13 @@ use crate::host::HostError;
 /// sentinels (ABI §6.3; basic-combat semantics lib.rs L73–91).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModuleError {
+    /// note: the input envelope is missing or malformed.
     InputMalformed,
+    /// note: the output envelope failed to serialize.
     SerializeFailed,
+    /// note: the host's output buffer is too small for the serialized output.
     OutputTooSmall,
+    /// note: a host function call failed.
     Host(HostError),
 }
 

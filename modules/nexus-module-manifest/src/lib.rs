@@ -23,7 +23,7 @@ use std::path::Path;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// why: avoids the `format_collect` lint and a hex dependency.
+/// note: lowercase hex encoding (avoids the `format_collect` lint and a hex dep).
 fn hex_encode(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(bytes.len() * 2);
