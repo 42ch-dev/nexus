@@ -7,6 +7,7 @@
 //! The provider bridge projects an unmigrated `SOUL.md` as that same profile,
 //! and the first write replaces the projection (the bridge keeps a stored kind
 //! over it), so no leaf ever touches the bearer file.
+// note: the provider profile is the single SOUL owner; no leaf touches the bearer file.
 
 use crate::commands::creator::memory::memory_identity;
 use crate::config::CliConfig;
@@ -20,23 +21,30 @@ use nexus_creator_memory::soul::SoulDocument;
 #[derive(Debug, Subcommand)]
 pub enum SoulCommand {
     /// Initialize a new SOUL document for the active creator
+    // note: CLI help must stay stable
     Init,
     /// Show the current SOUL document
+    // note: CLI help must stay stable
     Show,
     /// Edit the personality section of the SOUL document
+    // note: CLI help must stay stable
     EditPersonality {
         /// New personality content (markdown). Use "-" to read from stdin.
+        // note: CLI help must stay stable
         content: Option<String>,
     },
     /// Validate the SOUL document structure and sections
+    // note: CLI help must stay stable
     Validate,
     /// Push the personality section to long-term memory
+    // note: CLI help must stay stable
     PushPersonality,
     /// Refresh the ## Experience section from long-term memories (deterministic, no LLM)
+    // note: CLI help must stay stable
     RefreshExperience,
 }
 
-/// Run soul command.
+/// note: Run soul command.
 ///
 /// # Errors
 ///
@@ -63,20 +71,20 @@ pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// The retained "no SOUL document" refusal. The document has no file path after
+/// note: The retained "no SOUL document" refusal. The document has no file path after
 /// the cutover, so the wording drops the old `at <path>` suffix.
 fn soul_not_found(creator_id: &str) -> CliError {
     CliError::Other(format!("SOUL.md not found for creator '{creator_id}'."))
 }
 
-/// Map a SOUL document failure onto the retained `Memory error:` envelope the
+/// note: Map a SOUL document failure onto the retained `Memory error:` envelope the
 /// file-backed leaf rendered.
-#[allow(clippy::needless_pass_by_value)] // a `map_err` adapter takes the error by value
+#[allow(clippy::needless_pass_by_value)] // why: a `map_err` adapter takes the error by value
 fn soul_error(error: MemoryError) -> CliError {
     CliError::Other(format!("Memory error: {error}"))
 }
 
-/// Read the authored SOUL document body and its provider revision.
+/// note: Read the authored SOUL document body and its provider revision.
 async fn read_soul(config: &CliConfig, creator_id: &str) -> Result<(String, u64)> {
     with_read_only_core(config, async |core, principal| {
         let profile: ProfileDocument = core
@@ -198,7 +206,7 @@ async fn push_personality(config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// The identity report `soul push-personality` appends: the memory id and kind
+/// note: The identity report `soul push-personality` appends: the memory id and kind
 /// the pushed record carries, or neither line when it carries no authored
 /// identity — never a fabricated kind under an empty id (fix round 3, F5).
 fn personality_identity_lines(identity: Option<(String, String)>) -> Vec<String> {
@@ -235,7 +243,7 @@ mod tests {
 
     #[test]
     fn soul_command_enum_exists() {
-        // Verify the enum can be constructed (compile-time check)
+        // note: Verify the enum can be constructed (compile-time check)
         let _ = SoulCommand::Init;
         let _ = SoulCommand::Show;
         let _ = SoulCommand::Validate;
@@ -248,7 +256,7 @@ mod tests {
 
     #[test]
     fn push_personality_identity_is_never_fabricated() {
-        // No authored identity on the pushed record: no lines at all. The old
+        // note: No authored identity on the pushed record: no lines at all. The old
         // fallback printed an empty memory id and a made-up `personality_core`
         // kind (fix round 3, F5).
         assert_eq!(

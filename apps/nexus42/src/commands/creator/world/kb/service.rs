@@ -13,7 +13,7 @@ use nexus_contracts::{
 use nexus_core::CoreError;
 use std::collections::HashMap;
 
-/// Patch-leaf error mapping: the OCC conflict carries the caller's expected
+/// note: Patch-leaf error mapping: the OCC conflict carries the caller's expected
 /// version alongside the row's current version, so the reported pair is
 /// actionable (`expected v1, current v2`) instead of echoing the current
 /// version twice.
@@ -30,7 +30,7 @@ fn map_patch_error(err: CoreError, expected_version: u64) -> CliError {
     }
 }
 
-/// Run `creator world kb entity patch`.
+/// note: Run `creator world kb entity patch`.
 ///
 /// # Errors
 ///
@@ -39,7 +39,7 @@ fn map_patch_error(err: CoreError, expected_version: u64) -> CliError {
 /// taxonomy — `world_kb_conflict` (exit 76), `world_kb_validation_failed`
 /// (422), `not_found` (404), `forbidden` (403), writer-busy (exit 75).
 #[allow(clippy::too_many_arguments)]
-/// Map the closed `--audience` / `--audience-character` pair onto the frozen
+/// note: Map the closed `--audience` / `--audience-character` pair onto the frozen
 /// wire audience (`world-kb-entity-patch` schema). The author supplies intent
 /// only: core admission resolves the permitted identity and its holder against
 /// stored state inside the authoring transaction.
@@ -92,7 +92,7 @@ pub fn audience_wire(
 
 /// # Errors
 ///
-/// Returns [`CliError`] when the active creator/workspace cannot be resolved,
+/// note: Returns [`CliError`] when the active creator/workspace cannot be resolved,
 /// the core refuses the patch (admission, validation, `world_kb_conflict`, or
 /// the linked-`WorldSheet` guard), or the request/response cannot be
 /// serialized.
@@ -184,7 +184,7 @@ pub async fn run_entity_patch(
     };
 
     let core = open_direct_core(config).await?;
-    // Admission and the mutation share one outcome: whichever fails, the
+    // note: Admission and the mutation share one outcome: whichever fails, the
     // writer is closed before this command reports.
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
@@ -198,7 +198,7 @@ pub async fn run_entity_patch(
     render_patch_response(&world_id, &entity_id, &resp, json)
 }
 
-/// Run `creator world kb graph`.
+/// note: Run `creator world kb graph`.
 ///
 /// # Errors
 /// Returns [`CliError`] when the direct-writer core cannot be opened, the

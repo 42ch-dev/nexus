@@ -14,16 +14,17 @@
 //! ([`crate::core::open_engine_owned_core`]) because `kb_extract_jobs` is
 //! guarded to a migration/engine writer at the schema level; the status leaf
 //! reads over the direct-writer one.
+// note: the job row is core-owned; no leaf consults the retired file index.
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core, open_engine_owned_core};
 use crate::errors::{CliError, Result};
 use nexus_core::QueueKbExtractParams;
 
-/// Default maximum number of extract jobs shown when listing without `--job-id`.
+/// note: Default maximum number of extract jobs shown when listing without `--job-id`.
 const DEFAULT_EXTRACT_STATUS_LIMIT: u32 = 100;
 
-/// `creator world kb queue-extract` — idempotent enqueue of a Work artifact
+/// note: `creator world kb queue-extract` — idempotent enqueue of a Work artifact
 /// for extraction into a target world.
 ///
 /// Creates a row in `kb_extract_jobs` with status `queued` through the core
@@ -51,7 +52,7 @@ pub async fn queue_extract(
     work_id: Option<&str>,
     chapter: Option<i32>,
 ) -> Result<()> {
-    // QC2 W-004: reject negative/zero chapter values before opening the core,
+    // why: QC2 W-004: reject negative/zero chapter values before opening the core,
     // so the legacy refusal wording is the one the caller reads. The producer
     // refuses the same input fail-closed for every other transport.
     if let Some(ch) = chapter {
@@ -60,7 +61,7 @@ pub async fn queue_extract(
         }
     }
 
-    // The queue is engine-owned job state (`kb_extract_jobs` is guarded to a
+    // why: The queue is engine-owned job state (`kb_extract_jobs` is guarded to a
     // migration/engine writer), so the enqueue leaf takes the engine admission;
     // the direct-writer pool cannot write that table.
     let core = open_engine_owned_core(config).await?;
@@ -105,7 +106,7 @@ pub async fn queue_extract(
     Ok(())
 }
 
-/// `creator world kb extract-status` — show extract job(s) for the active creator.
+/// note: `creator world kb extract-status` — show extract job(s) for the active creator.
 ///
 /// With `--job-id`, shows a specific job. Without it, lists up to
 /// `DEFAULT_EXTRACT_STATUS_LIMIT` (100) most recent jobs. Each arm reads
@@ -123,7 +124,7 @@ pub async fn extract_status(config: &CliConfig, job_id: Option<&str>) -> Result<
     list_extract_jobs(config).await
 }
 
-/// `extract-status --job-id <id>` — one job in detail.
+/// note: `extract-status --job-id <id>` — one job in detail.
 async fn show_extract_job(config: &CliConfig, job_id: &str) -> Result<()> {
     let core = open_direct_core(config).await?;
     let outcome = async {
@@ -144,7 +145,7 @@ async fn show_extract_job(config: &CliConfig, job_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// `extract-status` — the creator's most recent jobs.
+/// note: `extract-status` — the creator's most recent jobs.
 async fn list_extract_jobs(config: &CliConfig) -> Result<()> {
     let core = open_direct_core(config).await?;
     let outcome = async {
@@ -184,7 +185,7 @@ async fn list_extract_jobs(config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// Print a single job in detail.
+/// note: Print a single job in detail.
 fn print_job_detail(job: &nexus_local_db::KbExtractJob) {
     println!("Job:           {}", job.job_id);
     println!("  Creator:     {}", job.creator_id);
@@ -204,7 +205,7 @@ fn print_job_detail(job: &nexus_local_db::KbExtractJob) {
     }
 }
 
-/// Truncate a string for tabular display.
+/// note: Truncate a string for tabular display.
 fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()

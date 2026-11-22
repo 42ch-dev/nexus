@@ -37,6 +37,7 @@
 //!
 //! Pack build/parse helpers live in [`nexus_spoke_adapter::pack`]; this module
 //! is the CLI wiring only.
+// note: pack I/O is World-lore transport only; no holder content is written outside the core.
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
@@ -54,41 +55,50 @@ use nexus_spoke_adapter::pack::st_lorebook::{
 };
 use std::path::PathBuf;
 
-/// Default version string stamped into `modules.pack.version` when
+/// note: Default version string stamped into `modules.pack.version` when
 /// `--pack-version` is not supplied.
 const DEFAULT_PACK_VERSION: &str = "0.1.0";
 
 /// `creator world kb pack` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum PackCommand {
     /// Export one world's Knowledge entries and their relations to a portable
     /// Narrative Knowledge Pack JSON file.
+    // note: CLI help must stay stable
     Export(ExportArgs),
     /// Import Knowledge entries and relations from a Narrative Knowledge Pack
     /// JSON file into a world (additive — never deletes existing atoms).
+    // note: CLI help must stay stable
     Import(ImportArgs),
 }
 
 /// Arguments for `creator world kb pack export`.
+// note: CLI help must stay stable
 #[derive(Debug, clap::Args)]
 pub struct ExportArgs {
     /// World reference — the world ID (e.g. `wld_abc123`)
+    // note: CLI help must stay stable
     pub world_ref: String,
 
     /// Output path for the pack JSON file (required).
+    // note: CLI help must stay stable
     #[arg(long)]
     pub out: PathBuf,
 
     /// Pack title override (default: the world's title).
+    // note: CLI help must stay stable
     #[arg(long)]
     pub title: Option<String>,
 
     /// Pack version string written into `modules.pack.version`.
+    // note: CLI help must stay stable
     #[arg(long, default_value = DEFAULT_PACK_VERSION)]
     pub pack_version: String,
 
     /// Include deprecated (inactive) Knowledge entries. By default only active
     /// (non-deleted / non-merged / non-deprecated) entries are exported.
+    // note: CLI help must stay stable
     #[arg(long)]
     pub include_deprecated: bool,
 
@@ -96,11 +106,12 @@ pub struct ExportArgs {
     /// Without it the export emits only the rows the exporting Creator's
     /// admitted policy may read (shared rows); private material of another
     /// holder and quarantined import atoms are never emitted either way.
+    // note: CLI help must stay stable
     #[arg(long)]
     pub include_owned_private: bool,
 }
 
-/// Dispatch a `creator world kb pack` subcommand through the direct-core seam.
+/// note: Dispatch a `creator world kb pack` subcommand through the direct-core seam.
 ///
 /// The pool argument the retired adapter needed is gone: the seam owns the
 /// writer, so this leaf cannot open (let alone migrate) a workspace itself.
@@ -125,7 +136,7 @@ pub async fn run(cmd: PackCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // Nothing reaches stdout until the shared seam released the writer, so a
+    // why: Nothing reaches stdout until the shared seam released the writer, so a
     // close that did not settle is never reported as an exported or imported
     // pack.
     match finish_direct(&core, outcome).await? {
@@ -144,15 +155,15 @@ pub async fn run(cmd: PackCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// One `pack` leaf's post-settle render.
+/// note: One `pack` leaf's post-settle render.
 ///
 /// The leaves below return these values instead of printing, so the writer is
 /// always released before the first byte of command output.
 #[derive(Debug)]
 enum PackRender {
-    /// Text printed verbatim (`export`, `--review-import`).
+    /// note: Text printed verbatim (`export`, `--review-import`).
     Text(String),
-    /// One import run: the ST conversion notes that precede the summary (empty
+    /// note: One import run: the ST conversion notes that precede the summary (empty
     /// on the pack path), the core's per-atom report, and the dry-run flag the
     /// retained summary text depends on.
     Import {
@@ -166,24 +177,31 @@ enum PackRender {
 ///
 /// Maps onto the typed request's [`PackImportRequestConflict`]; the core owns
 /// the conflict execution.
+// note: CLI help must stay stable
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum ConflictStrategy {
     /// Skip existing entries/relations (default).
+    // note: CLI help must stay stable
     Skip,
     /// Rename conflicting entries (disambiguate canonical name + fresh id).
+    // note: CLI help must stay stable
     Rename,
     /// Overwrite existing entries (body upsert, lifecycle preserved).
+    // note: CLI help must stay stable
     Overwrite,
 }
 
 /// Arguments for `creator world kb pack import`.
+// note: CLI help must stay stable
 #[derive(Debug, clap::Args)]
 pub struct ImportArgs {
     /// World reference — the world ID (e.g. `wld_abc123`).
+    // note: CLI help must stay stable
     pub world_ref: String,
 
     /// Input path for the pack JSON file (required unless `--from-st` or
     /// `--review-import`).
+    // note: CLI help must stay stable
     #[arg(
         long,
         conflicts_with = "from_st",
@@ -194,6 +212,7 @@ pub struct ImportArgs {
 
     /// Import a `SillyTavern` lorebook JSON file (documented format) instead
     /// of a pack — converted to a pack before the standard import path.
+    // note: CLI help must stay stable
     #[arg(
         long,
         conflicts_with = "in",
@@ -203,11 +222,13 @@ pub struct ImportArgs {
     pub from_st: Option<PathBuf>,
 
     /// Print the create/skip plan without performing any writes.
+    // note: CLI help must stay stable
     #[arg(long)]
     pub dry_run: bool,
 
     /// Conflict-resolution policy when an `entry_id` or canonical name already
     /// exists in the target world.
+    // note: CLI help must stay stable
     #[arg(long, value_enum, default_value_t = ConflictStrategy::Skip)]
     pub conflict: ConflictStrategy,
 
@@ -216,6 +237,7 @@ pub struct ImportArgs {
     /// `<foreign-id>=character-private:<character_id>`. Repeat the flag for
     /// several ids. Without a mapping a foreign-governed atom is quarantined,
     /// never adopted by string equality.
+    // note: CLI help must stay stable
     #[arg(
         long = "holder-map",
         value_name = "FOREIGN-ID=SELECTOR",
@@ -225,11 +247,12 @@ pub struct ImportArgs {
 
     /// Read-only review of one import batch's quarantined atoms (mutually
     /// exclusive with pack/ST input and holder mappings).
+    // note: CLI help must stay stable
     #[arg(long = "review-import", value_name = "BATCH-ID")]
     pub review_import: Option<String>,
 }
 
-/// `creator world kb pack export` implementation.
+/// note: `creator world kb pack export` implementation.
 ///
 /// Returns the success summary `run` prints once the writer settled.
 ///
@@ -246,7 +269,7 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
         description: None,
         ..Default::default()
     };
-    // Durable §6/§9: the export converges on the core's admitted read path
+    // why: Durable §6/§9: the export converges on the core's admitted read path
     // instead of loading a raw store, so a row outside the exporting Creator's
     // authority is never read, let alone emitted.
     let response = core
@@ -259,7 +282,7 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
         .await
         .map_err(map_core_error)?;
 
-    // ── Write to disk ─────────────────────────────────────────────────
+    // note: Write to disk
     let out_path = &args.out;
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -280,7 +303,7 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
         ))
     })?;
 
-    // ── Success summary ───────────────────────────────────────────────
+    // note: Success summary
     let pack_meta = response.modules.get("pack");
     let meta_str = |key: &str| {
         pack_meta
@@ -307,9 +330,9 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
     Ok(lines.join("\n"))
 }
 
-// ── Import ─────────────────────────────────────────────────────────────
+// note: Import
 
-/// `creator world kb pack import` implementation.
+/// note: `creator world kb pack import` implementation.
 ///
 /// Returns the render `run` prints once the writer settled. A per-atom
 /// rejection (including a quarantine) is still the retained aggregate refusal,
@@ -321,7 +344,7 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
 /// is inadmissible, the review arm cannot read the batch, or the core refuses
 /// the World/admission.
 async fn import(args: ImportArgs, core: &CoreService, principal: &Principal) -> Result<PackRender> {
-    // Read-only review arm (durable §6): the same command, mutually exclusive
+    // note: Read-only review arm (durable §6): the same command, mutually exclusive
     // with pack/ST input and mappings (clap enforces it). Core admission
     // authorizes it to the stored controlling Creator and the owning World.
     if let Some(batch_id) = args.review_import.as_deref() {
@@ -338,19 +361,19 @@ async fn import(args: ImportArgs, core: &CoreService, principal: &Principal) -> 
     })
 }
 
-/// One import run resolved through the core: the per-atom report plus the ST
+/// note: One import run resolved through the core: the per-atom report plus the ST
 /// conversion notes that precede its summary (empty on the pack path).
 ///
 /// The notes are carried out of the outcome instead of being printed inside it:
 /// a run the seam refuses must leave stdout untouched.
 struct ImportRun {
-    /// The core's per-atom import (or dry-run preview) report.
+    /// note: The core's per-atom import (or dry-run preview) report.
     response: PackImportResponse,
-    /// `render_st_diagnostics` output, or empty when the source is a pack.
+    /// note: `render_st_diagnostics` output, or empty when the source is a pack.
     diagnostics: String,
 }
 
-/// Run one pack import (or its dry-run preview) through the typed core.
+/// note: Run one pack import (or its dry-run preview) through the typed core.
 ///
 /// The pack document travels **verbatim** into the request — never rebuilt from
 /// the typed atoms — so a quarantined atom keeps the document's own JSON and a
@@ -375,7 +398,7 @@ async fn import_report(
     let parsed = parse_pack(&value)
         .map_err(|e| CliError::Other(format!("Invalid pack format in {source_display}: {e}")))?;
     let serde_json::Value::Object(pack) = parsed.source else {
-        // `parse_pack` accepts objects only, so this is unreachable by
+        // why: `parse_pack` accepts objects only, so this is unreachable by
         // construction — it stays a refusal instead of a panic.
         return Err(CliError::Other(format!(
             "Invalid pack format in {source_display}: the pack document must be a JSON object"
@@ -389,7 +412,7 @@ async fn import_report(
             ConflictStrategy::Overwrite => PackImportRequestConflict::Overwrite,
         },
         include_anchors: false,
-        // The CLI's adoptions travel as parsed mappings (the typed
+        // why: The CLI's adoptions travel as parsed mappings (the typed
         // `holder_map` argument), exactly like the retired adapter's
         // out-of-band argument — never duplicated onto the wire literal.
         holder_map: Vec::new(),
@@ -415,7 +438,7 @@ async fn import_report(
     })
 }
 
-/// Read the selected pack/ST source: the document to import, the ST conversion
+/// note: Read the selected pack/ST source: the document to import, the ST conversion
 /// diagnostics (empty on the pack path) and the display name for error text.
 ///
 /// # Errors
@@ -425,7 +448,7 @@ async fn import_report(
 fn read_source(
     args: &ImportArgs,
 ) -> Result<(serde_json::Value, Vec<ConversionDiagnostic>, String)> {
-    // Source selection: pack JSON (`--in`) or SillyTavern lorebook
+    // note: Source selection: pack JSON (`--in`) or SillyTavern lorebook
     // (`--from-st`). clap enforces exactly one. The ST converter runs before
     // `parse_pack`; its diagnostics are printed before the import summary
     // (also under `--dry-run`).
@@ -476,7 +499,7 @@ fn read_source(
     Ok((value, Vec::new(), pack_path.display().to_string()))
 }
 
-/// Render one core import report in the retained CLI texture.
+/// note: Render one core import report in the retained CLI texture.
 ///
 /// Called by `run` **after** [`finish_direct`] released the writer: the report
 /// and its stderr warnings describe a run the seam has already resolved, and
@@ -528,7 +551,7 @@ fn render_import(response: &PackImportResponse, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// `--review-import <batch-id>`: print one batch's quarantined atoms.
+/// note: `--review-import <batch-id>`: print one batch's quarantined atoms.
 ///
 /// Read-only, owner-only, bounded by the core review arm. The original wire
 /// governance is printed exactly as the pack carried it — this is isolated
@@ -568,7 +591,7 @@ async fn review_quarantine(
             atom.original_owner.as_deref().unwrap_or("<none>"),
             atom.original_disclosure.as_deref().unwrap_or("<none>"),
         ));
-        // The original atom JSON is printed exactly as the pack document
+        // why: The original atom JSON is printed exactly as the pack document
         // carried it (never a re-serialization of the typed entry).
         if let Some(original) = atom.original_entry.as_deref() {
             lines.push(format!("    original: {original}"));
@@ -577,7 +600,7 @@ async fn review_quarantine(
     Ok(lines.join("\n"))
 }
 
-/// Report the atoms one import held outside the KB stores.
+/// note: Report the atoms one import held outside the KB stores.
 ///
 /// The ids, reasons and original governance are printed so the operator can
 /// adopt them explicitly with `--holder-map` and then inspect them with
@@ -611,7 +634,7 @@ fn report_quarantine(quarantined: &[PackImportResponseQuarantinedItem], dry_run:
     }
 }
 
-/// The pinned wire spelling of a quarantine reason.
+/// note: The pinned wire spelling of a quarantine reason.
 ///
 /// The closed two-value vocabulary lives in the wire schema; serializing the
 /// typed reason keeps that one owner instead of a second hand-written table.
@@ -619,12 +642,12 @@ fn quarantine_reason_wire(reason: PackImportResponseQuarantinedItemReason) -> St
     serde_json::to_value(reason)
         .ok()
         .and_then(|value| value.as_str().map(ToString::to_string))
-        // Unreachable for a fieldless enum; a debug rendering stays honest
+        // note: Unreachable for a fieldless enum; a debug rendering stays honest
         // rather than printing an empty label.
         .unwrap_or_else(|| format!("{reason:?}"))
 }
 
-/// Render the ST lorebook conversion diagnostics summary (printed before the
+/// note: Render the ST lorebook conversion diagnostics summary (printed before the
 /// import summary, also under `--dry-run`).
 fn render_st_diagnostics(diagnostics: &[ConversionDiagnostic]) -> String {
     use std::fmt::Write as _;
@@ -676,13 +699,13 @@ mod tests {
     const OWNER_NAME: &str = "Owner Name";
     const WORLD: &str = "wld_pack";
     const WORLD_TITLE: &str = "Pack World";
-    /// Workspace slug the fixture materializes (mirrors `common/direct.rs`).
+    /// note: Workspace slug the fixture materializes (mirrors `common/direct.rs`).
     const WORKSPACE_SLUG: &str = "default";
-    /// The provenance stamp the core writes on imported atoms (`pack_import`).
+    /// note: The provenance stamp the core writes on imported atoms (`pack_import`).
     /// The core constant is private, so the test pins the stored wire value.
     const IMPORT_PROVENANCE: &str = "pack_import";
 
-    /// One hermetic direct-core workspace (v1.193 P0-T4).
+    /// note: One hermetic direct-core workspace (v1.193 P0-T4).
     ///
     /// The retired adapter was handed a raw CLI pool; the pack leaves now run
     /// through the typed core, so a test needs the real home layout: a
@@ -692,20 +715,20 @@ mod tests {
     /// the core joined, so reads and the explicit state writes these tests make
     /// are admitted exactly as the CLI's own are.
     struct PackFixture {
-        /// Hermetic `HOME` (parent of `.nexus42`), kept alive for the test.
+        /// note: Hermetic `HOME` (parent of `.nexus42`), kept alive for the test.
         #[allow(dead_code)]
         home: tempfile::TempDir,
-        /// Seed/verify handle over the fixture workspace `state.db`.
+        /// note: Seed/verify handle over the fixture workspace `state.db`.
         pool: SqlitePool,
-        /// The direct-writer core the pack leaves are called with.
+        /// note: The direct-writer core the pack leaves are called with.
         core: CoreService,
-        /// The admitted principal of that core.
+        /// note: The admitted principal of that core.
         principal: nexus_core::Principal,
-        /// The fixture's registered creator (the seeded world's owner).
+        /// note: The fixture's registered creator (the seeded world's owner).
         creator_id: String,
     }
 
-    /// Build the hermetic home, its workspace writer and the direct core.
+    /// note: Build the hermetic home, its workspace writer and the direct core.
     ///
     /// The home is materialized through the core's own pre-selection entry
     /// (`CoreHomeService`: register the creator, then select the workspace that
@@ -761,7 +784,7 @@ mod tests {
         }
     }
 
-    /// Build a fresh hermetic workspace and seed one World owned by the
+    /// note: Build a fresh hermetic workspace and seed one World owned by the
     /// fixture creator.
     async fn world_fixture(world_id: &str, title: &str, slug: &str) -> PackFixture {
         let fixture = fixture().await;
@@ -778,7 +801,7 @@ mod tests {
         fixture
     }
 
-    /// Seed one world with two confirmed Knowledge entries and one relation
+    /// note: Seed one world with two confirmed Knowledge entries and one relation
     /// between them. Returns the fixture (kept alive for the test) and the
     /// entry/relation ids.
     async fn seeded_pool() -> (PackFixture, Vec<String>, Vec<String>) {
@@ -795,7 +818,7 @@ mod tests {
             });
             let res = store.insert_knowledge_entry(kb).await.unwrap();
             entry_ids.push(res.entry_id);
-            // Stable ordering for deterministic relation target ids.
+            // note: Stable ordering for deterministic relation target ids.
             let _ = i;
         }
 
@@ -827,7 +850,7 @@ mod tests {
         (fixture, entry_ids, rel_ids)
     }
 
-    /// Build a hermetic workspace with one empty (entry-less) world.
+    /// note: Build a hermetic workspace with one empty (entry-less) world.
     async fn empty_world_pool() -> PackFixture {
         world_fixture(WORLD, WORLD_TITLE, "pack-world").await
     }
@@ -837,7 +860,7 @@ mod tests {
         let (fx, _entry_ids, _rel_ids) = seeded_pool().await;
         let tmp_out = tempfile::NamedTempFile::new().unwrap();
         let out_path = tmp_out.path().to_path_buf();
-        // NamedTempFile creates an empty file; remove it so export writes fresh.
+        // why: NamedTempFile creates an empty file; remove it so export writes fresh.
         drop(tmp_out);
 
         let args = ExportArgs {
@@ -856,17 +879,17 @@ mod tests {
         let text = std::fs::read_to_string(&out_path).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-        // Handbook shape: top-level keys present.
+        // note: Handbook shape: top-level keys present.
         assert!(value.get("modules").is_some(), "modules key must exist");
         assert!(value.get("entries").is_some(), "entries key must exist");
         assert!(value.get("relations").is_some(), "relations key must exist");
-        // Anchors are never emitted (nexus persists no SourceAnchor store).
+        // why: Anchors are never emitted (nexus persists no SourceAnchor store).
         assert!(
             value.get("source_anchors").is_none(),
             "source_anchors must be omitted"
         );
 
-        // modules.pack required metadata.
+        // why: modules.pack required metadata.
         let pack = value["modules"]["pack"]
             .as_object()
             .expect("modules.pack must be an object");
@@ -874,7 +897,7 @@ mod tests {
         assert_eq!(pack["version"], DEFAULT_PACK_VERSION);
         assert_eq!(pack["creator"], OWNER_NAME);
 
-        // parse_pack validates against the spoke handbook shape.
+        // note: parse_pack validates against the spoke handbook shape.
         let parsed = parse_pack(&value).expect("written pack must parse via parse_pack");
         assert_eq!(parsed.entries.len(), 3, "all 3 confirmed entries exported");
         assert_eq!(
@@ -883,7 +906,7 @@ mod tests {
             "only one relation (non-dangling) exported"
         );
 
-        // Stable ordering: entries sorted by canonical_name ascending.
+        // note: Stable ordering: entries sorted by canonical_name ascending.
         let names: Vec<&str> = parsed
             .entries
             .iter()
@@ -891,7 +914,7 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["Alice", "Bob", "Carol"]);
 
-        // The surviving relation is Alice → Bob.
+        // why: The surviving relation is Alice → Bob.
         assert_eq!(parsed.relations[0].relation_id, "rel_export_001");
     }
 
@@ -914,7 +937,7 @@ mod tests {
             .await
             .expect_err("export must fail for missing world");
         let msg = format!("{err}");
-        // The direct-core refusal names the 404 family and the resolved
+        // why: The direct-core refusal names the 404 family and the resolved
         // resource (`map_core_error` mirrors the daemon adapter's status and
         // envelope), which is the retained texture for a missing World on this
         // seam.
@@ -929,7 +952,7 @@ mod tests {
         );
     }
 
-    /// The export is author-scoped: without an active Creator there is no
+    /// note: The export is author-scoped: without an active Creator there is no
     /// admitted policy to export under, so the command refuses instead of
     /// emitting a pack under a fallback label.
     ///
@@ -949,15 +972,15 @@ mod tests {
         );
     }
 
-    // ── Import helpers ──────────────────────────────────────────────────
+    // note: Import helpers
 
-    /// Export the fixture world's entries to a pack JSON file. Returns the
+    /// note: Export the fixture world's entries to a pack JSON file. Returns the
     /// file path (the temp dir keeps it alive).
     async fn export_to_file(fx: &PackFixture) -> (PathBuf, tempfile::TempDir) {
         export_to_file_custom_world(fx, WORLD).await
     }
 
-    /// Export one world's entries to a temp pack file.
+    /// note: Export one world's entries to a temp pack file.
     async fn export_to_file_custom_world(
         fx: &PackFixture,
         world_id: &str,
@@ -980,31 +1003,31 @@ mod tests {
         (out_path, tmp_dir)
     }
 
-    /// Count entries in a world via `list_by_world`.
+    /// note: Count entries in a world via `list_by_world`.
     async fn count_entries(pool: &SqlitePool, world_id: &str) -> usize {
         let store = SqliteKbStore::new(pool.clone());
         store.list_by_world(world_id).await.map_or(0, |v| v.len())
     }
 
-    /// Count relations in a world via `list_relationships_for_world`.
+    /// note: Count relations in a world via `list_relationships_for_world`.
     async fn count_relations(pool: &SqlitePool, world_id: &str) -> usize {
         list_relationships_for_world(pool, world_id, false, i64::MAX)
             .await
             .map_or(0, |v| v.len())
     }
 
-    // ── Import tests ────────────────────────────────────────────────────
+    // note: Import tests
 
     #[tokio::test(flavor = "multi_thread")]
     async fn import_creates_entries_and_relations_from_pack() {
-        // Phase 1: build a seeded world, export to pack.
+        // note: Phase 1: build a seeded world, export to pack.
         let (fx, _entry_ids, _rel_ids) = seeded_pool().await;
         assert_eq!(count_entries(&fx.pool, WORLD).await, 3);
         assert_eq!(count_relations(&fx.pool, WORLD).await, 1);
 
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // Phase 2: new empty world (same WORLD id but fresh DB), import.
+        // note: Phase 2: new empty world (same WORLD id but fresh DB), import.
         let fx2 = empty_world_pool().await;
         assert_eq!(count_entries(&fx2.pool, WORLD).await, 0);
 
@@ -1030,7 +1053,7 @@ mod tests {
         let (fx, _entry_ids, _rel_ids) = seeded_pool().await;
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // Import into fresh DB.
+        // note: Import into fresh DB.
         let fx2 = empty_world_pool().await;
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
@@ -1047,7 +1070,7 @@ mod tests {
         assert_eq!(count_entries(&fx2.pool, WORLD).await, 3);
         assert_eq!(count_relations(&fx2.pool, WORLD).await, 1);
 
-        // Second import (idempotent).
+        // note: Second import (idempotent).
         let args2 = ImportArgs {
             world_ref: WORLD.to_string(),
             r#in: Some(pack_path),
@@ -1060,7 +1083,7 @@ mod tests {
         import(args2, &fx2.core, &fx2.principal)
             .await
             .expect("second import must succeed");
-        // Counts unchanged — all collisions skipped.
+        // note: Counts unchanged — all collisions skipped.
         assert_eq!(
             count_entries(&fx2.pool, WORLD).await,
             3,
@@ -1106,16 +1129,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn import_skips_on_canonical_name_collision() {
-        // Seed a world with one entry, export a pack containing that entry
+        // note: Seed a world with one entry, export a pack containing that entry
         // plus another, then import into a world that already has a
         // different entry_id but same canonical_name.
         let (fx, entry_ids, _rel_ids) = seeded_pool().await;
-        let alice_id = &entry_ids[0]; // "Alice"
-        let bob_id = &entry_ids[1]; // "Bob"
-        let carol_id = &entry_ids[2]; // "Carol"
+        let alice_id = &entry_ids[0]; // note: "Alice"
+        let bob_id = &entry_ids[1]; // note: "Bob"
+        let carol_id = &entry_ids[2]; // note: "Carol"
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // New world: pre-create a "Carol" entry with a DIFFERENT entry_id
+        // note: New world: pre-create a "Carol" entry with a DIFFERENT entry_id
         // but same canonical_name. Then import the pack (which also has Carol
         // under the original entry_id).
         let fx2 = empty_world_pool().await;
@@ -1145,15 +1168,15 @@ mod tests {
             .await
             .expect("import must succeed");
 
-        // Should create 2 entries (Alice, Bob — not Carol because
+        // why: Should create 2 entries (Alice, Bob — not Carol because
         // canonical_name collision), and skip Carol's entry_id.
-        assert_eq!(count_entries(&fx2.pool, WORLD).await, 3); // clone Carol + Alice + Bob
-                                                              // Carol's entry_id from the pack should NOT exist.
+        assert_eq!(count_entries(&fx2.pool, WORLD).await, 3); // note: clone Carol + Alice + Bob
+        // note: Carol's entry_id from the pack should NOT exist.
         assert!(
             store.get_knowledge_entry(carol_id).await.is_err(),
             "pack's Carol entry_id must not be imported"
         );
-        // Alice and Bob's entry_ids SHOULD exist.
+        // note: Alice and Bob's entry_ids SHOULD exist.
         assert!(
             store.get_knowledge_entry(alice_id).await.is_ok(),
             "pack's Alice must be imported"
@@ -1183,7 +1206,7 @@ mod tests {
             .await
             .expect("import must succeed");
 
-        // Verify provenance on created entries.
+        // note: Verify provenance on created entries.
         let store = SqliteKbStore::new(fx2.pool.clone());
         let entries = store.list_by_world(WORLD).await.unwrap();
         assert!(!entries.is_empty(), "import must create entries");
@@ -1276,7 +1299,7 @@ mod tests {
         let (fx, _entry_ids, _rel_ids) = seeded_pool().await;
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // Pre-create Carol with a distinct body and non-default status.
+        // note: Pre-create Carol with a distinct body and non-default status.
         let fx2 = empty_world_pool().await;
         let store = SqliteKbStore::new(fx2.pool.clone());
         let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
@@ -1333,7 +1356,7 @@ mod tests {
         let carol_id = &entry_ids[2];
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // Mutate Carol in-place so re-import has something to overwrite.
+        // why: Mutate Carol in-place so re-import has something to overwrite.
         let store = SqliteKbStore::new(fx.pool.clone());
         let mut carol = store
             .get_knowledge_entry(carol_id)
@@ -1423,11 +1446,11 @@ mod tests {
         const WORLD_B: &str = "wld_pack_b";
         const WORLD_B_TITLE: &str = "Pack World B";
 
-        // World A seeded with 3 entries + 1 relation; export its pack.
+        // note: World A seeded with 3 entries + 1 relation; export its pack.
         let (fx, entry_ids_a, _rel_ids_a) = seeded_pool().await;
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // Second world in the *same* DB — entry_ids from World A already exist globally.
+        // note: Second world in the *same* DB — entry_ids from World A already exist globally.
         nexus_local_db::kb_store::seed::world(
             &fx.pool,
             WORLD_B,
@@ -1452,17 +1475,17 @@ mod tests {
             .await
             .expect("import into World B must succeed");
 
-        // Entries skipped (foreign-world PK collision) — none created in B.
+        // note: Entries skipped (foreign-world PK collision) — none created in B.
         assert_eq!(count_entries(&fx.pool, WORLD_B).await, 0);
-        // Relations must not be inserted: endpoints were never admitted for B.
+        // why: Relations must not be inserted: endpoints were never admitted for B.
         assert_eq!(count_relations(&fx.pool, WORLD_B).await, 0);
-        // World A unchanged.
+        // note: World A unchanged.
         assert_eq!(count_entries(&fx.pool, WORLD).await, 3);
         assert_eq!(count_relations(&fx.pool, WORLD).await, 1);
         let _ = entry_ids_a;
     }
 
-    /// Greptile P1 follow-up: foreign `entry_id` + target-world canonical-name
+    /// note: Greptile P1 follow-up: foreign `entry_id` + target-world canonical-name
     /// match must still remap pack id → target id so relations import.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_foreign_entry_id_remaps_via_canonical_name() {
@@ -1483,7 +1506,7 @@ mod tests {
         )
         .await;
 
-        // Pre-create Alice/Bob/Carol in B under *new* entry_ids (same names).
+        // note: Pre-create Alice/Bob/Carol in B under *new* entry_ids (same names).
         let store = SqliteKbStore::new(fx.pool.clone());
         let mut b_ids = Vec::new();
         for name in ["Alice", "Bob", "Carol"] {
@@ -1509,7 +1532,7 @@ mod tests {
             .await
             .expect("import must succeed with remap");
 
-        // No new entries (all name-collided); relation Alice→Bob from pack
+        // note: No new entries (all name-collided); relation Alice→Bob from pack
         // should land pointing at B's Alice/Bob ids.
         assert_eq!(count_entries(&fx.pool, WORLD_B).await, 3);
         assert_eq!(
@@ -1529,7 +1552,7 @@ mod tests {
         .unwrap();
         assert_eq!(row.0, b_ids[0], "source remapped to B Alice");
         assert_eq!(row.1, b_ids[1], "target remapped to B Bob");
-        // Pack's World A entry_ids must not appear as endpoints in B.
+        // why: Pack's World A entry_ids must not appear as endpoints in B.
         assert_ne!(row.0, entry_ids_a[0]);
         assert_ne!(row.1, entry_ids_a[1]);
     }
@@ -1538,15 +1561,15 @@ mod tests {
     async fn pack_export_import_cross_world_complementarity() {
         const WORLD_B: &str = "wld_pack_b";
         const WORLD_B_TITLE: &str = "Pack World B";
-        // ── Phase 1: Seed World A with 3 entries + 1 relation ─────────
+        // note: Phase 1: Seed World A with 3 entries + 1 relation
         let (fxa, _entry_ids_a, _rel_ids_a) = seeded_pool().await;
         assert_eq!(count_entries(&fxa.pool, WORLD).await, 3);
         assert_eq!(count_relations(&fxa.pool, WORLD).await, 1);
 
-        // Export World A → pack file.
+        // note: Export World A → pack file.
         let (pack_path, _pack_dir) = export_to_file(&fxa).await;
 
-        // ── Phase 2: fresh workspace holding World B (different world_id) ─
+        // note: Phase 2: fresh workspace holding World B (different world_id)
         let fxb = world_fixture(WORLD_B, WORLD_B_TITLE, "pack-world-b").await;
 
         assert_eq!(
@@ -1560,7 +1583,7 @@ mod tests {
             "World B starts with zero relations"
         );
 
-        // ── Phase 3: Import pack into World B ─────────────────────────
+        // note: Phase 3: Import pack into World B
         let args = ImportArgs {
             world_ref: WORLD_B.to_string(),
             r#in: Some(pack_path.clone()),
@@ -1574,7 +1597,7 @@ mod tests {
             .await
             .expect("import into World B must succeed");
 
-        // ── Phase 4: Assert entries and relation present ──────────────
+        // note: Phase 4: Assert entries and relation present
         assert_eq!(
             count_entries(&fxb.pool, WORLD_B).await,
             3,
@@ -1586,7 +1609,7 @@ mod tests {
             "World B must have the imported relation"
         );
 
-        // Verify entries by entry_id from the pack (ids preserved across worlds).
+        // note: Verify entries by entry_id from the pack (ids preserved across worlds).
         let store_b = SqliteKbStore::new(fxb.pool.clone());
         let entries_b = store_b.list_by_world(WORLD_B).await.unwrap();
         let imported_names: Vec<&str> = entries_b
@@ -1599,7 +1622,7 @@ mod tests {
             "imported entries must have expected canonical names"
         );
 
-        // ── Phase 5: Assert provenance on imported entries ────────────
+        // note: Phase 5: Assert provenance on imported entries
         for entry in &entries_b {
             assert_eq!(
                 entry.source_provenance_kind.as_deref(),
@@ -1609,7 +1632,7 @@ mod tests {
             );
         }
 
-        // ── Phase 6: Re-import → idempotent (created: 0, all skipped) ─
+        // note: Phase 6: Re-import → idempotent (created: 0, all skipped)
         let args2 = ImportArgs {
             world_ref: WORLD_B.to_string(),
             r#in: Some(pack_path),
@@ -1635,7 +1658,7 @@ mod tests {
         );
     }
 
-    /// V1.152 P2 dogfood: export→import round-trip on activation-carrying entries +
+    /// note: V1.152 P2 dogfood: export→import round-trip on activation-carrying entries +
     /// relations preserves provenance, `modules.activation`, and skip-idempotency.
     // Long integration test; splitting would obscure the end-to-end scenario.
     #[allow(clippy::too_many_lines)]
@@ -1780,7 +1803,7 @@ mod tests {
     async fn import_surfaces_clean_error_when_world_missing() {
         let fx = fixture().await;
 
-        // Create a minimal valid pack file.
+        // note: Create a minimal valid pack file.
         let pack_dir = tempfile::tempdir().unwrap();
         let pack_path = pack_dir.path().join("empty_pack.json");
         let pack_json = serde_json::json!({
@@ -1814,9 +1837,9 @@ mod tests {
         );
     }
 
-    // ── F-001: revision clearance on create ────────────────────────────
+    // note: F-001: revision clearance on create
 
-    /// Seed a fixture where one entry has `revision >= 1` (simulates an entry
+    /// note: Seed a fixture where one entry has `revision >= 1` (simulates an entry
     /// created/updated through the spoke adapter path), export, then import
     /// into a fresh world. The import must clear `revision` to `None` before
     /// create so the spoke `validate_create_revision` gate passes.
@@ -1839,7 +1862,7 @@ mod tests {
 
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // Import into fresh world — revision must be cleared.
+        // why: Import into fresh world — revision must be cleared.
         let fx2 = empty_world_pool().await;
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
@@ -1854,10 +1877,10 @@ mod tests {
             .await
             .expect("import must succeed despite revision >= 1");
 
-        // All 3 entries should be created.
+        // note: All 3 entries should be created.
         assert_eq!(count_entries(&fx2.pool, WORLD).await, 3);
 
-        // Imported entries must carry pack_import provenance.
+        // why: Imported entries must carry pack_import provenance.
         let store2 = SqliteKbStore::new(fx2.pool.clone());
         let imported = store2.list_by_world(WORLD).await.unwrap();
         for entry in &imported {
@@ -1870,15 +1893,15 @@ mod tests {
         }
     }
 
-    // ── F-002: canonical-name collision remap ──────────────────────────
+    // note: F-002: canonical-name collision remap
 
-    /// Pre-create Carol under a different `entry_id` in the target world,
+    /// note: Pre-create Carol under a different `entry_id` in the target world,
     /// import a pack that has Alice→Carol relation. After import, the
     /// relation must point at the **existing** Carol id (remap), not the
     /// pack's Carol id.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_remaps_relation_endpoints_on_name_collision() {
-        // Build a fixture whose world has a Carol→Alice relation (instead of
+        // why: Build a fixture whose world has a Carol→Alice relation (instead of
         // Alice→Bob).
         let fx = world_fixture(WORLD, WORLD_TITLE, "pack-world").await;
 
@@ -1896,7 +1919,7 @@ mod tests {
         let alice_id = &entry_ids[0];
         let carol_id = &entry_ids[2];
 
-        // Carol→Alice relation (instead of Alice→Bob).
+        // why: Carol→Alice relation (instead of Alice→Bob).
         let rel_id = "rel_carol_to_alice".to_string();
         sqlx::query(
             "INSERT INTO kb_relationships \
@@ -1916,7 +1939,7 @@ mod tests {
 
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // ── Target world: pre-create Carol with a different id ─────────
+        // note: Target world: pre-create Carol with a different id
         let fx2 = empty_world_pool().await;
         let store2 = SqliteKbStore::new(fx2.pool.clone());
         let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
@@ -1931,7 +1954,7 @@ mod tests {
             "pre-created Carol must have different id than pack Carol"
         );
 
-        // ── Import ─────────────────────────────────────────────────────
+        // note: Import
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
             r#in: Some(pack_path),
@@ -1945,10 +1968,10 @@ mod tests {
             .await
             .expect("import must succeed");
 
-        // Alice and Bob created (2 new), Carol skipped (name collision) → 3 total.
+        // note: Alice and Bob created (2 new), Carol skipped (name collision) → 3 total.
         assert_eq!(count_entries(&fx2.pool, WORLD).await, 3);
 
-        // Carol→Alice relation must exist, with from_id = pre-existing Carol id.
+        // why: Carol→Alice relation must exist, with from_id = pre-existing Carol id.
         let relations = list_relationships_for_world(&fx2.pool, WORLD, false, i64::MAX)
             .await
             .unwrap();
@@ -1965,7 +1988,7 @@ mod tests {
         );
     }
 
-    // ── F-006: CLI error-path tests ────────────────────────────────────
+    // note: F-006: CLI error-path tests
 
     #[tokio::test]
     async fn import_errors_on_missing_file() {
@@ -2015,9 +2038,9 @@ mod tests {
         );
     }
 
-    // ── V1.146 P4 T5: modules activation round-trip ────────────────────
+    // note: V1.146 P4 T5: modules activation round-trip
 
-    /// Modules (activation) survive pack export → import round-trip, and
+    /// note: Modules (activation) survive pack export → import round-trip, and
     /// `apply_activation` correctly classifies imported entries by their
     /// carried `modules.activation` fire-conditions.
     ///
@@ -2032,12 +2055,12 @@ mod tests {
         const WORLD_A: &str = "wld_activation_a";
         const WORLD_B: &str = "wld_activation_b";
 
-        // ── Phase 1: Seed world A with entries carrying modules ─────────
+        // note: Phase 1: Seed world A with entries carrying modules
         let fxa = world_fixture(WORLD_A, "Activation World A", "activation-world-a").await;
 
         let store_a = SqliteKbStore::new(fxa.pool.clone());
 
-        // Entry "Dragon" — activation key ["dragon"], logic "and_any".
+        // note: Entry "Dragon" — activation key ["dragon"], logic "and_any".
         let mut dragon = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Dragon");
         dragon.body = Some(KnowledgeEntryBody {
             summary: Some("A fearsome fire-breathing dragon".to_string()),
@@ -2048,7 +2071,7 @@ mod tests {
         }));
         let _dragon_res = store_a.insert_knowledge_entry(dragon).await.unwrap();
 
-        // Entry "Ghost" — activation key ["haunt"], must NOT match
+        // why: Entry "Ghost" — activation key ["haunt"], must NOT match
         // a stage0 that only mentions "dragon". Summary deliberately
         // avoids the substring "haunt" so the entry does not self-match.
         let mut ghost = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Ghost");
@@ -2061,10 +2084,10 @@ mod tests {
         }));
         let _ghost_res = store_a.insert_knowledge_entry(ghost).await.unwrap();
 
-        // ── Phase 2: Export world A → pack file ─────────────────────────
+        // note: Phase 2: Export world A → pack file
         let (pack_path, _pack_dir) = export_to_file_custom_world(&fxa, WORLD_A).await;
 
-        // ── Phase 3: fresh workspace holding world B; import pack ───────
+        // note: Phase 3: fresh workspace holding world B; import pack
         let fxb = world_fixture(WORLD_B, "Activation World B", "activation-world-b").await;
 
         let import_args = ImportArgs {
@@ -2080,12 +2103,12 @@ mod tests {
             .await
             .expect("import must succeed");
 
-        // ── Phase 4: Verify modules survived the round-trip ─────────────
+        // note: Phase 4: Verify modules survived the round-trip
         let store_b = SqliteKbStore::new(fxb.pool.clone());
         let entries_b = store_b.list_by_world(WORLD_B).await.unwrap();
         assert_eq!(entries_b.len(), 2, "both entries imported");
 
-        // Dragon: modules must be preserved verbatim.
+        // why: Dragon: modules must be preserved verbatim.
         let imported_dragon = entries_b
             .iter()
             .find(|e| e.canonical_name == "Dragon")
@@ -2110,7 +2133,7 @@ mod tests {
             "activation.key must contain 'dragon' after round-trip"
         );
 
-        // Ghost: must also preserve modules.
+        // why: Ghost: must also preserve modules.
         let imported_ghost = entries_b
             .iter()
             .find(|e| e.canonical_name == "Ghost")
@@ -2120,11 +2143,11 @@ mod tests {
             "Ghost.modules must survive pack round-trip"
         );
 
-        // ── Phase 5: Activation with stage0 mentioning "dragon" only ────
+        // note: Phase 5: Activation with stage0 mentioning "dragon" only
         let stage0_dragon = "The story begins where a fearsome dragon awakens.";
         let result = activation::apply_activation(&entries_b, stage0_dragon, &[]);
 
-        // Dragon: has activation key "dragon", present in stage0 → matched.
+        // note: Dragon: has activation key "dragon", present in stage0 → matched.
         assert_eq!(
             result.matched.len(),
             1,
@@ -2142,7 +2165,7 @@ mod tests {
             "Ghost must be in unmatched set"
         );
 
-        // Trace must record the classification.
+        // why: Trace must record the classification.
         let dragon_trace = result
             .trace
             .iter()
@@ -2167,7 +2190,7 @@ mod tests {
             ghost_trace.reason
         );
 
-        // ── Phase 6: Activation with stage0 mentioning both keys ────────
+        // note: Phase 6: Activation with stage0 mentioning both keys
         let stage0_both = "A dragon battles a ghost that haunts the ruins.";
         let result2 = activation::apply_activation(&entries_b, stage0_both, &[]);
 
@@ -2423,7 +2446,7 @@ mod tests {
         assert_eq!(count_relations(&fx2.pool, WORLD).await, 1);
     }
 
-    #[allow(clippy::too_many_lines)] // one activation journey asserted end to end
+    #[allow(clippy::too_many_lines)] // note: one activation journey asserted end to end
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_io_modules_preserved_on_rename_and_overwrite_collision() {
         use nexus_spoke_adapter::adapter::activation;
@@ -2512,7 +2535,7 @@ mod tests {
         let fx = empty_world_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let pack_path = dir.path().join("bad_pack.json");
-        // Valid JSON but missing the required `modules.pack` key.
+        // why: Valid JSON but missing the required `modules.pack` key.
         let pack_json = serde_json::json!({
             "entries": [],
             "relations": []
@@ -2542,9 +2565,9 @@ mod tests {
         );
     }
 
-    // ── DF-80: ST lorebook import (`--from-st`) ────────────────────────
+    // note: DF-80: ST lorebook import (`--from-st`)
 
-    /// `--from-st` and `--in` are mutually exclusive at the clap level;
+    /// note: `--from-st` and `--in` are mutually exclusive at the clap level;
     /// exactly one source is required.
     #[test]
     fn import_from_st_conflicts_with_in_at_clap() {
@@ -2585,7 +2608,7 @@ mod tests {
         assert!(neither.is_err(), "import without a source must fail");
     }
 
-    /// A documented-format ST lorebook imports through the standard pack
+    /// note: A documented-format ST lorebook imports through the standard pack
     /// path: entries land with `canonical_name` from `comment`, `body.summary`
     /// from `content`, and `modules.activation` from keys/constant.
     #[tokio::test(flavor = "multi_thread")]
@@ -2649,7 +2672,7 @@ mod tests {
         assert_eq!(activation["constant"], serde_json::json!(true));
     }
 
-    /// Unknown/undocumented ST fields produce diagnostics but do not abort
+    /// note: Unknown/undocumented ST fields produce diagnostics but do not abort
     /// the import — all entries still land.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_from_st_unknown_fields_import_continues() {
@@ -2681,13 +2704,13 @@ mod tests {
         assert_eq!(count_entries(&fx.pool, WORLD).await, 1);
     }
 
-    /// Malformed ST lorebook files abort before any write (no partial import).
+    /// note: Malformed ST lorebook files abort before any write (no partial import).
     #[tokio::test]
     async fn import_from_st_malformed_file_aborts_before_write() {
         let fx = empty_world_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let st_path = dir.path().join("lorebook.json");
-        // Valid JSON but `entries` is neither an array nor an object (the
+        // note: Valid JSON but `entries` is neither an array nor an object (the
         // uid-keyed object form is the native ST export shape and converts).
         std::fs::write(&st_path, r#"{ "entries": "not-an-array-or-object" }"#).unwrap();
 
@@ -2711,7 +2734,7 @@ mod tests {
         assert_eq!(count_entries(&fx.pool, WORLD).await, 0, "no partial import");
     }
 
-    /// `--conflict` passes through to `import_pack` unchanged on the ST path:
+    /// note: `--conflict` passes through to `import_pack` unchanged on the ST path:
     /// a rename policy disambiguates a canonical-name collision.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_from_st_conflict_rename_passthrough() {

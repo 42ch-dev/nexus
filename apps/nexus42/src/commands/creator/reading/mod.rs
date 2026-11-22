@@ -38,20 +38,23 @@ use nexus_core::{CoreService, Principal};
 use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
-/// Valid annotation highlight colors (V1.89 closed enum, core-validated).
+/// note: Valid annotation highlight colors (V1.89 closed enum, core-validated).
 const VALID_ANNOTATION_COLORS: [&str; 4] = ["yellow", "blue", "green", "pink"];
-/// Scroll-progress unit ceiling: thousandths (0–10000).
+/// note: Scroll-progress unit ceiling: thousandths (0–10000).
 const SCROLL_PROGRESS_MAX: i64 = 10_000;
 
 /// `creator reading` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ReadingCommand {
     /// Reading progress (persisted scroll position per work + chapter).
+    // note: CLI help must stay stable
     Progress {
         #[command(subcommand)]
         command: ProgressCommand,
     },
     /// Reading annotations / highlights (per work + chapter).
+    // note: CLI help must stay stable
     Annotation {
         #[command(subcommand)]
         command: AnnotationCommand,
@@ -59,132 +62,173 @@ pub enum ReadingCommand {
 }
 
 /// `creator reading progress` verbs.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ProgressCommand {
     /// Get persisted scroll progress for a work + chapter.
+    // note: CLI help must stay stable
     Get {
         /// Work ID (wrk_...) — the core's canonical work reference.
+        // note: CLI help must stay stable
         work_id: String,
         /// Chapter number (1-based).
+        // note: CLI help must stay stable
         #[arg(long)]
         chapter: u64,
         /// Volume number (1-based; defaults to 1).
+        // note: CLI help must stay stable
         #[arg(long)]
         volume: Option<NonZeroU64>,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Upsert persisted scroll progress for a work + chapter.
+    // note: CLI help must stay stable
     Set {
         /// Work ID (wrk_...) — the core's canonical work reference.
+        // note: CLI help must stay stable
         work_id: String,
         /// Chapter number (1-based).
+        // note: CLI help must stay stable
         #[arg(long)]
         chapter: u64,
         /// Volume number (1-based; defaults to 1).
+        // note: CLI help must stay stable
         #[arg(long)]
         volume: Option<NonZeroU64>,
         /// Scroll position in thousandths (0–10000).
+        // note: CLI help must stay stable
         #[arg(long)]
         scroll: i64,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Clear persisted scroll progress for a work + chapter.
+    // note: CLI help must stay stable
     Clear {
         /// Work ID (wrk_...) — the core's canonical work reference.
+        // note: CLI help must stay stable
         work_id: String,
         /// Chapter number (1-based).
+        // note: CLI help must stay stable
         #[arg(long)]
         chapter: u64,
         /// Volume number (1-based; defaults to 1).
+        // note: CLI help must stay stable
         #[arg(long)]
         volume: Option<NonZeroU64>,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// `creator reading annotation` verbs.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum AnnotationCommand {
     /// List annotations for a work + chapter.
+    // note: CLI help must stay stable
     List {
         /// Work ID (wrk_...) — the core's canonical work reference.
+        // note: CLI help must stay stable
         work_id: String,
         /// Chapter number (1-based).
+        // note: CLI help must stay stable
         #[arg(long)]
         chapter: u64,
         /// Volume number (1-based; defaults to 1).
+        // note: CLI help must stay stable
         #[arg(long)]
         volume: Option<NonZeroU64>,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Add an annotation to a work + chapter.
+    // note: CLI help must stay stable
     Add {
         /// Work ID (wrk_...) — the core's canonical work reference.
+        // note: CLI help must stay stable
         work_id: String,
         /// Chapter number (1-based).
+        // note: CLI help must stay stable
         #[arg(long)]
         chapter: u64,
         /// Volume number (1-based; defaults to 1).
+        // note: CLI help must stay stable
         #[arg(long)]
         volume: Option<NonZeroU64>,
         /// Start character offset (inclusive) into the chapter body text.
+        // note: CLI help must stay stable
         #[arg(long)]
         start: u64,
         /// End character offset (exclusive); must be strictly greater than `--start`.
+        // note: CLI help must stay stable
         #[arg(long)]
         end: u64,
         /// Selected text being annotated (must be non-empty).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "TEXT")]
         selected_text: String,
         /// Highlight color: yellow | blue | green | pink.
+        // note: CLI help must stay stable
         #[arg(long)]
         color: String,
         /// Optional free-text note attached to the highlight.
+        // note: CLI help must stay stable
         #[arg(long)]
         note: Option<String>,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Patch an existing annotation (color and/or note).
+    // note: CLI help must stay stable
     Patch {
         /// Annotation ID (ann_...).
+        // note: CLI help must stay stable
         annotation_id: String,
         /// New highlight color: yellow | blue | green | pink. At least one
         /// of --color / --note is required.
+        // note: CLI help must stay stable
         #[arg(long, required_unless_present = "note")]
         color: Option<String>,
         /// New note. An empty string clears the note; omitting the flag
         /// leaves the note unchanged. At least one of --color / --note is
         /// required.
+        // note: CLI help must stay stable
         #[arg(long, required_unless_present = "color")]
         note: Option<String>,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Remove an annotation.
+    // note: CLI help must stay stable
     Remove {
         /// Annotation ID (ann_...).
+        // note: CLI help must stay stable
         annotation_id: String,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-/// Run a `creator reading` subcommand.
+/// note: Run a `creator reading` subcommand.
 ///
 /// The writer is released by [`finish_direct`] before any line is printed, so
 /// a command never reports an outcome its core could not settle.
@@ -207,7 +251,7 @@ pub async fn run(cmd: ReadingCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // `None` is a settled verb that prints nothing (`--json` on a delete).
+    // note: `None` is a settled verb that prints nothing (`--json` on a delete).
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
@@ -303,9 +347,9 @@ async fn run_annotation(
     }
 }
 
-// ── Shared helpers ────────────────────────────────────────────────────────
+// note: Shared helpers
 
-/// Parse a 1-based chapter number into the typed `NonZeroU64` key.
+/// note: Parse a 1-based chapter number into the typed `NonZeroU64` key.
 ///
 /// # Errors
 ///
@@ -315,7 +359,7 @@ fn parse_chapter(chapter: u64) -> Result<NonZeroU64> {
     NonZeroU64::new(chapter).ok_or_else(|| CliError::Other("--chapter must be >= 1".to_string()))
 }
 
-/// Validate the scroll-progress range (thousandths, 0–10000).
+/// note: Validate the scroll-progress range (thousandths, 0–10000).
 ///
 /// # Errors
 ///
@@ -330,7 +374,7 @@ fn validate_scroll(scroll: i64) -> Result<()> {
     }
 }
 
-/// Parse a create-request highlight color (V1.89 closed enum).
+/// note: Parse a create-request highlight color (V1.89 closed enum).
 ///
 /// # Errors
 ///
@@ -350,7 +394,7 @@ fn parse_create_color(color: &str) -> Result<ReadingAnnotationCreateRequestColor
     }
 }
 
-/// Parse a patch highlight color against the V1.89 closed enum.
+/// note: Parse a patch highlight color against the V1.89 closed enum.
 ///
 /// # Errors
 ///
@@ -369,7 +413,7 @@ fn parse_patch_color(color: &str) -> Result<ReadingAnnotationPatchRequestColor> 
     }
 }
 
-/// Render a progress DTO row for human output.
+/// note: Render a progress DTO row for human output.
 fn render_progress(resp: &ReadingProgressResponse) -> String {
     let mut out = String::new();
     let _ = writeln!(
@@ -386,9 +430,9 @@ fn render_progress(resp: &ReadingProgressResponse) -> String {
     out
 }
 
-// ── Progress leaves ───────────────────────────────────────────────────────
+// note: Progress leaves
 
-/// `creator reading progress get` — read persisted scroll progress.
+/// note: `creator reading progress get` — read persisted scroll progress.
 ///
 /// # Errors
 ///
@@ -420,7 +464,7 @@ async fn progress_get(
     Ok(Some(render_progress(&resp)))
 }
 
-/// `creator reading progress set <work_id> --chapter <n> --scroll <p>` —
+/// note: `creator reading progress set <work_id> --chapter <n> --scroll <p>` —
 /// upsert persisted scroll progress.
 ///
 /// # Errors
@@ -461,7 +505,7 @@ async fn progress_set(
     )))
 }
 
-/// `creator reading progress clear` — delete persisted scroll progress.
+/// note: `creator reading progress clear` — delete persisted scroll progress.
 ///
 /// # Errors
 ///
@@ -495,9 +539,9 @@ async fn progress_clear(
     )))
 }
 
-// ── Annotation leaves ─────────────────────────────────────────────────────
+// note: Annotation leaves
 
-/// `creator reading annotation list` — list annotations for a work + chapter.
+/// note: `creator reading annotation list` — list annotations for a work + chapter.
 ///
 /// # Errors
 ///
@@ -552,7 +596,7 @@ async fn annotation_list(
     Ok(Some(out))
 }
 
-/// `creator reading annotation add` — create an annotation.
+/// note: `creator reading annotation add` — create an annotation.
 ///
 /// # Errors
 ///
@@ -609,7 +653,7 @@ async fn annotation_add(
     )))
 }
 
-/// `creator reading annotation patch` — edit an annotation's color / note.
+/// note: `creator reading annotation patch` — edit an annotation's color / note.
 ///
 /// # Errors
 ///
@@ -642,7 +686,7 @@ async fn annotation_patch(
     Ok(Some(format!("Updated annotation {annotation_id}.")))
 }
 
-/// `creator reading annotation remove` — delete an annotation.
+/// note: `creator reading annotation remove` — delete an annotation.
 ///
 /// # Errors
 ///

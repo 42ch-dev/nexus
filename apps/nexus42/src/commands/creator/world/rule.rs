@@ -28,6 +28,7 @@
 //! authors add a new rule). `archive` is the core's terminal
 //! `status = archived` transition (V1.198 §13): the row is retained, hidden
 //! from the default read and accepted only as an archive-only repeat.
+// note: the core owns rule vocabulary, ownership gating and the archive lifecycle.
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
@@ -37,47 +38,57 @@ use nexus_contracts::{WorldRuleCreateRequest, WorldRuleResponse, WorldRuleUpdate
 use nexus_core::{CoreService, Principal, RulePatchPresence};
 use serde_json::{Map, Value};
 
-/// The spoke status written by `rule deactivate` (PD-1: spoke vocabulary —
+/// note: The spoke status written by `rule deactivate` (PD-1: spoke vocabulary —
 /// do **not** invent `inactive`).
 const DEPRECATED_STATUS: &str = "deprecated";
 
-/// The terminal status written by `rule archive` (V1.198 §13: the fourth
+/// note: The terminal status written by `rule archive` (V1.198 §13: the fourth
 /// status, transition-only — `add --status archived` is refused).
 const ARCHIVED_STATUS: &str = "archived";
 
 /// `creator world rule` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum RuleCommand {
     /// Add a structured rule to a world (default status: active → auto-included
     /// by the check loop when `rule_refs` is empty; `--status draft` stages)
+    // note: CLI help must stay stable
     Add {
         /// World ID (required, e.g. `wld_abc123`); must be owned by the active creator
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: String,
         /// Human-stable rule name (`canonical_name`)
+        // note: CLI help must stay stable
         #[arg(long)]
         name: String,
         /// Author classification (open string; core: rule / prohibition / style)
+        // note: CLI help must stay stable
         #[arg(long, default_value = "rule")]
         kind: String,
         /// Human summary for list/UI. **Not** evaluated by the checker (PD-1)
+        // note: CLI help must stay stable
         #[arg(long)]
         statement: String,
         /// Checker hint (open string; core: info / warning / error)
+        // note: CLI help must stay stable
         #[arg(long, default_value = "warning")]
         severity: String,
         /// Target entry type (repeatable; empty = all types in check scope).
         /// Rejected alongside an `observer_cardinality` constraint (events
         /// carry no `entry_type` — AR-2).
+        // note: CLI help must stay stable
         #[arg(long)]
         entry_type: Vec<String>,
         /// Rule status (the core's closed create grammar: `draft` / `active` /
         /// `deprecated`; `archived` is a transition, not an authoring state —
         /// any other value is refused, never stored)
+        // note: CLI help must stay stable
         #[arg(long, default_value = "active")]
         status: String,
         /// Structured constraint carrier as a JSON object string (AR-2:
         /// closed shapes; validated member-aware by the core, fail early)
+        // note: CLI help must stay stable
         #[arg(long)]
         constraint: String,
     },
@@ -85,26 +96,33 @@ pub enum RuleCommand {
     /// List a world's rules (every non-archived status — draft/deprecated
     /// included, so authors see what auto-include will skip; archived rows are
     /// omitted by default per the V1.198 default read)
+    // note: CLI help must stay stable
     List {
         /// World ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: String,
         /// Include retained `archived` rows (default: archived omitted; the
         /// omission is selected by the core, never filtered here)
+        // note: CLI help must stay stable
         #[arg(long)]
         include_archived: bool,
         /// Emit machine-readable JSON
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
     },
 
     /// Set a rule's status to `deprecated` (spoke vocabulary; re-activation
     /// is a Non-Goal — authors add a new rule)
+    // note: CLI help must stay stable
     Deactivate {
         /// World ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: String,
         /// Rule ID (e.g. `rul_abc123`)
+        // note: CLI help must stay stable
         #[arg(long)]
         rule_id: String,
     },
@@ -112,17 +130,20 @@ pub enum RuleCommand {
     /// Archive a rule — the terminal `status = archived` transition (the row
     /// is retained but hidden from the default list; repetition succeeds).
     /// There is no restore or delete: reviving content means adding a new rule
+    // note: CLI help must stay stable
     Archive {
         /// World ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: String,
         /// Rule ID (e.g. `rul_abc123`)
+        // note: CLI help must stay stable
         #[arg(long)]
         rule_id: String,
     },
 }
 
-/// Run a `creator world rule` subcommand.
+/// note: Run a `creator world rule` subcommand.
 ///
 /// Opens the direct-writer core, resolves the admitted principal, and closes
 /// the writer before this command reports — on success and on failure.
@@ -176,7 +197,7 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // The leaves return their report; nothing reaches stdout until the shared
+    // why: The leaves return their report; nothing reaches stdout until the shared
     // seam released the writer, so a refused or unsettleable write is never
     // reported as an added/listed/deactivated rule.
     if let Some(text) = finish_direct(&core, outcome).await? {
@@ -185,13 +206,13 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-// ── Leaf logic ────────────────────────────────────────────────────────
+// note: Leaf logic
 //
 // These take the open `&CoreService` plus its admitted `&Principal` so
 // integration tests can drive them against a hermetic direct-core home
 // without re-opening the writer (same seam as `world/kb/service.rs`).
 
-/// Parse the AR-2 `--constraint` argument into the wire carrier map.
+/// note: Parse the AR-2 `--constraint` argument into the wire carrier map.
 ///
 /// Only the shape the generated request requires is checked here — a JSON
 /// **object**. The closed four-family carrier grammar stays owned by the
@@ -209,7 +230,7 @@ fn parse_constraint_object(constraint_json: &str) -> Result<Map<String, Value>> 
     }
 }
 
-/// `creator world rule add` — create a structured rule through the core.
+/// note: `creator world rule add` — create a structured rule through the core.
 ///
 /// The core validates the AR-2 carrier (member-aware, fail early), the
 /// `observer_cardinality` × `--entry-type` pair, the meta-field values and the
@@ -225,7 +246,7 @@ fn parse_constraint_object(constraint_json: &str) -> Result<Map<String, Value>> 
 /// carrier outside the closed grammar, the core's World-ownership refusal
 /// (403) or a storage error.
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors the flat `rule add` flag surface; grouping the
+// why: ^ justification: mirrors the flat `rule add` flag surface; grouping the
 // ten PD-1 flags into a struct would add indirection for the two callers
 // (CLI + tests).
 pub async fn rule_add(
@@ -255,7 +276,7 @@ pub async fn rule_add(
         .map_err(map_core_error)
 }
 
-/// Render one created rule — the human report `run` prints once the writer
+/// note: Render one created rule — the human report `run` prints once the writer
 /// settled.
 fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
     let mut lines = vec![
@@ -285,7 +306,7 @@ fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
     lines.join("\n")
 }
 
-/// Lists a world's rules in store order (`canonical_name ASC, rule_id ASC`).
+/// note: Lists a world's rules in store order (`canonical_name ASC, rule_id ASC`).
 ///
 /// Every non-archived status is listed (AR-3), including draft/deprecated so
 /// authors see what auto-include skips. Archived rows stay hidden unless
@@ -307,7 +328,7 @@ pub async fn rule_list(
     include_archived: bool,
     json: bool,
 ) -> Result<Option<String>> {
-    // V1.198 §13: the caller selects inclusion once; the core omits archived
+    // note: V1.198 §13: the caller selects inclusion once; the core omits archived
     // rows in SQL before the 501-row probe (`--include-archived` reveals them).
     let response = core
         .list_world_rules(principal, world_id.to_string(), include_archived)
@@ -346,7 +367,7 @@ pub async fn rule_list(
     Ok(Some(lines.join("\n")))
 }
 
-/// `creator world rule deactivate` — set a rule's status to `deprecated`
+/// note: `creator world rule deactivate` — set a rule's status to `deprecated`
 /// (spoke vocabulary; PD-1).
 ///
 /// This is the core's `status = deprecated` update: the World-ownership guard
@@ -377,7 +398,7 @@ pub async fn rule_deactivate(
         world_id.to_string(),
         rule_id.to_string(),
         request,
-        // A direct caller names the fields it authored: this leaf writes
+        // why: A direct caller names the fields it authored: this leaf writes
         // `status` alone (the generated DTO cannot state that itself).
         RulePatchPresence::from_supplied_keys(&["status"]),
     )
@@ -389,7 +410,7 @@ pub async fn rule_deactivate(
     )))
 }
 
-/// `creator world rule archive` — set a rule's status to `archived`
+/// note: `creator world rule archive` — set a rule's status to `archived`
 /// (V1.198 §13 terminal transition).
 ///
 /// The same core `status` update seam as [`rule_deactivate`]: the
@@ -422,7 +443,7 @@ pub async fn rule_archive(
         world_id.to_string(),
         rule_id.to_string(),
         request,
-        // Status-only presence: the archived tombstone accepts exactly this.
+        // note: Status-only presence: the archived tombstone accepts exactly this.
         RulePatchPresence::from_supplied_keys(&["status"]),
     )
     .await

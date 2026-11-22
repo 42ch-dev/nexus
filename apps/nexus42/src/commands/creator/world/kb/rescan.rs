@@ -29,6 +29,7 @@
 //!
 //! `--dry-run` computes the candidate preview + `kb_key_blocks` diff without
 //! writing.
+// note: candidates and confirmed rows are refreshed from chapter text; the file index stays retired.
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
@@ -45,39 +46,39 @@ use nexus_orchestration::quality_loop::{
 };
 use sqlx::SqlitePool;
 
-/// Re-export the world-KB forbidden code so cross-author attempts share the
+/// note: Re-export the world-KB forbidden code so cross-author attempts share the
 /// stable error string with `creator world kb` (T-B P0/P1).
 pub use crate::commands::creator::world::kb::WORLD_KB_FORBIDDEN_CODE;
 
-/// Default `blockType` guess used by the heuristic (mirrors
+/// note: Default `blockType` guess used by the heuristic (mirrors
 /// `quality_loop::DEFAULT_BLOCK_TYPE_GUESS`, kept private there).
 const DEFAULT_BLOCK_TYPE_GUESS: &str = "character";
 
-/// Report produced by a rescan (serialized for `--json`).
+/// note: Report produced by a rescan (serialized for `--json`).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RescanReport {
     pub work_ref: String,
     pub chapter: i32,
     pub world_id: String,
     pub dry_run: bool,
-    /// Newly-inserted pending candidate names.
+    /// note: Newly-inserted pending candidate names.
     pub candidates_inserted: Vec<String>,
-    /// Pending candidate names whose payload was refreshed.
+    /// note: Pending candidate names whose payload was refreshed.
     pub candidates_updated: Vec<String>,
-    /// Stale pending candidates removed (name vanished from the chapter).
+    /// note: Stale pending candidates removed (name vanished from the chapter).
     pub candidates_removed: Vec<String>,
-    /// Pending candidates whose payload was unchanged.
+    /// note: Pending candidates whose payload was unchanged.
     pub candidates_unchanged: usize,
-    /// Names extracted but with no active `KnowledgeEntryRecord` (advisory; adopt to promote).
+    /// note: Names extracted but with no active `KnowledgeEntryRecord` (advisory; adopt to promote).
     pub kb_inserted_advisory: Vec<String>,
-    /// Active `KnowledgeEntryRecord`s whose body was refreshed.
+    /// note: Active `KnowledgeEntryRecord`s whose body was refreshed.
     pub kb_updated: Vec<String>,
-    /// Active `KnowledgeEntryRecord`s whose name vanished from extraction (advisory).
+    /// note: Active `KnowledgeEntryRecord`s whose name vanished from extraction (advisory).
     pub kb_removed_advisory: Vec<String>,
 }
 
 impl RescanReport {
-    /// Returns `true` when the rescan changed (or would change) nothing.
+    /// note: Returns `true` when the rescan changed (or would change) nothing.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.candidates_inserted.is_empty()
@@ -87,23 +88,23 @@ impl RescanReport {
     }
 }
 
-/// Cross-chapter reuse entry for the work-scoped rescan report.
+/// note: Cross-chapter reuse entry for the work-scoped rescan report.
 ///
 /// One per aggregate. Surfaced in `--dry-run` output so the author can see, per
 /// canonical entity, which chapters referenced it and whether an active
 /// `KnowledgeEntryRecord` already exists (entity-scope-model §5.5.1).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CrossChapterReuse {
-    /// Canonical entity name (first-seen case).
+    /// note: Canonical entity name (first-seen case).
     pub canonical_name: String,
-    /// Chapters that referenced this entity, ascending + deduped.
+    /// note: Chapters that referenced this entity, ascending + deduped.
     pub source_chapters: Vec<i32>,
-    /// `true` when an active `KnowledgeEntryRecord` already exists for this name in the
+    /// note: `true` when an active `KnowledgeEntryRecord` already exists for this name in the
     /// work's world (advisory "no new candidate needed").
     pub existing_kb_row: bool,
 }
 
-/// Report produced by a work-scoped (`--work`) rescan (serialized for `--json`).
+/// note: Report produced by a work-scoped (`--work`) rescan (serialized for `--json`).
 ///
 /// Separate from [`RescanReport`] (chapter-scoped) so the V1.50 shape is
 /// unchanged (AC2 non-breaking extension).
@@ -112,29 +113,29 @@ pub struct WorkRescanReport {
     pub work_ref: String,
     pub world_id: String,
     pub dry_run: bool,
-    /// Chapters actually scanned (had a readable body file), ascending.
+    /// note: Chapters actually scanned (had a readable body file), ascending.
     pub chapters_scanned: Vec<i32>,
-    /// Newly-inserted pending candidate names (one per aggregate with no
+    /// note: Newly-inserted pending candidate names (one per aggregate with no
     /// existing pending/confirmed row).
     pub candidates_inserted: Vec<String>,
-    /// Pending candidate names whose payload / `source_chapter_id` was refreshed.
+    /// note: Pending candidate names whose payload / `source_chapter_id` was refreshed.
     pub candidates_updated: Vec<String>,
-    /// Pending candidates removed (name vanished from ALL chapters).
+    /// note: Pending candidates removed (name vanished from ALL chapters).
     pub candidates_removed: Vec<String>,
-    /// Pending candidates whose payload was unchanged.
+    /// note: Pending candidates whose payload was unchanged.
     pub candidates_unchanged: usize,
-    /// Cross-chapter reuse summary, one entry per aggregate.
+    /// note: Cross-chapter reuse summary, one entry per aggregate.
     pub cross_chapter_reuse: Vec<CrossChapterReuse>,
-    /// Names extracted but with no active `KnowledgeEntryRecord` (advisory; adopt to promote).
+    /// note: Names extracted but with no active `KnowledgeEntryRecord` (advisory; adopt to promote).
     pub kb_inserted_advisory: Vec<String>,
-    /// Active `KnowledgeEntryRecord`s whose body was refreshed.
+    /// note: Active `KnowledgeEntryRecord`s whose body was refreshed.
     pub kb_updated: Vec<String>,
-    /// Active `KnowledgeEntryRecord`s whose name vanished from extraction (advisory).
+    /// note: Active `KnowledgeEntryRecord`s whose name vanished from extraction (advisory).
     pub kb_removed_advisory: Vec<String>,
 }
 
 impl WorkRescanReport {
-    /// Returns `true` when the work rescan changed (or would change) nothing.
+    /// note: Returns `true` when the work rescan changed (or would change) nothing.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.candidates_inserted.is_empty()
@@ -144,7 +145,7 @@ impl WorkRescanReport {
     }
 }
 
-/// Dispatch `creator world kb rescan` onto its chapter- or work-scoped mode.
+/// note: Dispatch `creator world kb rescan` onto its chapter- or work-scoped mode.
 ///
 /// Exactly one of the positional `<work_ref>/<chapter>` or `--work <work_ref>`
 /// names the scan scope; supplying both (or neither) fails closed.
@@ -174,7 +175,7 @@ pub async fn run(
     }
 }
 
-/// `creator world kb rescan <work_ref>/<chapter>` CLI entrypoint.
+/// note: `creator world kb rescan <work_ref>/<chapter>` CLI entrypoint.
 ///
 /// Resolves the active creator, workspace pool, and workspace dir from
 /// `CliConfig`, then delegates to [`kb_rescan_hermetic`]. The seam's admission
@@ -194,7 +195,7 @@ pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bo
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
-    // The seam's admission pre-flight runs before the pool open: `Schema::init`
+    // why: The seam's admission pre-flight runs before the pool open: `Schema::init`
     // migrates — and therefore creates — the selected workspace, so a selection
     // that names no materialized workspace must be refused instead of having one
     // created for it.
@@ -214,7 +215,7 @@ pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bo
     Ok(())
 }
 
-/// Hermetic rescan logic (testable against a fresh temp DB + temp workspace).
+/// note: Hermetic rescan logic (testable against a fresh temp DB + temp workspace).
 ///
 /// Takes an explicit pool, creator, and optional workspace dir so integration
 /// tests can drive it without `$HOME` or a daemon. `workspace_dir` being
@@ -258,7 +259,7 @@ pub async fn kb_rescan_hermetic(
         ))
     })?;
 
-    // Author gate: world owner must match the active creator (AC4).
+    // why: Author gate: world owner must match the active creator (AC4).
     require_world_owner(pool, &world_id, creator_id).await?;
 
     let ws_dir = workspace_dir.ok_or_else(|| {
@@ -269,16 +270,16 @@ pub async fn kb_rescan_hermetic(
         )
     })?;
 
-    // Read the chapter's current prose.
+    // note: Read the chapter's current prose.
     let prose = read_chapter_prose(pool, &work.work_id, chapter, ws_dir).await?;
 
-    // Fresh workspace_id (R-V150KBED-02 self-corrects here).
+    // note: Fresh workspace_id (R-V150KBED-02 self-corrects here).
     let workspace_id = resolve_workspace_id(pool, creator_id).await;
 
-    // Heuristic extraction (review-time, no LLM).
+    // note: Heuristic extraction (review-time, no LLM).
     let candidates = extract_candidates_from_text(&prose);
 
-    // Diff baseline: pending candidates currently sourced from this chapter.
+    // note: Diff baseline: pending candidates currently sourced from this chapter.
     let old_for_chapter = list_for_chapter(pool, &work.work_id, i64::from(chapter))
         .await
         .map_err(|e| CliError::Other(format!("Failed to list chapter candidates: {e}")))?;
@@ -316,12 +317,10 @@ pub async fn kb_rescan_hermetic(
     Ok(report)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.51 T-A P1 — Work-scoped (`--work`) cross-chapter reconciliation
-// (closes R-V150KBED-08; spec: world-kb-runtime-architecture.md §5.5.1)
-// ═══════════════════════════════════════════════════════════════════════
+// note: V1.51 T-A P1 — Work-scoped (`--work`) cross-chapter reconciliation
+// (closes R-V150KBED-08; spec: docs/specs/architecture/world-kb-runtime-architecture.md §5.5.1)
 
-/// `creator world kb rescan --work <work_ref>` CLI entrypoint.
+/// note: `creator world kb rescan --work <work_ref>` CLI entrypoint.
 ///
 /// Resolves the active creator, workspace pool, and workspace dir from
 /// `CliConfig`, then delegates to [`kb_rescan_work_hermetic`]. The seam's
@@ -346,7 +345,7 @@ pub async fn kb_rescan_work(
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
-    // The seam's admission pre-flight runs before the pool open: `Schema::init`
+    // why: The seam's admission pre-flight runs before the pool open: `Schema::init`
     // migrates — and therefore creates — the selected workspace, so a selection
     // that names no materialized workspace must be refused instead of having one
     // created for it.
@@ -366,7 +365,7 @@ pub async fn kb_rescan_work(
     Ok(())
 }
 
-/// Hermetic work-scoped rescan logic (testable against a fresh temp DB + temp
+/// note: Hermetic work-scoped rescan logic (testable against a fresh temp DB + temp
 /// workspace).
 ///
 /// Iterates all chapters in `Works/<work_ref>/Stories/` (via the
@@ -407,7 +406,7 @@ pub async fn kb_rescan_work_hermetic(
         ))
     })?;
 
-    // Author gate: world owner must match the active creator (AC4 / §5.5.3).
+    // why: Author gate: world owner must match the active creator (AC4 / §5.5.3).
     require_world_owner(pool, &world_id, creator_id).await?;
 
     let ws_dir = workspace_dir.ok_or_else(|| {
@@ -418,19 +417,19 @@ pub async fn kb_rescan_work_hermetic(
         )
     })?;
 
-    // Enumerate chapters and extract per-chapter candidates (heuristic).
+    // note: Enumerate chapters and extract per-chapter candidates (heuristic).
     let (chapters_scanned, per_chapter) = extract_per_chapter(pool, &work.work_id, ws_dir).await?;
 
-    // Pure cross-chapter aggregation (group by canonical_name).
+    // note: Pure cross-chapter aggregation (group by canonical_name).
     let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
 
-    // Existing active KnowledgeEntryRecord names (for the reuse summary + KB refresh).
+    // note: Existing active KnowledgeEntryRecord names (for the reuse summary + KB refresh).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
     let old_kb_rows = store
         .list_by_world(&world_id)
         .await
         .map_err(|e| CliError::Other(format!("Failed to list world KnowledgeEntries: {e}")))?;
-    // Mirrors the `kb_key_blocks` partial unique index
+    // why: Mirrors the `kb_key_blocks` partial unique index
     // `WHERE status NOT IN ('deleted', 'merged', 'deprecated')` (nexus-kb
     // extract_sync); replicated here because that helper is crate-private.
     let active_kb_names: std::collections::HashSet<String> = old_kb_rows
@@ -439,7 +438,7 @@ pub async fn kb_rescan_work_hermetic(
         .map(|kb| kb.canonical_name.to_ascii_lowercase())
         .collect();
 
-    // Build the cross-chapter reuse summary (always; surfaces in both dry + non-dry).
+    // note: Build the cross-chapter reuse summary (always; surfaces in both dry + non-dry).
     let cross_chapter_reuse: Vec<CrossChapterReuse> = aggregates
         .iter()
         .map(|a| CrossChapterReuse {
@@ -449,7 +448,7 @@ pub async fn kb_rescan_work_hermetic(
         })
         .collect();
 
-    // Existing pending/confirmed candidates for this work (for stale cleanup +
+    // note: Existing pending/confirmed candidates for this work (for stale cleanup +
     // upsert classification). Loaded once across the whole work.
     let existing_for_work =
         nexus_local_db::kb_extract_job::list_pending_for_world(pool, &world_id, None)
@@ -471,7 +470,7 @@ pub async fn kb_rescan_work_hermetic(
         kb_removed_advisory: Vec::new(),
     };
 
-    // Non-dry path: acquire advisory lock before any DB upsert (T-B P0).
+    // note: Non-dry path: acquire advisory lock before any DB upsert (T-B P0).
     // Dry path is read-only → no lock. Guard dropped at end of scope.
     let work_dir = ws_dir.join("Works").join(work_ref);
     let _file_lock = if dry_run || !work_dir.exists() {
@@ -480,7 +479,7 @@ pub async fn kb_rescan_work_hermetic(
         Some(acquire_work_lock(&work_dir)?)
     };
 
-    // Upsert one row per aggregate (DB uniqueness collapses same-name rows).
+    // note: Upsert one row per aggregate (DB uniqueness collapses same-name rows).
     sync_work_candidates(
         &mut report,
         pool,
@@ -493,7 +492,7 @@ pub async fn kb_rescan_work_hermetic(
     )
     .await?;
 
-    // Refresh confirmed KnowledgeEntryRecord bodies (same §5.5 invariant as chapter-scope).
+    // note: Refresh confirmed KnowledgeEntryRecord bodies (same §5.5 invariant as chapter-scope).
     // Non-dry path applies via diff_and_apply; dry path computes only.
     sync_work_kb_rows(
         &mut report,
@@ -508,7 +507,7 @@ pub async fn kb_rescan_work_hermetic(
     Ok(report)
 }
 
-/// Enumerate a work's chapters, read each chapter body from disk, and run the
+/// note: Enumerate a work's chapters, read each chapter body from disk, and run the
 /// heuristic extractor. Returns `(chapters_scanned, per_chapter candidates)`,
 /// ordered by chapter number. Chapters without a `body_path` are skipped.
 // CLI helper — single-threaded tokio; Send not required.
@@ -543,7 +542,7 @@ async fn extract_per_chapter(
     Ok((chapters_scanned, per_chapter))
 }
 
-/// Acquire the T-B P0 advisory file lock for a work-scoped rescan, mapping
+/// note: Acquire the T-B P0 advisory file lock for a work-scoped rescan, mapping
 /// `FileLockError` → the dual exit-code contract (Locked → 75, Io → 78).
 /// Unix-only — the `file_lock` module is `#[cfg(unix)]` (V1.153 P2 T2).
 #[cfg(unix)]
@@ -561,7 +560,7 @@ fn acquire_work_lock(
     }
 }
 
-/// V1.153 P2 T2: no advisory flock on Windows (the `file_lock` module is
+/// note: V1.153 P2 T2: no advisory flock on Windows (the `file_lock` module is
 /// unix-only); shared-DB write access is WAL-governed (P2 spec § Coexistence)
 /// — no-op so the CLI proceeds unlocked.
 #[cfg(not(unix))]
@@ -569,7 +568,7 @@ fn acquire_work_lock(_work_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Upsert one row per cross-chapter aggregate + remove stale pending
+/// note: Upsert one row per cross-chapter aggregate + remove stale pending
 /// candidates whose name vanished from ALL chapters.
 // CLI helper — single-threaded tokio; Send not required. Argument count
 // mirrors the chapter-scoped `sync_candidates` DAO-shaped upsert signature;
@@ -594,11 +593,11 @@ async fn sync_work_candidates(
         } else {
             agg.block_type.as_str()
         };
-        // TODO(T-B P1): swap this non-versioned upsert_pending_candidate call
+        // note: TODO(T-B P1): swap this non-versioned upsert_pending_candidate call
         // for the versioned CAS path (kb_extract_jobs.version column +
         // cas_update helper) once T-B P1 ships. The advisory lock acquired
         // above is the cross-process guard; CAS will be the per-row optimistic
-        // guard. Single call-site swap — see world-kb-runtime-architecture.md
+        // guard. Single call-site swap — see docs/specs/architecture/world-kb-runtime-architecture.md
         // §5.5.1 "T-B P1 CAS hook".
         let outcome = if dry_run {
             preview_work_candidate_outcome(existing_for_work, agg)
@@ -628,7 +627,7 @@ async fn sync_work_candidates(
         }
     }
 
-    // Stale cleanup across the WHOLE work: pending candidates whose name no
+    // note: Stale cleanup across the WHOLE work: pending candidates whose name no
     // longer appears in any chapter's aggregate.
     let new_names: std::collections::HashSet<String> = aggregates
         .iter()
@@ -647,7 +646,7 @@ async fn sync_work_candidates(
         let removed = if dry_run {
             true
         } else {
-            // Delete the stale pending row sourced from this work (any chapter).
+            // note: Delete the stale pending row sourced from this work (any chapter).
             delete_pending_for_chapter_work(pool, work_id, old_name)
                 .await
                 .map_err(|e| CliError::Other(format!("Failed to delete stale candidate: {e}")))?
@@ -659,7 +658,7 @@ async fn sync_work_candidates(
     Ok(())
 }
 
-/// Preview a work-scoped upsert outcome without writing (dry-run).
+/// note: Preview a work-scoped upsert outcome without writing (dry-run).
 fn preview_work_candidate_outcome(
     existing_for_work: &[nexus_local_db::kb_extract_job::KbExtractPromotion],
     agg: &nexus_orchestration::quality_loop::AggregatedCandidate,
@@ -683,7 +682,7 @@ fn preview_work_candidate_outcome(
     }
 }
 
-/// Delete a stale `pending` candidate sourced from anywhere in the work
+/// note: Delete a stale `pending` candidate sourced from anywhere in the work
 /// (cross-chapter cleanup). Unlike the chapter-scoped
 /// [`delete_pending_for_chapter`], this matches on `work_id` +
 /// `canonical_name` regardless of `source_chapter_id`.
@@ -709,7 +708,7 @@ async fn delete_pending_for_chapter_work(
     Ok(result.rows_affected() > 0)
 }
 
-/// Refresh confirmed `KnowledgeEntryRecord` bodies from the cross-chapter aggregates
+/// note: Refresh confirmed `KnowledgeEntryRecord` bodies from the cross-chapter aggregates
 /// (same §5.5 invariant as the chapter-scoped path; inserts/deletes stay with
 /// adopt/edit/delete). Pure half (`compute_kb_diff`) in dry mode; non-dry
 /// applies via [`nexus_knowledge::world_kb::diff_and_apply`].
@@ -723,7 +722,7 @@ async fn sync_work_kb_rows(
     aggregates: &[AggregatedCandidate],
     dry_run: bool,
 ) -> Result<()> {
-    // Parse each aggregate's payload into a KnowledgeEntryBody for the delta.
+    // note: Parse each aggregate's payload into a KnowledgeEntryBody for the delta.
     let mut new_bodies: Vec<(String, KnowledgeEntryBody)> = Vec::with_capacity(aggregates.len());
     for agg in aggregates {
         let body: KnowledgeEntryBody =
@@ -753,7 +752,7 @@ async fn sync_work_kb_rows(
     Ok(())
 }
 
-/// Print the work-scoped rescan report (human-readable by default, JSON with `--json`).
+/// note: Print the work-scoped rescan report (human-readable by default, JSON with `--json`).
 fn print_work_report(report: &WorkRescanReport, json: bool) {
     if json {
         println!(
@@ -779,7 +778,7 @@ fn print_work_report(report: &WorkRescanReport, json: bool) {
             .join(",")
     );
 
-    // Cross-chapter reuse summary (AC3).
+    // note: Cross-chapter reuse summary (AC3).
     if !report.cross_chapter_reuse.is_empty() {
         println!("  Cross-chapter reuse:");
         for r in &report.cross_chapter_reuse {
@@ -830,7 +829,7 @@ fn print_work_report(report: &WorkRescanReport, json: bool) {
     }
 }
 
-/// Upsert freshly-extracted candidates and remove stale pending ones.
+/// note: Upsert freshly-extracted candidates and remove stale pending ones.
 ///
 /// Fills `report.candidates_*`. In `dry_run` mode the classification is a
 /// read-only preview against the chapter's existing rows; otherwise the DB
@@ -887,7 +886,7 @@ async fn sync_candidates(
         }
     }
 
-    // Stale pending candidates (sourced from this chapter, no longer present).
+    // note: Stale pending candidates (sourced from this chapter, no longer present).
     let new_names: std::collections::HashSet<&str> = candidates
         .iter()
         .map(|c| c.canonical_name_guess.as_str())
@@ -916,7 +915,7 @@ async fn sync_candidates(
     Ok(())
 }
 
-/// Refresh confirmed `KnowledgeEntryRecord` bodies via the nexus-kb delta.
+/// note: Refresh confirmed `KnowledgeEntryRecord` bodies via the nexus-kb delta.
 ///
 /// Fills `report.kb_*`. In `dry_run` mode the diff is computed (pure) but not
 /// applied; otherwise [`nexus_knowledge::world_kb::diff_and_apply`] refreshes matching rows.
@@ -953,7 +952,7 @@ async fn sync_kb_rows(
     Ok(())
 }
 
-/// Parse `<work_ref>/<chapter>` into `(work_ref, chapter)`.
+/// note: Parse `<work_ref>/<chapter>` into `(work_ref, chapter)`.
 fn parse_target(target: &str) -> Result<(String, i32)> {
     let (work_ref, chapter_str) = target.rsplit_once('/').ok_or_else(|| {
         CliError::Other(format!(
@@ -974,13 +973,13 @@ fn parse_target(target: &str) -> Result<(String, i32)> {
     Ok((work_ref.to_string(), chapter))
 }
 
-/// Minimal Work row needed for a rescan.
+/// note: Minimal Work row needed for a rescan.
 struct ResolvedWork {
     work_id: String,
     world_id: Option<String>,
 }
 
-/// Resolve `<work_ref>` → Work.
+/// note: Resolve `<work_ref>` → Work.
 ///
 /// Matches `work_ref`, `story_ref`, or `work_id` globally (the author typed a
 /// valid ref). Authz is enforced later by [`require_world_owner`] on **world**
@@ -1007,7 +1006,7 @@ async fn resolve_work(
     Ok(row.map(|(work_id, world_id)| ResolvedWork { work_id, world_id }))
 }
 
-/// Read the chapter body prose from the workspace filesystem.
+/// note: Read the chapter body prose from the workspace filesystem.
 async fn read_chapter_prose(
     pool: &SqlitePool,
     work_id: &str,
@@ -1037,7 +1036,7 @@ async fn read_chapter_prose(
     })
 }
 
-/// Author identity gate. Reads `narrative_worlds.owner_creator_id` and
+/// note: Author identity gate. Reads `narrative_worlds.owner_creator_id` and
 /// requires it to match `creator_id`. Returns `403 WORLD_KB_FORBIDDEN` on
 /// mismatch — same code path as `creator world kb` (T-B P0/P1).
 async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str) -> Result<()> {
@@ -1066,7 +1065,7 @@ async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str
     }
 }
 
-/// Best-effort fresh `workspace_id` for the upserted candidate rows.
+/// note: Best-effort fresh `workspace_id` for the upserted candidate rows.
 ///
 /// R-V150KBED-02: `narrative_gateway.workspace_id` may be stale; the column is
 /// informational only. The rescan resolves it fresh here so newly-upserted
@@ -1085,7 +1084,7 @@ async fn resolve_workspace_id(pool: &SqlitePool, creator_id: &str) -> String {
     ws.unwrap_or_else(|| creator_id.to_string())
 }
 
-/// Preview an upsert outcome without writing (dry-run).
+/// note: Preview an upsert outcome without writing (dry-run).
 ///
 /// Classifies a candidate against the chapter's existing pending rows. This is
 /// a faithful preview on a clean per-chapter basis; the real (non-dry) path
@@ -1114,7 +1113,7 @@ fn preview_candidate_outcome(
     }
 }
 
-/// Parse each candidate's `proposed_payload` JSON into a `KnowledgeEntryBody` for
+/// note: Parse each candidate's `proposed_payload` JSON into a `KnowledgeEntryBody` for
 /// the nexus-kb delta.
 fn parse_candidate_bodies(candidates: &[KbCandidate]) -> Result<Vec<(String, KnowledgeEntryBody)>> {
     let mut out = Vec::with_capacity(candidates.len());
@@ -1130,7 +1129,7 @@ fn parse_candidate_bodies(candidates: &[KbCandidate]) -> Result<Vec<(String, Kno
     Ok(out)
 }
 
-/// Map a KB sync store error to a user-facing `CliError`.
+/// note: Map a KB sync store error to a user-facing `CliError`.
 fn map_kb_sync_error(e: nexus_knowledge::world_kb::KbStoreError) -> CliError {
     use nexus_knowledge::world_kb::KbStoreError as E;
     match e {
@@ -1142,7 +1141,7 @@ fn map_kb_sync_error(e: nexus_knowledge::world_kb::KbStoreError) -> CliError {
     }
 }
 
-/// Print the rescan report (human-readable by default, JSON with `--json`).
+/// note: Print the rescan report (human-readable by default, JSON with `--json`).
 fn print_report(report: &RescanReport, json: bool) {
     if json {
         println!(

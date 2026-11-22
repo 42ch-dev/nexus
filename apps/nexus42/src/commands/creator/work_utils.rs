@@ -6,10 +6,11 @@
 //! entrances; every retained Work arm resolves its active Work through
 //! [`super::works::active_work_id_core`]. What remains is the bounded file
 //! reader the retained authoring leaves share.
+// note: the size cap fails before any read, so an oversized file is never loaded.
 
 use crate::errors::{CliError, Result};
 
-/// Read a file into a string with a client-side size cap (qc3 S-002).
+/// note: Read a file into a string with a client-side size cap (qc3 S-002).
 ///
 /// Rejects an oversized input with a named CLI error *before* the read
 /// (instead of unbounded `read_to_string`) so a `--content-file`/`--file`

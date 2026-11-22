@@ -25,6 +25,7 @@
 //! `creator character soul reflect` entrances are gone together with the
 //! daemon transport they needed: core host capture, session and soul
 //! synthesis behavior stay library/core operations, not CLI commands.
+// note: contract boundaries above are enforced by the core; this module only maps flags and renders DTOs.
 
 use crate::commands::creator::work_utils::read_file_bounded;
 use crate::config::CliConfig;
@@ -67,30 +68,39 @@ use nexus_local_db::{CharacterPatch, FieldPatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF
 use std::path::{Path, PathBuf};
 
 /// `creator character` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum CharacterCommand {
     /// Mint a Character with its first World binding
+    // note: CLI help must stay stable
     Create {
         /// Character display name
+        // note: CLI help must stay stable
         #[arg(long)]
         display_name: String,
         /// Owned World for the initial binding
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: String,
         /// Optional image URI
+        // note: CLI help must stay stable
         #[arg(long)]
         image_uri: Option<String>,
         /// Optional persona JSON object
+        // note: CLI help must stay stable
         #[arg(long)]
         persona: Option<String>,
         /// Optional `WorldSheet` `KnowledgeEntry` id
+        // note: CLI help must stay stable
         #[arg(long)]
         world_sheet_entry_id: Option<String>,
         /// Emit the generated `CreateCharacterResponse` DTO
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// List Characters owned by the active Creator
+    // note: CLI help must stay stable
     List {
         #[arg(long)]
         limit: Option<i64>,
@@ -100,32 +110,38 @@ pub enum CharacterCommand {
         json: bool,
     },
     /// Show one Character
+    // note: CLI help must stay stable
     Show {
         character_id: String,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Binding mutations
+    // note: CLI help must stay stable
     Binding {
         #[command(subcommand)]
         command: BindingCommand,
     },
     /// Character `KnowledgeEntry` add/list/view
+    // note: CLI help must stay stable
     Knowledge {
         #[command(subcommand)]
         command: KnowledgeCommand,
     },
     /// Character SOUL/Memory bearer operations (v1.184 P3)
+    // note: CLI help must stay stable
     Memory {
         #[command(subcommand)]
         command: CharacterMemoryCommand,
     },
     /// Character `ToM` L1/L2 record and show (v1.184 P4)
+    // note: CLI help must stay stable
     Tom {
         #[command(subcommand)]
         command: CharacterTomCommand,
     },
     /// Edit Character identity metadata (explicit revision CAS)
+    // note: CLI help must stay stable
     Edit {
         character_id: String,
         #[arg(long)]
@@ -144,6 +160,7 @@ pub enum CharacterCommand {
         json: bool,
     },
     /// Archive (freeze) a Character
+    // note: CLI help must stay stable
     Archive {
         character_id: String,
         #[arg(long)]
@@ -152,6 +169,7 @@ pub enum CharacterCommand {
         json: bool,
     },
     /// Restore an archived Character to active
+    // note: CLI help must stay stable
     Restore {
         character_id: String,
         #[arg(long)]
@@ -162,9 +180,11 @@ pub enum CharacterCommand {
 }
 
 /// `creator character binding` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum BindingCommand {
     /// Add an active World binding
+    // note: CLI help must stay stable
     Add {
         #[arg(long)]
         character_id: String,
@@ -176,8 +196,10 @@ pub enum BindingCommand {
         json: bool,
     },
     /// List bindings for a Character
+    // note: CLI help must stay stable
     List {
         /// Character ID (e.g. `chr_abc123`)
+        // note: CLI help must stay stable
         character_id: String,
         #[arg(long)]
         limit: Option<i64>,
@@ -187,6 +209,7 @@ pub enum BindingCommand {
         json: bool,
     },
     /// Show one binding detail
+    // note: CLI help must stay stable
     Show {
         #[arg(long)]
         character_id: String,
@@ -196,6 +219,7 @@ pub enum BindingCommand {
         json: bool,
     },
     /// Patch a binding `WorldSheet` link
+    // note: CLI help must stay stable
     Edit {
         #[arg(long)]
         character_id: String,
@@ -211,6 +235,7 @@ pub enum BindingCommand {
         json: bool,
     },
     /// Remove a non-last active binding
+    // note: CLI help must stay stable
     Remove {
         #[arg(long)]
         character_id: String,
@@ -222,12 +247,15 @@ pub enum BindingCommand {
 }
 
 /// `creator character knowledge` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
     /// Add a `KnowledgeEntry` under a stored owner
+    // note: CLI help must stay stable
     Add {
         /// Owner kind: world | character | binding. A World-owned create
         /// carries no summary (§11.5) — see `--summary`.
+        // note: CLI help must stay stable
         #[arg(long)]
         owner: String,
         #[arg(long)]
@@ -242,13 +270,16 @@ pub enum KnowledgeCommand {
         /// never supplies a holder id or a management flag: `author-only`
         /// resolves to the admitted controlling Creator's own holder and
         /// `character-private` to a Character this Creator owns.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "AUDIENCE")]
         audience: Option<String>,
         /// Character a `character-private` audience resolves to.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "CHARACTER_ID", requires = "audience")]
         audience_character: Option<String>,
         /// Retired World-only visibility flag. Refused on presence — including
         /// `--creator-only=false`: use `--audience author-only` instead.
+        // note: CLI help must stay stable
         #[arg(long, num_args = 0..=1, default_missing_value = "true")]
         creator_only: Option<bool>,
         #[arg(long)]
@@ -258,18 +289,22 @@ pub enum KnowledgeCommand {
         /// Authored summary text. Refused together with `--owner world`
         /// (§11.5: a World-owned create carries no summary) — omit it, or use
         /// `--owner character|binding`.
+        // note: CLI help must stay stable
         #[arg(long)]
         summary: Option<String>,
         /// Read the summary from a file (at most 65536 UTF-8 bytes, untrimmed).
         /// Refused together with `--owner world`, exactly like `--summary`.
+        // note: CLI help must stay stable
         #[arg(long)]
         summary_file: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// List Character-owned `KnowledgeEntry` rows (no World union)
+    // note: CLI help must stay stable
     List {
         /// Character ID (e.g. `chr_abc123`)
+        // note: CLI help must stay stable
         character_id: String,
         #[arg(long)]
         limit: Option<i64>,
@@ -279,8 +314,10 @@ pub enum KnowledgeCommand {
         json: bool,
     },
     /// Compose `KnowledgeView` for a Creator or Character `actor_ref`
+    // note: CLI help must stay stable
     View {
         /// `actor_kind`: creator | character
+        // note: CLI help must stay stable
         #[arg(long)]
         actor: String,
         #[arg(long)]
@@ -299,6 +336,7 @@ pub enum KnowledgeCommand {
         json: bool,
     },
     /// Show one Character-scoped `KnowledgeEntry` detail (summary + metadata)
+    // note: CLI help must stay stable
     Show {
         #[arg(long)]
         character_id: String,
@@ -308,6 +346,7 @@ pub enum KnowledgeCommand {
         json: bool,
     },
     /// Edit `canonical_name` and/or summary with revision CAS
+    // note: CLI help must stay stable
     Edit {
         #[arg(long)]
         character_id: String,
@@ -327,19 +366,23 @@ pub enum KnowledgeCommand {
         /// `shared` clears holder+disclosure, `author-only` resolves the
         /// Creator's holder, `character-private` a permitted Character's.
         /// Omitted preserves the stored pair.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "AUDIENCE")]
         audience: Option<String>,
         /// Character a `character-private` audience resolves to.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "CHARACTER_ID", requires = "audience")]
         audience_character: Option<String>,
         /// Retired World-only visibility flag. Refused on presence — including
         /// `--creator-only=false`: use `--audience author-only` instead.
+        // note: CLI help must stay stable
         #[arg(long, num_args = 0..=1, default_missing_value = "true")]
         creator_only: Option<bool>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Delete an unreferenced `KnowledgeEntry` with revision CAS
+    // note: CLI help must stay stable
     Remove {
         #[arg(long)]
         character_id: String,
@@ -353,9 +396,11 @@ pub enum KnowledgeCommand {
 }
 
 /// `creator character memory` subcommands (v1.184 P3).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum CharacterMemoryCommand {
     /// Capture a session-end digest into the Character review queue
+    // note: CLI help must stay stable
     Capture {
         #[arg(long)]
         character_id: String,
@@ -368,6 +413,7 @@ pub enum CharacterMemoryCommand {
         #[arg(long)]
         task_kind: Option<String>,
         /// Session digest (raw text)
+        // note: CLI help must stay stable
         #[arg(long)]
         digest: String,
         #[arg(long)]
@@ -376,6 +422,7 @@ pub enum CharacterMemoryCommand {
         json: bool,
     },
     /// List pending-review entries for a Character scope
+    // note: CLI help must stay stable
     PendingList {
         #[arg(long)]
         character_id: String,
@@ -389,6 +436,7 @@ pub enum CharacterMemoryCommand {
         json: bool,
     },
     /// Count pending-review entries for a Character scope
+    // note: CLI help must stay stable
     PendingCount {
         #[arg(long)]
         character_id: String,
@@ -398,6 +446,7 @@ pub enum CharacterMemoryCommand {
         json: bool,
     },
     /// Dismiss a pending-review entry without promoting
+    // note: CLI help must stay stable
     PendingDismiss {
         #[arg(long)]
         character_id: String,
@@ -407,6 +456,7 @@ pub enum CharacterMemoryCommand {
         json: bool,
     },
     /// Drain one bounded batch of the Character review queue
+    // note: CLI help must stay stable
     Review {
         #[arg(long)]
         character_id: String,
@@ -416,6 +466,7 @@ pub enum CharacterMemoryCommand {
         json: bool,
     },
     /// List Character memory fragments for a scope
+    // note: CLI help must stay stable
     Fragments {
         #[arg(long)]
         character_id: String,
@@ -429,6 +480,7 @@ pub enum CharacterMemoryCommand {
         json: bool,
     },
     /// Explicit, revision-checked local→shared promotion
+    // note: CLI help must stay stable
     Promote {
         #[arg(long)]
         character_id: String,
@@ -442,10 +494,12 @@ pub enum CharacterMemoryCommand {
 }
 
 /// `creator character tom` subcommands (v1.184 P4).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
-#[allow(clippy::large_enum_variant)] // clap derive requires non-boxed subcommands
+#[allow(clippy::large_enum_variant)] // why: clap derive requires non-boxed subcommands
 pub enum CharacterTomCommand {
     /// Record one L1 or L2 belief on an authorized carrier
+    // note: CLI help must stay stable
     Record {
         #[arg(long)]
         character_id: String,
@@ -485,6 +539,7 @@ pub enum CharacterTomCommand {
         json: bool,
     },
     /// List bounded `ToM` rows (L1 before L2 in keyset order)
+    // note: CLI help must stay stable
     Show {
         #[arg(long)]
         character_id: String,
@@ -501,7 +556,7 @@ pub enum CharacterTomCommand {
     },
 }
 
-/// Run `creator character`.
+/// note: Run `creator character`.
 ///
 /// Every arm authors through the shared direct-core seam and the writer is
 /// released by [`finish_direct`] before any line is printed, so a command
@@ -521,14 +576,14 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
         run_arm(&core, &principal, cmd).await
     }
     .await;
-    // `None` is a settled verb that prints nothing (`--json` on a remove).
+    // note: `None` is a settled verb that prints nothing (`--json` on a remove).
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
     Ok(())
 }
 
-/// v1.215 P1-T5 (W1): the `knowledge add` argv refusals are pure input checks
+/// note: v1.215 P1-T5 (W1): the `knowledge add` argv refusals are pure input checks
 /// — the retired `--creator-only` flag and the World-owned summary — so they
 /// run here, **before** [`open_direct_core`] admits the writer. An invalid
 /// combination then reports its owner-scope cause without initializing or
@@ -552,12 +607,12 @@ fn refuse_invalid_knowledge_add_input(cmd: &CharacterCommand) -> Result<()> {
     Ok(())
 }
 
-/// Dispatch one arm.
+/// note: Dispatch one arm.
 ///
 /// Every mutation carries the caller's explicit `--expected-revision` into the
 /// core's CAS, and every lifecycle write goes through the core's exclusive
 /// per-Character transition lease — never a bare status write.
-#[allow(clippy::too_many_lines)] // single CLI command dispatcher
+#[allow(clippy::too_many_lines)] // why: single CLI command dispatcher
 async fn run_arm(
     core: &CoreService,
     principal: &Principal,
@@ -967,13 +1022,13 @@ fn parse_persona(raw: Option<String>) -> Result<serde_json::Map<String, serde_js
         .ok_or_else(|| CliError::Other("--persona must be a JSON object".into()))
 }
 
-/// Default `--limit` page size for the Character/binding list leaves (the
+/// note: Default `--limit` page size for the Character/binding list leaves (the
 /// retired daemon adapter's page size).
 const DEFAULT_LIST_LIMIT: u32 = 50;
-/// Largest `--limit` the list leaves accept (the retired adapter's ceiling).
+/// note: Largest `--limit` the list leaves accept (the retired adapter's ceiling).
 const MAX_LIST_LIMIT: u32 = 100;
 
-/// Convert a CLI-supplied string into one generated request newtype, surfacing
+/// note: Convert a CLI-supplied string into one generated request newtype, surfacing
 /// the generated constraint message as the command's own error.
 fn wire_field<T: TryFrom<String>>(value: String) -> Result<T>
 where
@@ -982,12 +1037,12 @@ where
     value.try_into().map_err(wire_error)
 }
 
-/// Surface a generated wire-conversion failure as a CLI input error.
+/// note: Surface a generated wire-conversion failure as a CLI input error.
 fn wire_error(err: impl std::fmt::Display) -> CliError {
     CliError::Other(err.to_string())
 }
 
-/// Convert a CLI `--expected-revision` (`u64`) into the stored `i64` revision.
+/// note: Convert a CLI `--expected-revision` (`u64`) into the stored `i64` revision.
 ///
 /// The flag is wider than the stored revision: a value the core's `i64` cannot
 /// represent is refused instead of wrapping into a negative revision, which
@@ -997,7 +1052,7 @@ fn revision_i64(raw: u64) -> Result<i64> {
         .map_err(|_| CliError::Other("expected_revision is out of range for i64".into()))
 }
 
-/// Resolve `--limit` into the core's page size.
+/// note: Resolve `--limit` into the core's page size.
 fn resolve_list_limit(raw: Option<i64>) -> Result<u32> {
     let Some(limit) = raw else {
         return Ok(DEFAULT_LIST_LIMIT);
@@ -1008,7 +1063,7 @@ fn resolve_list_limit(raw: Option<i64>) -> Result<u32> {
         .ok_or_else(|| CliError::Other(format!("limit must be between 1 and {MAX_LIST_LIMIT}")))
 }
 
-/// Decode the opaque `v1:<offset>` cursor the list responses mint.
+/// note: Decode the opaque `v1:<offset>` cursor the list responses mint.
 ///
 /// The token is client-facing and opaque: only the retained `v1:` encoding is
 /// understood, and anything else is refused rather than silently restarted
@@ -1028,7 +1083,7 @@ fn decode_list_cursor(cursor: Option<&str>) -> Result<u32> {
         })
 }
 
-/// Create a Character with its initial active World binding.
+/// note: Create a Character with its initial active World binding.
 ///
 /// # Errors
 ///
@@ -1036,7 +1091,7 @@ fn decode_list_cursor(cursor: Option<&str>) -> Result<u32> {
 /// (`--world-id` shape, display-name bounds, `--persona` shape) and the mapped
 /// core refusal otherwise (foreign/unknown World,
 /// `duplicate_character_display_name`, `invalid_world_sheet`).
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn create(
     core: &CoreService,
     principal: &Principal,
@@ -1070,7 +1125,7 @@ async fn create(
     )))
 }
 
-/// List the active Creator's Characters, oldest first.
+/// note: List the active Creator's Characters, oldest first.
 ///
 /// # Errors
 ///
@@ -1113,7 +1168,7 @@ async fn list(
     Ok(Some(lines.join("\n")))
 }
 
-/// Show one owned Character.
+/// note: Show one owned Character.
 ///
 /// # Errors
 ///
@@ -1138,7 +1193,7 @@ async fn show(
     )))
 }
 
-/// Render one Character detail as the `--json` DTO or the human block.
+/// note: Render one Character detail as the `--json` DTO or the human block.
 fn render_character_detail(resp: &CharacterDetail, json: bool) -> Result<String> {
     if json {
         return Ok(serde_json::to_string_pretty(resp)?);
@@ -1150,7 +1205,7 @@ fn render_character_detail(resp: &CharacterDetail, json: bool) -> Result<String>
     ))
 }
 
-/// Edit Character identity metadata under the caller's explicit revision CAS.
+/// note: Edit Character identity metadata under the caller's explicit revision CAS.
 ///
 /// # Errors
 ///
@@ -1190,7 +1245,7 @@ async fn edit_character(
             "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
         ));
     }
-    // The tri-state `FieldPatch` is the storage contract: an omitted member
+    // why: The tri-state `FieldPatch` is the storage contract: an omitted member
     // keeps the stored value, an explicit `--clear-*` clears it, and a supplied
     // value sets it. Persona is stored as a JSON object string.
     let persona_json = match persona {
@@ -1226,7 +1281,7 @@ async fn edit_character(
     Ok(Some(render_character_detail(&resp, json)?))
 }
 
-/// Archive one owned Character through the core's lifecycle transition.
+/// note: Archive one owned Character through the core's lifecycle transition.
 ///
 /// # Errors
 ///
@@ -1249,7 +1304,7 @@ async fn archive_character(
     .await
 }
 
-/// Restore one owned Character through the core's lifecycle transition.
+/// note: Restore one owned Character through the core's lifecycle transition.
 ///
 /// # Errors
 ///
@@ -1272,7 +1327,7 @@ async fn restore_character(
     .await
 }
 
-/// Commit one Character lifecycle transition.
+/// note: Commit one Character lifecycle transition.
 ///
 /// The one-call core transition takes the exclusive per-Character lease
 /// (busy refusal, ownership and pre-transition epoch re-read under the fence)
@@ -1302,7 +1357,7 @@ async fn transition_character(
         .transition_character(principal, request)
         .await
         .map_err(map_core_error)?;
-    // The transition response carries the core's own Character wire; the
+    // note: The transition response carries the core's own Character wire; the
     // detail envelope is the retained CLI projection of the same fields.
     let character = serde_json::to_value(resp.character)?;
     let detail = CharacterDetail {
@@ -1311,7 +1366,7 @@ async fn transition_character(
     Ok(Some(render_character_detail(&detail, json)?))
 }
 
-/// Render one binding detail as the `--json` DTO or the human line.
+/// note: Render one binding detail as the `--json` DTO or the human line.
 fn render_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<String> {
     if json {
         return Ok(serde_json::to_string_pretty(resp)?);
@@ -1328,7 +1383,7 @@ fn render_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<St
     ))
 }
 
-/// Show one owned binding (retained reads tolerate an archived Character).
+/// note: Show one owned binding (retained reads tolerate an archived Character).
 ///
 /// # Errors
 ///
@@ -1347,7 +1402,7 @@ async fn show_binding(
     Ok(Some(render_binding_detail(&resp, json)?))
 }
 
-/// Patch the optional `WorldSheet` link under the caller's explicit revision CAS.
+/// note: Patch the optional `WorldSheet` link under the caller's explicit revision CAS.
 ///
 /// # Errors
 ///
@@ -1371,7 +1426,7 @@ async fn edit_binding(
             "use either --world-sheet-entry-id or --clear-world-sheet, not both".into(),
         ));
     }
-    // Tri-state `FieldPatch`: `--clear-world-sheet` clears the nullable link,
+    // why: Tri-state `FieldPatch`: `--clear-world-sheet` clears the nullable link,
     // a supplied entry id sets it, and an omitted member keeps it.
     let sheet_patch = if clear_world_sheet {
         FieldPatch::Clear
@@ -1393,7 +1448,7 @@ async fn edit_binding(
     Ok(Some(render_binding_detail(&resp, json)?))
 }
 
-/// Add one active World binding to an owned Character.
+/// note: Add one active World binding to an owned Character.
 ///
 /// # Errors
 ///
@@ -1433,7 +1488,7 @@ async fn add_binding(
     )))
 }
 
-/// List one owned Character's bindings.
+/// note: List one owned Character's bindings.
 ///
 /// # Errors
 ///
@@ -1472,7 +1527,7 @@ async fn list_bindings(
     Ok(Some(lines.join("\n")))
 }
 
-/// Remove one active binding (the last active binding is a zero-mutation 409).
+/// note: Remove one active binding (the last active binding is a zero-mutation 409).
 ///
 /// # Errors
 ///
@@ -1511,7 +1566,7 @@ fn load_bounded_summary_text(
     Ok(summary)
 }
 
-/// Round-trip one projected value into a generated response DTO.
+/// note: Round-trip one projected value into a generated response DTO.
 ///
 /// The generated response families each own an inline item type with the same
 /// JSON shape, exactly like the daemon adapter's own handlers: the projection
@@ -1522,7 +1577,7 @@ fn wire_map<T: serde::de::DeserializeOwned>(value: impl serde::Serialize) -> Res
     Ok(serde_json::from_value(value)?)
 }
 
-/// The retained item projection of one stored knowledge record.
+/// note: The retained item projection of one stored knowledge record.
 ///
 /// Mirrors the native bridge's `knowledge_item_from_record`
 /// (`crates/nexus-core-node/src/actors.rs`): the native governance pair
@@ -1559,7 +1614,7 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> Result<Knowledge
     wire_map(serde_json::Value::Object(value))
 }
 
-/// The detail envelope's summary: the canonical authored body summary, `null`
+/// note: The detail envelope's summary: the canonical authored body summary, `null`
 /// when the stored body carries no summary member.
 fn knowledge_summary_wire_value(record: &KnowledgeEntryRecord) -> Option<&str> {
     record
@@ -1568,7 +1623,7 @@ fn knowledge_summary_wire_value(record: &KnowledgeEntryRecord) -> Option<&str> {
         .and_then(|body| body.summary.as_deref())
 }
 
-/// The retained detail projection of one stored knowledge record.
+/// note: The retained detail projection of one stored knowledge record.
 fn knowledge_detail_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeEntryDetail> {
     let item = knowledge_item_from_record(record)?;
     wire_map(serde_json::json!({
@@ -1577,7 +1632,7 @@ fn knowledge_detail_from_record(record: &KnowledgeEntryRecord) -> Result<Knowled
     }))
 }
 
-/// The retained page projection of one core knowledge page.
+/// note: The retained page projection of one core knowledge page.
 fn knowledge_page_wire_value(page: &ActorKnowledgePage) -> Result<serde_json::Value> {
     let mut items = Vec::with_capacity(page.items.len());
     for record in &page.items {
@@ -1593,7 +1648,7 @@ fn knowledge_page_wire_value(page: &ActorKnowledgePage) -> Result<serde_json::Va
     }))
 }
 
-/// Derive the opaque [`AdmittedActor`] token from the wire `actor_ref`.
+/// note: Derive the opaque [`AdmittedActor`] token from the wire `actor_ref`.
 ///
 /// Projection only: the core re-validates stored ownership inside the call, so
 /// a payload claim never widens the view, and the Creator arm never inherits
@@ -1623,7 +1678,7 @@ fn render_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<St
     ))
 }
 
-/// Durable §5: the retired World-only `--creator-only` flag is refused by
+/// note: Durable §5: the retired World-only `--creator-only` flag is refused by
 /// **presence**, `--creator-only=false` included — it is the compatibility
 /// input to refuse, never a permanent alias.
 fn refuse_legacy_creator_only_flag(present: Option<bool>) -> Result<()> {
@@ -1635,7 +1690,7 @@ fn refuse_legacy_creator_only_flag(present: Option<bool>) -> Result<()> {
     Ok(())
 }
 
-/// Durable §11.5: a World-owned create carries no summary — the server answers
+/// note: Durable §11.5: a World-owned create carries no summary — the server answers
 /// `422 invalid_input`. Refused here on flag **presence** (before the writer is
 /// opened and before the summary-file read) so the author is told the
 /// owner-scope cause and its two recoveries instead of a round-trip refusal.
@@ -1655,7 +1710,7 @@ fn refuse_world_owned_summary(
     Ok(())
 }
 
-/// Map the closed `--audience` / `--audience-character` pair onto the frozen
+/// note: Map the closed `--audience` / `--audience-character` pair onto the frozen
 /// wire object (durable §3). The author supplies intent only: the permitted
 /// identity and its holder are resolved by core admission against stored state.
 fn audience_wire(
@@ -1708,7 +1763,7 @@ fn owner_kind_wire(owner: &str) -> Result<&'static str> {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn add_knowledge(
     core: &CoreService,
     principal: &Principal,
@@ -1743,7 +1798,7 @@ async fn add_knowledge(
     if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
         body["summary"] = serde_json::Value::String(text);
     }
-    // The retained absent/null distinction is a request-shape concern owned by
+    // why: The retained absent/null distinction is a request-shape concern owned by
     // this leaf: the raw member presence drives the core's `summary_present`
     // bit, so a World-owned create carrying the member is refused by the core
     // exactly as the daemon adapter refused it.
@@ -1782,7 +1837,7 @@ async fn show_knowledge(
     )?))
 }
 
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn edit_knowledge(
     core: &CoreService,
     principal: &Principal,
@@ -1813,7 +1868,7 @@ async fn edit_knowledge(
                 .into(),
         ));
     }
-    // Tri-state `FieldPatch` is the storage contract: an omitted member keeps
+    // why: Tri-state `FieldPatch` is the storage contract: an omitted member keeps
     // the stored summary, `--clear-summary` clears it, a supplied text sets it.
     let summary_text = load_bounded_summary_text(summary, summary_file)?;
     let summary_patch = if clear_summary {
@@ -1823,7 +1878,7 @@ async fn edit_knowledge(
             .as_deref()
             .map_or(FieldPatch::Keep, FieldPatch::Set)
     };
-    // The closed `--audience` pair is admitted from the wire member exactly
+    // why: The closed `--audience` pair is admitted from the wire member exactly
     // like the native bridge: the CLI never supplies a holder id, and the core
     // resolves the permitted identity against stored state under the CAS.
     let audience_wire: Option<UpdateKnowledgeEntryRequestAudience> = audience
@@ -1910,7 +1965,7 @@ async fn list_knowledge(
     Ok(Some(lines.join("\n")))
 }
 
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn view_knowledge(
     core: &CoreService,
     principal: &Principal,
@@ -1953,7 +2008,7 @@ async fn view_knowledge(
         body["cursor"] = serde_json::Value::String(c);
     }
     let req: ViewRequest = serde_json::from_value(body)?;
-    // The read policy is chosen by the core from the admitted actor kind: a
+    // note: The read policy is chosen by the core from the admitted actor kind: a
     // Creator viewpoint is the management review, a Character viewpoint stays
     // the strict holder-filtered selection. This leaf selects neither.
     let query = ActorKnowledgeViewQuery {
@@ -1976,7 +2031,7 @@ async fn view_knowledge(
     }
     let mut lines: Vec<String> = Vec::with_capacity(resp.items.len() + 1);
     for item in &resp.items {
-        // Durable §7: the projection carries the native governance pair, never
+        // why: Durable §7: the projection carries the native governance pair, never
         // the retired `creator_only` boolean — shared is the *absence* of
         // disclosure.
         let governance = item
@@ -2005,7 +2060,7 @@ async fn view_knowledge(
     Ok(Some(lines.join("\n")))
 }
 
-// ─── Character SOUL/Memory helpers (v1.184 P3) ─────────────────────────────
+// note: Character SOUL/Memory helpers (v1.184 P3)
 //
 // Every memory arm is one core bearer operation behind the Character's
 // activity lease: capture, the retained pending reads/dismiss, the bounded
@@ -2014,7 +2069,7 @@ async fn view_knowledge(
 // re-implements queue semantics, and the writer was released before any line
 // is printed.
 
-/// The retained capture projection (the `CaptureCharacterPendingReviewResponse`).
+/// note: The retained capture projection (the `CaptureCharacterPendingReviewResponse`).
 fn render_character_capture(
     resp: &CaptureCharacterPendingReviewResponse,
     json: bool,
@@ -2028,7 +2083,7 @@ fn render_character_capture(
     ))
 }
 
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn memory_capture(
     core: &CoreService,
     principal: &Principal,
@@ -2149,7 +2204,7 @@ async fn memory_pending_dismiss(
     }
 }
 
-/// Drain one bounded batch; loops while `has_more` (cap 100 calls, stops on
+/// note: Drain one bounded batch; loops while `has_more` (cap 100 calls, stops on
 /// zero-progress) mirroring `creator memory review`.
 const CHARACTER_REVIEW_DRAIN_MAX_CALLS: u32 = 100;
 
@@ -2190,7 +2245,7 @@ async fn memory_review(
             break;
         }
         if call + 1 >= CHARACTER_REVIEW_DRAIN_MAX_CALLS {
-            // Call cap reached with more rows reported by the core.
+            // note: Call cap reached with more rows reported by the core.
             has_more = true;
             cap_exhausted = true;
             break;
@@ -2296,7 +2351,7 @@ async fn memory_promote(
     )))
 }
 
-// ─── Character ToM helpers (v1.184 P4) ─────────────────────────────────────
+// note: Character ToM helpers (v1.184 P4)
 
 fn merge_tom_json_field(body: &mut serde_json::Value, key: &str, value: Option<String>) {
     if let Some(v) = value {
@@ -2304,7 +2359,7 @@ fn merge_tom_json_field(body: &mut serde_json::Value, key: &str, value: Option<S
     }
 }
 
-/// The retained record projection (the `RecordCharacterTomResponse`).
+/// note: The retained record projection (the `RecordCharacterTomResponse`).
 fn render_tom_record(resp: &RecordCharacterTomResponse, json: bool) -> Result<String> {
     if json {
         return Ok(serde_json::to_string_pretty(resp)?);
@@ -2315,7 +2370,7 @@ fn render_tom_record(resp: &RecordCharacterTomResponse, json: bool) -> Result<St
     ))
 }
 
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn tom_record(
     core: &CoreService,
     principal: &Principal,
@@ -2364,7 +2419,7 @@ async fn tom_record(
     Ok(Some(render_tom_record(&resp, json)?))
 }
 
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
+#[allow(clippy::too_many_arguments)] // note: CLI arg mapping
 async fn tom_show(
     core: &CoreService,
     principal: &Principal,
@@ -2385,7 +2440,7 @@ async fn tom_show(
     if let Some(c) = cursor {
         body["cursor"] = serde_json::Value::String(c);
     }
-    // The core owns the page bounds and the opaque keyset cursor: this leaf
+    // why: The core owns the page bounds and the opaque keyset cursor: this leaf
     // forwards them and never re-derives the keyset order.
     let query: ListCharacterTomQuery = serde_json::from_value(body)?;
     let resp = core
@@ -2447,7 +2502,7 @@ mod holder_public_tests {
     use super::{audience_wire, refuse_legacy_creator_only_flag, refuse_world_owned_summary};
     use std::path::Path;
 
-    // v1.191 P1 T9 (durable §5/§6): the CLI request surface for the shipped
+    // note: v1.191 P1 T9 (durable §5/§6): the CLI request surface for the shipped
     // `creator character knowledge` authoring commands.
 
     #[test]
@@ -2477,7 +2532,7 @@ mod holder_public_tests {
 
     #[test]
     fn v1191_holder_public_legacy_creator_only_flag_is_refused_by_presence() {
-        // `--creator-only` and `--creator-only=false` are both refused; only
+        // why: `--creator-only` and `--creator-only=false` are both refused; only
         // an absent flag is accepted.
         for present in [Some(true), Some(false)] {
             let err = refuse_legacy_creator_only_flag(present).unwrap_err();
@@ -2489,7 +2544,7 @@ mod holder_public_tests {
         assert!(refuse_legacy_creator_only_flag(None).is_ok());
     }
 
-    /// v1.215 P1-T5 (`R-V1208-P2-06`): the World-owned create has no summary
+    /// note: v1.215 P1-T5 (`R-V1208-P2-06`): the World-owned create has no summary
     /// (§11.5), and only that owner is narrowed — the refusal keys on flag
     /// presence, so an unread `--summary-file` path is refused exactly like
     /// `--summary`.

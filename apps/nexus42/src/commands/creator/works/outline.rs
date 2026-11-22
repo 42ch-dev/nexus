@@ -43,13 +43,14 @@ use nexus_contracts::daemon_api::canvas::outline::{
 };
 use std::num::NonZeroU64;
 
-/// Client-side cap for `--content-file` reads (qc3 S-002). Mirrors the
+/// note: Client-side cap for `--content-file` reads (qc3 S-002). Mirrors the
 /// core's `OUTLINE_FILE_MAX_BYTES` (`nexus-core/src/outline.rs`) so an
 /// accidentally oversized file is rejected before the full read instead of
 /// being materialized and then refused by the core.
 const CONTENT_FILE_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 /// `creator works outline` verbs (V1.72 canvas read + structure patch).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum OutlineCommand {
     /// Show the canonical work outline + timeline (V1.72 read model).
@@ -58,11 +59,14 @@ pub enum OutlineCommand {
     /// events, foreshadows, and chapter titles. `--json` emits the DTO
     /// verbatim. The revision printed here is the `--base-revision` to pass
     /// to the patch leaves.
+    // note: CLI help must stay stable
     Show {
         /// Work reference (wrk_...) — the Work's canonical id.
+        // note: CLI help must stay stable
         work_ref: String,
         /// Emit machine-readable JSON (the `WorkOutline` DTO verbatim)
         /// instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -72,40 +76,50 @@ pub enum OutlineCommand {
     /// CAS-guarded: `--base-revision` must match the outline revision from
     /// `outline show`. On an `outline_conflict` refusal, re-read the outline
     /// and reapply with the new revision.
+    // note: CLI help must stay stable
     Patch {
         /// Work reference (wrk_...) — the Work's canonical id.
+        // note: CLI help must stay stable
         work_ref: String,
         /// Revision observed on the last canonical read (CAS). On an
         /// `outline_conflict` refusal, re-read the outline (`creator works
         /// outline show`) and reapply with the new revision.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         base_revision: u64,
         /// Structural operation: `move_chapter`, `link_event`, or
         /// `attach_to_volume`.
+        // note: CLI help must stay stable
         #[arg(long, value_enum)]
         op: OutlineOpArg,
         /// Target chapter number (required for `move_chapter` /
         /// `attach_to_volume`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         chapter: Option<u64>,
         /// Destination volume (required for `move_chapter` /
         /// `attach_to_volume`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         volume: Option<u64>,
         /// Timeline event id (required for `link_event`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "EVENT_ID")]
         event: Option<String>,
         /// Chapter the event realizes (required for `link_event`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         target_chapter: Option<u64>,
         /// Emit machine-readable JSON (the `OutlinePatchResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// `creator works chapter` verbs (V1.72 outline-node patch).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ChapterCommand {
     /// Patch a chapter's outline-node metadata (title, slug, word counts,
@@ -119,54 +133,68 @@ pub enum ChapterCommand {
     /// CAS-guarded: `--base-revision` must match the outline revision from
     /// `outline show`. On an `outline_conflict` refusal, re-read the outline
     /// and reapply with the new revision.
+    // note: CLI help must stay stable
     Patch {
         /// Work reference (wrk_...) — the Work's canonical id.
+        // note: CLI help must stay stable
         work_ref: String,
         /// Chapter number (1-based) — the outline node to patch.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         n: u64,
         /// Revision observed on the last canonical read (CAS). On an
         /// `outline_conflict` refusal, re-read the outline (`creator works
         /// outline show`) and reapply with the new revision.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         base_revision: u64,
         /// Display title for the chapter (UI-facing; persisted in the work
         /// outline frontmatter).
+        // note: CLI help must stay stable
         #[arg(long)]
         title: Option<String>,
         /// Filename slug for the chapter (kebab-case, 1..=80 chars, unique
         /// within the work).
+        // note: CLI help must stay stable
         #[arg(long)]
         slug: Option<String>,
         /// Planned word count for the chapter.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         planned_word_count: Option<u64>,
         /// Actual word count for the chapter, if known.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         actual_word_count: Option<u64>,
         /// Volume binding for the chapter.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         volume: Option<u64>,
         /// Lifecycle status: `not_started`, `outlined`, `draft`,
         /// `finalized`, or `published` (published is read/protected).
+        // note: CLI help must stay stable
         #[arg(long, value_enum)]
         status: Option<ChapterStatusArg>,
         /// Chapter outline prose (rich-text outline content). Persisted to
         /// the chapter's `outline_path` markdown file under the same
         /// `outline_revision` CAS; never touches `body_path`.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "TEXT", conflicts_with = "content_file")]
         content: Option<String>,
         /// Read `--content` from a file instead of the flag value.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "PATH", conflicts_with = "content")]
         content_file: Option<String>,
         /// Emit machine-readable JSON (the `OutlinePatchResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// `creator works timeline` verbs (V1.72 canvas patch).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum TimelineCommand {
     /// Patch the work timeline (V1.72 canvas).
@@ -174,98 +202,125 @@ pub enum TimelineCommand {
     /// CAS-guarded: `--base-revision` must match the outline revision from
     /// `outline show`. On an `outline_conflict` refusal, re-read the outline
     /// and reapply with the new revision.
+    // note: CLI help must stay stable
     Patch {
         /// Work reference (wrk_...) — the Work's canonical id.
+        // note: CLI help must stay stable
         work_ref: String,
         /// Revision observed on the last canonical read (CAS). On an
         /// `outline_conflict` refusal, re-read the outline (`creator works
         /// outline show`) and reapply with the new revision.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         base_revision: u64,
         /// Timeline operation: `add_event`, `remove_event`,
         /// `attach_event_to_chapter`, `link_foreshadow`, or
         /// `unlink_foreshadow`.
+        // note: CLI help must stay stable
         #[arg(long, value_enum)]
         op: TimelineOpArg,
         /// Identifier of an existing event (required for `remove_event`,
         /// `attach_event_to_chapter`, `link_foreshadow`,
         /// `unlink_foreshadow`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "EVENT_ID")]
         event: Option<String>,
         /// Human-facing title for a new event (required for `add_event`).
+        // note: CLI help must stay stable
         #[arg(long)]
         title: Option<String>,
         /// Optional longer description for a new event (`add_event`).
+        // note: CLI help must stay stable
         #[arg(long)]
         description: Option<String>,
         /// Chapter number the event realizes (`add_event`,
         /// `attach_event_to_chapter`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         realizes_chapter: Option<u64>,
         /// Chapter number the event attaches to (`attach_event_to_chapter`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         target_chapter: Option<u64>,
         /// Event the source event foreshadows / stops foreshadowing
         /// (`link_foreshadow`, `unlink_foreshadow`).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "EVENT_ID")]
         foreshadows_event: Option<String>,
         /// Emit machine-readable JSON (the `OutlinePatchResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// `--op` value for outline structure patches (V1.72 wire vocabulary).
+// note: CLI help must stay stable
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OutlineOpArg {
     /// Move a chapter to a different volume.
+    // note: CLI help must stay stable
     #[value(name = "move_chapter")]
     MoveChapter,
     /// Link a timeline event to a realizing chapter.
+    // note: CLI help must stay stable
     #[value(name = "link_event")]
     LinkEvent,
     /// Attach a chapter to a volume.
+    // note: CLI help must stay stable
     #[value(name = "attach_to_volume")]
     AttachToVolume,
 }
 
 /// `--op` value for timeline patches (V1.72 wire vocabulary).
+// note: CLI help must stay stable
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum TimelineOpArg {
     /// Add a new timeline event.
+    // note: CLI help must stay stable
     #[value(name = "add_event")]
     AddEvent,
     /// Remove an existing timeline event.
+    // note: CLI help must stay stable
     #[value(name = "remove_event")]
     RemoveEvent,
     /// Attach an existing event to a chapter.
+    // note: CLI help must stay stable
     #[value(name = "attach_event_to_chapter")]
     AttachEventToChapter,
     /// Link a foreshadow edge (source → target).
+    // note: CLI help must stay stable
     #[value(name = "link_foreshadow")]
     LinkForeshadow,
     /// Remove a foreshadow edge.
+    // note: CLI help must stay stable
     #[value(name = "unlink_foreshadow")]
     UnlinkForeshadow,
 }
 
 /// `--status` value for chapter patches (V1.72 closed lifecycle vocabulary).
+// note: CLI help must stay stable
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum ChapterStatusArg {
     /// Not started.
+    // note: CLI help must stay stable
     #[value(name = "not_started")]
     NotStarted,
     /// Outlined.
+    // note: CLI help must stay stable
     #[value(name = "outlined")]
     Outlined,
     /// Draft.
+    // note: CLI help must stay stable
     #[value(name = "draft")]
     Draft,
     /// Finalized.
+    // note: CLI help must stay stable
     #[value(name = "finalized")]
     Finalized,
     /// Published (read/protected in V1.72 patch routes).
+    // note: CLI help must stay stable
     #[value(name = "published")]
     Published,
 }
@@ -304,7 +359,7 @@ impl ChapterStatusArg {
     }
 }
 
-/// Run a `creator works outline|chapter|timeline` subcommand.
+/// note: Run a `creator works outline|chapter|timeline` subcommand.
 ///
 /// # Errors
 ///
@@ -342,7 +397,7 @@ pub async fn run(cmd: OutlineCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Run a `creator works chapter` subcommand.
+/// note: Run a `creator works chapter` subcommand.
 ///
 /// # Errors
 ///
@@ -387,7 +442,7 @@ pub async fn run_chapter(cmd: ChapterCommand, config: &CliConfig) -> Result<()> 
     }
 }
 
-/// Run a `creator works timeline` subcommand.
+/// note: Run a `creator works timeline` subcommand.
 ///
 /// # Errors
 ///
@@ -428,7 +483,7 @@ pub async fn run_timeline(cmd: TimelineCommand, config: &CliConfig) -> Result<()
     }
 }
 
-/// Parse a 1-based chapter/volume number into the canvas `NonZeroU64` key.
+/// note: Parse a 1-based chapter/volume number into the canvas `NonZeroU64` key.
 ///
 /// # Errors
 ///
@@ -438,7 +493,7 @@ fn parse_positive(n: u64, flag: &str) -> Result<NonZeroU64> {
     NonZeroU64::new(n).ok_or_else(|| CliError::Other(format!("{flag} must be >= 1")))
 }
 
-/// `creator works outline show <work_ref>` — read the canonical work outline
+/// note: `creator works outline show <work_ref>` — read the canonical work outline
 /// + timeline (`CoreService::work_outline`).
 ///
 /// # Errors
@@ -465,7 +520,7 @@ async fn outline_show(config: &CliConfig, work_ref: &str, json: bool) -> Result<
     Ok(())
 }
 
-/// `creator works outline patch <work_ref> --base-revision N --op <op> …` —
+/// note: `creator works outline patch <work_ref> --base-revision N --op <op> …` —
 /// patch the outline structure (`CoreService::patch_outline_structure`).
 ///
 /// # Errors
@@ -474,7 +529,7 @@ async fn outline_show(config: &CliConfig, work_ref: &str, json: bool) -> Result<
 /// `--op` is missing, the mapped core refusal ([`map_core_error`]) for the
 /// `outline_conflict` CAS family, an unknown Work or a rejected patch, plus
 /// any cleanup refusal from [`finish_direct`].
-#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
+#[allow(clippy::too_many_arguments)] // note: CLI param plumbing — house pattern
 async fn outline_patch(
     config: &CliConfig,
     work_ref: &str,
@@ -486,7 +541,7 @@ async fn outline_patch(
     target_chapter: Option<u64>,
     json: bool,
 ) -> Result<()> {
-    // CLI-side required-flag checks mirror the core's field errors so
+    // why: CLI-side required-flag checks mirror the core's field errors so
     // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         OutlineOpArg::MoveChapter => {
@@ -538,7 +593,7 @@ async fn outline_patch(
         target_chapter_id: target_chapter
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
-        // Scene/beat authoring members are not exposed through the CLI yet;
+        // why: Scene/beat authoring members are not exposed through the CLI yet;
         // the transport still requires the struct literal to name them.
         scene_id: None,
         beat_id: None,
@@ -552,7 +607,7 @@ async fn outline_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_outline_structure(
                 &principal,
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // note: `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "outline",
                 work_ref.to_string(),
@@ -573,7 +628,7 @@ async fn outline_patch(
     Ok(())
 }
 
-/// `creator works chapter patch <work_ref> --n <n> --base-revision N …` —
+/// note: `creator works chapter patch <work_ref> --n <n> --base-revision N …` —
 /// patch a chapter's outline-node metadata
 /// (`CoreService::patch_outline_chapter` — the outline **node** patch, NOT
 /// the V1.65 chapter-content patch).
@@ -585,7 +640,7 @@ async fn outline_patch(
 /// ([`map_core_error`]) for the `outline_conflict` CAS family, an unknown
 /// Work or chapter, or a rejected patch, plus any cleanup refusal from
 /// [`finish_direct`].
-#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
+#[allow(clippy::too_many_arguments)] // note: CLI param plumbing — house pattern
 async fn chapter_patch(
     config: &CliConfig,
     work_ref: &str,
@@ -602,7 +657,7 @@ async fn chapter_patch(
     json: bool,
 ) -> Result<()> {
     let chapter = parse_positive(n, "--n")?;
-    // `--content` / `--content-file` are `conflicts_with` each other at clap
+    // why: `--content` / `--content-file` are `conflicts_with` each other at clap
     // parse time, so at most one is set here.
     let content = if let Some(text) = content {
         Some(text.to_string())
@@ -652,7 +707,7 @@ async fn chapter_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_outline_chapter(
                 &principal,
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // note: `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "chapter",
                 work_ref.to_string(),
@@ -674,7 +729,7 @@ async fn chapter_patch(
     Ok(())
 }
 
-/// `creator works timeline patch <work_ref> --base-revision N --op <op> …` —
+/// note: `creator works timeline patch <work_ref> --base-revision N --op <op> …` —
 /// patch the work timeline (`CoreService::patch_timeline_event`).
 ///
 /// # Errors
@@ -683,7 +738,7 @@ async fn chapter_patch(
 /// `--op` is missing, the mapped core refusal ([`map_core_error`]) for the
 /// `outline_conflict` CAS family, an unknown Work or event, or a rejected
 /// patch, plus any cleanup refusal from [`finish_direct`].
-#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
+#[allow(clippy::too_many_arguments)] // note: CLI param plumbing — house pattern
 async fn timeline_patch(
     config: &CliConfig,
     work_ref: &str,
@@ -697,7 +752,7 @@ async fn timeline_patch(
     foreshadows_event: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    // CLI-side required-flag checks mirror the core's field errors so
+    // why: CLI-side required-flag checks mirror the core's field errors so
     // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         TimelineOpArg::AddEvent => {
@@ -773,7 +828,7 @@ async fn timeline_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_timeline_event(
                 &principal,
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // note: `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "timeline",
                 work_ref.to_string(),
@@ -794,7 +849,7 @@ async fn timeline_patch(
     Ok(())
 }
 
-/// Render a `WorkOutline` for human output.
+/// note: Render a `WorkOutline` for human output.
 fn render_work_outline(outline: &WorkOutline) {
     println!(
         "Outline for {} (revision {})",
@@ -814,7 +869,7 @@ fn render_work_outline(outline: &WorkOutline) {
     println!("  updated_at: {}", outline.updated_at);
 }
 
-/// `Volume N`, followed by `: <label>` only when the volume has a non-blank label.
+/// note: `Volume N`, followed by `: <label>` only when the volume has a non-blank label.
 fn volume_heading(vol: &WorkOutlineVolumesItem) -> String {
     let id = vol.volume_id.get();
     match vol.label.trim() {
@@ -823,7 +878,7 @@ fn volume_heading(vol: &WorkOutlineVolumesItem) -> String {
     }
 }
 
-/// Render an `OutlinePatchResponse` for human output.
+/// note: Render an `OutlinePatchResponse` for human output.
 fn render_patch_response(resp: &OutlinePatchResponse) {
     println!("  new_revision: {}", resp.new_revision.get());
     for effect in &resp.side_effects {

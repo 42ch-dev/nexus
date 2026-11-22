@@ -8,22 +8,23 @@
 //! the remaining execution entrances — `works intake`, `works resume-chain` and
 //! the hard-reject `works start` / `works create` stubs — together with the
 //! incomplete Creator runner; every arm below is a retained atomic operation.
+// note: every arm below is a retained atomic operation, not a runner entrance.
 
 use crate::errors::Result;
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-// v1.193 P0-T7: every retained Work arm — selection, pool, inspiration,
+// note: v1.193 P0-T7: every retained Work arm — selection, pool, inspiration,
 // governance and findings — runs on the typed core seam ([`crate::core`]).
 use crate::core::{finish_direct, map_core_error, open_direct_core};
-// V1.42 P-last (R-V141P0-06): completion-lock file path check
+// note: V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
-// Schema-owned wire shape for the stale enrichment of `works status --json`
+// note: Schema-owned wire shape for the stale enrichment of `works status --json`
 // (the core report is not a wire type).
 use nexus_contracts::daemon_api::findings::{
     StaleFindingEntry as StaleFindingWire, StaleFindingsResponse as StaleFindingsWire,
 };
-// Schema-owned wire shapes for the `--json` output of the pool reads; the core
+// note: Schema-owned wire shapes for the `--json` output of the pool reads; the core
 // carriers are not wire types (they still hold the stored `creator_id`).
 use nexus_contracts::{
     AppendInspirationRequest, ListWorksQuery, ReleaseCompletionLockRequest,
@@ -41,16 +42,20 @@ pub mod cron;
 pub mod outline;
 
 /// Work management subcommands (DF-60 §6.2H).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum WorksCommand {
     /// List all Works for the active creator.
     ///
     /// Migrated from `creator run list` (V1.41).
+    // note: CLI help must stay stable
     List {
         /// Filter by status
+        // note: CLI help must stay stable
         #[arg(long)]
         status: Option<String>,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -58,10 +63,13 @@ pub enum WorksCommand {
     ///
     /// When `<work_id>` is omitted, resolves the pool `active` Work.
     /// Migrated from `creator run status` (V1.41).
+    // note: CLI help must stay stable
     Status {
         /// Work ID (wrk_...). Omit to use pool active Work.
+        // note: CLI help must stay stable
         work_id: Option<String>,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -71,22 +79,26 @@ pub enum WorksCommand {
     /// optional `work_id` — `status`, `inspire`, `reopen`,
     /// `reconcile-chapters`, `findings list`, `rules reset` — fall back to
     /// this Work when it is omitted.
+    // note: CLI help must stay stable
     Use {
         /// Work ID (wrk_...) to set as active
+        // note: CLI help must stay stable
         work_id: String,
     },
     /// Manage the completion lock for a Work (DF-60 §3.2).
+    // note: CLI help must stay stable
     CompletionLock {
         #[command(subcommand)]
         command: CompletionLockCommand,
     },
     /// Manage the selection pool — promote, archive, list entries (DF-61).
+    // note: CLI help must stay stable
     Pool {
         #[command(subcommand)]
         action: PoolAction,
     },
 
-    // ── V1.45 P2: atomic Work operations migrated from `creator run` ──
+    // note: V1.45 P2: atomic Work operations migrated from `creator run`
     /// Append inspiration / direction to an existing Work (V1.45 P2).
     ///
     /// Pure side-input lane: POSTs an inspiration note to the Work's
@@ -94,11 +106,14 @@ pub enum WorksCommand {
     /// Migrated from `creator run continue` (drops the unimplemented `--preset`).
     Inspire {
         /// Work ID (wrk_...). Omit to use pool active Work.
+        // note: CLI help must stay stable
         work_id: Option<String>,
         /// New inspiration / direction note
+        // note: CLI help must stay stable
         #[arg(long)]
         note: String,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -111,13 +126,17 @@ pub enum WorksCommand {
     /// the required `--reason` is recorded. A Work that is not
     /// completion-locked is refused.
     /// Migrated from `creator run resume --reopen`.
+    // note: CLI help must stay stable
     Reopen {
         /// Work ID (wrk_...). Omit to use pool active Work.
+        // note: CLI help must stay stable
         work_id: Option<String>,
         /// Audit reason for reopening (required, audit-logged)
+        // note: CLI help must stay stable
         #[arg(long)]
         reason: String,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -131,13 +150,16 @@ pub enum WorksCommand {
     /// V1.49 P2 (R-V148P4-W2): `--dry-run` previews the `ReconcileReport`
     /// without filesystem/DB writes; `--yes` skips the confirmation prompt
     /// on the mutating path (mirrors `works rules reset` safety flags).
+    // note: CLI help must stay stable
     ReconcileChapters {
         /// Work ID (wrk_...). Omit to use pool active Work.
+        // note: CLI help must stay stable
         work_id: Option<String>,
         /// Preview the reconcile as a `ReconcileReport` without writing.
         ///
         /// No filesystem or DB rows are modified, no runtime lock is acquired,
         /// and no confirmation prompt is shown. Takes precedence over `--yes`.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         dry_run: bool,
         /// Skip the confirmation prompt and mutate immediately.
@@ -147,14 +169,16 @@ pub enum WorksCommand {
         /// frontmatter. Pass `--yes` (or `-y`) to proceed non-interactively;
         /// use `--dry-run` to preview the changes without writing. Mirrors
         /// `apt-get -y` / `pacman --noconfirm`.
+        // note: CLI help must stay stable
         #[arg(long = "yes", short = 'y', default_value_t = false)]
         yes: bool,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
-    // ── V1.48 P2: findings + rules (Layer 2 AGENTS.md) ──────────────
+    // note: V1.48 P2: findings + rules (Layer 2 AGENTS.md)
     /// Finding-level operations (accept rule suggestions, future prune / …).
     ///
     /// V1.48 P2 introduces the `accept` subcommand which appends a finding's
@@ -168,12 +192,13 @@ pub enum WorksCommand {
     ///
     /// V1.48 P2 introduces the `reset` subcommand which restores the
     /// default `AGENTS.md` scaffold.
+    // note: CLI help must stay stable
     Rules {
         #[command(subcommand)]
         command: RulesCommand,
     },
 
-    // ── V1.50 T-A P0: per-Work cron configuration ──────────────────────
+    // note: V1.50 T-A P0: per-Work cron configuration
     /// Manage per-Work cron configuration for novel-writing staggering
     /// (V1.50 §3). Foundation: set/show/list the `schedule_json` column.
     Cron {
@@ -181,7 +206,7 @@ pub enum WorksCommand {
         command: cron::CronCommand,
     },
 
-    // ── V1.50 T-A P3: per-Work auto-chronology ─────────────────────────
+    // note: V1.50 T-A P3: per-Work auto-chronology
     /// Manage per-Work auto-chronology (volume auto-advance on finish)
     /// (V1.50 §2.2). `set` toggles the opt-in flag; `show` renders state;
     /// `advance` manually overrides to a target volume.
@@ -189,7 +214,7 @@ pub enum WorksCommand {
         #[command(subcommand)]
         command: chronology::ChronologyCommand,
     },
-    // ── V1.175 P1 Task 3: outline/chapter/timeline patch leaves (group 2) ──
+    // note: V1.175 P1 Task 3: outline/chapter/timeline patch leaves (group 2)
     /// Show / patch the work outline (V1.72 canvas read + structure patch).
     ///
     /// Thin daemon-HTTP leaves over the existing canvas routes (AR-84 group
@@ -209,6 +234,7 @@ pub enum WorksCommand {
     /// (different DTO family, not covered here). CAS-guarded with
     /// `--base-revision`; a stale revision returns 409 `outline_conflict`
     /// (re-read the outline and reapply).
+    // note: CLI help must stay stable
     Chapter {
         #[command(subcommand)]
         command: outline::ChapterCommand,
@@ -218,6 +244,7 @@ pub enum WorksCommand {
     ///
     /// CAS-guarded with `--base-revision`; a stale revision returns 409
     /// `outline_conflict` (re-read the outline and reapply).
+    // note: CLI help must stay stable
     Timeline {
         #[command(subcommand)]
         command: outline::TimelineCommand,
@@ -225,6 +252,7 @@ pub enum WorksCommand {
 }
 
 /// Completion lock subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum CompletionLockCommand {
     /// Release the Work's completion lock and reopen it for further writing.
@@ -233,16 +261,20 @@ pub enum CompletionLockCommand {
     /// `novel_completion_status` becomes `reopened` and the derived
     /// `.completion-lock.json` is removed. `creator works reopen --reason "…"`
     /// runs the same release with an explicit audit reason.
+    // note: CLI help must stay stable
     Release {
         /// Work ID (wrk_...) to release the completion lock for
+        // note: CLI help must stay stable
         work_id: String,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// Findings subcommands (V1.48 P2).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum FindingsCommand {
     /// Accept a finding's `rule_suggestion` and append it to the Work's
@@ -253,10 +285,13 @@ pub enum FindingsCommand {
     /// under `## Accepted rule suggestions` in
     /// `Works/<work_ref>/AGENTS.md` (idempotent on `finding_id`), and
     /// marks the finding `status=resolved`.
+    // note: CLI help must stay stable
     Accept {
         /// Finding ID (fnd_...) to accept.
+        // note: CLI help must stay stable
         finding_id: String,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -266,35 +301,43 @@ pub enum FindingsCommand {
     /// Deletes `resolved` findings whose `updated_at` is older than the
     /// retention window (default 90 days). `open` and `wont_fix` findings are
     /// never touched. Pass `--dry-run` to preview the count without deleting.
+    // note: CLI help must stay stable
     Prune {
         /// Retention window in days (default 90 = `RETENTION_DEFAULT_DAYS`).
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = nexus_local_db::RETENTION_DEFAULT_DAYS)]
         older_than_days: i64,
         /// Preview the count that WOULD be pruned without deleting.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         dry_run: bool,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
-    // ── V1.175 P1 Task 4: findings triage leaves (group 8, AR-87) ──────
+    // note: V1.175 P1 Task 4: findings triage leaves (group 8, AR-87)
     /// List findings for a Work (`GET /v1/daemon/works/:work_id/findings`).
     ///
     /// Optional `--status` / `--severity` filters. `--json` emits the
     /// `ListFindingsResponse` DTO verbatim.
     List {
         /// Work reference (wrk_...). Omit to use pool active Work.
+        // note: CLI help must stay stable
         work_id: Option<String>,
         /// Filter by status (single value or comma-separated list, e.g.
         /// `open,triaged`).
+        // note: CLI help must stay stable
         #[arg(long)]
         status: Option<String>,
         /// Filter by severity (`info`, `minor`, `major`, `blocker`).
+        // note: CLI help must stay stable
         #[arg(long)]
         severity: Option<String>,
         /// Emit machine-readable JSON (the `ListFindingsResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -313,18 +356,23 @@ pub enum FindingsCommand {
     /// `invalid_transition` naming `from → to`.
     SetStatus {
         /// Finding ID (fnd_...) to update.
+        // note: CLI help must stay stable
         finding_id: String,
         /// Work reference (wrk_...) the finding belongs to.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "WORK_REF")]
         work: String,
         /// New status (closed lifecycle vocabulary above).
+        // note: CLI help must stay stable
         #[arg(long, value_enum)]
         status: FindingStatusArg,
         /// New routing hint (`write`, `brainstorm`, `none`, `master`).
+        // note: CLI help must stay stable
         #[arg(long)]
         target_executor: Option<String>,
         /// Emit machine-readable JSON (the `FindingDetailResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -332,22 +380,25 @@ pub enum FindingsCommand {
 
 /// `--status` value for `creator works findings set-status` (V1.49 F6
 /// closed lifecycle vocabulary, AR-87).
+// note: CLI help must stay stable
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum FindingStatusArg {
     Open,
     Triaged,
     /// In review.
+    // note: CLI help must stay stable
     #[value(name = "in_review")]
     InReview,
     Resolved,
     /// Won't fix.
+    // note: CLI help must stay stable
     #[value(name = "wont_fix")]
     WontFix,
     Duplicate,
 }
 
 impl FindingStatusArg {
-    /// Wire token (`snake_case`) for the PATCH body.
+    /// note: Wire token (`snake_case`) for the PATCH body.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -362,6 +413,7 @@ impl FindingStatusArg {
 }
 
 /// Layer 2 rules subcommands (V1.48 P2).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum RulesCommand {
     /// Reset the Work's `AGENTS.md` to the default scaffold (V1.48 P2,
@@ -380,13 +432,16 @@ pub enum RulesCommand {
     ///   immediately, intended for scripted use (matches the `apt-get -y` /
     ///   `pacman --noconfirm` convention).
     /// - `--dry-run` takes precedence over `--yes`.
+    // note: CLI help must stay stable
     Reset {
         /// Work ID (wrk_...). Omit to use pool active Work.
+        // note: CLI help must stay stable
         work_id: Option<String>,
         /// Preview the reset as a unified diff without writing.
         ///
         /// No file is modified and no confirmation prompt is shown. Takes
         /// precedence over `--yes`.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         dry_run: bool,
         /// Skip the confirmation prompt and write immediately.
@@ -394,40 +449,52 @@ pub enum RulesCommand {
         /// By default the reset prints a diff and asks for confirmation before
         /// overwriting `AGENTS.md`. Pass `--yes` (or `-y`) to proceed
         /// non-interactively. Mirrors `apt-get -y` / `pacman --noconfirm`.
+        // note: CLI help must stay stable
         #[arg(long = "yes", short = 'y', default_value_t = false)]
         yes: bool,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// Selection pool subcommands (DF-61).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum PoolAction {
     /// List pool entries for the active creator.
+    // note: CLI help must stay stable
     List {
         /// Filter by status (active, queued, completed, archived)
+        // note: CLI help must stay stable
         #[arg(long)]
         status: Option<String>,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Promote a Work to `active` in the pool (demotes prior active).
+    // note: CLI help must stay stable
     Promote {
         /// Work ID (wrk_...) to promote
+        // note: CLI help must stay stable
         work_id: String,
         /// Also set as CLI default via `works use`
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         set_default: bool,
     },
     /// Archive a pool entry.
+    // note: CLI help must stay stable
     Archive {
         /// Pool entry ID (npe_...) to archive
+        // note: CLI help must stay stable
         entry_id: String,
     },
     /// Manage the inspiration pool (DF-61 §4).
+    // note: CLI help must stay stable
     Inspiration {
         #[command(subcommand)]
         action: InspirationAction,
@@ -438,52 +505,65 @@ pub enum PoolAction {
 ///
 /// Pool-level inspiration items (DB SSOT in `inspiration_items` table);
 /// distinct from per-Work `works.inspiration_log`.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum InspirationAction {
     /// Add a new inspiration item (creates MD scaffold + DB row).
     ///
     /// Pool-level item; distinct from per-Work `works.inspiration_log`.
+    // note: CLI help must stay stable
     Add {
         /// Title for the inspiration item
+        // note: CLI help must stay stable
         title: String,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// List inspiration items.
     ///
     /// Pool-level items; distinct from per-Work `works.inspiration_log`.
+    // note: CLI help must stay stable
     List {
         /// Filter by status (idea, promoted, archived)
+        // note: CLI help must stay stable
         #[arg(long)]
         status: Option<String>,
         /// Emit machine-readable JSON instead of human text
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Promote an inspiration item — creates a Work + pool row.
     ///
     /// Pool-level item; distinct from per-Work `works.inspiration_log`.
+    // note: CLI help must stay stable
     Promote {
         /// Inspiration item ID (npi_...) to promote
+        // note: CLI help must stay stable
         item_id: String,
         /// Optional idea override for the new Work's ``initial_idea``
+        // note: CLI help must stay stable
         #[arg(long)]
         idea: Option<String>,
         /// Also set as CLI default via `works use`
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         set_default: bool,
     },
     /// Archive an inspiration item.
     ///
     /// Pool-level item; distinct from per-Work `works.inspiration_log`.
+    // note: CLI help must stay stable
     Archive {
         /// Inspiration item ID (npi_...) to archive
+        // note: CLI help must stay stable
         item_id: String,
     },
 }
 
-/// Dispatch `creator works` subcommands.
+/// note: Dispatch `creator works` subcommands.
 ///
 /// # Errors
 ///
@@ -528,7 +608,7 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Handle `creator works list` — the active creator's Works page.
+/// note: Handle `creator works list` — the active creator's Works page.
 ///
 /// Reads the typed core producer ([`CoreService::list_works`]) with the
 /// retained query defaults: only the `--status` filter is set, so the core's
@@ -585,7 +665,7 @@ async fn handle_list(config: &CliConfig, status: Option<String>, json: bool) -> 
     Ok(())
 }
 
-/// Resolve the omitted Work through a two-step selection over the core.
+/// note: Resolve the omitted Work through a two-step selection over the core.
 ///
 /// Every arm that accepts an omitted `<work_id>` (status, inspire, reopen,
 /// reconcile-chapters, and the findings/rules leaves in
@@ -650,7 +730,7 @@ pub(crate) async fn active_work_id_core(
         })
 }
 
-// Migrated from run.rs — preserved status display logic with DF-60 extensions.
+// why: Migrated from run.rs — preserved status display logic with DF-60 extensions.
 //
 // v1.193 P0-T7: the Work *and* its findings/stale enrichment come from the
 // typed core (`get_work` plus the findings family, with the active-Work
@@ -681,7 +761,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
     .await;
     let (work, open_findings, stale) = finish_direct(&core, outcome).await?;
 
-    // `WorkDetails` derives `Serialize` as the retained tool/Work wire shape
+    // note: `WorkDetails` derives `Serialize` as the retained tool/Work wire shape
     // (it replaced the daemon's field-for-field copy), and every reader below
     // treats an absent nullable key and an explicit `null` identically.
     let resolved_id = work.work_id.clone();
@@ -699,7 +779,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
         };
         let mut output = enrich_status_json(resp, findings, stale.as_ref());
 
-        // V1.51 T-B P0: add lock_holder field (best-effort, reads from filesystem).
+        // note: V1.51 T-B P0: add lock_holder field (best-effort, reads from filesystem).
         if let Some(lock_holder) = read_lock_holder_json(&output) {
             if let Some(obj) = output.as_object_mut() {
                 obj.insert("lock_holder".to_string(), lock_holder);
@@ -708,7 +788,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
 
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        // V1.39 P4 T3: stale findings banner — best-effort, never
+        // why: V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
         //
         // R-V146P0-QC3-S3: rendered from the enrichment read taken inside the
@@ -757,7 +837,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
             .unwrap_or(0);
         let chapters = resp.get("chapters").and_then(|v| v.as_array());
 
-        // V1.38 P0 (T8): per-chapter status UX per spec §8.1.
+        // note: V1.38 P0 (T8): per-chapter status UX per spec §8.1.
         // For novel profile works, show chapter-centric output.
         if let (Some("novel"), Some(ch_list)) = (work_profile, chapters) {
             let finalized_count = ch_list
@@ -768,27 +848,26 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
 
             let profile_tag = " (novel)".to_string();
 
-            // V1.43 P2 (T2): the open-findings summary for spec §4 row 3 comes
+            // note: V1.43 P2 (T2): the open-findings summary for spec §4 row 3 comes
             // from the enrichment read taken inside the admitted writer.
             if work_status == "completed" {
                 let updated_at = resp
                     .get("updated_at")
                     .and_then(|v| v.as_str())
                     .unwrap_or("(unknown)");
-                // V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
+                // note: V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
                 println!("═══════════════════════════════════════════════════════");
                 println!("  \"{title}\" — Work {resolved_id}{profile_tag}");
                 println!("  COMPLETED at {updated_at}");
                 println!("  {total}/{total} chapters finalized.");
                 println!("  No further novel-writing schedules will be enqueued.");
                 println!();
-                // V1.43 P2: findings summary in completed view (spec §4 row 3).
+                // note: V1.43 P2: findings summary in completed view (spec §4 row 3).
                 print_findings_summary(&open_findings);
-                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
+                // note: V1.47 P1: normalize user-facing copy — spec name, not repo path.
                 println!("  This Work is complete; see novel-author-experience §3");
                 println!("═══════════════════════════════════════════════════════");
             } else {
-                // Header
                 println!("Work: {resolved_id} — {title}{profile_tag}");
                 println!("work_ref: {work_ref}");
                 println!("intake: {intake_status}");
@@ -796,7 +875,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("current_chapter: {current_chapter}");
                 println!("total_planned_chapters: {total_planned}");
 
-                // V1.39 T7: auto-chain checkpoint fields
+                // note: V1.39 T7: auto-chain checkpoint fields
                 let auto_chain = resp
                     .get("auto_chain_enabled")
                     .and_then(serde_json::Value::as_bool)
@@ -813,13 +892,13 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("auto_chain_enabled: {auto_chain}");
                 println!("driver_schedule_id: {driver}");
                 if interrupted {
-                    // v1.193 P2-T1: the `creator works resume-chain` entrance was
+                    // note: v1.193 P2-T1: the `creator works resume-chain` entrance was
                     // removed with the incomplete Creator runner; the flag stays
                     // reported, but no CLI remediation command is advertised.
                     println!("auto_chain_interrupted: true");
                 }
 
-                // V1.41: completion lock fields (DF-60 §6.2H)
+                // note: V1.41: completion lock fields (DF-60 §6.2H)
                 if let Some(completion_status) =
                     resp.get("novel_completion_status").and_then(|v| v.as_str())
                 {
@@ -827,7 +906,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 }
                 if let Some(locked_at) = resp.get("completion_locked_at").and_then(|v| v.as_str()) {
                     println!("completion_locked_at: {locked_at}");
-                    // V1.42 P-last (R-V141P0-06): missing-file hint.
+                    // note: V1.42 P-last (R-V141P0-06): missing-file hint.
                     print_completion_lock_hint(work_ref, &resolved_id);
                 }
                 if let Some(lock_holder) = resp.get("runtime_lock_holder").and_then(|v| v.as_str())
@@ -835,7 +914,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                     println!("runtime_lock_holder: {lock_holder}");
                 }
 
-                // V1.43 P2: findings summary (spec §4 row 3).
+                // note: V1.43 P2: findings summary (spec §4 row 3).
                 print_findings_summary(&open_findings);
 
                 // Per-chapter table
@@ -844,13 +923,13 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 print_chapter_table(ch_list, &resolved_id);
             }
         } else {
-            // Non-novel or generic work display
+            // note: Non-novel or generic work display
             println!("Work: {resolved_id} — {title}");
             println!("status: {work_status}");
             println!("work_ref: {work_ref}");
             println!("intake: {intake_status}");
 
-            // Show all remaining key-value pairs
+            // note: Show all remaining key-value pairs
             let skip_keys = [
                 "work_id",
                 "title",
@@ -883,7 +962,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
     Ok(())
 }
 
-/// Handle `creator works use` — set the pool `active` row for a Work (DF-60 §1.1).
+/// note: Handle `creator works use` — set the pool `active` row for a Work (DF-60 §1.1).
 ///
 /// The Work is read first so an unknown id is refused before any write (the
 /// retired adapter's GET-then-POST order), then
@@ -915,9 +994,9 @@ async fn handle_use(config: &CliConfig, work_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── V1.45 P2: atomic Work operations ──────────────────────────────────
+// note: V1.45 P2: atomic Work operations
 
-/// Handle `creator works inspire` — append an inspiration note to the Work's
+/// note: Handle `creator works inspire` — append an inspiration note to the Work's
 /// own `inspiration_log` (V1.45 P2).
 ///
 /// Pure side-input: [`CoreService::append_work_inspiration`] appends to the
@@ -948,7 +1027,7 @@ async fn handle_inspire(
             .append_work_inspiration(
                 &principal,
                 resolved_id.clone(),
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // note: `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "inspire",
                 AppendInspirationRequest {
@@ -971,7 +1050,7 @@ async fn handle_inspire(
     Ok(())
 }
 
-/// Handle `creator works reopen` — reopen a completed Work (V1.45 P2).
+/// note: Handle `creator works reopen` — reopen a completed Work (V1.45 P2).
 ///
 /// Runs the core's completion-lock release
 /// ([`CoreService::release_work_completion_lock`]): the DB
@@ -999,7 +1078,7 @@ async fn handle_reopen(
     reason: &str,
     json: bool,
 ) -> Result<()> {
-    // W-5: Cap and sanitize reason
+    // note: W-5: Cap and sanitize reason
     if reason.len() > 512 {
         return Err(crate::errors::CliError::Config(format!(
             "--reason exceeds maximum length (512 chars); got {} chars",
@@ -1043,7 +1122,7 @@ async fn handle_reopen(
     Ok(())
 }
 
-/// Handle `creator works reconcile-chapters` — rebuild `work_chapters`
+/// note: Handle `creator works reconcile-chapters` — rebuild `work_chapters`
 /// (V1.45 P2; V1.49 P2 adds `--dry-run` / `--yes`).
 ///
 /// Scans the Work's `Stories/` directory and syncs `work_chapters` rows.
@@ -1082,7 +1161,7 @@ async fn handle_reconcile_chapters(
             None => active_work_id_core(&core, &principal).await?,
         };
 
-        // `--dry-run`: preview only, never write, never prompt. The core
+        // why: `--dry-run`: preview only, never write, never prompt. The core
         // computes the report without the runtime lock and without any
         // filesystem/DB write (overlay §8.2).
         if dry_run {
@@ -1090,10 +1169,10 @@ async fn handle_reconcile_chapters(
             return Ok((resolved_id, ReconcileOutcome::Reconciled(report, true)));
         }
 
-        // Mutating path: confirm unless `--yes` (mirror `works rules reset`).
+        // note: Mutating path: confirm unless `--yes` (mirror `works rules reset`).
         if !yes {
             if json {
-                // Machine-readable mode cannot host an interactive prompt;
+                // why: Machine-readable mode cannot host an interactive prompt;
                 // report that confirmation is required and write nothing.
                 return Ok((
                     resolved_id.clone(),
@@ -1138,23 +1217,23 @@ async fn handle_reconcile_chapters(
     Ok(())
 }
 
-/// What a `works reconcile-chapters` invocation decided, once its flags were
+/// note: What a `works reconcile-chapters` invocation decided, once its flags were
 /// read inside the admitted writer.
 ///
 /// The CLI renders every arm **after** [`finish_direct`] settles the writer, so
 /// the decision travels out of the block instead of printing inside it.
 enum ReconcileOutcome {
-    /// `--json` without `--yes`: a machine consumer cannot confirm, so nothing
+    /// note: `--json` without `--yes`: a machine consumer cannot confirm, so nothing
     /// was written and the body reports that confirmation is required.
     ConfirmationRequired(serde_json::Value),
-    /// The interactive prompt was declined: nothing was written.
+    /// note: The interactive prompt was declined: nothing was written.
     Declined,
-    /// A reconcile was previewed (`--dry-run`) or applied; `true` labels the
+    /// note: A reconcile was previewed (`--dry-run`) or applied; `true` labels the
     /// human report as a dry run.
     Reconciled(WorkReconcileReport, bool),
 }
 
-/// Run the core reconcile for one Work.
+/// note: Run the core reconcile for one Work.
 ///
 /// [`CoreService::reconcile_work_chapters`] owns the existence check, the
 /// runtime lock (mutating path only) and the report; `holder_kind` labels the
@@ -1183,7 +1262,7 @@ async fn reconcile(
     .map_err(map_core_error)
 }
 
-/// Project the core reconcile report onto the retained wire shape.
+/// note: Project the core reconcile report onto the retained wire shape.
 ///
 /// `nexus_local_db::work_chapters::ReconcileReport` is what the daemon route
 /// returned verbatim; the direct-core `--json` output keeps those field names
@@ -1199,7 +1278,7 @@ const fn reconcile_report_wire(
     }
 }
 
-/// Render a `ReconcileReport` (created / updated / resynced / preserved) for
+/// note: Render a `ReconcileReport` (created / updated / resynced / preserved) for
 /// the human path. `is_dry_run` toggles the leading label.
 fn print_reconcile_report(resolved_id: &str, report: &WorkReconcileReport, is_dry_run: bool) {
     let WorkReconcileReport {
@@ -1220,7 +1299,7 @@ fn print_reconcile_report(resolved_id: &str, report: &WorkReconcileReport, is_dr
     println!("  Preserved: {preserved}");
 }
 
-/// Human-mode confirmation before a mutating reconcile (V1.49 P2).
+/// note: Human-mode confirmation before a mutating reconcile (V1.49 P2).
 ///
 /// Mirrors `rules_runtime::confirm_reset_interactive`. Returns `Ok(true)` when
 /// the user confirms, `Ok(false)` when they decline. Errors when stdin is not a
@@ -1250,14 +1329,14 @@ fn confirm_reconcile_interactive(resolved_id: &str) -> Result<bool> {
     Ok(confirmed == Some(true))
 }
 
-/// Audit reason recorded when `completion-lock release` performs the release:
+/// note: Audit reason recorded when `completion-lock release` performs the release:
 /// the verb carries no `--reason` of its own, so the audit entry names the
 /// command that released the lock. `works reopen --reason "…"` runs the same
 /// producer with the caller's own text.
 const COMPLETION_LOCK_RELEASE_REASON: &str =
     "released via `nexus42 creator works completion-lock release`";
 
-/// Handle `creator works completion-lock`.
+/// note: Handle `creator works completion-lock`.
 ///
 /// `release` runs the core's completion-lock release
 /// ([`CoreService::release_work_completion_lock`]) — the single typed producer
@@ -1301,9 +1380,9 @@ async fn handle_completion_lock(config: &CliConfig, cmd: CompletionLockCommand) 
     Ok(())
 }
 
-// ── Selection pool handlers (DF-61) ────────────────────────────────────
+// note: Selection pool handlers (DF-61)
 
-/// Handle `creator works pool` — the selection pool and the pool-level
+/// note: Handle `creator works pool` — the selection pool and the pool-level
 /// inspiration store, each on its own typed core producer.
 ///
 /// The four pool-inspiration methods
@@ -1341,7 +1420,7 @@ async fn handle_pool(config: &CliConfig, action: PoolAction) -> Result<()> {
         }
     }
     .await;
-    // The leaves return their report; nothing reaches stdout until the shared
+    // why: The leaves return their report; nothing reaches stdout until the shared
     // seam released the writer, so a promoted/archived entry is never reported
     // ahead of a close that did not settle.
     if let Some(text) = finish_direct(&core, outcome).await? {
@@ -1427,7 +1506,7 @@ async fn handle_pool_promote(
     )];
 
     if set_default {
-        // `works use` semantics: the pool `active` row is the CLI default. The
+        // note: `works use` semantics: the pool `active` row is the CLI default. The
         // retired adapter issued this selection as a second control request;
         // the core promotes to `active` on both paths.
         core.select_work(principal, work_id.to_string())
@@ -1457,7 +1536,7 @@ async fn handle_pool_archive(
     Ok(Some(format!("Entry {entry_id} → {}", entry.status)))
 }
 
-// ── Inspiration pool handlers (DF-61 §4) ───────────────────────────────
+// note: Inspiration pool handlers (DF-61 §4)
 
 async fn handle_inspiration(
     core: &CoreService,
@@ -1593,7 +1672,7 @@ async fn handle_inspiration_promote(
     )];
 
     if set_default {
-        // The atomic promotion already wrote the new Work as the pool `active`
+        // note: The atomic promotion already wrote the new Work as the pool `active`
         // row; this is the retained `works use` selection on its own request.
         core.select_work(principal, promoted.work_id.clone())
             .await
@@ -1621,14 +1700,14 @@ async fn handle_inspiration_archive(
     Ok(Some(format!("Inspiration item {item_id} archived.")))
 }
 
-/// Schema-owned pool-list element (`--json` only).
+/// note: Schema-owned pool-list element (`--json` only).
 type PoolListEntry = nexus_contracts::generated::core::works::work_pool_entry::WorkPoolEntry;
 
-/// Schema-owned inspiration-list element (`--json` only).
+/// note: Schema-owned inspiration-list element (`--json` only).
 type InspirationListItem =
     nexus_contracts::generated::core::works::work_inspiration_item::WorkInspirationItem;
 
-/// Project a core pool entry onto the wire shape the pool list serves.
+/// note: Project a core pool entry onto the wire shape the pool list serves.
 ///
 /// The stored `creator_id` never reaches the output (R-V141P1-11 — local-first,
 /// always the active creator), exactly as the retired daemon adapter and the
@@ -1644,7 +1723,7 @@ fn pool_entry_wire(entry: nexus_core::WorkPoolEntry) -> PoolListEntry {
     }
 }
 
-/// Project a core pool-inspiration item onto the wire shape the pool
+/// note: Project a core pool-inspiration item onto the wire shape the pool
 /// inspiration list serves (stored `creator_id` intentionally not serialized).
 fn inspiration_item_wire(item: nexus_core::WorkInspirationItem) -> InspirationListItem {
     InspirationListItem {
@@ -1658,15 +1737,15 @@ fn inspiration_item_wire(item: nexus_core::WorkInspirationItem) -> InspirationLi
     }
 }
 
-// ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
+// note: Shared display helpers (V1.42 P-last R-V141P0-02 dedup)
 
-/// Hard cap on the number of open findings the status enrichment reads.
+/// note: Hard cap on the number of open findings the status enrichment reads.
 ///
 /// The cap is also the truncation marker: exactly this many rows means more
 /// may exist beyond the read page.
 const FINDINGS_FETCH_LIMIT: usize = 50;
 
-/// Stale-findings threshold for the status banner: 96h.
+/// note: Stale-findings threshold for the status banner: 96h.
 ///
 /// The retired daemon adapter resolved this from
 /// `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS` (a daemon-runtime concern that
@@ -1674,19 +1753,19 @@ const FINDINGS_FETCH_LIMIT: usize = 50;
 /// used.
 const STALE_FINDINGS_THRESHOLD_SECS: i64 = 96 * 60 * 60;
 
-/// Result of reading a Work's open findings.
+/// note: Result of reading a Work's open findings.
 ///
 /// Distinguishes "successfully read 0 findings" from "read failed", so the
 /// display layer can print distinct messages.
 enum FindingsResult {
-    /// Findings were read successfully.
+    /// note: Findings were read successfully.
     Fetched(Vec<serde_json::Value>),
-    /// The read did not return findings (storage error, unknown Work, …).
+    /// note: The read did not return findings (storage error, unknown Work, …).
     Unavailable,
 }
 
 impl FindingsResult {
-    /// The read slice, or `None` when the read failed (graceful degradation).
+    /// note: The read slice, or `None` when the read failed (graceful degradation).
     fn as_slice(&self) -> Option<&[serde_json::Value]> {
         match self {
             Self::Fetched(items) => Some(items),
@@ -1695,7 +1774,7 @@ impl FindingsResult {
     }
 }
 
-/// Read the Work's open findings — best-effort, `Unavailable` on failure.
+/// note: Read the Work's open findings — best-effort, `Unavailable` on failure.
 ///
 /// V1.43 P2 (T2): used by `handle_status` to satisfy spec §4 row 3
 /// ("Are there open findings? Count + severity summary"). The rows are the
@@ -1725,7 +1804,7 @@ async fn fetch_open_findings(
             if let Ok(serde_json::Value::Array(items)) = serde_json::to_value(&resp.items) {
                 FindingsResult::Fetched(items)
             } else {
-                // A serialization failure is the same class as a failed read: the
+                // why: A serialization failure is the same class as a failed read: the
                 // status command degrades instead of reporting a findings list it
                 // cannot render.
                 tracing::warn!(
@@ -1746,7 +1825,7 @@ async fn fetch_open_findings(
     }
 }
 
-/// Read the creator-global stale-findings summary — best-effort, `None` on
+/// note: Read the creator-global stale-findings summary — best-effort, `None` on
 /// failure (parity with the human stale banner).
 ///
 /// The returned value is the wire shape `GET /v1/daemon/findings/stale`
@@ -1759,7 +1838,7 @@ async fn fetch_stale_findings(
         .list_stale_findings(principal, STALE_FINDINGS_THRESHOLD_SECS)
         .await
         .map_err(|error| {
-            // R-V146P0-QC3-S2: observe the silent swallow — a failed stale
+            // why: R-V146P0-QC3-S2: observe the silent swallow — a failed stale
             // read must not vanish into `None` without a trace.
             tracing::warn!(
                 error = %error,
@@ -1770,7 +1849,7 @@ async fn fetch_stale_findings(
     serde_json::to_value(stale_findings_wire(report)).ok()
 }
 
-/// Project the core stale report onto the wire shape the retired stale route
+/// note: Project the core stale report onto the wire shape the retired stale route
 /// served (same keys and types, so `findings_stale` is unchanged).
 fn stale_findings_wire(report: CoreStaleFindingsResponse) -> StaleFindingsWire {
     StaleFindingsWire {
@@ -1822,7 +1901,7 @@ async fn fetch_status_enrichment(
     tokio::join!(findings, stale)
 }
 
-/// Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
+/// note: Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
 ///
 /// Pure over `(stale_count, threshold_seconds)`. Returns `Some(banner)` only
 /// when `stale_count > 0` (no banner noise when nothing is stale); `None`
@@ -1834,7 +1913,7 @@ fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<Strin
         return None;
     }
     let threshold_hours = threshold_seconds / 3600;
-    // V1.47 P1: normalize user-facing copy — spec name, not repo path.
+    // note: V1.47 P1: normalize user-facing copy — spec name, not repo path.
     // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
     Some(format!(
         "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
@@ -1879,7 +1958,7 @@ fn enrich_status_json(
             "findings".to_string(),
             serde_json::Value::Array(arr.to_vec()),
         );
-        // qc3 F-003: surface the 50-item fetch cap so JSON consumers can
+        // why: qc3 F-003: surface the 50-item fetch cap so JSON consumers can
         // distinguish "exactly 50 open findings" from "50+ open findings".
         // Omitted when not at the cap (consumers treat absence as not-truncated).
         if is_truncated {
@@ -1901,26 +1980,26 @@ fn enrich_status_json(
     resp
 }
 
-/// Parsed open-findings summary for display formatting.
+/// note: Parsed open-findings summary for display formatting.
 ///
 /// Extracted as a struct to enable hermetic unit testing of
 /// `format_findings_summary` without daemon client dependency.
 #[derive(Debug, Default)]
 struct FindingsSummary {
-    /// Total open finding count.
+    /// note: Total open finding count.
     open_count: usize,
-    /// Whether the count is truncated (server returned exactly the limit).
+    /// note: Whether the count is truncated (server returned exactly the limit).
     is_truncated: bool,
-    /// Highest severity among open findings (ordered: blocker > major > minor > info).
+    /// note: Highest severity among open findings (ordered: blocker > major > minor > info).
     highest_severity: Option<String>,
-    /// Per-severity counts for the summary line.
+    /// note: Per-severity counts for the summary line.
     severity_counts: Vec<(String, usize)>,
-    /// Top findings (up to 5) with title, severity, and routing hint.
+    /// note: Top findings (up to 5) with title, severity, and routing hint.
     top_findings: Vec<(String, String, String)>,
 }
 
 impl FindingsSummary {
-    /// Parse from the JSON array returned by the findings list endpoint.
+    /// note: Parse from the JSON array returned by the findings list endpoint.
     ///
     /// `is_truncated` should be `true` when the server returned exactly
     /// `FINDINGS_FETCH_LIMIT` rows, indicating there may be more findings
@@ -1932,7 +2011,7 @@ impl FindingsSummary {
 
         let open_count = findings.len();
 
-        // Severity priority order (highest first).
+        // note: Severity priority order (highest first).
         let severity_order = ["blocker", "major", "minor", "info"];
         let mut severity_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -1946,7 +2025,7 @@ impl FindingsSummary {
                 .to_string();
             *severity_counts.entry(sev.clone()).or_insert(0) += 1;
 
-            // Track highest severity.
+            // note: Track highest severity.
             let current_rank = severity_order.iter().position(|s| *s == sev);
             let highest_rank = highest_severity
                 .as_ref()
@@ -1956,7 +2035,7 @@ impl FindingsSummary {
             }
         }
 
-        // Sort severity counts by priority order.
+        // note: Sort severity counts by priority order.
         let mut severity_vec: Vec<(String, usize)> = severity_counts.into_iter().collect();
         severity_vec.sort_by(|a, b| {
             let ra = severity_order.iter().position(|s| *s == a.0);
@@ -1964,7 +2043,7 @@ impl FindingsSummary {
             ra.cmp(&rb)
         });
 
-        // Top 5 findings with (title, severity, routing_hint).
+        // note: Top 5 findings with (title, severity, routing_hint).
         let top_findings = findings
             .iter()
             .take(5)
@@ -1998,7 +2077,7 @@ impl FindingsSummary {
     }
 }
 
-/// Format and print the open-findings summary block for `creator works status`.
+/// note: Format and print the open-findings summary block for `creator works status`.
 ///
 /// Per spec §4 row 3: "Count + severity summary; link to review preset name."
 /// Per cli-spec §7.1: clear, non-jargon formatting.
@@ -2008,7 +2087,7 @@ impl FindingsSummary {
 ///   the removed runner — no CLI preset dispatch entrance is claimed)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult) {
-    // R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
+    // why: R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
     // helper so the test helper `capture_findings_output` cannot drift from
     // production. This wrapper only prints each rendered line.
     for line in format_findings_summary_lines(result) {
@@ -2016,7 +2095,7 @@ fn print_findings_summary(result: &FindingsResult) {
     }
 }
 
-/// Render the open-findings summary as a vector of display lines (pure).
+/// note: Render the open-findings summary as a vector of display lines (pure).
 ///
 /// Extracted from `print_findings_summary` (R-V146P0-QC1-S2) as the single
 /// formatting path shared by the production printer and the test helper
@@ -2043,7 +2122,7 @@ fn format_findings_summary_lines(result: &FindingsResult) -> Vec<String> {
         return vec!["findings: none open".to_string()];
     }
 
-    // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
+    // note: Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
     // Truncated: "findings: 50+ open (...)"
     let count_display = if summary.is_truncated {
         format!("{}+", summary.open_count)
@@ -2065,7 +2144,7 @@ fn format_findings_summary_lines(result: &FindingsResult) -> Vec<String> {
         "findings: {count_display} open ({sev_summary}){highest_tag}"
     )];
 
-    // Top findings with routing hints (sanitized).
+    // note: Top findings with routing hints (sanitized).
     for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
         let safe_title = sanitize_for_terminal(title);
         let safe_hint = sanitize_for_terminal(hint);
@@ -2100,7 +2179,7 @@ const CHAPTER_PATH_HINT_CAP: usize = 50;
 /// `CHAPTER_PATH_HINT_CAP` to prevent tail latency on large works; a
 /// summary line covers chapters beyond the cap.
 fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
-    // Resolve the operational workspace dir once (best-effort). When this
+    // why: Resolve the operational workspace dir once (best-effort). When this
     // cannot be resolved (no active creator, no home dir, etc.), on-disk
     // hints are silently skipped — the table still renders normally.
     let ws_dir = operational_workspace_dir_from_config();
@@ -2120,7 +2199,7 @@ fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
     let total_chapters = chapters.len();
     let hint_cap = total_chapters.min(CHAPTER_PATH_HINT_CAP);
 
-    // tracing span records chapter count + effective cap; the >100ms
+    // note: tracing span records chapter count + effective cap; the >100ms
     // threshold log below surfaces slow loops without spamming fast SSDs.
     let hint_loop_elapsed_ms = {
         let span = tracing::info_span!("chapter_path_hints", total_chapters, capped = hint_cap,);
@@ -2167,7 +2246,7 @@ fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
         );
     }
 
-    // V1.46 P2 QC fix W-001: summary line for chapters beyond the cap.
+    // why: V1.46 P2 QC fix W-001: summary line for chapters beyond the cap.
     // Emitted only when the workspace was resolved (otherwise the entire
     // hint feature was silently skipped and a summary would mislead the
     // user into thinking paths were checked).
@@ -2193,7 +2272,7 @@ fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
     ))
 }
 
-/// V1.51 T-B P0: read the lock holder info from the filesystem and return
+/// note: V1.51 T-B P0: read the lock holder info from the filesystem and return
 /// it as a JSON value for `creator works status --json`. Returns `None` if
 /// the `work_ref` is missing, the workspace directory cannot be resolved, or
 /// the lock file doesn't exist / is unreadable.
@@ -2259,7 +2338,7 @@ fn chapter_path_missing_hint(ch: &serde_json::Value, ws_dir: &std::path::Path) -
     Some(format!("{} missing on disk", parts.join(", ")))
 }
 
-/// V1.46 P2 QC fix W-001: pure helper that formats the `"+ N more
+/// note: V1.46 P2 QC fix W-001: pure helper that formats the `"+ N more
 /// (paths not checked)"` summary line for chapters beyond the hint cap.
 /// Returns `None` when `skipped == 0` so the caller can skip rendering.
 ///
@@ -2268,7 +2347,7 @@ fn chapter_path_hint_skipped_summary(skipped: usize) -> Option<String> {
     (skipped > 0).then(|| format!("+ {skipped} more (paths not checked)"))
 }
 
-/// V1.42 P-last (R-V141P0-06): best-effort on-disk completion-lock file check.
+/// note: V1.42 P-last (R-V141P0-06): best-effort on-disk completion-lock file check.
 ///
 /// DB `completion_locked_at` is the authoritative lock state. The
 /// `.completion-lock.json` file is a derived artifact. When the file is
@@ -2277,7 +2356,7 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
     if work_ref.starts_with('(') {
         return;
     }
-    // R-V146P2-QC1-S2: route through the shared `operational_workspace_dir_from_config`
+    // why: R-V146P2-QC1-S2: route through the shared `operational_workspace_dir_from_config`
     // helper instead of re-implementing the config → creator_id → workspace_slug →
     // home → operational_workspace_dir lookup inline. The helper has identical
     // best-effort semantics (None on any resolution failure); the prior ad-hoc
@@ -2291,12 +2370,12 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
         .join(".completion-lock.json");
     if !lock_path.exists() {
         println!("⚠ completion-lock file missing (DB says locked but file not found)");
-        // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
+        // note: V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
         println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
     }
 }
 
-/// Truncate a string to `max_len` characters, appending `…` if truncated.
+/// note: Truncate a string to `max_len` characters, appending `…` if truncated.
 fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
         format!("{}…", &s[..max_len])
@@ -2305,21 +2384,21 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Strip ASCII control characters and ANSI escape sequences from a string
+/// note: Strip ASCII control characters and ANSI escape sequences from a string
 /// to prevent terminal display corruption from user-supplied data.
 ///
 /// Preserves printable ASCII, Unicode, `\n`, and `\t`. Strips:
 /// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
 /// - ANSI CSI sequences (`ESC [ ... letter`)
 fn sanitize_for_terminal(s: &str) -> String {
-    // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
+    // note: Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
     let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
-        // The pattern is a compile-time constant; panic is unreachable.
+        // note: The pattern is a compile-time constant; panic is unreachable.
         unreachable!("invalid ANSI regex pattern: {e}")
     });
     let stripped = ansi_re.replace_all(s, "");
 
-    // Phase 2: remove remaining ASCII control chars (keep \n, \t, and printable).
+    // why: Phase 2: remove remaining ASCII control chars (keep \n, \t, and printable).
     stripped
         .chars()
         .filter(|&c| {
@@ -2327,14 +2406,14 @@ fn sanitize_for_terminal(s: &str) -> String {
                 return true;
             }
             let code = c as u32;
-            // Allow printable chars: space (0x20) and above, excluding DEL (0x7F).
+            // note: Allow printable chars: space (0x20) and above, excluding DEL (0x7F).
             // Below 0x20 are control chars — filter them out.
             code >= 0x20 && code != 0x7F
         })
         .collect()
 }
 
-// ── Tests (V1.43 P2 T4) ───────────────────────────────────────────────
+// note: Tests (V1.43 P2 T4)
 
 #[cfg(test)]
 mod tests {
@@ -2350,7 +2429,7 @@ mod tests {
         })
     }
 
-    /// R-V146P0-QC2-S1: build a finding element with the FULL list-API shape
+    /// note: R-V146P0-QC2-S1: build a finding element with the FULL list-API shape
     /// (every field the findings list endpoint returns), not the minimal
     /// `finding_json` subset. Used to assert `enrich_status_json` preserves
     /// the element verbatim (full shape fidelity, not just a few fields).
@@ -2373,7 +2452,7 @@ mod tests {
         })
     }
 
-    // ── FindingsSummary parsing tests ────────────────────────────────────
+    // note: FindingsSummary parsing tests
 
     #[test]
     fn findings_summary_empty() {
@@ -2418,7 +2497,7 @@ mod tests {
         let summary = FindingsSummary::from_findings_json(&findings, false);
         assert_eq!(summary.open_count, 4);
         assert_eq!(summary.highest_severity.as_deref(), Some("blocker"));
-        // Sorted by severity priority (blocker first).
+        // note: Sorted by severity priority (blocker first).
         assert_eq!(summary.severity_counts[0].0, "blocker");
         assert_eq!(summary.severity_counts[0].1, 1);
         assert_eq!(summary.severity_counts[1].0, "major");
@@ -2445,10 +2524,10 @@ mod tests {
         assert!(summary.is_truncated);
     }
 
-    // ── print_findings_summary display tests ─────────────────────────────
+    // note: print_findings_summary display tests
 
     fn capture_findings_output(findings: &[serde_json::Value]) -> String {
-        // R-V146P0-QC1-S2: delegate to the shared production formatter so the
+        // why: R-V146P0-QC1-S2: delegate to the shared production formatter so the
         // test helper cannot drift from `print_findings_summary`. The slice is
         // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
         // covered directly by `format_findings_summary_lines` unit tests.
@@ -2460,18 +2539,16 @@ mod tests {
     fn display_no_open_findings() {
         let output = capture_findings_output(&[]);
         assert!(output.contains("findings: none open"));
-        // v1.193 P2-T1: the removed `creator run` runner is not advertised.
+        // note: v1.193 P2-T1: the removed `creator run` runner is not advertised.
         assert!(!output.contains("creator run"));
         assert!(!output.contains("highest"));
     }
 
-    // -----------------------------------------------------------------------
-    // R-V146P0-QC1-S2: shared formatter covers the Unavailable branch + parity
-    // -----------------------------------------------------------------------
+    // note: R-V146P0-QC1-S2: shared formatter covers the Unavailable branch + parity
 
     #[test]
     fn format_findings_summary_lines_unavailable_branch() {
-        // R-V146P0-QC1-S2: the shared `format_findings_summary_lines` owns the
+        // why: R-V146P0-QC1-S2: the shared `format_findings_summary_lines` owns the
         // Unavailable branch (previously only reachable via the production
         // `print_findings_summary`, never via the test helper). Pins the
         // one-line degradation output.
@@ -2482,7 +2559,7 @@ mod tests {
 
     #[test]
     fn format_findings_summary_lines_parity_with_capture_helper() {
-        // R-V146P0-QC1-S2: the test helper `capture_findings_output` now
+        // why: R-V146P0-QC1-S2: the test helper `capture_findings_output` now
         // delegates to the shared formatter, so its output must equal
         // `format_findings_summary_lines(...).join("\n")` byte-for-byte.
         // A representative populated case proves no formatting drifted.
@@ -2498,7 +2575,7 @@ mod tests {
             via_helper, via_shared,
             "helper must delegate to shared formatter"
         );
-        // Sanity: the populated summary surfaces the count + a top finding.
+        // note: Sanity: the populated summary surfaces the count + a top finding.
         assert!(via_shared.contains("findings: 3 open"));
         assert!(via_shared.contains("1 blocker"));
         assert!(via_shared.contains("Continuity error"));
@@ -2530,7 +2607,7 @@ mod tests {
 
     #[test]
     fn display_findings_completed_work_shows_summary() {
-        // Verify that the findings summary format works for the completed
+        // note: Verify that the findings summary format works for the completed
         // path too — same formatting, just inserted before the "complete" message.
         let findings = vec![finding_json("info", "Nice-to-have", "→ none")];
         let output = capture_findings_output(&findings);
@@ -2552,7 +2629,7 @@ mod tests {
             finding_json("minor", "Typo", "→ copyedit"),
         ];
         let output = capture_findings_output(&findings);
-        // Each per-finding hint appears verbatim in the output.
+        // note: Each per-finding hint appears verbatim in the output.
         assert!(
             output.contains("→ write"),
             "per-finding routing_hint '→ write' must appear: {output}"
@@ -2572,17 +2649,17 @@ mod tests {
         );
     }
 
-    // ── Completion display tests ─────────────────────────────────────────
+    // note: Completion display tests
 
     #[test]
     fn completion_shows_zero_open_findings() {
-        // When no findings exist, the summary line should say "none open".
+        // note: When no findings exist, the summary line should say "none open".
         let output = capture_findings_output(&[]);
         assert!(output.contains("findings: none open"));
         assert!(!output.contains("creator run"));
     }
 
-    // ── Truncation tests ─────────────────────────────────────────────────
+    // note: Truncation tests
 
     #[test]
     fn truncate_with_ellipsis_short() {
@@ -2594,7 +2671,7 @@ mod tests {
         assert_eq!(truncate_with_ellipsis("hello world", 5), "hello…");
     }
 
-    // ── Truncated findings (50+) display test ────────────────────────────
+    // note: Truncated findings (50+) display test
 
     #[test]
     fn display_truncated_findings_shows_plus_indicator() {
@@ -2606,14 +2683,14 @@ mod tests {
             output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT}+ open")),
             "expected '50+ open' indicator in output: {output}"
         );
-        // Should NOT show bare "50 open" (without +).
+        // note: Should NOT show bare "50 open" (without +).
         assert!(
             !output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT} open")),
             "should not show exact count without '+' when truncated"
         );
     }
 
-    // ── V1.46 P0 enrich_status_json tests (novel-only gate + JSON contract) ──
+    // note: V1.46 P0 enrich_status_json tests (novel-only gate + JSON contract)
 
     fn novel_work_resp() -> serde_json::Value {
         serde_json::json!({
@@ -2646,7 +2723,7 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("findings[] present for novel work");
         assert_eq!(arr.len(), 2);
-        // Same element shape as list API (verbatim).
+        // note: Same element shape as list API (verbatim).
         assert_eq!(
             arr[0].get("severity").and_then(|v| v.as_str()),
             Some("major")
@@ -2655,7 +2732,7 @@ mod tests {
             arr[0].get("routing_hint").and_then(|v| v.as_str()),
             Some("→ write")
         );
-        // Daemon work fields preserved.
+        // note: Daemon work fields preserved.
         assert_eq!(
             out.get("title").and_then(|v| v.as_str()),
             Some("Test Novel")
@@ -2669,7 +2746,7 @@ mod tests {
 
     #[test]
     fn enrich_novel_preserves_full_finding_element_shape_verbatim() {
-        // R-V146P0-QC2-S1: the existing enrich tests used the minimal
+        // why: R-V146P0-QC2-S1: the existing enrich tests used the minimal
         // `finding_json` helper and only spot-checked `severity` /
         // `routing_hint`. Assert full element-shape fidelity: a finding
         // carrying every list-API field must survive `enrich_status_json`
@@ -2684,12 +2761,12 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("findings[] present");
         assert_eq!(arr.len(), 1, "exactly the one full-shape finding");
-        // Verbatim equality: the enriched element equals the input element.
+        // note: Verbatim equality: the enriched element equals the input element.
         assert_eq!(
             arr[0], full,
             "enrich must preserve the full finding element verbatim (no field drop/rename/coerce)"
         );
-        // Pin a handful of the previously-unasserted fields explicitly so a
+        // why: Pin a handful of the previously-unasserted fields explicitly so a
         // regression message points at the right field.
         assert_eq!(
             arr[0].get("chapter").and_then(serde_json::Value::as_i64),
@@ -2725,14 +2802,14 @@ mod tests {
 
     #[test]
     fn enrich_novel_unavailable_findings_omits_key() {
-        // When the findings endpoint is unreachable (None), omit findings[]
+        // note: When the findings endpoint is unreachable (None), omit findings[]
         // rather than fabricating an empty array (graceful degradation).
         let out = enrich_status_json(novel_work_resp(), None, None);
         assert!(
             out.get("findings").is_none(),
             "findings key omitted when unavailable"
         );
-        // qc3 F-003: truncation marker must also be absent when findings
+        // why: qc3 F-003: truncation marker must also be absent when findings
         // were not fetched at all.
         assert!(
             out.get("findings_truncated").is_none(),
@@ -2740,11 +2817,11 @@ mod tests {
         );
     }
 
-    // ── qc3 F-003: findings_truncated marker tests ───────────────────────
+    // note: qc3 F-003: findings_truncated marker tests
 
     #[test]
     fn enrich_findings_truncated_marker_set_when_at_limit() {
-        // When the daemon returns exactly FINDINGS_FETCH_LIMIT (50) rows,
+        // why: When the daemon returns exactly FINDINGS_FETCH_LIMIT (50) rows,
         // there may be more open findings beyond the fetched page. Surface
         // a `findings_truncated: true` flag so JSON consumers can detect
         // the cap (qc3 F-003).
@@ -2762,7 +2839,7 @@ mod tests {
 
     #[test]
     fn enrich_findings_truncated_omitted_when_below_limit() {
-        // Below the cap, the marker is omitted (not false) so consumers can
+        // why: Below the cap, the marker is omitted (not false) so consumers can
         // distinguish "truncation known to be false" from "not applicable".
         let findings = vec![
             finding_json("major", "Plot hole", "→ write"),
@@ -2777,7 +2854,7 @@ mod tests {
 
     #[test]
     fn enrich_findings_truncated_omitted_when_empty() {
-        // Empty findings (fetched successfully, none open) — not truncated.
+        // note: Empty findings (fetched successfully, none open) — not truncated.
         let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
         assert!(
             out.get("findings_truncated").is_none(),
@@ -2799,7 +2876,7 @@ mod tests {
 
     #[test]
     fn enrich_missing_work_profile_omits_findings() {
-        // A work with no work_profile field is treated as non-novel.
+        // note: A work with no work_profile field is treated as non-novel.
         let resp = serde_json::json!({ "work_id": "wrk_x", "title": "Mystery" });
         let findings = vec![finding_json("info", "x", "→ none")];
         let out = enrich_status_json(resp, Some(findings.as_slice()), None);
@@ -2833,7 +2910,7 @@ mod tests {
 
     #[test]
     fn enrich_preserves_daemon_work_fields() {
-        // Daemon GET work payload fields must be unchanged (spec §4.1).
+        // why: Daemon GET work payload fields must be unchanged (spec §4.1).
         let resp = serde_json::json!({
             "work_id": "wrk_full",
             "title": "Full",
@@ -2853,11 +2930,11 @@ mod tests {
         assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
     }
 
-    // ── R-V146P0-QC3-S3: human-path stale banner rendering ──────────────
+    // note: R-V146P0-QC3-S3: human-path stale banner rendering
 
     #[test]
     fn format_stale_banner_none_when_zero() {
-        // R-V146P0-QC3-S3: zero stale findings must NOT emit a banner
+        // why: R-V146P0-QC3-S3: zero stale findings must NOT emit a banner
         // (no empty sentinel noise). The human status path now routes through
         // `format_stale_banner`, so the zero-suppression is unit-testable.
         assert_eq!(format_stale_banner(0, 96 * 60 * 60), None);
@@ -2865,7 +2942,7 @@ mod tests {
 
     #[test]
     fn format_stale_banner_some_when_stale_count_positive() {
-        // R-V146P0-QC3-S3: a positive stale count renders the banner with the
+        // note: R-V146P0-QC3-S3: a positive stale count renders the banner with the
         // computed whole-hour threshold and the spec citation.
         let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
         assert!(
@@ -2884,13 +2961,13 @@ mod tests {
 
     #[test]
     fn format_stale_banner_computes_hours_from_seconds() {
-        // R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
+        // note: R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
         // (integer division). 345600s = 96h; 7200s = 2h.
         assert!(format_stale_banner(1, 345_600).unwrap().contains(">96h"));
         assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
     }
 
-    // ── sanitize_for_terminal tests ──────────────────────────────────────
+    // note: sanitize_for_terminal tests
 
     #[test]
     fn sanitize_for_terminal_strips_escape_codes() {
@@ -2915,7 +2992,7 @@ mod tests {
 
     #[test]
     fn sanitize_for_terminal_strips_del() {
-        // DEL (0x7F) should be removed
+        // note: DEL (0x7F) should be removed
         let input = "before\x7Fafter";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "beforeafter");
@@ -2930,17 +3007,17 @@ mod tests {
 
     #[test]
     fn sanitize_for_terminal_strips_clear_screen() {
-        // \x1b[2J is "clear screen"
+        // note: \x1b[2J is "clear screen"
         let input = "good\x1b[2Jbad";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "goodbad");
     }
 
-    // ── R-V146P2-QC1-S2: workspace-dir resolution dedup ─────────────────
+    // note: R-V146P2-QC1-S2: workspace-dir resolution dedup
 
     #[test]
     fn print_completion_lock_hint_no_ops_when_work_ref_is_placeholder() {
-        // R-V146P2-QC1-S2: a placeholder work_ref (starting with "(") must
+        // why: R-V146P2-QC1-S2: a placeholder work_ref (starting with "(") must
         // short-circuit before any workspace-dir resolution. Asserts the
         // early-return branch is preserved after routing through the shared
         // `operational_workspace_dir_from_config` helper.
@@ -2950,18 +3027,18 @@ mod tests {
 
     #[test]
     fn print_completion_lock_hint_no_ops_when_workspace_unresolvable() {
-        // R-V146P2-QC1-S2: with a real-looking work_ref but no resolvable
+        // note: R-V146P2-QC1-S2: with a real-looking work_ref but no resolvable
         // active creator/workspace (the default test-env state), the shared
         // helper returns None and the hint is skipped without panicking.
         // Pins that the deduplicated resolution path degrades gracefully.
         print_completion_lock_hint("MYNOVEL", "wrk_test");
     }
 
-    // ── FindingsResult unavailable display test ──────────────────────────
+    // note: FindingsResult unavailable display test
 
     #[test]
     fn display_unavailable_findings() {
-        // When findings are unavailable, the output should say "unavailable"
+        // note: When findings are unavailable, the output should say "unavailable"
         // not "none open". This tests the logic that print_findings_summary uses.
         let result = FindingsResult::Unavailable;
         let output = match result {
@@ -2980,11 +3057,12 @@ mod tests {
         assert!(!output.contains("none open"));
     }
 
-    // ── V1.45 P2: CLI parsing tests for migrated works subcommands ──────
+    // note: V1.45 P2: CLI parsing tests for migrated works subcommands
 
     use clap::Parser;
 
     /// Minimal CLI struct for hermetic parsing tests of `creator works`.
+    // note: CLI help must stay stable
     #[derive(Parser)]
     struct WorksCli {
         #[command(subcommand)]
@@ -3062,7 +3140,7 @@ mod tests {
 
     #[test]
     fn works_reopen_rejects_removed_extend_chapters_flag() {
-        // The flag rode the retired daemon patch body; no retained request
+        // why: The flag rode the retired daemon patch body; no retained request
         // carries `total_planned_chapters`, so the parser must refuse it
         // instead of silently dropping it.
         let result = WorksCli::try_parse_from([
@@ -3121,7 +3199,7 @@ mod tests {
         }
     }
 
-    /// V1.49 P2 (R-V148P4-W2): `--dry-run` and `--yes` flags parse correctly.
+    /// note: V1.49 P2 (R-V148P4-W2): `--dry-run` and `--yes` flags parse correctly.
     #[test]
     fn works_reconcile_chapters_parses_dry_run_and_yes_flags() {
         let cli =
@@ -3182,7 +3260,7 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_body_missing_on_disk() {
-        // body_path configured but file does not exist → hint should fire
+        // note: body_path configured but file does not exist → hint should fire
         // and mention body_path.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(Some("Works/my-novel/Stories/ch01-intro.md"), None);
@@ -3197,7 +3275,7 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_outline_missing_on_disk() {
-        // outline_path configured but file does not exist → hint fires.
+        // note: outline_path configured but file does not exist → hint fires.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(
             None,
@@ -3213,9 +3291,9 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_both_present_no_hint() {
-        // Both paths configured AND present on disk → no hint (None).
+        // note: Both paths configured AND present on disk → no hint (None).
         let dir = tempfile::tempdir().expect("tempdir");
-        // Create the files so exists() returns true.
+        // why: Create the files so exists() returns true.
         let body_rel = "Works/my-novel/Stories/ch01.md";
         let outline_rel = "Works/my-novel/Outlines/chapters/ch01-outline.md";
         std::fs::create_dir_all(dir.path().join("Works/my-novel/Stories"))
@@ -3235,7 +3313,7 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_no_paths_configured_no_hint() {
-        // Neither body_path nor outline_path in the JSON → None (nothing to
+        // note: Neither body_path nor outline_path in the JSON → None (nothing to
         // check; daemon has not assigned file paths yet).
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(None, None);
@@ -3248,7 +3326,7 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_both_missing_mentions_both() {
-        // Both configured, neither exists → hint mentions both fields.
+        // note: Both configured, neither exists → hint mentions both fields.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(
             Some("Works/x/Stories/ch01.md"),
@@ -3268,7 +3346,7 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_exists_failure_is_silent() {
-        // Best-effort contract: `Path::exists()` returns false (rather than
+        // why: Best-effort contract: `Path::exists()` returns false (rather than
         // panicking) for unreadable / permission-denied paths. The hint
         // surfaces "missing on disk" for such cases too — reconcile is the
         // correct remediation regardless. This test pins the "swallow"
@@ -3277,10 +3355,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let dir_path = dir.path().to_path_buf();
         let ch = chapter_with_paths(Some("nonexistent/ch01.md"), None);
-        // Drop the tempdir handle but keep the path; the files never existed.
+        // why: Drop the tempdir handle but keep the path; the files never existed.
         drop(dir);
         let hint = chapter_path_missing_hint(&ch, &dir_path);
-        // After drop the tempdir may still exist on disk (cleanup is
+        // note: After drop the tempdir may still exist on disk (cleanup is
         // best-effort), but the inner file definitely does not → Some.
         assert!(
             hint.is_some(),
@@ -3288,11 +3366,11 @@ mod tests {
         );
     }
 
-    // ── V1.46 P2 QC fix W-001: chapter hint cap + summary tests ──────────
+    // note: V1.46 P2 QC fix W-001: chapter hint cap + summary tests
 
     #[test]
     fn chapter_path_hint_skipped_summary_format() {
-        // Format contract for the "+ N more (paths not checked)" line.
+        // note: Format contract for the "+ N more (paths not checked)" line.
         assert_eq!(
             chapter_path_hint_skipped_summary(1).as_deref(),
             Some("+ 1 more (paths not checked)"),
@@ -3301,7 +3379,7 @@ mod tests {
             chapter_path_hint_skipped_summary(10).as_deref(),
             Some("+ 10 more (paths not checked)"),
         );
-        // Zero skipped → no summary line (caller must not render one).
+        // why: Zero skipped → no summary line (caller must not render one).
         assert!(
             chapter_path_hint_skipped_summary(0).is_none(),
             "no summary when skipped == 0"
@@ -3310,7 +3388,7 @@ mod tests {
 
     #[test]
     fn chapter_path_hint_cap_only_first_50_chapters_get_hints() {
-        // 60-chapter work, all with missing body_path. Without the cap,
+        // why: 60-chapter work, all with missing body_path. Without the cap,
         // every chapter would emit a ⚠ hint (and incur a synchronous
         // `exists()` syscall). The cap bounds the inspected set at
         // `CHAPTER_PATH_HINT_CAP` and summarizes the remainder.
@@ -3320,14 +3398,14 @@ mod tests {
             .collect();
         assert_eq!(chapters.len(), 60);
 
-        // Mirror print_chapter_table's cap math.
+        // note: Mirror print_chapter_table's cap math.
         let hint_cap = chapters.len().min(CHAPTER_PATH_HINT_CAP);
         assert_eq!(
             hint_cap, CHAPTER_PATH_HINT_CAP,
             "60-chapter work hits the cap"
         );
 
-        // Only the first `hint_cap` chapters are inspected for path hints.
+        // note: Only the first `hint_cap` chapters are inspected for path hints.
         let capped_hint_count = chapters[..hint_cap]
             .iter()
             .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
@@ -3337,7 +3415,7 @@ mod tests {
             "all 50 capped chapters have missing body_path → 50 hints"
         );
 
-        // Prove the cap is actually bounding something real: the skipped
+        // why: Prove the cap is actually bounding something real: the skipped
         // chapters WOULD have generated hints if the cap weren't in place.
         let would_have_hinted = chapters[hint_cap..]
             .iter()
@@ -3348,7 +3426,7 @@ mod tests {
             "skipped chapters would have hinted without the cap"
         );
 
-        // Summary line covers exactly the skipped count.
+        // note: Summary line covers exactly the skipped count.
         let skipped = chapters.len().saturating_sub(hint_cap);
         assert_eq!(skipped, 10);
         let summary =
@@ -3358,7 +3436,7 @@ mod tests {
 
     #[test]
     fn chapter_path_hint_cap_not_triggered_under_50() {
-        // A 10-chapter work is well under the cap: no chapter is skipped,
+        // note: A 10-chapter work is well under the cap: no chapter is skipped,
         // no summary line is rendered, and the existing per-chapter
         // behavior is fully preserved.
         let chapters: Vec<serde_json::Value> = (1..=10)
@@ -3375,7 +3453,7 @@ mod tests {
         );
     }
 
-    // ── V1.48 P2: CLI parsing for findings + rules subcommands ────────
+    // note: V1.48 P2: CLI parsing for findings + rules subcommands
 
     #[test]
     fn works_findings_accept_parses_with_finding_id() {
@@ -3411,7 +3489,7 @@ mod tests {
         }
     }
 
-    // ── V1.48 P2 T4: rules reset CLI parsing ──────────────────────────
+    // note: V1.48 P2 T4: rules reset CLI parsing
 
     #[test]
     fn works_rules_reset_parses_without_work_id() {
@@ -3458,7 +3536,7 @@ mod tests {
         }
     }
 
-    // ── V1.48 P2-fix1: --dry-run / --yes flag parsing ─────────────────
+    // note: V1.48 P2-fix1: --dry-run / --yes flag parsing
 
     #[test]
     fn works_rules_reset_supports_dry_run_flag() {

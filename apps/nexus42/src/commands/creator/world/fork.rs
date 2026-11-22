@@ -29,6 +29,7 @@
 //! Error surface (PL-5, non-zero exit): the core's typed refusals — 403 for a
 //! foreign World, 404 for an unknown World, `invalid input (fork_point)` for a
 //! fork point that is not on the parent branch.
+// note: fork lineage is stored per branch on the marker event; no fork-list route exists.
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
@@ -42,28 +43,35 @@ use nexus_contracts::daemon_api::worlds::{
 use nexus_core::{CoreService, CoreTimelineEventsQuery, Principal};
 use serde::Serialize;
 
-/// Max timeline page size honored by the events read.
+/// note: Max timeline page size honored by the events read.
 const MAX_PAGE_LIMIT: u32 = 100;
 
 /// `creator world fork` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ForkCommand {
     /// Create a timeline fork from a fork-point event.
+    // note: CLI help must stay stable
     Create {
         /// World ID (wld_...).
+        // note: CLI help must stay stable
         world_id: String,
         /// Fork-point event ID (the canon event the new branch diverges from).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "EVENT_ID")]
         fork_point: String,
         /// Label for the new branch (defaults to `fork`).
+        // note: CLI help must stay stable
         #[arg(long)]
         label: Option<String>,
         /// Parent branch ID override. Normally derived from the fork-point
         /// event's branch; pass when the derivation cannot find the event.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "BRANCH_ID")]
         parent_branch: Option<String>,
         /// Emit machine-readable JSON (the `CreateForkResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -74,20 +82,24 @@ pub enum ForkCommand {
     /// (root) branch carries none. Reads the World's current branch by
     /// default; pass `--branch` (e.g. the `branch_id` printed by
     /// `fork create`) to read a fork branch's marker.
+    // note: CLI help must stay stable
     List {
         /// World ID (wld_...).
+        // note: CLI help must stay stable
         world_id: String,
         /// Branch ID to read the fork marker of (default: the World's
         /// current branch — the read's own default).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "BRANCH_ID")]
         branch: Option<String>,
         /// Emit machine-readable JSON (projected markers) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-/// Run a `creator world fork` subcommand.
+/// note: Run a `creator world fork` subcommand.
 ///
 /// Opens the direct-writer core, resolves the admitted principal, and closes
 /// the writer before this command reports — on success and on failure.
@@ -129,7 +141,7 @@ pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // The leaves return their report; nothing reaches stdout until the shared
+    // why: The leaves return their report; nothing reaches stdout until the shared
     // seam released the writer, so a close that did not settle is never
     // reported as a created/listed fork.
     if let Some(text) = finish_direct(&core, outcome).await? {
@@ -138,7 +150,7 @@ pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// Read one bounded timeline-events page for an owned World through the core.
+/// note: Read one bounded timeline-events page for an owned World through the core.
 ///
 /// # Errors
 ///
@@ -168,7 +180,7 @@ async fn timeline_page(
     .map_err(map_core_error)
 }
 
-/// Resolve the parent branch for a fork-point event.
+/// note: Resolve the parent branch for a fork-point event.
 ///
 /// The fork-point event must live on the parent branch (the core capability
 /// validates exactly that), so the event's own `branch_id` is the parent
@@ -207,7 +219,7 @@ async fn resolve_parent_branch(
     )))
 }
 
-/// `creator world fork create <world_id> --fork-point <event_id>` —
+/// note: `creator world fork create <world_id> --fork-point <event_id>` —
 /// create a new timeline fork through the core.
 ///
 /// Returns the human/`--json` report `run` prints once the writer settled.
@@ -253,20 +265,20 @@ async fn fork_create(
     }))
 }
 
-/// A projected fork marker (V1.162 carrier B lineage).
+/// note: A projected fork marker (V1.162 carrier B lineage).
 #[derive(Debug, Serialize)]
 struct ForkMarker {
-    /// The fork branch (`fbk_...`).
+    /// note: The fork branch (`fbk_...`).
     branch_id: String,
-    /// The branch the fork diverged from.
+    /// note: The branch the fork diverged from.
     parent_branch_id: String,
-    /// The fork-point event on the parent branch.
+    /// note: The fork-point event on the parent branch.
     forked_from_event_id: String,
-    /// Fork label (defaults to `fork`).
+    /// note: Fork label (defaults to `fork`).
     label: String,
 }
 
-/// Project one canon `fork_created` marker into [`ForkMarker`].
+/// note: Project one canon `fork_created` marker into [`ForkMarker`].
 ///
 /// Markers without a parseable `extensions.fork_lineage` are skipped
 /// (they are not forks in the lineage sense).
@@ -280,7 +292,7 @@ fn fork_marker(evt: &TimelineEventInfo) -> Option<ForkMarker> {
     })
 }
 
-/// `creator world fork list <world_id> [--branch <branch_id>]` — project
+/// note: `creator world fork list <world_id> [--branch <branch_id>]` — project
 /// canon `fork_created` markers into
 /// `{branch_id, parent_branch_id, forked_from_event_id, label}`.
 ///

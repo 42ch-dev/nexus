@@ -13,6 +13,7 @@
 //! [`crate::core::require_materialized_workspace`] before the workspace pool
 //! is opened, so no `creator world kb` entrance can migrate — and therefore
 //! create — a workspace the selection never had.
+// note: workspace materialization is admitted before any pool opens.
 
 pub mod extract;
 pub mod pack;
@@ -39,13 +40,14 @@ use nexus_local_db::kb_extract_job::{
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
 
-/// Relationship projection cap enforced by the core graph projection
+/// note: Relationship projection cap enforced by the core graph projection
 /// (mirrors the daemon constant). The wire DTO carries no `truncated` flag, so
 /// the CLI mirrors the constant to surface a possibly truncated listing
 /// honestly on the human path (qc3 W-002).
 const GRAPH_RELATIONSHIP_CAP: usize = 1000;
 
 /// `creator world kb entity` verbs (core direct-writer OCC surface).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum KbEntityCommand {
     /// Patch a World KB entity through the core direct-writer route (CAS on revision).
@@ -55,50 +57,63 @@ pub enum KbEntityCommand {
     /// `world_kb_conflict`, refetch the graph and reapply with the new version.
     /// Distinct from the local-DB `creator world kb edit` (direct SQLite, no
     /// OCC) — this leaf writes through the core direct-writer only.
+    // note: CLI help must stay stable
     Patch {
         /// World ID (wld_...).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "WORLD_ID")]
         world_id: String,
         /// Entity ID (kb_...) to patch.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "ENTITY_ID")]
         entity_id: String,
         /// Per-row version observed on the last canonical read (CAS).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "N")]
         expected_version: u64,
         /// New canonical name (display title).
+        // note: CLI help must stay stable
         #[arg(long)]
         title: Option<String>,
         /// Replacement body JSON (`{"summary":...,"attributes":...,"tags":...}`).
+        // note: CLI help must stay stable
         #[arg(long)]
         body: Option<String>,
         /// Replacement alias list (comma-separated).
+        // note: CLI help must stay stable
         #[arg(long, value_delimiter = ',')]
         aliases: Option<Vec<String>>,
         /// Re-classify the entity (valid `BlockType`).
+        // note: CLI help must stay stable
         #[arg(long, value_enum)]
         block_type: Option<BlockTypeArg>,
         /// Per-entry functional-dialect modules JSON (first-level key upsert;
         /// `{}` is a no-op).
+        // note: CLI help must stay stable
         #[arg(long)]
         modules: Option<String>,
         /// Author audience: `shared`, `author-only`, or `character-private`.
         /// Omitted preserves the stored holder/disclosure pair; `shared`
         /// clears both. Governance moves under the same `--expected-version`
         /// CAS as the content.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "AUDIENCE")]
         audience: Option<String>,
         /// Character a `character-private` audience resolves to (must be a
         /// Character this Creator owns and that is bound to this World).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "CHARACTER_ID", requires = "audience")]
         audience_character: Option<String>,
         /// Emit machine-readable JSON (the `WorldKbPatchEntityResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
 /// `--block-type` value for `entity patch` (V1.73 wire vocabulary).
+// note: CLI help must stay stable
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum BlockTypeArg {
     Character,
@@ -156,21 +171,25 @@ impl BlockTypeArg {
 /// Flattened into the `WorldKbCommand::Graph` variant so the declaration
 /// exists once while the CLI shape stays
 /// `creator world kb graph --world-id ...`.
+// note: CLI help must stay stable
 #[derive(Debug, Args)]
 pub struct GraphArgs {
     /// World ID (wld_...).
+    // note: CLI help must stay stable
     #[arg(long, value_name = "WORLD_ID")]
     pub world_id: String,
     /// Include `needs_review = 1` (extraction-suggested) relationships.
+    // note: CLI help must stay stable
     #[arg(long, default_value_t = false)]
     pub include_suggested: bool,
     /// Emit machine-readable JSON (the `WorldKbGraphResponse` DTO verbatim)
     /// instead of human text.
+    // note: CLI help must stay stable
     #[arg(long, default_value_t = false)]
     pub json: bool,
 }
 
-/// Human/JSON rendering for a successful `entity patch`.
+/// note: Human/JSON rendering for a successful `entity patch`.
 pub(crate) fn render_patch_response(
     world_id: &str,
     entity_id: &str,
@@ -195,7 +214,7 @@ pub(crate) fn render_patch_response(
     Ok(())
 }
 
-/// Human/JSON rendering for a successful `graph` read.
+/// note: Human/JSON rendering for a successful `graph` read.
 pub(crate) fn render_graph_response(
     world_id: &str,
     resp: &WorldKbGraphResponse,
@@ -237,37 +256,48 @@ pub(crate) fn render_graph_response(
     Ok(())
 }
 
-/// Stable error code embedded in cross-author `403` messages.
+/// note: Stable error code embedded in cross-author `403` messages.
 pub const WORLD_KB_FORBIDDEN_CODE: &str = "WORLD_KB_FORBIDDEN";
 
 /// `creator world kb` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum WorldKbCommand {
     /// List all `KnowledgeEntries` in a world (id / `canonical_name` / `block_type` / status)
+    // note: CLI help must stay stable
     List {
         /// World reference — the world ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_ref: String,
         /// Emit machine-readable JSON
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
     },
 
     /// Show full body + provenance + status for a single `KnowledgeEntryRecord`
+    // note: CLI help must stay stable
     Show {
         /// World reference — the world ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_ref: String,
         /// `KnowledgeEntryRecord` ID (e.g. `kb_...`)
+        // note: CLI help must stay stable
         block_id: String,
         /// Emit machine-readable JSON
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
     },
 
     /// Edit a `KnowledgeEntryRecord` body in place (re-runs `ValidationMode::Novel`)
+    // note: CLI help must stay stable
     Edit {
         /// World reference — the world ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_ref: String,
         /// `KnowledgeEntryRecord` ID (e.g. `kb_...`)
+        // note: CLI help must stay stable
         block_id: String,
         /// New body as JSON (`{"summary":...,"attributes":...,"tags":...}`).
         /// `attributes.hygiene` (DF-79) is an optional array of
@@ -276,20 +306,26 @@ pub enum WorldKbCommand {
         /// assembly time — read-path only, the stored body is never mutated.
         /// At most 32 transforms per entry are applied; the rest are
         /// skipped and reported in the assembly trace.
+        // note: CLI help must stay stable
         #[arg(long)]
         body: String,
         /// Emit machine-readable JSON confirmation
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
     },
 
     /// Delete a `KnowledgeEntryRecord` (soft-delete; prompts unless `--yes`)
+    // note: CLI help must stay stable
     Delete {
         /// World reference — the world ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_ref: String,
         /// `KnowledgeEntryRecord` ID (e.g. `kb_...`)
+        // note: CLI help must stay stable
         block_id: String,
         /// Skip the interactive confirmation prompt
+        // note: CLI help must stay stable
         #[arg(long, short = 'y')]
         yes: bool,
     },
@@ -297,17 +333,22 @@ pub enum WorldKbCommand {
     /// List review-time KB candidates awaiting confirmation (V1.50 T-B P1).
     /// With `--missing-only`, list advisory finalize-time missing candidates
     /// from `Works/<work_ref>/Logs/kb/missing/` instead.
+    // note: CLI help must stay stable
     Pending {
         /// World reference — the world ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_ref: String,
         /// Maximum number of candidates to list
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = 100)]
         limit: i64,
         /// Emit machine-readable JSON
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
         /// List advisory missing candidates detected at finalize time
         /// (scans `Works/<work_ref>/Logs/kb/missing/`)
+        // note: CLI help must stay stable
         #[arg(long)]
         missing_only: bool,
     },
@@ -316,24 +357,31 @@ pub enum WorldKbCommand {
     ///
     /// Without `--auto`, requires an `extract_job_id`. With `--auto --world-ref`,
     /// promotes all high-confidence pending candidates in that world.
+    // note: CLI help must stay stable
     Adopt {
         /// `kb_extract_jobs` job ID (e.g. `xj_...`). Required unless `--auto`.
+        // note: CLI help must stay stable
         #[arg(required_unless_present = "auto")]
         extract_job_id: Option<String>,
         /// Auto-promote all high-confidence pending candidates in `--world-ref`.
+        // note: CLI help must stay stable
         #[arg(long, requires = "world_ref")]
         auto: bool,
         /// World reference (required with `--auto`).
+        // note: CLI help must stay stable
         #[arg(long)]
         world_ref: Option<String>,
         /// Emit machine-readable JSON confirmation
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
     },
 
     /// Dismiss a review-time KB candidate (archived to `Logs/kb/rejected/`)
+    // note: CLI help must stay stable
     Reject {
         /// `kb_extract_jobs` job ID (e.g. `xj_...`)
+        // note: CLI help must stay stable
         extract_job_id: String,
     },
 
@@ -344,17 +392,22 @@ pub enum WorldKbCommand {
     ///
     /// Use `--chapter N` to locate the Work's chapter N body and set
     /// `source_kind=work_chapter`, `profile_hint=novel` automatically.
+    // note: CLI help must stay stable
     QueueExtract {
         /// Idempotency label for the job (the source the extractor reads is
         /// the Work artifact named by `--work-id` / `--chapter`)
+        // note: CLI help must stay stable
         work_entry_id: String,
         /// Target world ID for the resulting `KnowledgeEntryRecord`
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: String,
         /// Source work ID (parent of the chapter artifact)
+        // note: CLI help must stay stable
         #[arg(long)]
         work_id: Option<String>,
         /// Chapter number sugar for novel profile (locates the chapter N body)
+        // note: CLI help must stay stable
         #[arg(long)]
         chapter: Option<i32>,
     },
@@ -362,8 +415,10 @@ pub enum WorldKbCommand {
     /// Show extract job status for the active creator.
     ///
     /// Without `--job-id`, lists up to 100 most recent jobs for the active creator.
+    // note: CLI help must stay stable
     ExtractStatus {
         /// Specific job ID to inspect
+        // note: CLI help must stay stable
         #[arg(long)]
         job_id: Option<String>,
     },
@@ -383,25 +438,31 @@ pub enum WorldKbCommand {
     /// R-V150KBED-08). Exactly one of the positional `<work_ref>/<chapter>` or
     /// `--work <work_ref>` must be supplied; supplying both (or neither)
     /// fails closed.
+    // note: CLI help must stay stable
     Rescan {
         /// `<work_ref>/<chapter>` — e.g. `my-novel/05`. Mutually exclusive with
         /// `--work`.
+        // note: CLI help must stay stable
         target: Option<String>,
         /// Work-scoped cross-chapter rescan: iterate all chapters in
         /// `Works/<work_ref>/Stories/` and reconcile by `canonical_name`.
         /// Mutually exclusive with the positional `<work_ref>/<chapter>`.
+        // note: CLI help must stay stable
         #[arg(long, value_name = "WORK_REF")]
         work: Option<String>,
         /// Show what would change without writing
+        // note: CLI help must stay stable
         #[arg(long)]
         dry_run: bool,
         /// Emit machine-readable JSON
+        // note: CLI help must stay stable
         #[arg(long)]
         json: bool,
     },
 
     /// Portable Knowledge-pack I/O (export / import a world's lore as a
     /// single spoke-compatible JSON file).
+    // note: CLI help must stay stable
     Pack {
         #[command(subcommand)]
         command: pack::PackCommand,
@@ -412,19 +473,21 @@ pub enum WorldKbCommand {
     /// `entity patch` writes through `nexus-core` with `--expected-version` CAS —
     /// distinct from the local-DB `edit` (direct SQLite, no OCC). `graph` reads
     /// the entity graph projection via the same core service route.
+    // note: CLI help must stay stable
     Entity {
         #[command(subcommand)]
         command: KbEntityCommand,
     },
 
     /// Show the World KB entity graph (direct core read, V1.175 P1 group 4).
+    // note: CLI help must stay stable
     Graph {
         #[command(flatten)]
         args: GraphArgs,
     },
 }
 
-/// Run a `creator world kb` subcommand.
+/// note: Run a `creator world kb` subcommand.
 ///
 /// The direct-core leaves route to the shared seam ([`service`] and [`pack`])
 /// first and never touch the local workspace pool; the local leaves are
@@ -441,7 +504,7 @@ pub enum WorldKbCommand {
 #[allow(clippy::future_not_send)]
 pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        // Direct-core leaves: `open_direct_core` inside the service (or the
+        // why: Direct-core leaves: `open_direct_core` inside the service (or the
         // pack leaf) owns their admission, and it refuses an unmaterialized
         // selection *before* `CoreService::open`. The local pool [`run_local`]
         // opens runs `Schema::init`, which migrates — and therefore creates —
@@ -477,7 +540,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Run one local (workspace-pool) `creator world kb` leaf.
+/// note: Run one local (workspace-pool) `creator world kb` leaf.
 ///
 /// The seam's admission pre-flight runs before the pool open, so a selection
 /// that names no materialized workspace is refused instead of having one
@@ -534,7 +597,7 @@ async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
         } => {
             let ws_root = crate::config::find_workspace_root();
             if auto {
-                // clap `requires = "world_ref"` guarantees this is Some.
+                // why: clap `requires = "world_ref"` guarantees this is Some.
                 let world_ref = world_ref
                     .ok_or_else(|| CliError::Other("--auto requires --world-ref".to_string()))?;
                 kb_adopt_auto(&pool, &creator_id, &world_ref, ws_root.as_deref(), json).await
@@ -549,7 +612,7 @@ async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             let ws_root = crate::config::find_workspace_root();
             kb_reject(&pool, &creator_id, &extract_job_id, ws_root.as_deref()).await
         }
-        // `run` routes these to the seam before this pool is opened.
+        // note: `run` routes these to the seam before this pool is opened.
         WorldKbCommand::Pack { .. }
         | WorldKbCommand::Entity { .. }
         | WorldKbCommand::Graph { .. }
@@ -561,7 +624,7 @@ async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Run `creator world kb entity patch` through the shared direct-core seam.
+/// note: Run `creator world kb entity patch` through the shared direct-core seam.
 ///
 /// One `CoreService` call, guarded by the CAS in `--expected-version`; the
 /// writer is closed before this leaf reports, on success and on failure.
@@ -607,7 +670,7 @@ async fn run_entity(command: KbEntityCommand, config: &CliConfig) -> Result<()> 
     }
 }
 
-// ── Hermetic logic functions ──────────────────────────────────────────
+// note: Hermetic logic functions
 //
 // These take an explicit `&SqlitePool` (+ `creator_id` where an owner gate is
 // needed) so integration tests can drive them against a fresh temp DB without
@@ -616,7 +679,7 @@ async fn run_entity(command: KbEntityCommand, config: &CliConfig) -> Result<()> 
 // the `run` entrypoint above remains the only caller that resolves the pool
 // from `CliConfig`.
 
-/// `creator world kb list` — list all active `KnowledgeEntries` in a world.
+/// note: `creator world kb list` — list all active `KnowledgeEntries` in a world.
 ///
 /// # Errors
 ///
@@ -653,7 +716,7 @@ pub async fn kb_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<()
     Ok(())
 }
 
-/// `creator world kb show` — show full body + provenance + status.
+/// note: `creator world kb show` — show full body + provenance + status.
 ///
 /// # Errors
 ///
@@ -698,7 +761,7 @@ pub async fn kb_show(pool: &SqlitePool, world_id: &str, block_id: &str, json: bo
     Ok(())
 }
 
-/// `creator world kb edit` — edit body in place with Novel validation re-run.
+/// note: `creator world kb edit` — edit body in place with Novel validation re-run.
 ///
 /// # Errors
 ///
@@ -714,7 +777,7 @@ pub async fn kb_edit(
     body_str: &str,
     json: bool,
 ) -> Result<()> {
-    // Novel-mode store so update_knowledge_entry re-runs V1.40 P1 validation (§5.1.1).
+    // why: Novel-mode store so update_knowledge_entry re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
     let mut block = store
@@ -723,7 +786,7 @@ pub async fn kb_edit(
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
-    // Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
+    // note: Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
     // the source Work's creator AND the World owner are both authorized.
     // Legacy rows (NULL source_work_id) fall back to World owner only.
     require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
@@ -756,7 +819,7 @@ pub async fn kb_edit(
     Ok(())
 }
 
-/// `creator world kb delete` — soft-delete with confirmation prompt.
+/// note: `creator world kb delete` — soft-delete with confirmation prompt.
 ///
 /// # Errors
 ///
@@ -772,14 +835,14 @@ pub async fn kb_delete(
 ) -> Result<()> {
     let store = SqliteKbStore::new(pool.clone());
 
-    // Pre-check existence + world binding for a clean error before prompting.
+    // note: Pre-check existence + world binding for a clean error before prompting.
     let block = store
         .get_knowledge_entry(block_id)
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
-    // Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
+    // note: Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
     // the source Work's creator AND the World owner are both authorized.
     // Legacy rows (NULL source_work_id) fall back to World owner only.
     require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
@@ -799,9 +862,9 @@ pub async fn kb_delete(
     Ok(())
 }
 
-// ── V1.50 T-B P1: review-time promotion surface ──────────────────────
+// note: V1.50 T-B P1: review-time promotion surface
 
-/// `creator world kb pending` — list candidates awaiting confirmation.
+/// note: `creator world kb pending` — list candidates awaiting confirmation.
 ///
 /// With `missing_only = false` (default), lists `pending` `kb_extract_jobs` rows
 /// (V1.50 behavior). With `missing_only = true`, scans advisory missing-KB logs
@@ -823,7 +886,7 @@ pub async fn kb_pending(
     missing_only: bool,
     workspace_dir: Option<&std::path::Path>,
 ) -> Result<()> {
-    // Author identity gate (same code path as edit/delete).
+    // note: Author identity gate (same code path as edit/delete).
     require_world_owner(pool, world_id, creator_id).await?;
 
     if missing_only {
@@ -862,7 +925,7 @@ pub async fn kb_pending(
     Ok(())
 }
 
-/// `creator world kb pending --missing-only` implementation.
+/// note: `creator world kb pending --missing-only` implementation.
 ///
 /// Scans `Works/<work_ref>/Logs/kb/missing/*.md` for every Work bound to the
 /// given World, parses YAML frontmatter, and prints advisory missing candidates.
@@ -884,7 +947,7 @@ async fn kb_pending_missing_only(
 
     let mut entries = collect_missing_entries(pool, world_id, ws_dir).await?;
 
-    // Stable ordering: chapter ascending, then canonical name.
+    // note: Stable ordering: chapter ascending, then canonical name.
     entries.sort_by(|a, b| {
         a.chapter
             .cmp(&b.chapter)
@@ -899,7 +962,7 @@ async fn kb_pending_missing_only(
     render_missing_entries(world_id, &entries, json)
 }
 
-/// Collect advisory missing-KB entries from log files.
+/// note: Collect advisory missing-KB entries from log files.
 async fn collect_missing_entries(
     pool: &SqlitePool,
     world_id: &str,
@@ -965,7 +1028,7 @@ async fn collect_missing_entries(
     Ok(entries)
 }
 
-/// Render collected missing-KB entries as text or JSON.
+/// note: Render collected missing-KB entries as text or JSON.
 fn render_missing_entries(world_id: &str, entries: &[MissingKbEntry], json: bool) -> Result<()> {
     if json {
         let items: Vec<serde_json::Value> = entries
@@ -1007,7 +1070,7 @@ fn render_missing_entries(world_id: &str, entries: &[MissingKbEntry], json: bool
     Ok(())
 }
 
-/// Split a Markdown file into its YAML frontmatter and body.
+/// note: Split a Markdown file into its YAML frontmatter and body.
 ///
 /// Expects the file to start with `---` and contain a second `---` ending the
 /// frontmatter block. Returns the frontmatter text (without delimiters) and the
@@ -1025,7 +1088,7 @@ fn split_frontmatter(text: &str) -> std::result::Result<(&str, &str), String> {
     Ok((fm.trim(), body.trim_start()))
 }
 
-/// Truncate a source quote for terminal output.
+/// note: Truncate a source quote for terminal output.
 fn truncate_quote(q: &str) -> String {
     let q = q.trim();
     if q.chars().count() > 50 {
@@ -1036,7 +1099,7 @@ fn truncate_quote(q: &str) -> String {
     }
 }
 
-/// Parsed frontmatter of a missing-KB log file.
+/// note: Parsed frontmatter of a missing-KB log file.
 #[derive(Debug, serde::Deserialize)]
 struct MissingKbLogFrontmatter {
     generated_at: String,
@@ -1045,7 +1108,7 @@ struct MissingKbLogFrontmatter {
     candidates: Vec<MissingKbLogCandidate>,
 }
 
-/// Parsed candidate inside a missing-KB log frontmatter.
+/// note: Parsed candidate inside a missing-KB log frontmatter.
 #[derive(Debug, serde::Deserialize)]
 struct MissingKbLogCandidate {
     canonical_name: String,
@@ -1054,7 +1117,7 @@ struct MissingKbLogCandidate {
     confidence: Option<f64>,
 }
 
-/// Flattened missing-KB entry used for sorting/output.
+/// note: Flattened missing-KB entry used for sorting/output.
 struct MissingKbEntry {
     chapter: i32,
     world_id: String,
@@ -1062,7 +1125,7 @@ struct MissingKbEntry {
     candidate: MissingKbLogCandidate,
 }
 
-/// `creator world kb adopt` — confirm a candidate into a `confirmed` `KnowledgeEntryRecord`.
+/// note: `creator world kb adopt` — confirm a candidate into a `confirmed` `KnowledgeEntryRecord`.
 ///
 /// Steps (entity-scope-model.md §5.5.3 promotion gate):
 /// 1. Load the promotion row; require it is in `pending` state.
@@ -1099,13 +1162,13 @@ pub async fn kb_adopt(
     json: bool,
 ) -> Result<()> {
     let candidate = load_pending_candidate(pool, extract_job_id).await?;
-    let candidate_version = candidate.version; // V1.51 T-B P1: CAS preimage version
+    let candidate_version = candidate.version; // note: V1.51 T-B P1: CAS preimage version
     let world_id = candidate.world_id.as_str();
 
-    // Author identity gate.
+    // note: Author identity gate.
     require_world_owner(pool, world_id, creator_id).await?;
 
-    // V1.51 T-B P0: acquire advisory file lock before the DB transaction (W-001).
+    // note: V1.51 T-B P0: acquire advisory file lock before the DB transaction (W-001).
     // Resolve work_ref from the candidate's work_id, then acquire the lock.
     #[cfg(unix)]
     let _file_lock =
@@ -1144,17 +1207,17 @@ pub async fn kb_adopt(
         };
 
     #[cfg(not(unix))]
-    // V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
+    // note: V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
     // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
     // advisory lock, proceed unlocked.
     let _file_lock = ();
 
-    // Parse proposed body.
+    // note: Parse proposed body.
     let body: KnowledgeEntryBody =
         serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
             .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
 
-    // Parse block_type guess → wire BlockType.
+    // note: Parse block_type guess → wire BlockType.
     let block_type_str = candidate.block_type_guess.as_deref().unwrap_or("character");
     let block_type = parse_block_type_cli(block_type_str)?;
 
@@ -1164,16 +1227,16 @@ pub async fn kb_adopt(
         .ok_or_else(|| CliError::Other("Candidate has no canonical_name_guess".to_string()))?
         .to_string();
 
-    // Novel-mode store so insert re-runs V1.40 P1 validation (§5.1.1).
+    // why: Novel-mode store so insert re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
     let mut kb = KnowledgeEntryRecord::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
-    // §5.5.1: adopt transitions to `confirmed` (terminal KnowledgeEntryRecord status).
+    // note: §5.5.1: adopt transitions to `confirmed` (terminal KnowledgeEntryRecord status).
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
 
-    // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance linkage (entity-scope-model.md §5.5.7).
+    // note: V1.52 T-A P2: Work→KnowledgeEntryRecord provenance linkage (entity-scope-model.md §5.5.7).
     // Populate source_work_id and source_chapter from the extract job context.
     // provenance_kind is inferred: LLM extraction → review_time_extract,
     // heuristic/no LLM → manual.
@@ -1189,7 +1252,7 @@ pub async fn kb_adopt(
         Some("manual".to_string())
     };
 
-    // R-V150KBED-03: atomic promotion. The KnowledgeEntryRecord insert and the promotion
+    // why: R-V150KBED-03: atomic promotion. The KnowledgeEntryRecord insert and the promotion
     // row flip share a single transaction; any failure (validation, insert,
     // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
     // KnowledgeEntryRecord is persisted.
@@ -1202,9 +1265,9 @@ pub async fn kb_adopt(
         .insert_key_block_in_tx(&mut tx, kb)
         .await
         .map_err(|e| map_kb_store_error("adopt", extract_job_id, world_id, e))?;
-    // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
+    // note: On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
-    // V1.51 T-B P1: CAS-aware flip — guards against stale preimage
+    // note: V1.51 T-B P1: CAS-aware flip — guards against stale preimage
     // (another writer raced between load_pending_candidate and this flip).
     // On version mismatch → E_VERSION (exit 76, retry).
     let flipped = mark_confirmed_in_tx_with_cas(&mut tx, extract_job_id, candidate_version)
@@ -1221,10 +1284,10 @@ pub async fn kb_adopt(
                 CliError::Other(format!("Failed to mark candidate confirmed: {e}"))
             }
         })?;
-    // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
+    // note: On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
     if !flipped {
-        // Race: the row was confirmed/rejected between `load_pending_candidate`
+        // why: Race: the row was confirmed/rejected between `load_pending_candidate`
         // and this flip. Explicit rollback so the orphan KnowledgeEntryRecord insert is
         // undone before we surface the error. Best-effort: a rollback failure
         // is logged but the row was never committed so no orphan persists.
@@ -1245,7 +1308,7 @@ pub async fn kb_adopt(
         .await
         .map_err(|e| CliError::Other(format!("Failed to commit adopt transaction: {e}")))?;
 
-    // V1.51 T-A P0: surface LLM extraction metadata (cli-spec §6.2G). Read
+    // note: V1.51 T-A P0: surface LLM extraction metadata (cli-spec §6.2G). Read
     // the dedicated columns first; fall back to the proposed_payload JSON keys
     // for V1.50 rows where the columns are NULL (llm-extract.md §3.2).
     let (confidence, source_quote) = extract_llm_metadata(&candidate);
@@ -1270,7 +1333,7 @@ pub async fn kb_adopt(
             insert_result.owner.world_id().unwrap_or_default()
         );
         println!("  Status:      confirmed");
-        // Confidence is shown as 2-decimal or '-' for heuristic rows; source
+        // note: Confidence is shown as 2-decimal or '-' for heuristic rows; source
         // quote is truncated for terminal width (full text in --json).
         let conf_display = confidence.map_or_else(|| "-".to_string(), |c| format!("{c:.2}"));
         let quote_display = source_quote.as_deref().map_or_else(
@@ -1280,7 +1343,7 @@ pub async fn kb_adopt(
                 if q.is_empty() {
                     "-".to_string()
                 } else if q.chars().count() > 60 {
-                    // char-count truncation keeps multi-byte text correct.
+                    // why: char-count truncation keeps multi-byte text correct.
                     let head: String = q.chars().take(57).collect();
                     format!("{head}...")
                 } else {
@@ -1294,7 +1357,7 @@ pub async fn kb_adopt(
     Ok(())
 }
 
-/// `creator world kb adopt --auto` — auto-promote high-confidence pending candidates.
+/// note: `creator world kb adopt --auto` — auto-promote high-confidence pending candidates.
 ///
 /// Iterates pending `kb_extract_jobs` rows for the given world and promotes those
 /// meeting the safe auto-promotion threshold:
@@ -1354,7 +1417,7 @@ pub async fn kb_adopt_auto(
         reason: String,
     }
 
-    // Author identity gate (same as single adopt).
+    // note: Author identity gate (same as single adopt).
     require_world_owner(pool, world_id, creator_id).await?;
 
     let pending = list_pending_for_world(pool, world_id, None)
@@ -1366,7 +1429,7 @@ pub async fn kb_adopt_auto(
     let mut promoted: Vec<PromotedRecord> = Vec::new();
     let mut skipped: Vec<SkippedRecord> = Vec::new();
 
-    // R-V152TA-S009 (doc-defer): each candidate opens its own transaction
+    // why: R-V152TA-S009 (doc-defer): each candidate opens its own transaction
     // (begin → insert_key_block_in_tx → CAS flip → commit) so that a
     // per-candidate failure (duplicate canonical_name, validation error, CAS
     // race) rolls back ONLY that candidate and the loop continues with the
@@ -1385,7 +1448,7 @@ pub async fn kb_adopt_auto(
             continue;
         };
 
-        // ── Eligibility checks ─────────────────────────────────────────────
+        // note: Eligibility checks
         let Some(confidence) = candidate.llm_confidence else {
             skipped.push(SkippedRecord {
                 extract_job_id: candidate.job_id.clone(),
@@ -1416,7 +1479,7 @@ pub async fn kb_adopt_auto(
             continue;
         }
 
-        // ── Build KnowledgeEntryRecord ─────────────────────────────────────────────────
+        // note: Build KnowledgeEntryRecord
         let body: KnowledgeEntryBody =
             serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
                 .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
@@ -1428,13 +1491,13 @@ pub async fn kb_adopt_auto(
         kb.status = "confirmed".to_string();
         kb.created_at = chrono::Utc::now().to_rfc3339();
 
-        // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance linkage.
+        // note: V1.52 T-A P2: Work→KnowledgeEntryRecord provenance linkage.
         // Auto-adopt sets author_explicit provenance; source from extract job.
         kb.source_work_id = candidate.work_id.clone();
         kb.source_chapter = candidate.source_chapter_id;
         kb.source_provenance_kind = Some("author_explicit".to_string());
 
-        // ── Atomic insert + audit flip ─────────────────────────────────────
+        // note: Atomic insert + audit flip
         let mut tx = pool
             .begin()
             .await
@@ -1495,7 +1558,7 @@ pub async fn kb_adopt_auto(
             CliError::Other(format!("Failed to commit adopt-auto transaction: {e}"))
         })?;
 
-        // Best-effort audit log (non-fatal to the promotion outcome).
+        // note: Best-effort audit log (non-fatal to the promotion outcome).
         if let Err(e) = write_auto_promoted_log(
             pool,
             workspace_dir,
@@ -1522,7 +1585,7 @@ pub async fn kb_adopt_auto(
         });
     }
 
-    // R-V152TA-S004: surface every auto-promote skip at `info!` so operators
+    // why: R-V152TA-S004: surface every auto-promote skip at `info!` so operators
     // can see why candidates were left pending (provenance gaps, low
     // confidence, duplicate names, CAS races) without re-running the command
     // with `--json`. One event per skip keeps the audit trail greppable.
@@ -1535,7 +1598,7 @@ pub async fn kb_adopt_auto(
         );
     }
 
-    // ── Output ───────────────────────────────────────────────────────────
+    // note: Output
     if json {
         println!(
             "{}",
@@ -1566,7 +1629,7 @@ pub async fn kb_adopt_auto(
     Ok(())
 }
 
-/// Write the auto-promotion audit log (V1.52 T-A P0).
+/// note: Write the auto-promotion audit log (V1.52 T-A P0).
 ///
 /// Path: `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md`.
 /// Returns Ok(()) without writing when no workspace is bound (hermetic tests).
@@ -1583,7 +1646,7 @@ async fn write_auto_promoted_log(
         return Ok(());
     };
 
-    // R-V150KBED-05: resolve the human-readable work_ref (works.story_ref)
+    // note: R-V150KBED-05: resolve the human-readable work_ref (works.story_ref)
     // before constructing the log path.
     let work_ref = resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir)
         .await
@@ -1637,7 +1700,7 @@ async fn write_auto_promoted_log(
     Ok(())
 }
 
-/// Write an audit log `body` to `path` and `fsync` before returning
+/// note: Write an audit log `body` to `path` and `fsync` before returning
 /// (R-V152TA-S005).
 ///
 /// `std::fs::write` alone does not guarantee the bytes reach durable storage
@@ -1661,7 +1724,7 @@ fn write_audit_log_with_fsync(
     Ok(())
 }
 
-/// `creator world kb reject` — dismiss a candidate (archived to
+/// note: `creator world kb reject` — dismiss a candidate (archived to
 /// `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md`).
 ///
 /// # Errors
@@ -1679,10 +1742,10 @@ pub async fn kb_reject(
     let candidate = load_pending_candidate(pool, extract_job_id).await?;
     let world_id = candidate.world_id.as_str();
 
-    // Author identity gate.
+    // note: Author identity gate.
     require_world_owner(pool, world_id, creator_id).await?;
 
-    // R-V150KBED-05: resolve the human-readable work_ref (works.story_ref) for
+    // note: R-V150KBED-05: resolve the human-readable work_ref (works.story_ref) for
     // the reject audit-log path BEFORE the DB flip. A missing work_ref fails
     // cleanly here — no rejected row, no orphan audit log under the wrong path.
     // The prior behavior wrote under `Works/<work_id>/...` using the opaque DB
@@ -1699,7 +1762,7 @@ pub async fn kb_reject(
         )));
     }
 
-    // Best-effort audit log (entity-scope-model §5.5.4). Non-fatal: a missing
+    // note: Best-effort audit log (entity-scope-model §5.5.4). Non-fatal: a missing
     // workspace dir (hermetic tests) or write failure does not undo the reject.
     if let Err(e) = write_rejected_log(
         workspace_dir,
@@ -1718,9 +1781,9 @@ pub async fn kb_reject(
     Ok(())
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
+// note: Helpers
 
-/// Verify the referenced `KnowledgeEntryRecord` actually belongs to the requested world.
+/// note: Verify the referenced `KnowledgeEntryRecord` actually belongs to the requested world.
 fn require_block_in_world(
     block: &KnowledgeEntryRecord,
     world_id: &str,
@@ -1736,7 +1799,7 @@ fn require_block_in_world(
     Ok(())
 }
 
-/// Author identity gate with Work→KnowledgeEntryRecord provenance support (§5.5.7).
+/// note: Author identity gate with Work→KnowledgeEntryRecord provenance support (§5.5.7).
 ///
 /// When `source_work_id` is set (R-V150KBED-02 resolution), the authorisation
 /// gate accepts EITHER the World owner OR the source Work's creator — a KB row
@@ -1751,7 +1814,7 @@ async fn require_world_or_work_owner(
     creator_id: &str,
     source_work_id: Option<&str>,
 ) -> Result<()> {
-    // R-V150KBED-02: when source_work_id is set, check the source Work's creator.
+    // note: R-V150KBED-02: when source_work_id is set, check the source Work's creator.
     if let Some(work_id) = source_work_id {
         // SAFETY: static query against the known works table schema.
         let work_creator: Option<String> =
@@ -1768,15 +1831,15 @@ async fn require_world_or_work_owner(
                 return Ok(());
             }
         }
-        // Source work creator doesn't match; fall through to world owner check.
+        // note: Source work creator doesn't match; fall through to world owner check.
     }
 
-    // Fall back to the canonical World owner check for legacy rows and
+    // note: Fall back to the canonical World owner check for legacy rows and
     // for cases where the source work creator didn't match.
     require_world_owner(pool, world_id, creator_id).await
 }
 
-/// Author identity gate. Reads `narrative_worlds.owner_creator_id` and requires
+/// note: Author identity gate. Reads `narrative_worlds.owner_creator_id` and requires
 /// it to match `creator_id`. Returns `403 WORLD_KB_FORBIDDEN` on mismatch.
 ///
 /// Per entity-scope-model §1.2/§5.1, `KnowledgeEntryRecord`s are World-scoped and the
@@ -1809,7 +1872,7 @@ async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str
     }
 }
 
-/// Confirm an interactive delete. Returns `false` on non-interactive terminals
+/// note: Confirm an interactive delete. Returns `false` on non-interactive terminals
 /// (caller should require `--yes` in that case).
 fn confirm_delete(block_id: &str, world_id: &str) -> bool {
     dialoguer::Confirm::new()
@@ -1824,7 +1887,7 @@ fn confirm_delete(block_id: &str, world_id: &str) -> bool {
         })
 }
 
-/// Map a `KbStoreError` to a user-facing `CliError`, surfacing validation
+/// note: Map a `KbStoreError` to a user-facing `CliError`, surfacing validation
 /// failures with a clear `ValidationError` prefix.
 fn map_kb_store_error(verb: &str, block_id: &str, world_id: &str, e: KbStoreError) -> CliError {
     match e {
@@ -1839,7 +1902,7 @@ fn map_kb_store_error(verb: &str, block_id: &str, world_id: &str, e: KbStoreErro
     }
 }
 
-/// Build the JSON summary object for `--json` list output.
+/// note: Build the JSON summary object for `--json` list output.
 fn block_summary_json(block: &KnowledgeEntryRecord) -> serde_json::Value {
     serde_json::json!({
         "key_block_id": block.entry_id,
@@ -1850,9 +1913,9 @@ fn block_summary_json(block: &KnowledgeEntryRecord) -> serde_json::Value {
     })
 }
 
-// ── V1.50 T-B P1 helpers ─────────────────────────────────────────────
+// note: V1.50 T-B P1 helpers
 
-/// Load a promotion candidate by ID and require it is in `pending` state.
+/// note: Load a promotion candidate by ID and require it is in `pending` state.
 ///
 /// Surfaces a clean error if the row is missing, not a promotion candidate,
 /// or already confirmed/rejected.
@@ -1879,7 +1942,7 @@ async fn load_pending_candidate(
     Ok(row)
 }
 
-/// Parse a `snake_case` `block_type` string into a wire `BlockType`.
+/// note: Parse a `snake_case` `block_type` string into a wire `BlockType`.
 ///
 /// Accepts the wire format (e.g. `"character"`). Returns a clear error on
 /// unknown values so the author can correct the `block_type_guess`.
@@ -1895,7 +1958,7 @@ fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
     })
 }
 
-/// Resolve the LLM extraction metadata for an adopt display (V1.51 T-A P0,
+/// note: Resolve the LLM extraction metadata for an adopt display (V1.51 T-A P0,
 /// cli-spec §6.2G).
 ///
 /// Reads the dedicated `llm_confidence` / `llm_source_quote` columns first;
@@ -1925,7 +1988,7 @@ fn extract_llm_metadata(candidate: &KbExtractPromotion) -> (Option<f64>, Option<
     (confidence, source_quote)
 }
 
-/// Write the rejected-candidate audit log (entity-scope-model §5.5.4).
+/// note: Write the rejected-candidate audit log (entity-scope-model §5.5.4).
 ///
 /// Path: `<workspace_dir>/Works/<work_ref>/Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md`.
 ///
@@ -1943,10 +2006,10 @@ fn write_rejected_log(
     work_ref: Option<&str>,
 ) -> std::result::Result<(), String> {
     let Some(ws_dir) = workspace_dir else {
-        // No workspace bound (hermetic test) — skip log writing.
+        // note: No workspace bound (hermetic test) — skip log writing.
         return Ok(());
     };
-    // R-V150KBED-05: work_ref is resolved upstream from works.story_ref; fall
+    // why: R-V150KBED-05: work_ref is resolved upstream from works.story_ref; fall
     // back only if the caller passed None despite having a workspace dir
     // (defensive — kb_reject resolves before calling, so this is unreachable
     // in the CLI path but keeps the helper safe for direct callers).
@@ -1989,7 +2052,7 @@ fn write_rejected_log(
     Ok(())
 }
 
-/// Resolve the human-readable `work_ref` (`works.story_ref`) for the reject
+/// note: Resolve the human-readable `work_ref` (`works.story_ref`) for the reject
 /// audit-log path (entity-scope-model §5.5.4; home-layout `Works/<work_ref>/`
 /// convention). R-V150KBED-05.
 ///
@@ -2005,7 +2068,7 @@ async fn resolve_work_ref_for_log(
     workspace_dir: Option<&std::path::Path>,
 ) -> Result<Option<String>> {
     if workspace_dir.is_none() {
-        // No workspace bound (hermetic test) — no log to write, no ref needed.
+        // note: No workspace bound (hermetic test) — no log to write, no ref needed.
         return Ok(None);
     }
     let Some(wid) = work_id else {
@@ -2033,7 +2096,7 @@ async fn resolve_work_ref_for_log(
     }
 }
 
-/// Run `creator world kb graph` (direct core read).
+/// note: Run `creator world kb graph` (direct core read).
 pub(crate) async fn run_graph(args: GraphArgs, config: &CliConfig) -> Result<()> {
     service::run_graph(config, args.world_id, args.include_suggested, args.json).await
 }

@@ -26,7 +26,7 @@ use nexus_contracts::daemon_api::inspector::{
 };
 use std::fmt::Write as _;
 
-/// Generation stages accepted by `--stage` (V1.151 enum, verbatim).
+/// note: Generation stages accepted by `--stage` (V1.151 enum, verbatim).
 const GENERATION_STAGES: [&str; 8] = [
     "intake",
     "research",
@@ -39,6 +39,7 @@ const GENERATION_STAGES: [&str; 8] = [
 ];
 
 /// `creator inspector` subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum InspectorCommand {
     /// Assemble and print the moment inspector packet for an owned World.
@@ -46,26 +47,31 @@ pub enum InspectorCommand {
     /// Observe-only: the core assembles over a read-only directive store —
     /// it never writes and never burns directive TTL. The `moment-directive`
     /// route is intentionally not covered here (not §5 remainder).
+    // note: CLI help must stay stable
     Moment {
         /// World ID (wld_...).
+        // note: CLI help must stay stable
         world_id: String,
         /// Optional Work ID (wrk_...) — when given, the Work's binding
         /// must agree with the World.
+        // note: CLI help must stay stable
         #[arg(long)]
         work: Option<String>,
         /// Generation stage assignment: `intake` | `research` | `produce` |
         /// `review` | `persist` | `work_maintenance` | `system_maintenance` |
         /// `unspecified`.
+        // note: CLI help must stay stable
         #[arg(long)]
         stage: Option<String>,
         /// Emit machine-readable JSON (the `MomentInspectResponse` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-/// Run a `creator inspector` subcommand.
+/// note: Run a `creator inspector` subcommand.
 ///
 /// The writer is released by [`finish_direct`] before any line is printed.
 ///
@@ -102,7 +108,7 @@ pub async fn run(cmd: InspectorCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// Parse a generation-stage string against the V1.151 enum.
+/// note: Parse a generation-stage string against the V1.151 enum.
 ///
 /// # Errors
 ///
@@ -125,7 +131,7 @@ fn parse_stage(stage: &str) -> Result<MomentInspectRequestGenerationStage> {
     }
 }
 
-/// `creator inspector moment <world_id> [--work …] [--stage …]` — print
+/// note: `creator inspector moment <world_id> [--work …] [--stage …]` — print
 /// the moment inspector packet for an owned World.
 ///
 /// # Errors
@@ -157,7 +163,7 @@ async fn moment(
     Ok(render_packet(world_id, &resp))
 }
 
-/// Render a compact human summary of the inspector packet.
+/// note: Render a compact human summary of the inspector packet.
 fn render_packet(world_id: &str, resp: &MomentInspectResponse) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Inspector moment — {world_id}");

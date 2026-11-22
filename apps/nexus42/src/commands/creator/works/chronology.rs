@@ -21,57 +21,71 @@ use clap::Subcommand;
 use crate::config::{self, CliConfig};
 use crate::errors::{CliError, Result};
 
-// ── Clap subcommand definitions (spec §2.2) ──────────────────────────────
+// note: Clap subcommand definitions (spec §2.2)
 
 /// `creator works chronology` subcommand group (spec §2.2).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ChronologyCommand {
     /// Enable or disable auto-chronology for a Work (spec §2.2).
+    // note: CLI help must stay stable
     Set {
         /// Work reference (`work_ref` slug) or `work_id` (`wrk_...`).
+        // note: CLI help must stay stable
         work_ref: String,
         /// `--auto true` enables the daemon auto-advance; `--auto false`
         /// disables it (the default state for every shipped Work).
+        // note: CLI help must stay stable
         #[arg(long)]
         auto: bool,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Show the auto-chronology state + last advance for a Work (spec §2.2).
+    // note: CLI help must stay stable
     Show {
         /// Work reference (`work_ref` slug) or `work_id` (`wrk_...`).
+        // note: CLI help must stay stable
         work_ref: String,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Manually advance a Work to a volume, bypassing finish detection
     /// (spec §2.2 override path).
+    // note: CLI help must stay stable
     Advance {
         /// Work reference (`work_ref` slug) or `work_id` (`wrk_...`).
+        // note: CLI help must stay stable
         work_ref: String,
         /// Target volume number to advance to (e.g. `2`, `3`).
+        // note: CLI help must stay stable
         #[arg(long)]
         volume: i32,
         /// Number of `not_started` chapter rows to seed for the new volume
         /// (optional; default 0 = placeholder outline, author seeds manually).
+        // note: CLI help must stay stable
         #[arg(long)]
         chapters: Option<i32>,
         /// Bypass the idempotent guard and overwrite an existing outline
         /// (recovery path for a post-commit outline-write failure or an
         /// orphaned crash-state outline).
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         force: bool,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-// ── Dispatcher + handlers ────────────────────────────────────────────────
+// note: Dispatcher + handlers
 
-/// Dispatch `creator works chronology` subcommands.
+/// note: Dispatch `creator works chronology` subcommands.
 ///
 /// Opens the local `state.db` directly for `set`/`show` (foundation-slice
 /// precedent: `creator works cron`). `advance` resolves the workspace root so
@@ -122,7 +136,7 @@ pub async fn handle_chronology(cmd: ChronologyCommand, config: &CliConfig) -> Re
     }
 }
 
-/// `creator works chronology set` — persist the auto-chronology flag (§2.2).
+/// note: `creator works chronology set` — persist the auto-chronology flag (§2.2).
 async fn handle_set(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -150,7 +164,7 @@ async fn handle_set(
     Ok(())
 }
 
-/// `creator works chronology show` — render the flag + last advance (§2.2).
+/// note: `creator works chronology show` — render the flag + last advance (§2.2).
 async fn handle_show(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -181,7 +195,7 @@ async fn handle_show(
     Ok(())
 }
 
-/// `creator works chronology advance` — manual override (spec §2.2).
+/// note: `creator works chronology advance` — manual override (spec §2.2).
 // R-V150-WLA-02 (V1.50 P-last WL-A / auto-chronology qc1 S-002): the 8
 // inputs are read together from one CLI invocation + one Work row; packing
 // them into a struct would duplicate the `WorkAutoChronologyRow` shape
@@ -279,12 +293,12 @@ async fn handle_advance(
     Ok(())
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// note: Helpers
 
-/// SAFETY label for infallible `writeln!`/`write!` into a `String` (no IO).
+/// note: SAFETY label for infallible `writeln!`/`write!` into a `String` (no IO).
 const WRITE_OK: &str = "write to String is infallible";
 
-/// Resolve `<work_ref>` / `<work_id>` to a concrete `work_id`.
+/// note: Resolve `<work_ref>` / `<work_id>` to a concrete `work_id`.
 async fn resolve_work_id(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -301,7 +315,7 @@ async fn resolve_work_id(
         })
 }
 
-/// Best-effort label for the most recent chronology advance log entry.
+/// note: Best-effort label for the most recent chronology advance log entry.
 ///
 /// Scans `Works/<work_ref>/Logs/chronology/` (when a workspace root is
 /// discoverable) and returns the newest `<date>-advance-vol<N>.md` filename, or

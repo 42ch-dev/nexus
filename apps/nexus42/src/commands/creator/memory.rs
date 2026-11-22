@@ -3,6 +3,7 @@
 //! Long-term memory CRUD, the SOUL-independent review pipeline, and fragment
 //! management. Every leaf is a typed `CoreService` client since NXM-6: no
 //! command opens a legacy memory file.
+// note: the review drain stops on the call cap or on a zero-progress call, and the two serialize distinctly.
 
 use crate::config::CliConfig;
 use crate::core::{
@@ -26,130 +27,163 @@ use std::str::FromStr;
 #[derive(Debug, Subcommand)]
 pub enum MemoryCommand {
     /// List all long-term memories for current creator
+    // note: CLI help must stay stable
     List,
 
     /// Create a new long-term memory
+    // note: CLI help must stay stable
     Create {
         /// Memory slug (filename, path-safe)
+        // note: CLI help must stay stable
         slug: String,
 
         /// Memory kind (`story_summary`, `research_material`, etc.)
+        // note: CLI help must stay stable
         #[arg(long, default_value = "custom")]
         kind: String,
 
         /// Initial content (if empty, opens editor)
+        // note: CLI help must stay stable
         #[arg(long)]
         content: Option<String>,
     },
 
     /// Show a specific memory
+    // note: CLI help must stay stable
     Show { slug: String },
 
     /// Edit an existing memory (opens in editor)
+    // note: CLI help must stay stable
     Edit { slug: String },
 
     /// Delete a memory
+    // note: CLI help must stay stable
     Delete {
         slug: String,
 
         /// Skip confirmation
+        // note: CLI help must stay stable
         #[arg(long)]
         force: bool,
     },
 
     /// Trigger review of pending queue (drains while `has_more`; cap 100 calls)
+    // note: CLI help must stay stable
     Review {
         /// Emit machine-readable JSON (cumulative drain report) instead of
         /// human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// List memory fragments
+    // note: CLI help must stay stable
     Fragments {
         /// Emit machine-readable JSON (the `ListMemoryFragmentsResponse`
         /// DTO verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// List pending review entries for current creator
+    // note: CLI help must stay stable
     PendingList {
         /// Emit machine-readable JSON (the `ListPendingReviewsResponse`
         /// DTO verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Pending-review queue operations
+    // note: CLI help must stay stable
     Pending {
         #[command(subcommand)]
         command: PendingCommand,
     },
 
     /// Show details of a pending review entry
+    // note: CLI help must stay stable
     PendingShow {
         /// Pending review ID to show
+        // note: CLI help must stay stable
         pending_id: String,
         /// Emit machine-readable JSON (the `PendingReviewInfo` DTO
         /// verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Dismiss a pending review entry without promoting
+    // note: CLI help must stay stable
     PendingDismiss {
         /// Pending review ID to dismiss
+        // note: CLI help must stay stable
         pending_id: String,
         /// Emit machine-readable JSON (the `DeletePendingReviewResponse`
         /// DTO verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Migrate every remaining legacy memory row and bearer file into provider
     /// surfaces (one guarded pass; a completed pass verifies and is a no-op)
+    // note: CLI help must stay stable
     MigrateLegacy {
         /// Emit machine-readable JSON (the `LegacyContentMigration` report)
         /// instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Capture a session digest into the pending-review queue
+    // note: CLI help must stay stable
     Capture {
         /// Pending review ID for the captured digest
+        // note: CLI help must stay stable
         #[arg(long)]
         pending_id: String,
 
         /// Session that produced the digest
+        // note: CLI help must stay stable
         #[arg(long)]
         session_id: String,
 
         /// World the session ran in (provenance context)
+        // note: CLI help must stay stable
         #[arg(long)]
         world_id: Option<String>,
 
         /// Task kind heuristic (`brainstorm`, `outline`, `chapter`, `research`,
         /// `unknown`)
+        // note: CLI help must stay stable
         #[arg(long)]
         task_kind: Option<String>,
 
         /// Raw digest extracted from the session
+        // note: CLI help must stay stable
         #[arg(long)]
         digest: String,
 
         /// Capture timestamp (RFC 3339; defaults to the current time)
+        // note: CLI help must stay stable
         #[arg(long)]
         created_at: Option<String>,
 
         /// Emit machine-readable JSON (the `CreatePendingReviewResponse`
         /// DTO verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 
     /// Show or change the selected memory provider
+    // note: CLI help must stay stable
     Provider {
         #[command(subcommand)]
         command: ProviderCommand,
@@ -160,12 +194,15 @@ pub enum MemoryCommand {
 ///
 /// The surface is selection-only: `use remote` accepts ids, endpoint, peer key
 /// and allowlist, never a seed, token or credential body (§2.2).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ProviderCommand {
     /// Show the selected provider (implicit local when unset)
+    // note: CLI help must stay stable
     Show,
 
     /// Select the memory provider written to `[memory_provider]`
+    // note: CLI help must stay stable
     Use {
         #[command(subcommand)]
         command: ProviderUseCommand,
@@ -173,48 +210,59 @@ pub enum ProviderCommand {
 }
 
 /// `creator memory provider use` targets.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum ProviderUseCommand {
     /// Select the built-in local provider
+    // note: CLI help must stay stable
     Local,
 
     /// Select a remote Connect provider (non-secret references only)
+    // note: CLI help must stay stable
     Remote {
         /// Provider space the remote authority serves
+        // note: CLI help must stay stable
         #[arg(long)]
         space_id: String,
 
         /// Operator-provisioned credential file id (not the secret)
+        // note: CLI help must stay stable
         #[arg(long)]
         credential_id: String,
 
         /// `wss://` endpoint (`ws://` is accepted for loopback tests only)
+        // note: CLI help must stay stable
         #[arg(long)]
         connect_endpoint: String,
 
         /// Remote Ed25519 public key, 64 lowercase hex characters
+        // note: CLI help must stay stable
         #[arg(long)]
         remote_pubkey_hex: String,
 
         /// Trusted remote peer id (repeat or space-separate; at least one)
+        // note: CLI help must stay stable
         #[arg(long = "allowlist", required = true, num_args = 1..)]
         allowlist: Vec<String>,
     },
 }
 
 /// `creator memory pending` subcommands (AR-86).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum PendingCommand {
     /// Count pending review entries for current creator
+    // note: CLI help must stay stable
     Count {
         /// Emit machine-readable JSON (the `CountPendingReviewsResponse`
         /// DTO verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-/// Run memory command.
+/// note: Run memory command.
 ///
 /// The local CRUD and SOUL leaves are provider clients: each opens the shared
 /// direct-core seam, calls one typed `CoreService` operation and prints its
@@ -227,7 +275,7 @@ pub enum PendingCommand {
 /// - The mapped core refusal (admission, `[not_found]` / `[forbidden]`,
 ///   storage) reaches the leaf
 pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
-    // Selection is home-level: it needs no active creator and opens no core.
+    // note: Selection is home-level: it needs no active creator and opens no core.
     let command = match command {
         MemoryCommand::Provider { command } => return provider(command),
         other => other,
@@ -249,12 +297,12 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
         MemoryCommand::Show { slug } => show(config, creator_id, &slug).await,
         MemoryCommand::Edit { slug } => edit(config, creator_id, &slug).await,
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force).await,
-        // The review and capture family runs on the same direct-core seam.
+        // note: The review and capture family runs on the same direct-core seam.
         direct => run_direct(direct, config, creator_id).await,
     }
 }
 
-/// Run one leaf on the shared direct-core seam and print its rendered outcome.
+/// note: Run one leaf on the shared direct-core seam and print its rendered outcome.
 ///
 /// One `CoreService` call per leaf over the raw user home; the writer is
 /// released by [`finish_direct`] before a line is printed, so no command
@@ -313,7 +361,7 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
                 )
                 .await
             }
-            // `run` routes the E1/E2 leaves and `provider` before this seam is
+            // note: `run` routes the E1/E2 leaves and `provider` before this seam is
             // opened.
             MemoryCommand::List
             | MemoryCommand::Create { .. }
@@ -333,7 +381,7 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
     Ok(())
 }
 
-/// One authored long-term memory as the CLI renders it.
+/// note: One authored long-term memory as the CLI renders it.
 ///
 /// The display identity rides in the record's `nexus_legacy` block — the shape
 /// the provider bridge projects and every write in this family stores — so a
@@ -357,7 +405,7 @@ impl MemoryLine {
             .structured
             .as_ref()
             .and_then(|structured| structured.get("nexus_legacy"));
-        // A record with no authored slug has no address on this surface, so it
+        // why: A record with no authored slug has no address on this surface, so it
         // is not listed under one: a blank SLUG column named nothing (fix
         // round 3, F6).
         Some(Self {
@@ -386,21 +434,21 @@ impl MemoryLine {
     }
 }
 
-/// The authored kind one record renders with: the `nexus.<MemoryKind>` namespace
+/// note: The authored kind one record renders with: the `nexus.<MemoryKind>` namespace
 /// is transport (D-7), so a namespaced kind renders as its bare value. The
 /// stage-0 filter reads the same normalization.
 pub(crate) fn memory_kind_label(kind: &str) -> &str {
     kind.strip_prefix("nexus.").unwrap_or(kind)
 }
 
-/// The retained "no such memory" refusal for one authored slug.
+/// note: The retained "no such memory" refusal for one authored slug.
 fn memory_not_found(creator_id: &str, slug: &str) -> CliError {
     CliError::Other(format!(
         "Memory '{slug}' not found for creator '{creator_id}'."
     ))
 }
 
-/// The authored `(memory_id, kind)` of one Creator record, for the leaves that
+/// note: The authored `(memory_id, kind)` of one Creator record, for the leaves that
 /// report the identity they just wrote.
 pub(crate) fn memory_identity(record: &RetainedRecord) -> Option<(String, String)> {
     MemoryLine::from_record(record).map(|row| (row.memory_id, row.kind))
@@ -446,7 +494,7 @@ async fn create(
     kind: &str,
     content: Option<String>,
 ) -> Result<()> {
-    // The authored identity is validated before anything is opened.
+    // note: The authored identity is validated before anything is opened.
     if !slug_is_safe(slug) {
         return Err(CliError::Other(format!(
             "Invalid slug '{slug}': must not contain '..', '/', '\\\\', or control characters."
@@ -458,7 +506,7 @@ async fn create(
             MemoryKind::all_as_strings().join(", ")
         )));
     }
-    // The editor runs before the direct core admits the workspace writer, so an
+    // why: The editor runs before the direct core admits the workspace writer, so an
     // open editor never holds the cross-process writer admission.
     let body = match content {
         Some(body) => body,
@@ -498,7 +546,7 @@ async fn show(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     Ok(())
 }
 
-/// Render the `creator memory show` output for one record.
+/// note: Render the `creator memory show` output for one record.
 fn render_memory(record: &RetainedRecord) -> String {
     let Some(row) = MemoryLine::from_record(record) else {
         return String::new();
@@ -520,7 +568,7 @@ fn render_memory(record: &RetainedRecord) -> String {
     lines.join("\n")
 }
 
-/// The identity and revision to carry from a read into a guarded write
+/// note: The identity and revision to carry from a read into a guarded write
 /// (NXM-6 fix round 1, finding F3).
 fn memory_revision(record: &RetainedRecord) -> Option<MemoryRevision> {
     let RetainedRecord::LiveRecord(live) = record else {
@@ -533,7 +581,7 @@ fn memory_revision(record: &RetainedRecord) -> Option<MemoryRevision> {
 }
 
 async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
-    // Read, edit with nothing admitted, then write: an editor session never
+    // why: Read, edit with nothing admitted, then write: an editor session never
     // holds the workspace writer. The read's identity and revision ride into the
     // guarded write, so a change another writer made while the editor was open
     // is refused instead of silently overwritten (NXM-6 fix round 1, finding F3).
@@ -569,7 +617,7 @@ async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
 }
 
 async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Result<()> {
-    // The target is read and the confirmation answered with nothing admitted:
+    // why: The target is read and the confirmation answered with nothing admitted:
     // an interactive prompt must never hold the workspace writer, so an
     // unattended prompt cannot stall a daemon (NXM-6 fix round 1, finding F6).
     let revision = with_read_only_core(config, async |core, principal| {
@@ -585,7 +633,7 @@ async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -
         return Ok(());
     }
     let text = with_direct_core(config, async |core, principal| {
-        // The confirmed target is re-read under the writer: a record deleted or
+        // note: The confirmed target is re-read under the writer: a record deleted or
         // replaced while the prompt was open is not the one the user confirmed.
         let target = core
             .get_creator_memory(principal, slug)
@@ -611,7 +659,7 @@ async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -
     Ok(())
 }
 
-/// `[y/N]` confirmation for one deletion: an empty answer cancels (S-005).
+/// note: `[y/N]` confirmation for one deletion: an empty answer cancels (S-005).
 fn confirm_delete(creator_id: &str, slug: &str) -> Result<bool> {
     println!("Delete memory '{slug}' for creator '{creator_id}'? [y/N]");
     let mut input = String::new();
@@ -628,7 +676,7 @@ fn confirm_delete(creator_id: &str, slug: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// `creator memory capture` — record one session digest in the Creator's
+/// note: `creator memory capture` — record one session digest in the Creator's
 /// pending-review queue through the typed capture capability (NXM-16).
 ///
 /// Explicit capture only: the Host's automatic `remember` stays refused (D-4),
@@ -653,7 +701,7 @@ async fn capture(
     ))
 }
 
-/// Page size for the memory list/pending reads.
+/// note: Page size for the memory list/pending reads.
 ///
 /// The daemon adapter's `DEFAULT_QUERY_LIMIT` (`resolve_query_limit` on an
 /// omitted wire `limit`) used to be the owner; the typed core takes the page
@@ -661,11 +709,11 @@ async fn capture(
 /// same 50-row page.
 const MEMORY_PAGE_LIMIT: usize = 50;
 
-/// Hard cap on the review drain iterations (AR-86 — matches the
+/// note: Hard cap on the review drain iterations (AR-86 — matches the
 /// web drain contract's bounded loop; a review call processes ≤50 rows).
 const REVIEW_DRAIN_MAX_CALLS: u32 = 100;
 
-/// Cumulative drain outcome of [`drain_review_queue`].
+/// note: Cumulative drain outcome of [`drain_review_queue`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DrainOutcome {
     promoted: i64,
@@ -673,16 +721,16 @@ struct DrainOutcome {
     dropped: i64,
     processed: i64,
     has_more: bool,
-    /// True when the loop stopped on a zero-progress call (the core inspected
+    /// note: True when the loop stopped on a zero-progress call (the core inspected
     /// no rows but still reported `has_more`) rather than finishing the
     /// queue or exhausting the call cap.
     stopped_zero_progress: bool,
-    /// True when the loop exhausted [`REVIEW_DRAIN_MAX_CALLS`] with
+    /// note: True when the loop exhausted [`REVIEW_DRAIN_MAX_CALLS`] with
     /// `has_more` still true (cap exhaustion, not zero progress).
     cap_exhausted: bool,
 }
 
-/// Fold one review response into the cumulative drain outcome.
+/// note: Fold one review response into the cumulative drain outcome.
 ///
 /// Returns `true` when the loop should keep draining (`has_more` still true,
 /// the call made progress, and the call cap is not exhausted); `false` when
@@ -696,7 +744,7 @@ fn fold_review_response(outcome: &mut DrainOutcome, result: &ReviewResponse, cal
     if !outcome.has_more {
         return false;
     }
-    // Zero-progress guard: a call that inspected no rows but still reports
+    // why: Zero-progress guard: a call that inspected no rows but still reports
     // has_more would loop forever on an unprocessable head row.
     if result.processed.unwrap_or(0) == 0 {
         outcome.stopped_zero_progress = true;
@@ -705,7 +753,7 @@ fn fold_review_response(outcome: &mut DrainOutcome, result: &ReviewResponse, cal
     call + 1 < REVIEW_DRAIN_MAX_CALLS
 }
 
-/// Drain the pending-review queue.
+/// note: Drain the pending-review queue.
 ///
 /// Loops the core's bounded review call while it reports `has_more == true`,
 /// accumulating a cumulative `promoted/fragmented/dropped` report (AR-86 /
@@ -728,7 +776,7 @@ async fn drain_review_queue(
         cap_exhausted: false,
     };
     for call in 0..REVIEW_DRAIN_MAX_CALLS {
-        // The request's `creator_id` is the CLI's active creator, exactly the
+        // why: The request's `creator_id` is the CLI's active creator, exactly the
         // value the daemon adapter sent; the core re-checks it against the
         // admitted principal and refuses a mismatch.
         let result = core
@@ -748,7 +796,7 @@ async fn drain_review_queue(
     Ok(outcome)
 }
 
-/// Project the cumulative drain outcome onto the `--json` envelope.
+/// note: Project the cumulative drain outcome onto the `--json` envelope.
 ///
 /// The stop-reason flags (`stopped_zero_progress` / `cap_exhausted`) let a
 /// scripted drain retry tell an unprocessable head row from call-cap
@@ -766,7 +814,7 @@ fn review_json(outcome: DrainOutcome) -> serde_json::Value {
     })
 }
 
-/// Project the drain outcome onto the human-output lines.
+/// note: Project the drain outcome onto the human-output lines.
 ///
 /// The empty-queue message is only printed when the queue is genuinely empty
 /// (`processed == 0 && !has_more`); a zero-progress stop with `has_more`
@@ -796,7 +844,7 @@ fn review_human_lines(outcome: &DrainOutcome) -> Vec<String> {
     lines
 }
 
-/// `creator memory review [--json]` — drain the pending-review queue.
+/// note: `creator memory review [--json]` — drain the pending-review queue.
 ///
 /// See [`drain_review_queue`] for the drain contract.
 async fn review(
@@ -871,7 +919,6 @@ async fn pending_list(
     ];
 
     for r in &result.items {
-        // Truncate long IDs for display
         let pending_short = if r.pending_id.len() > 28 {
             format!("{}…", &r.pending_id[..25])
         } else {
@@ -892,7 +939,7 @@ async fn pending_list(
     Ok(lines.join("\n"))
 }
 
-/// `creator memory pending count [--json]` — count pending review entries
+/// note: `creator memory pending count [--json]` — count pending review entries
 /// (`CoreService::count_pending_reviews`, AR-86).
 async fn pending_count(
     core: &CoreService,
@@ -920,7 +967,7 @@ async fn pending_show(
     pending_id: &str,
     json: bool,
 ) -> Result<String> {
-    // The list read is cursor-paginated at [`MEMORY_PAGE_LIMIT`] rows/page; a
+    // note: The list read is cursor-paginated at [`MEMORY_PAGE_LIMIT`] rows/page; a
     // creator with more pending reviews can bury the requested ID past page 1.
     // Walk `pagination.next_cursor` until the ID is found or the pages are
     // exhausted (bounded loop — same cap convention as the review drain).
@@ -939,7 +986,7 @@ async fn pending_show(
         }
         match result.pagination.next_cursor {
             Some(next) if cursor.as_deref() != Some(next.as_str()) => cursor = Some(next),
-            // No next page, or a cursor that no longer advances — the ID is
+            // note: No next page, or a cursor that no longer advances — the ID is
             // not on any page.
             _ => {
                 return Err(crate::errors::CliError::Other(format!(
@@ -991,7 +1038,7 @@ async fn pending_dismiss(
     }
 }
 
-/// Migrate the workspace's remaining legacy memory content into provider
+/// note: Migrate the workspace's remaining legacy memory content into provider
 /// surfaces (P5).
 ///
 /// One guarded pass on the direct-core writer. A completed pass verifies its
@@ -1034,7 +1081,7 @@ async fn migrate_legacy(core: &CoreService, principal: &Principal, json: bool) -
     ))
 }
 
-/// Open a temporary file in the user's $EDITOR, return the edited content.
+/// note: Open a temporary file in the user's $EDITOR, return the edited content.
 ///
 /// Uses `tempfile::NamedTempFile` for automatic cleanup on drop (W-004),
 /// preventing temp file leaks if the process crashes or the editor exits
@@ -1049,7 +1096,7 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         uuid::Uuid::new_v4().simple()
     );
 
-    // Use tempfile::NamedTempFile for automatic cleanup on drop (W-004).
+    // note: Use tempfile::NamedTempFile for automatic cleanup on drop (W-004).
     // The file persists long enough for the editor to read it, but is
     // automatically deleted when the NamedTempFile goes out of scope.
     let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
@@ -1068,18 +1115,18 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         })?;
 
     if !status.success() {
-        // NamedTempFile auto-deletes on drop — no manual cleanup needed
+        // note: NamedTempFile auto-deletes on drop — no manual cleanup needed
         return Err(crate::errors::CliError::Other(format!(
             "Editor {editor} exited with non-zero status."
         )));
     }
 
     let content = std::fs::read_to_string(&temp_path)?;
-    // NamedTempFile auto-deletes on drop — no manual cleanup needed
+    // note: NamedTempFile auto-deletes on drop — no manual cleanup needed
     Ok(content)
 }
 
-/// `creator memory provider show|use` — selection only.
+/// note: `creator memory provider show|use` — selection only.
 ///
 /// No secret argument, stdin or environment value is read: `use remote` takes
 /// ids, endpoint, peer key and allowlist, and the shared core writer rejects a
@@ -1125,7 +1172,7 @@ fn provider(command: ProviderCommand) -> Result<()> {
     Ok(())
 }
 
-/// Read the on-disk selection; a missing table is the implicit local default.
+/// note: Read the on-disk selection; a missing table is the implicit local default.
 fn read_provider_selection(user_home: &Path) -> Result<MemoryProviderSelection> {
     let config = nexus_home_layout::active_context::read_memory_provider_config(
         &nexus_home_layout::nexus_root_from_home(user_home),
@@ -1133,7 +1180,7 @@ fn read_provider_selection(user_home: &Path) -> Result<MemoryProviderSelection> 
     MemoryProviderSelection::from_config(config).map_err(map_core_error)
 }
 
-/// Render the selection as non-secret `key: value` lines.
+/// note: Render the selection as non-secret `key: value` lines.
 fn render_provider_selection(selection: &MemoryProviderSelection) -> String {
     match selection {
         MemoryProviderSelection::Local => "memory_provider: local".to_string(),
@@ -1182,7 +1229,7 @@ mod tests {
         };
     }
 
-    // ── review drain loop (AR-86) ───────────────────────────────────────
+    // note: review drain loop (AR-86)
 
     fn review_response(promoted: i64, processed: i64, has_more: bool) -> ReviewResponse {
         ReviewResponse {
@@ -1196,7 +1243,7 @@ mod tests {
 
     #[test]
     fn fold_stops_on_zero_progress_with_has_more() {
-        // A call that inspects no rows but still reports `has_more` must
+        // why: A call that inspects no rows but still reports `has_more` must
         // stop the loop (an unprocessable head row cannot spin forever)
         // and be reported as a zero-progress stop, not cap exhaustion.
         let mut outcome = DrainOutcome {
@@ -1221,7 +1268,7 @@ mod tests {
 
     #[test]
     fn fold_continues_while_progress_and_has_more() {
-        // A productive call with `has_more` keeps the loop going; the
+        // why: A productive call with `has_more` keeps the loop going; the
         // cumulative counters accumulate across folds.
         let mut outcome = DrainOutcome {
             promoted: 0,
@@ -1242,7 +1289,7 @@ mod tests {
         assert!(!outcome.stopped_zero_progress);
         assert!(outcome.has_more);
 
-        // `has_more = false` closes the drain.
+        // note: `has_more = false` closes the drain.
         assert!(!fold_review_response(
             &mut outcome,
             &review_response(0, 0, false),
@@ -1255,7 +1302,7 @@ mod tests {
 
     #[test]
     fn fold_stops_at_call_cap() {
-        // The cap check is inside the fold: the final call under the cap
+        // why: The cap check is inside the fold: the final call under the cap
         // must not ask for another iteration (call 99 is the last allowed
         // call — `call + 1 < 100` is false on the 100th call index 99).
         let mut outcome = DrainOutcome {
@@ -1283,7 +1330,7 @@ mod tests {
 
     #[test]
     fn review_json_serializes_stop_reasons_differently() {
-        // qc2 W-1: a scripted `--json` drain retry must be able to tell an
+        // why: qc2 W-1: a scripted `--json` drain retry must be able to tell an
         // unprocessable head row (zero-progress stop) from call-cap
         // exhaustion — the two terminal causes serialize to distinct
         // envelopes.
@@ -1348,7 +1395,7 @@ mod tests {
 
     #[test]
     fn review_human_lines_empty_message_only_when_queue_genuinely_empty() {
-        // Bugbot Medium: `promoted + fragmented + dropped == 0` is not the
+        // why: Bugbot Medium: `promoted + fragmented + dropped == 0` is not the
         // empty-queue signal — a zero-progress stop must still surface the
         // stuck-queue note + retry guidance instead of "No pending memories".
         let lines = review_human_lines(&drain_outcome(0, 0, false, false));
@@ -1366,14 +1413,14 @@ mod tests {
             "stuck-queue note missing: {lines:?}"
         );
 
-        // Progress with `has_more` (cap-exhaustion stop) keeps the drain
+        // why: Progress with `has_more` (cap-exhaustion stop) keeps the drain
         // summary + continue note.
         let lines = review_human_lines(&drain_outcome(3, 50, true, false));
         assert!(lines[0].contains("promoted=3"), "{lines:?}");
         assert!(lines[1].contains("not fully drained"), "{lines:?}");
     }
 
-    /// One retained record from its wire JSON (`RetainedRecord` has no literal
+    /// note: One retained record from its wire JSON (`RetainedRecord` has no literal
     /// constructor); `legacy` is the record's authored `nexus_legacy` block.
     fn retained(kind: &str, text: &str, legacy: Option<serde_json::Value>) -> RetainedRecord {
         let mut record = serde_json::json!({
@@ -1401,7 +1448,7 @@ mod tests {
         serde_json::from_value(record).expect("retained record fixture")
     }
 
-    /// F6 (BUG-03, `memory.rs:311`): a record without an authored slug is not
+    /// note: F6 (BUG-03, `memory.rs:311`): a record without an authored slug is not
     /// listed under a blank one, and a record kind the bridge did not author
     /// renders as its bare kind instead of the `nexus.` namespace.
     #[test]
@@ -1416,12 +1463,12 @@ mod tests {
                 "updated_at": "2026-01-01T00:00:00Z",
             })),
         );
-        // No `nexus_legacy` at all: the provider's own record has no slug to
+        // why: No `nexus_legacy` at all: the provider's own record has no slug to
         // address it by, so it is not a list row.
         let slugless = retained("research_material", "Native body.", None);
         assert!(MemoryLine::from_record(&slugless).is_none());
 
-        // A slug with no authored `memory_kind`: the kind fallback normalizes
+        // note: A slug with no authored `memory_kind`: the kind fallback normalizes
         // the record's namespaced kind.
         let bare_kind = retained(
             "research_material",
@@ -1444,7 +1491,7 @@ mod tests {
             )),
             "fixed-width row shape drifted: {text}"
         );
-        // The bare-kind row's `updated_at` is the record's own provider
+        // note: The bare-kind row's `updated_at` is the record's own provider
         // timestamp (no authored `updated_at` in its legacy block).
         assert!(
             text.contains(&format!(

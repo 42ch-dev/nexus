@@ -21,6 +21,7 @@
 //!
 //! v1.193 P2-T13: the `basic-cli`/`legacy-cli` router is gone — this module
 //! is the single retained `creator world` implementation.
+// note: event-add keeps the guarded local narrative writer; no CoreService method exists for it.
 
 pub mod fork;
 pub mod kb;
@@ -35,6 +36,7 @@ use clap::Subcommand;
 use nexus_contracts::{CreateWorldRequest, CreateWorldRequestTitle};
 
 /// World subcommands.
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
     /// Create a new narrative world
@@ -46,46 +48,59 @@ pub enum WorldCommand {
     /// `--slug`/`--visibility`/`--time-policy`/`--description` extras are
     /// gone: the typed seam carries none of them, and accepting a flag no
     /// owner honours would be a silent no-op.
+    // note: CLI help must stay stable
     Create {
         /// World title
+        // note: CLI help must stay stable
         #[arg(long)]
         title: String,
     },
 
     /// Add a timeline event to a world
+    // note: CLI help must stay stable
     #[command(name = "event-add")]
     EventAdd {
         /// World ID (required, e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_id: String,
         /// Branch ID (defaults to world's root branch)
+        // note: CLI help must stay stable
         #[arg(long)]
         branch_id: Option<String>,
         /// Event type (default: `story_advance`)
+        // note: CLI help must stay stable
         #[arg(long, default_value = "story_advance")]
         event_type: String,
         /// Event title
+        // note: CLI help must stay stable
         #[arg(long)]
         title: Option<String>,
         /// Event summary
+        // note: CLI help must stay stable
         #[arg(long)]
         summary: Option<String>,
         /// Observer entry ID recorded in `modules.observation` (repeatable;
         /// e.g. `kb_ana`). Any observer starts the observation module.
+        // note: CLI help must stay stable
         #[arg(long)]
         observer: Vec<String>,
         /// Observation access as a JSON object string (optional; e.g.
         /// `{"line_of_sight":true}`). Providing `--access` without any
         /// `--observer` records `observers: []` (explicit nobody).
+        // note: CLI help must stay stable
         #[arg(long)]
         access: Option<String>,
     },
 
     /// List all worlds in the active workspace
+    // note: CLI help must stay stable
     List,
 
     /// Show details for a single world
+    // note: CLI help must stay stable
     Show {
         /// World ID (e.g. `wld_abc123`)
+        // note: CLI help must stay stable
         world_id: String,
     },
 
@@ -95,6 +110,7 @@ pub enum WorldCommand {
     /// CLI for inspecting and editing World-scoped `KnowledgeEntryRecord` rows. This is a
     /// separate surface from the retired work-scope `creator kb` group (V1.231,
     /// ADR K1 §5.3).
+    // note: CLI help must stay stable
     Kb {
         #[command(subcommand)]
         command: kb::WorldKbCommand,
@@ -103,6 +119,7 @@ pub enum WorldCommand {
     ///
     /// The CLI is the only write path for `spoke_rules` rows and the
     /// CLI-only validation gate for the AR-2 constraint carrier.
+    // note: CLI help must stay stable
     Rule {
         #[command(subcommand)]
         command: rule::RuleCommand,
@@ -111,6 +128,7 @@ pub enum WorldCommand {
     /// Timeline fork surface — `create` (one `CoreService::create_fork` call)
     /// plus `list` (projection of the core timeline-events read) — V1.175 P1
     /// group 5.
+    // note: CLI help must stay stable
     Fork {
         #[command(subcommand)]
         command: fork::ForkCommand,
@@ -122,6 +140,7 @@ pub enum WorldCommand {
     /// `list_world_findings` is a core read, so this surface has no write
     /// owner at all. Triage writes ride the work-findings PATCH
     /// (`creator works findings set-status`).
+    // note: CLI help must stay stable
     Findings {
         #[command(subcommand)]
         command: FindingsCommand,
@@ -133,6 +152,7 @@ pub enum WorldCommand {
 /// Read surface only — world findings are advisory and read through the core
 /// (V1.165): there is no world-findings write owner at all; triage writes ride
 /// the work-findings PATCH (`creator works findings set-status`).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum FindingsCommand {
     /// List world-attached check findings
@@ -140,16 +160,18 @@ pub enum FindingsCommand {
     /// by design, AR-87 #1).
     List {
         /// World ID (wld_...).
+        // note: CLI help must stay stable
         #[arg(long, value_name = "WORLD_ID")]
         world_id: String,
         /// Emit machine-readable JSON (the `WorldFindingsListResponse`
         /// DTO verbatim) instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-/// Run a world subcommand.
+/// note: Run a world subcommand.
 ///
 /// # Errors
 ///
@@ -192,7 +214,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Open a DB pool for the active workspace (initializing the schema).
+/// note: Open a DB pool for the active workspace (initializing the schema).
 ///
 /// The seam's admission pre-flight runs before the pool open: `Schema::init`
 /// migrates — and therefore creates — the selected workspace `state.db`, so a
@@ -212,7 +234,7 @@ pub async fn open_workspace_pool(config: &CliConfig) -> Result<sqlx::SqlitePool>
     Ok(pool)
 }
 
-/// Get the active creator ID or error.
+/// note: Get the active creator ID or error.
 ///
 /// # Errors
 /// Returns [`CliError::CreatorNotSelected`] when no creator is active in the
@@ -224,7 +246,7 @@ pub fn active_creator_id(config: &CliConfig) -> Result<String> {
         .ok_or(crate::errors::CliError::CreatorNotSelected)
 }
 
-/// Run `creator world create` through the typed core World seam.
+/// note: Run `creator world create` through the typed core World seam.
 ///
 /// The core validates the title, derives the slug and owns the write; this
 /// leaf only renders the created World. The direct writer is closed on both
@@ -256,9 +278,9 @@ async fn run_create(config: &CliConfig, title: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run `creator world event-add`.
+/// note: Run `creator world event-add`.
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors run_event_add's flat event-add field surface;
+// why: ^ justification: mirrors run_event_add's flat event-add field surface;
 // grouping the AR-5 observation flags into a struct would add indirection
 // for the two new callers (CLI + tests).
 async fn run_event_add(
@@ -273,10 +295,10 @@ async fn run_event_add(
 ) -> Result<()> {
     let pool = open_workspace_pool(config).await?;
 
-    // Build `modules.observation` from the AR-5 flags (None = unrecorded).
+    // note: Build `modules.observation` from the AR-5 flags (None = unrecorded).
     let modules_json = build_observation_modules(observers, access)?;
 
-    // If no branch_id specified, look up the world's root_fork_branch_id
+    // note: If no branch_id specified, look up the world's root_fork_branch_id
     let branch_id_resolved = if let Some(bid) = branch_id {
         bid.to_string()
     } else {
@@ -321,7 +343,7 @@ async fn run_event_add(
     Ok(())
 }
 
-/// Build the `modules.observation` JSON payload from `event-add` observation
+/// note: Build the `modules.observation` JSON payload from `event-add` observation
 /// flags (AR-5 lock — tri-state).
 ///
 /// - No observation flags → `None`: the appended event stores
@@ -369,7 +391,7 @@ fn build_observation_modules(observers: &[String], access: Option<&str>) -> Resu
     })
 }
 
-/// Run `creator world list`.
+/// note: Run `creator world list`.
 ///
 /// # Errors
 ///
@@ -403,7 +425,7 @@ async fn run_list(config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// Run `creator world show`.
+/// note: Run `creator world show`.
 ///
 /// The core read returns the same `WorldState` projection the list arm
 /// renders; an unknown id is the core's `not_found` (404) family.
@@ -495,13 +517,14 @@ mod tests {
     use clap::Parser;
 
     /// Minimal CLI struct for hermetic parsing tests of `creator world`.
+    // note: CLI help must stay stable
     #[derive(Parser)]
     struct WorldCli {
         #[command(subcommand)]
         command: WorldCommand,
     }
 
-    // ── AR-5: event-add observation flag parsing ──────────────────────
+    // note: AR-5: event-add observation flag parsing
 
     #[test]
     fn event_add_parses_observer_and_access_flags() {
@@ -551,7 +574,7 @@ mod tests {
         }
     }
 
-    /// v1.215 P1-T5 (compass D8): the World id is the command's one required
+    /// note: v1.215 P1-T5 (compass D8): the World id is the command's one required
     /// primary id, so it is positional and the removed `--world-id` spelling is
     /// not an alias — clap refuses it instead of accepting a second form.
     #[test]
@@ -562,11 +585,11 @@ mod tests {
         );
     }
 
-    // ── AR-5: observation modules builder (tri-state) ─────────────────
+    // note: AR-5: observation modules builder (tri-state)
 
     #[test]
     fn build_observation_modules_none_without_flags() {
-        // (b) no observation flags → None → modules_json stays NULL at rest.
+        // note: (b) no observation flags → None → modules_json stays NULL at rest.
         assert!(
             build_observation_modules(&[], None).unwrap().is_none(),
             "no observation flags must yield no modules payload"
@@ -575,7 +598,7 @@ mod tests {
 
     #[test]
     fn build_observation_modules_observer_and_access() {
-        // (a) observer + access → observation object with both keys.
+        // note: (a) observer + access → observation object with both keys.
         let modules = build_observation_modules(
             &["kb_ana".to_string()],
             Some(r#"{"line_of_sight":true,"hearing_range":true}"#),
@@ -611,7 +634,7 @@ mod tests {
 
     #[test]
     fn build_observation_modules_zero_observers_with_access() {
-        // (c) explicit nobody: observers: [] + access (PD-9 empty state).
+        // note: (c) explicit nobody: observers: [] + access (PD-9 empty state).
         let modules = build_observation_modules(&[], Some(r#"{"line_of_sight":true}"#))
             .unwrap()
             .expect("access without observers must produce a payload");
@@ -629,7 +652,7 @@ mod tests {
 
     #[test]
     fn build_observation_modules_rejects_non_object_access() {
-        // (d) non-object --access rejected at the CLI boundary.
+        // note: (d) non-object --access rejected at the CLI boundary.
         for bad in [r"[1,2,3]", r#""just a string""#, "42", "null"] {
             let err = build_observation_modules(&["kb_ana".to_string()], Some(bad)).unwrap_err();
             assert!(
@@ -651,7 +674,7 @@ mod tests {
 
     #[test]
     fn build_observation_modules_rejects_empty_observer() {
-        // (d) empty/whitespace observer values rejected.
+        // note: (d) empty/whitespace observer values rejected.
         for bad in ["", "   "] {
             let err = build_observation_modules(&[bad.to_string()], None).unwrap_err();
             assert!(

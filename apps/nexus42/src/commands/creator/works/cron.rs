@@ -23,7 +23,7 @@ use clap::Subcommand;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 
-// ── Shared WorkSchedule model + validation core (V1.171 P2 AR-29) ────────
+// note: Shared WorkSchedule model + validation core (V1.171 P2 AR-29)
 //
 // The per-Work cron model, defaults, normalizer, validators, and stable error
 // code constants now live in `nexus-orchestration::schedule::work_schedule`
@@ -36,7 +36,7 @@ pub use nexus_orchestration::schedule::work_schedule::{
     normalize_cron_fields,
     validate_cron_expr,
     validate_tz,
-    // The model + default table, re-exported for CLI-facing surfaces.
+    // note: The model + default table, re-exported for CLI-facing surfaces.
     RoleSchedule,
     RolesSchedule,
     WorkSchedule,
@@ -51,7 +51,7 @@ pub use nexus_orchestration::schedule::work_schedule::{
     ERR_INVALID_TZ,
 };
 
-/// Map shared validation failures onto the CLI's config-error surface. The
+/// note: Map shared validation failures onto the CLI's config-error surface. The
 /// message carries the stable code prefix exactly as before the unification,
 /// so rendered output is unchanged.
 impl From<nexus_orchestration::schedule::work_schedule::CronValidationError> for CliError {
@@ -60,9 +60,9 @@ impl From<nexus_orchestration::schedule::work_schedule::CronValidationError> for
     }
 }
 
-// ── Resolve stored blob → effective schedule ─────────────────────────────
+// note: Resolve stored blob → effective schedule
 
-/// Resolve a stored `schedule_json` blob into an effective [`WorkSchedule`].
+/// note: Resolve a stored `schedule_json` blob into an effective [`WorkSchedule`].
 ///
 /// Thin CLI-side wrapper over the shared core
 /// [`WorkSchedule::resolve`](nexus_orchestration::schedule::work_schedule::WorkSchedule::resolve)
@@ -79,9 +79,9 @@ pub fn resolve_schedule(stored: Option<&str>) -> WorkSchedule {
     WorkSchedule::resolve(stored).0
 }
 
-// ── CLI set-args application ─────────────────────────────────────────────
+// note: CLI set-args application
 
-/// Inputs from `creator works cron set` flags (spec §3.1).
+/// note: Inputs from `creator works cron set` flags (spec §3.1).
 //
 // The bool fields are a 1:1 mirror of clap's `--no-<role>` / `--all-off`
 // flags; restructuring into enums would diverge from the CLI surface, so we
@@ -89,21 +89,21 @@ pub fn resolve_schedule(stored: Option<&str>) -> WorkSchedule {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default)]
 pub struct CronSetArgs {
-    /// `--brainstorm <cron>` (None = leave unchanged from current schedule).
+    /// note: `--brainstorm <cron>` (None = leave unchanged from current schedule).
     pub brainstorm: Option<String>,
-    /// `--write <cron>`.
+    /// note: `--write <cron>`.
     pub write: Option<String>,
-    /// `--review <cron>`.
+    /// note: `--review <cron>`.
     pub review: Option<String>,
-    /// `--tz <iana-tz>`.
+    /// note: `--tz <iana-tz>`.
     pub tz: Option<String>,
-    /// `--no-brainstorm` (disable role).
+    /// note: `--no-brainstorm` (disable role).
     pub no_brainstorm: bool,
-    /// `--no-write`.
+    /// note: `--no-write`.
     pub no_write: bool,
-    /// `--no-review`.
+    /// note: `--no-review`.
     pub no_review: bool,
-    /// `--all-off` (spec §3.1): escape hatch permitting all roles disabled.
+    /// note: `--all-off` (spec §3.1): escape hatch permitting all roles disabled.
     pub all_off: bool,
 }
 
@@ -118,7 +118,7 @@ pub struct CronSetArgs {
 /// stable code `E_CRON_ALL_ROLES_DISABLED` when every role ends up disabled
 /// and `--all-off` was not passed (spec §3.1, R-V150P0-W2).
 pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSchedule> {
-    // Validate every provided value before mutating (fail-fast, no partial write).
+    // note: Validate every provided value before mutating (fail-fast, no partial write).
     if let Some(ref expr) = args.brainstorm {
         validate_cron_expr(expr)?;
     }
@@ -132,7 +132,7 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
         validate_tz(tz)?;
     }
 
-    // R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): reject
+    // why: R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): reject
     // `--<role> EXPR --no-<role>` self-contradictions before mutating. The
     // pre-fix path silently last-write-wins (cron expression stored but
     // role disabled), which is confusing to read back via `cron show`.
@@ -160,7 +160,7 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
         || args.no_write
         || args.no_review
     {
-        // At least one flag → patch the current schedule.
+        // note: At least one flag → patch the current schedule.
         if let Some(expr) = &args.brainstorm {
             schedule.roles.brainstorm.cron.clone_from(expr);
         }
@@ -183,9 +183,9 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
             schedule.roles.review.enabled = false;
         }
     } else {
-        // No flags at all → reset to defaults (spec §3.1).
+        // note: No flags at all → reset to defaults (spec §3.1).
         schedule = WorkSchedule::defaults();
-        // R-V150P0-W1: honor an explicitly-resolved TZ (env/default fold from
+        // why: R-V150P0-W1: honor an explicitly-resolved TZ (env/default fold from
         // `handle_set`) when resetting, so NEXUS_TZ / UTC land correctly. The
         // raw CLI args have `tz=None` on a reset, so this only fires when the
         // caller folded a concrete TZ into `effective_args`.
@@ -194,7 +194,7 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
         }
     }
 
-    // R-V150P0-W2: spec §3.1 — at least one role must remain enabled unless the
+    // why: R-V150P0-W2: spec §3.1 — at least one role must remain enabled unless the
     // author explicitly passes `--all-off`. Reject empty schedules with a
     // stable error code so the foundation contract is enforced at config time.
     let any_enabled = schedule.roles.brainstorm.enabled
@@ -210,7 +210,7 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
     Ok(schedule)
 }
 
-/// Resolve the TZ to persist for a `set` operation (R-V150P0-W1).
+/// note: Resolve the TZ to persist for a `set` operation (R-V150P0-W1).
 ///
 /// Pure merge semantic, unit-tested independently of `handle_set`:
 ///
@@ -228,12 +228,12 @@ fn resolve_tz(args_tz: Option<&str>, env: Option<&str>) -> Option<String> {
         .or_else(|| env.map(str::to_string))
 }
 
-// ── Rendering (spec §3.2 / §3.3) ─────────────────────────────────────────
+// note: Rendering (spec §3.2 / §3.3)
 
-/// SAFETY label for infallible `writeln!`/`write!` into a `String` (no IO).
+/// note: SAFETY label for infallible `writeln!`/`write!` into a `String` (no IO).
 const WRITE_OK: &str = "write to String is infallible";
 
-/// Render the `show` output (spec §3.2): local + UTC firing display.
+/// note: Render the `show` output (spec §3.2): local + UTC firing display.
 ///
 /// Four columns match the spec §3.2 example: `Role / Cron / Local time /
 /// Next fire (UTC)`. Disabled roles render `--` for Local time and `disabled`
@@ -268,7 +268,7 @@ pub fn render_show(work_ref: &str, schedule: &WorkSchedule) -> String {
     out
 }
 
-/// Render the local-time firing pattern for a cron expression (spec §3.2).
+/// note: Render the local-time firing pattern for a cron expression (spec §3.2).
 ///
 /// Parses the minute/hour fields and renders up to three `HH:MM` slots. When
 /// the hour field is `*`, renders the minute pattern followed by
@@ -311,7 +311,7 @@ fn local_time_display(cron_expr: &str) -> String {
     }
 }
 
-/// Compute the next UTC fire time for a cron expression (spec §3.2,
+/// note: Compute the next UTC fire time for a cron expression (spec §3.2,
 /// R-V150P0-W3).
 ///
 /// Interprets the expression in UTC (P0 approximation; the spec's full
@@ -325,7 +325,7 @@ fn next_fire_utc(cron_expr: &str) -> Option<String> {
     Some(format!("{}", next.format("%Y-%m-%d %H:%M UTC")))
 }
 
-/// Render the `list` output (spec §3.3) across workspace Works.
+/// note: Render the `list` output (spec §3.3) across workspace Works.
 ///
 /// Defaults are shown as the canonical cron expression (spec §3.3 last line).
 #[must_use]
@@ -354,18 +354,18 @@ pub fn render_list(rows: &[ListRow]) -> String {
     out
 }
 
-/// One row for the `list` surface.
+/// note: One row for the `list` surface.
 #[derive(Debug, Clone)]
 pub struct ListRow {
-    /// Human slug (None when the Work has no `work_ref` set).
+    /// note: Human slug (None when the Work has no `work_ref` set).
     pub work_ref: Option<String>,
-    /// Primary key (`wrk_...`); used as display fallback.
+    /// note: Primary key (`wrk_...`); used as display fallback.
     pub work_id: String,
-    /// Effective resolved schedule (defaults merged in).
+    /// note: Effective resolved schedule (defaults merged in).
     pub schedule: WorkSchedule,
 }
 
-/// R-V150-WLA-05 (V1.50 P-last WL-A / cron-foundation qc1 S3): build the
+/// note: R-V150-WLA-05 (V1.50 P-last WL-A / cron-foundation qc1 S3): build the
 /// JSON object for one `list --json` row. Includes both `work_ref` (the
 /// human slug, `null` when unset) and `work_id` (the canonical `wrk_...`
 /// primary key) so machine consumers can always identify the row even
@@ -380,7 +380,7 @@ fn list_row_to_json(row: &ListRow) -> serde_json::Value {
     })
 }
 
-/// Label for a role cell: disabled → `disabled`; enabled → the cron expression.
+/// note: Label for a role cell: disabled → `disabled`; enabled → the cron expression.
 /// `resolve_schedule` already folds defaults in, so an unset Work shows the
 /// canonical default cron here (spec §3.3 last line).
 fn role_label(role: &RoleSchedule) -> String {
@@ -391,7 +391,7 @@ fn role_label(role: &RoleSchedule) -> String {
     }
 }
 
-/// Best-effort UTC offset display for a TZ (e.g. `UTC+08:00`).
+/// note: Best-effort UTC offset display for a TZ (e.g. `UTC+08:00`).
 ///
 /// Falls back to `UTC offset unknown` when the TZ can't be resolved (should
 /// not happen post-validation, but render must never panic). chrono's offset
@@ -405,7 +405,7 @@ fn tz_offset_display(tz: &str) -> String {
     format!("UTC{offset}")
 }
 
-/// Truncate a string to `max` chars, appending `…` if truncated.
+/// note: Truncate a string to `max` chars, appending `…` if truncated.
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -415,63 +415,81 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-// ── Clap subcommand definitions (spec §3) ────────────────────────────────
+// note: Clap subcommand definitions (spec §3)
 
 /// `creator works cron` subcommand group (spec §3).
+// note: CLI help must stay stable
 #[derive(Debug, Subcommand)]
 pub enum CronCommand {
     /// Set per-Work cron configuration (spec §3.1).
+    // note: CLI help must stay stable
     Set {
         /// Work reference (`work_ref` slug) or `work_id` (`wrk_...`).
+        // note: CLI help must stay stable
         work_ref: String,
         /// Brainstorm cron expression (5-field).
+        // note: CLI help must stay stable
         #[arg(long)]
         brainstorm: Option<String>,
         /// Write cron expression (5-field).
+        // note: CLI help must stay stable
         #[arg(long)]
         write: Option<String>,
         /// Review cron expression (5-field).
+        // note: CLI help must stay stable
         #[arg(long)]
         review: Option<String>,
         /// IANA timezone (default: `NEXUS_TZ` env, fallback `UTC`).
+        // note: CLI help must stay stable
         #[arg(long)]
         tz: Option<String>,
         /// Disable the brainstorm role (`enabled: false`).
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         no_brainstorm: bool,
         /// Disable the write role.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         no_write: bool,
         /// Disable the review role.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         no_review: bool,
         /// Permit disabling all three roles at once (spec §3.1 "all-off" rule).
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         all_off: bool,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// Show the resolved schedule with local + UTC firing times (spec §3.2).
+    // note: CLI help must stay stable
     Show {
         /// Work reference (`work_ref` slug) or `work_id` (`wrk_...`).
+        // note: CLI help must stay stable
         work_ref: String,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     /// List cron config across all Works in the active workspace (spec §3.3).
+    // note: CLI help must stay stable
     List {
         /// Maximum number of Works to return (default 100; R-V150P0-W4).
+        // note: CLI help must stay stable
         #[arg(long)]
         limit: Option<u32>,
         /// Emit machine-readable JSON instead of human text.
+        // note: CLI help must stay stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
 }
 
-// ── Dispatcher + handlers ────────────────────────────────────────────────
+// note: Dispatcher + handlers
 
 /// Dispatch `creator works cron` subcommands.
 ///
@@ -493,7 +511,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
-    // V1.51 T-B P0: resolve workspace directory for file lock path construction.
+    // note: V1.51 T-B P0: resolve workspace directory for file lock path construction.
     let workspace_dir = {
         let home = crate::config::nexus_home().unwrap_or_else(|_| std::path::PathBuf::from("."));
         nexus_home_layout::operational_workspace_dir(&home, &creator_id, &workspace_slug)
@@ -541,7 +559,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// `creator works cron set` — persist the per-Work cron config (spec §3.1).
+/// note: `creator works cron set` — persist the per-Work cron config (spec §3.1).
 async fn handle_set(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -553,12 +571,12 @@ async fn handle_set(
 ) -> Result<()> {
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
 
-    // V1.51 T-B P0: acquire advisory file lock before mutating works.schedule_json.
+    // note: V1.51 T-B P0: acquire advisory file lock before mutating works.schedule_json.
     // The lock is released on drop when this function returns.
     #[cfg(unix)]
     let _file_lock = {
         let work_dir = workspace_dir.join("Works").join(work_ref);
-        // Best-effort: only acquire if the work directory exists (production path).
+        // note: Best-effort: only acquire if the work directory exists (production path).
         if work_dir.exists() {
             match nexus_local_db::file_lock::try_acquire(&work_dir, "cli:cron-set") {
                 Ok(guard) => Some(guard),
@@ -579,12 +597,12 @@ async fn handle_set(
     };
 
     #[cfg(not(unix))]
-    // V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
+    // note: V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
     // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
     // advisory lock, proceed unlocked.
     let _file_lock = ();
 
-    // R-V150P0-W5 (resolved in T-A P1): transactional compare-and-swap write.
+    // why: R-V150P0-W5 (resolved in T-A P1): transactional compare-and-swap write.
     // The previous path (`get → apply → set`) was an unconditional
     // read-modify-write with a TOCTOU window. The retained cron evaluator
     // (T-A P1 — `nexus_orchestration::schedule::cron_supervisor`) is the
@@ -596,7 +614,7 @@ async fn handle_set(
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let base = resolve_schedule(stored.as_deref());
 
-    // R-V150P0-W1: TZ merge semantics. Only fold env/default TZ on the reset
+    // why: R-V150P0-W1: TZ merge semantics. Only fold env/default TZ on the reset
     // path (no flags) or when `--tz` is passed. A role-only patch without
     // `--tz` must preserve the previously-configured `base.tz` — folding the
     // env/default here used to silently clobber it.
@@ -625,7 +643,7 @@ async fn handle_set(
         .map_err(|e| CliError::Other(format!("schedule_json serialization failed: {e}")))?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    // R-V150P0-W5: CAS write inside a transaction. `stored` is the expected
+    // note: R-V150P0-W5: CAS write inside a transaction. `stored` is the expected
     // pre-image; the UPDATE only applies if the row still matches.
     let mut tx = pool
         .begin()
@@ -641,7 +659,7 @@ async fn handle_set(
     .await
     .map_err(|e| CliError::Other(format!("schedule_json CAS write failed: {e}")))?;
     if !applied {
-        // CAS mismatch — another writer (the cron evaluator, or a concurrent
+        // note: CAS mismatch — another writer (the cron evaluator, or a concurrent
         // CLI) raced ahead. Roll back and surface a retry hint.
         let _ = tx.rollback().await;
         return Err(CliError::Config(
@@ -654,7 +672,7 @@ async fn handle_set(
         .await
         .map_err(|e| CliError::Other(format!("schedule_json transaction commit failed: {e}")))?;
 
-    // R-V150P1CRONBW-03 (qc3 W-001): the retained cron evaluator
+    // why: R-V150P1CRONBW-03 (qc3 W-001): the retained cron evaluator
     // (`nexus_orchestration::schedule::cron_supervisor`) memoises parsed
     // `cron::Schedule`s per `(work_id, role)` keyed on the raw cron string.
     // The cache self-heals on content drift, but a successful
@@ -673,7 +691,7 @@ async fn handle_set(
     Ok(())
 }
 
-/// `creator works cron show` — render the resolved schedule (spec §3.2).
+/// note: `creator works cron show` — render the resolved schedule (spec §3.2).
 async fn handle_show(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -693,7 +711,7 @@ async fn handle_show(
     Ok(())
 }
 
-/// `creator works cron list` — list cron across workspace Works (spec §3.3).
+/// note: `creator works cron list` — list cron across workspace Works (spec §3.3).
 async fn handle_list(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -713,7 +731,7 @@ async fn handle_list(
         .collect();
 
     if json {
-        // R-V150-WLA-05: `list_row_to_json` carries `work_id` alongside
+        // why: R-V150-WLA-05: `list_row_to_json` carries `work_id` alongside
         // `work_ref` so machine consumers can always identify the row.
         let json_rows: Vec<serde_json::Value> = rows.iter().map(list_row_to_json).collect();
         println!(
@@ -726,7 +744,7 @@ async fn handle_list(
     Ok(())
 }
 
-/// Resolve `<work_ref>` / `<work_id>` to a concrete `work_id`, with a clear
+/// note: Resolve `<work_ref>` / `<work_id>` to a concrete `work_id`, with a clear
 /// error when no Work matches in the active workspace.
 async fn resolve_work_id(
     pool: &sqlx::SqlitePool,
@@ -745,7 +763,7 @@ async fn resolve_work_id(
 }
 
 #[cfg(test)]
-// R-V150-WLA-01 (V1.50 P-last WL-A / cron-foundation qc1 S4): test-only —
+// why: R-V150-WLA-01 (V1.50 P-last WL-A / cron-foundation qc1 S4): test-only —
 // `.unwrap()` keeps assertion intent readable; panics surface test names.
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -753,7 +771,7 @@ mod tests {
 
     #[test]
     fn validate_cron_accepts_spec_defaults() {
-        // All three spec defaults must validate (5-field).
+        // why: All three spec defaults must validate (5-field).
         validate_cron_expr(DEFAULT_BRAINSTORM_CRON).unwrap();
         validate_cron_expr(DEFAULT_WRITE_CRON).unwrap();
         validate_cron_expr(DEFAULT_REVIEW_CRON).unwrap();
@@ -848,7 +866,7 @@ mod tests {
         };
         let out = apply_set_args(base, &args).unwrap();
         assert_eq!(out.roles.brainstorm.cron, "0 9 * * *");
-        // Other roles keep defaults.
+        // why: Other roles keep defaults.
         assert_eq!(out.roles.write.cron, DEFAULT_WRITE_CRON);
     }
 
@@ -872,7 +890,7 @@ mod tests {
         assert!(apply_set_args(base, &args).is_err());
     }
 
-    /// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004):
+    /// note: R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004):
     /// `--brainstorm EXPR --no-brainstorm` (and the write / review
     /// siblings) must be rejected with the `E_CRON_CONFLICTING_FLAGS`
     /// stable code rather than silently storing a disabled role with an
@@ -886,7 +904,7 @@ mod tests {
         ] {
             let base = WorkSchedule::defaults();
             let mut args = CronSetArgs::default();
-            // Build the conflicting pair via field mutation by parsing the
+            // note: Build the conflicting pair via field mutation by parsing the
             // role names (cheaper than three near-identical literals).
             match role_expr_field {
                 "brainstorm" => args.brainstorm = Some(DEFAULT_BRAINSTORM_CRON.to_string()),
@@ -934,7 +952,7 @@ mod tests {
         let out = render_show("my-work", &s);
         assert!(out.contains("Work: my-work"));
         assert!(out.contains("disabled"));
-        assert!(out.contains("Asia") || out.contains("UTC")); // tz line present
+        assert!(out.contains("Asia") || out.contains("UTC")); // note: tz line present
     }
 
     #[test]
@@ -963,13 +981,13 @@ mod tests {
         assert!(out.contains("disabled"));
     }
 
-    /// R-V150-WLA-05: `list --json` row must carry both `work_ref` (the
+    /// note: R-V150-WLA-05: `list --json` row must carry both `work_ref` (the
     /// human slug, `null` when unset) and `work_id` (the canonical
     /// `wrk_...` primary key). Machine consumers should be able to
     /// identify the row even when the Work has no `work_ref` set.
     #[test]
     fn list_row_to_json_includes_work_id_and_work_ref() {
-        // Case 1: Work with a human work_ref slug.
+        // note: Case 1: Work with a human work_ref slug.
         let row_with_ref = ListRow {
             work_ref: Some("my-novel".to_string()),
             work_id: "wrk_001".to_string(),
@@ -983,7 +1001,7 @@ mod tests {
             "schedule object must be present"
         );
 
-        // Case 2: Work with no work_ref (regression guard for the qc1 S3
+        // why: Case 2: Work with no work_ref (regression guard for the qc1 S3
         // gap — `work_ref: null` must not leave the consumer without any
         // identifier).
         let row_no_ref = ListRow {
@@ -1015,7 +1033,7 @@ mod tests {
         assert_eq!(normalize_cron_fields("0 0 3 * * *"), "0 0 3 * * *");
     }
 
-    // ── R-V150P0-W1: TZ preservation on role-only patch ──────────────────
+    // note: R-V150P0-W1: TZ preservation on role-only patch
 
     #[test]
     fn resolve_tz_explicit_arg_wins() {
@@ -1040,7 +1058,7 @@ mod tests {
 
     #[test]
     fn set_no_review_preserves_custom_tz() {
-        // Pre-store a Work with tz="Asia/Shanghai"; patch with --no-review and
+        // why: Pre-store a Work with tz="Asia/Shanghai"; patch with --no-review and
         // no --tz. apply_set_args must leave base.tz unchanged (R-V150P0-W1).
         let mut base = WorkSchedule::defaults();
         base.tz = "Asia/Shanghai".to_string();
@@ -1056,7 +1074,7 @@ mod tests {
         assert!(!out.roles.review.enabled);
     }
 
-    // ── R-V150P0-W2: spec §3.1 "all-off" rule ─────────────────────────────
+    // note: R-V150P0-W2: spec §3.1 "all-off" rule
 
     #[test]
     fn apply_set_args_all_off_without_flag_rejects() {
@@ -1092,11 +1110,11 @@ mod tests {
         assert!(!out.roles.review.enabled);
     }
 
-    // ── R-V150P0-W3: show columns (Local time + Next fire UTC) ───────────
+    // note: R-V150P0-W3: show columns (Local time + Next fire UTC)
 
     #[test]
     fn render_show_includes_local_and_next_fire_columns() {
-        let s = WorkSchedule::defaults(); // brainstorm = 0 3,9,15,21 * * *, tz=UTC
+        let s = WorkSchedule::defaults(); // note: brainstorm = 0 3,9,15,21 * * *, tz=UTC
         let out = render_show("my-work", &s);
         assert!(
             out.contains("Local time"),
@@ -1106,7 +1124,7 @@ mod tests {
             out.contains("Next fire (UTC)"),
             "missing Next fire (UTC) header: {out}"
         );
-        // brainstorm row has a concrete local-time slot (03:00) and a UTC fire.
+        // note: brainstorm row has a concrete local-time slot (03:00) and a UTC fire.
         assert!(
             out.contains("03:00"),
             "brainstorm local time slot missing: {out}"
@@ -1119,7 +1137,7 @@ mod tests {
         let mut s = WorkSchedule::defaults();
         s.roles.brainstorm.enabled = false;
         let out = render_show("d-work", &s);
-        // The disabled brainstorm row: Local time cell = "--", Next fire = "disabled".
+        // note: The disabled brainstorm row: Local time cell = "--", Next fire = "disabled".
         assert!(
             out.contains("--"),
             "disabled local-time cell '--' missing: {out}"
