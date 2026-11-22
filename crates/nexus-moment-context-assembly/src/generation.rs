@@ -18,36 +18,36 @@
 
 use std::fmt;
 
-/// Generation-type discriminator for spec §4 slot gating.
+/// note: generation-type discriminator for spec §4 slot gating.
 ///
 /// `None` on [`MomentRequest`](crate::moment::MomentRequest) (the default)
 /// is treated as [`Self::Unspecified`] — every slot fills, current behavior
 /// (neutral golden + direct CLI / inspector path).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GenerationStage {
-    /// Creative Brief Intake (`work_init`).
+    /// note: creative brief intake; run-intent `work_init`.
     Intake,
-    /// Reference / KB gathering (`knowledge_ingest` / `work_continue`).
+    /// note: reference / KB gathering; run-intent `knowledge_ingest` / `work_continue`.
     Research,
-    /// Primary drafting / generation (`work_continue`).
+    /// note: primary drafting / generation; run-intent `work_continue`.
     Produce,
-    /// Quality loop / revision (`work_continue`).
+    /// note: quality loop / revision; run-intent `work_continue`.
     Review,
-    /// Memory + KB promotion (`knowledge_ingest` / `work_continue`).
+    /// note: memory + KB promotion; run-intent `knowledge_ingest` / `work_continue`.
     Persist,
-    /// Work-adjacent non-narrative upkeep preset run-intent (`work_maintenance`).
+    /// note: work-adjacent non-narrative upkeep preset run-intent (`work_maintenance`).
     WorkMaintenance,
-    /// `_system.*` maintenance preset run-intent (`system_maintenance`) —
-    /// no lore slots at all (spec §4, `_system.*` isolation invariant).
+    /// invariant: `_system.*` maintenance preset run-intent (`system_maintenance`)
+    /// gets no lore slots at all (spec §4, `_system.*` isolation).
     SystemMaintenance,
-    /// No generation context (direct `assemble-moment` CLI / inspector
+    /// note: no generation context (direct `assemble-moment` CLI / inspector
     /// path) — all slots on (spec §4).
     #[default]
     Unspecified,
 }
 
 impl GenerationStage {
-    /// Stable string form — the CLI `assemble-moment --stage` values.
+    /// note: stable string form — the CLI `assemble-moment --stage` values.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -62,11 +62,11 @@ impl GenerationStage {
         }
     }
 
-    /// Parse the CLI string form.
+    /// note: parses the CLI string form; `None` for unknown values.
     ///
-    /// Returns `None` for unknown values — the caller treats an unknown
-    /// value as [`Self::Unspecified`] (safe default, all slots on) and logs;
-    /// an unknown stage must never fail or panic the assembly (T3).
+    /// The caller treats an unknown value as [`Self::Unspecified`] (safe
+    /// default, all slots on) and logs; an unknown stage must never fail or
+    /// panic the assembly (T3).
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -115,9 +115,9 @@ mod tests {
 
     #[test]
     fn unknown_stage_parses_to_none_safe_default() {
-        // T3: an unknown stage value must degrade to the safe default
+        // invariant: an unknown stage value degrades to the safe default
         // (`None` ⇒ `Unspecified` ⇒ all slots on) at the caller — never a
-        // panic or hard error.
+        // panic or hard error (T3).
         for bad in ["draft", "revise", "continue", "summarize", "", "PRODUCE"] {
             assert_eq!(
                 GenerationStage::parse(bad),

@@ -5,6 +5,8 @@
 //! (`{NEXUS_HOME}/agent-host/config.toml`). Readiness is not recomputed here:
 //! the owner re-probes the selected providers at the next execution-owner
 //! start, which is the same authority that publishes `provider_ready`.
+// invariant: both lanes are thin adapters over
+// `{NEXUS_HOME}/agent-host/config.toml` — no readiness state is written here.
 
 use std::path::PathBuf;
 
@@ -16,8 +18,9 @@ use nexus_contracts::{CoreError, CoreErrorCode};
 
 use crate::NativeCore;
 
-/// A client-side rejection in the wire `CoreError` envelope the service maps to
-/// 400 `invalid_input` (never the sanitized 500 a bare reason would become).
+/// why: a client-side rejection in the wire `CoreError` envelope the service
+/// maps to 400 `invalid_input` (never the sanitized 500 a bare reason would
+/// become).
 fn invalid_input(message: impl Into<String>) -> Error {
     crate::core_error::napi_error_from_wire(CoreError {
         code: CoreErrorCode::InvalidInput,
@@ -34,9 +37,9 @@ fn validate(config: &AgentHostConfig) -> Result<()> {
         ));
     }
     for provider in &config.providers {
-        // The launcher's own admission check is the single source of truth:
-        // id non-empty; enabled entries need a supported protocol AND a
-        // non-empty command. A save can never accept what the launcher rejects.
+        // invariant: the launcher's own admission check is the single source of
+        // truth — id non-empty; enabled entries need a supported protocol AND a
+        // non-empty command, so a save can never accept what the launcher rejects.
         validate_provider_config(provider).map_err(|error| invalid_input(error.to_string()))?;
     }
     Ok(())
@@ -55,7 +58,7 @@ impl NativeCore {
 
 #[napi]
 impl NativeCore {
-    /// Read the agent-host config; a missing file yields the native defaults.
+    /// note: reads the agent-host config; a missing file yields the native defaults.
     #[napi]
     pub async fn get_agent_host_config(&self) -> Result<Buffer> {
         self.deny_service_only()?;
@@ -65,8 +68,8 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&config)?))
     }
 
-    /// Replace the agent-host config file. Unknown-provider policy and every
-    /// provider entry are validated before the atomic write.
+    /// note: replaces the agent-host config file; unknown-provider policy and
+    /// every provider entry are validated before the atomic write.
     #[napi]
     pub async fn save_agent_host_config(&self, config_json: Buffer) -> Result<()> {
         self.deny_service_only()?;
@@ -133,8 +136,8 @@ mod tests {
 
     #[test]
     fn accepts_disabled_provider_without_command() {
-        // A stale entry disabled by replacement semantics keeps no command but
-        // must not block the save: the launcher never selects it.
+        // note: a stale entry disabled by replacement semantics keeps no command
+        // but must not block the save — the launcher never selects it.
         validate(&config_with(provider(None, false))).expect("disabled entry is accepted");
     }
 }

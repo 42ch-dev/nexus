@@ -1,9 +1,9 @@
-//! Two-stage context assembly for `local_first` / `cloud_enhanced` modes.
+//! note: two-stage context assembly for `local_first` / `cloud_enhanced` modes.
 //!
-//! Stage-1: Call platform `context/assemble` API.
-//! Stage-2: Merge platform response with local SOUL + memories + fragments.
+//! Stage-1 calls the platform `context/assemble` API; Stage-2 merges that
+//! response with local SOUL + memories + fragments.
 //!
-//! Spec: `creator-memory-soul-lifecycle.md` §9
+//! Spec: `docs/specs/creator/creator-memory-soul-lifecycle.md` §9
 
 use crate::recall::{memory_body, memory_display_id, memory_kind, memory_updated_at};
 use nexus_contracts::local::domain::RuntimeMode;
@@ -11,38 +11,38 @@ use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
-/// Section heading for personality (matches SOUL.md).
+/// note: heading text mirrors the `## Personality` section of the creator's SOUL.md.
 const PERSONALITY_HEADING: &str = "## Personality";
 
-/// Section heading for experience (matches SOUL.md).
+/// note: heading text mirrors the `## Experience` section of the creator's SOUL.md.
 const EXPERIENCE_HEADING: &str = "## Experience";
 
-/// Section heading for fragment keywords.
+/// note: heading for the deduped, lowercased fragment-keyword list.
 const FRAGMENT_KEYWORDS_HEADING: &str = "### Fragment keywords (deduped)";
 
-/// Section heading for platform memory items.
+/// note: heading for Stage-1 platform memory items after local-ID dedup.
 const PLATFORM_MEMORY_HEADING: &str = "### Platform Memory Items";
 
-/// Section heading for knowledge base entries.
+/// note: heading for Stage-1 knowledge base entries.
 const KB_HEADING: &str = "### Knowledge Base";
 
-/// Section heading for timeline events.
+/// note: heading for Stage-1 timeline events.
 const TIMELINE_HEADING: &str = "### Timeline Events";
 
-/// Response from platform `context/assemble` API (Stage-1).
+/// note: Stage-1 body of the platform `context/assemble` API.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssembleResponse {
-    /// Memory items from platform vector search (optional).
+    /// note: platform vector-search hits; empty when the platform matched none.
     pub memory_items: Vec<MemoryItemRef>,
-    /// Knowledge base entries (optional).
+    /// note: knowledge base entries the platform matched.
     pub kb: Vec<KbEntry>,
-    /// Timeline events (optional).
+    /// note: timeline events the platform matched.
     pub timeline: Vec<TimelineEventRef>,
-    /// Assembly metadata from platform.
+    /// note: platform assembly metadata; never rendered into the prompt.
     pub metadata: AssembleMetadata,
 }
 
-/// Reference to a memory item (from platform).
+/// note: one platform vector-search hit; `relevance_score` renders as `[relevance: x.xx]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MemoryItemRef {
     pub memory_id: String,
@@ -50,7 +50,7 @@ pub struct MemoryItemRef {
     pub relevance_score: Option<f32>,
 }
 
-/// Knowledge base entry reference.
+/// note: knowledge base entry reference as the platform returns it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KbEntry {
     pub entry_id: String,
@@ -58,7 +58,7 @@ pub struct KbEntry {
     pub content: String,
 }
 
-/// Timeline event reference.
+/// note: timeline event reference; rendered as `[timestamp] event_type (event_id)`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TimelineEventRef {
     pub event_id: String,
@@ -66,40 +66,41 @@ pub struct TimelineEventRef {
     pub timestamp: String,
 }
 
-/// Assembly metadata from platform.
+/// note: platform assembly metadata (assemble timestamp and token estimate).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssembleMetadata {
     pub assembled_at: String,
     pub token_count_estimate: Option<u32>,
 }
 
-/// Two-stage context assembly for `local_first` / `cloud_enhanced` modes.
+/// note: two-stage assembly for `local_first` / `cloud_enhanced` modes.
 ///
-/// Stage-1: Call platform `context/assemble` API.
-/// Stage-2: Merge platform response with local SOUL + memories + fragments.
+/// Stage-1 calls the platform `context/assemble` API; Stage-2 merges that
+/// response with local SOUL + memories + fragments.
 pub struct TwoStageAssembly {
-    /// Stage-1 response from platform (optional — may fail or return empty).
+    /// note: Stage-1 result; `None` routes [`Self::assemble_with_fallback`] to the Stage-0 path.
     pub stage1_response: Option<AssembleResponse>,
-    /// Local SOUL personality section.
+    /// note: rendered under [`PERSONALITY_HEADING`]; empty omits the section.
     pub personality: String,
-    /// Local SOUL experience section.
+    /// note: rendered under [`EXPERIENCE_HEADING`]; empty omits the section.
     pub experience: String,
-    /// Local long-term memories: the contract `nexus.<MemoryKind>` records.
+    /// note: contract `nexus.<MemoryKind>` records, sorted by kind then newest-first.
     pub long_term_memories: Vec<RetainedRecord>,
-    /// Local fragment keywords (union from `memory_fragments`).
+    /// note: trimmed, lowercased and deduped before rendering; empty omits the section.
     pub fragment_keywords: Vec<String>,
-    /// User task prompt.
+    /// note: appended last; empty contributes nothing.
     pub user_prompt: String,
-    /// System/policy prefix.
+    /// note: emitted first; empty contributes nothing.
     pub system_prefix: String,
-    /// Token budget.
+    /// note: token budget carried for callers; `assemble` does not truncate to it.
     pub max_tokens: Option<usize>,
-    /// Current runtime mode (for merge rules).
+    /// note: carried for merge rules; `assemble` currently renders the same output for every mode.
     pub runtime_mode: RuntimeMode,
 }
 
 impl TwoStageAssembly {
-    /// Assemble the final context (Stage-2 merge).
+    /// note: Stage-2 merge order — system prefix, personality, memories, fragment
+    /// keywords, Stage-1 platform items/kb/timeline, experience, prompt.
     #[must_use]
     pub fn assemble(&self) -> String {
         let mut parts = Vec::new();
@@ -187,7 +188,7 @@ impl TwoStageAssembly {
         parts.join("\n")
     }
 
-    /// Assemble with fallback to Stage0-style output if Stage-1 failed.
+    /// note: Stage-1 absent → Stage-0 output with no platform sections; otherwise [`Self::assemble`].
     #[must_use]
     pub fn assemble_with_fallback(&self) -> String {
         if self.stage1_response.is_none() {

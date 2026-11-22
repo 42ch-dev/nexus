@@ -33,10 +33,12 @@
 //! carries (`modules.placement`, `modules.activation_trace`, `slot_map`,
 //! `hygiene`) comes from an entry the snapshot admitted — a hidden row can
 //! neither appear nor be scored here.
+// invariant: the packet is a pure projection of the assembled `MomentContext` —
+// no KB re-read, so no entry the `ActorView` snapshot hid can appear.
 
 use crate::moment::MomentContext;
 
-/// Build the enriched inspector packet JSON from an assembled
+/// note: builds the enriched inspector packet JSON from an assembled
 /// [`MomentContext`].
 ///
 /// `modules.*` keeps the spoke assemble-module recipe (unchanged, AC-I3);
@@ -51,7 +53,6 @@ use crate::moment::MomentContext;
 pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
     let trace = ctx.activation_trace.as_deref().unwrap_or(&[]);
 
-    // modules.placement: entries that passed activation (accepted == true).
     let placement: Vec<serde_json::Value> = trace
         .iter()
         .filter(|t| t.accepted)
@@ -64,7 +65,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // modules.activation_trace: full per-entry fire/miss trace.
     let trace_json: Vec<serde_json::Value> = trace
         .iter()
         .map(|t| {
@@ -77,8 +77,8 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // slot_map: entry_id → slot id (spec §2 H2) — captured post stage-gate
-    // at assembly time, so it reflects what actually rendered.
+    // note: slot_map is captured post stage-gate at assembly time, so it
+    // reflects what actually rendered (spec §2 H2).
     let slot_map: Vec<serde_json::Value> = ctx
         .slot_map
         .as_deref()
@@ -92,7 +92,7 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // budget: chars/4 token accounting (spec §2 H3). `None` budget (no
+    // note: chars/4 token accounting (spec §2 H3); a `None` budget (no
     // activation ran) renders zeros with null cap/remaining.
     let budget = serde_json::json!({
         "primary_tokens_est": ctx.activation_budget.as_ref().map_or(0, |b| b.primary_tokens_est),
@@ -100,8 +100,8 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         "cap": ctx.activation_budget.as_ref().and_then(|b| b.cap),
         "remaining": ctx.activation_budget.as_ref().and_then(|b| b.remaining),
     });
-    // moment_directive: status/metadata only (spec §2 H6). Reads ONLY
-    // `ctx.moment_directive_meta` — the directive body is excluded **by
+    // invariant: status/metadata only (spec §2 H6) — reads ONLY
+    // `ctx.moment_directive_meta`, so the directive body is excluded **by
     // construction** (AC-I3). `"none"` + nulls when no directive injected.
     let moment_directive = match ctx.moment_directive_meta.as_ref() {
         Some(meta) => serde_json::json!({
@@ -124,8 +124,8 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         }),
     };
 
-    // hygiene: per-entry transform trace (DF-79) — always present, empty
-    // array when no hygiene pass ran or no carrier-bearing entries.
+    // note: per-entry transform trace (DF-79) — always present, empty array
+    // when no hygiene pass ran or no carrier-bearing entries.
     let hygiene: Vec<serde_json::Value> = ctx
         .hygiene_trace
         .as_deref()
@@ -173,7 +173,7 @@ mod tests {
         }
     }
 
-    /// V1.151 P0 (spec §2 + AC-I6): the enriched packet over a seeded
+    /// note: V1.151 P0 (spec §2 + AC-I6) — the enriched packet over a seeded
     /// `MomentContext` (slots + hops budget + active directive) carries the
     /// three product-local sections with the exact captured values, and
     /// `modules.*` is unchanged from the trace-derived shape.
@@ -232,7 +232,6 @@ mod tests {
 
         let packet = build_inspector_packet(&ctx);
 
-        // slot_map section: entry_id → slot, exact captured values.
         assert_eq!(
             packet["slot_map"],
             serde_json::json!([
@@ -243,7 +242,6 @@ mod tests {
             "slot_map must carry the captured post-gate slot assignments"
         );
 
-        // budget section: chars/4 accounting.
         assert_eq!(
             packet["budget"],
             serde_json::json!({
@@ -255,7 +253,6 @@ mod tests {
             "budget must carry the captured token accounting"
         );
 
-        // moment_directive section: status/metadata only.
         assert_eq!(
             packet["moment_directive"],
             serde_json::json!({
@@ -269,7 +266,6 @@ mod tests {
             }),
             "moment_directive must carry status/metadata only"
         );
-        // hygiene section: per-entry transform trace (DF-79).
         assert_eq!(
             packet["hygiene"],
             serde_json::json!([
@@ -278,7 +274,7 @@ mod tests {
             "hygiene must carry the per-entry transform trace"
         );
 
-        // modules.* unchanged: derived solely from the activation trace.
+        // invariant: `modules.*` stays derived solely from the activation trace.
         assert_eq!(
             packet["modules"]["placement"],
             serde_json::json!([
@@ -298,7 +294,7 @@ mod tests {
         );
     }
 
-    /// V1.151 P0 (spec §2): a neutral context (no slots, no budget, no
+    /// note: V1.151 P0 (spec §2) — a neutral context (no slots, no budget, no
     /// directive) still yields the fixed four-section shape — empty arrays
     /// and nulls — so consumers can rely on a stable packet.
     #[test]

@@ -1,4 +1,6 @@
 //! JS provider callback bridge with bounded TSFN admission (architecture §7).
+// invariant: at most `MAX_ACTIVE_PROMISES` (32) TSFN calls are in flight;
+// admission beyond that returns `Busy` (503) instead of queueing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -117,13 +119,13 @@ impl JsProviderBridge {
             })?;
         let gen_at_enqueue = self.state.generation.load(Ordering::SeqCst);
 
-        // Subscribe to the versioned close signal BEFORE the enqueue. `wait_for`
-        // re-reads the stored value, so a close landing at any later point is
-        // observed even though no waiter was registered when it fired — the
-        // `Notify`-based form could lose that wake entirely.
+        // why: subscribe to the versioned close signal BEFORE the enqueue.
+        // `wait_for` re-reads the stored value, so a close landing at any later
+        // point is observed even though no waiter was registered when it fired —
+        // the `Notify`-based form could lose that wake entirely.
         let mut close_rx = self.state.close_watch();
         let close_fut = async move {
-            // `Err` means the sender was dropped, which is also "no longer open".
+            // note: `Err` means the sender was dropped, which is also "no longer open".
             let _ = close_rx.wait_for(|closed| *closed).await;
         };
         if self.state.is_closing() {

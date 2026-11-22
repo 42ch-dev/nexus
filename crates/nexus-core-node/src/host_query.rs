@@ -7,6 +7,8 @@
 //! scoping. Native keeps no second registry of Actor authority — its own state
 //! holds the provider-only JS view, which is merged after the native rows and
 //! paged after the merge.
+// invariant: native rows are the authority's owner-scoped view; the JS view is a
+// separate one merged after them and paged only after the merge.
 
 use nexus_agent_host::ids::{HostOperationId, HostSessionId};
 use nexus_agent_host::providers::port::operation_status_wire;
@@ -23,13 +25,11 @@ use uuid::Uuid;
 use super::core_error;
 use super::env_state::{EnvState, JsSessionRecord};
 
-/// The page the authority is asked for while draining its native rows. The
-/// merged page is what the caller's own `limit` applies to, so the drain walks
-/// the authority in full rather than truncating the native side.
+/// why: the drain walks the authority in full; the caller's own `limit` applies
+/// only to the merged page, not to the native side.
 const NATIVE_ROW_PAGE: u64 = 250;
 
-/// Wire shape for a JS-provider session. JS adapter ids are arbitrary strings,
-/// so they are compared raw and never UUID-parsed.
+/// note: JS adapter ids are arbitrary strings — compared raw, never UUID-parsed.
 fn js_session_wire(record: &JsSessionRecord) -> NexusAgentHostSessionResponse {
     NexusAgentHostSessionResponse {
         session_id: record.session_id.clone(),
@@ -46,8 +46,8 @@ fn js_session_wire(record: &JsSessionRecord) -> NexusAgentHostSessionResponse {
     }
 }
 
-/// A host rejection that means "not found" is what get_session/get_operation
-/// report after both branches miss. Every other error propagates.
+/// note: a host rejection meaning "not found" is what get_session/get_operation
+/// report once both branches miss; every other error propagates.
 fn not_found(reason: &str) -> String {
     core_error::open_reason_not_found(reason)
 }
@@ -89,9 +89,9 @@ pub fn deny_actor_provider_ids(
     }
     if let Some(raw) = operation_id {
         if let Ok(uuid) = Uuid::parse_str(raw) {
-            // Either index: an operation reserved with a recorded Character
-            // outcome, or one registered before the Host bound it to its
-            // session. The retired-session case is covered by the session
+            // note: either index — an operation reserved with a recorded
+            // Character outcome, or one registered before the Host bound it to
+            // its session. The retired-session case is covered by the session
             // check, and a terminal record keeps its operation id until the
             // core's bounded eviction.
             if authority.owns_actor_operation(&HostOperationId(uuid)) {
@@ -102,17 +102,17 @@ pub fn deny_actor_provider_ids(
     Ok(())
 }
 
-/// One refusal shape for both raw entry points: the LANE is the reason (the id
-/// did nothing wrong here), so the caller is told to use the Actor Host methods
-/// rather than retry the provider-only path.
+/// why: one refusal shape for both raw entry points — the LANE is the reason
+/// (the id did nothing wrong here), so the caller is told to use the Actor Host
+/// methods rather than retry the provider-only path.
 fn forbidden_actor_id(kind: &str, raw: &str) -> CoreError {
     CoreError::Forbidden {
         resource: format!("actor {kind} {raw} on the provider-only lane"),
     }
 }
 
-/// Deterministic merged session list: native (authority) entries share one sort
-/// key with the JS entries and keep precedence on a raw session_id collision, so
+/// note: deterministic merged list — native entries share one sort key with the
+/// JS entries and keep precedence on a raw session_id collision, so
 /// pagination/order/not-found semantics are identical for both.
 fn merge_session_wires(
     native: Vec<NexusAgentHostSessionResponse>,
@@ -135,8 +135,8 @@ fn js_sessions_snapshot(state: &EnvState) -> Vec<JsSessionRecord> {
         .unwrap_or_default()
 }
 
-/// The attached authority and the active principal every native query is scoped
-/// to.
+/// note: the attached authority and the active principal every native query is
+/// scoped to.
 ///
 /// `hostQuery` carries no principal handle (its signature is unchanged), and the
 /// native surface has exactly one open selection — so the principal is the one
@@ -182,8 +182,8 @@ fn single_request(query: CoreHostQueryQuery) -> CoreHostQuery {
     }
 }
 
-/// Owner-scoped native session rows from the ONE core authority — Actor pair and
-/// tombstone included — drained past `cursor`.
+/// note: owner-scoped native session rows from the ONE core authority — Actor
+/// pair and tombstone included — drained past `cursor`.
 ///
 /// The authority pages its rows; the merge pages the union, so every page the
 /// authority reports is drained here before the JS view joins it.
@@ -208,8 +208,8 @@ async fn native_session_rows(
         }
         match list.pagination.next_cursor {
             Some(cursor) => next = Some(cursor),
-            // A full page without a cursor cannot be followed; the rows already
-            // drained are the complete authority view.
+            // why: a full page without a cursor cannot be followed; the rows
+            // already drained are the complete authority view.
             None => return Ok(rows),
         }
     }
@@ -229,7 +229,7 @@ pub async fn dispatch_host_query(
             let health = response
                 .health
                 .ok_or_else(core_error::open_reason_internal)?;
-            // Native precedence: only count JS sessions that are not already
+            // why: native precedence — only count JS sessions not already
             // represented in the core-authorized native registry, so a collision
             // cannot double-count a session or its operation.
             let native = native_session_rows(&authority, &principal, None).await?;
@@ -323,8 +323,8 @@ pub async fn dispatch_host_query(
             let raw = request.session_id.as_deref().ok_or_else(|| {
                 core_error::open_reason_invalid_input("get_session requires session_id")
             })?;
-            // A raw comparison is safe and never parses a JS id: every native
-            // session id is a UUID, so a JS-shaped id can never collide.
+            // why: a raw comparison is safe and never parses a JS id — every
+            // native session id is a UUID, so a JS-shaped id can never collide.
             let native = native_session_rows(&authority, &principal, None).await?;
             if let Some(row) = native.into_iter().find(|row| row.session_id == raw) {
                 return Ok(CoreHostQueryResponse {
@@ -336,7 +336,6 @@ pub async fn dispatch_host_query(
                     scan: None,
                 });
             }
-            // JS branch: raw-id compare.
             let js = state.with_js_state(|s| s.session(raw).cloned()).flatten();
             if let Some(record) = js {
                 return Ok(CoreHostQueryResponse {
@@ -354,12 +353,12 @@ pub async fn dispatch_host_query(
             let raw = request.operation_id.as_deref().ok_or_else(|| {
                 core_error::open_reason_invalid_input("get_operation requires operation_id")
             })?;
-            // Native branch first for a UUID, matching GetSession precedence. The
-            // row set is the authority's owner-scoped view; the wire status is
-            // the manager session-state projection, which the row does not carry.
-            // The durable journal fallback stays AFTER the JS branch below, so a
-            // provider-only operation id is never preempted by its own journal
-            // row.
+            // why: native branch first for a UUID, matching GetSession
+            // precedence. The row set is the authority's owner-scoped view; the
+            // wire status is the manager session-state projection, which the row
+            // does not carry. The durable journal fallback stays AFTER the JS
+            // branch below, so a provider-only operation id is never preempted
+            // by its own journal row.
             if let Ok(uuid) = Uuid::parse_str(raw) {
                 let op_id = HostOperationId(uuid);
                 let native = native_session_rows(&authority, &principal, None).await?;
@@ -392,7 +391,7 @@ pub async fn dispatch_host_query(
                     }
                 }
             }
-            // JS branch: raw-id compare (adapter ids are arbitrary strings).
+            // note: JS branch — raw-id compare; adapter ids are arbitrary strings.
             if let Some(op) = state.with_js_state(|s| s.operation(raw)).flatten() {
                 return Ok(CoreHostQueryResponse {
                     operation: Some(NexusAgentHostOperationResponse {
@@ -408,8 +407,8 @@ pub async fn dispatch_host_query(
                     scan: None,
                 });
             }
-            // Durable journal fallback: after a restart the in-memory state is
-            // gone, but a previously active op is still queryable as
+            // why: durable journal fallback — after a restart the in-memory state
+            // is gone, but a previously active op is still queryable as
             // interrupted, read through the CoreService-owned journal.
             if let Some(core) = state.journal_core() {
                 if let Ok(Some((operation_id, session_id, _provider_id, status))) =

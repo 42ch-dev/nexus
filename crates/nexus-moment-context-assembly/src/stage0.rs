@@ -14,85 +14,78 @@
 //! - Uses chars/4 heuristic for token estimation
 //! - Personality section is NEVER truncated
 //! - Truncatable sections are dropped from the end when budget exceeded
+// invariant: both entry points emit the §9.2 section order, and personality is
+// never truncated — only truncatable sections may be dropped (spec §9.3).
 
 use crate::recall::{memory_body, memory_display_id, memory_kind, memory_updated_at};
 use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use std::collections::BTreeSet;
 
-/// Section heading for fragment keywords.
+/// note: section heading for fragment keywords.
 const FRAGMENT_KEYWORDS_HEADING: &str = "### Fragment keywords (deduped)";
 
-/// Section heading for personality (matches SOUL.md).
+/// note: section heading for personality (matches SOUL.md).
 const PERSONALITY_HEADING: &str = "## Personality";
 
-/// Section heading for experience (matches SOUL.md).
+/// note: section heading for experience (matches SOUL.md).
 const EXPERIENCE_HEADING: &str = "## Experience";
 
-/// Structured delimiter marking the start of the Stage0 personality section.
-///
-/// Emitted by `Stage0Assembly::assemble()` / `assemble_with_truncation()`
-/// immediately after the `## Personality` heading and body.
-/// Used by `MomentContext::split_stage0_personality()` for reliable personality extraction.
+/// note: structured delimiter marking the start of the Stage0 personality
+/// section, emitted by `Stage0Assembly::assemble()` /
+/// `assemble_with_truncation()` immediately after the `## Personality` heading
+/// and body. `MomentContext::split_stage0_personality()` relies on it for
+/// personality extraction.
 pub(crate) const STAGE0_PERSONALITY_START: &str = "---STAGE0:PERSONALITY:START---";
 
-/// Structured delimiter marking the end of the Stage0 personality section.
+/// note: structured delimiter marking the end of the Stage0 personality
+/// section.
 pub(crate) const STAGE0_PERSONALITY_END: &str = "---STAGE0:PERSONALITY:END---";
 
-/// Stage-0 context assembly for `local_only` mode.
-///
-/// Collects all local context sources and assembles them in the
-/// spec-defined order (§9.2).
+/// note: Stage-0 context assembly for `local_only` mode, collecting all local
+/// context sources and assembling them in the spec-defined order (§9.2).
 #[derive(Debug, Clone, Default)]
 pub struct Stage0Assembly {
-    /// Personality section content (verbatim from SOUL.md `## Personality`).
+    /// note: personality section content (verbatim from SOUL.md `## Personality`).
     pub personality: String,
-    /// Experience section content (aggregated from SOUL.md `## Experience`).
+    /// note: experience section content (aggregated from SOUL.md `## Experience`).
     pub experience: String,
-    /// Long-term memories to include, sorted by kind then recency.
-    ///
-    /// These are the upstream contract records (`RetainedRecord`) — the
-    /// provider's `nexus.<MemoryKind>` recall rows, never the legacy
-    /// `LongTermMemory` file type (NXM-7 / compass D5).
+    /// note: long-term memories to include, sorted by kind then recency. These
+    /// are the upstream contract records (`RetainedRecord`) — the provider's
+    /// `nexus.<MemoryKind>` recall rows, never the legacy `LongTermMemory` file
+    /// type (NXM-7 / compass D5).
     pub long_term_memories: Vec<RetainedRecord>,
-    /// Fragment keywords (deduped union from `memory_fragments`).
+    /// note: fragment keywords (deduped union from `memory_fragments`).
     pub fragment_keywords: Vec<String>,
-    /// System/policy prefix (runtime injection).
+    /// note: system/policy prefix (runtime injection).
     pub system_prefix: String,
-    /// Current user task prompt.
+    /// note: current user task prompt.
     pub user_prompt: String,
-    /// Optional token budget for the assembled context.
+    /// note: optional token budget for the assembled context.
     pub max_tokens: Option<usize>,
 }
 
 impl Stage0Assembly {
     #[must_use]
-    /// Assemble the full context string without truncation.
-    ///
-    /// Follows spec §9.2 ordering exactly.
+    /// note: assemble the full context string without truncation, following
+    /// spec §9.2 ordering exactly.
     pub fn assemble(&self) -> String {
         let mut parts = Vec::new();
-
-        // 1. System/policy prefix
         if !self.system_prefix.is_empty() {
             parts.push(self.system_prefix.clone());
         }
 
-        // 2. ## Personality (wrapped in structured delimiters)
         if !self.personality.is_empty() {
             parts.push(format!(
                 "{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n{}\n\n{STAGE0_PERSONALITY_END}",
                 self.personality
             ));
         }
-
-        // 3. Long-term memories (sorted by kind, then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", memory_display_id(mem));
             parts.push(format!("{title}\n\n{}\n", memory_body(mem)));
         }
 
-        // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
@@ -101,12 +94,10 @@ impl Stage0Assembly {
             ));
         }
 
-        // 5. ## Experience
         if !self.experience.is_empty() {
             parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
-        // 6. User prompt
         if !self.user_prompt.is_empty() {
             parts.push(self.user_prompt.clone());
         }
@@ -114,12 +105,11 @@ impl Stage0Assembly {
         parts.join("\n")
     }
 
-    /// Assemble with token budget truncation.
-    ///
-    /// When `max_tokens` is set, sections are truncated to fit within
-    /// the budget. Personality and system prefix are never truncated.
-    /// If the budget cannot accommodate non-truncatable sections alone,
-    /// they are still included (we never drop Personality).
+    /// note: assemble with token budget truncation — when `max_tokens` is set,
+    /// truncatable sections are truncated to fit the budget, while personality
+    /// and the system prefix are never truncated. If the budget cannot
+    /// accommodate the non-truncatable sections alone they are still included
+    /// (personality is never dropped).
     #[must_use]
     pub fn assemble_with_truncation(&self) -> String {
         let Some(budget) = self.max_tokens else {
@@ -129,15 +119,17 @@ impl Stage0Assembly {
         let sorted = self.sorted_memories();
         let keywords = self.deduped_keywords();
 
-        // Build sections in order: (heading, content, non_truncatable)
+        // note: one (heading, content, non_truncatable) per section, in spec
+        // §9.2 order.
         let mut sections: Vec<(String, String, bool)> = Vec::new();
 
-        // 1. System prefix (non-truncatable)
+        // invariant: the system prefix is never truncated (spec §9.3).
         if !self.system_prefix.is_empty() {
             sections.push((String::new(), self.system_prefix.clone(), true));
         }
 
-        // 2. Personality (non-truncatable — spec §9.3, wrapped in delimiters)
+        // invariant: personality is never truncated (spec §9.3) and stays
+        // wrapped in the structured delimiters.
         if !self.personality.is_empty() {
             sections.push((
                 format!("{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n"),
@@ -146,19 +138,18 @@ impl Stage0Assembly {
             ));
         }
 
-        // 3. Long-term memories (truncatable)
+        // note: memories, keywords and experience are truncatable, so they are
+        // dropped from the end when the budget runs out.
         for mem in &sorted {
             let heading = format!("### Memory: {}\n\n", memory_display_id(mem));
             sections.push((heading, memory_body(mem).to_string(), false));
         }
 
-        // 4. Fragment keywords (truncatable)
         if !keywords.is_empty() {
             let content = keywords.join(", ");
             sections.push((format!("{FRAGMENT_KEYWORDS_HEADING}\n\n"), content, false));
         }
 
-        // 5. Experience (truncatable)
         if !self.experience.is_empty() {
             sections.push((
                 format!("{EXPERIENCE_HEADING}\n\n"),
@@ -167,14 +158,13 @@ impl Stage0Assembly {
             ));
         }
 
-        // 6. User prompt (non-truncatable)
+        // invariant: the user prompt is never truncated.
         if !self.user_prompt.is_empty() {
             sections.push((String::new(), self.user_prompt.clone(), true));
         }
 
         let included = truncate_with_budget(&sections, budget);
 
-        // Reassemble
         let parts: Vec<String> = included
             .into_iter()
             .map(|(heading, content)| {
@@ -189,7 +179,7 @@ impl Stage0Assembly {
         parts.join("\n\n")
     }
 
-    /// Sort memories by kind (alphabetical), then by `updated_at`
+    /// note: sort memories by kind (alphabetical), then by `updated_at`
     /// descending (most recent first).
     fn sorted_memories(&self) -> Vec<&RetainedRecord> {
         let mut sorted: Vec<&RetainedRecord> = self.long_term_memories.iter().collect();
@@ -198,13 +188,14 @@ impl Stage0Assembly {
             if kind_cmp != std::cmp::Ordering::Equal {
                 return kind_cmp;
             }
-            // Most recent first (reverse chronological)
+            // note: reversed comparison puts the most recent memory first.
             memory_updated_at(b).cmp(memory_updated_at(a))
         });
         sorted
     }
 
-    /// Deduplicate fragment keywords using a `BTreeSet` for deterministic ordering.
+    /// note: deduplicate fragment keywords through a `BTreeSet`, giving
+    /// deterministic ordering.
     fn deduped_keywords(&self) -> Vec<String> {
         let set: BTreeSet<String> = self
             .fragment_keywords
@@ -216,24 +207,17 @@ impl Stage0Assembly {
     }
 }
 
-/// Estimate token count using the chars/4 heuristic.
-///
-/// NOTE (S-004): Token estimation uses `chars/4` as a rough approximation.
-/// Actual tokenization depends on the tokenizer used by the LLM.
+/// note: estimate token count with the chars/4 heuristic (S-004) — a rough
+/// approximation; actual tokenization depends on the tokenizer used by the LLM.
 #[must_use]
 pub const fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }
 
-/// Truncate sections to fit within a token budget.
-///
-/// Each section is a tuple of `(heading, content, non_truncatable)`:
-/// - `heading`: section heading text (included in token count)
-/// - `content`: section body text
-/// - `non_truncatable`: if `true`, the section is always included
-///
-/// Non-truncatable sections are always included regardless of budget.
-/// Truncatable sections are included greedily from the start.
+/// note: truncate sections to fit within a token budget. Each section is
+/// `(heading, content, non_truncatable)`: the heading counts toward the tokens,
+/// non-truncatable sections are always included regardless of budget, and
+/// truncatable sections are included greedily from the start.
 #[must_use]
 pub fn truncate_with_budget(
     sections: &[(String, String, bool)],
@@ -242,7 +226,6 @@ pub fn truncate_with_budget(
     let mut result = Vec::new();
     let mut used_tokens: usize = 0;
 
-    // First pass: include all non-truncatable sections
     for (heading, content, non_truncatable) in sections {
         if *non_truncatable {
             let section_text = format!("{heading}{content}");
@@ -252,7 +235,6 @@ pub fn truncate_with_budget(
         }
     }
 
-    // Second pass: greedily add truncatable sections
     for (heading, content, non_truncatable) in sections {
         if *non_truncatable {
             continue;
@@ -265,7 +247,6 @@ pub fn truncate_with_budget(
             result.push((heading.clone(), content.clone()));
             used_tokens += full_tokens;
         } else if remaining > 0 {
-            // Partially truncate: estimate how many chars fit
             let target_chars = remaining * 4;
             let heading_chars = heading.len();
             let content_chars = target_chars.saturating_sub(heading_chars);
@@ -282,7 +263,8 @@ pub fn truncate_with_budget(
     result
 }
 
-/// Truncate text to approximately `max_chars` characters at a word boundary.
+/// note: truncate text to approximately `max_chars` characters at a word
+/// boundary.
 fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
@@ -485,8 +467,6 @@ mod tests {
         assert_eq!(truncate_to_char_count("text", 0), "");
     }
 
-    // --- A3.1: Delimiter emit tests ---
-
     #[test]
     fn assemble_emits_personality_delimiters() {
         let asm = Stage0Assembly {
@@ -514,7 +494,8 @@ mod tests {
             start_pos < end_pos,
             "start delimiter must come before end delimiter"
         );
-        // Content between delimiters must include personality body and heading
+        // invariant: the personality body and heading both sit between the
+        // delimiters.
         let between = &output[start_pos + STAGE0_PERSONALITY_START.len()..end_pos];
         assert!(
             between.contains("Bold and creative."),

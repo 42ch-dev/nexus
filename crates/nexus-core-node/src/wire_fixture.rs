@@ -1,23 +1,24 @@
 //! Shared disposable home seeding for wire proofs and lifecycle tests.
+// note: both consumers share this seeding so they see the same home shape.
 
 use std::path::Path;
 
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use sqlx::SqlitePool;
 
-/// Creator id must satisfy the wire `CreatorId` pattern
-/// (`^ctr_[a-zA-Z0-9]+$`) so family projections that carry
-/// `owner_creator_id` stay wire-valid on the seeded home.
+/// invariant: the creator id must satisfy the wire `CreatorId` pattern
+/// (`^ctr_[a-zA-Z0-9]+$`) so family projections that carry `owner_creator_id`
+/// stay wire-valid on the seeded home.
 const CREATOR: &str = "ctr_testcreator";
 const SLUG: &str = "default";
 const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    // v1.191 P1 T4/T9: a workspace identity is usable only once its subject and
-    // its holder registry row have committed together, and the admitted
+    // why: a workspace identity is usable only once its subject and its holder
+    // registry row have committed together (v1.191 P1 T4/T9), and the admitted
     // ActorView/KB read scope fails closed (`holder_state_invalid`) on a raw
-    // subject row. Materialize through the one Creator materialization.
+    // subject row — so materialize through the one Creator materialization.
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
         .await
         .expect("seed creator");

@@ -1,5 +1,7 @@
-//! V1.150 P0 — preset slot routing for the assembled World-KB lore block
-//! (DF-75, spec `fl-l-w5-prompt-control-plane.md` §1.1 / §2).
+//! V1.150 P0 — preset slot routing for the assembled World-KB lore block (DF-75).
+//!
+//! see `docs/specs/architecture/spoke-adapter-architecture.md` — slot engine, slot vocabulary
+//! and generation-stage gates.
 //!
 //! A **thin post-activation step**: it consumes the V1.149-emitted activated
 //! candidate list (already filtered and sorted by the activation engine —
@@ -64,65 +66,65 @@ use std::collections::BTreeMap;
 use crate::generation::GenerationStage;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
-/// Section heading for the `world.before` slot (Q1 provisional lock —
-/// `guides/mca-section-audit.md`; product meaning locked in spec §2).
+/// note: heading for the `world.before` slot (Q1 provisional lock) — product
+/// meaning fixed by the slot vocabulary in `docs/specs/architecture/spoke-adapter-architecture.md`.
 const WORLD_BEFORE_HEADING: &str = "### World (Before)";
-/// Section heading for the `world.after` slot (Q1 provisional lock).
+/// note: heading for the `world.after` slot (Q1 provisional lock).
 const WORLD_AFTER_HEADING: &str = "### World (After)";
-/// Section heading prefix for the open `kb.outlet.<name>` slots — rendered as
+/// note: heading prefix for the open `kb.outlet.<name>` slots — rendered as
 /// `### Outlet: <name>` (Q1 provisional lock).
 const OUTLET_HEADING_PREFIX: &str = "### Outlet: ";
-/// Section heading for the `style.post_history` slot (Q1 provisional lock —
+/// note: heading for the `style.post_history` slot (Q1 provisional lock —
 /// the one reserved well-known outlet name, tail of the lore block).
 const STYLE_POST_HISTORY_HEADING: &str = "### Style (Post-History)";
 
-/// The well-known outlet name reserved by V1.150 (spec §2). Every other
+/// note: the well-known outlet name reserved by V1.150; every other
 /// `outlet` string opens a `kb.outlet.<name>` slot.
 const WELL_KNOWN_STYLE_OUTLET: &str = "style.post_history";
 
-/// The routing hint values actioned by V1.150 (spoke handbook
-/// `domain-profile-lore-activation.md` §Position hint values).
+/// note: the routing hint values this module actions — spoke handbook
+/// `domain-profile-lore-activation.md` `modules.activation.position_hint`.
 const HINT_BEFORE_DEFS: &str = "before_defs";
 const HINT_AFTER_DEFS: &str = "after_defs";
 const HINT_OUTLET: &str = "outlet";
 
-/// Named, ordered slots produced by routing the V1.149 matched candidate
+/// note: named, ordered slots produced by routing the V1.149 matched candidate
 /// list. Slots keep the V1.149 emitted order within themselves (priority
 /// desc, order asc, stable index; `constant:true` band first).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SlotRouting {
-    /// `world.before` — entries with `position_hint:"before_defs"`.
+    /// note: `world.before` — entries with `position_hint:"before_defs"`.
     pub before: Vec<KnowledgeEntryRecord>,
-    /// Default fallback — no hint, `position_hint:"depth"`, unknown hint, or
+    /// note: default fallback — no hint, `position_hint:"depth"`, unknown hint, or
     /// an `outlet` hint without a paired name. Renders as the V1.149 flat
     /// entry block (no sub-heading) — the neutral-only byte-equivalence
     /// anchor.
     pub fallback: Vec<KnowledgeEntryRecord>,
-    /// `world.after` — entries with `position_hint:"after_defs"`.
+    /// note: `world.after` — entries with `position_hint:"after_defs"`.
     pub after: Vec<KnowledgeEntryRecord>,
-    /// `kb.outlet.<name>` — open outlets keyed by the outlet string.
+    /// note: `kb.outlet.<name>` — open outlets keyed by the outlet string.
     /// Rendered sorted by `<name>` (`BTreeMap` iteration order is the sort).
     pub outlets: BTreeMap<String, Vec<KnowledgeEntryRecord>>,
-    /// `style.post_history` — the one reserved well-known outlet (tail of the
+    /// note: `style.post_history` — the one reserved well-known outlet (tail of the
     /// lore block, after all open outlets).
     pub post_history: Vec<KnowledgeEntryRecord>,
 }
 
-/// One accepted entry's slot assignment.
+/// note: one accepted entry's slot assignment.
 ///
 /// The inspector packet `slot_map` row (V1.151 P0, DF-76 spec §2 H2):
 /// `entry_id` → slot id (`world.before` | `default` | `world.after` |
 /// `kb.outlet.<name>` | `style.post_history` | `moment.directive`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotMapEntry {
-    /// The routed entry's stable id.
+    /// note: the routed entry's stable id.
     pub entry_id: String,
-    /// The named slot the entry landed in (product slot ids, spec §2).
+    /// note: the named slot the entry landed in (product slot ids, spec §2).
     pub slot: String,
 }
 
 impl SlotRouting {
-    /// Flatten the routed slots into the inspector slot map — every entry
+    /// note: flatten the routed slots into the inspector slot map — every entry
     /// that survived the stage gate mapped to its slot id (spec §2 H2).
     ///
     /// Emit order follows the render order (top → bottom, spec §2 / Q5):
@@ -177,7 +179,7 @@ impl SlotRouting {
     }
 }
 
-/// Route the V1.149-emitted matched candidate list into named slots.
+/// note: route the V1.149-emitted matched candidate list into named slots.
 ///
 /// Consumes the list and moves each entry into exactly one slot; entries are
 /// appended in emitted order, so every slot preserves the V1.149
@@ -190,7 +192,7 @@ pub fn route_slots(matched: Vec<KnowledgeEntryRecord>) -> SlotRouting {
     let mut routing = SlotRouting::default();
     for entry in matched {
         let (position_hint, outlet) = placement_of(&entry);
-        // Outlet names are normalized before routing (R-001): trimmed so the
+        // why: outlet names are normalized before routing (R-001) — trimmed so the
         // reserved `style.post_history` matches even with stray whitespace,
         // and names carrying structural characters (newline/CR/`#`/control
         // chars) fall back instead of rendering an injected `### Outlet:`
@@ -206,7 +208,7 @@ pub fn route_slots(matched: Vec<KnowledgeEntryRecord>) -> SlotRouting {
                     .or_default()
                     .push(entry);
             }
-            // `depth` (parsed-not-actioned), unknown hints, `outlet` without a
+            // note: `depth` (parsed-not-actioned), unknown hints, `outlet` without a
             // paired name, empty/whitespace names, and structural-char names
             // (R-001 — would break the `### Outlet:` heading) → default
             // fallback (round-trip safe).
@@ -216,12 +218,12 @@ pub fn route_slots(matched: Vec<KnowledgeEntryRecord>) -> SlotRouting {
     routing
 }
 
-/// V1.150 P2 — apply the spec §4 generation-stage fill matrix to the
+/// note: V1.150 P2 — apply the spec §4 generation-stage fill matrix to the
 /// V1.149-emitted matched candidate list, **before** slot routing.
 ///
 /// The activation engine already decided what fires; this step shapes
 /// assembly output by the request's generation stage. Matrix cells
-/// (spec §4, `fl-l-w5-prompt-control-plane.md`):
+/// (spec §4 — `docs/specs/architecture/spoke-adapter-architecture.md` generation-stage gates):
 ///
 /// | Slot family | `intake` | `research` | `produce` | `review` | `persist` | `work_maintenance` | `system_maintenance` | `unspecified` |
 /// |---|---|---|---|---|---|---|---|---|
@@ -259,10 +261,10 @@ pub fn apply_stage_gate(
     stage: Option<GenerationStage>,
 ) -> Vec<KnowledgeEntryRecord> {
     match stage.unwrap_or(GenerationStage::Unspecified) {
-        // (a) tested gate — `system_maintenance`: no lore slots at all
+        // note: tested gate — `system_maintenance`: no lore slots at all
         // (spec §4 row; `_system.*` isolation invariant).
         GenerationStage::SystemMaintenance => Vec::new(),
-        // (a) tested gate — `style.post_history` off for every
+        // note: tested gate — `style.post_history` off for every
         // non-`produce`/`review` stage; all other slots stay on
         // ((b) current-behavior).
         GenerationStage::Intake
@@ -272,7 +274,7 @@ pub fn apply_stage_gate(
             .into_iter()
             .filter(|entry| !routes_to_style_post_history(entry))
             .collect(),
-        // (b) current-behavior — `produce` + `review` fill every slot
+        // note: current-behavior — `produce` + `review` fill every slot
         // (incl. `style.post_history`); `unspecified` (direct CLI /
         // inspector path) keeps all slots on (spec §4 rows).
         GenerationStage::Produce | GenerationStage::Review | GenerationStage::Unspecified => {
@@ -281,7 +283,7 @@ pub fn apply_stage_gate(
     }
 }
 
-/// True when the entry's placement routes it to the reserved
+/// note: true when the entry's placement routes it to the reserved
 /// `style.post_history` slot (the one well-known outlet name, spec §2).
 ///
 /// The outlet name is compared **trimmed** so the near-variant
@@ -295,7 +297,7 @@ fn routes_to_style_post_history(entry: &KnowledgeEntryRecord) -> bool {
     )
 }
 
-/// True when an outlet name is safe to render inside a `### Outlet: <name>`
+/// note: true when an outlet name is safe to render inside a `### Outlet: <name>`
 /// heading: no newline/CR (would break the heading and inject a second
 /// section), no `#` (would fake a nested sub-heading), and no other control
 /// characters (R-001). Unsafe names fall back like empty/whitespace ones —
@@ -305,7 +307,7 @@ fn is_safe_outlet_name(name: &str) -> bool {
         .all(|c| c != '\n' && c != '\r' && c != '#' && !c.is_control())
 }
 
-/// Render the routed slots into the `## World Knowledge Base` body.
+/// note: render the routed slots into the `## World Knowledge Base` body.
 ///
 /// Emit order (top → bottom, spec §2 / Q5): `### World (Before)` → default
 /// fallback (existing flat entry block, **no** sub-heading) → `### World
@@ -353,7 +355,7 @@ pub fn render_slots(routing: &SlotRouting) -> Option<String> {
     }
 }
 
-/// Read the parsed-but-preserved placement fields
+/// note: read the parsed-but-preserved placement fields
 /// (`modules.activation.position_hint` / `outlet`) from a matched entry.
 ///
 /// V1.149 parsed and preserved these fields (spec §2 — "parsed +
@@ -379,7 +381,7 @@ fn placement_of(entry: &KnowledgeEntryRecord) -> (Option<String>, Option<String>
     (position_hint, outlet)
 }
 
-/// Format `WorldKB` entries into markdown context text lines — the exact
+/// note: format `WorldKB` entries into markdown context text lines — the exact
 /// V1.149 flat-block format (`- **name** [BlockType]: summary`). The default
 /// fallback slot renders through this function so neutral-only output stays
 /// byte-identical to V1.149 (AC-I1b); the activation off-switch in
@@ -408,7 +410,7 @@ mod tests {
     use super::*;
     use nexus_contracts::BlockType;
 
-    /// Helper: build a `KnowledgeEntryRecord` with a `modules.activation` JSON payload
+    /// note: helper — build a `KnowledgeEntryRecord` with a `modules.activation` JSON payload
     /// (or `None` for a fully neutral entry).
     fn entry(name: &str, id: &str, activation: Option<serde_json::Value>) -> KnowledgeEntryRecord {
         let mut entry = KnowledgeEntryRecord::new("wld_1", BlockType::Character, name);
@@ -514,7 +516,7 @@ mod tests {
 
     #[test]
     fn depth_hint_routes_to_default_fallback() {
-        // `position_hint:"depth"` is parsed + preserved but NOT actioned
+        // why: `position_hint:"depth"` is parsed + preserved but NOT actioned
         // (locked Non-Goal) → default fallback.
         let routing = route_slots(vec![entry("DepthLore", "kb_d", Some(with_hint("depth")))]);
         assert_eq!(names(&routing.fallback), vec!["DepthLore"]);
@@ -522,7 +524,7 @@ mod tests {
 
     #[test]
     fn unknown_hint_routes_to_default_fallback() {
-        // Unknown `position_hint` values are ignored for routing (consumer-
+        // why: unknown `position_hint` values are ignored for routing (consumer-
         // only, round-trip safe) → default fallback.
         let routing = route_slots(vec![entry("OddLore", "kb_u", Some(with_hint("sideways")))]);
         assert_eq!(names(&routing.fallback), vec!["OddLore"]);
@@ -530,7 +532,7 @@ mod tests {
 
     #[test]
     fn outlet_hint_without_name_routes_to_default_fallback() {
-        // `outlet` hint with no paired outlet name is malformed → fallback
+        // why: `outlet` hint with no paired outlet name is malformed → fallback
         // (no error, no invented outlet).
         let routing = route_slots(vec![entry(
             "Nameless",
@@ -547,7 +549,7 @@ mod tests {
 
     #[test]
     fn outlet_without_outlet_hint_is_ignored_for_routing() {
-        // The `outlet` field is only meaningful paired with `position_hint:
+        // why: the `outlet` field is only meaningful paired with `position_hint:
         // "outlet"` (handbook); a bare outlet string must not open a slot.
         let routing = route_slots(vec![entry(
             "BareOutlet",
@@ -560,7 +562,7 @@ mod tests {
 
     #[test]
     fn empty_or_whitespace_outlet_name_routes_to_default_fallback() {
-        // `position_hint:"outlet"` with an empty/whitespace `outlet` string
+        // why: `position_hint:"outlet"` with an empty/whitespace `outlet` string
         // would open a nameless `kb.outlet.<"">` slot and render a bare
         // `### Outlet: ` heading — route to the default fallback instead.
         for bad_name in ["", "   "] {
@@ -592,7 +594,7 @@ mod tests {
 
     #[test]
     fn style_outlet_with_trailing_space_still_matches_reserved() {
-        // R-001: a `"style.post_history "` near-variant (trailing whitespace)
+        // why: R-001 — a `"style.post_history "` near-variant (trailing whitespace)
         // must route to the reserved tail slot — not open a near-duplicate
         // `kb.outlet."style.post_history "` slot (which would also bypass the
         // generation-stage gate).
@@ -620,7 +622,7 @@ mod tests {
 
     #[test]
     fn outlet_names_with_structural_chars_fall_back() {
-        // R-001: outlet names carrying newline/CR/`#`/control chars would
+        // safety: R-001 — outlet names carrying newline/CR/`#`/control chars would
         // break the `### Outlet: <name>` heading (newline injects a second
         // section; `#` fakes a nested sub-heading) — they must fall back and
         // never render as an outlet heading.
@@ -649,7 +651,7 @@ mod tests {
 
     #[test]
     fn hint_wins_over_outlet_when_both_present() {
-        // R-003 coverage: `position_hint` takes precedence over a paired
+        // why: R-003 coverage — `position_hint` takes precedence over a paired
         // `outlet` name — `before_defs`/`after_defs` route to their slots even
         // when the entry also carries an outlet (match-arm order; the outlet
         // hint only opens a slot when the hint IS `outlet`).
@@ -695,7 +697,7 @@ mod tests {
 
     #[test]
     fn within_slot_keeps_emitted_order() {
-        // The matched list arrives in V1.149 emit order (priority desc, order
+        // invariant: the matched list arrives in V1.149 emit order (priority desc, order
         // asc, stable; constant band first). Routing appends in that order,
         // so each slot preserves it — no re-sort across slots.
         let routing = route_slots(vec![
@@ -708,7 +710,7 @@ mod tests {
 
     #[test]
     fn routing_does_not_mutate_source_entries() {
-        // Slots only shape assembly output: routed entries keep their modules
+        // invariant: slots only shape assembly output — routed entries keep their modules
         // JSON byte-identical (no mutation, no activation re-fire).
         let activation = serde_json::json!({
             "keys": ["king"],
@@ -728,7 +730,7 @@ mod tests {
 
     #[test]
     fn render_emit_order_matches_spec() {
-        // One entry per slot; rendered order must be: World (Before) → flat
+        // invariant: one entry per slot; rendered order must be: World (Before) → flat
         // fallback block (no heading) → World (After) → Outlet: aether →
         // Outlet: zone.z (sorted) → Style (Post-History) (tail).
         let routing = route_slots(vec![
@@ -767,7 +769,7 @@ mod tests {
 
     #[test]
     fn render_fallback_only_is_v149_flat_block() {
-        // Neutral-only: every entry routes to the default fallback, and the
+        // invariant: neutral-only — every entry routes to the default fallback, and the
         // rendered body is byte-identical to the V1.149 flat block format
         // (no sub-headings) — the AC-I1b anchor at the render level.
         let routing = route_slots(vec![
@@ -787,7 +789,7 @@ mod tests {
 
     #[test]
     fn render_omits_empty_slots() {
-        // Only `world.before` populated → only its sub-heading renders.
+        // note: only `world.before` populated → only its sub-heading renders.
         let routing = route_slots(vec![entry("Rules", "kb_1", Some(with_hint("before_defs")))]);
         let rendered = render_slots(&routing).expect("before present");
         assert_eq!(
@@ -802,9 +804,7 @@ mod tests {
         assert_eq!(render_slots(&routing), None);
     }
 
-    // ── V1.150 P2: generation-stage gate (spec §4 / AC-I4) ────────────────
-
-    /// A mixed matched list covering every routing shape: `before_defs`,
+    /// note: a mixed matched list covering every routing shape: `before_defs`,
     /// `after_defs`, the reserved style outlet, two open outlets, and a
     /// no-hint neutral entry.
     fn mixed_matched_list() -> Vec<KnowledgeEntryRecord> {
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn stage_gate_keeps_style_slot_for_produce_and_review() {
-        // AC-I4 on-side: `style.post_history` fills for `produce` + `review`.
+        // invariant: AC-I4 on-side — `style.post_history` fills for `produce` + `review`.
         for stage in [GenerationStage::Produce, GenerationStage::Review] {
             let gated = apply_stage_gate(mixed_matched_list(), Some(stage));
             assert!(
@@ -837,7 +837,7 @@ mod tests {
 
     #[test]
     fn stage_gate_excludes_style_slot_for_non_produce_review_stages() {
-        // AC-I4 off-side: `style.post_history` is off for intake / research /
+        // invariant: AC-I4 off-side — `style.post_history` is off for intake / research /
         // persist / work_maintenance. Only the style entry is excluded —
         // every other slot keeps filling (current-behavior cells).
         for stage in [
@@ -860,7 +860,7 @@ mod tests {
 
     #[test]
     fn stage_gate_excludes_trailing_space_style_variant() {
-        // R-001: the trimmed comparison in `routes_to_style_post_history`
+        // why: R-001 — the trimmed comparison in `routes_to_style_post_history`
         // closes the near-variant bypass — a `"style.post_history "` entry is
         // gated off for `persist` just like the exact name.
         let gated = apply_stage_gate(
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn stage_gate_system_maintenance_runs_no_lore_slots() {
-        // `system_maintenance`: the whole row is off — no lore slots at all
+        // invariant: `system_maintenance` runs no lore slots at all — the whole row is off
         // (spec §4; `_system.*` isolation invariant).
         assert_eq!(
             apply_stage_gate(
@@ -894,7 +894,7 @@ mod tests {
 
     #[test]
     fn stage_gate_unspecified_keeps_all_slots_on() {
-        // `unspecified` (direct CLI / inspector path, and the `None` default):
+        // note: `unspecified` (direct CLI / inspector path, and the `None` default):
         // every slot fills — current behavior (spec §4 row; AC-I1b anchor).
         for stage in [None, Some(GenerationStage::Unspecified)] {
             let gated = apply_stage_gate(mixed_matched_list(), stage);
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn stage_gate_style_entries_drop_not_reroute_to_fallback() {
-        // The gate EXCLUDES style entries for off-stages — they are not
+        // why: the gate excludes style entries for off-stages — they are not
         // re-routed into the fallback (which would still inject the
         // post-history guidance the product treats as noise).
         let gated = apply_stage_gate(mixed_matched_list(), Some(GenerationStage::Persist));
@@ -925,7 +925,7 @@ mod tests {
 
     #[test]
     fn stage_gate_render_persist_omits_style_heading() {
-        // End-to-end at the render level: a persist-stage assembly renders
+        // note: end-to-end at the render level — a persist-stage assembly renders
         // every slot heading except `### Style (Post-History)`.
         let gated = apply_stage_gate(mixed_matched_list(), Some(GenerationStage::Persist));
         let rendered = render_slots(&route_slots(gated)).expect("slots present");
@@ -939,7 +939,7 @@ mod tests {
 
     #[test]
     fn stage_gate_unspecified_renders_byte_equivalent_to_ungated() {
-        // `None`/`unspecified` on the gate is byte-identical to not running
+        // invariant: `None`/`unspecified` on the gate is byte-identical to not running
         // the gate at all — the neutral path (AC-I1b at the slot layer).
         let gated = apply_stage_gate(mixed_matched_list(), None);
         let ungated = mixed_matched_list();

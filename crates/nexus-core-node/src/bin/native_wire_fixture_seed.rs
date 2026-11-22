@@ -1,4 +1,5 @@
 //! Seeds a disposable home for native wire proof (mirrors world_kb_contract fixture).
+// note: prints the seeded home path on stdout for the calling harness.
 
 use std::path::PathBuf;
 

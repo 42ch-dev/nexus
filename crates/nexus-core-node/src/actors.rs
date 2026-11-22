@@ -7,8 +7,8 @@
 //! [`nexus_core::CoreHomeService`] for the Creator family) owns the effect,
 //! and the result is serialized back as the schema-owned wire shape. The
 //! response-scoped module paths (`daemon_api::characters::…`) disambiguate the
-//! inline repeated wire types exactly like the daemon handlers. No SQL, no
-//! second engine, no policy.
+//! inline repeated wire types exactly like the daemon handlers.
+// invariant: no SQL, no second engine, no policy.
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -94,19 +94,19 @@ use serde::de::DeserializeOwned;
 
 use crate::NativeCore;
 
-/// Per-family list defaults; byte-identical with the daemon HTTP adapters
+/// note: per-family list defaults; byte-identical with the daemon HTTP adapters
 /// (`characters.rs` / `character_memory.rs`).
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 100;
-/// Creator-scope memory list clamp (`handlers/memory.rs`).
+/// note: creator-scope memory list clamp (`handlers/memory.rs`).
 const MEMORY_MAX_LIMIT: usize = 250;
 const MEMORY_DEFAULT_LIMIT: i64 = 50;
-/// Retained opaque offset-cursor prefix (`api/pagination.rs`).
+/// note: retained opaque offset-cursor prefix (`api/pagination.rs`).
 const OFFSET_CURSOR_PREFIX: &str = "v1:";
 
 type CoreWire<T> = std::result::Result<T, CoreError>;
 
-/// Parse an owned wire payload into a generated DTO. Parse failures surface as
+/// note: parse an owned wire payload into a generated DTO. Parse failures surface as
 /// `invalid <label>: …` rejections, which the TS error mapper classifies as
 /// 400 `invalid_input`.
 fn decode<T: DeserializeOwned>(payload: Buffer, label: &str) -> Result<T> {
@@ -114,7 +114,7 @@ fn decode<T: DeserializeOwned>(payload: Buffer, label: &str) -> Result<T> {
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
 }
 
-/// Parse an owned wire payload once into the typed DTO plus the raw-key view
+/// note: parse an owned wire payload once into the typed DTO plus the raw-key view
 /// (the raw member presence drives the tri-state patch fields). `Buffer` is
 /// not `Clone`, so both views come from the single parse.
 fn decode_with_raw<T: DeserializeOwned>(
@@ -133,7 +133,7 @@ fn decode_with_raw<T: DeserializeOwned>(
     Ok((typed, raw))
 }
 
-/// Wire round-trip for generated DTO construction inside core-call closures; a
+/// note: wire round-trip for generated DTO construction inside core-call closures; a
 /// projection failure is the retained `CHARACTER_WIRE_INVALID` internal
 /// category, not a client error.
 fn wire_map<T: DeserializeOwned>(value: impl serde::Serialize) -> CoreWire<T> {
@@ -145,7 +145,7 @@ fn wire_map<T: DeserializeOwned>(value: impl serde::Serialize) -> CoreWire<T> {
     })
 }
 
-/// Decode the retained opaque offset cursor (`v1:<offset>`); absent → 0.
+/// note: decode the retained opaque offset cursor (`v1:<offset>`); absent → 0.
 fn offset_from_cursor(cursor: Option<String>) -> Result<u32> {
     let Some(raw) = cursor else {
         return Ok(0);
@@ -164,7 +164,7 @@ fn offset_from_cursor(cursor: Option<String>) -> Result<u32> {
     })
 }
 
-/// Character/memory family list clamp (default 50, max 100).
+/// note: character/memory family list clamp (default 50, max 100).
 fn resolve_limit(raw: Option<i64>) -> Result<u32> {
     match raw {
         None => Ok(DEFAULT_LIMIT),
@@ -177,7 +177,7 @@ fn resolve_limit(raw: Option<i64>) -> Result<u32> {
     }
 }
 
-/// Creator-scope memory list clamp (default 50, 1..=250) as `usize`.
+/// note: creator-scope memory list clamp (default 50, 1..=250) as `usize`.
 fn resolve_query_limit(raw: Option<i64>) -> usize {
     let clamped = raw
         .unwrap_or(MEMORY_DEFAULT_LIMIT)
@@ -185,19 +185,18 @@ fn resolve_query_limit(raw: Option<i64>) -> usize {
     usize::try_from(clamped).unwrap_or(MEMORY_MAX_LIMIT)
 }
 
-/// Retained creator-id shape guard (`ctr_` + ASCII alphanumerics).
+/// note: retained creator-id shape guard (`ctr_` + ASCII alphanumerics).
 fn valid_creator_id(creator_id: &str) -> bool {
     creator_id.len() > 4
         && creator_id.starts_with("ctr_")
         && creator_id[4..].bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
-/// The standalone napi surface carries no ACP capability registry, so the
+/// note: the standalone napi surface carries no ACP capability registry, so the
 /// provider-backed SOUL synthesizer factory is `None` — the daemon's own
 /// "missing registry" semantics: observational reflects succeed without any
 /// provider effect, and a forced regeneration surfaces the core's retained
-/// 503 after authorization (never a fake success). Provider-backed synthesis
-/// wiring lands with the P5-T3 provider surface.
+/// 503 after authorization (never a fake success).
 struct UnavailableSoulSynthesizer;
 
 impl nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer for UnavailableSoulSynthesizer {
@@ -214,8 +213,6 @@ impl nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer for Unavaila
     }
 }
 
-// ── Knowledge wire projections (mirror handlers/actor_knowledge.rs) ────────
-
 fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<KnowledgeViewItem> {
     let created_at =
         parse_stored_created_at(&record.created_at).map_err(|error| CoreError::Internal {
@@ -229,7 +226,7 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<Knowled
         serde_json::to_value(record.block_type).map_err(|error| CoreError::Internal {
             category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {error}"),
         })?;
-    // v1.191 P1 T9 (durable §7): the bridge projection mirrors the daemon item
+    // note: v1.191 P1 T9 (durable §7): the bridge projection mirrors the daemon item
     // family — native `holder_entry_id` / `disclosure`, no `creator_only`, and
     // `owner` staying the narrative `KnowledgeOwnerRef` container. Both
     // governance members are absent for an in-scope shared entry.
@@ -264,7 +261,7 @@ mod v1191_holder_public_tests {
     use super::{knowledge_item_from_record, KnowledgeEntryRecord};
     use nexus_contracts::BlockType;
 
-    // v1.191 P1 T9 (durable §7): the NAPI bridge item projection must match the
+    // note: v1.191 P1 T9 (durable §7): the NAPI bridge item projection must match the
     // daemon item family exactly — native governance pair, no legacy boolean.
 
     #[test]
@@ -286,7 +283,7 @@ mod v1191_holder_public_tests {
     }
 }
 
-/// The retained summary wire member projects from the stored body block.
+/// note: the retained summary wire member projects from the stored body block.
 fn knowledge_summary_wire_value(record: &KnowledgeEntryRecord) -> Option<&str> {
     record
         .body
@@ -319,7 +316,7 @@ fn knowledge_page(page: &ActorKnowledgePage) -> CoreWire<(Vec<ViewItem>, ViewPag
     Ok((items, pagination))
 }
 
-/// Derive the opaque [`AdmittedActor`] token from the wire actor_ref exactly
+/// note: derive the opaque [`AdmittedActor`] token from the wire actor_ref exactly
 /// like the daemon view handler: stored ownership is re-validated inside the
 /// core call, so this is projection only.
 fn admitted_from_ref(actor_ref: &NexusActorRef) -> AdmittedActor {
@@ -333,7 +330,7 @@ fn admitted_from_ref(actor_ref: &NexusActorRef) -> AdmittedActor {
     }
 }
 
-/// Tri-state knowledge summary patch: absent → keep, null → clear, string → set.
+/// note: tri-state knowledge summary patch: absent → keep, null → clear, string → set.
 fn knowledge_summary_patch<'a>(
     raw: &'a serde_json::Map<String, serde_json::Value>,
     req: &'a UpdateKnowledgeEntryRequest,
@@ -354,7 +351,7 @@ fn knowledge_summary_patch<'a>(
     }
 }
 
-/// Tri-state character patch (`build_character_patch` in the daemon adapter):
+/// note: tri-state character patch (`build_character_patch` in the daemon adapter):
 /// presence of the raw member distinguishes set/clear from keep, and the
 /// persona JSON string borrows from `persona_buf` to satisfy the core's
 /// `CharacterPatch<'_>` lifetime.
@@ -410,7 +407,7 @@ fn build_character_patch<'a>(
     })
 }
 
-/// Binding sheet tri-state patch: absent → 400 (empty patch), null → clear,
+/// note: binding sheet tri-state patch: absent → 400 (empty patch), null → clear,
 /// string → set.
 fn build_binding_sheet_patch<'a>(
     raw: &'a serde_json::Map<String, serde_json::Value>,
@@ -437,9 +434,7 @@ fn build_binding_sheet_patch<'a>(
 
 #[napi]
 impl NativeCore {
-    // ── Character identity + bindings (P2-T1 authority) ─────────────────────
-
-    /// `GET /v1/daemon/characters` — read-model Character list.
+    /// note: `GET /v1/daemon/characters` — read-model Character list.
     #[napi]
     pub async fn list_characters(
         &self,
@@ -455,7 +450,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters` — 201 at the adapter.
+    /// note: `POST /v1/daemon/characters` — 201 at the adapter.
     #[napi]
     pub async fn create_character(
         &self,
@@ -469,7 +464,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}` — a foreign/missing
+    /// note: `GET /v1/daemon/characters/{character_id}` — a foreign/missing
     /// Character is the core's 404 (existence hidden).
     #[napi]
     pub async fn get_character(
@@ -483,7 +478,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/characters/{character_id}` — tri-state patch over the
+    /// note: `PATCH /v1/daemon/characters/{character_id}` — tri-state patch over the
     /// raw member view + typed DTO; both parse from the single owned payload.
     /// Wire-shape validation intentionally precedes owner/404 admission so an
     /// empty patch on a foreign/missing Character returns 400, not 404.
@@ -509,7 +504,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/archive` — the standalone
+    /// note: `POST /v1/daemon/characters/{character_id}/archive` — the standalone
     /// lifecycle path goes through the core's fenced transition (the daemon's
     /// registry-fence + Host-retirement half belongs to the Host session
     /// surface, P4-T2).
@@ -524,7 +519,7 @@ impl NativeCore {
             .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/restore`.
+    /// note: `POST /v1/daemon/characters/{character_id}/restore`.
     #[napi]
     pub async fn restore_character(
         &self,
@@ -552,7 +547,7 @@ impl NativeCore {
         .map_err(|error| Error::from_reason(error.to_string()))?;
         self.json_call(principal_handle, async move |core, principal| {
             let response = core.transition_character(&principal, request).await?;
-            // The retained archive/restore envelope is `CharacterDetail`.
+            // note: the retained archive/restore envelope is `CharacterDetail`.
             let detail: CharacterDetail = wire_map(serde_json::json!({
                 "character": response.character,
             }))?;
@@ -561,7 +556,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/bindings` — 201 at the adapter.
+    /// note: `POST /v1/daemon/characters/{character_id}/bindings` — 201 at the adapter.
     #[napi]
     pub async fn add_character_binding(
         &self,
@@ -587,7 +582,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/bindings`.
+    /// note: `GET /v1/daemon/characters/{character_id}/bindings`.
     #[napi]
     pub async fn list_character_bindings(
         &self,
@@ -605,7 +600,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`.
+    /// note: `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`.
     #[napi]
     pub async fn get_character_binding(
         &self,
@@ -621,7 +616,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}` —
+    /// note: `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}` —
     /// a stale `expected_revision` is the core's retained 409; a stale
     /// binding sheet value never silently wins.
     #[napi]
@@ -649,7 +644,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` —
+    /// note: `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` —
     /// 204 at the adapter.
     #[napi]
     pub async fn remove_character_binding(
@@ -666,9 +661,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Actor KnowledgeView (P2-T1 authority) ───────────────────────────────
-
-    /// `POST /v1/daemon/actor-knowledge/view` — the admitted-actor context
+    /// note: `POST /v1/daemon/actor-knowledge/view` — the admitted-actor context
     /// read: a foreign/unknown actor ref rejects before any storage effect.
     #[napi]
     pub async fn actor_knowledge_view(
@@ -698,7 +691,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/actor-knowledge/entries` — 201 at the adapter.
+    /// note: `POST /v1/daemon/actor-knowledge/entries` — 201 at the adapter.
     #[napi]
     pub async fn add_actor_knowledge_entry(
         &self,
@@ -706,7 +699,7 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let (req, raw) = decode_with_raw::<AddKnowledgeEntryRequest>(request_json, "request")?;
-        // The retained wire distinction between an absent and a null `summary`
+        // why: the retained wire distinction between an absent and a null `summary`
         // member is a request-shape concern, so it stays at the adapter.
         let summary_present = raw.contains_key("summary");
         self.json_call(principal_handle, async move |core, principal| {
@@ -721,7 +714,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/knowledge`.
+    /// note: `GET /v1/daemon/characters/{character_id}/knowledge`.
     #[napi]
     pub async fn list_character_knowledge(
         &self,
@@ -754,7 +747,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}`.
+    /// note: `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}`.
     #[napi]
     pub async fn get_knowledge_entry(
         &self,
@@ -771,7 +764,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}`.
+    /// note: `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}`.
     #[napi]
     pub async fn patch_knowledge_entry(
         &self,
@@ -805,7 +798,7 @@ impl NativeCore {
             None
         };
         let summary_patch = knowledge_summary_patch(&raw, &req)?;
-        // v1.191 P1 T7 (durable §3): the closed `audience` member rides the
+        // note: v1.191 P1 T7 (durable §3): the closed `audience` member rides the
         // same expected_revision CAS; the core owns admission of the identity
         // it names.
         let audience = nexus_core::authored_patch_audience(req.audience.as_ref())
@@ -827,7 +820,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}` —
+    /// note: `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}` —
     /// 204 at the adapter; `expected_revision` is a required query parameter.
     #[napi]
     pub async fn delete_knowledge_entry(
@@ -850,9 +843,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Creator identity family (CoreHomeService; Tier-1 — no principal) ────
-
-    /// Open the pre-selection home-control entry against the raw user home this
+    /// note: open the pre-selection home-control entry against the raw user home this
     /// environment was opened with.
     ///
     /// Home control is admitted on the service-only shell as well: the first-run
@@ -875,7 +866,7 @@ impl NativeCore {
             .map_err(crate::core_error::napi_error_from_domain)
     }
 
-    /// `GET /v1/daemon/creators`.
+    /// note: `GET /v1/daemon/creators`.
     #[napi]
     pub async fn list_creators(&self, query_json: Buffer) -> Result<Buffer> {
         let query: ListCreatorsQuery = decode(query_json, "query")?;
@@ -887,7 +878,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    /// `POST /v1/daemon/creators` — 201 at the adapter. The display name
+    /// note: `POST /v1/daemon/creators` — 201 at the adapter. The display name
     /// crosses as a plain argument: no generated create-DTO exists for the
     /// creators family (schema gap recorded in the task report).
     #[napi]
@@ -900,7 +891,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&detail)?))
     }
 
-    /// `GET /v1/daemon/creators/{creator_id}`.
+    /// note: `GET /v1/daemon/creators/{creator_id}`.
     #[napi]
     pub async fn get_creator(&self, creator_id: String) -> Result<Buffer> {
         let home = self.home_service()?;
@@ -910,7 +901,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&detail)?))
     }
 
-    /// `PATCH /v1/daemon/creators/{creator_id}`.
+    /// note: `PATCH /v1/daemon/creators/{creator_id}`.
     #[napi]
     pub async fn patch_creator(
         &self,
@@ -925,7 +916,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&detail)?))
     }
 
-    /// `PUT /v1/daemon/creators/active`.
+    /// note: `PUT /v1/daemon/creators/active`.
     #[napi]
     pub async fn set_active_creator(&self, request_json: Buffer) -> Result<Buffer> {
         let request: SetActiveCreatorRequest = decode(request_json, "request")?;
@@ -936,7 +927,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    /// `GET /v1/daemon/creators/active`.
+    /// note: `GET /v1/daemon/creators/active`.
     #[napi]
     pub async fn get_active_creator(&self) -> Result<Buffer> {
         let home = self.home_service()?;
@@ -946,7 +937,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    /// `POST /v1/daemon/creators/{creator_id}` — retained `:logout` verb.
+    /// note: `POST /v1/daemon/creators/{creator_id}` — retained `:logout` verb.
     #[napi]
     pub async fn logout_creator(&self, creator_id: String) -> Result<Buffer> {
         let home = self.home_service()?;
@@ -956,9 +947,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    // ── Workspace home family (plan v1219 shell Task 4) ─────────────────────
-
-    /// `GET /v1/daemon/workspaces` — workspace discovery over the home entry.
+    /// note: `GET /v1/daemon/workspaces` — workspace discovery over the home entry.
     #[napi]
     pub async fn list_workspaces(&self) -> Result<Buffer> {
         let home = self.home_service()?;
@@ -969,7 +958,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    /// `GET /v1/daemon/workspace` — the active selection plus its operational
+    /// note: `GET /v1/daemon/workspace` — the active selection plus its operational
     /// paths. The retained 409 `uninitialized` refusal is the core's own
     /// (no selected creator), never a synthesized response.
     #[napi]
@@ -994,7 +983,7 @@ impl NativeCore {
             .iter()
             .find(|item| item.creator_id == creator_id && item.workspace_slug == workspace_slug)
             .map(|item| item.creative_root.clone())
-            // A workspace registered without `local_root` has no creative
+            // why: a workspace registered without `local_root` has no creative
             // root; the retained response omits the field instead of naming
             // an empty path.
             .filter(|root| !root.is_empty());
@@ -1012,7 +1001,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    /// `POST /v1/daemon/workspace/active` — select and initialize one
+    /// note: `POST /v1/daemon/workspace/active` — select and initialize one
     /// workspace (selection persistence and the foreign-workspace denial are
     /// the core's own).
     #[napi]
@@ -1026,7 +1015,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    /// `POST /v1/daemon/workspaces` — create and register a workspace for the
+    /// note: `POST /v1/daemon/workspaces` — create and register a workspace for the
     /// active creator (I-000063). Validation, exclusivity and the atomic write
     /// order are the core's own.
     #[napi]
@@ -1040,9 +1029,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    // ── Character memory / SOUL / ToM (P2-T2 authority) ─────────────────────
-
-    /// `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
+    /// note: `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
     #[napi]
     pub async fn capture_character_pending_review(
         &self,
@@ -1058,7 +1045,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/memory/pending-review`.
+    /// note: `GET /v1/daemon/characters/{character_id}/memory/pending-review`.
     #[napi]
     pub async fn list_character_pending_reviews(
         &self,
@@ -1077,7 +1064,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/memory/pending-review/count`.
+    /// note: `GET /v1/daemon/characters/{character_id}/memory/pending-review/count`.
     #[napi]
     pub async fn count_character_pending_reviews(
         &self,
@@ -1094,7 +1081,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`.
+    /// note: `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`.
     #[napi]
     pub async fn delete_character_pending_review(
         &self,
@@ -1109,7 +1096,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/memory/review`.
+    /// note: `POST /v1/daemon/characters/{character_id}/memory/review`.
     #[napi]
     pub async fn review_character_memory(
         &self,
@@ -1125,7 +1112,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/memory/fragments`.
+    /// note: `GET /v1/daemon/characters/{character_id}/memory/fragments`.
     #[napi]
     pub async fn list_character_memory_fragments(
         &self,
@@ -1150,7 +1137,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`.
+    /// note: `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`.
     #[napi]
     pub async fn promote_character_fragment(
         &self,
@@ -1175,7 +1162,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/soul/reflect` — the
+    /// note: `POST /v1/daemon/characters/{character_id}/soul/reflect` — the
     /// synthesizer factory is `None` (no ACP registry on this surface);
     /// authorization still precedes any provider consideration.
     #[napi]
@@ -1195,7 +1182,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/characters/{character_id}/tom`.
+    /// note: `POST /v1/daemon/characters/{character_id}/tom`.
     #[napi]
     pub async fn record_character_tom(
         &self,
@@ -1211,7 +1198,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/characters/{character_id}/tom`.
+    /// note: `GET /v1/daemon/characters/{character_id}/tom`.
     #[napi]
     pub async fn list_character_tom(
         &self,
@@ -1227,9 +1214,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Creator-scope memory family (active-creator equality kept here) ─────
-
-    /// `POST /v1/daemon/memory/pending-review` — 201. The wire `creator_id`
+    /// note: `POST /v1/daemon/memory/pending-review` — 201. The wire `creator_id`
     /// must be the natively minted active creator; a mismatch is the retained
     /// 403 (the same equality guard the Creator list/count routes keep).
     #[napi]
@@ -1250,7 +1235,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/memory/pending-review` — the wire `creator_id` must be
+    /// note: `GET /v1/daemon/memory/pending-review` — the wire `creator_id` must be
     /// the natively minted active creator; a mismatch is the retained 403.
     #[napi]
     pub async fn list_pending_reviews(
@@ -1279,7 +1264,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/memory/pending-review/count?creator_id=…` — the wire
+    /// note: `GET /v1/daemon/memory/pending-review/count?creator_id=…` — the wire
     /// `creator_id` must be the natively minted active creator; a mismatch is
     /// the retained 403 (same equality + format guard as the list route).
     #[napi]
@@ -1309,7 +1294,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id=…` —
+    /// note: `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id=…` —
     /// the wire `creator_id` must be the natively minted active creator; a
     /// mismatch is the retained 403 (same guard as the list route).
     #[napi]
@@ -1340,7 +1325,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/memory/review`.
+    /// note: `POST /v1/daemon/memory/review`.
     #[napi]
     pub async fn review_memory(
         &self,
@@ -1367,7 +1352,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/memory/fragments`.
+    /// note: `GET /v1/daemon/memory/fragments`.
     #[napi]
     pub async fn list_memory_fragments(
         &self,
@@ -1395,7 +1380,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/memory/soul/reflect` — Creator-SOUL; synthesizer
+    /// note: `POST /v1/daemon/memory/soul/reflect` — Creator-SOUL; synthesizer
     /// factory is `None` (same missing-registry semantics as the Character
     /// reflect above).
     #[napi]
@@ -1426,9 +1411,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Moment inspector + directive (P2-T2 authority) ──────────────────────
-
-    /// `POST /v1/daemon/inspector/moment` — observational read-only assembly.
+    /// note: `POST /v1/daemon/inspector/moment` — observational read-only assembly.
     #[napi]
     pub async fn inspect_moment(
         &self,
@@ -1443,7 +1426,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/moment-directive`.
+    /// note: `POST /v1/daemon/moment-directive`.
     #[napi]
     pub async fn moment_directive(
         &self,

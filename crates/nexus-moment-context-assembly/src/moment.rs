@@ -16,8 +16,9 @@
 //!
 //! # Async
 //!
-//! Domain store queries are async. Callers must provide concrete implementations
-//! of the store traits. The crate provides no default runtime or storage backend.
+//! Domain store queries are async.
+// invariant: callers inject concrete store implementations — the crate ships
+// no default runtime or storage backend.
 
 use crate::directive::{
     ActiveDirective, DirectiveDepth, DirectiveStore, MomentDirectiveStatus, NoDirectiveStore,
@@ -34,28 +35,29 @@ use nexus_spoke_adapter::adapter::activation::{
     apply_activation_with_hops, ActivationBudget, HopConfig, HopEdge,
 };
 
-/// Section heading for World State in assembled context.
+/// note: section heading for World State in assembled context.
 const WORLD_STATE_HEADING: &str = "## World State";
 
-/// Section heading for Timeline in assembled context.
+/// note: section heading for Timeline in assembled context.
 const TIMELINE_HEADING: &str = "## Timeline";
 
-/// Section heading for World Knowledge Base in assembled context.
+/// note: section heading for World Knowledge Base in assembled context.
 const WORLD_KB_HEADING: &str = "## World Knowledge Base";
 
-/// Section heading for the reserved Moment Directive slot (V1.150 P0 —
-/// spec §2 / Q1 provisional lock). Placed between `## Timeline` and
-/// `## World Knowledge Base`. P0 reserves the position but never renders it
-/// (no directive active); P1 fills the slot.
+/// note: reserved Moment Directive slot (V1.150 P0 — spec §2 / Q1 provisional
+/// lock), placed between `## Timeline` and `## World Knowledge Base`. P0
+/// reserves the position but never renders it (no directive active); P1 fills
+/// the slot.
 const MOMENT_DIRECTIVE_HEADING: &str = "## Moment Directive";
 
-/// P2 Character mind headings (empty rows; P3/P4 fill the same slots).
+/// note: P2 Character mind headings (empty rows; P3/P4 fill the same slots).
 const CHARACTER_SOUL_HEADING: &str = "## Character SOUL";
 const CHARACTER_MEMORY_HEADING: &str = "## Character Memory";
 const CHARACTER_TOM_L1_HEADING: &str = "## Character ToM — L1";
 const CHARACTER_TOM_L2_HEADING: &str = "## Character ToM — L2";
 
-/// P3/P4 Character SOUL/Memory/ToM projection into the four fixed mind slots.
+/// note: P3/P4 Character SOUL/Memory/ToM projection into the four fixed mind
+/// slots.
 ///
 /// Immutable once built: [`Self::new`] applies fixed deterministic bounds
 /// (UTF-8-safe truncation + entry cap) so the projected slots are stable and
@@ -63,31 +65,31 @@ const CHARACTER_TOM_L2_HEADING: &str = "## Character ToM — L2";
 /// identical (missing optional memory/ToM is an honest empty section).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterMindInput {
-    /// SOUL.md text for the executing Character, bounded and truncated.
+    /// note: SOUL.md text for the executing Character, bounded and truncated.
     pub soul: Option<String>,
-    /// Memory lines for the admitted scope, bounded and caller-ordered.
+    /// note: memory lines for the admitted scope, bounded and caller-ordered.
     pub memory: Vec<String>,
-    /// L1 self-belief lines for the executing Character, bounded and in the
-    /// Task 2 service's deterministic keyset order (v1.184 P4).
+    /// note: L1 self-belief lines for the executing Character, bounded and in
+    /// the Task 2 service's deterministic keyset order (v1.184 P4).
     pub tom_l1: Vec<String>,
-    /// L2 lines: the executing Character's recorded model of other
+    /// note: L2 lines — the executing Character's recorded model of other
     /// Characters, bounded and in the same keyset order (v1.184 P4).
     pub tom_l2: Vec<String>,
 }
 
-/// Max Unicode scalar chars for the projected SOUL slot (4 KiB).
+/// note: max Unicode scalar chars for the projected SOUL slot (4 KiB).
 pub const CHARACTER_MIND_MAX_SOUL_CHARS: usize = 4096;
-/// Max memory lines projected into the `## Character Memory` slot.
+/// note: max memory lines projected into the `## Character Memory` slot.
 pub const CHARACTER_MIND_MAX_MEMORY_ENTRIES: usize = 20;
-/// Max Unicode scalar chars per projected memory line.
+/// note: max Unicode scalar chars per projected memory line.
 pub const CHARACTER_MIND_MAX_ENTRY_CHARS: usize = 280;
-/// Max L1/L2 `ToM` lines projected into each `## Character ToM` slot.
+/// note: max L1/L2 `ToM` lines projected into each `## Character ToM` slot.
 pub const CHARACTER_MIND_MAX_TOM_ENTRIES: usize = 20;
-/// Max Unicode scalar chars per projected `ToM` line.
+/// note: max Unicode scalar chars per projected `ToM` line.
 pub const CHARACTER_MIND_MAX_TOM_CHARS: usize = 280;
 
 impl CharacterMindInput {
-    /// Build a bounded, deterministic mind input.
+    /// note: builds a bounded, deterministic mind input.
     #[must_use]
     pub fn new(soul: Option<String>, memory: Vec<String>) -> Self {
         let soul = soul.map(|s| truncate_chars(&s, CHARACTER_MIND_MAX_SOUL_CHARS));
@@ -104,7 +106,7 @@ impl CharacterMindInput {
         }
     }
 
-    /// Attach bounded, deterministic L1/L2 `ToM` lines (v1.184 P4).
+    /// note: attaches bounded, deterministic L1/L2 `ToM` lines (v1.184 P4).
     ///
     /// L1 is projected before L2 by construction: the caller passes the
     /// already keyset-ordered `(order, carrier_entry_id, row_ordinal)` split;
@@ -125,7 +127,7 @@ impl CharacterMindInput {
         self
     }
 
-    /// Whether neither slot carries content (used by tests to assert the
+    /// note: whether neither slot carries content (used by tests to assert the
     /// legacy/honest-empty path).
     #[cfg(test)]
     fn is_empty(&self) -> bool {
@@ -136,7 +138,7 @@ impl CharacterMindInput {
     }
 }
 
-/// Truncate `text` to at most `max_chars` Unicode scalar chars.
+/// note: truncates `text` to at most `max_chars` Unicode scalar chars.
 ///
 /// Counts scalar characters (never bytes) and, when truncating, reserves one
 /// scalar for the `…` marker so the total is exactly `max_chars` — the bound
@@ -152,18 +154,18 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     s
 }
 
-/// Actor discriminant for internal MCA context. Authorization is caller-owned.
+/// note: actor discriminant for internal MCA context; authorization is
+/// caller-owned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MomentActorKind {
-    /// Explicit Creator actor (no Character mind headings).
+    /// note: explicit Creator actor (no Character mind headings).
     Creator,
-    /// Character actor: bounded view + four fixed empty mind headings.
+    /// note: Character actor — bounded view + four fixed empty mind headings.
     Character,
 }
 
-/// Internal Actor context carried into [`assemble_moment`].
-///
-/// MCA does not authorize; the daemon admission service must populate this.
+/// note: internal Actor context carried into [`assemble_moment`]; MCA does not
+/// authorize — the daemon admission service must populate this.
 ///
 /// # ActorView-only snapshot (HARD, v1.191 P1 T11 — durable §4.2)
 ///
@@ -177,25 +179,26 @@ pub enum MomentActorKind {
 /// selection over the owned containers.
 #[derive(Debug, Clone)]
 pub struct MomentActorContext {
-    /// Admitted actor kind.
+    /// note: admitted actor kind.
     pub kind: MomentActorKind,
-    /// The admitted `ActorView` snapshot: the complete filtered rows this actor
-    /// may see (Character-global shared rows included, other holders' private
-    /// rows excluded).
+    /// note: the admitted `ActorView` snapshot — the complete filtered rows this
+    /// actor may see (Character-global shared rows included, other holders'
+    /// private rows excluded).
     pub character_view: CharacterViewInput,
-    /// P3 SOUL/Memory projection for [`MomentActorKind::Character`]. `None`
-    /// means no projection (the P2 empty-heading bytes). Ignored for Creator.
+    /// note: P3 SOUL/Memory projection for [`MomentActorKind::Character`];
+    /// `None` means no projection (the P2 empty-heading bytes). Ignored for
+    /// Creator.
     pub character_mind: Option<CharacterMindInput>,
 }
 
 impl MomentActorContext {
-    /// Character actor with a bounded admitted view (may be empty rows).
+    /// note: Character actor with a bounded admitted view (may be empty rows).
     #[must_use]
     pub fn character(view: CharacterViewInput) -> Self {
         Self::character_with_mind(view, CharacterMindInput::default())
     }
 
-    /// Character actor with a bounded admitted SOUL/Memory projection.
+    /// note: Character actor with a bounded admitted SOUL/Memory projection.
     #[must_use]
     pub const fn character_with_mind(view: CharacterViewInput, mind: CharacterMindInput) -> Self {
         Self {
@@ -205,7 +208,7 @@ impl MomentActorContext {
         }
     }
 
-    /// Creator actor consuming its admitted `ActorView` snapshot.
+    /// note: Creator actor consuming its admitted `ActorView` snapshot.
     #[must_use]
     pub const fn creator_with_view(view: CharacterViewInput) -> Self {
         Self {
@@ -220,39 +223,39 @@ impl MomentActorContext {
     }
 }
 
-/// Parameters for a single moment context assembly request.
+/// note: parameters for a single moment context assembly request.
 ///
 /// All IDs are strings for now (matching current domain APIs).
 /// Fields left as `None` indicate that domain source should be skipped.
 #[derive(Debug, Clone)]
 pub struct MomentRequest {
-    /// World ID to pull narrative state and KB assets for.
+    /// note: World ID to pull narrative state and KB assets for.
     pub world_id: Option<String>,
-    /// Work ID for the work-bound moment (V1.150 P1): scope resolution of the
-    /// Moment Directive (spec §3.2) and the chapter-advance TTL signal
-    /// (spec §3.3) are keyed on it. Optional — the observation path may
+    /// note: the work-bound moment's Work ID (V1.150 P1) — Moment Directive
+    /// scope resolution (spec §3.2) and the chapter-advance TTL signal
+    /// (spec §3.3) are keyed on it; optional, since the observation path may
     /// assemble a raw world without a Work.
     pub work_id: Option<String>,
-    /// Creator ID owning the moment (V1.150 P1): directives are
-    /// creator-scoped; `None` means no directive can be in scope.
+    /// note: creator owning the moment (V1.150 P1) — directives are
+    /// creator-scoped, so `None` means no directive can be in scope.
     pub creator_id: Option<String>,
-    /// Branch ID within the world (optional, for fork-specific context).
+    /// note: branch ID within the world (optional, for fork-specific context).
     pub branch_id: Option<String>,
-    /// Event ID to focus context around (optional).
+    /// note: event ID to focus context around (optional).
     pub event_id: Option<String>,
-    /// Stage-0 assembly inputs (SOUL, memories, fragments, prompt).
+    /// note: Stage-0 assembly inputs (SOUL, memories, fragments, prompt).
     pub stage0: Stage0Assembly,
-    /// Cross-domain token budget (approximate chars/4 heuristic).
-    /// When set, applies truncation to domain sections after Stage-0 personality.
-    /// Personality section inside Stage-0 is never truncated.
+    /// note: cross-domain token budget (approximate chars/4 heuristic); when
+    /// set, domain sections are truncated after the never-truncated Stage-0
+    /// personality section.
     pub max_tokens: Option<usize>,
-    /// KB query: maximum number of key blocks to return.
+    /// note: KB query cap — maximum number of key blocks to return.
     pub kb_limit: Option<usize>,
-    /// KB query: text search filter (case-insensitive substring).
+    /// note: KB query text filter (case-insensitive substring).
     pub kb_text_search: Option<String>,
-    /// KB query: filter by block type.
+    /// note: KB query filter by block type.
     pub kb_block_type: Option<BlockType>,
-    /// Enable lore activation filtering on `WorldKB` entries (V1.146 P4 T2,
+    /// note: lore activation filtering on `WorldKB` entries (V1.146 P4 T2,
     /// default-on since V1.149 P0 T2).
     ///
     /// When `true`, the activation pass runs after the `WorldKB` fetch,
@@ -261,8 +264,8 @@ pub struct MomentRequest {
     /// Default `true` — activation is the shipped product behavior; `false`
     /// restores V1.146 flag-off semantics (all entries returned unchanged).
     pub activation_enabled: bool,
-    /// Preloaded confirmed relation edges of the world for relation-hop
-    /// expansion (V1.149 P1, spec §5). `None` ⇒ activation-only pass
+    /// note: preloaded confirmed relation edges for relation-hop expansion
+    /// (V1.149 P1, spec §5). `None` ⇒ activation-only pass
     /// (P0 behavior); `Some(..)` ⇒ `apply_activation_with_hops` — primary-
     /// fired / `constant` entries BFS-expand up to 2 graph hops within the
     /// hop token budget, and graph-adjacent entries join `matched` without
@@ -272,15 +275,15 @@ pub struct MomentRequest {
     /// `NexusAdapter::list_hop_edges_for_world` (the `RelationPort` gap:
     /// spoke's port is get/put only); MCA itself never walks relations.
     pub hop_edges: Option<Vec<HopEdge>>,
-    /// Caller-provided cap on the hop token budget (chars/4, spec Q1).
+    /// note: caller-provided cap on the hop token budget (chars/4, spec Q1).
     /// When `max_tokens` is set, the effective budget is the cross-domain
     /// remainder after personality (never truncated) + `world_state` +
     /// `timeline` reservations, bounded by this cap; when `max_tokens` is
     /// absent, only this cap applies (`None` ⇒ depth + cycle only).
     /// See [`hop_budget_tokens`].
     pub hop_max_tokens: Option<usize>,
-    /// Generation type for spec §4 slot gating (V1.150 P2, DF-75 — guide
-    /// `mca-section-audit.md` Q4 lock).
+    /// note: generation stage for spec §4 slot gating (V1.150 P2, DF-75 —
+    /// guide `mca-section-audit.md` Q4 lock).
     ///
     /// `None` (the default) is treated as [`GenerationStage::Unspecified`] —
     /// every slot fills, which is current behavior and the neutral golden /
@@ -290,12 +293,13 @@ pub struct MomentRequest {
     /// the preset runner / schedule path threads the executing stage when it
     /// drives assembly (see `guides/generation-trigger-wiring.md`).
     pub generation_stage: Option<GenerationStage>,
-    /// Optional admitted Actor context (v1.184 P2). `None` is exact legacy.
+    /// note: optional admitted Actor context (v1.184 P2); `None` is exact
+    /// legacy.
     pub actor: Option<MomentActorContext>,
 }
 
 impl MomentRequest {
-    /// Create a minimal request with only Stage-0 inputs.
+    /// note: minimal request with only Stage-0 inputs.
     #[must_use]
     pub const fn new(stage0: Stage0Assembly) -> Self {
         Self {
@@ -317,14 +321,14 @@ impl MomentRequest {
         }
     }
 
-    /// Set the world context (world ID, optional branch, optional event).
+    /// note: sets the world ID; branch and event have their own setters.
     #[must_use]
     pub fn with_world(mut self, world_id: impl Into<String>) -> Self {
         self.world_id = Some(world_id.into());
         self
     }
 
-    /// Set the work ID for the work-bound moment (V1.150 P1 — Moment
+    /// note: sets the work ID for the work-bound moment (V1.150 P1 — Moment
     /// Directive scope resolution + chapter-advance TTL).
     #[must_use]
     pub fn with_work(mut self, work_id: impl Into<String>) -> Self {
@@ -332,7 +336,7 @@ impl MomentRequest {
         self
     }
 
-    /// Set the owning creator ID (V1.150 P1 — Moment Directives are
+    /// note: sets the owning creator ID (V1.150 P1 — Moment Directives are
     /// creator-scoped; `None` ⇒ no directive can be in scope).
     #[must_use]
     pub fn with_creator(mut self, creator_id: impl Into<String>) -> Self {
@@ -340,74 +344,73 @@ impl MomentRequest {
         self
     }
 
-    /// Set the branch ID within the world.
+    /// note: sets the branch ID within the world.
     #[must_use]
     pub fn with_branch(mut self, branch_id: impl Into<String>) -> Self {
         self.branch_id = Some(branch_id.into());
         self
     }
 
-    /// Set the focused event ID.
+    /// note: sets the focused event ID.
     #[must_use]
     pub fn with_event(mut self, event_id: impl Into<String>) -> Self {
         self.event_id = Some(event_id.into());
         self
     }
 
-    /// Set cross-domain token budget.
+    /// note: sets the cross-domain token budget.
     #[must_use]
     pub const fn with_max_tokens(mut self, max_tokens: usize) -> Self {
         self.max_tokens = Some(max_tokens);
         self
     }
 
-    /// Set KB result limit.
+    /// note: sets the KB result limit.
     #[must_use]
     pub const fn with_kb_limit(mut self, limit: usize) -> Self {
         self.kb_limit = Some(limit);
         self
     }
 
-    /// Set KB text search filter.
+    /// note: sets the KB text search filter.
     #[must_use]
     pub fn with_kb_text_search(mut self, text: impl Into<String>) -> Self {
         self.kb_text_search = Some(text.into());
         self
     }
 
-    /// Set KB block type filter.
+    /// note: sets the KB block type filter.
     #[must_use]
     pub const fn with_kb_block_type(mut self, block_type: BlockType) -> Self {
         self.kb_block_type = Some(block_type);
         self
     }
 
-    /// Enable lore activation filtering (V1.146 P4 T2).
+    /// note: enables lore activation filtering (V1.146 P4 T2).
     #[must_use]
     pub const fn with_activation_enabled(mut self, enabled: bool) -> Self {
         self.activation_enabled = enabled;
         self
     }
 
-    /// Provide preloaded relation-hop edges (V1.149 P1, spec §5). `None`
-    /// (the default) keeps the activation-only P0 behavior.
+    /// note: provides preloaded relation-hop edges (V1.149 P1, spec §5);
+    /// omitting it keeps the activation-only P0 behavior.
     #[must_use]
     pub fn with_hop_edges(mut self, edges: Vec<HopEdge>) -> Self {
         self.hop_edges = Some(edges);
         self
     }
 
-    /// Cap the hop token budget (chars/4, spec Q1). See [`hop_budget_tokens`]
-    /// for how the cap combines with `max_tokens`.
+    /// note: caps the hop token budget (chars/4, spec Q1); see
+    /// [`hop_budget_tokens`] for how the cap combines with `max_tokens`.
     #[must_use]
     pub const fn with_hop_max_tokens(mut self, cap: usize) -> Self {
         self.hop_max_tokens = Some(cap);
         self
     }
 
-    /// Set the generation stage for spec §4 slot gating (V1.150 P2).
-    ///
-    /// `None` (the default — don't call this) keeps every slot on
+    /// note: sets the generation stage for spec §4 slot gating (V1.150 P2);
+    /// leaving it unset keeps every slot on
     /// ([`GenerationStage::Unspecified`]).
     #[must_use]
     pub const fn with_generation_stage(mut self, stage: GenerationStage) -> Self {
@@ -415,7 +418,7 @@ impl MomentRequest {
         self
     }
 
-    /// Attach admitted Actor context (Character or Creator).
+    /// note: attaches admitted Actor context (Character or Creator).
     #[must_use]
     pub fn with_actor(mut self, actor: MomentActorContext) -> Self {
         self.actor = Some(actor);
@@ -423,67 +426,70 @@ impl MomentRequest {
     }
 }
 
-/// Assembled context from all domain sources for a single moment.
+/// note: assembled context from all domain sources for a single moment.
 ///
 /// Each field is `Some(...)` if that domain source was queried successfully,
 /// or `None` if it was skipped, failed, or returned no data.
 #[derive(Debug, Clone, Default)]
 pub struct MomentContext {
-    /// Stage-0 context (always present — SOUL, memories, fragments, prompt).
+    /// note: Stage-0 context (always present — SOUL, memories, fragments,
+    /// prompt).
     pub stage0_context: String,
-    /// Narrative world state (if a `world_id` was provided and found).
+    /// note: narrative world state (present when a `world_id` was provided and
+    /// found).
     pub world_state: Option<String>,
-    /// Timeline summary text (if available).
+    /// note: timeline summary text (when available).
     pub timeline: Option<String>,
-    /// World KB summary text (key blocks for the world).
+    /// note: World KB summary text (key blocks for the world).
     pub world_kb: Option<String>,
-    /// Moment Directive slot (V1.150 P0 reserved — V1.150 P1 fills it): the
-    /// `## Moment Directive` top-level section within the directive region
+    /// note: Moment Directive slot (V1.150 P0 reserved — V1.150 P1 fills it) —
+    /// the `## Moment Directive` top-level section within the directive region
     /// (above lore, below system/personality). `None` means no directive is
     /// active and the section is never rendered — the neutral-only
     /// byte-equivalence anchor (AC-I1b).
     pub moment_directive: Option<String>,
-    /// Placement of the directive section within the directive region
-    /// (V1.150 P1). Defaults to [`DirectiveDepth::Tail`] — P0's reserved
+    /// note: placement of the directive section within the directive region
+    /// (V1.150 P1); defaults to [`DirectiveDepth::Tail`] — P0's reserved
     /// position between `## Timeline` and `## World Knowledge Base` — so
     /// contexts that set only the body keep the P0 layout.
     pub moment_directive_depth: DirectiveDepth,
-    /// Per-entry activation trace (populated when `activation_enabled` is true).
-    /// V1.146 P4 T3: exposed for inspector packet emission.
+    /// note: per-entry activation trace (populated when `activation_enabled` is
+    /// true; V1.146 P4 T3 exposes it for inspector packet emission).
     pub activation_trace:
         Option<Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>>,
-    /// Slot map (V1.151 P0, DF-76 spec §2 H2): every accepted entry that
-    /// survived the generation-stage gate mapped to its slot id — captured
+    /// note: slot map (V1.151 P0, DF-76 spec §2 H2) — every accepted entry that
+    /// survived the generation-stage gate mapped to its slot id, captured
     /// **post stage-gate** so the map reflects what actually rendered.
     /// `None` when no slot routing ran (no World-KB, activation off, or all
     /// entries gated off). A synthetic
     /// `{ entry_id: <directive_id>, slot: "moment.directive" }` entry is
     /// appended when a directive injected this assembly.
     pub slot_map: Option<Vec<SlotMapEntry>>,
-    /// Activation token-budget accounting (spec §2 H3): chars/4 estimates
-    /// for primary matches vs. relation hops + cap/remaining. `Some` whenever
-    /// activation ran; `None` when activation is disabled. Additive — never
-    /// part of `to_full_context()` (AC-I6).
+    /// note: activation token-budget accounting (spec §2 H3) — chars/4
+    /// estimates for primary matches vs. relation hops + cap/remaining. `Some`
+    /// whenever activation ran; `None` when activation is disabled. Additive —
+    /// never part of `to_full_context()` (AC-I6).
     pub activation_budget: Option<ActivationBudget>,
-    /// Status-only Moment Directive metadata for the inspector packet (spec
-    /// §2 H6) — **NEVER the directive body** (AC-I3; body exclusion is by
-    /// construction — the packet builder reads only this field). `None` when
-    /// no directive is active. Additive — never part of `to_full_context()`.
+    /// note: status-only Moment Directive metadata for the inspector packet
+    /// (spec §2 H6) — **NEVER the directive body** (AC-I3; body exclusion is by
+    /// construction, since the packet builder reads only this field). `None`
+    /// when no directive is active. Additive — never part of
+    /// `to_full_context()`.
     pub moment_directive_meta: Option<MomentDirectiveStatus>,
-    /// Hygiene trace (DF-79): per-entry rows for carrier-bearing entries —
-    /// `{entry_id, applied, skipped, notes}`. `None` when no hygiene pass
-    /// ran (no World-KB, activation off, or all entries gated off).
+    /// note: hygiene trace (DF-79) — per-entry rows for carrier-bearing
+    /// entries, `{entry_id, applied, skipped, notes}`. `None` when no hygiene
+    /// pass ran (no World-KB, activation off, or all entries gated off).
     /// Additive — never part of `to_full_context()` (AC-I6).
     pub hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>>,
-    /// P3 SOUL/Memory projection into the four fixed Character mind headings.
-    /// `Some(mind)` emits the headings (SOUL/Memory bodies when present; the
-    /// two `ToM` headings always empty); `None` is legacy — empty sections stay
-    /// omitted.
+    /// note: P3 SOUL/Memory projection into the four fixed Character mind
+    /// headings. `Some(mind)` emits the headings (SOUL/Memory bodies when
+    /// present; the two `ToM` headings always empty); `None` is legacy — empty
+    /// sections stay omitted.
     pub character_mind: Option<CharacterMindInput>,
 }
 
 impl MomentContext {
-    /// Assemble the full context string from all sources.
+    /// note: assembles the full context string from all sources.
     ///
     /// Follows the spec ordering (§9.2) with domain extensions:
     /// 1. Stage-0 context (system prefix, personality, memories, keywords, experience, prompt)
@@ -541,7 +547,7 @@ impl MomentContext {
         parts.into_iter().flatten().collect::<Vec<_>>().join("\n")
     }
 
-    /// Apply cross-domain token budget truncation.
+    /// note: applies cross-domain token budget truncation.
     ///
     /// Personality section inside Stage-0 is never truncated.
     /// The remaining budget (after personality) is distributed across
@@ -551,18 +557,17 @@ impl MomentContext {
     pub fn apply_cross_domain_truncation(&mut self, max_tokens: usize) {
         let max_chars = max_tokens.saturating_mul(4);
 
-        // Extract personality from stage0_context — personality section is never truncated.
+        // why: the personality section is never truncated, so it is reserved
+        // before any domain section draws on the budget.
         let (personality_part, rest_stage0) = self.split_stage0_personality();
 
         let personality_chars = personality_part.chars().count();
         let mut remaining = max_chars.saturating_sub(personality_chars);
 
-        // Truncate domain sections in priority order
         remaining = Self::truncate_section(&mut self.world_state, remaining);
         remaining = Self::truncate_section(&mut self.timeline, remaining);
         remaining = Self::truncate_section(&mut self.world_kb, remaining);
 
-        // Truncate remaining stage0 content (non-personality)
         if rest_stage0.chars().count() > remaining {
             self.stage0_context = if personality_part.is_empty() {
                 Self::truncate_text(&rest_stage0, remaining)
@@ -575,7 +580,7 @@ impl MomentContext {
         }
     }
 
-    /// Split `stage0_context` into (`personality_section`, rest).
+    /// note: splits `stage0_context` into (`personality_section`, rest).
     ///
     /// Prefers structured delimiter split (`---STAGE0:PERSONALITY:START---` /
     /// `---STAGE0:PERSONALITY:END---`). Falls back to the markdown-header
@@ -584,7 +589,8 @@ impl MomentContext {
         split_stage0_personality(&self.stage0_context)
     }
 
-    /// Truncate a section to fit within `max_chars`, returning remaining chars.
+    /// note: truncates a section to fit within `max_chars`, returning remaining
+    /// chars.
     fn truncate_section(section: &mut Option<String>, max_chars: usize) -> usize {
         section.as_mut().map_or(max_chars, |text| {
             let len = text.chars().count();
@@ -597,13 +603,13 @@ impl MomentContext {
         })
     }
 
-    /// Truncate text to at most `max_chars` characters, trying to break at line boundaries.
+    /// note: truncates text to at most `max_chars` characters, preferring a
+    /// line-boundary break.
     fn truncate_text(text: &str, max_chars: usize) -> String {
         if text.chars().count() <= max_chars {
             return text.to_string();
         }
         let truncated: String = text.chars().take(max_chars).collect();
-        // Try to break at last newline
         if let Some(pos) = truncated.rfind('\n') {
             truncated[..pos].to_string()
         } else {
@@ -612,13 +618,12 @@ impl MomentContext {
     }
 }
 
-/// Extract the personality section from a Stage-0 context string — the shared
-/// helper behind [`MomentContext::split_stage0_personality`] (delimiter
+/// note: extracts the personality section from a Stage-0 context string — the
+/// shared helper behind [`MomentContext::split_stage0_personality`] (delimiter
 /// protocol first, legacy `## Personality` heuristic fallback). The relation-
 /// hop budget reuses it so the personality reservation matches exactly what
 /// cross-domain truncation protects (personality is **never** truncated).
 fn split_stage0_personality(ctx: &str) -> (String, String) {
-    // Primary path: structured delimiters
     if let (Some(start_pos), Some(end_pos)) = (
         ctx.find(STAGE0_PERSONALITY_START),
         ctx.find(STAGE0_PERSONALITY_END),
@@ -635,12 +640,11 @@ fn split_stage0_personality(ctx: &str) -> (String, String) {
         }
     }
 
-    // Legacy fallback: markdown-header heuristic
     ctx.find("## Personality").map_or_else(
         || (String::new(), ctx.to_string()),
         |pos| {
             let after_personality_header = &ctx[pos..];
-            let end_of_personality = after_personality_header[14..] // skip "## Personality"
+            let end_of_personality = after_personality_header[14..] // note: 14 skips the "## Personality" header.
                 .find("\n## ")
                 .map_or(after_personality_header.len(), |i| 14 + i);
 
@@ -651,7 +655,7 @@ fn split_stage0_personality(ctx: &str) -> (String, String) {
     )
 }
 
-/// Hop token budget per iteration spec Q1 (architect lock).
+/// note: hop token budget per iteration spec Q1 (architect lock).
 ///
 /// Formula: when `max_tokens` is set, the hop budget is the cross-domain
 /// remainder **after** reserving personality (never truncated) +
@@ -687,9 +691,8 @@ fn hop_budget_tokens(
     )
 }
 
-/// Assemble moment context from all domain sources.
-///
-/// This is the primary entry point for full moment context assembly.
+/// note: assembles moment context from all domain sources — the primary entry
+/// point for full moment context assembly.
 /// It queries each domain source in sequence and combines the results.
 ///
 /// Uses a [`NoDirectiveStore`] — the Moment Directive slot can never fill on
@@ -720,7 +723,8 @@ where
     assemble_moment_with_directive(request, narrative, kb_store, &NoDirectiveStore).await
 }
 
-/// Assemble moment context with a Moment Directive store (V1.150 P1, DF-75).
+/// note: assembles moment context with a Moment Directive store (V1.150 P1,
+/// DF-75).
 ///
 /// Same flow as [`assemble_moment`], plus the directive step (spec §3):
 /// resolve + load the active directive for the work-bound moment, render it
@@ -748,9 +752,9 @@ where
 /// - `D`: A [`DirectiveStore`] implementation (composition root adapter over
 ///   `nexus-local-db`; in-memory stub in tests).
 #[allow(clippy::future_not_send)]
-// Three-domain assembly orchestrator (stage-0 → world_state → timeline →
-// world-kb → directive) — the per-section blocks keep the function at ~114
-// lines; splitting would scatter one assembly's steps.
+// why: three-domain assembly orchestrator (stage-0 → world_state → timeline →
+// world-kb → directive); the per-section blocks keep the function at ~114
+// lines, and splitting would scatter one assembly's steps.
 #[allow(clippy::too_many_lines)]
 pub async fn assemble_moment_with_directive<G, K, D>(
     request: &MomentRequest,
@@ -763,15 +767,14 @@ where
     K: KbStore,
     D: DirectiveStore,
 {
-    // 1. Stage-0: always assemble from creator memory inputs
     let stage0_context = if request.stage0.max_tokens.is_some() {
         request.stage0.assemble_with_truncation()
     } else {
         request.stage0.assemble()
     };
 
-    // 2. Narrative context (if world_id provided). Character Actor mode never
-    // loads unrestricted World State / Timeline.
+    // invariant: a Character Actor never loads unrestricted World State or
+    // Timeline.
     let skip_unrestricted_narrative = request
         .actor
         .as_ref()
@@ -787,10 +790,10 @@ where
         (None, None)
     };
 
-    // V1.149 P0 T2: extended activation scan — Stage-0 full text + outline
-    // beats (timeline title/summary). The timeline was already fetched above;
-    // reuse it here BEFORE it is stored on the context. Manuscript body is not
-    // on the MCA path (documented gap, spec §3) — Stage-0 fallback only.
+    // why: V1.149 P0 T2 activation scans Stage-0 full text plus the timeline's
+    // outline beats, reused here before the timeline is stored on the context;
+    // the manuscript body is not on the MCA path (documented gap, spec §3), so
+    // Stage-0 is the only fallback text.
     let activation_scan_text = if request.activation_enabled {
         timeline.as_ref().map_or_else(
             || stage0_context.clone(),
@@ -800,36 +803,34 @@ where
         String::new()
     };
 
-    // 3. World KB (if world_id provided)
-    // V1.146 P4 T3: capture activation trace for inspector packet emission.
+    // note: World KB is queried only when a `world_id` is given; V1.146 P4 T3
+    // captures the activation trace for inspector packet emission.
     let mut activation_trace: Option<
         Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>,
     > = None;
-    // V1.151 P0 (DF-76 spec §2 H3): capture the activation token-budget
-    // accounting (primary/hop estimates + cap/remaining) alongside the trace.
+    // note: V1.151 P0 (DF-76 spec §2 H3) activation token-budget accounting
+    // (primary/hop estimates + cap/remaining), captured alongside the trace.
     let mut activation_budget: Option<ActivationBudget> = None;
-    // V1.151 P0 (spec §2 H2): capture the post stage-gate slot map (which
-    // accepted entry landed in which slot) for the inspector packet.
+    // note: V1.151 P0 (spec §2 H2) post stage-gate slot map — which accepted
+    // entry landed in which slot — for the inspector packet.
     let mut slot_map: Option<Vec<SlotMapEntry>> = None;
-    // DF-79: capture the per-entry hygiene trace (applied/skipped/notes)
-    // for the inspector packet — `Some` whenever the hygiene pass ran.
+    // note: DF-79 per-entry hygiene trace (applied/skipped/notes) for the
+    // inspector packet — `Some` whenever the hygiene pass ran.
     let mut hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>> = None;
     let world_kb = if let Some(ref world_id) = request.world_id {
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
                 let entries = if request.activation_enabled {
-                    // V1.149 P0 T2: default-on lore activation over the
-                    // fetched WorldKB entries. Scan text = Stage-0 + timeline
-                    // outline beats (reused from step 2). Unmatched
-                    // entries are filtered out (activation gate). Neutral
-                    // entries (no activation module) remain in matched.
-                    // V1.146 P4 T3: capture the full ActivationResult for
-                    // diagnostic trace emission.
-                    // V1.149 P1: when preloaded relation-hop edges are present,
-                    // the engine also BFS-expands up to 2 graph hops from
+                    // note: V1.149 P0 T2 default-on lore activation over the
+                    // fetched WorldKB entries; the scan text is Stage-0 plus
+                    // timeline outline beats (from step 2), unmatched entries
+                    // are filtered out, and neutral entries (no activation
+                    // module) remain in `matched`. V1.146 P4 T3 captures the
+                    // full `ActivationResult` for trace emission; V1.149 P1
+                    // additionally BFS-expands up to 2 graph hops from
                     // primary-fired/constant entries within the hop token
-                    // budget (spec Q1 — `hop_budget_tokens`); hop-pulled
-                    // entries join matched without re-firing keys.
+                    // budget (spec Q1 — `hop_budget_tokens`), hop-pulled
+                    // entries joining `matched` without re-firing keys.
                     let activation_result = request.hop_edges.as_deref().map_or_else(
                         || {
                             nexus_spoke_adapter::adapter::activation::apply_activation(
@@ -840,7 +841,7 @@ where
                         },
                         |edges| {
                             let hop_config = HopConfig {
-                                max_hops: 2, // architect lock Q1
+                                max_hops: 2, // note: architect lock Q1.
                                 max_hop_tokens: hop_budget_tokens(
                                     request,
                                     &stage0_context,
@@ -866,31 +867,31 @@ where
                 if entries.is_empty() {
                     None
                 } else if request.activation_enabled {
-                    // V1.150 P0/P2 (DF-75): shape the activation-matched
-                    // entries into the World-KB body — spec §4 generation-
-                    // stage gate first (`slots::apply_stage_gate`), then
-                    // slot routing + render (spec §2 / Q5). Neutral-only
-                    // Worlds render byte-identically to the V1.149 flat
-                    // block (AC-I1b); the gate runs only on the activation-
-                    // on path (the off-switch below keeps every entry
-                    // unchanged); `None` stage ⇒ all slots on.
-                    // V1.151 P0 (spec §2 H2): capture the slot map post
-                    // stage-gate — it reflects what actually rendered.
-                    // DF-79: the hygiene pass runs inside `render_gated_slots`
-                    // (between stage gate and slot routing); capture its trace.
+                    // note: V1.150 P0/P2 (DF-75) shapes the activation-matched
+                    // entries into the World-KB body — spec §4 generation-stage
+                    // gate first (`slots::apply_stage_gate`), then slot routing
+                    // plus render (spec §2 / Q5). Neutral-only Worlds render
+                    // byte-identically to the V1.149 flat block (AC-I1b); the
+                    // gate runs only on the activation-on path (the off-switch
+                    // below keeps every entry unchanged); `None` stage ⇒ all
+                    // slots on. V1.151 P0 (spec §2 H2) captures the slot map
+                    // post stage-gate so it reflects what actually rendered;
+                    // DF-79 runs the hygiene pass inside `render_gated_slots`
+                    // (between stage gate and slot routing) and captures its
+                    // trace.
                     let (rendered, map, hygiene) =
                         render_gated_slots(entries, request.generation_stage);
                     slot_map = Some(map);
                     hygiene_trace = Some(hygiene);
                     rendered
                 } else {
-                    // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every
-                    // candidate entry unchanged", V1.146 flag-off semantics):
-                    // slot routing is an activation-product shaping step and
-                    // must not run when activation is disabled. Every entry is
-                    // emitted UNCHANGED as the V1.149 flat block (no
+                    // invariant: with activation off (V1.149 escape hatch,
+                    // lock #1 — "off ⇒ every candidate entry unchanged",
+                    // V1.146 flag-off semantics) every entry is emitted
+                    // UNCHANGED as the V1.149 flat block with no
                     // `### World (Before)` / `### Outlet:` /
-                    // `### Style (Post-History)` sub-headings).
+                    // `### Style (Post-History)` sub-headings — slot routing is
+                    // an activation-product shaping step and must not run.
                     Some(slots::format_entries(&entries))
                 }
             }
@@ -900,18 +901,18 @@ where
         None
     };
 
-    // 4. Moment Directive (V1.150 P1, spec §3): resolve + load the active
-    //    directive for the work-bound moment (scope resolution spec §3.2 —
-    //    Work wins, else World override for the Work's bound World, else
-    //    none), then run the post-injection lifecycle. The plain
-    //    `assemble_moment` path passes a `NoDirectiveStore`, which always
-    //    resolves `None` — nothing renders, nothing decrements (AC-I1b).
+    // note: V1.150 P1 (spec §3) resolves and loads the active directive for
+    // the work-bound moment (scope resolution spec §3.2 — Work wins, else
+    // World override for the Work's bound World, else none), then runs the
+    // post-injection lifecycle. The plain `assemble_moment` path passes a
+    // `NoDirectiveStore`, which always resolves `None` — nothing renders,
+    // nothing decrements (AC-I1b).
     let directive = apply_directive(directives, request).await;
 
-    // V1.151 P0 (spec §2 H2): the directive occupies the reserved
-    // `moment.directive` slot — a synthetic slot-map entry appears only
-    // when a directive injected this assembly (`moment.directive` is a
-    // top-level section, never a World-KB routing slot).
+    // note: V1.151 P0 (spec §2 H2) — the directive occupies the reserved
+    // `moment.directive` slot, so a synthetic slot-map entry appears only when
+    // a directive injected this assembly (`moment.directive` is a top-level
+    // section, never a World-KB routing slot).
     if let Some(d) = &directive {
         slot_map.get_or_insert_with(Vec::new).push(SlotMapEntry {
             entry_id: d.directive_id.clone(),
@@ -924,15 +925,16 @@ where
         world_state,
         timeline,
         world_kb,
-        // V1.150 P0 reserved the slot; P1 fills it with the active directive
-        // body. `None` ⇒ no `## Moment Directive` section (neutral-only).
+        // note: V1.150 P0 reserved the slot; P1 fills it with the active
+        // directive body — `None` ⇒ no `## Moment Directive` section
+        // (neutral-only).
         moment_directive: directive.as_ref().map(|d| d.body.clone()),
         moment_directive_depth: directive
             .as_ref()
             .map_or_else(DirectiveDepth::default, |d| d.insert_depth),
         activation_trace,
-        // V1.151 P0 (spec §2 H3/H6): additive inspector surface — budget
-        // accounting + status-only directive metadata (never the body).
+        // note: V1.151 P0 (spec §2 H3/H6) additive inspector surface — budget
+        // accounting plus status-only directive metadata (never the body).
         slot_map,
         activation_budget,
         moment_directive_meta: directive.as_ref().map(MomentDirectiveStatus::from),
@@ -943,8 +945,8 @@ where
         }),
     };
 
-    // 6. Cross-domain truncation if max_tokens set (the directive section is
-    //    never truncated — it is author instruction, like personality).
+    // invariant: cross-domain truncation never touches the directive section —
+    // it is author instruction, like personality.
     if let Some(max_tokens) = request.max_tokens {
         ctx.apply_cross_domain_truncation(max_tokens);
     }
@@ -952,8 +954,8 @@ where
     ctx
 }
 
-/// Resolve the active Moment Directive for a request and — when one was
-/// injected — run the post-injection lifecycle (spec §3.3: TTL decrement /
+/// note: resolves the active Moment Directive for a request and — when one was
+/// injected — runs the post-injection lifecycle (spec §3.3: TTL decrement /
 /// chapter-advance / scene-clear bookkeeping, best-effort; the store never
 /// fails the assembly).
 ///
@@ -991,8 +993,8 @@ async fn apply_directive<D: DirectiveStore>(
     directive
 }
 
-/// V1.150 P2 (DF-75, spec §4 / Q5) — shape the activation-matched World-KB
-/// entries into the section body: apply the generation-stage gate
+/// note: V1.150 P2 (DF-75, spec §4 / Q5) — shapes the activation-matched
+/// World-KB entries into the section body: apply the generation-stage gate
 /// ([`slots::apply_stage_gate`]), route the eligible entries into named,
 /// ordered slots, and render. `None` (all entries gated off, e.g.
 /// `system_maintenance`) yields `None` — the caller omits the whole
@@ -1010,9 +1012,9 @@ fn render_gated_slots(
     Vec<SlotMapEntry>,
     Vec<crate::hygiene::HygieneTraceEntry>,
 ) {
-    // DF-79: the hygiene pass runs between the generation-stage gate and
-    // slot routing — transforms shape the emitted `body.summary` text on
-    // the owned assembly-local copies (read-path only).
+    // note: DF-79 — the hygiene pass runs between the generation-stage gate
+    // and slot routing; transforms shape the emitted `body.summary` text on the
+    // owned assembly-local copies (read-path only).
     let gated = slots::apply_stage_gate(entries, stage);
     let (hygiened, trace) = crate::hygiene::apply_hygiene(gated);
     let routing = slots::route_slots(hygiened);
@@ -1032,15 +1034,16 @@ fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
         let lines = mind.memory.join("\n");
         format!("{lines}\n")
     };
-    // ToM bodies (v1.184 P4): absent rows keep the exact P2/P3 empty-heading
-    // bytes (`heading\n\n` straight into the next heading).
+    // note: ToM bodies (v1.184 P4) — absent rows keep the exact P2/P3
+    // empty-heading bytes (`heading\n\n` straight into the next heading).
     let tom_l1 = if mind.tom_l1.is_empty() {
         String::new()
     } else {
         format!("{}\n", mind.tom_l1.join("\n"))
     };
-    // L2 section keeps the legacy trailing bytes exactly: empty renders
-    // `heading\n`; filled renders `heading\n\n<lines>\n` (memory pattern).
+    // note: the L2 section keeps the legacy trailing bytes exactly — empty
+    // renders `heading\n`, filled renders `heading\n\n<lines>\n` (memory
+    // pattern).
     let tom_l2_section = if mind.tom_l2.is_empty() {
         format!("{CHARACTER_TOM_L2_HEADING}\n")
     } else {
@@ -1051,7 +1054,7 @@ fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
     )
 }
 
-/// Fetch narrative context (world state + timeline) from the gateway.
+/// note: fetches narrative context (world state + timeline) from the gateway.
 // Traits use async fn in trait without Send bounds — same pattern as nexus-narrative.
 #[allow(clippy::future_not_send)]
 async fn fetch_narrative_context<G: NarrativeGateway>(
@@ -1071,11 +1074,11 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
     Ok((world_state_text, timeline_text))
 }
 
-/// Fetch World KB entries using structured query (no formatting).
+/// note: fetches World KB entries as records, unformatted, so the activation
+/// pass can operate on entries before formatting; callers use
+/// `format_entries` (in `slots.rs`) to produce context text.
 ///
-/// V1.146 P4 T2: extracted so the activation pass can operate on entries
-/// before formatting. Callers use `format_entries` (in `slots.rs`) to produce
-/// context text.
+/// V1.146 P4 T2 extracted this step out of the formatting path.
 ///
 /// # ActorView-only snapshot (HARD, v1.191 P1 T11 — durable §4.2)
 ///
@@ -1110,7 +1113,7 @@ async fn fetch_world_kb_entries<K: KbStore>(
     Ok(result.items)
 }
 
-/// Format a [`WorldState`] into a human-readable context string.
+/// note: formats a [`WorldState`] into a human-readable context string.
 fn format_world_state(ws: &nexus_narrative::WorldState) -> String {
     let mut parts = Vec::new();
     parts.push(format!("**{}** ({})", ws.title, ws.world_id));
@@ -1127,7 +1130,7 @@ fn format_world_state(ws: &nexus_narrative::WorldState) -> String {
     parts.join("\n")
 }
 
-/// Format timeline events into a human-readable context string.
+/// note: formats timeline events into a human-readable context string.
 fn format_timeline(events: &[nexus_narrative::timeline_event::TimelineEvent]) -> String {
     let mut lines = Vec::new();
     for event in events {
@@ -1154,7 +1157,7 @@ mod tests {
     use nexus_narrative::InMemoryNarrativeGateway;
     use std::sync::Arc;
 
-    /// Helper: create a `Stage0Assembly` with minimal content.
+    /// note: creates a `Stage0Assembly` with minimal content.
     fn minimal_stage0() -> Stage0Assembly {
         Stage0Assembly {
             personality: "A creative writer.".to_string(),
@@ -1164,7 +1167,7 @@ mod tests {
         }
     }
 
-    /// Helper: set up in-memory stores for testing.
+    /// note: in-memory stores for testing.
     struct TestStores {
         narrative: InMemoryNarrativeGateway<InMemoryKbStore>,
         kb: InMemoryKbStore,
@@ -1260,7 +1263,6 @@ mod tests {
     async fn full_context_assembles_all_sections() {
         let stores = TestStores::new();
 
-        // Set up world
         let world = nexus_narrative::world::World::new(
             "wld_1",
             "ctr_test",
@@ -1271,7 +1273,6 @@ mod tests {
         );
         stores.narrative.insert_world(world);
 
-        // Set up event
         let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
             "wld_1",
             "fbk_root",
@@ -1281,7 +1282,6 @@ mod tests {
         event.title = Some("The Beginning".to_string());
         stores.narrative.insert_event(event);
 
-        // Set up KB
         let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
@@ -1448,12 +1448,10 @@ mod tests {
         assert!(output.contains("Task."));
     }
 
-    // ── V1.150 P0: reserved Moment Directive slot (spec §2 / Q1) ──────
-
     #[tokio::test]
     async fn assemble_moment_reserves_directive_slot_empty() {
-        // P0 reserves the `moment.directive` slot but never fills it: a full
-        // assembly leaves `moment_directive` None and renders no
+        // invariant: P0 reserves the `moment.directive` slot but never fills
+        // it — a full assembly leaves `moment_directive` None and renders no
         // `## Moment Directive` section (AC-I1b neutral-only promise).
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
@@ -1472,8 +1470,8 @@ mod tests {
 
     #[test]
     fn to_full_context_renders_directive_between_timeline_and_world_kb() {
-        // The reserved slot's emit position: between `## Timeline` and
-        // `## World Knowledge Base` (above lore, below system) — the stable
+        // note: the reserved slot's emit position — between `## Timeline` and
+        // `## World Knowledge Base` (above lore, below system), the stable
         // insertion point P1 fills.
         let ctx = MomentContext {
             stage0_context: "stage0".to_string(),
@@ -1501,7 +1499,7 @@ mod tests {
 
     #[test]
     fn to_full_context_omits_empty_directive() {
-        // An empty directive body renders nothing (guards P1 drift).
+        // note: an empty directive body renders nothing (guards P1 drift).
         let ctx = MomentContext {
             stage0_context: "stage0".to_string(),
             moment_directive: Some(String::new()),
@@ -1510,14 +1508,13 @@ mod tests {
         assert!(!ctx.to_full_context().contains(MOMENT_DIRECTIVE_HEADING));
     }
 
-    // ── V1.150 P1: Moment Directive injection (spec §3) ──────────────
-
-    /// In-memory `DirectiveStore` stub: serves a fixed directive and records
-    /// `after_injection` calls (`directive_id`, `event_id`, `work_id`).
+    /// note: in-memory `DirectiveStore` stub — serves a fixed directive and
+    /// records `after_injection` calls (`directive_id`, `event_id`, `work_id`).
     #[derive(Default)]
     struct TestDirectiveStore {
         active: Option<ActiveDirective>,
-        // Test stub records (directive_id, event_id, work_id) triples.
+        // note: `after_injection` records (directive_id, event_id, work_id)
+        // triples.
         #[allow(clippy::type_complexity)]
         calls: Arc<std::sync::Mutex<Vec<(String, Option<String>, Option<String>)>>>,
     }
@@ -1535,7 +1532,8 @@ mod tests {
         }
     }
 
-    // `unused_async_trait_impl` (clippy 1.98): test stub, no async I/O — trait contract.
+    // why: the test stub has no async I/O, but the trait contract is async
+    // (clippy 1.98 `unused_async_trait_impl`).
     #[allow(clippy::unused_async_trait_impl)]
     impl DirectiveStore for TestDirectiveStore {
         async fn load_active(
@@ -1561,7 +1559,7 @@ mod tests {
         }
     }
 
-    /// Helper: a directive with the given depth and a distinctive body.
+    /// note: a directive with the given depth and a distinctive body.
     fn active_directive(depth: DirectiveDepth) -> ActiveDirective {
         ActiveDirective {
             directive_id: "dir_1".to_string(),
@@ -1576,8 +1574,8 @@ mod tests {
         }
     }
 
-    /// Seed a world + a timeline event so `world_state` and `timeline` are
-    /// both present (the directive region has three interior positions).
+    /// note: seeds a world and a timeline event so `world_state` and `timeline`
+    /// are both present (the directive region has three interior positions).
     // Kept async for symmetric call shape with the other seed helpers; the
     // body is synchronous.
     #[allow(clippy::unused_async)]
@@ -1642,7 +1640,6 @@ mod tests {
             "personality is never replaced or truncated"
         );
 
-        // Post-injection lifecycle ran exactly once with the request anchors.
         assert_eq!(
             store.after_injection_calls(),
             vec![(
@@ -1666,14 +1663,16 @@ mod tests {
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
         for (depth, expected) in [
-            // head: directly below Stage-0 (nearest system) — before World State
+            // note: head — directly below Stage-0 (nearest system), before
+            // World State.
             (DirectiveDepth::Head, ("stage0", "directive", "world state")),
-            // mid: between World State and Timeline
+            // note: mid — between World State and Timeline.
             (
                 DirectiveDepth::Mid,
                 ("world state", "directive", "timeline"),
             ),
-            // tail: between Timeline and World KB (nearest lore — P0's reserved position)
+            // note: tail — between Timeline and World KB (nearest lore; P0's
+            // reserved position).
             (DirectiveDepth::Tail, ("timeline", "directive", "world KB")),
         ] {
             let store = TestDirectiveStore::with_directive(active_directive(depth));
@@ -1705,9 +1704,9 @@ mod tests {
 
     #[tokio::test]
     async fn no_active_directive_is_byte_equivalent_to_plain_assembly() {
-        // AC-I1b with a store present but empty: a `DirectiveStore` that
-        // resolves nothing must not change the assembled bytes at all —
-        // no `## Moment Directive` wrapper, no lifecycle call.
+        // note: AC-I1b with a store present but empty — a `DirectiveStore` that
+        // resolves nothing must not change the assembled bytes at all, and must
+        // make no lifecycle call.
         let stores = TestStores::new();
         seed_world_and_timeline(&stores).await;
         let store = TestDirectiveStore::default();
@@ -1735,9 +1734,10 @@ mod tests {
 
     #[tokio::test]
     async fn directive_never_leaks_into_activation_trace_or_world_kb() {
-        // AC-I3: the Moment Directive is product-local — it must never appear
-        // in the activation trace (the AssemblePacket `activation_trace[]`
-        // source) nor in the World-KB text (the `modules.placement[]` source).
+        // invariant: AC-I3 — the Moment Directive is product-local, so it must
+        // never appear in the activation trace (the AssemblePacket
+        // `activation_trace[]` source) nor in the World-KB text (the
+        // `modules.placement[]` source).
         let stores = TestStores::new();
         seed_world_and_timeline(&stores).await;
         stores
@@ -1763,13 +1763,12 @@ mod tests {
         let ctx =
             assemble_moment_with_directive(&request, &stores.narrative, &stores.kb, &store).await;
 
-        // The directive IS injected into the slot.
         assert_eq!(
             ctx.moment_directive.as_deref(),
             Some("Keep the prose terse.")
         );
-        // The trace is present (activation fired on "king") and carries the
-        // entry — but never the directive body.
+        // note: the trace is present (activation fired on "king") and carries
+        // the entry, but never the directive body.
         let trace = ctx.activation_trace.expect("activation trace present");
         assert!(
             trace.iter().any(|t| t.entry_id == "kb_hero" && t.accepted),
@@ -1780,7 +1779,8 @@ mod tests {
             !trace_json.contains("Keep the prose terse."),
             "directive body must never appear in activation_trace (AC-I3)"
         );
-        // The directive body is not lore: absent from the World-KB text.
+        // note: the directive body is not lore, so it is absent from the
+        // World-KB text.
         let kb_text = ctx.world_kb.expect("world KB present");
         assert!(
             !kb_text.contains("Keep the prose terse."),
@@ -1803,12 +1803,12 @@ mod tests {
         assert!(ctx.stage0_context.contains("Write chapter 3."));
     }
 
-    /// C2.2: KB query respects `kb_limit` — seeded multi-block, limit 1 yields single line.
+    /// note: C2.2 — KB query respects `kb_limit`; a seeded multi-block store
+    /// with limit 1 yields a single line.
     #[tokio::test]
     async fn kb_query_respects_limit() {
         let stores = TestStores::new();
 
-        // Seed two KB blocks
         let kb1 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
@@ -1822,7 +1822,6 @@ mod tests {
         stores.kb.insert_knowledge_entry(kb1).await.unwrap();
         stores.kb.insert_knowledge_entry(kb2).await.unwrap();
 
-        // Without limit: both blocks
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
@@ -1832,13 +1831,12 @@ mod tests {
             "unlimited KB should contain Castle"
         );
 
-        // With limit 1: only one block
+        // note: with limit 1 exactly one of the two blocks is returned.
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_kb_limit(1);
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.unwrap();
-        // One of them, not both
         let has_hero = kb_text.contains("Hero");
         let has_castle = kb_text.contains("Castle");
         assert!(
@@ -1847,7 +1845,7 @@ mod tests {
         );
     }
 
-    /// C2.2: KB query respects `kb_text_search` filter.
+    /// note: C2.2 — KB query respects the `kb_text_search` filter.
     #[tokio::test]
     async fn kb_query_respects_text_search() {
         let stores = TestStores::new();
@@ -1880,12 +1878,11 @@ mod tests {
         );
     }
 
-    /// C2.3: Cross-domain truncation bounds total output.
+    /// note: C2.3 — cross-domain truncation bounds total output.
     #[tokio::test]
     async fn cross_domain_truncation_respects_budget() {
         let stores = TestStores::new();
 
-        // Set up world
         let world = nexus_narrative::world::World::new(
             "wld_1",
             "ctr_test",
@@ -1896,7 +1893,6 @@ mod tests {
         );
         stores.narrative.insert_world(world);
 
-        // Set up KB
         let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
@@ -1904,15 +1900,13 @@ mod tests {
         );
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
-        // Without truncation: full content
         let request_no_budget = MomentRequest::new(minimal_stage0()).with_world("wld_1");
         let ctx_full = assemble_moment(&request_no_budget, &stores.narrative, &stores.kb).await;
         let full_len = ctx_full.to_full_context().chars().count();
 
-        // With small budget
         let request_budget = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
-            .with_max_tokens(50); // 200 chars budget
+            .with_max_tokens(50); // note: 50 tokens ≈ 200 chars at chars/4.
         let ctx_budget = assemble_moment(&request_budget, &stores.narrative, &stores.kb).await;
         let budget_len = ctx_budget.to_full_context().chars().count();
 
@@ -1921,18 +1915,18 @@ mod tests {
             "truncated output ({budget_len}) should not exceed full output ({full_len})"
         );
 
-        // Personality should still be present (never truncated)
+        // invariant: the personality section is never truncated, so it survives
+        // any budget.
         assert!(
             ctx_budget.stage0_context.contains("A creative writer."),
             "personality must survive truncation"
         );
     }
 
-    // --- A3.2: Delimiter-based personality split tests ---
-
     #[test]
     fn split_personality_uses_delimiter_path() {
-        // Stage0 assembly now emits delimiters, so split should use them
+        // note: Stage-0 assembly emits delimiters, so the split takes the
+        // structured path.
         let asm = Stage0Assembly {
             personality: "Bold and creative writer.".to_string(),
             experience: "10 years.".to_string(),
@@ -1974,7 +1968,8 @@ mod tests {
 
     #[test]
     fn split_personality_delimiter_round_trip() {
-        // Full round-trip: assemble → to_full_context → split_stage0_personality
+        // note: full round-trip — assemble → to_full_context →
+        // split_stage0_personality.
         let asm = Stage0Assembly {
             system_prefix: "System prefix.".to_string(),
             personality: "Creative soul.".to_string(),
@@ -1999,10 +1994,11 @@ mod tests {
             character_mind: None,
         };
 
-        // apply_cross_domain_truncation uses split_stage0_personality internally
+        // note: `apply_cross_domain_truncation` uses
+        // `split_stage0_personality` internally.
         ctx.apply_cross_domain_truncation(50);
 
-        // Personality must survive truncation
+        // invariant: the personality section survives truncation.
         assert!(
             ctx.stage0_context.contains("Creative soul."),
             "personality must survive truncation round-trip"
@@ -2011,8 +2007,9 @@ mod tests {
 
     #[test]
     fn split_personality_r13_scenario_no_false_split() {
-        // R13: personality containing "## " sub-headers must not cause premature split.
-        // With delimiters, the split is structural, not heuristic.
+        // note: R13 — a personality containing "## " sub-headers must not
+        // cause a premature split; with delimiters the split is structural,
+        // not heuristic.
         let asm = Stage0Assembly {
             personality: "A writer with goals.\n\n## Goals\n- Write daily\n- Be bold".to_string(),
             experience: "10 years.".to_string(),
@@ -2039,7 +2036,7 @@ mod tests {
 
     #[test]
     fn split_personality_legacy_heuristic_fallback() {
-        // Content without delimiters should fall back to heuristic
+        // note: content without delimiters takes the heuristic fallback.
         let legacy_content =
             "System prefix.\n\n## Personality\n\nA creative soul.\n\n## Experience\n\n10 years.\n";
 
@@ -2060,9 +2057,8 @@ mod tests {
         assert!(rest.contains("10 years"), "rest must contain experience");
     }
 
-    // ── V1.146 P4 T2: activation flag tests ────────────────────────
-
-    /// Helper: create a `KnowledgeEntryRecord` with optional `modules.activation` JSON.
+    /// note: creates a `KnowledgeEntryRecord` with optional
+    /// `modules.activation` JSON.
     fn kb_entry_with_modules(
         world_id: &str,
         block_type: nexus_contracts::BlockType,
@@ -2078,8 +2074,8 @@ mod tests {
 
     #[tokio::test]
     async fn activation_flag_off_includes_all_entries() {
-        // Explicit OFF (off-switch semantics): entries with activation modules
-        // all appear — byte-identical to V1.146 flag-off behavior.
+        // note: explicit OFF (off-switch semantics) — entries with activation
+        // modules all appear, byte-identical to V1.146 flag-off behavior.
         let stores = TestStores::new();
 
         let hero = kb_entry_with_modules(
@@ -2159,20 +2155,22 @@ mod tests {
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
         let kb_text = ctx.world_kb.expect("world_kb must be present");
 
-        // Every candidate entry appears unchanged (off-switch: no filtering).
+        // invariant: every candidate entry appears unchanged — the off-switch
+        // performs no filtering.
         for name in ["Rules", "Style Note", "Open Lore", "Neutral"] {
             assert!(kb_text.contains(name), "off-switch: {name} must appear");
         }
-        // No slot sub-headings — the off-switch output is the flat block.
+        // invariant: the off-switch output is the flat block, with no slot
+        // sub-headings.
         assert!(
             !kb_text.contains("### "),
             "off-switch must not render slot sub-headings, got: {kb_text}"
         );
 
-        // Byte-identical to the V1.149 flat block for the same entries: the
-        // store read order is shared between the assembly and this re-query
-        // (same `InMemoryKbStore` instance, no mutation in between), so the
-        // expected string is deterministic.
+        // why: the store read order is shared between the assembly and this
+        // re-query (same `InMemoryKbStore` instance, no mutation in between),
+        // so the expected string is deterministic and the comparison to the
+        // V1.149 flat block is byte-exact.
         let items = stores
             .kb
             .query(&nexus_knowledge::world_kb::KbQuery::new("wld_1"))
@@ -2188,7 +2186,8 @@ mod tests {
 
     #[tokio::test]
     async fn activation_flag_on_no_activation_module_includes_all() {
-        // Flag ON but no entries carry activation modules → same output as OFF.
+        // note: flag ON but no entries carry activation modules gives the same
+        // output as OFF.
         let stores = TestStores::new();
 
         for (id, name, bt) in [
@@ -2213,8 +2212,9 @@ mod tests {
 
     #[tokio::test]
     async fn activation_default_on_filters_unmatched_entries() {
-        // Default-ON (no explicit flag): stage0 mentions "king" → Hero matches
-        // (key "king"), Castle is unmatched (key "dragon"), Forest is neutral.
+        // note: default-ON (no explicit flag) — stage0 mentions "king", so Hero
+        // matches (key "king"), Castle is unmatched (key "dragon"), and Forest
+        // is neutral.
         let stores = TestStores::new();
 
         stores
@@ -2257,7 +2257,8 @@ mod tests {
             user_prompt: "Write chapter 3.".to_string(),
             ..Stage0Assembly::default()
         };
-        // No with_activation_enabled call — the default is ON since V1.149.
+        // note: no `with_activation_enabled` call — the default is ON since
+        // V1.149.
         let request = MomentRequest::new(stage0).with_world("wld_1");
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
@@ -2275,12 +2276,11 @@ mod tests {
             "Forest (neutral, no modules) should survive activation"
         );
     }
-    // ── DF-79: hygiene transforms (read-path only) ───────────────────
 
     #[tokio::test]
     async fn hygiene_transform_applies_at_emission_and_stored_body_unchanged() {
-        // The transform applies to the emitted `body.summary` text; the
-        // stored World-KB body stays byte-identical (read-path invariant).
+        // invariant: the transform applies to the emitted `body.summary` text;
+        // the stored World-KB body stays byte-identical (read-path only).
         let stores = TestStores::new();
         let mut kb =
             KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
@@ -2317,14 +2317,13 @@ mod tests {
             "emitted summary must not carry the raw text"
         );
 
-        // Trace row captured on the context.
         let trace = ctx.hygiene_trace.expect("hygiene trace must be captured");
         assert_eq!(trace.len(), 1);
         assert_eq!(trace[0].entry_id, "kb_hygiene");
         assert_eq!(trace[0].applied, 1);
         assert_eq!(trace[0].skipped, 0);
 
-        // Read-path invariant: the stored body is byte-identical.
+        // invariant: the stored body stays byte-identical (read-path transform).
         let stored_entry = stores.kb.get_knowledge_entry("kb_hygiene").await.unwrap();
         let stored_summary = stored_entry
             .body
@@ -2336,8 +2335,8 @@ mod tests {
 
     #[tokio::test]
     async fn hygiene_neutral_entries_byte_identical_and_no_trace_rows() {
-        // No carrier → no trace rows; assembly output is the plain flat
-        // block (byte-identical to the no-hygiene path).
+        // note: no carrier means no trace rows, and the assembly output is the
+        // plain flat block (byte-identical to the no-hygiene path).
         let stores = TestStores::new();
         for (id, name) in [("kb_a", "Hero"), ("kb_b", "Castle")] {
             let mut kb =
@@ -2357,7 +2356,8 @@ mod tests {
         let kb_text = ctx.world_kb.expect("world_kb must render");
         assert!(kb_text.contains("Hero summary"));
         assert!(kb_text.contains("Castle summary"));
-        // The pass ran (activation-on path) but no carrier → empty trace.
+        // note: the pass ran (activation-on path) but found no carrier, so the
+        // trace is empty.
         let trace = ctx
             .hygiene_trace
             .expect("hygiene pass ran on the activation-on path");
@@ -2366,10 +2366,10 @@ mod tests {
 
     #[tokio::test]
     async fn hygiene_carrier_survives_edit_patch_round_trip() {
-        // Simulates `creator world kb edit --body`: JSON round-trip through
-        // `KnowledgeEntryBody` + `update_knowledge_entry` (the kb_edit code path).
-        // The `attributes.hygiene` carrier must survive the store round-trip
-        // and drive the emission transform.
+        // note: simulates `creator world kb edit --body` — a JSON round-trip
+        // through `KnowledgeEntryBody` plus `update_knowledge_entry` (the
+        // kb_edit code path). The `attributes.hygiene` carrier must survive the
+        // store round-trip and drive the emission transform.
         let stores = TestStores::new();
         let mut kb =
             KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
@@ -2384,7 +2384,8 @@ mod tests {
             Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
-        // Author patches the body with a hygiene carrier (kb_edit flow).
+        // note: the author patches the body with a hygiene carrier (kb_edit
+        // flow).
         let patched: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
             serde_json::from_str(
                 r#"{"summary":"The hero fights the dragon","attributes":{"hygiene":[{"pattern":"dragon","replacement":"wyrm"}]}}"#,
@@ -2398,7 +2399,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Re-read: the carrier survived the store round-trip.
         let re_read = stores.kb.get_knowledge_entry("kb_hygiene").await.unwrap();
         let attrs = re_read
             .body
@@ -2407,7 +2407,6 @@ mod tests {
             .expect("stored attributes");
         assert_eq!(attrs["hygiene"][0]["pattern"], "dragon");
 
-        // Assembly applies the transform.
         let stage0 = Stage0Assembly {
             personality: "A hero rises.".to_string(),
             experience: "10 years.".to_string(),
@@ -2425,8 +2424,8 @@ mod tests {
 
     #[tokio::test]
     async fn activation_default_on_and_all_requires_all_keys_with_secondary() {
-        // and_all with secondary_keys: entry needs ALL primary AND ALL
-        // secondary keys to match (handbook truth table §2.1).
+        // note: `and_all` with `secondary_keys` — the entry needs ALL primary
+        // AND ALL secondary keys to match (handbook truth table §2.1).
         let stores = TestStores::new();
         stores
             .kb
@@ -2455,8 +2454,9 @@ mod tests {
 
     #[tokio::test]
     async fn activation_default_on_not_any_excludes_when_secondary_matches() {
-        // not_any with secondary_keys: entry excluded when a secondary key
-        // matches (primary-any + no secondary = fire; spec §2.1).
+        // note: `not_any` with `secondary_keys` — the entry is excluded when a
+        // secondary key matches (primary-any plus no secondary fires; spec
+        // §2.1).
         let stores = TestStores::new();
         stores
             .kb
@@ -2476,7 +2476,7 @@ mod tests {
             personality: "The orc army marched forward.".to_string(),
             ..Stage0Assembly::default()
         };
-        // Default-on (no explicit flag).
+        // note: default-on (no explicit flag).
         let request = MomentRequest::new(stage0).with_world("wld_1");
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
@@ -2488,7 +2488,7 @@ mod tests {
 
     #[tokio::test]
     async fn activation_empty_world_yields_none() {
-        // Default-on but no KB entries → world_kb is None.
+        // note: default-on with no KB entries leaves `world_kb` None.
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_ghost");
 
@@ -2498,9 +2498,10 @@ mod tests {
 
     #[tokio::test]
     async fn activation_timeline_participates_in_scan() {
-        // Extended scan (V1.149 P0 T2): the activation key matches ONLY the
-        // timeline outline-beat text (event title), not stage0 and not the
-        // entry's own self-match text — the entry fires via timeline text.
+        // note: the extended scan (V1.149 P0 T2) matches activation keys against
+        // timeline outline-beat text (the event title) only — not stage0, not
+        // the entry's own self-match text — so this entry fires via timeline
+        // text alone.
         use nexus_narrative::timeline_event::{TimelineEvent, TimelineEventType};
         let stores = TestStores::new();
 
@@ -2519,7 +2520,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        // A second entry whose key appears nowhere → filtered.
+        // note: a second entry whose key appears nowhere must be filtered.
         stores
             .kb
             .insert_knowledge_entry(kb_entry_with_modules(
@@ -2552,8 +2553,6 @@ mod tests {
         );
     }
 
-    // ── V1.149 P1: relation-hop expansion (fixture edges, no DB) ──────
-
     fn hop_edge(from_id: &str, to_id: &str, relation_type: &str) -> HopEdge {
         HopEdge {
             relation_id: format!("rel_{from_id}_{to_id}"),
@@ -2570,8 +2569,9 @@ mod tests {
         }
     }
 
-    /// Seed: Harbor (fires on "king"), Dawn Dock (key "dragon" — no match),
-    /// Harbor Guild (key "elf" — no match). Edges: Harbor→Dawn Dock→Guild.
+    /// note: seeds Harbor (fires on "king"), Dawn Dock (key "dragon" — no
+    /// match) and Harbor Guild (key "elf" — no match); edges are
+    /// Harbor→Dawn Dock→Guild.
     async fn seed_hop_fixture(stores: &TestStores) {
         stores
             .kb
@@ -2617,8 +2617,9 @@ mod tests {
 
     #[tokio::test]
     async fn activation_hops_pull_graph_neighbors() {
-        // Harbor fires on "king" → BFS pulls Dawn Dock (1 hop) and Harbor
-        // Guild (2 hops) without keyword-tagging them (spec §5 product story).
+        // note: Harbor fires on "king", so BFS pulls Dawn Dock (1 hop) and
+        // Harbor Guild (2 hops) without keyword-tagging them (spec §5 product
+        // story).
         let stores = TestStores::new();
         seed_hop_fixture(&stores).await;
 
@@ -2637,7 +2638,7 @@ mod tests {
             kb_text.contains("Harbor Guild"),
             "2-hop neighbor pulled without keyword match"
         );
-        // Hop trace rows carry the hop fields.
+        // note: hop trace rows carry their hop fields.
         let trace = ctx.activation_trace.expect("trace present");
         let dock_hop = trace
             .iter()
@@ -2655,8 +2656,8 @@ mod tests {
 
     #[tokio::test]
     async fn activation_hops_without_edges_is_p0_only() {
-        // No preloaded edges ⇒ activation-only behavior (P0): neighbors stay
-        // filtered out.
+        // note: no preloaded edges falls back to activation-only behavior (P0)
+        // — neighbors stay filtered out.
         let stores = TestStores::new();
         seed_hop_fixture(&stores).await;
 
@@ -2671,8 +2672,8 @@ mod tests {
 
     #[tokio::test]
     async fn activation_hops_off_switch_returns_all_entries_no_hop() {
-        // Off-switch (V1.146 flag-off semantics): even with hop edges
-        // preloaded, every entry is returned unchanged and nothing hops.
+        // invariant: the off-switch (V1.146 flag-off semantics) returns every
+        // entry unchanged even with hop edges preloaded — nothing hops.
         let stores = TestStores::new();
         seed_hop_fixture(&stores).await;
 
@@ -2694,15 +2695,16 @@ mod tests {
 
     #[tokio::test]
     async fn activation_hops_neutral_only_byte_equivalent() {
-        // Neutral-only golden under hops: no activation modules ⇒ no seeds ⇒
-        // no hop pull ⇒ world_kb byte-identical with and without edges
-        // (the neutral-only ship guarantee, spec §1, holds under hops).
+        // note: neutral-only golden under hops — no activation modules means no
+        // seeds, so no hop pull, so `world_kb` is byte-identical with and
+        // without edges (the neutral-only ship guarantee, spec §1, holds under
+        // hops).
         //
-        // Both runs share ONE store: `InMemoryKbStore` iterates a
-        // per-instance-seeded `HashMap`, so two separately-seeded stores can
-        // return identical entries in different orders (flaky test, fixed
-        // T3); reads are pure, so a single store keeps the input order
-        // identical and the byte-comparison meaningful.
+        // why one store: `InMemoryKbStore` iterates a per-instance-seeded
+        // `HashMap`, so two separately-seeded stores can return identical
+        // entries in different orders (flaky test, fixed T3); reads are pure,
+        // so sharing one store keeps the input order identical and the
+        // byte-comparison meaningful.
         let stores = TestStores::new();
         for (name, id) in [("Hero", "kb_n1"), ("Castle", "kb_n2")] {
             stores
@@ -2751,9 +2753,9 @@ mod tests {
         // AC-I2 #4: personality is reserved FIRST (never truncated), so a
         // personality section that alone exceeds max_chars leaves zero hop
         // budget — a large caller cap cannot override the reservation.
-        let stage0 = stage0_with(&"P".repeat(200)); // section ≈ 219 chars
+        let stage0 = stage0_with(&"P".repeat(200)); // note: section ≈ 219 chars.
         let request = MomentRequest::new(stage0.clone())
-            .with_max_tokens(50) // max_chars 200 < personality section
+            .with_max_tokens(50) // note: max_chars 200 < personality section.
             .with_hop_max_tokens(1000);
         assert_eq!(
             hop_budget_tokens(&request, &stage0.assemble(), None, None),
@@ -2763,11 +2765,11 @@ mod tests {
 
     #[test]
     fn hop_budget_caller_cap_bounds_the_remainder() {
-        // The caller-provided hop cap is an upper bound on the computed
+        // note: the caller-provided hop cap is an upper bound on the computed
         // cross-domain remainder.
         let stage0 = stage0_with("small");
         let request = MomentRequest::new(stage0.clone())
-            .with_max_tokens(1000) // remainder ≈ 994 tokens
+            .with_max_tokens(1000) // note: remainder ≈ 994 tokens.
             .with_hop_max_tokens(7);
         assert_eq!(
             hop_budget_tokens(&request, &stage0.assemble(), None, None),
@@ -2777,9 +2779,9 @@ mod tests {
 
     #[test]
     fn hop_budget_no_max_tokens_passes_through_caller_cap() {
-        // No `max_tokens` ⇒ no cross-domain remainder to compute: the caller
-        // cap passes through unchanged (`None` stays `None` — depth + cycle
-        // only, spec Q1).
+        // note: without `max_tokens` there is no cross-domain remainder to
+        // compute — the caller cap passes through unchanged (`None` stays
+        // `None`: depth + cycle only, spec Q1).
         let stage0 = stage0_with("Any");
         let capped = MomentRequest::new(stage0.clone()).with_hop_max_tokens(9);
         assert_eq!(
@@ -2795,7 +2797,7 @@ mod tests {
 
     #[test]
     fn hop_budget_subtracts_world_state_and_timeline() {
-        // Formula (spec Q1): `(max_tokens*4 − personality_section −
+        // note: formula (spec Q1) — `(max_tokens*4 − personality_section −
         // world_state − timeline) / 4`, floored. The personality section
         // length is derived from the assembled delimiter format so the
         // assertion pins the exact arithmetic.
@@ -2811,7 +2813,7 @@ mod tests {
         };
         let ws = "ws";
         let tl = "tl";
-        let request = MomentRequest::new(stage0).with_max_tokens(100); // 400 chars
+        let request = MomentRequest::new(stage0).with_max_tokens(100); // note: 400 chars.
         let budget = hop_budget_tokens(&request, &assembled, Some(ws), Some(tl));
         let expected = (400 - section_chars - ws.chars().count() - tl.chars().count()) / 4;
         assert_eq!(budget, Some(expected));
@@ -2839,15 +2841,15 @@ mod tests {
             .with_hop_edges(hop_fixture_edges());
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
-        // Personality survives the tight budget untouched (never truncated):
-        // the section content + heading are preserved (the truncation
-        // reconstruction keeps the personality section verbatim — delimiter
-        // tokens themselves live in the truncated remainder).
+        // invariant: the personality section survives the tight budget untouched
+        // — its content and heading are preserved, because the truncation
+        // reconstruction keeps the section verbatim and only the delimiter
+        // tokens live in the truncated remainder.
         assert!(ctx.stage0_context.contains("A king rules the land."));
         assert!(ctx.stage0_context.contains("## Personality"));
 
-        // Budget-gated pull: Dock (fits the remainder) is accepted via hop,
-        // Guild (exceeds it) is not.
+        // note: budget-gated pull — Dock (fits the remainder) is accepted via
+        // hop, Guild (exceeds it) is not.
         let trace = ctx.activation_trace.expect("trace present");
         assert!(trace.iter().any(|t| t.entry_id == "kb_dock" && t.accepted));
         assert!(trace
@@ -2855,8 +2857,6 @@ mod tests {
             .any(|t| t.entry_id == "kb_guild" && !t.accepted));
         assert!(!trace.iter().any(|t| t.entry_id == "kb_guild" && t.accepted));
     }
-
-    // ── P3: Character SOUL/Memory slot projection ─────────────────────────
 
     #[test]
     fn mind_input_applies_fixed_bounds_deterministically() {
@@ -2892,7 +2892,7 @@ mod tests {
         );
         assert!(last.ends_with('…'));
 
-        // Multi-byte safe: truncating é-heavy text hits the same scalar cap
+        // invariant: truncating é-heavy text hits the same scalar cap
         // (two-byte chars) and never splits a code point.
         let mind = CharacterMindInput::new(Some(wide_soul), vec![]);
         let wide = mind.soul.as_ref().unwrap();
@@ -2900,14 +2900,15 @@ mod tests {
         assert!(wide.ends_with('…'));
         assert!(wide.is_char_boundary(wide.len()));
 
-        // Four-byte (astral) chars hit the same scalar cap and stay valid UTF-8.
+        // invariant: four-byte (astral) chars hit the same scalar cap and stay
+        // valid UTF-8.
         let mind = CharacterMindInput::new(Some(astral_soul), vec![]);
         let astral = mind.soul.as_ref().unwrap();
         assert_eq!(astral.chars().count(), CHARACTER_MIND_MAX_SOUL_CHARS);
         assert!(astral.ends_with('…'));
         assert!(astral.is_char_boundary(astral.len()));
 
-        // Empty / None keeps is_empty true (legacy empty headings).
+        // note: empty or `None` keeps `is_empty` true (legacy empty headings).
         let empty = CharacterMindInput::default();
         assert!(empty.is_empty());
         let filled = CharacterMindInput::new(Some("soul".to_string()), vec!["m1".to_string()]);
@@ -2925,7 +2926,8 @@ mod tests {
         assert!(rendered.contains("# Ava\nSOUL body\n"));
         assert!(rendered.contains("## Character Memory\n\n- m1\n- m2\n"));
         assert!(rendered.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
-        // SOUL before Memory before ToM; no ToM content.
+        // note: order is SOUL, then Memory, then ToM, and no ToM content is
+        // rendered.
         let soul_pos = rendered.find("## Character SOUL").unwrap();
         let mem_pos = rendered.find("## Character Memory").unwrap();
         let tom1 = rendered.find("## Character ToM — L1").unwrap();
@@ -2964,7 +2966,8 @@ mod tests {
             nexus_contracts::BlockType::Character,
             "AdmittedAda",
         );
-        // Empty mind: legacy P2 empty headings, no SOUL/Memory bodies.
+        // note: empty mind keeps the legacy P2 empty headings, with no
+        // SOUL/Memory bodies.
         let request = MomentRequest::new(Stage0Assembly {
             user_prompt: "Act.".to_string(),
             personality: "Creator SOUL must not leak.".to_string(),
@@ -2978,7 +2981,8 @@ mod tests {
         let empty_full = ctx.to_full_context();
         assert!(empty_full.contains("## Character SOUL\n\n## Character Memory\n\n"));
 
-        // Projected mind: SOUL + Memory bodies present; ToM stays empty.
+        // note: a projected mind emits the SOUL and Memory bodies; ToM stays
+        // empty.
         let projected = CharacterMindInput::new(
             Some("# Ava\nSOUL".to_string()),
             vec![
@@ -3003,11 +3007,9 @@ mod tests {
         assert!(full.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
     }
 
-    // ── v1.191 P1 T11: ActorView-only model input (durable §4.2) ─────────
-
-    /// The container matrix over one store: a Character-global shared World
-    /// row, this Character's own Character-owned row and binding-local row are
-    /// each visible because the admitted snapshot carries them; another
+    /// note: the container matrix over one store — a Character-global shared
+    /// World row, this Character's own Character-owned row and binding-local
+    /// row are each visible because the admitted snapshot carries them; another
     /// holder's World-owned `owner-private` row is admitted by nobody here and
     /// is never read out of the store.
     #[tokio::test]
@@ -3046,8 +3048,8 @@ mod tests {
             stores.kb.insert_knowledge_entry(row).await.unwrap();
         }
 
-        // The admitted Character ActorView snapshot: World shared + this
-        // Character's own container + its binding's container rows.
+        // note: the admitted Character ActorView snapshot — World shared rows
+        // plus this Character's own container and its binding's container rows.
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_actor(MomentActorContext::character(
@@ -3078,8 +3080,8 @@ mod tests {
         );
     }
 
-    /// Fail-closed: an Actor with an empty admitted snapshot emits no
-    /// World-KB section even though the store it was handed holds rows —
+    /// note: fail-closed — an Actor with an empty admitted snapshot emits no
+    /// World-KB section even though the store it was handed holds rows;
     /// "missing/incomplete snapshot" never widens into a World query.
     #[tokio::test]
     async fn v1191_holder_context_empty_snapshot_fails_closed() {

@@ -13,7 +13,7 @@ use tokio::sync::{Mutex, Notify};
 pub const MAX_PENDING_BYTES_TOTAL: usize = 1024 * 1024;
 pub const FINALIZE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Serialized native environment lifecycle phases.
+/// note: serialized native environment lifecycle phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnvLifecyclePhase {
     Closed,
@@ -22,7 +22,7 @@ pub enum EnvLifecyclePhase {
     Closing,
 }
 
-/// Per-addon environment instance marker stored via `Env::set_instance_data`.
+/// note: per-addon environment instance marker stored via `Env::set_instance_data`.
 pub struct EnvInstance {
     pub state: Arc<EnvState>,
 }
@@ -108,67 +108,65 @@ impl Drop for PendingBudgetGuard<'_> {
 pub struct EnvState {
     pub generation: AtomicU64,
     pub core: StdMutex<Option<Arc<CoreService>>>,
-    /// The raw user home this environment was opened with. Retained so the
-    /// pre-selection home control plane (creator + workspace families) stays
-    /// reachable on the service-only shell, where no core exists to derive it
-    /// from.
+    /// why: retained so the pre-selection home control plane (creator + workspace
+    /// families) stays reachable on the service-only shell, where no core exists
+    /// to derive it from.
     pub user_home: StdMutex<Option<PathBuf>>,
-    /// The access mode this environment was opened with. A later in-process
+    /// note: the access mode this environment was opened with; a later in-process
     /// promotion repeats the same admission mode as the startup open would.
     pub open_access: StdMutex<Option<CoreAccess>>,
-    /// The JS provider adapter installed at open (None for the native Host
-    /// providers). Retained so promotion composes the SAME adapter instead of
-    /// replacing the provider callback identity mid-process.
+    /// why: retained so promotion composes the SAME adapter instead of replacing
+    /// the provider callback identity mid-process (`None` for the native Host
+    /// providers).
     pub js_provider_port: StdMutex<Option<Arc<dyn ProviderPort>>>,
-    /// The Host lifetime slot: the ONE attached core authority (its manager,
+    /// invariant: this slot holds the ONE attached core authority (its manager,
     /// Actor registry and composed provider port), never a bare manager. The
     /// core authority owns every Actor effect/observation/close path; native
     /// only borrows its manager for readiness and hosted execution.
     pub host: StdMutex<Option<Arc<HostHandle>>>,
     pub provider_port: StdMutex<Option<Arc<dyn ProviderPort>>>,
     pub pending_budget: PendingBudget,
-    /// One-shot close signal used by cancellation paths that can afford to miss
+    /// note: one-shot close signal for cancellation paths that can afford to miss
     /// a wake (they re-check `is_closing`).
     pub close_notify: Notify,
-    /// Race-free close signal. A `watch` receiver carries a version, so a close
-    /// that lands between a subscriber's check and its await can never be lost —
-    /// unlike `Notify::notify_waiters`, which fires only at already-registered
-    /// waiters.
+    /// why: race-free close signal. A `watch` receiver carries a version, so a
+    /// close that lands between a subscriber's check and its await can never be
+    /// lost — unlike `Notify::notify_waiters`, which fires only at
+    /// already-registered waiters.
     pub close_watch: tokio::sync::watch::Sender<bool>,
     pub closing: AtomicU64,
     pub lifecycle: StdMutex<EnvLifecyclePhase>,
-    /// A rollback or close retained an owner whose cleanup is unconfirmed.
+    /// note: a rollback or close retained an owner whose cleanup is unconfirmed.
     pub interrupted: AtomicBool,
-    /// Environment tombstoned after NAPI cleanup; no further JS calls.
+    /// note: environment tombstoned after NAPI cleanup; no further JS calls.
     pub env_dead: AtomicBool,
-    /// Concurrent close callers await one settlement.
+    /// note: concurrent close callers await one settlement.
     pub close_notify_settled: Arc<Notify>,
     pub settled_close: Mutex<Option<CoreCloseReport>>,
     pub close_in_flight: Mutex<bool>,
-    /// Last observed pending operation/task IDs for close reports.
+    /// note: last observed pending operation/task IDs for close reports.
     pub pending_operation_ids: Mutex<Vec<String>>,
-    /// Bounded structured state for JS-provider sessions and operations.
-    ///
+    /// note: bounded structured state for JS-provider sessions and operations;
     /// `hostQuery` also reads it as a fallback when a hydration miss occurs.
     pub js_state: StdMutex<JsProviderState>,
-    /// Service-only shell: compatibility/status without DB, host, or principal.
+    /// note: service-only shell — compatibility/status without DB, host, or principal.
     pub service_only_uninitialized: AtomicBool,
 }
 
-/// Terminal statuses a JS-provider operation can reach.
+/// note: terminal statuses a JS-provider operation can reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsOperationStatus {
     Running,
     Finished,
     Failed,
     Interrupted,
-    /// A cooperative cancel was accepted. This is terminal and observable — a
+    /// invariant: a cooperative cancel accepted here is terminal and observable — a
     /// repeated GET reports `cancelled`, never a stale `running`.
     Cancelled,
 }
 
 impl JsOperationStatus {
-    /// The generated wire status string for this terminal/live state.
+    /// note: the generated wire status string for this terminal/live state.
     #[must_use]
     pub const fn wire(self) -> &'static str {
         match self {
@@ -181,7 +179,7 @@ impl JsOperationStatus {
     }
 }
 
-/// One JS-provider operation retained for exact operation responses.
+/// note: one JS-provider operation retained for exact operation responses.
 #[derive(Debug, Clone)]
 pub struct JsOperationRecord {
     pub operation_id: String,
@@ -189,7 +187,7 @@ pub struct JsOperationRecord {
     pub status: JsOperationStatus,
 }
 
-/// A JS-provider session plus its active operation.
+/// note: a JS-provider session plus its active operation.
 #[derive(Debug, Clone)]
 pub struct JsSessionRecord {
     pub session_id: String,
@@ -197,26 +195,24 @@ pub struct JsSessionRecord {
     pub active_operation_id: Option<String>,
 }
 
-/// Bounded structured state for JS-provider sessions and operations.
-///
-/// Session/active-op state is bounded by the transport reservation
-/// ([`JS_PROVIDER_MAX_ACTIVE_SESSIONS`]); retained terminal operations by
-/// [`JS_MAX_TERMINAL_OPERATIONS`]. No collection grows unbounded.
+/// invariant: no collection grows unbounded — session/active-op state is bounded
+/// by the transport reservation ([`JS_PROVIDER_MAX_ACTIVE_SESSIONS`]), and
+/// retained terminal operations by [`JS_MAX_TERMINAL_OPERATIONS`].
 #[derive(Debug)]
 pub struct JsProviderState {
     sessions: BTreeMap<String, JsSessionRecord>,
     terminal: VecDeque<JsOperationRecord>,
-    /// Slots reserved by an in-flight launch, counted against the session cap so
-    /// concurrent launches cannot race past the bound.
+    /// why: counted against the session cap so concurrent launches cannot race
+    /// past the bound.
     reserved: usize,
 }
 
-/// Hard cap on retained terminal JS operations across all JS sessions.
+/// note: hard cap on retained terminal JS operations across all JS sessions.
 pub const JS_MAX_TERMINAL_OPERATIONS: usize = 64;
 
-/// Explicit transport cap on concurrent JS-provider sessions, reserved before a
-/// launch is dispatched so a successful launched child is never dropped (which
-/// would leak an owned ACP child untracked by close).
+/// why: explicit transport cap, reserved before a launch is dispatched so a
+/// successful launched child is never dropped (which would leak an owned ACP
+/// child untracked by close).
 pub const JS_PROVIDER_MAX_ACTIVE_SESSIONS: usize = 16;
 
 impl JsProviderState {
@@ -229,13 +225,11 @@ impl JsProviderState {
         }
     }
 
-    /// Upsert a terminal record by operation_id, so a duplicate terminal event
-    /// can never retain a stale status or waste the cap.
-    ///
-    /// The first terminal wins: a later event must never downgrade an
+    /// invariant: the first terminal wins — a later event must never downgrade an
     /// already-observed terminal (in particular, a `cancelled` accepted by the
     /// cooperative cancel path stays `cancelled` even if a subsequent stream
-    /// event would otherwise rewrite it).
+    /// event would otherwise rewrite it). Upserting by id also means a duplicate
+    /// terminal can never retain a stale status or waste the cap.
     fn upsert_terminal(&mut self, record: JsOperationRecord) {
         if let Some(existing) = self
             .terminal
@@ -253,7 +247,7 @@ impl JsProviderState {
         }
     }
 
-    /// Look up an active-or-terminal operation by id.
+    /// note: look up an active-or-terminal operation by id.
     #[must_use]
     pub fn operation(&self, operation_id: &str) -> Option<JsOperationRecord> {
         for session in self.sessions.values() {
@@ -308,9 +302,7 @@ impl EnvState {
         }
     }
 
-    /// Race-safe pre-launch reservation for a JS-provider session.
-    ///
-    /// Reserves one of the bounded session slots *before* the launch is
+    /// why: reserves one of the bounded session slots *before* the launch is
     /// dispatched, so a launched child is never dropped for lack of tracking
     /// (which would leak an owned ACP child). Returns `false` when the transport
     /// session cap is reached.
@@ -325,14 +317,14 @@ impl EnvState {
         false
     }
 
-    /// Release a reservation whose launch did not produce a session.
+    /// note: release a reservation whose launch did not produce a session.
     pub fn release_js_session_reservation(&self) {
         if let Ok(mut state) = self.js_state.lock() {
             state.reserved = state.reserved.saturating_sub(1);
         }
     }
 
-    /// Record a launched JS-provider session and its admitted provider id,
+    /// note: record a launched JS-provider session and its admitted provider id,
     /// consuming a pending reservation if one exists.
     pub fn record_js_session(&self, session_id: String, provider_id: String) {
         if let Ok(mut state) = self.js_state.lock() {
@@ -353,8 +345,8 @@ impl EnvState {
         }
     }
 
-    /// Record an executed JS-provider operation. Requires the admitted launch
-    /// record: an unknown session is never fabricated with an empty provider id.
+    /// invariant: requires the admitted launch record — an unknown session is never
+    /// fabricated with an empty provider id.
     pub fn record_js_session_operation(&self, session_id: &str, operation_id: String) {
         if let Ok(mut state) = self.js_state.lock() {
             if let Some(session) = state.sessions.get_mut(session_id) {
@@ -363,7 +355,7 @@ impl EnvState {
         }
     }
 
-    /// Record an operation terminal observed from a real provider event batch,
+    /// note: record an operation terminal observed from a real provider event batch,
     /// or an accepted cooperative cancel: the cancel path settles exactly the
     /// requested operation id (never whichever operation happens to be active
     /// for the session). Clears the session's active op and upserts a bounded
@@ -388,8 +380,8 @@ impl EnvState {
         }
     }
 
-    /// A `SessionStopped` marks any active op interrupted and removes the session
-    /// from the active set, consistently with shutdown semantics.
+    /// note: a `SessionStopped` marks any active op interrupted and removes the
+    /// session from the active set, consistently with shutdown semantics.
     pub fn record_js_session_stopped(&self, session_id: &str) {
         if let Ok(mut state) = self.js_state.lock() {
             let active = state
@@ -407,14 +399,14 @@ impl EnvState {
         }
     }
 
-    /// Forget a JS-provider session whose owned cleanup was confirmed.
+    /// note: forget a JS-provider session whose owned cleanup was confirmed.
     pub fn forget_js_session(&self, session_id: &str) {
         if let Ok(mut state) = self.js_state.lock() {
             state.sessions.remove(session_id);
         }
     }
 
-    /// Live JS-provider sessions awaiting an owned release.
+    /// note: live JS-provider sessions awaiting an owned release.
     pub fn js_sessions_snapshot(&self) -> Vec<(String, Option<String>)> {
         self.js_state
             .lock()
@@ -428,7 +420,7 @@ impl EnvState {
             .unwrap_or_default()
     }
 
-    /// Session ids still awaiting release, for close reports.
+    /// note: session ids still awaiting release, for close reports.
     pub fn js_session_ids(&self) -> Vec<String> {
         self.js_sessions_snapshot()
             .into_iter()
@@ -436,15 +428,12 @@ impl EnvState {
             .collect()
     }
 
-    /// Run `f` against the structured JS state under one lock.
+    /// note: run `f` against the structured JS state under one lock.
     pub fn with_js_state<T>(&self, f: impl FnOnce(&JsProviderState) -> T) -> Option<T> {
         self.js_state.lock().ok().map(|state| f(&state))
     }
 
-    /// Clone the open core for the effect-boundary journal seam (P4-T2). The
-    /// durable JS-provider journal is owned by [`CoreService`]; no pool handle
-    /// is stored or exposed on the environment any more.
-    /// Project a domain [`nexus_core::CoreError`] onto the wire taxonomy at
+    /// note: project a domain [`nexus_core::CoreError`] onto the wire taxonomy at
     /// the environment boundary. The journal-relevant arms keep their honest
     /// codes; anything else is the bounded internal fallback.
     fn wire_domain_error(err: nexus_core::CoreError) -> CoreError {
@@ -467,16 +456,19 @@ impl EnvState {
         }
     }
 
+    /// note: clone the open core for the effect-boundary journal seam (P4-T2); the
+    /// durable JS-provider journal is owned by [`CoreService`], and no pool handle
+    /// is stored or exposed on the environment.
     pub(crate) fn journal_core(&self) -> Option<Arc<CoreService>> {
         self.core.lock().ok().and_then(|slot| slot.clone())
     }
 
-    /// Journal an operation write-through at the provider boundary through
-    /// the [`CoreService`]-owned journal (LIFE-3). The in-memory state
-    /// remains authoritative for this process, but the durable mirror is part
-    /// of the effect contract: a failed write is returned to the caller,
-    /// never discarded. With no open core (service-only shell) there is no
-    /// journal and nothing to mirror.
+    /// note: journal an operation write-through at the provider boundary through the
+    /// [`CoreService`]-owned journal (LIFE-3). The in-memory state remains
+    /// authoritative for this process, but the durable mirror is part of the
+    /// effect contract: a failed write is returned to the caller, never
+    /// discarded. With no open core (service-only shell) there is no journal
+    /// and nothing to mirror.
     ///
     /// # Errors
     ///
@@ -496,12 +488,12 @@ impl EnvState {
             .map_err(Self::wire_domain_error)
     }
 
-    /// Inspect the actual delivered provider events WITHOUT mutating state:
+    /// note: inspect the actual delivered provider events WITHOUT mutating state —
     /// `OpFinished` → `Finished`, `OpFailed` → `Failed`, `SessionStopped` →
     /// `Interrupted`. The terminal is derived from the real batch, never a
-    /// caller label. Returns the terminal status plus the owning session so
-    /// the caller can journal first (LIFE-3) and only then apply the terminal
-    /// in memory: a failed journal write retains the consumed batch in the
+    /// caller label. Returns the terminal status plus the owning session so the
+    /// caller can journal first (LIFE-3) and only then apply the terminal in
+    /// memory: a failed journal write retains the consumed batch in the
     /// admitting wrapper for exactly-one re-delivery after the journal retry
     /// succeeds, never a terminal memory without its durable mirror.
     pub fn detect_js_batch_terminal(
@@ -531,9 +523,8 @@ impl EnvState {
         terminal
     }
 
-    /// Apply a previously detected batch terminal to in-memory truth. Called
-    /// only after the durable mirror succeeded, so memory and journal always
-    /// agree on the one terminal outcome.
+    /// invariant: called only after the durable mirror succeeded, so memory and
+    /// journal always agree on the one terminal outcome.
     pub fn apply_js_batch_terminal(
         &self,
         session_id: &str,
@@ -545,13 +536,13 @@ impl EnvState {
             JsOperationStatus::Finished | JsOperationStatus::Failed => {
                 self.record_js_operation_terminal(session_id, operation_id, status);
             }
-            // Batch events never derive these; only the cancel path settles
-            // `Cancelled` and `Running` is the pre-terminal state.
+            // why: batch events never derive these; only the cancel path settles
+            // `Cancelled`, and `Running` is the pre-terminal state.
             JsOperationStatus::Running | JsOperationStatus::Cancelled => {}
         }
     }
 
-    /// Journal an operation's terminal status durably through the
+    /// note: journal an operation's terminal status durably through the
     /// [`CoreService`]-owned journal (LIFE-3).
     ///
     /// # Errors
@@ -565,9 +556,9 @@ impl EnvState {
         let Some(core) = self.journal_core() else {
             return Ok(());
         };
-        // The operation record keeps its launch identity: the status write
-        // carries the real owning session and provider id, never blanks that
-        // would clobber the stored identity columns.
+        // invariant: the operation record keeps its launch identity — the status
+        // write carries the real owning session and provider id, never blanks
+        // that would clobber the stored identity columns.
         let (session_id, provider_id) = self
             .with_js_state(|s| {
                 s.operation(operation_id).and_then(|op| {
@@ -582,7 +573,7 @@ impl EnvState {
             .map_err(Self::wire_domain_error)
     }
 
-    /// Drop journaled operations for a cleanly shut-down session through the
+    /// note: drop journaled operations for a cleanly shut-down session through the
     /// [`CoreService`]-owned journal.
     ///
     /// # Errors
@@ -616,9 +607,9 @@ impl EnvState {
 
     pub async fn publish_open(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Open;
-        // The close signal is a level, not a pulse: reopening must clear it or
-        // every later callback would observe "closing" and be rejected. Only the
-        // `false` transition is broadcast on open; the next close sets it again.
+        // why: the close signal is a level, not a pulse — reopening must clear it
+        // or every later callback would observe "closing" and be rejected. Only
+        // the `false` transition is broadcast on open; the next close sets it again.
         self.close_watch.send_replace(false);
     }
 
@@ -629,7 +620,7 @@ impl EnvState {
     pub async fn publish_closed(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
         self.clear_service_only_uninitialized();
-        // The retained JS provider adapter belongs to this open only; a later
+        // why: the retained JS provider adapter belongs to this open only; a later
         // open installs its own.
         self.js_provider_port
             .lock()
@@ -637,11 +628,9 @@ impl EnvState {
             .take();
     }
 
-    /// Subscribe to the race-free close signal.
-    ///
-    /// `wait_for` returns immediately when the value already satisfies the
-    /// predicate, so a close that happened before the subscription is observed
-    /// rather than lost.
+    /// note: subscribe to the race-free close signal. `wait_for` returns immediately
+    /// when the value already satisfies the predicate, so a close that happened
+    /// before the subscription is observed rather than lost.
     #[must_use]
     pub fn close_watch(&self) -> tokio::sync::watch::Receiver<bool> {
         self.close_watch.subscribe()
@@ -668,7 +657,7 @@ impl EnvState {
         self.closing
             .store(self.generation.load(Ordering::SeqCst), Ordering::SeqCst);
         self.close_notify.notify_waiters();
-        // `send_replace` always updates the stored value, so a receiver created
+        // why: `send_replace` always updates the stored value, so a receiver created
         // after this point still observes the closed state.
         self.close_watch.send_replace(true);
     }
@@ -743,7 +732,7 @@ impl EnvState {
                                     quiesce_pending.push("actor-quiesce-deadline".to_string());
                                     false
                                 } else {
-                                    // Bounded by the same absolute deadline: the
+                                    // why: bounded by the same absolute deadline — the
                                     // joins inside are deliberately unbounded
                                     // (the authority retains its drain
                                     // ownership), so an expired budget cancels
@@ -804,10 +793,10 @@ impl EnvState {
                                         service.close(),
                                     )
                                     .await;
-                                    // `cleanup_confirmed` needs the existing
-                                    // core/JS-owner settlement too (contract
-                                    // §3): an unconfirmed report retains the
-                                    // owner instead of reading `Ok` as success.
+                                    // invariant: `cleanup_confirmed` needs the existing
+                                    // core/JS-owner settlement too (contract §3) — an
+                                    // unconfirmed report retains the owner instead of
+                                    // reading `Ok` as success.
                                     let confirmed = match settled {
                                         Ok(Ok(report)) => {
                                             let confirmed = report.cleanup_confirmed;
@@ -839,8 +828,8 @@ impl EnvState {
                             None => true,
                             Some(authority) => {
                                 let released = if ordered_close_unconfirmed {
-                                    // The ordered close has not reached this
-                                    // authority's settlement: it owns the Actor
+                                    // why: the ordered close has not reached this
+                                    // authority's settlement — it owns the Actor
                                     // drains a retry must re-join, so both it
                                     // and its manager/`LocalSet` stay retained.
                                     host_pending.push(
@@ -878,8 +867,8 @@ impl EnvState {
                                         }
                                     }
                                 };
-                                // A join that could not settle inside the budget
-                                // hands its `JoinHandle` to tracked cleanup
+                                // invariant: a join that could not settle inside the
+                                // budget hands its `JoinHandle` to tracked cleanup
                                 // straight away, so a retained authority never
                                 // leaves a detached `LocalSet` thread behind.
                                 if let Some(handle) = authority
@@ -902,9 +891,9 @@ impl EnvState {
                         };
 
                         if core_released && host_released {
-                            // Owned sessions confirmed clean: the process
-                            // reaper is stopped inside the remaining budget so
-                            // it cannot outlive this finalize.
+                            // note: owned sessions confirmed clean — the process reaper
+                            // is stopped inside the remaining budget so it cannot
+                            // outlive this finalize.
                             let stop = super::cleanup_registry::stop_reaper(deadline);
                             if !stop.joined || stop.pending_entries > 0 {
                                 let mut pending = work_state.pending_operations_snapshot().await;
@@ -977,7 +966,7 @@ impl EnvState {
         }
     }
 
-    /// The attached Host authority retained as this environment's Host
+    /// note: the attached Host authority retained as this environment's Host
     /// lifetime slot, or `None` when no owner is established.
     #[must_use]
     pub fn host_authority(&self) -> Option<Arc<HostHandle>> {
@@ -1002,7 +991,7 @@ impl EnvState {
             || self.provider_port.lock().ok().is_some_and(|g| g.is_some())
     }
 
-    /// NAPI8 environment cleanup: revoke generation and gate admissions.
+    /// note: NAPI8 environment cleanup — revoke generation and gate admissions.
     pub fn tombstone_env(&self) {
         self.env_dead.store(true, Ordering::SeqCst);
         self.generation.fetch_add(1, Ordering::SeqCst);
@@ -1024,16 +1013,16 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    /// Wait for the race-free close signal, bounded.
+    /// note: wait for the race-free close signal, bounded.
     async fn wait_closed(mut rx: tokio::sync::watch::Receiver<bool>) -> bool {
-        // Bind the result before returning: a tail expression's temporaries are
-        // dropped after the locals they borrow.
+        // why: bind the result before returning — a tail expression's temporaries
+        // are dropped after the locals they borrow.
         let waited =
             tokio::time::timeout(Duration::from_secs(5), rx.wait_for(|closed| *closed)).await;
         waited.is_ok()
     }
 
-    /// Q3-W3: the lost-wake shape. A close fires while no waiter is registered;
+    /// invariant: Q3-W3 — a close fires while no waiter is registered;
     /// `Notify::notified()` created afterwards would never resolve, so the
     /// versioned close signal must report the closed state to a late subscriber.
     #[tokio::test]
@@ -1048,7 +1037,7 @@ mod tests {
             "a close that already happened must be observed, not lost"
         );
 
-        // Contrast: a `Notify` waiter registered after the notify never fires.
+        // note: contrast — a `Notify` waiter registered after the notify never fires.
         // This is the exact lost-wake the versioned signal replaces, and it shows
         // the assertion above is meaningful rather than trivially true.
         let notify_waiter =
@@ -1059,8 +1048,8 @@ mod tests {
         );
     }
 
-    /// Q3-W3: admission racing close under contention. Subscribers register while
-    /// the close fires; not one may miss it.
+    /// note: Q3-W3 — admission racing close under contention. Subscribers register
+    /// while the close fires; not one may miss it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn close_signal_races_subscribers_without_lost_wakes() {
         let state = Arc::new(EnvState::new());
@@ -1082,9 +1071,9 @@ mod tests {
         }
     }
 
-    /// The close signal is a LEVEL, not a pulse: reopening must clear it or every
-    /// later callback would observe "closing" and be rejected (which is exactly
-    /// what the callback-lifecycle suite caught).
+    /// invariant: the close signal is a LEVEL, not a pulse — reopening must clear it
+    /// or every later callback would observe "closing" and be rejected (which is
+    /// exactly what the callback-lifecycle suite caught).
     #[tokio::test]
     async fn reopen_clears_the_close_signal() {
         let state = EnvState::new();
@@ -1102,7 +1091,6 @@ mod tests {
             "a reopened environment must not keep signalling closed"
         );
 
-        // And a later close is still observed.
         state.begin_close();
         let rx_after = state.close_watch();
         let closed = tokio::time::timeout(Duration::from_secs(2), wait_closed(rx_after)).await;
@@ -1112,7 +1100,7 @@ mod tests {
         );
     }
 
-    /// A pre-close subscriber observes the transition, not the initial value.
+    /// note: a pre-close subscriber observes the transition, not the initial value.
     #[tokio::test]
     async fn close_signal_wakes_a_pre_registered_subscriber() {
         let state = Arc::new(EnvState::new());
@@ -1143,7 +1131,6 @@ mod tests {
         assert!(state.try_reserve_js_session());
         state.record_js_session("sess-1".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-1", "op-1".to_string());
-        // Active op is live and queryable with the admitted provider id.
         let session = state
             .with_js_state(|s| s.session("sess-1").cloned())
             .flatten()
@@ -1155,8 +1142,8 @@ mod tests {
             .flatten()
             .unwrap();
         assert_eq!(op.status.wire(), "running");
-        // A real terminal event clears the active op and retains the terminal:
-        // detected without mutating, then applied — the durable mirror runs
+        // note: a real terminal event clears the active op and retains the terminal —
+        // detected without mutating, then applied; the durable mirror runs
         // between the two in production (LIFE-3).
         let (status, session_id) = state
             .detect_js_batch_terminal("op-1", &[op_finished("op-1")])
@@ -1199,7 +1186,7 @@ mod tests {
         let state = EnvState::new();
         state.record_js_session("sess-2".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-2", "op-y".to_string());
-        // An accepted cancel for `op-x` while `op-y` is the session's active
+        // note: an accepted cancel for `op-x` while `op-y` is the session's active
         // operation settles exactly `op-x` and never touches `op-y`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Cancelled);
         assert_eq!(
@@ -1222,13 +1209,13 @@ mod tests {
             "running",
             "cancel(op-x) must not mark the session's active op op-y cancelled"
         );
-        // Active-op clearing is preserved only when it matches the targeted op.
+        // note: active-op clearing is preserved only when it matches the targeted op.
         let session = state
             .with_js_state(|s| s.session("sess-2").cloned())
             .flatten()
             .unwrap();
         assert_eq!(session.active_operation_id.as_deref(), Some("op-y"));
-        // A later terminal event must never downgrade the settled `cancelled`.
+        // invariant: a later terminal event must never downgrade the settled `cancelled`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Finished);
         assert_eq!(
             state
@@ -1276,7 +1263,7 @@ mod tests {
             retained, JS_MAX_TERMINAL_OPERATIONS,
             "terminal history must be bounded"
         );
-        // A duplicate terminal upserts rather than appending.
+        // note: a duplicate terminal upserts rather than appending.
         state.record_js_operation_terminal("sess-4", "op-5", JsOperationStatus::Failed);
         assert_eq!(
             state.with_js_state(|s| s.terminal.len()).unwrap(),
@@ -1315,14 +1302,14 @@ mod tests {
             assert!(reserved <= JS_PROVIDER_MAX_ACTIVE_SESSIONS);
         }
         assert_eq!(reserved, JS_PROVIDER_MAX_ACTIVE_SESSIONS);
-        // Releasing a reservation frees exactly one slot.
+        // note: releasing a reservation frees exactly one slot.
         state.release_js_session_reservation();
         assert!(state.try_reserve_js_session());
     }
 
-    /// Seed a minimal nexus home + workspace DB and open a real
-    /// engine-owner [`CoreService`] installed on the env, so the journal
-    /// tests exercise the P4-T2 CoreService-owned journal seam end to end.
+    /// note: seed a minimal nexus home + workspace DB and open a real engine-owner
+    /// [`CoreService`] installed on the env, so the journal tests exercise the
+    /// P4-T2 CoreService-owned journal seam end to end.
     async fn open_env_with_core() -> (tempfile::TempDir, Arc<EnvState>) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let user_home = tmp.path().to_path_buf();
@@ -1356,14 +1343,14 @@ mod tests {
         (tmp, state)
     }
 
-    /// A core whose journal storage can no longer accept writes: every write
-    /// fails for real, and the Result must say so — LIFE-3 is never silently
-    /// best-effort.
+    /// invariant: a core whose journal storage can no longer accept writes makes
+    /// every write fail for real, and the Result must say so — LIFE-3 is never
+    /// silently best-effort.
     #[tokio::test]
     async fn journal_failures_are_propagated_not_discarded() {
         let (_tmp, state) = open_env_with_core().await;
         let core = state.journal_core().expect("core installed");
-        // Fail the journal by closing the owning service behind the env's
+        // why: fail the journal by closing the owning service behind the env's
         // back; the owned seam must surface the failure, not swallow it.
         core.close().await.expect("close");
         assert!(
@@ -1390,7 +1377,7 @@ mod tests {
         );
     }
 
-    /// Success behavior is unchanged: with the real admitted engine core the
+    /// note: success behavior is unchanged — with the real admitted engine core the
     /// same calls return Ok and the journal reflects the writes.
     #[tokio::test]
     async fn journal_success_path_still_returns_ok() {
@@ -1407,8 +1394,8 @@ mod tests {
             .journal_operation_status("op-ok", "cancelled")
             .await
             .expect("terminal upsert succeeds");
-        // A cancelled operation is already terminal: settlement has nothing to
-        // settle and reports zero affected rows, not an error.
+        // note: a cancelled operation is already terminal — settlement has nothing
+        // to settle and reports zero affected rows, not an error.
         let settled = core.settle_provider_orphans().await.expect("settlement");
         assert_eq!(settled, 0);
         state

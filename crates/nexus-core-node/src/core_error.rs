@@ -1,4 +1,6 @@
 //! Map domain errors to generated wire [`CoreError`] JSON for N-API consumers.
+// note: an N-API consumer parses the rejection reason as JSON, so classification
+// rides `code`/`details`, never `message`.
 
 use napi::bindgen_prelude::Error;
 use nexus_agent_host::core::readiness::safe_provider_message;
@@ -7,7 +9,7 @@ use nexus_contracts::{CoreError, CoreErrorCode};
 use nexus_core::{CoreError as DomainError, MemoryProviderRefusal};
 use serde_json::Value;
 
-/// Serialize a wire [`CoreError`] as the N-API rejection reason.
+/// note: serialize a wire [`CoreError`] as the N-API rejection reason.
 pub fn napi_error_from_wire(err: CoreError) -> Error {
     let payload = serde_json::to_string(&err).unwrap_or_else(|_| {
         serde_json::to_string(&CoreError {
@@ -21,12 +23,12 @@ pub fn napi_error_from_wire(err: CoreError) -> Error {
     Error::from_reason(payload)
 }
 
-/// Map a native-core domain error to wire JSON for TS `JSON.parse(message)`.
+/// note: map a native-core domain error to wire JSON for TS `JSON.parse(message)`.
 pub fn napi_error_from_domain(err: DomainError) -> Error {
     napi_error_from_wire(wire_core_error_from_domain(err))
 }
 
-/// Parse an `open_core` rejection reason into a typed N-API error.
+/// note: parse an `open_core` rejection reason into a typed N-API error.
 pub fn napi_error_from_open_reason(reason: String) -> Error {
     if let Ok(wire) = serde_json::from_str::<CoreError>(&reason) {
         return napi_error_from_wire(wire);
@@ -42,22 +44,22 @@ pub fn napi_error_from_open_reason(reason: String) -> Error {
     })
 }
 
-/// Serialize a wire [`CoreError`] for `open_core` rejection reasons.
+/// note: serialize a wire [`CoreError`] for `open_core` rejection reasons.
 pub fn open_reason_from_wire(err: CoreError) -> String {
     serde_json::to_string(&err).unwrap_or_else(|_| "open failed".to_string())
 }
 
-/// Serialize a domain error for `open_core` rejection reasons.
+/// note: serialize a domain error for `open_core` rejection reasons.
 pub fn open_reason_from_domain(err: DomainError) -> String {
     open_reason_from_wire(wire_core_error_from_domain(err))
 }
 
-/// Serialize a host error for `open_core` rejection reasons.
+/// note: serialize a host error for `open_core` rejection reasons.
 pub fn open_reason_from_host(err: HostError) -> String {
     open_reason_from_wire(wire_core_error_from_host(err))
 }
 
-/// Serialize an invalid-input wire error for host-query style rejections.
+/// note: serialize an invalid-input wire error for host-query style rejections.
 pub fn open_reason_invalid_input(message: impl Into<String>) -> String {
     open_reason_from_wire(CoreError {
         code: CoreErrorCode::InvalidInput,
@@ -67,7 +69,7 @@ pub fn open_reason_invalid_input(message: impl Into<String>) -> String {
     })
 }
 
-/// Serialize a not-found wire error for host-query style rejections.
+/// note: serialize a not-found wire error for host-query style rejections.
 pub fn open_reason_not_found(message: impl Into<String>) -> String {
     open_reason_from_wire(CoreError {
         code: CoreErrorCode::NotFound,
@@ -77,7 +79,7 @@ pub fn open_reason_not_found(message: impl Into<String>) -> String {
     })
 }
 
-/// Serialize a sanitized internal wire error for host-query style rejections.
+/// note: serialize a sanitized internal wire error for host-query style rejections.
 pub fn open_reason_internal() -> String {
     open_reason_from_wire(CoreError {
         code: CoreErrorCode::Internal,
@@ -87,7 +89,7 @@ pub fn open_reason_internal() -> String {
     })
 }
 
-/// The typed `details.category` naming the absent embedded Host authority.
+/// note: the typed `details.category` naming the absent embedded Host authority.
 ///
 /// It is the ONLY stable discriminator for that state: the public code/status
 /// stay `invalid_input`/`400` (an unattached authority is truthful degraded
@@ -96,7 +98,7 @@ pub fn open_reason_internal() -> String {
 /// absence fallback into a hard failure.
 pub const HOST_NOT_STARTED_CATEGORY: &str = "host_not_started";
 
-/// The ONE wire envelope for the absent embedded Host authority.
+/// note: the ONE wire envelope for the absent embedded Host authority.
 ///
 /// The open/close sequence holds the attached authority pair (journal core +
 /// Host authority) in one lifetime: both slots are published together at the
@@ -114,12 +116,12 @@ pub fn host_not_started_wire() -> CoreError {
     }
 }
 
-/// Serialize the absent-authority envelope for the string-reason entry points.
+/// note: serialize the absent-authority envelope for the string-reason entry points.
 pub fn open_reason_host_not_started() -> String {
     open_reason_from_wire(host_not_started_wire())
 }
 
-/// Reject an absent authority with the typed envelope for N-API entry points.
+/// note: reject an absent authority with the typed envelope for N-API entry points.
 ///
 /// The raw `Error::from_reason("<text>")` shape is deliberately not used here:
 /// a bare reason cannot carry the typed category, and the TS boundary would
@@ -128,7 +130,7 @@ pub fn napi_error_host_not_started() -> Error {
     napi_error_from_wire(host_not_started_wire())
 }
 
-/// The typed `details.category` naming a principal handle that does not encode
+/// note: the typed `details.category` naming a principal handle that does not encode
 /// this open's active principal at this generation (V1.206 P2 site 5).
 ///
 /// Mirrors [`HOST_NOT_STARTED_CATEGORY`]: the public code/status stay
@@ -139,7 +141,7 @@ pub fn napi_error_host_not_started() -> Error {
 /// fault.
 pub const INVALID_PRINCIPAL_HANDLE_CATEGORY: &str = "invalid_principal_handle";
 
-/// The ONE wire envelope for a principal handle that fails the shared
+/// note: the ONE wire envelope for a principal handle that fails the shared
 /// verification in `verified_principal`.
 pub fn invalid_principal_handle_wire() -> CoreError {
     CoreError {
@@ -153,7 +155,7 @@ pub fn invalid_principal_handle_wire() -> CoreError {
     }
 }
 
-/// Reject an invalid principal handle with the typed envelope for N-API entry
+/// note: reject an invalid principal handle with the typed envelope for N-API entry
 /// points.
 ///
 /// The raw `Error::from_reason("<text>")` shape is deliberately not used here:
@@ -173,7 +175,7 @@ fn internal_error_bucket(category: &str) -> &'static str {
     }
 }
 
-/// Map a host error to the generated wire envelope without leaking raw diagnostics.
+/// note: map a host error to the generated wire envelope without leaking raw diagnostics.
 pub fn wire_core_error_from_host(err: HostError) -> CoreError {
     let category = err.category();
     let message = safe_provider_message(&err);
@@ -200,7 +202,7 @@ pub fn wire_core_error_from_host(err: HostError) -> CoreError {
     }
 }
 
-/// Typed uninitialized denial shared by service-only entrypoints.
+/// note: typed uninitialized denial shared by service-only entrypoints.
 pub fn service_only_uninitialized_wire() -> CoreError {
     CoreError {
         code: CoreErrorCode::Uninitialized,
@@ -230,8 +232,8 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: serde_json::Map::from_iter([("resource".into(), Value::String(resource))]),
             http_status: Some(403),
         },
-        // World-owner scoping denial: mirrors the daemon adapter's
-        // `Forbidden { resource: "world {world_id}", reason }` (403).
+        // note: world-owner scoping denial renders as 403 `forbidden` with
+        // resource `world {world_id}` and the reason split into `details`.
         DomainError::WorldOwnerDenied { world_id, reason } => CoreError {
             code: CoreErrorCode::Forbidden,
             message: format!("forbidden: world {world_id} — {reason}"),
@@ -259,7 +261,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             ]),
             http_status: Some(400),
         },
-        // Outline OCC conflicts retain their structured details on the wire.
+        // note: outline OCC conflicts keep their structured details on the wire.
         DomainError::OutlineConflict(details) => CoreError {
             code: CoreErrorCode::OutlineConflict,
             message: "outline conflict".into(),
@@ -277,7 +279,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             ]),
             http_status: Some(409),
         },
-        // Outline validation retains its structured summary on the wire.
+        // note: outline validation keeps its structured summary on the wire.
         DomainError::OutlineValidation(summary) => CoreError {
             code: CoreErrorCode::OutlineValidationFailed,
             message: "outline validation failed".into(),
@@ -316,10 +318,9 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
                 http_status: Some(422),
             }
         }
-        // Compute input validation (V1.147 P3 F2): the core carries the
-        // structured per-entry object (`{"invalid_entries": […]}`) and the
-        // daemon renders it as the 422 `invalid_input` envelope with that
-        // object verbatim under `details`; mirror both here.
+        // note: input validation keeps the core's structured per-entry object
+        // (`{"invalid_entries": […]}`) verbatim under `details` on the 422
+        // `invalid_input` envelope.
         DomainError::InputValidation { details } => {
             let detail_value = serde_json::to_value(&details).unwrap_or(Value::Null);
             let details_map = match detail_value {
@@ -361,16 +362,12 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             )]),
             http_status: Some(coded_wire_status(&code)),
         },
-        // A peer-side tool refusal. The spine's public code is always
+        // note: a peer-side tool refusal — the spine's public code is always
         // `not_supported` (the sole raise site, `capabilities.rs`, sets it
-        // literally); the peer's own lowercase code rides in
-        // `details.wire_code`, verbatim — never re-parsed from the message.
-        // Mirrors `From<CoreError> for NexusApiError`, where
-        // `PeerDenied { code, wire_code, message }` becomes `PeerToolDenied`:
-        // `error_code()` returns the public `code`, `details` carry
-        // `wire_code`, and the status is `BAD_REQUEST`. The public code is
-        // consumed as the enum constant rather than the bound string because
-        // this surface types it as `CoreErrorCode`.
+        // literally), the peer's own lowercase code rides `details.wire_code`
+        // verbatim (never re-parsed from the message), and the status is 400.
+        // The public code is consumed as the enum constant rather than the
+        // bound string because this surface types it as `CoreErrorCode`.
         DomainError::PeerDenied {
             wire_code, message, ..
         } => CoreError {
@@ -403,16 +400,16 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: Default::default(),
             http_status: Some(400),
         },
-        // Workspace-creation exclusivity refusal: the domain names the exact
-        // collision, the adapter renders the stable 409 code.
+        // note: workspace-creation exclusivity refusal — the domain names the
+        // exact collision, the stable 409 `workspace_conflict` code carries it.
         DomainError::WorkspaceConflict(message) => CoreError {
             code: CoreErrorCode::WorkspaceConflict,
             message: format!("workspace conflict: {message}"),
             details: Default::default(),
             http_status: Some(409),
         },
-        // Retained bearer-memory 403 wire shape: the core carries the split
-        // resource + reason; render the daemon's combined forbidden message.
+        // note: retained bearer-memory 403 shape — the core carries resource
+        // and reason split; the message joins them.
         DomainError::ForbiddenReason { resource, reason } => CoreError {
             code: CoreErrorCode::Forbidden,
             message: format!("forbidden: {resource} — {reason}"),
@@ -422,17 +419,17 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             ]),
             http_status: Some(403),
         },
-        // Truthful no-provider/capability 503 (e.g. SOUL synthesis demanded
-        // with no capability registry).
+        // note: truthful no-provider/capability 503 (e.g. SOUL synthesis
+        // demanded with no capability registry).
         DomainError::ServiceUnavailable(message) => CoreError {
             code: CoreErrorCode::ServiceUnavailable,
             message,
             details: Default::default(),
             http_status: Some(503),
         },
-        // Narrative-quality rejection: the daemon's BadRequest
-        // `narrative_generation_failed` rides the generated invalid_input
-        // vocabulary with the carrier code in details.
+        // note: narrative-quality rejection — `narrative_generation_failed`
+        // rides the generated `invalid_input` vocabulary as the `carrier_code`
+        // detail.
         DomainError::NarrativeRejected(message) => CoreError {
             code: CoreErrorCode::InvalidInput,
             message: message.clone(),
@@ -442,26 +439,27 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             )]),
             http_status: Some(400),
         },
-        // Generic domain conflict (409); the generated vocabulary has no
-        // generic `conflict` code yet, so `owner_busy` carries the 409
-        // envelope with the message verbatim.
+        // why: the generated vocabulary has no generic `conflict` code, so
+        // `owner_busy` carries the 409 envelope with the message verbatim.
         DomainError::Conflict(message) => CoreError {
             code: CoreErrorCode::OwnerBusy,
             message,
             details: Default::default(),
             http_status: Some(409),
         },
-        // Stable actor-family wire conflicts (durable §11.1 codes): the 409
-        // rides `owner_busy` with the retained stable code in details.
+        // note: stable actor-family conflicts (durable §11.1 codes) — the 409
+        // rides `owner_busy`, the retained stable code travels as
+        // `details.conflict_code`.
         DomainError::ActorConflict { code, message } => CoreError {
             code: CoreErrorCode::OwnerBusy,
             message,
             details: serde_json::Map::from_iter([("conflict_code".into(), Value::String(code))]),
             http_status: Some(409),
         },
-        // A stale candidate compose base: the plan's canonical 409 envelope under
-        // the dedicated `strategy_candidate_conflict` code, with exactly the
-        // details the plan's Q2 contract names.
+        // why: a stale compose base is a compare-and-swap conflict — the
+        // dedicated `strategy_candidate_conflict` code on an exact 409, with
+        // the plan's full Q2 detail set (base/current revision, conflicting
+        // path, recovery hint).
         DomainError::StrategyCandidateConflict(conflict) => CoreError {
             code: CoreErrorCode::StrategyCandidateConflict,
             message: format!(
@@ -489,9 +487,9 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             ]),
             http_status: Some(409),
         },
-        // A second approve of the same content: the snapshot that already froze it is the
-        // answer, never a second row. A dedicated 409 code keeps this distinct from the
-        // stale-compose-base conflict above.
+        // why: a repeat approve freezes nothing — the snapshot that already
+        // froze this content is the answer, never a second row; the dedicated
+        // 409 keeps it distinct from the stale-compose-base conflict above.
         DomainError::StrategyAlreadyApproved(conflict) => CoreError {
             code: CoreErrorCode::StrategyAlreadyApproved,
             message: format!(
@@ -518,11 +516,11 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             )]),
             http_status: Some(500),
         },
-        // A remote memory-provider refusal: the peer's message and extra
-        // details never travel. Only the whitelisted effective memory code,
-        // an allowlisted peer wire code and the effective retry class ride
-        // `details`, so a caller can still tell an uncertain outcome from a
-        // clean failure (spec §3.1).
+        // safety: a remote memory-provider refusal never forwards the peer's
+        // message or extra details — only the whitelisted effective memory
+        // code, an allowlisted peer wire code and the effective retry class
+        // ride `details`, so a caller can still tell an uncertain outcome from
+        // a clean failure (spec §3.1).
         DomainError::MemoryProviderRefused {
             code,
             wire_code,
@@ -537,9 +535,9 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             }
             details.insert("retry_class".into(), Value::String(retry_class));
             match conflict_code {
-                // A proven definite memory conflict keeps the retained
+                // note: a proven definite memory conflict keeps the retained
                 // consumer-visible `conflict_code`/409 envelope the local
-                // `ActorConflict` already renders, with static text.
+                // `ActorConflict` renders, with static text.
                 Some(conflict_code) => {
                     details.insert("conflict_code".into(), Value::String(conflict_code));
                     CoreError {
@@ -569,14 +567,11 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
     }
 }
 
-/// Map a preset/strategy authoring failure to wire JSON.
+/// note: map a preset/strategy authoring failure to wire JSON.
 ///
-/// Mirrors `From<PresetError> for NexusApiError` in the daemon adapter
-/// (`crates/nexus-daemon-runtime/src/api/errors.rs`) variant for variant, so a
-/// preset error reads identically whether it reached the caller over HTTP or
-/// through this native surface. The mapped `http_status` is the daemon's own
-/// status for the same variant — the wire envelope carries it so the TS layer
-/// does not re-derive it.
+/// Each variant carries the `http_status` the HTTP transport publishes for the
+/// same refusal, so the service transport (`apps/nexus-service/src/errors.ts`)
+/// honours the envelope instead of re-deriving the status from the code.
 fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
     use nexus_core::PresetError;
     match error {
@@ -587,9 +582,8 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
                 "wire_code".into(),
                 Value::String(code.clone()),
             )]),
-            // `Rejected` is the daemon's `BadRequest`, whose status comes from
-            // its own code table: the semantic-validation codes are 422 and
-            // everything else 400.
+            // note: `Rejected` is a `BadRequest` — `preset_rejected_status`
+            // assigns 422 to the semantic-validation codes and 400 otherwise.
             http_status: Some(preset_rejected_status(&code)),
         },
         PresetError::InvalidInput { field, reason } => CoreError {
@@ -625,8 +619,9 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
             ]),
             http_status: Some(403),
         },
-        // The inner `code` is deliberately NOT leaked as the public code: the
-        // daemon always reports `internal` for this variant.
+        // why: the inner `code` is deliberately not the public code — this
+        // variant always reports `internal`; the real code stays in
+        // `details.wire_code` for the operator.
         PresetError::Internal { code, message } => CoreError {
             code: CoreErrorCode::Internal,
             message: "internal error".into(),
@@ -671,15 +666,6 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
     }
 }
 
-/// The status the daemon adapter assigns to a coded refusal.
-///
-/// Mirrors the daemon's own tables so this native surface and the HTTP
-/// transport render the same family for the same refusal.
-///
-/// Returns `i64` rather than the daemon's `u16` because the wire
-/// `CoreError.http_status` is `Option<i64>` (generated from the schema); the
-/// numbers are identical either way, and the helper exists only to feed that
-/// field.
 fn coded_core_error_code(code: &str) -> CoreErrorCode {
     match code {
         "policy_blocked" => CoreErrorCode::PolicyBlocked,
@@ -695,6 +681,12 @@ fn coded_core_error_code(code: &str) -> CoreErrorCode {
     }
 }
 
+/// note: the status a coded refusal publishes, so this surface and the HTTP
+/// transport render the same family for the same refusal.
+///
+/// `i64` rather than `u16` because the wire `CoreError.http_status` is
+/// `Option<i64>` (generated from the schema); the numbers are identical, and
+/// the helper exists only to feed that field.
 fn coded_wire_status(code: &str) -> i64 {
     match code {
         "conflict" => 409,
@@ -705,11 +697,11 @@ fn coded_wire_status(code: &str) -> i64 {
         // carries the code; this adapter decides the status
         // (`docs/specs/orchestration/orchestration-engine.md` §human wait).
         "workflow_wait_conflict" | "workflow_state_conflict" => 409,
-        // v1.207 P3 (spec §B.1/§B.3/§C): the durable-operation refusals are
-        // conflicts — `operation_id_conflict` is the first-writer-wins
-        // ownership refusal (§B.1) and `uncertain` is the "no terminal
-        // receipt, never retry blindly" answer (§B.3 item 4). Both must be an
-        // exact 409 with their coded detail, never the 400 fallback.
+        // why: the durable-operation refusals are conflicts —
+        // `operation_id_conflict` is the first-writer-wins ownership refusal
+        // (§B.1) and `uncertain` is the "no terminal receipt, never retry
+        // blindly" answer (§B.3 item 4); each must be an exact 409 with its
+        // coded detail, never the 400 fallback (spec §B.1/§B.3/§C, v1.207 P3).
         "operation_id_conflict" | "uncertain" | "operation_in_progress" => 409,
         "invalid_state"
         | "invalid_transition"
@@ -733,13 +725,11 @@ fn coded_wire_status(code: &str) -> i64 {
     }
 }
 
-/// The daemon's status table for a `PresetError::Rejected` code.
+/// note: the status table for a `PresetError::Rejected` code — 422 for the
+/// semantic-validation codes, 400 otherwise (the `BadRequest` family).
 ///
-/// `Rejected` renders as the daemon's `BadRequest`, whose public status is 422
-/// for the semantic-validation codes and 400 otherwise.
-///
-/// Returns `i64` for the same reason as [`coded_wire_status`]: the wire
-/// `http_status` field is `Option<i64>`.
+/// `i64` for the same reason as [`coded_wire_status`]: the wire `http_status`
+/// field is `Option<i64>`.
 fn preset_rejected_status(code: &str) -> i64 {
     match code {
         "world_id_required"
@@ -807,22 +797,21 @@ mod tests {
             wire_code: "capability_missing".into(),
             message: "peer does not expose that tool".into(),
         });
-        // The public code is the spine's, never the peer's — the peer's own
-        // code must not become the classification a client branches on.
+        // invariant: the public code is the spine's, never the peer's — the
+        // peer's own code must not become the classification a client branches on.
         assert_eq!(wire.code, CoreErrorCode::NotSupported);
         assert_eq!(wire.message, "peer does not expose that tool");
         assert_eq!(wire.http_status, Some(400));
-        // The peer's code survives verbatim in details, where the daemon's
-        // `PeerToolDenied` also carries it.
+        // note: the peer's code survives verbatim in `details.wire_code`.
         assert_eq!(
             wire.details.get("wire_code").and_then(|v| v.as_str()),
             Some("capability_missing")
         );
     }
 
-    /// v1.207 P3 (§B.1/§B.3/§C): the two frozen durable-operation refusal
-    /// codes render an exact 409 with their code preserved in
-    /// `details.wire_code`, never the 400 `invalid_input` fallback.
+    /// note: the frozen durable-operation refusal codes render an exact 409
+    /// with their code preserved in `details.wire_code`, never the 400
+    /// `invalid_input` fallback (spec §B.1/§B.3/§C, v1.207 P3).
     #[test]
     fn durable_operation_refusals_are_conflicts() {
         for code in [

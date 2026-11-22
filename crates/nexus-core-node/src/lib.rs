@@ -2,7 +2,8 @@
 //!
 //! # Safety boundary
 //! N-API/Javascript interop is confined to dependency-provided shims and
-//! `#[napi]`-generated glue. All crate-local logic is safe Rust.
+//! `#[napi]`-generated glue.
+// invariant: all crate-local logic is safe Rust.
 
 mod actors;
 mod admitting_provider_port;
@@ -55,7 +56,7 @@ pub fn compatibility() -> Result<String> {
     let compat = NativeCompatibility {
         native_api_version: 1,
         writer_protocol: 1,
-        // Build-time target from `build.rs` (`TARGET`); never a runtime-env read.
+        // why: a build-time constant from `build.rs` (`TARGET`), never a runtime-env read.
         target_triple: env!("NEXUS_BUILD_TARGET").to_string(),
         package_version: env!("CARGO_PKG_VERSION").to_string(),
         contract_tree_sha256: contract_tree_sha256(),
@@ -182,7 +183,7 @@ impl NativeCore {
     pub async fn provider_call(&self, request_json: Buffer) -> Result<Buffer> {
         self.deny_service_only()?;
         let request: ProviderCall = serde_json::from_slice(request_json.as_ref())?;
-        // The provider-only lane is not an authority bypass (technical contract
+        // why: the provider-only lane is not an authority bypass (technical contract
         // §4): a core-indexed or tombstoned Actor id is refused before the port
         // can serve it, while an id the core never indexed keeps its existing
         // provider-only semantics.
@@ -214,7 +215,7 @@ impl NativeCore {
         max_bytes: u32,
     ) -> Result<Buffer> {
         self.deny_service_only()?;
-        // Same gate as `provider_call`: an Actor operation's stream belongs to
+        // why: same gate as `provider_call` — an Actor operation's stream belongs to
         // the core's own observation, so the raw lane must not drain it.
         host_query::deny_actor_provider_ids(&self.inner, None, Some(&operation_id))
             .map_err(core_error::napi_error_from_domain)?;
@@ -251,7 +252,7 @@ impl NativeCore {
         .await
     }
 
-    /// Dispatch one normalized operation (prompt / set_model / set_mode) on a
+    /// why: dispatch one normalized operation (prompt / set_model / set_mode) on a
     /// session through the same authority, so the Actor admission, the
     /// reservation of a Character operation and its terminal ownership all
     /// stay in the core.
@@ -270,7 +271,7 @@ impl NativeCore {
         .await
     }
 
-    /// The owner-authorized terminal outcome of one Character operation, from
+    /// note: the owner-authorized terminal outcome of one Character operation, from
     /// the authority's process-lifetime registry — never a value inferred from
     /// a generic session state or a provider-only journal row.
     #[napi]
@@ -286,7 +287,7 @@ impl NativeCore {
         .await
     }
 
-    /// Cancel one owner-authorized Character operation through the same
+    /// note: cancel one owner-authorized Character operation through the same
     /// manager, reporting the provider's actual accept/refuse.
     #[napi]
     pub async fn host_cancel_operation(
@@ -301,7 +302,7 @@ impl NativeCore {
         .await
     }
 
-    /// Shut one session down under the stored-owner gate: cancel its active
+    /// note: shut one session down under the stored-owner gate: cancel its active
     /// work, release it on the same manager, then retire the Actor reuse state.
     #[napi]
     pub async fn host_shutdown_session(
@@ -316,7 +317,7 @@ impl NativeCore {
         .await
     }
 
-    /// The next bounded batch of one Character operation's events, selected to
+    /// note: the next bounded batch of one Character operation's events, selected to
     /// the exact `(session_id, operation_id)` pair the authority recorded.
     #[napi]
     pub async fn next_host_events(
@@ -341,7 +342,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&report)?))
     }
 
-    /// Promote the service-only shell to the full core in process.
+    /// note: promote the service-only shell to the full core in process.
     ///
     /// Runs the SAME admission/publication the startup open performs, after a
     /// first-run workspace selection made the home initialized. Idempotent once
@@ -355,7 +356,7 @@ impl NativeCore {
         Ok(())
     }
 
-    /// The open service and the principal behind `principal_handle`.
+    /// note: the open service and the principal behind `principal_handle`.
     ///
     /// The core must be open, the environment must not be closing, and the
     /// handle must encode the ACTIVE principal of this open at this
@@ -406,7 +407,7 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&value)?))
     }
 
-    /// The Host-authority sibling of [`Self::json_call`]: the same verified
+    /// note: the Host-authority sibling of [`Self::json_call`]: the same verified
     /// principal, but the call reaches the attached core Host authority
     /// (`HostHandle`) instead of the domain service. The authority slot must
     /// hold the open's adopted authority; without one there is no Host to call.
@@ -428,7 +429,7 @@ impl NativeCore {
     }
 }
 
-/// Test-only: force cleanup attempts to report unconfirmed.
+/// note: test-only — force cleanup attempts to report unconfirmed.
 #[napi]
 pub fn force_unconfirmed_cleanup(enable: bool) {
     lifecycle::set_force_unconfirmed(enable);
@@ -459,7 +460,7 @@ pub fn open(env: Env, options_json: String, callbacks: Option<Object<'_>>) -> Re
     Ok(NativeCore { inner: state })
 }
 
-/// Reset the product's local state (`state.db` + its WAL/SHM siblings) under
+/// note: reset the product's local state (`state.db` + its WAL/SHM siblings) under
 /// the trusted `home`, resolving with the number of reset stores.
 ///
 /// The deletion runs in Rust behind the writer protocol's exclusive migration
@@ -486,7 +487,7 @@ pub async fn reset_local_state(home: String) -> Result<u32> {
     u32::try_from(count).map_err(|_| internal_reset_error("reset count out of range"))
 }
 
-/// Publish a complete config document at an absolute target path.
+/// note: publish a complete config document at an absolute target path.
 ///
 /// The ONE native publication path: a write-authorisation probe, the target's
 /// access-policy capture, a sealed staging directory and file, the ordered
@@ -528,7 +529,7 @@ pub async fn publish_document(path: String, contents: String) -> Result<()> {
     }
 }
 
-/// Map a publication refusal to the wire `CoreError` envelope.
+/// note: map a publication refusal to the wire `CoreError` envelope.
 ///
 /// The kind is mapped once, here: a target policy refusal (a denied write
 /// probe, an unreproducible policy, a hard-linked or non-regular target, a
@@ -563,12 +564,12 @@ fn wire_core_error_from_publication(error: &std::io::Error) -> CoreError {
     }
 }
 
-/// Wire rejection for a publication failure.
+/// note: wire rejection for a publication failure.
 fn napi_error_from_publication(error: &std::io::Error) -> Error {
     core_error::napi_error_from_wire(wire_core_error_from_publication(error))
 }
 
-/// Wire rejection for a publication infrastructure failure.
+/// note: wire rejection for a publication infrastructure failure.
 fn internal_publication_error(message: &str) -> Error {
     core_error::napi_error_from_wire(CoreError {
         code: CoreErrorCode::Internal,
@@ -578,7 +579,7 @@ fn internal_publication_error(message: &str) -> Error {
     })
 }
 
-/// Map a local-state reset failure to the wire `CoreError` envelope.
+/// note: map a local-state reset failure to the wire `CoreError` envelope.
 fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
     match err {
         nexus_local_db::LocalDbError::OwnerBusy { resource } => CoreError {
@@ -612,7 +613,7 @@ fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
             details: serde_json::Map::from_iter([("path".into(), Value::String(path.clone()))]),
             http_status: Some(500),
         },
-        // The reset cannot produce another variant; refuse honestly rather than
+        // why: the reset cannot produce another variant; refuse honestly rather than
         // leaking an unrelated diagnostic.
         _ => CoreError {
             code: CoreErrorCode::Internal,
@@ -623,12 +624,12 @@ fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
     }
 }
 
-/// Wire rejection for a reset failure, with the native reason attached.
+/// note: wire rejection for a reset failure, with the native reason attached.
 fn napi_error_from_reset(err: nexus_local_db::LocalDbError) -> Error {
     core_error::napi_error_from_wire(wire_core_error_from_reset(&err))
 }
 
-/// Wire rejection for a reset infrastructure failure.
+/// note: wire rejection for a reset infrastructure failure.
 fn internal_reset_error(message: &str) -> Error {
     core_error::napi_error_from_wire(CoreError {
         code: CoreErrorCode::Internal,

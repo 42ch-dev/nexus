@@ -19,6 +19,10 @@
 //! input: the display id, the slug, the per-fragment keywords and the memory
 //! file's frontmatter are the only members the projections need, and the rest
 //! stays provider/CLI provenance.
+// invariant: `partition` is the single classifier for both consumers — the nine
+// authored `nexus.<MemoryKind>` kinds are long-term memory, `fact` records are
+// the fragment family, everything else is not memory for MCA, and legacy-only
+// metadata never becomes an MCA input.
 
 use nexus_contracts::generated::domain::memory::MemoryMemoryKind;
 use nexus_spoke_adapter::spoke_schemas::data::retained_record::PlacementScope;
@@ -26,83 +30,83 @@ use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-/// Record kind of a fragment: the provider's core `fact` vocabulary.
+/// note: record kind of a fragment — the provider's core `fact` vocabulary.
 pub const FACT_KIND: &str = "fact";
 
-/// The legacy memory-file format version (`nexus_creator_memory::MEMORY_FILE_VERSION`),
-/// repeated because the DTO is what a provider-native record offers.
+/// note: the legacy memory-file format version
+/// (`nexus_creator_memory::MEMORY_FILE_VERSION`), repeated because the DTO is
+/// what a provider-native record offers.
 const DEFAULT_MEMORY_VERSION: u32 = 1;
 
-/// Prefix of a namespaced Nexus `MemoryKind`. The provider-side source of this
-/// string is `nexus_memory_provider::policy::NEXUS_KIND_PREFIX`; it is repeated
-/// here because this crate is a dependency of `nexus-core`, never the reverse,
-/// and the provider sits behind that edge.
+/// note: prefix of a namespaced Nexus `MemoryKind`. The provider-side source of
+/// this string is `nexus_memory_provider::policy::NEXUS_KIND_PREFIX`; it is
+/// repeated here because this crate is a dependency of `nexus-core`, never the
+/// reverse, and the provider sits behind that edge.
 const NEXUS_KIND_PREFIX: &str = "nexus.";
 
-/// One recall `fact` record as E6 renders a fragment line.
+/// note: one recall `fact` record as E6 renders a fragment line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FragmentMemory {
-    /// Legacy `fragment_id` when the record carries one, else its record id.
+    /// note: legacy `fragment_id` when the record carries one, else its record
+    /// id.
     pub fragment_id: String,
-    /// The fragment summary (`content.text`).
+    /// note: the fragment summary (`content.text`).
     pub summary: String,
-    /// `content.structured.nexus_legacy.keywords`; `None` when the record
+    /// note: `content.structured.nexus_legacy.keywords`; `None` when the record
     /// carries no keyword member at all (the distinction the projection's
     /// rendered line preserves).
     pub keywords: Option<Vec<String>>,
-    /// The record's legacy selection key: the original `created_at` TEXT a
-    /// migrated row carried, else the record's own rendering. The legacy
+    /// note: the record's legacy selection key — the original `created_at` TEXT
+    /// a migrated row carried, else the record's own rendering. The legacy
     /// per-scope read ordered by this text (not by the parsed instant), so the
     /// projection keeps the same key (fix round 4, finding R4-F1).
     pub created_at: String,
-    /// The admitted scope the fragment sits in. E6 bounds each scope's
+    /// note: the admitted scope the fragment sits in. E6 bounds each scope's
     /// fragments separately, exactly as the legacy per-scope queries did.
     pub scope: FragmentScope,
 }
 
-/// A recall record's placement as E6's per-scope fragment bounds need it.
+/// note: a recall record's placement as E6's per-scope fragment bounds need it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FragmentScope {
-    /// The bearer-shared scope.
+    /// note: the bearer-shared scope.
     Shared,
-    /// One binding-local scope (`context` placement).
+    /// note: one binding-local scope (`context` placement).
     Context(String),
 }
 
-/// A legacy memory file's frontmatter plus its body.
-///
-/// A migrated record carries these fields in `nexus_legacy`; a provider-native
-/// record never had a file, so its frontmatter is derived from the retained
-/// record itself.
+/// note: a legacy memory file's frontmatter plus its body. A migrated record
+/// carries these fields in `nexus_legacy`; a provider-native record never had a
+/// file, so its frontmatter is derived from the retained record itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryDocument {
-    /// `nexus_memory_version` — the legacy file format version.
+    /// note: `nexus_memory_version` — the legacy file format version.
     pub nexus_memory_version: u32,
-    /// `memory_id` — the logical id (`mem_<hex>`).
+    /// note: `memory_id` — the logical id (`mem_<hex>`).
     pub memory_id: String,
-    /// `memory_kind` — the bare authored kind (`story_summary`, …).
+    /// note: `memory_kind` — the bare authored kind (`story_summary`, …).
     pub memory_kind: String,
-    /// `updated_at` — the file's own timestamp text.
+    /// note: `updated_at` — the file's own timestamp text.
     pub updated_at: String,
-    /// `source_session_ids` — the ACP sessions that produced the memory.
+    /// note: `source_session_ids` — the ACP sessions that produced the memory.
     pub source_session_ids: Vec<String>,
-    /// The markdown body (`content.text`).
+    /// note: the markdown body (`content.text`).
     pub body: String,
 }
 
-/// One recall result set split into the inputs E6 and E10 consume.
+/// note: one recall result set split into the inputs E6 and E10 consume.
 #[derive(Debug, Clone, Default)]
 pub struct RecallPartition {
-    /// The authored `nexus.<MemoryKind>` records, in recall order.
+    /// note: the authored `nexus.<MemoryKind>` records, in recall order.
     pub long_term_memories: Vec<RetainedRecord>,
-    /// `fact` records in the legacy order (`created_at` TEXT DESC,
+    /// note: `fact` records in the legacy order (`created_at` TEXT DESC,
     /// `fragment_id` DESC) — E6's deterministic merge order.
     pub fragments: Vec<FragmentMemory>,
-    /// The union of every fragment's keywords (de-duplicated, sorted).
+    /// note: the union of every fragment's keywords (de-duplicated, sorted).
     pub fragment_keywords: Vec<String>,
 }
 
-/// Split a recall result set into the E10 long-term-memory vector, the E6
+/// note: split a recall result set into the E10 long-term-memory vector, the E6
 /// fragment signals and the MCA keyword union.
 #[must_use]
 pub fn partition(records: Vec<RetainedRecord>) -> RecallPartition {
@@ -150,15 +154,15 @@ pub fn partition(records: Vec<RetainedRecord>) -> RecallPartition {
     partition
 }
 
-/// Whether `kind` is one of the nine authored `nexus.<MemoryKind>` record kinds.
-/// The derived `nexus.soul_narrative` kind and the `event` provenance rows are
-/// outside that taxonomy, so they are not long-term memory.
+/// note: whether `kind` is one of the nine authored `nexus.<MemoryKind>` record
+/// kinds. The derived `nexus.soul_narrative` kind and the `event` provenance
+/// rows are outside that taxonomy, so they are not long-term memory.
 fn is_authored_kind(kind: &str) -> bool {
     kind.strip_prefix(NEXUS_KIND_PREFIX)
         .is_some_and(|bare| bare.parse::<MemoryMemoryKind>().is_ok())
 }
 
-/// The record's namespaced kind (`nexus.story_summary`, `fact`, `event`, …).
+/// note: the record's namespaced kind (`nexus.story_summary`, `fact`, `event`, …).
 #[must_use]
 pub fn memory_kind(record: &RetainedRecord) -> &str {
     match record {
@@ -167,7 +171,7 @@ pub fn memory_kind(record: &RetainedRecord) -> &str {
     }
 }
 
-/// The rendered body (`content.text`): what both entry points project.
+/// note: the rendered body (`content.text`), what both entry points project.
 #[must_use]
 pub const fn memory_body(record: &RetainedRecord) -> &str {
     match record {
@@ -176,8 +180,8 @@ pub const fn memory_body(record: &RetainedRecord) -> &str {
     }
 }
 
-/// The `### Memory:` title and cloud-dedup id: the legacy `memory_id` when the
-/// record carries one, else the provider's record id.
+/// note: the `### Memory:` title and cloud-dedup id — the legacy `memory_id`
+/// when the record carries one, else the provider's record id.
 #[must_use]
 pub fn memory_display_id(record: &RetainedRecord) -> String {
     legacy_metadata(record)
@@ -186,8 +190,9 @@ pub fn memory_display_id(record: &RetainedRecord) -> String {
         .map_or_else(|| record_id(record).to_string(), str::to_string)
 }
 
-/// The legacy slug of a projected long-term memory (`None` for a record that
-/// did not come from a bearer file). E6 orders its memory lines by this slug.
+/// note: the legacy slug of a projected long-term memory (`None` for a record
+/// that did not come from a bearer file). E6 orders its memory lines by this
+/// slug.
 #[must_use]
 pub fn memory_slug(record: &RetainedRecord) -> Option<&str> {
     legacy_metadata(record)
@@ -195,12 +200,11 @@ pub fn memory_slug(record: &RetainedRecord) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// The memory-file document a promoted record stands for.
-///
-/// The frontmatter is the one the migration preserves verbatim in
-/// `nexus_legacy`, plus the body. A record the provider authored natively never
-/// had a file, so its frontmatter is derived from the record (record id as the
-/// memory id, the bare kind, its own `updated_at`).
+/// note: the memory-file document a promoted record stands for. The frontmatter
+/// is the one the migration preserves verbatim in `nexus_legacy`, plus the body.
+/// A record the provider authored natively never had a file, so its frontmatter
+/// is derived from the record (record id as the memory id, the bare kind, its
+/// own `updated_at`).
 #[must_use]
 pub fn memory_document(record: &RetainedRecord) -> MemoryDocument {
     let legacy = legacy_metadata(record);
@@ -236,7 +240,7 @@ pub fn memory_document(record: &RetainedRecord) -> MemoryDocument {
     }
 }
 
-/// The record's placement as E6's per-scope fragment bounds need it.
+/// note: the record's placement as E6's per-scope fragment bounds need it.
 fn placement(record: &RetainedRecord) -> FragmentScope {
     let scope = match record {
         RetainedRecord::LiveRecord(live) => &live.scope,
@@ -250,7 +254,7 @@ fn placement(record: &RetainedRecord) -> FragmentScope {
     }
 }
 
-/// The `updated_at` recency key of the `nexus.<MemoryKind>` sort.
+/// note: the `updated_at` recency key of the `nexus.<MemoryKind>` sort.
 #[must_use]
 pub fn memory_updated_at(record: &RetainedRecord) -> &chrono::DateTime<chrono::Utc> {
     match record {
@@ -259,11 +263,11 @@ pub fn memory_updated_at(record: &RetainedRecord) -> &chrono::DateTime<chrono::U
     }
 }
 
-/// The record's legacy selection key: the original `created_at` TEXT a
-/// migrated row carries verbatim in `nexus_legacy`. The provider only keeps
-/// the normalized instant, whose order can differ from that text, so the
-/// bridge's raw column is what the legacy read ordered by. A provider-native
-/// record never had a legacy column and is keyed by its own rendering.
+/// note: the record's legacy selection key — the original `created_at` TEXT a
+/// migrated row carries verbatim in `nexus_legacy`. The provider only keeps the
+/// normalized instant, whose order can differ from that text, so the bridge's
+/// raw column is what the legacy read ordered by. A provider-native record never
+/// had a legacy column and is keyed by its own rendering.
 fn created_at_key(record: &RetainedRecord) -> String {
     legacy_metadata(record)
         .and_then(|legacy| legacy.get("created_at"))
@@ -288,7 +292,7 @@ fn record_id(record: &RetainedRecord) -> &str {
     }
 }
 
-/// `content.structured.nexus_legacy` — the legacy metadata the provider
+/// note: `content.structured.nexus_legacy` — the legacy metadata the provider
 /// preserves for CLI/provenance, never an MCA input as a whole.
 fn legacy_metadata(record: &RetainedRecord) -> Option<&serde_json::Map<String, Value>> {
     let content = match record {

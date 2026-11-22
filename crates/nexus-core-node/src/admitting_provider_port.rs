@@ -1,4 +1,6 @@
 //! Wraps a JS [`ProviderPort`] and injects Rust-admitted recipes for probe/launch.
+// invariant: every probe/launch reply is tracked under its own request-local
+// provider id, so concurrent calls never cross-assign ownership.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -12,7 +14,7 @@ use nexus_provider_ports::{ProviderPort, ProviderResult};
 
 use crate::env_state::{JsOperationStatus, JS_PROVIDER_MAX_ACTIVE_SESSIONS};
 
-/// Reuse the effect-path taxonomy so a native caller sees one category per
+/// why: reuse the effect-path taxonomy so a native caller sees one category per
 /// condition at both the admission boundary and the effect path. Mapping every
 /// host error to `invalid_input` reported policy denials and busy providers as
 /// malformed input.
@@ -20,8 +22,8 @@ fn map_host_error(err: nexus_agent_host::error::HostError) -> CoreError {
     nexus_agent_host::providers::port::host_error_to_core_error(&err)
 }
 
-/// A durable-journal failure is a typed internal error at the provider
-/// boundary: the effect's required write-through (LIFE-3) did not land, so
+/// why: a durable-journal failure is a typed internal error at the provider
+/// boundary — the effect's required write-through (LIFE-3) did not land, so
 /// success is never reported without its durable mirror.
 fn journal_failure(err: CoreError) -> CoreError {
     CoreError {
@@ -32,11 +34,11 @@ fn journal_failure(err: CoreError) -> CoreError {
     }
 }
 
-/// An effect-committed failure: the provider side effect (operation installed
-/// / cancelled / session reaped) already succeeded when the required durable
-/// journal write failed. This is NOT a rollback and NOT retryable: the reply
+/// note: an effect-committed failure — the provider side effect (operation
+/// installed / cancelled / session reaped) already succeeded when the required
+/// durable journal write failed. Never a rollback, never retryable: the reply
 /// is a typed 500 that names the affected operation/session so callers can
-/// inspect and clean up deterministically, and EnvState is kept aligned with
+/// inspect and clean up deterministically, and EnvState stays aligned with
 /// the actual provider effect (see the per-method call sites).
 fn effect_committed_failure(err: CoreError, operation_id: &str, session_id: &str) -> CoreError {
     let mut details = serde_json::Map::new();
@@ -79,11 +81,11 @@ fn provider_id_from_payload(
         })
 }
 
-/// A provider batch whose terminal was consumed from the provider but whose
-/// durable journal write failed. The real adapter dequeues terminal delivery
-/// and acknowledges it before `next` returns, so the provider cannot replay
-/// this batch: it is retained here and re-delivered exactly once after the
-/// journal retry succeeds.
+/// note: a provider batch whose terminal was consumed from the provider but
+/// whose durable journal write failed. The real adapter dequeues terminal
+/// delivery and acknowledges it before `next` returns, so the provider cannot
+/// replay this batch: it is retained here and re-delivered exactly once after
+/// the journal retry succeeds.
 struct PendingTerminalBatch {
     batch: ProviderEventBatch,
     status: JsOperationStatus,
@@ -94,10 +96,10 @@ pub struct AdmittingProviderPort {
     host: Arc<HostManager>,
     inner: Arc<dyn ProviderPort>,
     state: Arc<super::env_state::EnvState>,
-    /// Consumed-but-unjournaled terminal batches, keyed by operation id.
-    /// Bounded by `JS_PROVIDER_MAX_ACTIVE_SESSIONS`: a pending batch exists
-    /// only for an operation still active in memory, and every session holds
-    /// at most one active operation.
+    /// invariant: consumed-but-unjournaled terminal batches, keyed by operation
+    /// id, stay bounded by `JS_PROVIDER_MAX_ACTIVE_SESSIONS` — a pending batch
+    /// exists only for an operation still active in memory, and every session
+    /// holds at most one active operation.
     pending_terminal_batches: Mutex<HashMap<String, PendingTerminalBatch>>,
 }
 
@@ -115,8 +117,8 @@ impl AdmittingProviderPort {
         }
     }
 
-    /// Admit the recipe and return the request-local provider id, so concurrent
-    /// probe/launch calls can never cross-assign provider ownership.
+    /// why: admit the recipe and return the request-local provider id, so
+    /// concurrent probe/launch calls can never cross-assign provider ownership.
     async fn admit_probe_or_launch(&self, request: &mut ProviderCall) -> ProviderResult<String> {
         reject_caller_recipe_payload(&request.payload).map_err(map_host_error)?;
         let provider_id_raw = provider_id_from_payload(&request.payload)?;
@@ -136,13 +138,11 @@ impl AdmittingProviderPort {
         Ok(provider_id_raw)
     }
 
-    /// Retain a consumed provider terminal batch for exactly-one re-delivery
-    /// after the journal retry succeeds. The bound mirrors the active
-    /// operation cap: at most one pending batch per active operation, at most
-    /// one active operation per session, at most
-    /// `JS_PROVIDER_MAX_ACTIVE_SESSIONS` sessions. If the bound were somehow
-    /// exceeded the batch is dropped rather than growing unbounded — the
-    /// typed journal failure still reports the terminal loss.
+    /// invariant: at most one pending batch per active operation, one active
+    /// operation per session, and `JS_PROVIDER_MAX_ACTIVE_SESSIONS` sessions —
+    /// the bound mirrors the active operation cap. If it were somehow exceeded
+    /// the batch is dropped rather than growing unbounded; the typed journal
+    /// failure still reports the terminal loss.
     fn retain_pending_terminal_batch(&self, operation_id: &str, pending: PendingTerminalBatch) {
         if let Ok(mut pending_batches) = self.pending_terminal_batches.lock() {
             if pending_batches.len() < JS_PROVIDER_MAX_ACTIVE_SESSIONS
@@ -159,11 +159,12 @@ impl ProviderPort for AdmittingProviderPort {
     async fn call(&self, mut request: ProviderCall) -> ProviderResult<ProviderReply> {
         let method = request.method;
         let session_id = request.session_id.clone();
-        // A cancel call may carry only the operation id; capture it before the
-        // request is consumed so the settle path can resolve the owning session.
+        // why: a cancel call may carry only the operation id, so capture it
+        // before the request is consumed — the settle path resolves the owning
+        // session from it.
         let mut request_operation_id = request.operation_id.clone();
-        // Reserve a bounded tracking slot *before* any admission or dispatch for
-        // a launch. If the cap is reached, refuse with a typed Busy before
+        // why: reserve a bounded tracking slot *before* any admission or
+        // dispatch for a launch — at the cap, a typed Busy is refused before
         // touching the adapter, so a launched child is never dropped untracked.
         let reserved = if matches!(method, ProviderCallMethod::Launch) {
             if !self.state.try_reserve_js_session() {
@@ -178,8 +179,8 @@ impl ProviderPort for AdmittingProviderPort {
         } else {
             false
         };
-        // The admitted provider id is request-local: never a shared last-value
-        // slot, so concurrent launches cannot cross-assign ownership.
+        // why: request-local, never a shared last-value slot — concurrent
+        // launches cannot cross-assign ownership.
         let admitted_provider_id = if matches!(
             method,
             ProviderCallMethod::Probe | ProviderCallMethod::Launch
@@ -205,10 +206,11 @@ impl ProviderPort for AdmittingProviderPort {
                 return Err(err);
             }
         };
-        // The JS adapter owns its ACP children; native close must be able to
-        // cancel and release them, so track live JS sessions at the one place
-        // that observes every launch/execute/shutdown reply. The same state backs
-        // `hostQuery`, so it records the request-local admitted provider id.
+        // why: the JS adapter owns its ACP children and native close must be
+        // able to cancel and release them, so live JS sessions are tracked at
+        // the one place that observes every launch/execute/shutdown reply. The
+        // same state backs `hostQuery`, so it records the request-local
+        // admitted provider id.
         match method {
             ProviderCallMethod::Launch => {
                 if reply.ok {
@@ -226,10 +228,10 @@ impl ProviderPort for AdmittingProviderPort {
                 if let (Some(session_id), Some(operation_id)) =
                     (session_id.as_deref(), reply.operation_id.clone())
                 {
-                    // Durable write-through FIRST (LIFE-3) on the happy path:
-                    // an op still active at process exit is settled to
-                    // `interrupted` by the next open, so success is never
-                    // reported without its durable mirror.
+                    // invariant: durable write-through FIRST (LIFE-3) on the
+                    // happy path — an op still active at process exit is
+                    // settled to `interrupted` by the next open, so success is
+                    // never reported without its durable mirror.
                     let provider_id = self
                         .state
                         .with_js_state(|s| s.session(session_id).map(|r| r.provider_id.clone()))
@@ -245,10 +247,10 @@ impl ProviderPort for AdmittingProviderPort {
                                 .record_js_session_operation(session_id, operation_id);
                         }
                         Err(err) => {
-                            // Effect-committed failure: the adapter already
-                            // installed and started this operation before the
-                            // journal write ran, so the effect is committed —
-                            // never rolled back, never retryable. EnvState
+                            // note: effect-committed failure — the adapter
+                            // already installed and started this operation
+                            // before the journal write ran, so the effect is
+                            // never rolled back and never retryable. EnvState
                             // stays aligned with the real provider state (the
                             // operation is live), so inspect and native close
                             // can still discover and reap it deterministically.
@@ -259,10 +261,10 @@ impl ProviderPort for AdmittingProviderPort {
                     }
                 }
             }
-            // A cooperative cancel acknowledgement settles exactly the
-            // requested operation to the `cancelled` terminal (observable via
-            // GET), mirrored durably — never whichever operation happens to
-            // be active for the session. A cancel call may carry only the
+            // invariant: a cooperative cancel acknowledgement settles exactly
+            // the requested operation to the `cancelled` terminal (observable
+            // via GET), mirrored durably — never whichever operation happens
+            // to be active for the session. A cancel call may carry only the
             // operation id, so the owning session is resolved from the
             // operation when session_id is absent.
             ProviderCallMethod::Cancel if reply.ok => {
@@ -275,18 +277,18 @@ impl ProviderPort for AdmittingProviderPort {
                     })
                 });
                 if let Some(operation_id) = operation_id {
-                    // Journal the `cancelled` terminal BEFORE the in-memory
-                    // acknowledgement on the happy path (LIFE-3).
+                    // invariant: journal the `cancelled` terminal BEFORE the
+                    // in-memory acknowledgement on the happy path (LIFE-3).
                     match self
                         .state
                         .journal_operation_status(&operation_id, "cancelled")
                         .await
                     {
                         Ok(()) => {
-                            // Settle exactly the requested operation id —
-                            // never whichever operation happens to be active
-                            // for the session; the session's active op is
-                            // cleared only when it matches the targeted op.
+                            // invariant: settle exactly the requested operation
+                            // id, never whichever operation happens to be
+                            // active for the session; the session's active op
+                            // is cleared only when it matches the targeted op.
                             if let Some(session_id) = session_id.as_deref() {
                                 self.state.record_js_operation_terminal(
                                     session_id,
@@ -296,15 +298,15 @@ impl ProviderPort for AdmittingProviderPort {
                             }
                         }
                         Err(err) => {
-                            // Effect-committed failure: the adapter already
-                            // cancelled the requested operation, reaped the
-                            // owned child and released the session before this
-                            // journal write ran. The effect is committed —
-                            // never rolled back, never retryable — so EnvState
-                            // settles the same `cancelled` terminal the
-                            // provider actually produced, exactly for the
-                            // requested operation id, and the typed 500 names
-                            // the operation/session for deterministic
+                            // note: effect-committed failure — the adapter
+                            // already cancelled the requested operation, reaped
+                            // the owned child and released the session before
+                            // this journal write ran, so the effect is never
+                            // rolled back and never retryable. EnvState settles
+                            // the same `cancelled` terminal the provider
+                            // actually produced, exactly for the requested
+                            // operation id, and the typed 500 names the
+                            // operation/session for deterministic
                             // inspect/cleanup. The missing durable row is
                             // settled by the next open (orphan settlement).
                             let session = session_id.clone().unwrap_or_default();
@@ -322,20 +324,21 @@ impl ProviderPort for AdmittingProviderPort {
             }
             ProviderCallMethod::Shutdown if reply.ok => {
                 if let Some(session_id) = session_id.as_deref() {
-                    // Delete the durable mirror BEFORE forgetting the session
-                    // on the happy path (LIFE-3).
+                    // invariant: delete the durable mirror BEFORE forgetting the
+                    // session on the happy path (LIFE-3).
                     match self.state.forget_journal_session(session_id).await {
                         Ok(()) => {
                             self.state.forget_js_session(session_id);
                         }
                         Err(err) => {
-                            // Effect-committed failure: the adapter already
-                            // reaped the owned child and deleted the session,
-                            // so there is nothing left to reap — EnvState
-                            // stays aligned with that reality (the session is
-                            // gone from the live set) and the typed 500 names
-                            // the session. The stale journal rows are settled
-                            // by the next open (LIFE-3 orphan settlement).
+                            // note: effect-committed failure — the adapter
+                            // already reaped the owned child and deleted the
+                            // session, so there is nothing left to reap.
+                            // EnvState stays aligned with that reality (the
+                            // session is gone from the live set) and the typed
+                            // 500 names the session; the stale journal rows are
+                            // settled by the next open (LIFE-3 orphan
+                            // settlement).
                             self.state.forget_js_session(session_id);
                             return Err(effect_committed_failure(err, "", session_id));
                         }
@@ -353,8 +356,8 @@ impl ProviderPort for AdmittingProviderPort {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        // A pending terminal batch means an earlier delivery consumed this
-        // terminal from the provider (terminal delivery is dequeued and
+        // note: a pending terminal batch means an earlier delivery consumed
+        // this terminal from the provider (terminal delivery is dequeued and
         // acknowledged before `inner.next` returns, so a re-pull can never
         // replay it) but its durable mirror failed. Journal first, then apply
         // the memory terminal, then return the exact retained batch exactly
@@ -388,12 +391,12 @@ impl ProviderPort for AdmittingProviderPort {
             .inner
             .next(operation_id.clone(), max_events, max_bytes)
             .await?;
-        // Terminal truth comes from the actual delivered events, never a
-        // label. Detect without mutating, mirror the derived terminal durably
-        // (it must survive a restart), and only then apply it in memory
-        // (LIFE-3). A failed journal write cannot be repaired by a re-pull —
-        // the provider already consumed the batch — so the exact batch is
-        // retained and re-delivered after the journal retry succeeds.
+        // invariant: terminal truth comes from the actual delivered events,
+        // never a label — detect without mutating, mirror the derived terminal
+        // durably (it must survive a restart), and only then apply it in memory
+        // (LIFE-3). A failed journal write cannot be repaired by a re-pull
+        // because the provider already consumed the batch, so the exact batch
+        // is retained and re-delivered after the journal retry succeeds.
         if let Some((status, session_id)) = self
             .state
             .detect_js_batch_terminal(&operation_id, batch.events.as_slice())
@@ -434,8 +437,8 @@ mod tests {
     use nexus_provider_ports::{ProviderPort, ProviderResult};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// A probe/launch stub that echoes a deterministic session id and records
-    /// how many calls actually reached it (so a cap must deny *before* inner).
+    /// note: a probe/launch stub that echoes a deterministic session id and
+    /// counts calls that actually reached it, so a cap must deny *before* inner.
     struct EchoPort {
         calls: AtomicUsize,
     }
@@ -487,8 +490,8 @@ mod tests {
         }
     }
 
-    /// The cap must deny a launch *before* dispatching to inner, so a refused
-    /// launch never spawns an untracked owned child.
+    /// invariant: the cap denies a launch *before* dispatching to inner, so a
+    /// refused launch never spawns an untracked owned child.
     #[tokio::test]
     async fn js_session_cap_denies_launch_before_inner() {
         let state = Arc::new(EnvState::new());
@@ -497,7 +500,7 @@ mod tests {
         });
         let host = Arc::new(HostManager::new());
         let port = AdmittingProviderPort::new(host, inner.clone(), state.clone());
-        // Fill the transport session cap with direct reservations.
+        // note: fill the transport session cap with direct reservations.
         for _ in 0..crate::env_state::JS_PROVIDER_MAX_ACTIVE_SESSIONS {
             assert!(state.try_reserve_js_session());
         }
@@ -513,8 +516,8 @@ mod tests {
         );
     }
 
-    /// Concurrent launches must keep request-local ownership: each recorded
-    /// session carries its own provider id, never a shared last-value.
+    /// invariant: concurrent launches keep request-local ownership — each
+    /// recorded session carries its own provider id, never a shared last-value.
     #[tokio::test]
     async fn concurrent_launches_keep_request_local_provider_ownership() {
         let state = Arc::new(EnvState::new());
@@ -523,8 +526,9 @@ mod tests {
         });
         let host = Arc::new(HostManager::new());
         let port = Arc::new(AdmittingProviderPort::new(host, inner, state.clone()));
-        // Seed two launch records with distinct provider ids directly, proving
-        // the state maps session -> its own provider id (no cross-assignment).
+        // note: seed two launch records with distinct provider ids directly,
+        // proving the state maps session -> its own provider id (no
+        // cross-assignment).
         state.record_js_session("s-a".to_string(), "provider-a".to_string());
         state.record_js_session("s-b".to_string(), "provider-b".to_string());
         let a = state
@@ -540,8 +544,8 @@ mod tests {
         let _ = port;
     }
 
-    /// An Execute-ok stub carrying both session and operation ids, so the
-    /// durable write-through path runs after the inner effect succeeds.
+    /// note: an Execute-ok stub carrying both session and operation ids, so
+    /// the durable write-through path runs after the inner effect succeeds.
     struct ExecuteOkPort;
 
     #[async_trait]
@@ -579,11 +583,10 @@ mod tests {
         }
     }
 
-    /// Build a real [`nexus_core::CoreService`] and install it on the env as
-    /// the journal owner (P4-T2 seam). A read-only core refuses journal
-    /// writes for real; an engine-owner core accepts them.
-    ///
-    /// The home is seeded through the crate's ONE disposable-home fixture
+    /// note: build a real [`nexus_core::CoreService`] and install it on the env
+    /// as the journal owner (P4-T2 seam) — a read-only core refuses journal
+    /// writes for real, an engine-owner core accepts them. The home comes from
+    /// the crate's ONE disposable-home fixture
     /// (`seed_wire_home`): post-workspace-IA open semantics require the
     /// workspace state DB, not just `config.toml`, so a hand-written config
     /// alone opens a core whose journal has no workspace to write into.
@@ -617,21 +620,21 @@ mod tests {
         }
     }
 
-    /// LIFE-3 write-through is part of the Execute contract: a failed journal
-    /// upsert is a typed internal error, never a success reply without its
-    /// durable mirror. The provider effect (the installed, running operation)
-    /// is already committed when the journal fails, so EnvState stays aligned
-    /// with it — the session keeps its active operation so inspect and native
-    /// close can discover/reap it — and the typed 500 names the
+    /// invariant: LIFE-3 write-through is part of the Execute contract — a
+    /// failed journal upsert is a typed internal error, never a success reply
+    /// without its durable mirror. The provider effect (the installed, running
+    /// operation) is already committed when the journal fails, so EnvState
+    /// stays aligned with it: the session keeps its active operation so inspect
+    /// and native close can discover/reap it, and the typed 500 names the
     /// operation/session identity. The effect is not rolled back and not
     /// retryable.
     #[tokio::test]
     async fn execute_journal_failure_is_effect_committed_and_tracked() {
         let state = Arc::new(EnvState::new());
-        // A read-only core refuses journal writes for real (P4-T2 seam).
+        // note: a read-only core refuses journal writes for real (P4-T2 seam).
         let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
-        // Production records the session at Launch; the journal write-through
-        // resolves the provider id from that session record.
+        // note: production records the session at Launch; the journal
+        // write-through resolves the provider id from that session record.
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
@@ -671,16 +674,16 @@ mod tests {
         );
     }
 
-    /// An observed terminal is never reported as delivered when its durable
-    /// mirror failed: `next` propagates the journal failure, detection ran
-    /// without mutating, so the operation is still active in memory — and the
-    /// consumed batch is retained in the wrapper for re-delivery.
+    /// invariant: an observed terminal is never reported as delivered when its
+    /// durable mirror failed — `next` propagates the journal failure, detection
+    /// ran without mutating, so the operation is still active in memory, and
+    /// the consumed batch is retained in the wrapper for re-delivery.
     #[tokio::test]
     async fn terminal_journal_failure_on_next_is_propagated() {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-j".to_string());
-        // A read-only core refuses journal writes for real (P4-T2 seam).
+        // note: a read-only core refuses journal writes for real (P4-T2 seam).
         let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
@@ -718,9 +721,9 @@ mod tests {
         );
     }
 
-    /// A consuming provider stub: the terminal batch is dequeued exactly
-    /// once — every later pull returns an empty batch, mirroring the real
-    /// ACP adapter where terminal delivery is removed/acknowledged before
+    /// note: a consuming provider stub — the terminal batch is dequeued
+    /// exactly once (every later pull returns an empty batch), mirroring the
+    /// real ACP adapter where terminal delivery is removed/acknowledged before
     /// `next` returns.
     struct ConsumingTerminalPort {
         pulls: AtomicUsize,
@@ -767,9 +770,9 @@ mod tests {
         }
     }
 
-    /// The provider terminal is consumed on delivery (a re-pull can never
-    /// replay it), so a failed terminal journal must not lose it: the exact
-    /// batch is retained, a retry journals FIRST and re-delivers the same
+    /// invariant: the provider terminal is consumed on delivery (a re-pull can
+    /// never replay it), so a failed terminal journal must not lose it — the
+    /// exact batch is retained, a retry journals FIRST and re-delivers the same
     /// batch exactly once, and only after the durable mirror succeeds does
     /// memory settle the terminal.
     #[tokio::test]
@@ -777,7 +780,7 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-j".to_string());
-        // A read-only core refuses journal writes for real (P4-T2 seam).
+        // note: a read-only core refuses journal writes for real (P4-T2 seam).
         let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let inner = Arc::new(ConsumingTerminalPort {
             pulls: AtomicUsize::new(0),
@@ -785,7 +788,7 @@ mod tests {
         let port =
             AdmittingProviderPort::new(Arc::new(HostManager::new()), inner.clone(), state.clone());
 
-        // First delivery: the provider terminal is consumed, the journal
+        // note: first delivery consumes the provider terminal, the journal
         // write fails, and the exact batch is retained.
         let err = port
             .next("op-j".to_string(), 10, 64_000)
@@ -809,8 +812,8 @@ mod tests {
             "memory stays running until the durable mirror succeeds"
         );
 
-        // Retry with the journal still failing: no re-pull — the retained
-        // batch is kept for a later attempt.
+        // note: a retry with the journal still failing re-pulls nothing — the
+        // retained batch is kept for a later attempt.
         let err = port
             .next("op-j".to_string(), 10, 64_000)
             .await
@@ -822,9 +825,9 @@ mod tests {
             "a retry must not re-pull a consumed terminal"
         );
 
-        // The journal recovers: the retry journals first, settles memory,
-        // re-delivers the exact batch once, and clears the cache.
-        // The journal recovers: an engine-owner core accepts the write.
+        // note: the journal recovers — an engine-owner core accepts the write,
+        // the retry journals first, settles memory, re-delivers the exact batch
+        // once and clears the cache.
         let (_dir_ok, core_ok) =
             install_journal_core(&state, nexus_core::CoreAccess::EngineOwner).await;
         let batch = port
@@ -870,13 +873,13 @@ mod tests {
             .await
             .expect("journal read")
             .expect("the durable mirror row exists");
-        // The row seam is (operation_id, session_id, provider_id, status).
+        // note: the row seam is (operation_id, session_id, provider_id, status).
         assert_eq!(journaled.3, "failed");
         assert_eq!(journaled.2, "mock-acp");
         assert_eq!(journaled.1, "sess-j");
 
-        // A later pull reaches the provider again and carries no terminal:
-        // the terminal batch was delivered exactly once.
+        // note: a later pull reaches the provider again and carries no
+        // terminal — the terminal batch was delivered exactly once.
         let later = port
             .next("op-j".to_string(), 10, 64_000)
             .await
@@ -888,9 +891,9 @@ mod tests {
         );
     }
 
-    /// A cancel whose durable `cancelled` mirror fails is a typed error. The
-    /// provider effect (cancel + child reap + session release) already
-    /// committed, so EnvState settles the same `cancelled` terminal the
+    /// invariant: a cancel whose durable `cancelled` mirror fails is a typed
+    /// error. The provider effect (cancel + child reap + session release)
+    /// already committed, so EnvState settles the same `cancelled` terminal the
     /// provider actually produced — never a stale running state — and the
     /// typed 500 names the operation/session identity for deterministic
     /// inspect/cleanup. The effect is not rolled back and not retryable.
@@ -899,7 +902,7 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-j".to_string());
-        // A read-only core refuses journal writes for real (P4-T2 seam).
+        // note: a read-only core refuses journal writes for real (P4-T2 seam).
         let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
@@ -945,11 +948,11 @@ mod tests {
         );
     }
 
-    /// A successful cancel settles exactly the requested operation id — never
-    /// whichever operation happens to be active for the session (QC3-C2).
-    /// With `op-y` active, cancelling `op-x` must reach the `cancelled`
-    /// terminal for `op-x`, leave `op-y` running and still the session's
-    /// active op, and mirror only `op-x` durably.
+    /// invariant: a successful cancel settles exactly the requested operation
+    /// id, never whichever operation happens to be active for the session
+    /// (QC3-C2). With `op-y` active, cancelling `op-x` must reach the
+    /// `cancelled` terminal for `op-x`, leave `op-y` running and still the
+    /// session's active op, and mirror only `op-x` durably.
     #[tokio::test]
     async fn cancel_settles_the_requested_operation_not_the_session_active_op() {
         let state = Arc::new(EnvState::new());
@@ -1012,16 +1015,16 @@ mod tests {
         );
     }
 
-    /// A cancel whose durable mirror fails settles the same `cancelled`
-    /// terminal in memory, exactly for the requested operation id (QC3-C2):
-    /// with `op-y` active, a failed cancel of `op-x` must settle `op-x` and
-    /// leave `op-y` running and still the session's active op.
+    /// invariant: a cancel whose durable mirror fails settles the same
+    /// `cancelled` terminal in memory, exactly for the requested operation id
+    /// (QC3-C2) — with `op-y` active, a failed cancel of `op-x` settles `op-x`
+    /// and leaves `op-y` running and still the session's active op.
     #[tokio::test]
     async fn cancel_journal_failure_settles_the_requested_operation_not_the_active_op() {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-y".to_string());
-        // A read-only core refuses journal writes for real (P4-T2 seam).
+        // note: a read-only core refuses journal writes for real (P4-T2 seam).
         let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),

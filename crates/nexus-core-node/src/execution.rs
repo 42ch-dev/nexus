@@ -1,5 +1,8 @@
 //! Execution / Host control native family surface (P5-T3).
 //!
+// invariant: every family below delegates to the one core authority
+// (`CoreService` / `ExecutionHandle`); none of them owns an effect of its own.
+//!
 //! Four lanes, all thin napi adapters over the single core authority:
 //!
 //! 1. **Preset authoring + Strategy edits** — the P3 `CoreService` authority
@@ -94,7 +97,7 @@ fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Resul
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
 }
 
-/// Decode the wire compose union into the core's typed operation plus the base it guards.
+/// note: decodes the wire compose union into the core's typed operation plus the base it guards.
 ///
 /// The union is the wire contract (`{base_revision, op, payload}`); the core owns the op
 /// semantics, so this is the only place the two enum spellings meet. A variant the core cannot
@@ -174,7 +177,7 @@ const fn replace_subtree_expansion(
     }
 }
 
-/// Decode the approve request into the base revision plus the core's trajectory type.
+/// note: decodes the approve request into the base revision plus the core's trajectory type.
 ///
 /// The wire trajectory and the core's are two generated facades over one JSON shape, so the seam
 /// is the same JSON round-trip simulate uses. A `null` trajectory stays `None`: the core refuses
@@ -191,12 +194,12 @@ fn approve_request(request: StrategyApproveRequest) -> Result<(u64, Option<Simul
     Ok((request.base_revision, trajectory))
 }
 
-/// The committed compose result as the response contract.
+/// note: the committed compose result as the response contract.
 fn compose_response(
     outcome: nexus_core::ComposeOutcome,
 ) -> std::result::Result<StrategyComposeResponse, nexus_core::CoreError> {
-    // The IR document and this contract's inlined copy are two generated facades over one JSON
-    // shape, so the boundary joins them the same way simulate does.
+    // why: the IR document and this contract's inlined copy are two generated facades over one
+    // JSON shape, so the boundary joins them the same way simulate does.
     let document = serde_json::to_value(&outcome.candidate.document)
         .and_then(serde_json::from_value)
         .map_err(|error| nexus_core::CoreError::Internal {
@@ -254,7 +257,7 @@ fn compose_diagnostic(diagnostic: &ComposeDiagnostic) -> StrategyComposeDiagnost
     }
 }
 
-/// Whether every provider this host configuration SELECTS is available.
+/// note: whether every provider this host configuration SELECTS is available.
 ///
 /// The selection is the enabled provider set of the Host's own configuration —
 /// the same document admission reads — in configuration order, so readiness is
@@ -287,7 +290,7 @@ fn selected_providers_available(config: &AgentHostConfig, catalog: &ProviderCata
     })
 }
 
-/// Readiness read + owner establishment shared by the boot start and the
+/// note: readiness read + owner establishment shared by the boot start and the
 /// provider-config restart. The readiness answer is read BEFORE establishment
 /// so a workspace refusal still reports the truth about the provider lane.
 async fn publish_execution_owner(
@@ -304,11 +307,11 @@ async fn publish_execution_owner(
         .await
     {
         Ok(handle) => Some(handle.engine_epoch()),
-        // A workspace that cannot host an owner is the ONE shape this profile
+        // why: a workspace that cannot host an owner is the ONE shape this profile
         // reports as "no engine epoch": the admission pinned no usable creative
         // root, so the caller publishes the null sentinel.
         Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
-        // Every other workspace refusal keeps its neutral class on the wire.
+        // note: every other workspace refusal keeps its neutral class on the wire.
         Err(ExecutionOpenError::Workspace(err)) => {
             return Err(core_error::napi_error_from_domain(err));
         }
@@ -326,7 +329,7 @@ async fn publish_execution_owner(
 impl NativeCore {
     /// Establish the single hosted execution owner for this engine-owner core.
     ///
-    /// This is the production boot of current-host contracts §3.1: the ONE
+    /// note: the production boot of current-host contract §3.1 — the ONE
     /// core-owned `start_hosted_execution` factory composes the complete
     /// hosted owner (selected-root workspace bundle and its settled startup
     /// recovery, the prompt executor over the ONE already-owned Host, the
@@ -371,13 +374,13 @@ impl NativeCore {
             .inner
             .host_authority()
             .ok_or_else(core_error::napi_error_host_not_started)?;
-        // The attached authority's manager IS the manager the open started with
+        // why: the attached authority's manager IS the manager the open started with
         // the admitted pinned-root configuration: readiness and the hosted
         // execution owner borrow that same instance instead of a second one.
         publish_execution_owner(&core, providers, host.manager()).await
     }
 
-    /// Apply the saved provider config in-process: settle the current hosted
+    /// note: apply the saved provider config in-process: settle the current hosted
     /// owner, re-admit the config file's provider catalog, re-run the same
     /// manager start (config snapshot + bounded owner-bound probes), then
     /// establish a fresh owner and publish the fresh facts.
@@ -411,7 +414,7 @@ impl NativeCore {
 
         core.retire_execution().await;
 
-        // Re-read the document the save just wrote and re-admit its catalog,
+        // why: re-read the document the save just wrote and re-admit its catalog,
         // then run the manager start against the SAME manager the authority
         // exposes, so `selected_providers_ready` reads the saved selection.
         let admission = crate::lifecycle::validate_host_admission(&home)
@@ -420,7 +423,7 @@ impl NativeCore {
             .active_principal()
             .await
             .map_err(core_error::napi_error_from_domain)?;
-        // The probe boundary is the same pinned creative root the open used;
+        // note: the probe boundary is the same pinned creative root the open used;
         // an admission without one keeps the owner-less shape (no fabricated
         // readiness).
         let probe_owner = core.admission_creative_root().map(|root| {
@@ -452,9 +455,7 @@ impl NativeCore {
         publish_execution_owner(&core, providers, manager).await
     }
 
-    // ── Durable schedule mutations (P3 ExecutionHandle authority) ───────────
-
-    /// `GET /v1/daemon/orchestration/capabilities` — the live capability
+    /// note: `GET /v1/daemon/orchestration/capabilities` — the live capability
     /// registry rows the established owner's engine reads.
     ///
     /// Rows use the hand-coded local wire shape (`camelCase` schemas,
@@ -487,7 +488,7 @@ impl NativeCore {
         )?))
     }
 
-    /// The established execution owner, or a truthful rejection naming the
+    /// note: the established execution owner, or a truthful rejection naming the
     /// missing establishment (never a silently degraded write).
     fn execution_handle(&self) -> Result<std::sync::Arc<nexus_core::ExecutionHandle>> {
         self.deny_service_only()?;
@@ -502,7 +503,7 @@ impl NativeCore {
             .ok_or_else(|| Error::from_reason("execution owner not started"))
     }
 
-    /// `POST /v1/daemon/orchestration/schedules` (201 at the adapter).
+    /// note: `POST /v1/daemon/orchestration/schedules` (201 at the adapter).
     #[napi]
     pub async fn add_schedule(
         &self,
@@ -519,7 +520,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal`.
+    /// note: `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal`.
     #[napi]
     pub async fn signal_schedule(
         &self,
@@ -539,9 +540,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Durable control reads + core-context edits (P0-T6) ──────────────────
-
-    /// `GET /v1/daemon/orchestration/schedules`.
+    /// note: `GET /v1/daemon/orchestration/schedules`.
     ///
     /// The query crosses as the generated public DTO (`deny_unknown_fields`:
     /// a key outside the schema is a typed client refusal), and the response is
@@ -563,7 +562,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/orchestration/schedules/{schedule_id}`.
+    /// note: `GET /v1/daemon/orchestration/schedules/{schedule_id}`.
     #[napi]
     pub async fn inspect_schedule(
         &self,
@@ -580,7 +579,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/orchestration/sessions`.
+    /// note: `GET /v1/daemon/orchestration/sessions`.
     #[napi]
     pub async fn list_workflow_sessions(
         &self,
@@ -598,7 +597,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/orchestration/sessions/{run_id}`.
+    /// note: `GET /v1/daemon/orchestration/sessions/{session_id}`.
     #[napi]
     pub async fn get_workflow_session(
         &self,
@@ -615,7 +614,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context`.
+    /// note: `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context`.
     #[napi]
     pub async fn edit_core_context(
         &self,
@@ -635,9 +634,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Compute module/run/transaction surface (v1.195 P2-T3) ───────────────
-
-    /// `GET /v1/daemon/compute/modules` — the installed module registry (C1).
+    /// note: `GET /v1/daemon/compute/modules` — the installed module registry (C1).
     ///
     /// Machine capability rather than creator state, so there is no
     /// per-creator filter — but the principal is still verified, and the
@@ -654,7 +651,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/compute/modules/{module_id}` — one module's manifest (C2).
+    /// note: `GET /v1/daemon/compute/modules/{module_id}` — one module's manifest (C2).
     #[napi]
     pub async fn get_compute_module(
         &self,
@@ -670,7 +667,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/compute/run` — invoke a module against an owned World (C3).
+    /// note: `POST /v1/daemon/compute/run` — invoke a module against an owned World (C3).
     ///
     /// The run reaches the WASM authority the hosted factory installed, applies
     /// the existing input/fuel/memory/wall-clock limits, and persists proposals
@@ -692,7 +689,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/compute/runs/{run_id}` — one run's proposals or error (C4).
+    /// note: `GET /v1/daemon/compute/runs/{run_id}` — one run's proposals or error (C4).
     #[napi]
     pub async fn get_compute_run(
         &self,
@@ -708,7 +705,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/compute/runs` — the creator's run history page (C5).
+    /// note: `GET /v1/daemon/compute/runs` — the creator's run history page (C5).
     ///
     /// The query crosses as the generated DTO (`deny_unknown_fields` plus the
     /// closed status enum: a key or value outside the schema is a typed client
@@ -730,7 +727,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/compute/runs/{run_id}/accept` — commit once (C6).
+    /// note: `POST /v1/daemon/compute/runs/{run_id}/accept` — commit once (C6).
     ///
     /// The generated request carries the optional `evt_<index>` selection; the
     /// ONE domain transaction, its CAS and its rollback stay in the core.
@@ -753,7 +750,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/compute/runs/{run_id}/discard` — drop the proposals (C7).
+    /// note: `POST /v1/daemon/compute/runs/{run_id}/discard` — drop the proposals (C7).
     #[napi]
     pub async fn discard_compute_run(
         &self,
@@ -770,7 +767,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/compute/runs?world_id=…` — World-scoped clear (C8).
+    /// note: `DELETE /v1/daemon/compute/runs?world_id=…` — World-scoped clear (C8).
     ///
     /// The generated query makes `world_id` required and admits only terminal
     /// status values, so a missing scope or an out-of-vocabulary filter is
@@ -793,9 +790,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Same-run event subscriptions (P1-T3) ────────────────────────────────
-
-    /// `GET /v1/daemon/orchestration/sessions/{run_id}/events` — open ONE
+    /// note: `GET /v1/daemon/orchestration/sessions/{run_id}/events` — open ONE
     /// authorized subscription to a durable root run's bounded event stream.
     ///
     /// The generated request DTO crosses as an owned buffer (`deny_unknown_fields`:
@@ -827,7 +822,7 @@ impl NativeCore {
         .await
     }
 
-    /// Take the next bounded batch (`<= 16` frames / 1 MiB) of a subscribed
+    /// note: take the next bounded batch (`<= 16` frames / 1 MiB) of a subscribed
     /// run's stream. One pull may be outstanding per subscription, and a
     /// released, foreign or stale-generation token refuses as `not_found`.
     /// `closed` reports that the stream ended at this batch.
@@ -848,7 +843,7 @@ impl NativeCore {
         .await
     }
 
-    /// Release one subscription — the transport's disconnect/exit cleanup.
+    /// note: release one subscription — the transport's disconnect/exit cleanup.
     ///
     /// A pull blocked on the released token wakes with `closed`, so a
     /// disconnect can never leave the run's subscriber permit held. Releasing
@@ -870,9 +865,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Preset authoring (P3 authority) ─────────────────────────────────────
-
-    /// `GET /v1/daemon/presets`.
+    /// note: `GET /v1/daemon/presets`.
     #[napi]
     pub async fn list_presets(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -881,7 +874,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/presets/{id}`.
+    /// note: `GET /v1/daemon/presets/{id}`.
     #[napi]
     pub async fn get_preset(&self, principal_handle: String, preset_id: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -891,7 +884,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/presets` — scaffold (201 at the adapter).
+    /// note: `POST /v1/daemon/presets` — scaffold (201 at the adapter).
     #[napi]
     pub async fn scaffold_preset(
         &self,
@@ -905,7 +898,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/presets:validate`.
+    /// note: `POST /v1/daemon/presets:validate`.
     #[napi]
     pub async fn validate_preset(
         &self,
@@ -921,7 +914,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/presets/{id}:reload`.
+    /// note: `POST /v1/daemon/presets/{id}:reload`.
     #[napi]
     pub async fn reload_preset(
         &self,
@@ -935,7 +928,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/presets/{id}`.
+    /// note: `PATCH /v1/daemon/presets/{id}`.
     #[napi]
     pub async fn update_preset(
         &self,
@@ -952,7 +945,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/presets/{id}` — 204 at the adapter.
+    /// note: `DELETE /v1/daemon/presets/{id}` — 204 at the adapter.
     #[napi]
     pub async fn delete_preset(
         &self,
@@ -966,7 +959,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/orchestration/presets`.
+    /// note: `GET /v1/daemon/orchestration/presets`.
     #[napi]
     pub async fn list_orchestration_presets(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -975,7 +968,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/orchestration/presets/{id}/profile`.
+    /// note: `GET /v1/daemon/orchestration/presets/{id}/profile`.
     #[napi]
     pub async fn get_preset_profile(
         &self,
@@ -988,9 +981,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Strategy edits (P3 authority) ───────────────────────────────────────
-
-    /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch`.
     #[napi]
     pub async fn patch_strategy_state(
         &self,
@@ -1009,7 +1000,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/transitions/patch`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/transitions/patch`.
     #[napi]
     pub async fn patch_strategy_transition(
         &self,
@@ -1027,7 +1018,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch`.
     #[napi]
     pub async fn patch_strategy_prompt_template(
         &self,
@@ -1046,7 +1037,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/compose`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/compose`.
     ///
     /// One typed operation per request: the generated discriminated union is decoded here, the
     /// four ops cross the seam as the core's own `ComposeOp`, and the committed candidate travels
@@ -1070,7 +1061,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/generate`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/generate`.
     ///
     /// The HTTP surface of the generate kernel: the body is the generated `{base_revision, request}`
     /// contract, `request` is decoded into the SAME `GenerateRequest` the CLI parses arguments into
@@ -1085,8 +1076,8 @@ impl NativeCore {
         strategy_id: String,
         request_json: Buffer,
     ) -> Result<Buffer> {
-        /// The wire body minus the generated scaffolding: the request half IS the core's type, so
-        /// the two cannot drift without this failing to compile.
+        /// note: the wire body minus the generated scaffolding — the request half IS the
+        /// core's type, so the two cannot drift without this failing to compile.
         #[derive(serde::Deserialize)]
         struct GenerateBody {
             base_revision: u64,
@@ -1095,9 +1086,9 @@ impl NativeCore {
 
         let body: GenerateBody = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
-            // The executor the owner drives, never a second Host client: the HTTP surface corrects
-            // through the same provider selection a run uses, and `None` when the transport attached
-            // no model.
+            // why: the executor the owner drives, never a second Host client — the HTTP
+            // surface corrects through the same provider selection a run uses, and `None`
+            // when the transport attached no model.
             let corrector = core.execution().and_then(|owner| owner.prompt_executor());
             let outcome = core
                 .generate_strategy_candidate(
@@ -1113,7 +1104,7 @@ impl NativeCore {
         .await
     }
 
-    /// One `nexus.*` host-tool call through the capability spine — the agent-tool surface.
+    /// note: one `nexus.*` host-tool call through the capability spine — the agent-tool surface.
     ///
     /// The SAME admission pipeline, dispatch and audit an in-process schedule tick runs, over the
     /// owner's narrow `ToolContext` (which is where the prompt executor lives). A tool the spine
@@ -1135,7 +1126,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/simulate`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/simulate`.
     #[napi]
     pub async fn simulate_strategy(
         &self,
@@ -1153,7 +1144,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/approve`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/approve`.
     ///
     /// The request carries the candidate revision the client read and the exact trajectory it
     /// simulated; the core re-runs validation, pin verification and the deterministic walk, then
@@ -1178,7 +1169,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/strategies/{strategy_id}/workflow-ir`.
+    /// note: `GET /v1/daemon/strategies/{strategy_id}/workflow-ir`.
     #[napi]
     pub async fn strategy_workflow_ir(
         &self,
@@ -1191,7 +1182,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/strategies/{strategy_id}/candidate`.
+    /// note: `GET /v1/daemon/strategies/{strategy_id}/candidate`.
     ///
     /// The canonical candidate of §Q4/D17: the stored row when one exists, otherwise the
     /// `workflow-ir` import projection at revision `0`. The document carries the revision the
@@ -1212,7 +1203,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/strategies/{strategy_id}/apply`.
+    /// note: `POST /v1/daemon/strategies/{strategy_id}/apply`.
     ///
     /// The request names one approval by its content hash; the core recomputes the frozen
     /// document's canonical hash and then writes at most one append-only row, refusing an unknown
@@ -1235,7 +1226,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/strategies/{strategy_id}/applied`.
+    /// note: `GET /v1/daemon/strategies/{strategy_id}/applied`.
     ///
     /// The status read both the Canvas and the intake ask: the current apply (the row with no
     /// successor) and the strategy's newest approval by `candidate_revision`. Each side is null
@@ -1254,7 +1245,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/strategies/{strategy_id}/approvals`.
+    /// note: `GET /v1/daemon/strategies/{strategy_id}/approvals`.
     ///
     /// Every approval of the strategy in the status read's total order, so `items[0]` is that
     /// read's `newest_approval`. The list is what lets a client aim Apply at a superseded
@@ -1292,7 +1283,7 @@ mod tests {
         }
     }
 
-    /// A catalog row whose bounded probe already published `available`.
+    /// note: a catalog row whose bounded probe already published `available`.
     fn entry(id: &str, available: bool) -> nexus_agent_host::ProviderCatalogEntry {
         let provider_id = ProviderId::new(id.to_string());
         nexus_agent_host::ProviderCatalogEntry {
@@ -1322,8 +1313,8 @@ mod tests {
 
     #[test]
     fn unselected_catalog_presence_is_never_readiness() {
-        // A perfectly available catalog with no selected provider: the profile
-        // has nothing it can dispatch to, so it is not ready.
+        // why: a perfectly available catalog with no selected provider has nothing
+        // it can dispatch to, so it is not ready.
         let config = AgentHostConfig::default();
         assert!(!selected_providers_available(
             &config,
@@ -1333,7 +1324,7 @@ mod tests {
 
     #[test]
     fn unprobed_or_unavailable_selected_provider_is_not_ready() {
-        // Selected but never probed (the owner-less start marks the row
+        // why: selected but never probed (the owner-less start marks the row
         // unavailable) — or probed and unavailable: both are not ready.
         let config = AgentHostConfig {
             providers: vec![configured("dsh-native", true)],
@@ -1355,7 +1346,7 @@ mod tests {
 
     #[test]
     fn disabled_selection_does_not_pass_and_partial_selection_does_not_pass() {
-        // A disabled entry is not a selection: nothing is selected.
+        // invariant: a disabled entry is not a selection — nothing is selected.
         let only_disabled = AgentHostConfig {
             providers: vec![configured("dsh-native", false)],
             ..AgentHostConfig::default()
@@ -1364,7 +1355,7 @@ mod tests {
             &only_disabled,
             &catalog(vec![entry("dsh-native", true)])
         ));
-        // Every selected provider must be available: one unrelated healthy row
+        // invariant: every selected provider must be available; one unrelated healthy row
         // never substitutes for an unavailable selected one.
         let both = AgentHostConfig {
             providers: vec![configured("dsh-native", true), configured("mock-acp", true)],

@@ -4,6 +4,8 @@
 //! `JoinHandle` and `Arc<EnvState>` are registered here — never detached.
 //! A process-level reaper periodically joins completed workers and removes
 //! entries so successful cleanups do not leak registry slots.
+// invariant: a finalize worker that overruns its budget is tracked here, never
+// detached, and its entry is dropped only after the handle is joined.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -14,9 +16,9 @@ use super::env_state::EnvState;
 
 struct CleanupEntry {
     handle: Option<JoinHandle<()>>,
-    /// Ownership retention: the environment stays alive while its registered
-    /// cleanup worker is still running. Only the `#[cfg(test)]` registry
-    /// diagnostic reads it, so non-test builds still need the attribute.
+    /// invariant: the environment stays alive while its registered cleanup
+    /// worker is still running. Only the `#[cfg(test)]` registry diagnostic
+    /// reads it, so non-test builds still need the attribute.
     #[allow(dead_code)]
     state: Arc<EnvState>,
     completed: Arc<AtomicBool>,
@@ -46,7 +48,7 @@ fn registry() -> &'static Mutex<CleanupRegistryInner> {
     })
 }
 
-/// Join and remove every completed worker. Returns the number reaped.
+/// note: joins every completed worker and returns how many were reaped.
 pub fn reap_completed() -> usize {
     let mut reg = registry().lock().expect("cleanup registry mutex poisoned");
     let mut reaped = 0usize;
@@ -77,16 +79,16 @@ pub fn reap_completed() -> usize {
     reaped
 }
 
-/// Outcome of an explicit reaper stop.
+/// note: outcome of an explicit reaper stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReaperStop {
-    /// The reaper thread exited and was joined inside the deadline.
+    /// note: the reaper thread exited and was joined inside the deadline.
     pub joined: bool,
-    /// Entries still registered when the stop completed. Never discarded.
+    /// invariant: entries still registered when the stop completed; never discarded.
     pub pending_entries: usize,
 }
 
-/// Stop and join the process reaper within `deadline`.
+/// note: stops and joins the process reaper within `deadline`.
 ///
 /// A confirmed finalize/process cleanup calls this so the reaper does not
 /// outlive the finalizer's bounded budget. Registered entries are never
@@ -110,20 +112,20 @@ pub fn stop_reaper(deadline: Instant) -> ReaperStop {
         }
         if handle.is_finished() {
             let _ = handle.join();
-            // Only this now-joined reaper consumed the stop flag; reset it so a
-            // future reaper for the remaining entries is not born stopped.
+            // why: only this now-joined reaper consumed the stop flag; reset it
+            // so a future reaper for the remaining entries is not born stopped.
             owner.stop.store(false, Ordering::SeqCst);
         } else {
-            // Still running: keep the handle (never strand it) and leave the
-            // stop flag set so it exits as soon as it next polls.
+            // why: still running — keep the handle (never strand it) and leave
+            // the stop flag set so it exits as soon as it next polls.
             if let Ok(mut slot) = owner.handle.lock() {
                 *slot = Some(handle);
             }
             joined = false;
         }
     }
-    // Collect anything already finished so a stopped reaper cannot strand a
-    // worker that has completed.
+    // why: collect anything already finished so a stopped reaper cannot strand
+    // a worker that has completed.
     reap_completed();
     ReaperStop {
         joined,
@@ -135,12 +137,12 @@ fn entry_count() -> usize {
     registry().lock().map_or(0, |reg| reg.entries.len())
 }
 
-/// Register a timed-out LocalSet runtime thread. The handle is retained until reaped.
+/// note: registers a timed-out LocalSet runtime thread; the handle is retained until reaped.
 pub fn register_localset_thread(handle: JoinHandle<()>, state: Arc<EnvState>) {
     register_pending(handle, state, Arc::new(AtomicBool::new(false)));
 }
 
-/// Register a timed-out finalize worker. The handle is retained until reaped.
+/// note: registers a timed-out finalize worker; the handle is retained until reaped.
 pub fn register_pending(handle: JoinHandle<()>, state: Arc<EnvState>, completed: Arc<AtomicBool>) {
     ensure_reaper();
     let mut reg = registry().lock().expect("cleanup registry mutex poisoned");
@@ -151,12 +153,12 @@ pub fn register_pending(handle: JoinHandle<()>, state: Arc<EnvState>, completed:
     });
 }
 
-/// The registry is process-global; tests that assert on its contents must not
-/// interleave with each other.
+/// why: the registry is process-global, so tests that assert on its contents
+/// must not interleave with each other.
 #[cfg(test)]
 static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-/// Serialize a registry-asserting test against every other such test.
+/// note: serializes a registry-asserting test against every other such test.
 #[cfg(test)]
 pub fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
     REGISTRY_TEST_LOCK
@@ -164,7 +166,7 @@ pub fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Snapshot registry for tests.
+/// note: pending-entry and owner-slot counts after reaping, for tests.
 #[cfg(test)]
 pub fn registry_snapshot() -> (usize, usize) {
     reap_completed();
@@ -241,7 +243,7 @@ fn ensure_reaper() {
     *slot = Some(handle);
 }
 
-/// Join a finished reaper thread (test/diagnostics only).
+/// note: joins a finished reaper thread; test/diagnostics only.
 #[cfg(test)]
 fn reaper_joined_for_test() -> bool {
     match REAPER.get() {
@@ -266,7 +268,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
-    /// Drain any entry a previous test left behind so counts are local.
+    /// why: drain any entry a previous test left behind so counts are local.
     fn drain_registry() {
         for _ in 0..200 {
             reap_completed();
@@ -336,14 +338,14 @@ mod tests {
         assert_eq!(pending, 0, "completed entry must be reaped, not permanent");
     }
 
-    /// Q3-W5: the reaper stops and joins on demand inside a bounded deadline,
-    /// and stopping it never strands a registered entry.
+    /// note: Q3-W5 — the reaper stops and joins on demand inside a bounded
+    /// deadline, and stopping it never strands a registered entry.
     #[test]
     fn reaper_stops_and_joins_without_stranding_entries() {
         let _lock = crate::cleanup_registry::registry_test_lock();
         drain_registry();
 
-        // A worker that outlives the stop request.
+        // note: a worker that outlives the stop request.
         let done = Arc::new(AtomicBool::new(false));
         let handle = thread::spawn(|| {
             thread::sleep(Duration::from_millis(300));
@@ -352,8 +354,8 @@ mod tests {
         register_pending(handle, state, done);
         assert!(ensure_reaper_running(), "the reaper must be running");
 
-        // An already-expired deadline cannot join a live reaper; the handle must
-        // be retained rather than dropped/lost.
+        // invariant: an already-expired deadline cannot join a live reaper, so
+        // the handle is retained rather than dropped/lost.
         let stop = stop_reaper(Instant::now());
         if !stop.joined {
             assert!(
@@ -366,8 +368,8 @@ mod tests {
             "an unfinished worker must remain tracked, never discarded"
         );
 
-        // A later stop with a real budget joins the reaper, and the worker is
-        // reaped once it finishes.
+        // note: a later stop with a real budget joins the reaper, and the worker
+        // is reaped once it finishes.
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let stop = stop_reaper(deadline);
@@ -386,7 +388,7 @@ mod tests {
         );
     }
 
-    /// Whether the reaper owner still holds a `JoinHandle` (running or joinable).
+    /// note: whether the reaper owner still holds a `JoinHandle` (running or joinable).
     fn reaper_handle_present() -> bool {
         REAPER.get().is_some_and(|owner| {
             owner

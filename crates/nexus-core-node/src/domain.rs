@@ -7,6 +7,8 @@
 //! [`nexus_core::CoreService`] authority owns the effect, and the result is
 //! serialized back as the schema-owned wire shape. Conversions here are
 //! projection/carrier work only; no SQL, no second engine, no policy.
+// invariant: this layer owns no effect and no policy — every SQL statement and
+// authority check stays in `nexus_core::CoreService`.
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -39,12 +41,12 @@ use nexus_core::{
 
 use crate::NativeCore;
 
-/// Per-Work lock holder label for this surface. The daemon HTTP adapters pass
+/// note: per-Work lock holder label for this surface. The daemon HTTP adapters pass
 /// the same literal, so a 423 `Locked.reason` is byte-identical across the
 /// legacy and standalone surfaces (`cli:` stays the CLI's own label).
 const HTTP_HOLDER: &str = "http";
 
-/// Parse an owned wire payload into a generated DTO. Parse failures surface as
+/// note: parse an owned wire payload into a generated DTO. Parse failures surface as
 /// `invalid <label>: …` rejections, which the TS error mapper classifies as
 /// 400 `invalid_input` (client error, not a fault).
 fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Result<T> {
@@ -52,7 +54,7 @@ fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Resul
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
 }
 
-/// Optional bounded query parameter. Overflow/out-of-range is a client error
+/// note: optional bounded query parameter. Overflow/out-of-range is a client error
 /// (400 `invalid_input` via the "invalid …" rejection convention), never a
 /// silently-absent filter.
 fn query_u32_bounded<T>(value: Option<T>, field: &str) -> Result<Option<u32>>
@@ -70,9 +72,8 @@ where
 
 #[napi]
 impl NativeCore {
-    // ── World lifecycle (P0-T1 authority) ───────────────────────────────────
 
-    /// `GET /v1/daemon/narrative/worlds` — read-model World list.
+    /// note: `GET /v1/daemon/narrative/worlds` — read-model World list.
     #[napi]
     pub async fn narrative_list_worlds(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -82,7 +83,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/narrative/worlds/{world_id}` — single World read model.
+    /// note: `GET /v1/daemon/narrative/worlds/{world_id}` — single World read model.
     #[napi]
     pub async fn narrative_get_world(
         &self,
@@ -96,7 +97,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/worlds` — create a World (201 at the adapter).
+    /// note: `POST /v1/daemon/worlds` — create a World (201 at the adapter).
     #[napi]
     pub async fn create_world(
         &self,
@@ -110,7 +111,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/worlds/{world_id}` — hard delete (204 at the
+    /// note: `DELETE /v1/daemon/worlds/{world_id}` — hard delete (204 at the
     /// adapter); blocked bindings ride the core marker.
     #[napi]
     pub async fn delete_world(&self, principal_handle: String, world_id: String) -> Result<Buffer> {
@@ -121,9 +122,7 @@ impl NativeCore {
         .await
     }
 
-    // ── World KB mutations + projection (P0-T1) ─────────────────────────────
-
-    /// `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate`.
+    /// note: `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate`.
     #[napi]
     pub async fn promote_world_kb_candidate(
         &self,
@@ -140,7 +139,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship`.
+    /// note: `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship`.
     #[napi]
     pub async fn patch_world_kb_relationship(
         &self,
@@ -157,7 +156,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state`.
+    /// note: `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state`.
     #[napi]
     pub async fn world_kb_key_block_state(
         &self,
@@ -172,9 +171,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Fork, pack, rules, world findings (P0-T2) ───────────────────────────
-
-    /// `POST /v1/daemon/worlds/{world_id}/forks`.
+    /// note: `POST /v1/daemon/worlds/{world_id}/forks`.
     #[napi]
     pub async fn create_world_fork(
         &self,
@@ -189,7 +186,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/worlds/{world_id}/kb/pack/export`.
+    /// note: `POST /v1/daemon/worlds/{world_id}/kb/pack/export`.
     #[napi]
     pub async fn export_world_pack(
         &self,
@@ -198,7 +195,7 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackExportRequest = decode(request_json, "request")?;
-        // The explicit author intent for owned known-private material travels
+        // note: the explicit author intent for owned known-private material travels
         // with the request (v1.191 P1 T10, holder-governance.md §6).
         let include_owned_private = request.include_owned_private;
         self.json_call(principal_handle, async move |core, principal| {
@@ -208,7 +205,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/worlds/{world_id}/kb/pack/import` (conflict policy,
+    /// note: `POST /v1/daemon/worlds/{world_id}/kb/pack/import` (conflict policy,
     /// dry-run preview, id remapping and provenance stay core-owned).
     ///
     /// The frozen arms (v1.191 P1 T10) are dispatched by the core authority:
@@ -230,7 +227,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/worlds/{world_id}/rules` (default read: archived rows
+    /// note: `GET /v1/daemon/worlds/{world_id}/rules` (default read: archived rows
     /// omitted; the adapter passes `include_archived=true` to reveal them).
     ///
     /// The inclusion flag is a required primitive here — the HTTP/browser
@@ -250,7 +247,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/worlds/{world_id}/rules` (201 at the adapter).
+    /// note: `POST /v1/daemon/worlds/{world_id}/rules` (201 at the adapter).
     #[napi]
     pub async fn create_world_rule(
         &self,
@@ -265,7 +262,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}`.
+    /// note: `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}`.
     ///
     /// The generated request DTO erases the supplied-member set (`{}` ≡ absent
     /// constraint, JSON null ≡ absent member), so the raw JSON object keys are
@@ -295,7 +292,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/worlds/{world_id}/findings`.
+    /// note: `GET /v1/daemon/worlds/{world_id}/findings`.
     #[napi]
     pub async fn list_world_findings(
         &self,
@@ -308,7 +305,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/patterns` — read-only pattern package registry listing.
+    /// note: `GET /v1/daemon/patterns` — read-only pattern package registry listing.
     #[napi]
     pub async fn list_patterns(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -317,9 +314,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Timeline reads (P0-T3) ──────────────────────────────────────────────
-
-    /// `GET /v1/daemon/timeline/overview?cursor=`.
+    /// note: `GET /v1/daemon/timeline/overview?cursor=`.
     #[napi]
     pub async fn timeline_overview(
         &self,
@@ -327,7 +322,7 @@ impl NativeCore {
         query_json: Buffer,
     ) -> Result<Buffer> {
         let query: WireTimelineOverviewQuery = decode(query_json, "query")?;
-        // The wire cursor is a length-bounded newtype; the domain carrier is
+        // why: the wire cursor is a length-bounded newtype; the domain carrier is
         // the plain string. Re-serialize through `to_string` (never a lossy
         // debug print).
         let domain = CoreTimelineOverviewQuery {
@@ -341,7 +336,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/worlds/{world_id}/timeline/events`.
+    /// note: `GET /v1/daemon/worlds/{world_id}/timeline/events`.
     #[napi]
     pub async fn list_timeline_events(
         &self,
@@ -366,9 +361,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Work lifecycle (P1-T1 authority) ────────────────────────────────────
-
-    /// `GET /v1/daemon/works` — generated list envelope straight through.
+    /// note: `GET /v1/daemon/works` — generated list envelope straight through.
     #[napi]
     pub async fn list_works(&self, principal_handle: String, query_json: Buffer) -> Result<Buffer> {
         let query: ListWorksQuery = decode(query_json, "query")?;
@@ -379,7 +372,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/{work_id}` — Work detail projection.
+    /// note: `GET /v1/daemon/works/{work_id}` — Work detail projection.
     #[napi]
     pub async fn get_work(&self, principal_handle: String, work_id: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -389,7 +382,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works` — returns `[created, response]`; the adapter
+    /// note: `POST /v1/daemon/works` — returns `[created, response]`; the adapter
     /// maps the flag onto the retained 201 (new) / 200 (idempotent replay).
     ///
     /// An absent `world_id` key is normalised to the empty-string shape before
@@ -419,7 +412,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/works/{work_id}` — tri-state binding patch.
+    /// note: `PATCH /v1/daemon/works/{work_id}` — tri-state binding patch.
     #[napi]
     pub async fn patch_work(
         &self,
@@ -434,7 +427,7 @@ impl NativeCore {
             creative_brief: request.creative_brief,
             intake_status: request.intake_status,
             status: request.status,
-            // Tri-state binding fields ride the shared carrier grammar
+            // note: tri-state binding fields ride the shared carrier grammar
             // (`nexus_contracts::tristate`, `x-nexus-tri-state`); this boundary
             // only names the field in its own `invalid <field>: <reason>` refusal.
             world_id: presence_string(request.world_id)
@@ -448,7 +441,7 @@ impl NativeCore {
             auto_review_master_on_timeout: request.auto_review_master_on_timeout,
             auto_chain_interrupted: request.auto_chain_interrupted,
             work_profile: request.work_profile,
-            // The schedule-id list is the host-tool seam (`nexus.work.schedule.set`);
+            // why: the schedule-id list is the host-tool seam (`nexus.work.schedule.set`);
             // no HTTP caller supplies it, and the core treats `None` as "untouched".
             schedule_ids: None,
         };
@@ -461,7 +454,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/works/{work_id}` (204 at the adapter).
+    /// note: `DELETE /v1/daemon/works/{work_id}` (204 at the adapter).
     #[napi]
     pub async fn delete_work(&self, principal_handle: String, work_id: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -471,7 +464,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/inspiration`.
+    /// note: `POST /v1/daemon/works/{work_id}/inspiration`.
     #[napi]
     pub async fn append_work_inspiration(
         &self,
@@ -493,7 +486,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/completion-lock/release`.
+    /// note: `POST /v1/daemon/works/{work_id}/completion-lock/release`.
     #[napi]
     pub async fn release_work_completion_lock(
         &self,
@@ -512,7 +505,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/reconcile-chapters?dry_run=`.
+    /// note: `POST /v1/daemon/works/{work_id}/reconcile-chapters?dry_run=`.
     #[napi]
     pub async fn reconcile_work_chapters(
         &self,
@@ -544,7 +537,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/use`-equivalent durable selection —
+    /// note: `POST /v1/daemon/works/{work_id}/use`-equivalent durable selection —
     /// the pool-active mutation the Work surface exposes over HTTP is
     /// `set_pool_active`; `select_work` is the same persisted selection seam
     /// the CLI `works use` path uses.
@@ -557,9 +550,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Authoring pool + inspiration (P1-T1) ────────────────────────────────
-
-    /// `GET /v1/daemon/works/pool`.
+    /// note: `GET /v1/daemon/works/pool`.
     #[napi]
     pub async fn list_work_pool(
         &self,
@@ -597,7 +588,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/pool` — durable pool-active selection.
+    /// note: `POST /v1/daemon/works/pool` — durable pool-active selection.
     #[napi]
     pub async fn set_work_pool_active(
         &self,
@@ -617,7 +608,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/pool/promote`.
+    /// note: `POST /v1/daemon/works/pool/promote`.
     #[napi]
     pub async fn promote_work_pool_entry(
         &self,
@@ -636,7 +627,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/pool/archive`.
+    /// note: `POST /v1/daemon/works/pool/archive`.
     #[napi]
     pub async fn archive_work_pool_entry(
         &self,
@@ -654,7 +645,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/pool/inspiration` (201 at the adapter).
+    /// note: `POST /v1/daemon/works/pool/inspiration` (201 at the adapter).
     #[napi]
     pub async fn add_work_inspiration(
         &self,
@@ -676,7 +667,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/pool/inspiration`.
+    /// note: `GET /v1/daemon/works/pool/inspiration`.
     #[napi]
     pub async fn list_work_inspiration(
         &self,
@@ -715,7 +706,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/pool/inspiration/promote` (atomic three-write
+    /// note: `POST /v1/daemon/works/pool/inspiration/promote` (atomic three-write
     /// transaction stays core-owned).
     #[napi]
     pub async fn promote_work_inspiration(
@@ -740,7 +731,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/pool/inspiration/archive`.
+    /// note: `POST /v1/daemon/works/pool/inspiration/archive`.
     #[napi]
     pub async fn archive_work_inspiration(
         &self,
@@ -767,9 +758,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Chapter / outline content (P1-T2) ───────────────────────────────────
-
-    /// `GET /v1/daemon/works/{work_id}/chapters/`.
+    /// note: `GET /v1/daemon/works/{work_id}/chapters/`.
     #[napi]
     pub async fn list_chapters(
         &self,
@@ -790,7 +779,7 @@ impl NativeCore {
         }
     }
 
-    /// `GET /v1/daemon/works/{work_id}/chapters/{n}`.
+    /// note: `GET /v1/daemon/works/{work_id}/chapters/{n}`.
     #[napi]
     pub async fn chapter_detail(
         &self,
@@ -810,7 +799,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/{work_id}/chapters/{n}/outline`.
+    /// note: `GET /v1/daemon/works/{work_id}/chapters/{n}/outline`.
     #[napi]
     pub async fn chapter_outline(
         &self,
@@ -830,7 +819,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — raw content
+    /// note: `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — raw content
     /// download stays the JSON `ChapterBody` envelope (markdown inside).
     #[napi]
     pub async fn chapter_body(
@@ -851,7 +840,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/works/{work_id}/chapters/{n}`.
+    /// note: `PATCH /v1/daemon/works/{work_id}/chapters/{n}`.
     #[napi]
     pub async fn patch_chapter(
         &self,
@@ -873,7 +862,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/{work_id}/outline`.
+    /// note: `GET /v1/daemon/works/{work_id}/outline`.
     #[napi]
     pub async fn get_work_outline(
         &self,
@@ -886,7 +875,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/outline/patch`.
+    /// note: `POST /v1/daemon/works/{work_id}/outline/patch`.
     #[napi]
     pub async fn patch_outline_structure(
         &self,
@@ -903,7 +892,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/chapters/{n}/patch`.
+    /// note: `POST /v1/daemon/works/{work_id}/chapters/{n}/patch`.
     #[napi]
     pub async fn patch_outline_chapter(
         &self,
@@ -920,7 +909,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/timeline/patch`.
+    /// note: `POST /v1/daemon/works/{work_id}/timeline/patch`.
     #[napi]
     pub async fn patch_timeline_event(
         &self,
@@ -936,9 +925,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Findings (P1-T3) ────────────────────────────────────────────────────
-
-    /// Map a generated create-finding wire body onto the core carrier,
+    /// note: map a generated create-finding wire body onto the core carrier,
     /// applying the legacy wire defaults (`target_executor` = `none`,
     /// `kind` = `craft`).
     fn finding_create(
@@ -957,7 +944,7 @@ impl NativeCore {
         })
     }
 
-    /// `POST /v1/daemon/works/{work_id}/findings` (201 at the adapter).
+    /// note: `POST /v1/daemon/works/{work_id}/findings` (201 at the adapter).
     #[napi]
     pub async fn create_finding(
         &self,
@@ -975,7 +962,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/works/{work_id}/findings/from-review`.
+    /// note: `POST /v1/daemon/works/{work_id}/findings/from-review`.
     #[napi]
     pub async fn create_finding_from_review(
         &self,
@@ -994,7 +981,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/{work_id}/findings` — cursor-paginated page.
+    /// note: `GET /v1/daemon/works/{work_id}/findings` — cursor-paginated page.
     #[napi]
     pub async fn list_findings(
         &self,
@@ -1012,7 +999,7 @@ impl NativeCore {
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_findings(&principal, work_id, domain).await?;
-            // The core page carries the same generated item/pagination types;
+            // note: the core page carries the same generated item/pagination types;
             // only the carrier struct is non-Serializable.
             Ok(serde_json::json!({
                 "items": page.items,
@@ -1022,7 +1009,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/works/{work_id}/findings/{finding_id}`.
+    /// note: `GET /v1/daemon/works/{work_id}/findings/{finding_id}`.
     #[napi]
     pub async fn get_work_finding(
         &self,
@@ -1039,7 +1026,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/findings/{finding_id}` — creator-scoped lookup.
+    /// note: `GET /v1/daemon/findings/{finding_id}` — creator-scoped lookup.
     #[napi]
     pub async fn get_finding(
         &self,
@@ -1053,7 +1040,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — tri-state
+    /// note: `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — tri-state
     /// `rule_suggestion` (R-V1190-FINDINGS-TRISTATE-DUP): absent keeps the
     /// stored column, `null` clears it, a string sets it.
     ///
@@ -1078,7 +1065,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` (204).
+    /// note: `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` (204).
     #[napi]
     pub async fn delete_finding(
         &self,
@@ -1092,7 +1079,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/findings/batch`.
+    /// note: `PATCH /v1/daemon/findings/batch`.
     #[napi]
     pub async fn batch_update_findings(
         &self,
@@ -1108,7 +1095,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/findings/stale?threshold_seconds=` — the threshold
+    /// note: `GET /v1/daemon/findings/stale?threshold_seconds=` — the threshold
     /// resolution stays at the adapter (daemon env default 96h), matching the
     /// legacy surface.
     #[napi]
@@ -1121,7 +1108,7 @@ impl NativeCore {
             let report = core
                 .list_stale_findings(&principal, threshold_seconds)
                 .await?;
-            // StaleFindingEntry carries no Serialize: map field-wise.
+            // note: `StaleFindingEntry` carries no `Serialize`, so map field-wise.
             let findings: Vec<serde_json::Value> = report
                 .findings
                 .iter()
@@ -1145,7 +1132,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/findings/prune?older_than_days=&dry_run=`.
+    /// note: `POST /v1/daemon/findings/prune?older_than_days=&dry_run=`.
     #[napi]
     pub async fn prune_findings(
         &self,
@@ -1167,9 +1154,7 @@ impl NativeCore {
         .await
     }
 
-    // ── Reading depth (P1-T3) ───────────────────────────────────────────────
-
-    /// `GET /v1/daemon/reading/progress?work_id=&chapter=`.
+    /// note: `GET /v1/daemon/reading/progress?work_id=&chapter=`.
     #[napi]
     pub async fn get_reading_progress(
         &self,
@@ -1185,7 +1170,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PUT /v1/daemon/reading/progress`.
+    /// note: `PUT /v1/daemon/reading/progress`.
     #[napi]
     pub async fn put_reading_progress(
         &self,
@@ -1203,7 +1188,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/reading/progress?work_id=&chapter=` (204).
+    /// note: `DELETE /v1/daemon/reading/progress?work_id=&chapter=` (204).
     #[napi]
     pub async fn delete_reading_progress(
         &self,
@@ -1218,7 +1203,7 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/reading/annotations?work_id=&chapter=`.
+    /// note: `GET /v1/daemon/reading/annotations?work_id=&chapter=`.
     #[napi]
     pub async fn list_annotations(
         &self,
@@ -1234,7 +1219,7 @@ impl NativeCore {
         .await
     }
 
-    /// `POST /v1/daemon/reading/annotations` (201 at the adapter).
+    /// note: `POST /v1/daemon/reading/annotations` (201 at the adapter).
     #[napi]
     pub async fn create_annotation(
         &self,
@@ -1249,7 +1234,7 @@ impl NativeCore {
         .await
     }
 
-    /// `PATCH /v1/daemon/reading/annotations/{annotation_id}` — nullable
+    /// note: `PATCH /v1/daemon/reading/annotations/{annotation_id}` — nullable
     /// `note` keeps explicit-null clear semantics via the generated carrier.
     #[napi]
     pub async fn patch_annotation(
@@ -1268,7 +1253,7 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/reading/annotations/{annotation_id}` (204).
+    /// note: `DELETE /v1/daemon/reading/annotations/{annotation_id}` (204).
     #[napi]
     pub async fn delete_annotation(
         &self,
@@ -1283,7 +1268,7 @@ impl NativeCore {
     }
 }
 
-/// Work detail wire projection. Field-for-field with the schema-owned
+/// note: work detail wire projection. Field-for-field with the schema-owned
 /// `WorkDetailResponse`; the core carrier widens `i32` counters to the wire
 /// `i64` and the optional chapter list serializes as a (possibly empty) array.
 fn work_detail_wire(details: nexus_core::WorkDetails) -> WorkDetailResponse {
@@ -1323,7 +1308,7 @@ fn work_detail_wire(details: nexus_core::WorkDetails) -> WorkDetailResponse {
     }
 }
 
-/// Pool entry wire projection: the stored `creator_id` never crosses the wire
+/// note: pool entry wire projection: the stored `creator_id` never crosses the wire
 /// (R-V141P1-11 — local-first, always the active creator).
 fn pool_entry_wire(entry: nexus_core::WorkPoolEntry) -> WorkPoolEntry {
     WorkPoolEntry {

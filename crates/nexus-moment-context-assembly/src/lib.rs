@@ -23,6 +23,8 @@
 //!   carries long-term memories and fragments (E10 recall inputs, NXM-7)
 //! - `nexus-narrative` — World state, timeline, events (via `NarrativeGateway`)
 //! - `nexus-kb` — World-scoped key blocks (via `KbStore`)
+// invariant: the `cloud-stage` feature gates only the two-stage path; Stage-0 and
+// Moment assembly build unconditionally.
 
 pub mod directive;
 pub mod generation;
@@ -36,11 +38,9 @@ pub mod stage0;
 mod test_support;
 pub mod world_context;
 
-// Cloud-stage types gated behind feature flag
 #[cfg(feature = "cloud-stage")]
 pub mod cloud_stage;
 
-// Re-export primary types
 #[cfg(feature = "cloud-stage")]
 pub use cloud_stage::TwoStageAssembly;
 pub use directive::{
