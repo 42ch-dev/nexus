@@ -1094,8 +1094,8 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
         "ability" => "magic_system", // note: abilities → magic/superpower system
         "scene" => "level",       // note: scenes → levels
         "organization" | "conflict" => "faction", // note: organizations/conflicts → faction dynamics
-        "item" => "technology",   // note: items → technology/artifacts
-        "info_point" | "event" => "deity", // note: info points/events → deity (lore)
+        "item" => "technology",                   // note: items → technology/artifacts
+        "info_point" | "event" => "deity",        // note: info points/events → deity (lore)
         _ => {
             tracing::debug!(
                 block_type,
@@ -1128,14 +1128,14 @@ pub fn block_type_to_script_category(block_type: &str) -> &'static str {
         "beat" => "beat",
         "act" => "act",
         // note: cross-domain reuse: existing BlockType → closest script_category.
-        "character" => "dialogue",  // note: characters express through dialogue
-        "scene" => "act",           // note: scenes belong to acts
-        "event" => "beat",          // note: events are beats in narrative
-        "organization" => "act",    // note: organizations anchor acts
-        "conflict" => "beat",       // note: conflict is beat-level tension
+        "character" => "dialogue", // note: characters express through dialogue
+        "scene" => "act",          // note: scenes belong to acts
+        "event" => "beat",         // note: events are beats in narrative
+        "organization" => "act",   // note: organizations anchor acts
+        "conflict" => "beat",      // note: conflict is beat-level tension
         "info_point" => "dialogue", // note: info conveyed through dialogue
-        "ability" => "dialogue",    // note: abilities expressed in dialogue
-        "item" => "beat",           // note: items are beat-level props
+        "ability" => "dialogue",   // note: abilities expressed in dialogue
+        "item" => "beat",          // note: items are beat-level props
         _ => {
             tracing::debug!(
                 block_type,
