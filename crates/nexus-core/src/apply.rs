@@ -38,96 +38,96 @@ use serde_json::Value;
 use crate::compose::{verify_recorded_pins, PinVerificationFailure, ResolvedPatternPin};
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
-/// Why an apply was refused. Nothing was written when one is returned.
+/// why: an apply was refused. Nothing was written when one is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyRefusal {
-    /// No approval carries the requested content hash.
+    /// note: No approval carries the requested content hash.
     ApprovalNotFound {
-        /// The content hash the request named.
+        /// note: The content hash the request named.
         content_hash: String,
     },
-    /// The requested content hash belongs to another strategy's approval, so no apply row could
+    /// note: The requested content hash belongs to another strategy's approval, so no apply row could
     /// pair it with this strategy.
     ApprovalStrategyMismatch {
-        /// The content hash the request named.
+        /// note: The content hash the request named.
         content_hash: String,
-        /// The strategy the approval belongs to.
+        /// note: The strategy the approval belongs to.
         approval_strategy_id: String,
-        /// The strategy the request named.
+        /// note: The strategy the request named.
         strategy_id: String,
     },
-    /// The approval's frozen document no longer hashes to the identity the approval recorded, so
+    /// note: The approval's frozen document no longer hashes to the identity the approval recorded, so
     /// installing it would install a changed hash.
     ApprovalHashChanged {
-        /// The approval whose bytes moved.
+        /// note: The approval whose bytes moved.
         approval_id: String,
-        /// The `content_hash` stored on the approval row.
+        /// note: The `content_hash` stored on the approval row.
         stored_hash: String,
-        /// The canonical hash of the stored `document_json`.
+        /// note: The canonical hash of the stored `document_json`.
         recomputed_hash: String,
     },
-    /// The strategy does not resolve to a user bundle, so the schedule intake would never read
+    /// note: The strategy does not resolve to a user bundle, so the schedule intake would never read
     /// the apply this request would record.
     StrategyNotUserPreset {
-        /// The strategy the request named.
+        /// note: The strategy the request named.
         strategy_id: String,
     },
-    /// The strategy owns no schedule, so an applied identity would record nothing that runs.
+    /// note: The strategy owns no schedule, so an applied identity would record nothing that runs.
     StrategyHasNoSchedule {
-        /// The strategy the request named.
+        /// note: The strategy the request named.
         strategy_id: String,
     },
-    /// The approval is already the current apply; a repeat is the typed conflict. A *superseded*
+    /// note: The approval is already the current apply; a repeat is the typed conflict. A *superseded*
     /// approval is not covered: re-applying it is a legal rollback.
     AlreadyApplied {
-        /// The apply row that already carries this approval.
+        /// note: The apply row that already carries this approval.
         apply_id: String,
-        /// The approval that is already current.
+        /// note: The approval that is already current.
         approval_id: String,
     },
-    /// The approval's document cannot become an outer graph, so applying it would install an
+    /// note: The approval's document cannot become an outer graph, so applying it would install an
     /// identity the schedule intake refuses to build: the run would fail at its first build.
     DocumentUnbuildable {
-        /// The builder's own refusal, verbatim: `IrOuterGraphError::to_string()`.
+        /// note: The builder's own refusal, verbatim: `IrOuterGraphError::to_string()`.
         builder_reason: String,
     },
-    /// A pattern body the approved document pins no longer hashes to the pin the approval froze,
+    /// note: A pattern body the approved document pins no longer hashes to the pin the approval froze,
     /// so applying it would run bytes nobody approved.
     PinChanged {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package id.
+        /// note: The pinned package id.
         package_id: String,
-        /// The pinned package version.
+        /// note: The pinned package version.
         package_version: String,
-        /// The hash the approval recorded.
+        /// note: The hash the approval recorded.
         recorded_hash: String,
-        /// The hash the registry now serves.
+        /// note: The hash the registry now serves.
         scanned_hash: String,
     },
-    /// The registry does not resolve a pin the approval froze, so there are no bytes to compare.
+    /// note: The registry does not resolve a pin the approval froze, so there are no bytes to compare.
     PinUnavailable {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package id.
+        /// note: The pinned package id.
         package_id: String,
-        /// The pinned package version.
+        /// note: The pinned package version.
         package_version: String,
-        /// The hash the approval recorded.
+        /// note: The hash the approval recorded.
         recorded_hash: String,
     },
-    /// The approval's recorded pin snapshot cannot be relied on: it does not decode, it disagrees
+    /// note: The approval's recorded pin snapshot cannot be relied on: it does not decode, it disagrees
     /// with the document it was frozen beside, or the pattern registry cannot be read.
     PinsUnverifiable {
-        /// The approval whose pins could not be verified.
+        /// note: The approval whose pins could not be verified.
         approval_id: String,
-        /// What could not be compared, and why.
+        /// note: What could not be compared, and why.
         detail: String,
     },
 }
 
 impl ApplyRefusal {
-    /// The stable lowercase reason a client branches on.
+    /// note: The stable lowercase reason a client branches on.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
         match self {
@@ -144,7 +144,7 @@ impl ApplyRefusal {
         }
     }
 
-    /// The refusal envelope's `details`, carrying the identity the refusal names.
+    /// note: The refusal envelope's `details`, carrying the identity the refusal names.
     #[must_use]
     pub fn details(&self) -> Value {
         let mut details = serde_json::Map::new();
@@ -246,7 +246,7 @@ impl ApplyRefusal {
         Value::Object(details)
     }
 
-    /// The core error a refused apply returns; the adapter renders `details` verbatim.
+    /// note: The core error a refused apply returns; the adapter renders `details` verbatim.
     #[must_use]
     pub fn into_error(self) -> CoreError {
         CoreError::InputValidation {
@@ -344,7 +344,7 @@ fn apply_internal(detail: impl std::fmt::Display) -> CoreError {
     }
 }
 
-/// The identity an apply recorded. The row is immutable, so this is the whole answer.
+/// note: The identity an apply recorded. The row is immutable, so this is the whole answer.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AppliedStrategy {
     pub apply_id: String,
@@ -354,7 +354,7 @@ pub struct AppliedStrategy {
     pub supersedes_apply_id: Option<String>,
 }
 
-/// One approval of the strategy, reduced to the keys a client lists and applies by.
+/// note: One approval of the strategy, reduced to the keys a client lists and applies by.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyApproval {
     pub approval_id: String,
@@ -363,7 +363,7 @@ pub struct StrategyApproval {
     pub approved_at: String,
 }
 
-/// Every approval of a strategy, newest first.
+/// note: Every approval of a strategy, newest first.
 ///
 /// The order is [`CoreService::strategy_applied`]'s total order (`candidate_revision` DESC,
 /// `approved_at` DESC, `approval_id` DESC), so `items[0]` is that read's `newest_approval`. This
@@ -373,7 +373,7 @@ pub struct StrategyApprovals {
     pub items: Vec<StrategyApproval>,
 }
 
-/// The strategy's applied identity and the newest approval it could move to.
+/// note: The strategy's applied identity and the newest approval it could move to.
 ///
 /// `candidate_revision` defines approval newness (compass D11); `approved_at` and `approval_id`
 /// only make a tied query deterministic. A client compares `newest_approval.approval_id` with
@@ -392,7 +392,7 @@ pub struct StrategyAppliedStatus {
     pub applied_document_refusal: Option<AppliedDocumentRefusal>,
 }
 
-/// Why the current apply's frozen document could not be replayed, as the status read reports it.
+/// why: the current apply's frozen document could not be replayed, as the status read reports it.
 ///
 /// `reason` is [`ApplyLoadRefusal::reason`]'s stable `snake_case` wire code — the same code the
 /// schedule intake and the recovery path name — so a client switches on it, never on `message`.
@@ -403,7 +403,7 @@ pub struct AppliedDocumentRefusal {
 }
 
 impl CoreService {
-    /// The applied identity of `strategy_id`, the document it installed and its newest approval,
+    /// note: The applied identity of `strategy_id`, the document it installed and its newest approval,
     /// all read from the append-only rows. The apply side is [`current_apply`] — the same answer
     /// the schedule intake branches on, so the Canvas and the run never disagree about which
     /// apply is live — and the document is the one that apply installed.
@@ -425,7 +425,7 @@ impl CoreService {
 
         let current_apply = current_apply(&self.inner.pool, strategy_id).await?;
 
-        // The document half runs the same replay the intake and recovery run, against the apply
+        // why: The document half runs the same replay the intake and recovery run, against the apply
         // row this response reports: resolving a second `current_apply` could pair the document
         // with another apply's identity in one body. The outer `Err` propagates as above.
         let (applied_document, applied_document_refusal) = match current_apply.as_ref() {
@@ -477,7 +477,7 @@ impl CoreService {
         })
     }
 
-    /// Every approval of `strategy_id`, newest first in the same total order as
+    /// note: Every approval of `strategy_id`, newest first in the same total order as
     /// [`Self::strategy_applied`]'s `newest_approval` (`items[0]` is that same row).
     ///
     /// This is the read rollback needs: the status read reports only the newest approval, so a
@@ -519,7 +519,7 @@ impl CoreService {
         Ok(StrategyApprovals { items })
     }
 
-    /// Apply the approval `approval_content_hash` names, recording it as the strategy's current
+    /// note: Apply the approval `approval_content_hash` names, recording it as the strategy's current
     /// applied identity.
     ///
     /// # Errors
@@ -537,7 +537,7 @@ impl CoreService {
     ) -> CoreResult<AppliedStrategy> {
         self.verify_principal(principal)?;
 
-        // The intake reads an apply only for a user preset (`is_user_preset`), so an apply
+        // why: The intake reads an apply only for a user preset (`is_user_preset`), so an apply
         // naming an embedded or system id records a row nothing ever reads — a successful apply
         // that changes nothing. The source is the LOADER's answer through the resolver the intake
         // shares; a preset that does not resolve at all is equally not a user bundle. Validation
@@ -563,7 +563,7 @@ impl CoreService {
         let apply_id = format!("apl_{}", uuid::Uuid::new_v4());
         let applied_at = chrono::Utc::now().to_rfc3339();
 
-        // One statement owns every guard that depends on the apply table: the supersede link is
+        // why: One statement owns every guard that depends on the apply table: the supersede link is
         // the current row as this statement sees it, the already-current refusal is the absence of
         // any successor-less row naming this approval, and the schedule precondition rides in the
         // same statement so an apply cannot land for a strategy that lost its schedule. A
@@ -618,7 +618,7 @@ impl CoreService {
         })
     }
 
-    /// Resolve the approval `approval_content_hash` names for `strategy_id` and prove the identity
+    /// note: Resolve the approval `approval_content_hash` names for `strategy_id` and prove the identity
     /// it promises, returning the approval id and the hash the apply row records.
     ///
     /// # Errors
@@ -632,7 +632,7 @@ impl CoreService {
         strategy_id: &str,
         approval_content_hash: &str,
     ) -> CoreResult<(String, String)> {
-        // The approval lookup prefers this strategy's own row: two strategies approving the same
+        // why: The approval lookup prefers this strategy's own row: two strategies approving the same
         // content is legal, and the request names the strategy it applies to. `approval_id`
         // breaks the tie so a hash only foreign strategies carry names the same strategy on every
         // read: `UNIQUE (strategy_id, content_hash)` already rules out a tie inside one strategy.
@@ -663,7 +663,7 @@ impl CoreService {
             .into_error());
         }
 
-        // The approval identity is recomputed from the frozen bytes, never trusted from the
+        // why: The approval identity is recomputed from the frozen bytes, never trusted from the
         // column: an approval whose document moved no longer proves the hash it promises.
         let document: WorkflowDocument = serde_json::from_str(&document_json).map_err(|error| {
             apply_internal(format!(
@@ -681,13 +681,13 @@ impl CoreService {
             .into_error());
         }
 
-        // The hash freezes the document, not the pattern bodies it pins: a body edited under an
+        // why: The hash freezes the document, not the pattern bodies it pins: a body edited under an
         // unchanged `id@version` leaves this hash intact. The frozen pin snapshot is the second,
         // narrower guard, and it runs before buildability so a moved pin is named as the pin it is.
         verify_pins(self.nexus_home(), &document, &pins_json)
             .map_err(|failure| pin_apply_refusal(&approval_id, failure).into_error())?;
 
-        // The applied identity must be one the intake can build. The schedule intake builds this
+        // why: The applied identity must be one the intake can build. The schedule intake builds this
         // same document with `IrTemplateSource::OwnSource`, so a document the builder refuses
         // would apply, report itself applied, and then fail at its first build (I-000448). Same
         // predicate, same reason, before the row exists.
@@ -701,7 +701,7 @@ impl CoreService {
         Ok((approval_id, stored_hash))
     }
 
-    /// Name why the apply statement wrote no row. The schedule is checked first because it is the
+    /// note: Name why the apply statement wrote no row. The schedule is checked first because it is the
     /// only precondition that lives outside the apply table; with it in place the sole remaining
     /// predicate is the already-current guard, so this probe repeats that guard's own condition —
     /// a successor-less row of this strategy naming this approval, in the same total order
@@ -757,11 +757,9 @@ impl CoreService {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Load-side replay: which apply is live, and whether it still replays.
-// ---------------------------------------------------------------------------
+// note: Load-side replay: which apply is live, and whether it still replays.
 
-/// Whether `strategy_id` resolved to a user bundle — the only source the schedule intake reads an
+/// note: Whether `strategy_id` resolved to a user bundle — the only source the schedule intake reads an
 /// apply from.
 ///
 /// This is the ONE classification both sides of the apply gate use, so the two cannot disagree
@@ -774,7 +772,7 @@ impl CoreService {
 /// `_system.` id names no strategy.
 #[must_use]
 pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) -> bool {
-    // The decision itself lives in `nexus-home-layout::strategy_intake` so the
+    // why: The decision itself lives in `nexus-home-layout::strategy_intake` so the
     // engine's preset trait entries classify through the same function — one
     // rule for both sides of the intake gate.
     nexus_home_layout::strategy_intake::is_user_strategy_bundle(
@@ -786,7 +784,7 @@ pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) ->
     )
 }
 
-/// The apply that is live for `strategy_id`: the append-only row with no successor.
+/// note: The apply that is live for `strategy_id`: the append-only row with no successor.
 ///
 /// `None` when the strategy has no apply, which is the common case — "nothing applied" is an
 /// answer, not a refusal. A second successor-less row is only reachable by an admitted non-core
@@ -831,7 +829,7 @@ pub async fn current_apply(
     )
 }
 
-/// The document of `apply`, re-verified against the identity the apply recorded.
+/// note: The document of `apply`, re-verified against the identity the apply recorded.
 ///
 /// This is the same recomputation [`CoreService::apply_strategy`] performs, run again at load:
 /// the approval's frozen bytes are decoded and hashed, and a document that no longer hashes to
@@ -883,76 +881,76 @@ pub async fn verified_apply_document(
     Ok(Ok(document))
 }
 
-/// Why an applied identity cannot be replayed. Nothing was executed.
+/// why: an applied identity cannot be replayed. Nothing was executed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyLoadRefusal {
-    /// The applied document's frozen bytes no longer hash to the identity the apply recorded.
+    /// note: The applied document's frozen bytes no longer hash to the identity the apply recorded.
     DocumentChanged {
-        /// The strategy whose apply no longer replays.
+        /// note: The strategy whose apply no longer replays.
         strategy_id: String,
-        /// The apply that installed the identity.
+        /// note: The apply that installed the identity.
         apply_id: String,
-        /// The `content_hash` the apply recorded.
+        /// note: The `content_hash` the apply recorded.
         stored_hash: String,
-        /// The canonical hash of the stored `document_json`.
+        /// note: The canonical hash of the stored `document_json`.
         recomputed_hash: String,
     },
-    /// The applied document's frozen bytes no longer yield a canonical identity at all: they do
+    /// note: The applied document's frozen bytes no longer yield a canonical identity at all: they do
     /// not decode as a workflow document, or their hash cannot be computed.
     DocumentUnverifiable {
-        /// The strategy whose apply no longer replays.
+        /// note: The strategy whose apply no longer replays.
         strategy_id: String,
-        /// The apply that installed the identity.
+        /// note: The apply that installed the identity.
         apply_id: String,
-        /// What could not be read.
+        /// note: What could not be read.
         detail: String,
     },
-    /// A pattern body the applied document pins no longer hashes to the pin the apply froze.
+    /// note: A pattern body the applied document pins no longer hashes to the pin the apply froze.
     PinChanged {
-        /// The strategy whose apply no longer replays.
+        /// note: The strategy whose apply no longer replays.
         strategy_id: String,
-        /// The apply that installed the identity.
+        /// note: The apply that installed the identity.
         apply_id: String,
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package id.
+        /// note: The pinned package id.
         package_id: String,
-        /// The pinned package version.
+        /// note: The pinned package version.
         package_version: String,
-        /// The hash the apply recorded.
+        /// note: The hash the apply recorded.
         recorded_hash: String,
-        /// The hash the registry now serves.
+        /// note: The hash the registry now serves.
         scanned_hash: String,
     },
-    /// The registry does not resolve a pin the applied document records.
+    /// note: The registry does not resolve a pin the applied document records.
     PinUnavailable {
-        /// The strategy whose apply no longer replays.
+        /// note: The strategy whose apply no longer replays.
         strategy_id: String,
-        /// The apply that installed the identity.
+        /// note: The apply that installed the identity.
         apply_id: String,
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package id.
+        /// note: The pinned package id.
         package_id: String,
-        /// The pinned package version.
+        /// note: The pinned package version.
         package_version: String,
-        /// The hash the apply recorded.
+        /// note: The hash the apply recorded.
         recorded_hash: String,
     },
-    /// The applied identity's recorded pin snapshot cannot be relied on: it does not decode, it
+    /// note: The applied identity's recorded pin snapshot cannot be relied on: it does not decode, it
     /// disagrees with the document it was frozen beside, or the pattern registry cannot be read.
     PinsUnverifiable {
-        /// The strategy whose apply no longer replays.
+        /// note: The strategy whose apply no longer replays.
         strategy_id: String,
-        /// The apply that installed the identity.
+        /// note: The apply that installed the identity.
         apply_id: String,
-        /// What could not be compared, and why.
+        /// note: What could not be compared, and why.
         detail: String,
     },
 }
 
 impl ApplyLoadRefusal {
-    /// The stable lowercase wire code the refusal renders as — a coded refusal (HTTP 400 at the
+    /// note: The stable lowercase wire code the refusal renders as — a coded refusal (HTTP 400 at the
     /// adapter), never an internal fault.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
@@ -965,7 +963,7 @@ impl ApplyLoadRefusal {
         }
     }
 
-    /// The core error the load refusal returns, naming the strategy and the apply.
+    /// note: The core error the load refusal returns, naming the strategy and the apply.
     #[must_use]
     pub fn into_error(self) -> CoreError {
         CoreError::Coded {
@@ -1039,7 +1037,7 @@ impl std::fmt::Display for ApplyLoadRefusal {
     }
 }
 
-/// Read `pins_json` and re-compare it with the registry, scanning `<nexus_home>/patterns` only
+/// note: Read `pins_json` and re-compare it with the registry, scanning `<nexus_home>/patterns` only
 /// when a pin was recorded — a document that pins nothing never touches that root.
 // `PinVerificationFailure` carries the whole pin identity (nest, package, both hashes); boxing it
 // would only move the same bytes behind a pointer on this one refusal path.
@@ -1066,7 +1064,7 @@ fn verify_pins(
     verify_recorded_pins(document, &recorded, &packages)
 }
 
-/// The apply-time refusal a pin failure becomes, naming the approval it was read from.
+/// note: The apply-time refusal a pin failure becomes, naming the approval it was read from.
 fn pin_apply_refusal(approval_id: &str, failure: PinVerificationFailure) -> ApplyRefusal {
     match failure {
         PinVerificationFailure::Changed {
@@ -1098,7 +1096,7 @@ fn pin_apply_refusal(approval_id: &str, failure: PinVerificationFailure) -> Appl
     }
 }
 
-/// The load-time refusal a pin failure becomes, naming the strategy and the apply.
+/// note: The load-time refusal a pin failure becomes, naming the strategy and the apply.
 fn pin_load_refusal(
     strategy_id: &str,
     apply: &AppliedStrategy,
@@ -1140,7 +1138,7 @@ fn pin_load_refusal(
     }
 }
 
-/// Recompute an applied document's identity exactly as apply time did.
+/// note: Recompute an applied document's identity exactly as apply time did.
 // `ApplyLoadRefusal` carries the whole pin identity plus the strategy and apply it belongs to;
 // boxing it would change the type threaded through admission and recovery for one terminal path.
 #[allow(clippy::result_large_err)]
@@ -1227,7 +1225,7 @@ mod tests {
     fn a_document_edited_after_apply_is_refused_by_strategy_and_apply() {
         let document: WorkflowDocument = serde_json::from_str(IR).unwrap();
         let hash = content_hash(&document).unwrap();
-        // Edit the frozen bytes behind the apply's back; only the recomputation can catch it.
+        // why: Edit the frozen bytes behind the apply's back; only the recomputation can catch it.
         let mut edited = document;
         edited.version = 7;
         let edited_hash = content_hash(&edited).unwrap();

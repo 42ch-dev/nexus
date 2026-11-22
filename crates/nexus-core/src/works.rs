@@ -1,3 +1,4 @@
+// note: module documentation for the Work lifecycle command family
 //! Work lifecycle and authoring operations over the guarded core workspace.
 //! HTTP envelopes stay in adapters; these projections are owned domain values.
 
@@ -12,7 +13,7 @@ use nexus_contracts::{
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use uuid::Uuid;
 
-/// Serializes as the retained tool/Work wire shape.
+/// note: Serializes as the retained tool/Work wire shape.
 ///
 /// `serde` is derived rather than hand-mapped because the field set IS the
 /// wire contract — the pre-extraction daemon kept a field-for-field copy
@@ -34,48 +35,48 @@ pub struct WorkDetails {
     pub schedule_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
-    /// Current FL-E stage (V1.34).
+    /// note: Current FL-E stage (V1.34).
     pub current_stage: String,
-    /// Current FL-E stage status (V1.34).
+    /// note: Current FL-E stage status (V1.34).
     pub stage_status: String,
-    /// Work profile (V1.36 novel-workflow-profile §2.1).
+    /// note: Work profile (V1.36 novel-workflow-profile §2.1).
     pub work_profile: Option<String>,
-    /// Human slug for Works/ directory (V1.36 §2.1).
+    /// note: Human slug for Works/ directory (V1.36 §2.1).
     pub work_ref: Option<String>,
-    /// Total planned chapters (V1.36 §2.1).
+    /// note: Total planned chapters (V1.36 §2.1).
     pub total_planned_chapters: Option<i32>,
-    /// Current chapter index (V1.36 §2.1).
+    /// note: Current chapter index (V1.36 §2.1).
     pub current_chapter: i32,
-    /// Per-chapter rows (V1.38 P0 §8.1 — populated for novel profile Works).
+    /// note: Per-chapter rows (V1.38 P0 §8.1 — populated for novel profile Works).
     pub chapters: Option<Vec<serde_json::Value>>,
-    /// Next chapter to work on per §4.5.2 selection (V1.38 P0 — populated for novel profile).
+    /// note: Next chapter to work on per §4.5.2 selection (V1.38 P0 — populated for novel profile).
     pub next_chapter: Option<i32>,
-    /// V1.42: volume of the next chapter to work on (cross-volume aware).
+    /// note: V1.42: volume of the next chapter to work on (cross-volume aware).
     pub next_chapter_volume: Option<i32>,
-    /// Auto-chain enabled flag (V1.39 §5.4).
+    /// note: Auto-chain enabled flag (V1.39 §5.4).
     pub auto_chain_enabled: bool,
-    /// Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
+    /// note: Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
     pub driver_schedule_id: Option<String>,
-    /// Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
+    /// note: Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
     pub auto_chain_interrupted: bool,
-    /// Opt-in: stale-findings watcher auto-enqueues `novel-review-master`
+    /// note: Opt-in: stale-findings watcher auto-enqueues `novel-review-master`
     /// for this Work after the timeout threshold (V1.39 P4 T4, default false).
     pub auto_review_master_on_timeout: bool,
-    /// Runtime lock holder (V1.41 DF-60 §4, nullable).
+    /// note: Runtime lock holder (V1.41 DF-60 §4, nullable).
     pub runtime_lock_holder: Option<String>,
-    /// When the runtime lock was acquired (V1.41 DF-60 §4, nullable).
+    /// note: When the runtime lock was acquired (V1.41 DF-60 §4, nullable).
     pub runtime_lock_acquired_at: Option<String>,
-    /// When completion-lock was applied (V1.41 DF-60 §3, nullable).
+    /// note: When completion-lock was applied (V1.41 DF-60 §3, nullable).
     pub completion_locked_at: Option<String>,
-    /// Novel completion status (V1.41 DF-60 §2, nullable).
+    /// note: Novel completion status (V1.41 DF-60 §2, nullable).
     pub novel_completion_status: Option<String>,
-    /// Parent Work ID when created via lineage (V1.41 DF-60 §5.2, nullable).
+    /// note: Parent Work ID when created via lineage (V1.41 DF-60 §5.2, nullable).
     pub lineage_from_work_id: Option<String>,
 }
 
 impl From<WorkRecord> for WorkDetails {
     fn from(r: WorkRecord) -> Self {
-        // Parse JSON columns. Best-effort: if a column is malformed, fall back
+        // why: Parse JSON columns. Best-effort: if a column is malformed, fall back
         // to a sensible default rather than 500. The DB writes these via Rust
         // types so they should be valid JSON.
         let creative_brief = r
@@ -106,9 +107,9 @@ impl From<WorkRecord> for WorkDetails {
             work_ref: r.work_ref,
             total_planned_chapters: r.total_planned_chapters,
             current_chapter: r.current_chapter,
-            chapters: None,            // populated by enrich_with_chapters()
-            next_chapter: None,        // populated by enrich_with_chapters()
-            next_chapter_volume: None, // populated by enrich_with_chapters()
+            chapters: None,            // note: populated by enrich_with_chapters()
+            next_chapter: None,        // note: populated by enrich_with_chapters()
+            next_chapter_volume: None, // note: populated by enrich_with_chapters()
             auto_chain_enabled: r.auto_chain_enabled,
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
@@ -131,22 +132,22 @@ pub struct WorkPatchRequest {
     pub world_id: Option<Option<String>>,
     pub story_ref: Option<Option<String>>,
     pub primary_preset_id: Option<String>,
-    /// V1.34 FL-E: update the current stage.
+    /// note: V1.34 FL-E: update the current stage.
     pub current_stage: Option<String>,
-    /// V1.34 FL-E: update the stage status.
+    /// note: V1.34 FL-E: update the stage status.
     pub stage_status: Option<String>,
-    /// V1.34 FL-E: bypass stage-order gates (equivalent to CLI `--force`).
+    /// note: V1.34 FL-E: bypass stage-order gates (equivalent to CLI `--force`).
     pub force: Option<bool>,
-    /// V1.39 P4 T4: opt-in flag — when true the stale-findings watcher
+    /// note: V1.39 P4 T4: opt-in flag — when true the stale-findings watcher
     /// auto-enqueues `novel-review-master` for this Work past the timeout.
     pub auto_review_master_on_timeout: Option<bool>,
-    /// V1.39 §5.7: clear `auto_chain_interrupted` to resume auto-chain.
+    /// note: V1.39 §5.7: clear `auto_chain_interrupted` to resume auto-chain.
     /// R-V139P0-W-C: also triggers a supervisor tick so the resumed Work
     /// progresses immediately rather than waiting for the next cycle.
     pub auto_chain_interrupted: Option<bool>,
-    /// V1.65: explicit work profile classification (additive optional).
+    /// note: V1.65: explicit work profile classification (additive optional).
     pub work_profile: Option<String>,
-    /// V1.190 P1 (QC1-F-001 class): schedule-id list patch for the
+    /// note: V1.190 P1 (QC1-F-001 class): schedule-id list patch for the
     /// `nexus.work.schedule.set` host tool; the authority serializes the
     /// list into the DAO's JSON `schedule_ids` column.
     pub schedule_ids: Option<Vec<String>>,
@@ -161,7 +162,7 @@ pub struct SetPoolActiveRequest {
 #[derive(Debug, Clone)]
 pub struct WorkPoolEntry {
     pub entry_id: String,
-    /// V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
+    /// note: V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
     pub creator_id: String,
     pub work_id: String,
     pub status: String,
@@ -200,7 +201,7 @@ impl From<nexus_local_db::inspiration_items::InspirationItem> for WorkInspiratio
 }
 #[derive(Debug, Clone)]
 pub struct ReconcileDryRunQuery {
-    /// When `true`, compute the `ReconcileReport` without writing.
+    /// note: When `true`, compute the `ReconcileReport` without writing.
     pub dry_run: Option<bool>,
 }
 #[derive(Debug, Clone)]
@@ -221,7 +222,7 @@ pub struct ListPoolResponse {
 #[derive(Debug, Clone)]
 pub struct PromotePoolRequest {
     pub work_id: String,
-    /// If true, also set as pool active (redundant since promote always sets active).
+    /// note: If true, also set as pool active (redundant since promote always sets active).
     pub set_default: Option<bool>,
 }
 
@@ -259,7 +260,7 @@ pub struct ListInspirationResponse {
 #[derive(Debug, Clone)]
 pub struct WorkInspirationItem {
     pub item_id: String,
-    /// V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
+    /// note: V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
     pub creator_id: String,
     pub rel_path: String,
     pub title: String,
@@ -272,9 +273,9 @@ pub struct WorkInspirationItem {
 #[derive(Debug, Clone)]
 pub struct PromoteInspirationRequest {
     pub item_id: String,
-    /// Optional idea override for the new Work's `initial_idea`.
+    /// note: Optional idea override for the new Work's `initial_idea`.
     pub idea: Option<String>,
-    /// If true, set as pool active after creation.
+    /// note: If true, set as pool active after creation.
     pub set_default: Option<bool>,
 }
 
@@ -298,7 +299,7 @@ pub struct WorkReconcileReport {
 }
 
 #[derive(Debug, thiserror::Error)]
-// Crate-internal despite the private module: `RuntimeLockGuard` exposes it.
+// why: Crate-internal despite the private module: `RuntimeLockGuard` exposes it.
 #[allow(clippy::redundant_pub_crate)]
 pub(crate) enum WorkFault {
     #[error("{message}")]
@@ -323,7 +324,7 @@ impl From<WorkFault> for CoreError {
                 field: code,
                 reason: message,
             },
-            // The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR) rides
+            // why: The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR) rides
             // verbatim as `<CODE>: <message>`; the daemon `work_error` adapter re-emits
             // the code instead of collapsing it to the shared `CORE_ERROR` shape.
             WorkFault::Internal { code, message } => Self::Internal {
@@ -357,7 +358,7 @@ fn wire_cast<T: serde::Serialize, U: serde::de::DeserializeOwned>(
 impl CoreService {
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn create_work_with_outcome(
         &self,
@@ -372,7 +373,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn list_works(
         &self,
@@ -388,7 +389,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn get_work(
         &self,
@@ -404,7 +405,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn patch_work(
         &self,
@@ -421,7 +422,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn append_work_inspiration(
         &self,
@@ -439,7 +440,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn set_work_pool_active(
         &self,
@@ -454,7 +455,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn release_work_completion_lock(
         &self,
@@ -470,7 +471,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn delete_work(
         &self,
@@ -486,7 +487,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     #[cfg(feature = "execution")]
     pub async fn reconcile_work_chapters(
@@ -511,7 +512,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn list_work_pool(
         &self,
@@ -527,7 +528,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn promote_work_pool_entry(
         &self,
@@ -542,7 +543,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn archive_work_pool_entry(
         &self,
@@ -557,7 +558,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn add_work_inspiration(
         &self,
@@ -572,7 +573,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn list_work_inspiration(
         &self,
@@ -588,7 +589,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn promote_work_inspiration(
         &self,
@@ -603,7 +604,7 @@ impl CoreService {
     }
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn archive_work_inspiration(
         &self,
@@ -619,7 +620,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn create_work(
         &self,
@@ -633,7 +634,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// note: returns `CoreError` when the principal is rejected, the Works write scope
     /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn select_work(
         &self,
@@ -696,7 +697,7 @@ impl CoreService {
     }
 }
 
-/// The raw `local_root` the selected workspace's own `meta.json` registers.
+/// note: The raw `local_root` the selected workspace's own `meta.json` registers.
 ///
 /// The ONE reader of that document: every consumer that resolves a selected
 /// creative root — the Work family's own paths, the engine-owner admission pin
@@ -727,7 +728,7 @@ fn selected_workspace_meta_root(
         serde_json::from_str(&text).map_err(|error| CoreError::Internal {
             category: format!("workspace metadata: {error}"),
         })?;
-    // The operational meta.json key written by the daemon and CLI
+    // why: The operational meta.json key written by the daemon and CLI
     // workspace registration (`local_root`; handlers/workspaces.rs and
     // the CLI legacy_impl both emit it). There is no `creative_root`
     // writer anywhere — reading it resolved every core filesystem path
@@ -738,7 +739,7 @@ fn selected_workspace_meta_root(
         .map(str::to_owned))
 }
 
-/// The CANONICAL creative root the selected workspace registers, if any.
+/// note: The CANONICAL creative root the selected workspace registers, if any.
 ///
 /// Canonicalizing is what makes the admission pin, the Host probe boundary,
 /// the frozen run root, the executor's scope root and the commit authority's
@@ -775,14 +776,14 @@ pub fn canonical_selected_workspace_root(
     else {
         return Ok(None);
     };
-    // A canonical root the `String`-typed workspace ports cannot carry is
+    // why: A canonical root the `String`-typed workspace ports cannot carry is
     // refused HERE, at the pin: `lossless_root_str` is the same check the
     // hosted factory re-runs before it builds a single port.
     lossless_root_str(&path)?;
     Ok(Some(path))
 }
 
-/// Does the registration still name EXACTLY the pinned root?
+/// note: Does the registration still name EXACTLY the pinned root?
 ///
 /// This is the drift comparison the hosted factory runs before it composes a
 /// single port. It compares the RAW canonical paths, BEFORE any representability
@@ -818,7 +819,7 @@ pub fn selection_matches_pinned_root(
     )
 }
 
-/// The canonical root the selected workspace registers right now, with no
+/// note: The canonical root the selected workspace registers right now, with no
 /// representability requirement — the ONE body the pin and the drift comparison
 /// share, so both read the same document through the same reader and resolve the
 /// same canonical form.
@@ -850,7 +851,7 @@ fn selected_canonical_workspace_root(
     }
 }
 
-/// The canonical creative root as the LOSSLESS UTF-8 string a `String`-typed
+/// note: The canonical creative root as the LOSSLESS UTF-8 string a `String`-typed
 /// workspace port requires.
 ///
 /// The native Host binds the selected root as raw path BYTES, while every
@@ -914,7 +915,7 @@ fn checked_work_directory(
     Ok(path)
 }
 
-#[allow(clippy::too_many_lines)] // one linear domain operation
+#[allow(clippy::too_many_lines)] // why: one linear domain operation
 async fn create_work(
     service: &CoreService,
     principal: &Principal,
@@ -924,7 +925,7 @@ async fn create_work(
     let creator_id = principal.creator_id().to_string();
     let workspace_slug = principal.workspace_slug().to_string();
 
-    // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
+    // why: T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
     // R-V140P0-S1: Uses BadRequest (400) rather than UnprocessableEntity (422) for
     // missing required field. This is consistent with other "field missing" errors
     // in this handler. Semantic 422 is used only for preset_gates_failed.
@@ -941,7 +942,7 @@ async fn create_work(
         });
     }
 
-    // QC3 W-2: Validate that the provided world_id actually exists in
+    // why: QC3 W-2: Validate that the provided world_id actually exists in
     // narrative_worlds AND is owned by the requesting creator.
     {
         let wid = &req.world_id;
@@ -1035,7 +1036,7 @@ async fn create_work(
         lineage_from_work_id: req.lineage_from_work_id,
     };
 
-    // R-V133P1-01: Atomic create + idempotency in single transaction
+    // note: R-V133P1-01: Atomic create + idempotency in single transaction
     let crid = req.client_request_id.as_deref();
     service.verify_principal(principal)?;
     let result = works::create_work_atomic(pool, &record, crid)
@@ -1046,7 +1047,6 @@ async fn create_work(
         })?;
 
     match result {
-        // Idempotent replay — existing Work found
         Ok(existing) => Ok((
             false,
             CreateWorkResponse {
@@ -1054,9 +1054,8 @@ async fn create_work(
                 status: existing.status,
             },
         )),
-        // New Work created (no client_request_id)
         Err(new) => {
-            // DF-60 §5.3: if set_pool_active was requested, promote in pool
+            // note: DF-60 §5.3: if set_pool_active was requested, promote in pool
             if req.set_pool_active == Some(true) {
                 if let Err(e) = set_pool_active_inner(pool, &creator_id, &new.work_id).await {
                     tracing::warn!(
@@ -1085,7 +1084,7 @@ async fn list_works(
     let creator_id = principal.creator_id().to_string();
     let workspace_slug = principal.workspace_slug().to_string();
 
-    // F-F1 (V1.67): parse requested sort; default is empty (DB layer falls back
+    // note: F-F1 (V1.67): parse requested sort; default is empty (DB layer falls back
     // to `updated_at DESC`).
     let sort_terms = parse_sort_terms(
         query.sort.as_deref(),
@@ -1150,7 +1149,7 @@ async fn list_works(
     })
 }
 
-#[allow(clippy::too_many_lines)] // one linear domain operation
+#[allow(clippy::too_many_lines)] // why: one linear domain operation
 async fn get_work(
     service: &CoreService,
     principal: &Principal,
@@ -1161,7 +1160,7 @@ async fn get_work(
 
     let mut record = service.resolve_owned_work(principal, &work_id).await?;
 
-    // V1.36 P4 (T1): auto-promote works.status to 'completed' when all
+    // note: V1.36 P4 (T1): auto-promote works.status to 'completed' when all
     // chapters are finalized per novel-workflow-profile §6.1.
     if service.inner.access != CoreAccess::ReadOnly
         && record.status != "completed"
@@ -1170,7 +1169,7 @@ async fn get_work(
         match nexus_local_db::work_chapters::is_work_completed(pool, &work_id).await {
             Ok(true) => {
                 let now = chrono::Utc::now().to_rfc3339();
-                // V1.38 P0 (T7): set works.status = 'completed' per §6.1.
+                // note: V1.38 P0 (T7): set works.status = 'completed' per §6.1.
                 // novel_completion_status column not yet migrated — will be
                 // added in a future schema change; tracked as residual.
                 let patch = WorkPatch {
@@ -1212,7 +1211,7 @@ async fn get_work(
         }
     }
 
-    // V1.55 P2: auto-promote game-bible works.status to 'completed' when all
+    // note: V1.55 P2: auto-promote game-bible works.status to 'completed' when all
     // critical Design/*.md sections are accepted per game-bible-profile.md §8.
     if service.inner.access != CoreAccess::ReadOnly
         && record.status != "completed"
@@ -1270,7 +1269,7 @@ async fn get_work(
         }
     }
 
-    // V1.60 P1: auto-promote script works.status to 'completed' when all
+    // note: V1.60 P1: auto-promote script works.status to 'completed' when all
     // critical script sections are accepted per script-profile.md §8.
     if service.inner.access != CoreAccess::ReadOnly
         && record.status != "completed"
@@ -1324,7 +1323,7 @@ async fn get_work(
         }
     }
 
-    // V1.63 P0: auto-promote essay works.status to 'completed' when
+    // note: V1.63 P0: auto-promote essay works.status to 'completed' when
     // Drafts/draft.md frontmatter status == finalized AND intake complete.
     if service.inner.access != CoreAccess::ReadOnly
         && record.status != "completed"
@@ -1392,7 +1391,7 @@ async fn patch_work(
     let creator_id = principal.creator_id().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    // DF-60 §4: guard mutating operations against completion-lock and runtime-lock
+    // note: DF-60 §4: guard mutating operations against completion-lock and runtime-lock
     let current_work = service.resolve_owned_work(principal, &work_id).await?;
 
     if current_work.completion_locked_at.is_some() {
@@ -1405,7 +1404,7 @@ async fn patch_work(
     }
 
     if let Some(ref holder) = current_work.runtime_lock_holder {
-        // V1.42 P0: allow stale locks to be force-cleared by acquire below.
+        // note: V1.42 P0: allow stale locks to be force-cleared by acquire below.
         let ttl = nexus_local_db::ttl_from_env();
         if !nexus_local_db::is_lock_stale(&current_work, ttl) {
             return Err(WorkFault::Locked {
@@ -1417,11 +1416,10 @@ async fn patch_work(
         }
     }
 
-    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
     service.verify_principal(principal)?;
     let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id, holder_kind).await?;
 
-    // Capture every result before releasing: validation/DB failures must not
+    // why: Capture every result before releasing: validation/DB failures must not
     // strand the runtime holder, including the stage-change branch.
     let result = async {
         service.verify_principal(principal)?;
@@ -1450,7 +1448,7 @@ async fn append_inspiration(
     let creator_id = principal.creator_id().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    // V1.42.1 (R-V142-MERGE-CI-001): Verify work exists BEFORE acquiring the
+    // why: V1.42.1 (R-V142-MERGE-CI-001): Verify work exists BEFORE acquiring the
     // runtime lock. The previous ordering (P0 T2 wiring in e8993870) acquired
     // the lock before the existence check, which caused `acquire_runtime_lock`
     // to fail with `MissingVersionKey` → mapped to 500 instead of 404. It also
@@ -1465,7 +1463,7 @@ async fn append_inspiration(
         })?
         .ok_or_else(|| WorkFault::NotFound(format!("work {work_id}")))?;
 
-    // V1.39 §5.6 (T6): Single FL-E driver invariant.
+    // note: V1.39 §5.6 (T6): Single FL-E driver invariant.
     // If the Work has an active auto-chain driver, reject side input
     // to prevent concurrent schedule conflicts.
     if work.auto_chain_enabled && work.driver_schedule_id.is_some() {
@@ -1478,19 +1476,17 @@ async fn append_inspiration(
         )));
     }
 
-    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
     service.verify_principal(principal)?;
     let lock =
         RuntimeLockGuard::acquire(&service.inner.pool, &creator_id, &work_id, holder_kind).await?;
 
-    // Build JSON for inspiration entry
     let entry = serde_json::json!({
         "at": now.clone(),
         "note": req.note,
     });
     let entry_json = serde_json::to_string(&entry).unwrap_or_default();
 
-    // R-V133P1-04: append_inspiration now uses tx + Rust append and returns updated record
+    // why: R-V133P1-04: append_inspiration now uses tx + Rust append and returns updated record
     //
     // V1.42.1 (R-V142-MERGE-CI-001): release before propagating DB error.
     // The work existence was verified at the top of this handler; a
@@ -1520,13 +1516,12 @@ async fn append_inspiration(
         }
     };
 
-    // Derive count from post-state (not pre-fetch + 1)
+    // why: Derive count from post-state (not pre-fetch + 1)
     let count = serde_json::from_str::<serde_json::Value>(&updated.inspiration_log)
         .ok()
         .and_then(|v| v.as_array().map(Vec::len))
         .unwrap_or(0);
 
-    // V1.42 P0 (T2): Release runtime lock before returning.
     lock.release().await;
 
     Ok(AppendInspirationResponse {
@@ -1540,7 +1535,7 @@ async fn set_pool_active(
     principal: &Principal,
     req: SetPoolActiveRequest,
 ) -> Result<WorkPoolEntry, WorkFault> {
-    // IDOR fix: read active creator from config, reject body mismatch.
+    // why: IDOR fix: read active creator from config, reject body mismatch.
     let active_creator = principal.creator_id().to_string();
     if req.creator_id.is_some() && req.creator_id != Some(active_creator.clone()) {
         return Err(WorkFault::Forbidden {
@@ -1584,10 +1579,8 @@ async fn release_completion_lock_handler(
 ) -> Result<WorkDetails, WorkFault> {
     let creator_id = principal.creator_id().to_string();
 
-    // Step 1: Look up the Work record
     let work = service.resolve_owned_work(principal, &work_id).await?;
 
-    // Verify the work is actually completion-locked
     if work.completion_locked_at.is_none() {
         return Err(WorkFault::BadRequest {
             code: "not_locked".to_string(),
@@ -1595,7 +1588,7 @@ async fn release_completion_lock_handler(
         });
     }
 
-    // Step 2: Clear DB columns (SSOT)
+    // why: Step 2: Clear DB columns (SSOT)
     let now = chrono::Utc::now().to_rfc3339();
     let patch = WorkPatch {
         completion_locked_at: Some(None),
@@ -1611,7 +1604,7 @@ async fn release_completion_lock_handler(
             message: e.to_string(),
         })?;
 
-    // Step 3: Delete on-disk lock file (best-effort; DB is SSOT)
+    // note: deleting the on-disk lock file is best-effort; the DB is SSOT.
     if let Some(ref work_ref) = updated.work_ref {
         let workspace_path = service.work_workspace_path(principal)?.unwrap_or_default();
         if !workspace_path.is_empty() {
@@ -1649,10 +1642,10 @@ async fn delete_work(
     let pool = &service.inner.pool;
     let creator_id = principal.creator_id().to_string();
 
-    // Rule 1: existence check BEFORE lock acquire (V1.42.1 hotfix rule).
+    // why: Rule 1: existence check BEFORE lock acquire (V1.42.1 hotfix rule).
     let work = service.resolve_owned_work(principal, &work_id).await?;
 
-    // Reject while completion-locked or actively locked — author must release
+    // why: Reject while completion-locked or actively locked — author must release
     // those first. Cascading a delete under either state would silently drop
     // an in-flight authoring session.
     if work.completion_locked_at.is_some() {
@@ -1673,7 +1666,6 @@ async fn delete_work(
         }
     }
 
-    // Acquire the runtime lock for this mutating operation.
     service.verify_principal(principal)?;
     let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id, holder_kind).await?;
 
@@ -1704,12 +1696,12 @@ async fn delete_work(
     lock.release().await;
 
     if deleted == 0 {
-        // Concurrent delete raced between get_work and DELETE. Treat as 404 —
+        // why: Concurrent delete raced between get_work and DELETE. Treat as 404 —
         // the row is gone regardless of who removed it.
         return Err(WorkFault::NotFound(format!("work {work_id}")));
     }
 
-    // Best-effort on-disk cleanup: remove the Work directory (Manuscripts +
+    // why: Best-effort on-disk cleanup: remove the Work directory (Manuscripts +
     // Outlines). DB is SSOT — orphan files here do not corrupt state.
     if let Some(ref work_ref) = work.work_ref {
         let workspace_path = service.work_workspace_path(principal)?.unwrap_or_default();
@@ -1756,7 +1748,6 @@ async fn reconcile_chapters(
 ) -> CoreResult<nexus_local_db::work_chapters::ReconcileReport> {
     let dry_run = dry_run_query.dry_run.unwrap_or(false);
 
-    // Get the Work record to find work_ref
     let work = service.resolve_owned_work(principal, &work_id).await?;
 
     let work_ref = work.story_ref.as_deref().ok_or_else(|| {
@@ -1767,7 +1758,7 @@ async fn reconcile_chapters(
         })
     })?;
 
-    // Defense in depth: validate work_ref slug before passing to filesystem
+    // why: Defense in depth: validate work_ref slug before passing to filesystem
     // layer. Matches the same policy as
     // `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
     if !is_valid_work_ref(work_ref) {
@@ -1780,12 +1771,11 @@ async fn reconcile_chapters(
         .into());
     }
 
-    // Resolve workspace root from state
     let workspace_path_str = service.work_workspace_path(principal)?.unwrap_or_default();
     let workspace_root = std::path::Path::new(&workspace_path_str);
     let now = chrono::Utc::now().to_rfc3339();
 
-    // The port re-runs this immediately before it takes the Work runtime lock:
+    // why: The port re-runs this immediately before it takes the Work runtime lock:
     // the unlocked diff walk in between is the stale-read window, so what is
     // re-validated is exactly the caller's principal — its open generation, its
     // on-disk creator/workspace selection, and the service's open state.
@@ -1859,7 +1849,6 @@ async fn promote_pool_entry(
 ) -> Result<WorkPoolEntry, WorkFault> {
     let creator_id = principal.creator_id().to_string();
 
-    // Verify the work exists and belongs to this creator
     service.resolve_owned_work(principal, &req.work_id).await?;
 
     let entry = nexus_local_db::novel_pool_entries::promote_to_active(
@@ -1908,7 +1897,7 @@ async fn add_inspiration(
     let item_id = format!("npi_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Route through nexus-home-layout — resolve operational workspace dir
+    // why: Route through nexus-home-layout — resolve operational workspace dir
     // from nexus_home (~/.nexus42), not user home directly.
     let workspace_dir = service
         .inner
@@ -1994,7 +1983,6 @@ async fn promote_inspiration_handler(
 ) -> Result<PromoteInspirationResponse, WorkFault> {
     let creator_id = principal.creator_id().to_string();
 
-    // Look up the inspiration item
     let item =
         nexus_local_db::inspiration_items::get_inspiration(&service.inner.pool, &req.item_id)
             .await
@@ -2004,7 +1992,7 @@ async fn promote_inspiration_handler(
             })?
             .ok_or_else(|| WorkFault::NotFound(format!("inspiration item {}", req.item_id)))?;
 
-    // Cross-creator guard: only the owning creator can promote their items
+    // why: Cross-creator guard: only the owning creator can promote their items
     if item.creator_id != creator_id {
         return Err(WorkFault::NotFound(format!(
             "inspiration item {}",
@@ -2022,14 +2010,13 @@ async fn promote_inspiration_handler(
         });
     }
 
-    // Create a new Work from the inspiration
     let work_id = format!("wrk_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
     let workspace_slug = principal.workspace_slug().to_string();
 
     let idea = req.idea.as_deref().unwrap_or(&item.title);
 
-    // For inspiration promote, we create a Work without world_id (the user
+    // why: For inspiration promote, we create a Work without world_id (the user
     // can bind a world later). This is a lighter-weight flow than `run start`.
     let record = WorkRecord {
         work_id: work_id.clone(),
@@ -2065,7 +2052,7 @@ async fn promote_inspiration_handler(
         lineage_from_work_id: None,
     };
 
-    // Wrap the three writes (Work create + pool promote + inspiration update)
+    // why: Wrap the three writes (Work create + pool promote + inspiration update)
     // in a single transaction so a step-3 failure rolls back everything.
     service.verify_principal(principal)?;
     let pool_entry = nexus_local_db::inspiration_promote_atomic(
@@ -2120,7 +2107,7 @@ async fn enrich_with_chapters(
 
     let work_id = &dto.work_id;
 
-    // Populate chapter rows
+    // note: populate chapter rows
     // R-V139P5-N2 (deferred): no cap/pagination on list_chapters yet.
     // Works with 100+ chapters would benefit from server-side pagination.
     // Currently returns all rows; the CLI status command consumes the full list.
@@ -2154,14 +2141,12 @@ async fn enrich_with_chapters(
         }
     }
 
-    // Populate next_chapter (§4.5.2 selection) and next_chapter_volume (V1.42)
     match nexus_local_db::work_chapters::next_chapter_volume_aware(pool, work_id).await {
         Ok(Some((volume, chapter))) => {
             dto.next_chapter = Some(chapter);
             dto.next_chapter_volume = Some(volume);
         }
         Ok(None) => {
-            // No more chapters to work on
         }
         Err(e) => {
             tracing::warn!(
@@ -2176,10 +2161,10 @@ async fn enrich_with_chapters(
     dto
 }
 
-/// Apply non-stage fields (title, goal, brief, etc.) if any are present in the request.
+/// note: Apply non-stage fields (title, goal, brief, etc.) if any are present in the request.
 ///
 /// Returns early with `Ok(())` if no non-stage fields are present.
-#[allow(clippy::too_many_lines)] // one linear domain operation
+#[allow(clippy::too_many_lines)] // why: one linear domain operation
 async fn apply_non_stage_fields(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -2234,12 +2219,11 @@ async fn apply_non_stage_fields(
         lineage_from_work_id: None,
     };
 
-    // QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
+    // why: QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
     // already has a non-null world_id binding. This prevents downgrading
     // a mandatory-bound Work back to worldless via PATCH.
     // R-V140P0-S4: tracing for mandatory binding check observability.
     if non_stage_patch.world_id == Some(None) {
-        // Check if the Work currently has a non-null world_id.
         let current = works::get_work(pool, creator_id, work_id)
             .await
             .map_err(|e| WorkFault::Internal {
@@ -2260,7 +2244,7 @@ async fn apply_non_stage_fields(
         }
     }
 
-    // T4: validate world_id FK existence and ownership when PATCHing a non-null world_id.
+    // note: T4: validate world_id FK existence and ownership when PATCHing a non-null world_id.
     if let Some(Some(ref wid)) = non_stage_patch.world_id {
         let exists: Option<String> = sqlx::query_scalar!(
             r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
@@ -2301,7 +2285,7 @@ async fn apply_non_stage_fields(
     Ok(())
 }
 
-/// Handle PATCH with stage changes: gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
+/// note: Handle PATCH with stage changes: gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
 async fn patch_work_stage(
     service: &CoreService,
     principal: &Principal,
@@ -2341,7 +2325,7 @@ async fn patch_work_stage(
 
     let target_status = req.stage_status.as_deref().unwrap_or(&current.stage_status);
 
-    // R-CURSOR-PR42-03: Validate stage_status transitions to terminal states
+    // why: R-CURSOR-PR42-03: Validate stage_status transitions to terminal states
     // even when no explicit current_stage change is provided. Without this,
     // PATCH {"stage_status":"complete"} bypasses all FL-E gates.
     if req.stage_status.is_some() && req.current_stage.is_none() {
@@ -2383,11 +2367,10 @@ async fn patch_work_stage(
         },
     })?;
 
-    // Only apply non-stage fields after the stage transition succeeds.
+    // why: Only apply non-stage fields after the stage transition succeeds.
     service.verify_principal(principal)?;
     apply_non_stage_fields(pool, creator_id, work_id, req, now).await?;
 
-    // Re-fetch to get the fully updated record (stage + non-stage fields).
     let final_record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| WorkFault::Internal {
@@ -2411,7 +2394,7 @@ fn check_stage_status_transition(
     target_status: &str,
     force: bool,
 ) -> Result<(), WorkFault> {
-    // Terminal status values that require gate validation or explicit force.
+    // note: Terminal status values that require gate validation or explicit force.
     const TERMINAL_STATUSES: &[&str] = &["complete", "skipped"];
 
     if force {
@@ -2431,7 +2414,7 @@ fn check_stage_status_transition(
     Ok(())
 }
 
-/// Shared helper: transactional set-pool-active (DF-60 §5.3).
+/// note: Shared helper: transactional set-pool-active (DF-60 §5.3).
 ///
 /// Demotes any prior `active` row → `queued`, then upserts target → `active`.
 /// Uses `nexus_local_db::novel_pool_entries::promote_to_active` for the core logic.
@@ -2461,7 +2444,7 @@ fn is_valid_work_ref(s: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-// Crate-internal despite the private module: `crate::owner::work_artifact`
+// why: Crate-internal despite the private module: `crate::owner::work_artifact`
 // runs reconcile under this one lock implementation.
 #[allow(clippy::redundant_pub_crate)]
 pub(crate) struct RuntimeLockGuard {
@@ -2471,7 +2454,7 @@ pub(crate) struct RuntimeLockGuard {
     holder: String,
 }
 impl RuntimeLockGuard {
-    /// `holder_kind` labels the minted `cli:<kind>:<uuid>` holder; the daemon
+    /// note: `holder_kind` labels the minted `cli:<kind>:<uuid>` holder; the daemon
     /// HTTP surface passes `http` so 423 reasons keep the legacy label.
     pub(crate) async fn acquire(
         pool: &sqlx::SqlitePool,
@@ -2509,7 +2492,7 @@ impl RuntimeLockGuard {
     }
 }
 
-// Single authority for the Work list cursor/sort grammar: the offset-backed `v1:` cursor
+// why: Single authority for the Work list cursor/sort grammar: the offset-backed `v1:` cursor
 // and `-key,key` sort terms (defaults, bounds, trimming, empty comma terms, descending
 // terms, `<resource>_sort_invalid` / `invalid_input` errors) match the pre-extraction
 // daemon `list_works` behavior exactly. Consumed only by `list_works` here; the daemon

@@ -1,3 +1,4 @@
+// note: module documentation for the memory command family
 //! Bearer-isolated Creator/Character memory and Character `ToM` commands
 //! (v1.190 P2-T2).
 //!
@@ -71,7 +72,7 @@ use nexus_memory_provider::profile;
 use nexus_memory_provider::{CaptureBinding, LegacyContentMigration, MemoryDisposition};
 use spoke_operations::{spoke_schemas, SpokeReject, SpokeRejectCode, SpokeResult};
 
-/// Per-Character review-call budget (mirrors the Creator review handler — the
+/// note: Per-Character review-call budget (mirrors the Creator review handler — the
 /// batch drains at most one bounded slice per call and reports `has_more`).
 const REVIEW_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -100,12 +101,12 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
-/// One local metadata timestamp (RFC 3339 UTC) for D18 dependency rows.
+/// note: One local metadata timestamp (RFC 3339 UTC) for D18 dependency rows.
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-/// The effective outcome one remote provider result actually proves.
+/// note: The effective outcome one remote provider result actually proves.
 ///
 /// One decision for every remote-capable path: it governs the caller-visible
 /// class/family, whether a durable admission may be retired, and whether a
@@ -115,16 +116,16 @@ fn now_iso() -> String {
 /// leaves the attempt unknown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RemoteOutcome {
-    /// The provider proved a definite refusal of the reported code.
+    /// note: The provider proved a definite refusal of the reported code.
     Definite,
-    /// A transient failure: no effect was proven, but neither is the code's
+    /// note: A transient failure: no effect was proven, but neither is the code's
     /// own outcome (e.g. a `NOT_FOUND` while the provider is degraded).
     Retryable,
-    /// The attempt may have committed; nothing may be read as a clean outcome.
+    /// note: The attempt may have committed; nothing may be read as a clean outcome.
     Uncertain,
 }
 
-/// The §14.2 retry class the provider declared, when it is a known one.
+/// note: The §14.2 retry class the provider declared, when it is a known one.
 fn declared_retry_class(reject: &SpokeReject) -> Option<&str> {
     reject
         .details
@@ -134,7 +135,7 @@ fn declared_retry_class(reject: &SpokeReject) -> Option<&str> {
         .filter(|class| matches!(*class, "terminal" | "retryable" | "uncertain"))
 }
 
-/// The one effective-outcome decision for a remote provider result.
+/// note: The one effective-outcome decision for a remote provider result.
 ///
 /// Codes that can never prove an outcome win over the declared class (a
 /// contradictory `terminal` beside them stays unknown), and any missing,
@@ -155,7 +156,7 @@ fn remote_outcome(reject: &SpokeReject) -> RemoteOutcome {
     }
 }
 
-/// Whether one refusal proves the named no-effect outcome.
+/// note: Whether one refusal proves the named no-effect outcome.
 ///
 /// A local provider is authoritative by code: its in-process refusals carry no
 /// remote retry class and the retained local shortcuts stay unchanged. A remote
@@ -166,7 +167,7 @@ fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRe
         && (binding_is_local || remote_outcome(reject) == RemoteOutcome::Definite)
 }
 
-/// Whether one capture refusal proves this wire attempt had no effect (D18).
+/// note: Whether one capture refusal proves this wire attempt had no effect (D18).
 ///
 /// §14.2 classifies every memory reject in `details.retry_class`, and the
 /// provider documents `OUTCOME_UNCERTAIN` — including a response-projection
@@ -201,7 +202,7 @@ fn review_result_record_ids(
     issued_space: &str,
     issued_key: &str,
 ) -> CoreResult<Vec<String>> {
-    // I-272: every mismatch below is static. A forged receipt admits arbitrary
+    // why: I-272: every mismatch below is static. A forged receipt admits arbitrary
     // peer-authored bytes (`space_id`, `idempotency_key`, `result.outcome`,
     // `record_ids`) including private markers and newlines, and the pipeline
     // logs the very `Display` this helper returns - so no peer field is ever
@@ -274,7 +275,7 @@ fn review_result_record_ids(
     Ok(record_ids)
 }
 
-/// The candidate ids one committed capture receipt proves for THIS request.
+/// note: The candidate ids one committed capture receipt proves for THIS request.
 ///
 /// A committed capture may legitimately produce no candidate, so an empty list
 /// is consistent. The receipt must still be *this* request's: its echoed
@@ -322,7 +323,7 @@ fn capture_result_candidate_ids(
     Ok(candidate_ids)
 }
 
-/// The record id one committed promotion receipt proves for THIS request.
+/// note: The record id one committed promotion receipt proves for THIS request.
 ///
 /// D18: a committed promotion releases the record's binding dependency, so the
 /// receipt must prove this exact request — the echoed `space_id` and
@@ -375,7 +376,7 @@ fn promote_result_record_id(
     Ok(record.to_string())
 }
 
-/// The candidate one committed dismissal receipt proves for THIS request.
+/// note: The candidate one committed dismissal receipt proves for THIS request.
 ///
 /// §7.14's atomic result is `{ candidate_id, outcome: "dismissed" }` (MEM-R009),
 /// and the peer's schema accepts another space, key, candidate or outcome, so
@@ -453,9 +454,7 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
     })
 }
 
-// ── Provider seam (NXM-5 Task 2) ─────────────────────────────────────────
-//
-// The read and dismissal handlers below serve the memory family through the
+// note: The read and dismissal handlers below serve the memory family through the
 // `MemoryPort` the open pinned ([`CoreService::memory_binding`]) instead of
 // the legacy tables. This block is the existing-DTO/error adapter: a handler
 // keeps its retained request/response shape (compass D5) while the adapter
@@ -468,10 +467,10 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 // which is what lets the retained DTOs render the legacy display fields
 // (`pending_id`, `fragment_id`, `world_id`, keywords) rather than provider ids.
 
-/// The one authored profile kind (§4.2): the `SOUL.md` document.
+/// note: The one authored profile kind (§4.2): the `SOUL.md` document.
 const SOUL_PROFILE_KIND: &str = "personality";
 
-/// Map one port refusal onto the retained core error taxonomy.
+/// note: Map one port refusal onto the retained core error taxonomy.
 fn memory_reject(reject: &SpokeReject) -> CoreError {
     match reject.code {
         SpokeRejectCode::NotFound => CoreError::NotFound {
@@ -485,7 +484,7 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
             field: "memory".to_string(),
             reason: reject.message.clone(),
         },
-        // A CAS miss keeps the retained `version_mismatch` conflict code the
+        // why: A CAS miss keeps the retained `version_mismatch` conflict code the
         // legacy promotion path already renders (409 at the HTTP adapters), so
         // the same stale-revision answer reads the same on either path.
         SpokeRejectCode::RevisionConflict => CoreError::ActorConflict {
@@ -496,7 +495,7 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
     }
 }
 
-/// Map one port refusal under the pinned binding.
+/// note: Map one port refusal under the pinned binding.
 ///
 /// A local provider is trusted: its retained taxonomy, message and conflict
 /// detection stay exactly as before. A remote provider never contributes peer
@@ -510,7 +509,7 @@ fn memory_reject_for(binding: &MemoryProviderBinding, reject: &SpokeReject) -> C
     }
 }
 
-/// The shared safe policy for one refusal raised by a remote provider (§3.1).
+/// note: The shared safe policy for one refusal raised by a remote provider (§3.1).
 ///
 /// The peer controls its own message and extra details, so neither is trusted
 /// or copied: only the whitelisted effective code, the peer's wire code when it
@@ -538,7 +537,7 @@ fn remote_refusal(reject: &SpokeReject) -> CoreError {
         .filter(|code| SpokeRejectCode::try_from_str(code).is_some())
         .map(str::to_string);
     CoreError::MemoryProviderRefused {
-        // A proven stale-revision conflict keeps the `version_mismatch` code
+        // why: A proven stale-revision conflict keeps the `version_mismatch` code
         // consumers already match on the local branch (I-000204).
         conflict_code: (outcome == RemoteOutcome::Definite
             && reject.code == SpokeRejectCode::RevisionConflict)
@@ -550,7 +549,7 @@ fn remote_refusal(reject: &SpokeReject) -> CoreError {
     }
 }
 
-/// The coarse transport family for one whitelisted memory rejection code.
+/// note: The coarse transport family for one whitelisted memory rejection code.
 const fn memory_refusal_family(code: SpokeRejectCode) -> MemoryProviderRefusal {
     match code {
         SpokeRejectCode::NotFound
@@ -588,14 +587,14 @@ const fn memory_refusal_family(code: SpokeRejectCode) -> MemoryProviderRefusal {
         | SpokeRejectCode::ImportConflict
         | SpokeRejectCode::SpaceFrozen
         | SpokeRejectCode::SubjectFenced => MemoryProviderRefusal::Conflict,
-        // `OutcomeUncertain`, `InternalError`, `CapabilityPortMissing` and any
+        // why: `OutcomeUncertain`, `InternalError`, `CapabilityPortMissing` and any
         // code outside the capture contract's clean refusals: the outcome may
         // not be settled, so callers must not read it as a definite failure.
         _ => MemoryProviderRefusal::Unavailable,
     }
 }
 
-/// The success body of a port result as JSON, or its refusal under the binding.
+/// note: The success body of a port result as JSON, or its refusal under the binding.
 fn memory_ok_for<T: serde::Serialize>(
     binding: &MemoryProviderBinding,
     result: SpokeResult<T>,
@@ -606,7 +605,7 @@ fn memory_ok_for<T: serde::Serialize>(
     }
 }
 
-/// One pending-review row as the retained DTOs render it.
+/// note: One pending-review row as the retained DTOs render it.
 struct PendingMemoryRow {
     pending_id: String,
     session_id: String,
@@ -617,14 +616,14 @@ struct PendingMemoryRow {
     binding_id: Option<String>,
     shared: bool,
     created_at: String,
-    /// The provider candidate this row stands for: the review drain consumes it.
+    /// note: The provider candidate this row stands for: the review drain consumes it.
     candidate_id: String,
-    /// The candidate revision the read served (the review CAS precondition).
+    /// note: The candidate revision the read served (the review CAS precondition).
     revision: u64,
 }
 
 impl PendingMemoryRow {
-    /// Project one provider candidate onto the legacy pending-review row it
+    /// note: Project one provider candidate onto the legacy pending-review row it
     /// stands for; a candidate with no legacy origin is not part of this DTO.
     fn from_candidate(candidate: &Value) -> Option<Self> {
         let origin = candidate.pointer("/proposed/content/structured/nexus_legacy")?;
@@ -656,14 +655,14 @@ impl PendingMemoryRow {
 }
 
 impl PendingMemoryRow {
-    /// The E11 classifier input for this candidate: the retained pending-review
+    /// note: The E11 classifier input for this candidate: the retained pending-review
     /// fields, with the bearer's own id and its scope provenance.
     fn review_input(&self, bearer_id: &str) -> nexus_creator_memory::review::PendingReviewInput {
         nexus_creator_memory::review::PendingReviewInput {
             pending_id: self.pending_id.clone(),
             session_id: self.session_id.clone(),
             bearer_id: bearer_id.to_string(),
-            // The Creator arm's world id, or the Character arm's binding id.
+            // note: The Creator arm's world id, or the Character arm's binding id.
             scope_id: self.binding_id.clone().or_else(|| self.world_id.clone()),
             task_kind: self.task_kind.clone(),
             raw_digest: self.raw_digest.clone(),
@@ -672,7 +671,7 @@ impl PendingMemoryRow {
     }
 }
 
-/// Whether one projected pending row belongs to the requested retained scope:
+/// note: Whether one projected pending row belongs to the requested retained scope:
 /// `None` is the Character-shared queue, `Some(binding)` that binding's own.
 fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> bool {
     binding_id.map_or(row.shared, |binding| {
@@ -680,7 +679,7 @@ fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> boo
     })
 }
 
-/// One provider subject standing for a legacy memory bearer, plus the
+/// note: One provider subject standing for a legacy memory bearer, plus the
 /// authenticated principal that addresses it.
 ///
 /// A subject opts into the bridge's legacy projection by naming its bearer in
@@ -701,14 +700,14 @@ pub struct MemoryAdapter {
     binding: Arc<MemoryProviderBinding>,
     principal: spoke_schemas::Principal,
     subject_id: String,
-    /// The Nexus Character this bearer belongs to (`None` for the Creator
+    /// note: The Nexus Character this bearer belongs to (`None` for the Creator
     /// bearer): the D18 dependency namespace needs the Nexus subject, not only
     /// the provider subject id.
     character_id: Option<String>,
 }
 
 impl MemoryAdapter {
-    /// The adapter for one bearer, get-or-creating its provider subject.
+    /// note: The adapter for one bearer, get-or-creating its provider subject.
     ///
     /// Ensuring the subject is the write that opts the bearer into the bridge's
     /// legacy projection, so it runs only on a writable binding: a read-only
@@ -752,7 +751,7 @@ impl MemoryAdapter {
         })
     }
 
-    /// The bearer's memory-disposition section, when this binding serves the
+    /// note: The bearer's memory-disposition section, when this binding serves the
     /// local provider: a review drain holds it across the consumed-check, the
     /// classification and the persistence of every row it processes (NXM-5 Task
     /// 2 fix round 2, finding F1).
@@ -767,35 +766,35 @@ impl MemoryAdapter {
         Ok(Some(local.review_disposition(&self.subject_id).await?))
     }
 
-    /// The provider subject this adapter speaks for: the bearer a write under
+    /// note: The provider subject this adapter speaks for: the bearer a write under
     /// this adapter may mutate (R4-F2).
     const fn subject_id(&self) -> &str {
         self.subject_id.as_str()
     }
 
-    /// Whether the open pinned the local provider. Provider-local internals
+    /// note: Whether the open pinned the local provider. Provider-local internals
     /// (the narrative-cache invalidation behind a promotion) run only here.
     pub(crate) fn is_local(&self) -> bool {
         self.binding.is_local()
     }
 
-    /// Map a port result under this binding (see [`memory_ok_for`]).
+    /// note: Map a port result under this binding (see [`memory_ok_for`]).
     fn ok<T: serde::Serialize>(&self, result: SpokeResult<T>) -> CoreResult<Value> {
         memory_ok_for(&self.binding, result)
     }
 
-    /// Map a port refusal under this binding (see [`memory_reject_for`]).
+    /// note: Map a port refusal under this binding (see [`memory_reject_for`]).
     fn refuse(&self, reject: &SpokeReject) -> CoreError {
         memory_reject_for(&self.binding, reject)
     }
 
-    /// Whether this refusal proves the retained no-effect answer for one of
+    /// note: Whether this refusal proves the retained no-effect answer for one of
     /// `codes` (see [`refusal_proves`]).
     fn proves(&self, reject: &SpokeReject, codes: &[SpokeRejectCode]) -> bool {
         refusal_proves(self.is_local(), reject, codes)
     }
 
-    /// The remote dependency namespace this adapter may record facts under
+    /// note: The remote dependency namespace this adapter may record facts under
     /// (D18, §5.1): only a nonlocal binding with a pinned public client
     /// identity and a Character bearer has remote binding-local memory to
     /// protect. A local binding — or a nonlocal one whose identity was not
@@ -818,7 +817,7 @@ impl MemoryAdapter {
         ))
     }
 
-    /// Record one known remote provider-object fact for this binding (D18).
+    /// note: Record one known remote provider-object fact for this binding (D18).
     ///
     /// The write is monotone and conditional on the binding still existing, so
     /// a late acknowledgement cannot resurrect a terminal fact or a deleted
@@ -854,7 +853,7 @@ impl MemoryAdapter {
         Ok(())
     }
 
-    /// Record a committed review outcome (D18) in one local transaction: the
+    /// note: Record a committed review outcome (D18) in one local transaction: the
     /// consumed candidate, the record references the provider's receipt
     /// returned, **and** the retirement of this one attempt. A later
     /// capture-result publication can then neither resurrect the consumed
@@ -900,7 +899,7 @@ impl MemoryAdapter {
             .await
             .map_err(map_local_db_error)?;
         }
-        // Only this attempt retires, and only together with the facts above.
+        // why: Only this attempt retires, and only together with the facts above.
         if let Some(attempt) = attempt {
             nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
                 .await
@@ -910,7 +909,7 @@ impl MemoryAdapter {
         Ok(())
     }
 
-    /// Durably admit one remote binding-local review attempt before the RPC.
+    /// note: Durably admit one remote binding-local review attempt before the RPC.
     ///
     /// The drain can consume a candidate Core did not capture itself — an
     /// independent signed writer may create it with the legacy pending shape
@@ -961,7 +960,7 @@ impl MemoryAdapter {
         Ok(Some(admission_id))
     }
 
-    /// Apply the D18 consequence of one review refusal.
+    /// note: Apply the D18 consequence of one review refusal.
     ///
     /// Only the shared proven-no-effect policy may retire this attempt: an
     /// uncertain, retryable, unknown or contradictory outcome keeps it, and a
@@ -991,7 +990,7 @@ impl MemoryAdapter {
         Ok(())
     }
 
-    /// Every pending candidate of the subject, newest first in the retained
+    /// note: Every pending candidate of the subject, newest first in the retained
     /// `(created_at DESC, pending_id DESC)` order.
     ///
     /// Walks the provider's own bounded pages to the end of the authorized set:
@@ -1027,7 +1026,7 @@ impl MemoryAdapter {
                 None => break,
             }
         }
-        // The retained query ordered by its RAW `created_at` TEXT
+        // why: The retained query ordered by its RAW `created_at` TEXT
         // (`ORDER BY created_at DESC, pending_id DESC`), and mixed legacy
         // formats do not parse into that order: a whole-second `…00Z` row
         // outranks a `…00.900Z` one as text while the instant order puts the
@@ -1043,7 +1042,7 @@ impl MemoryAdapter {
         Ok(rows)
     }
 
-    /// The number of pending candidates `keep` admits, walked page by page.
+    /// note: The number of pending candidates `keep` admits, walked page by page.
     ///
     /// A count needs neither the retained order nor the rows themselves, so the
     /// same authorized pages [`Self::pending_rows`] reads are counted here
@@ -1081,7 +1080,7 @@ impl MemoryAdapter {
         Ok(count)
     }
 
-    /// The subject's records in the provider's `created_at DESC` order: at most
+    /// note: The subject's records in the provider's `created_at DESC` order: at most
     /// `want` rows, or the whole subject set when `want` is `None`.
     ///
     /// A `None` bound is the honest one for a caller that filters after the read
@@ -1099,7 +1098,7 @@ impl MemoryAdapter {
             .await
     }
 
-    /// The Creator's authored long-term records as the provider itself stores
+    /// note: The Creator's authored long-term records as the provider itself stores
     /// them, without the bridge's projection.
     ///
     /// A promoted memory is provider-native (a minted id) and carries its slug
@@ -1113,7 +1112,7 @@ impl MemoryAdapter {
             .await
     }
 
-    /// [`Self::records`] with the legacy bridge's projection made optional.
+    /// note: [`Self::records`] with the legacy bridge's projection made optional.
     async fn records_from(
         &self,
         selection: Value,
@@ -1137,7 +1136,7 @@ impl MemoryAdapter {
             }
         }
         if let Some(want) = want {
-            // The loop stops after the page that reaches the bound, so this
+            // why: The loop stops after the page that reaches the bound, so this
             // drops that page's remainder: the bound is the caller's, not the
             // provider's page size (fix round 4, finding F2).
             rows.truncate(want);
@@ -1145,7 +1144,7 @@ impl MemoryAdapter {
         Ok(rows)
     }
 
-    /// The `memory.records.list` request one page of a walk sends, in the pinned
+    /// note: The `memory.records.list` request one page of a walk sends, in the pinned
     /// space.
     fn records_request(
         &self,
@@ -1165,7 +1164,7 @@ impl MemoryAdapter {
         }))
     }
 
-    /// One mapped `memory.records.list` page in the pinned space.
+    /// note: One mapped `memory.records.list` page in the pinned space.
     ///
     /// A local binding serves the same read with the legacy bridge's projection
     /// applied (per `project_legacy`); a remote binding serves its own objects
@@ -1189,7 +1188,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// One kind-filtered family read of the subject's retained records, as the
+    /// note: One kind-filtered family read of the subject's retained records, as the
     /// upstream contract DTO (the data-target `RetainedRecord`) E6 and E10
     /// consume (NXM-7 fix round 2).
     ///
@@ -1223,7 +1222,7 @@ impl MemoryAdapter {
             .collect()
     }
 
-    /// Whether the subject is `archived` — the one subject state that removes
+    /// note: Whether the subject is `archived` — the one subject state that removes
     /// its records from recall (§7.7). A subject the provider has never seen
     /// carries no records either way, so its absence is not an archive.
     async fn subject_archived(&self) -> CoreResult<bool> {
@@ -1248,7 +1247,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// The subject's `personality` profile body — `SOUL.md` as the provider
+    /// note: The subject's `personality` profile body — `SOUL.md` as the provider
     /// renders it. `None` is the honest-empty answer for an absent document.
     pub(crate) async fn personality(&self) -> CoreResult<Option<String>> {
         let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
@@ -1270,7 +1269,7 @@ impl MemoryAdapter {
             .map(str::to_string))
     }
 
-    /// One candidate by its provider id (the bridge's projected row included);
+    /// note: One candidate by its provider id (the bridge's projected row included);
     /// `None` is the retained not-found answer.
     async fn candidate(&self, candidate_id: &str) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryCandidatesGetRequest = map_wire(json!({
@@ -1294,7 +1293,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// Dismiss one legacy-derived pending row: adopt it under the bridge's
+    /// note: Dismiss one legacy-derived pending row: adopt it under the bridge's
     /// deterministic id and consume it **in one guarded transaction** (NXM-5
     /// Task 2 fix round 1, finding F4).
     ///
@@ -1325,7 +1324,7 @@ impl MemoryAdapter {
             .await
         {
             SpokeResult::Ok(_) => Ok(true),
-            // `Ok(false)` is "nothing was pending under that id", and only the
+            // why: `Ok(false)` is "nothing was pending under that id", and only the
             // `Ok` receipt above means this dismissal consumed the row: a
             // candidate the review drain already promoted or fragmented is
             // `CandidateConsumed`, an absent row is `NotFound`, and a lost CAS
@@ -1347,7 +1346,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// Dismiss one provider-native pending candidate (a row captured through
+    /// note: Dismiss one provider-native pending candidate (a row captured through
     /// [`CoreService::create_pending_review`]): its candidate id is minted, so
     /// the retained `pending_id` can only address it through the row itself.
     ///
@@ -1376,7 +1375,7 @@ impl MemoryAdapter {
             "expected_revision": revision,
             "idempotency_key": format!("e4dismiss-native:{candidate_id}"),
         }))?;
-        // The committed receipt must identify THIS dismissal: a provider can
+        // why: The committed receipt must identify THIS dismissal: a provider can
         // answer with an older, still schema-valid receipt for another
         // candidate or key, and releasing on it would stop counting a pending
         // candidate as live.
@@ -1390,7 +1389,7 @@ impl MemoryAdapter {
         {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                // A mismatched receipt returns here with the candidate fact
+                // why: A mismatched receipt returns here with the candidate fact
                 // still live, so the binding stays protected.
                 let released =
                     dismiss_result_candidate_id(&body, &issued_space, &issued_key, candidate_id)?;
@@ -1419,7 +1418,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// Dismiss the provider candidate the retained `pending_id` addresses by
+    /// note: Dismiss the provider candidate the retained `pending_id` addresses by
     /// its bridge-shaped id, through the standard revision-checked operation.
     ///
     /// The retained `pending_id` can address a candidate by the bridge's
@@ -1446,7 +1445,7 @@ impl MemoryAdapter {
         let Some(row) = self.matched_pending_row(&candidate, pending_id) else {
             return Ok(false);
         };
-        // The binding this candidate was captured under is the dependency the
+        // why: The binding this candidate was captured under is the dependency the
         // dismissal acknowledges; a shared-scope candidate carries none.
         let binding_id = candidate
             .pointer("/capture_scope/context_id")
@@ -1455,7 +1454,7 @@ impl MemoryAdapter {
             .await
     }
 
-    /// The retained pending row one fetched provider candidate may be dismissed
+    /// note: The retained pending row one fetched provider candidate may be dismissed
     /// as: the candidate's borrowed `subject_id` must be this adapter's subject
     /// and it must carry the requested retained `pending_id`.
     ///
@@ -1474,7 +1473,7 @@ impl MemoryAdapter {
         (row.pending_id == pending_id).then_some(row)
     }
 
-    /// Consume one pending candidate with the review decision the drain built.
+    /// note: Consume one pending candidate with the review decision the drain built.
     ///
     /// The decision is the §7.15 wire decision (`promote` / `fragment` /
     /// `drop`). A legacy-derived candidate is adopted under the bridge's
@@ -1510,14 +1509,14 @@ impl MemoryAdapter {
             "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": expected_revision,
-            // Kept for the committed-result check: the response must name
+            // why: Kept for the committed-result check: the response must name
             // exactly the records this decision asked the provider to create.
             "decision": decision.clone(),
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
         if self.is_local() {
             let local = self.binding.local()?;
-            // The drain takes the section before it fetches its slice, so a
+            // why: The drain takes the section before it fetches its slice, so a
             // local review always has one.
             let section = section.ok_or_else(|| {
                 internal_err(
@@ -1533,13 +1532,13 @@ impl MemoryAdapter {
                 SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
             };
         }
-        // A remote binding-local review consumes a candidate the drain chose to
+        // why: A remote binding-local review consumes a candidate the drain chose to
         // settle, and that candidate need not carry a Core capture admission or
         // candidate fact (an independent signed writer can have created it).
         // Admit this one attempt before the RPC under the same per-attempt
         // namespace, then settle its facts and its retirement together.
         let attempt = self.admit_remote_review_attempt(binding_id).await?;
-        // The committed receipt must identify THIS request: a provider can
+        // why: The committed receipt must identify THIS request: a provider can
         // answer with an older, still schema-valid receipt whose result matches
         // in shape but belongs to another key (and a different namespace).
         let issued_space = request.space_id.as_str().to_string();
@@ -1552,13 +1551,13 @@ impl MemoryAdapter {
         {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                // An SDK-schema-valid receipt can still be inconsistent with the
+                // why: An SDK-schema-valid receipt can still be inconsistent with the
                 // decision (no ids, a short id list, a mismatched outcome). Only
                 // a consistent committed result may settle; otherwise the
                 // attempt keeps its admission and the binding stays protected.
                 let record_ids =
                     review_result_record_ids(&decision, &body, &issued_space, &issued_key)?;
-                // A settlement failure returns an error with the attempt still
+                // why: A settlement failure returns an error with the attempt still
                 // in place, so the binding stays protected.
                 self.record_remote_review(
                     attempt.as_deref(),
@@ -1584,7 +1583,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// Every Creator long-term memory record (the nine authored kinds only), in
+    /// note: Every Creator long-term memory record (the nine authored kinds only), in
     /// the provider's `created_at DESC` order.
     async fn memory_records(&self) -> CoreResult<Vec<Value>> {
         let kinds = creator_record_kinds();
@@ -1593,7 +1592,7 @@ impl MemoryAdapter {
             .await
     }
 
-    /// One long-term memory record by its authored slug.
+    /// note: One long-term memory record by its authored slug.
     ///
     /// A projected memory has the bridge's deterministic id, so the read opens
     /// exactly that record and never parses another bearer file (one malformed
@@ -1605,7 +1604,7 @@ impl MemoryAdapter {
     async fn memory_by_slug(&self, creator_id: &str, slug: &str) -> CoreResult<Option<Value>> {
         let record_id = legacy::memory_long_term_record_id(creator_id, slug);
         let stored = self.record(&record_id).await?;
-        // The by-id read serves a tombstone to admin coverage; the slug read is
+        // why: The by-id read serves a tombstone to admin coverage; the slug read is
         // the creator's own listing surface, where a deleted memory is absent.
         // Anything the deterministic id does not serve falls through to the
         // authored-kind read of provider rows, which excludes tombstones.
@@ -1622,7 +1621,7 @@ impl MemoryAdapter {
             .find(|record| creator_slug(record) == Some(slug)))
     }
 
-    /// The Creator's `personality` profile (`SOUL.md`), if authored.
+    /// note: The Creator's `personality` profile (`SOUL.md`), if authored.
     async fn personality_profile(&self) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
             "space_id": self.binding.space_id(),
@@ -1640,7 +1639,7 @@ impl MemoryAdapter {
             .cloned())
     }
 
-    /// Create one Creator long-term memory record (shared placement).
+    /// note: Create one Creator long-term memory record (shared placement).
     async fn create_memory_record(
         &self,
         kind: &str,
@@ -1664,7 +1663,7 @@ impl MemoryAdapter {
             .map(|_| ())
     }
 
-    /// Replace one Creator record's content on the expected revision.
+    /// note: Replace one Creator record's content on the expected revision.
     ///
     /// A record the bridge still projects is adopted under its deterministic id
     /// inside this write's guarded transaction (NXM-6 fix round 1, finding F2):
@@ -1700,7 +1699,7 @@ impl MemoryAdapter {
         .map(|_| ())
     }
 
-    /// Tombstone one Creator record on the expected revision, adopting a
+    /// note: Tombstone one Creator record on the expected revision, adopting a
     /// still-projected record inside the guarded write (see
     /// [`Self::update_memory_record`]).
     async fn delete_memory_record(
@@ -1731,7 +1730,7 @@ impl MemoryAdapter {
         .map(|_| ())
     }
 
-    /// Write the `personality` profile document.
+    /// note: Write the `personality` profile document.
     ///
     /// A *projected* `SOUL.md` (unmigrated) has no provider row, so its
     /// projected revision is not a stored one: the revision-checked write cannot
@@ -1758,7 +1757,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// One `memory.profile.update` at the exact expected revision.
+    /// note: One `memory.profile.update` at the exact expected revision.
     async fn upsert_personality_profile(
         &self,
         body: &str,
@@ -1781,7 +1780,7 @@ impl MemoryAdapter {
             .map(|_| ())
     }
 
-    /// One provider record (a projected legacy row included) by id.
+    /// note: One provider record (a projected legacy row included) by id.
     async fn record(&self, record_id: &str) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryRecordsGetRequest = map_wire(json!({
             "space_id": self.binding.space_id(),
@@ -1804,7 +1803,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// One Character fragment record by the id the fragment DTO serves.
+    /// note: One Character fragment record by the id the fragment DTO serves.
     ///
     /// A provider-native fragment is addressed by its own record id; a projected
     /// legacy fragment is addressed by the bridge's deterministic external id
@@ -1824,7 +1823,7 @@ impl MemoryAdapter {
             .await
     }
 
-    /// §7.21 explicit placement change to shared, revision-checked, adopting a
+    /// note: §7.21 explicit placement change to shared, revision-checked, adopting a
     /// still-projected legacy row inside the promotion's transaction. A CAS miss
     /// keeps the retained `version_mismatch` conflict; an absent record keeps
     /// the retained not-found answer. A remote binding has no projection to
@@ -1868,7 +1867,7 @@ impl MemoryAdapter {
         match result {
             SpokeResult::Ok(receipt) => {
                 if !self.is_local() {
-                    // D18: a promotion to shared releases the record's binding
+                    // why: D18: a promotion to shared releases the record's binding
                     // dependency. Only a receipt that proves THIS promotion —
                     // this space, key, record and the requested shared
                     // placement — may release it; otherwise another live
@@ -1888,13 +1887,13 @@ impl MemoryAdapter {
                 Ok(())
             }
             SpokeResult::Reject(reject) => Err(match reject.code {
-                // Only a proven absence takes the retained not-found answer; a
+                // why: Only a proven absence takes the retained not-found answer; a
                 // remote `NotFound` with a missing or unknown outcome stays an
                 // honest unknown failure.
                 SpokeRejectCode::NotFound if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                     not_found("character memory fragment", &format!("'{record_id}'"))
                 }
-                // The local provider keeps its trusted message; a remote
+                // why: The local provider keeps its trusted message; a remote
                 // definite stale-revision conflict reaches the same
                 // `version_mismatch` contract through the safe carrier in
                 // `self.refuse` (static text + classification metadata).
@@ -1907,7 +1906,7 @@ impl MemoryAdapter {
         }
     }
 
-    /// The placement a committed promotion left for one record, while the
+    /// note: The placement a committed promotion left for one record, while the
     /// SOUL-narrative invalidation it owes has not run (R4-F3 round 2).
     ///
     /// The recovery row is provider-local state, so a remote binding reports no
@@ -1923,7 +1922,7 @@ impl MemoryAdapter {
             .map_err(CoreError::from)
     }
 
-    /// Clear that recovery row once the invalidation ran; a remote binding has
+    /// note: Clear that recovery row once the invalidation ran; a remote binding has
     /// no row to clear.
     async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
         if !self.is_local() {
@@ -1937,7 +1936,7 @@ impl MemoryAdapter {
     }
 }
 
-/// A deterministic idempotency key for one memory write: `<op>:<digest>`.
+/// note: A deterministic idempotency key for one memory write: `<op>:<digest>`.
 ///
 /// The provider's key namespace is `(space, requester, op, key)` and a key is
 /// bounded at 128 characters, so an object id — which can be a long projected
@@ -1949,42 +1948,40 @@ fn idempotency_key(op: &str, object_id: &str) -> CoreResult<String> {
     }
 }
 
-// ── Review disposition authority (NXM-5 Task 2 fix round 2) ──────────────
-//
-// A provider dismissal and a legacy review drain decide the same digest, so
+// note: A provider dismissal and a legacy review drain decide the same digest, so
 // both hold the bearer's [`MemoryDisposition`] section: the drain across its
 // consumed-check and classification, the dismissal across its consume. The
 // step-point below lets a regression drive the exact interleaving a dismissal
 // would need and observe the section is not available to it.
 
-/// A step-point inside a review drain's disposition section (test builds only).
+/// note: A step-point inside a review drain's disposition section (test builds only).
 #[cfg(feature = "test-hooks")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryReviewPause {
-    /// The fetch-time check selected the slice; the drain is about to take the
+    /// note: The fetch-time check selected the slice; the drain is about to take the
     /// bearer's disposition section and re-check it there — the exact window a
     /// dismissal could otherwise slip into.
     AfterFetchCheck,
-    /// The slice was re-checked inside the section and is about to be
+    /// note: The slice was re-checked inside the section and is about to be
     /// classified and persisted.
     AfterRecheck,
 }
 
-/// The rendezvous a test arms for one [`MemoryReviewPause`].
+/// note: The rendezvous a test arms for one [`MemoryReviewPause`].
 #[cfg(feature = "test-hooks")]
 #[derive(Debug, Clone)]
 pub struct MemoryReviewRendezvous {
-    /// The step-point this rendezvous arms.
+    /// note: The step-point this rendezvous arms.
     pub at: MemoryReviewPause,
-    /// Fires once the drain is parked at `at`.
+    /// note: Fires once the drain is parked at `at`.
     pub entered: Arc<tokio::sync::Notify>,
-    /// Fires to resume the parked drain.
+    /// note: Fires to resume the parked drain.
     pub release: Arc<tokio::sync::Notify>,
 }
 
 #[cfg(feature = "test-hooks")]
 impl CoreService {
-    /// Test-only: park the next Creator or Character review drain at
+    /// note: Test-only: park the next Creator or Character review drain at
     /// `rendezvous.at`. Compiled out of a production build.
     #[doc(hidden)]
     pub fn pause_memory_review(&self, rendezvous: MemoryReviewRendezvous) {
@@ -1995,7 +1992,7 @@ impl CoreService {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rendezvous);
     }
 
-    /// Test-only: fail the next retained SOUL-narrative invalidation, which runs
+    /// note: Test-only: fail the next retained SOUL-narrative invalidation, which runs
     /// after its promotion already committed, so a regression can drive the
     /// failure/retry boundary (R4-F3). Compiled out of a production build.
     #[doc(hidden)]
@@ -2005,9 +2002,9 @@ impl CoreService {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Park at `at` when a test armed that step-point.
+    /// note: Park at `at` when a test armed that step-point.
     async fn park_memory_review(&self, at: MemoryReviewPause) {
-        // Only the armed step-point consumes the rendezvous: the drain walks
+        // why: Only the armed step-point consumes the rendezvous: the drain walks
         // every step-point, and taking a later one's rendezvous here would drop
         // it before the drain reached it.
         let armed = {
@@ -2030,7 +2027,7 @@ impl CoreService {
 }
 
 impl CoreService {
-    /// The provider adapter for the principal's own Creator bearer, over the
+    /// note: The provider adapter for the principal's own Creator bearer, over the
     /// pinned binding (a read-only core serves reads from its own provider too).
     pub(crate) async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_binding()?;
@@ -2045,7 +2042,7 @@ impl CoreService {
         .await
     }
 
-    /// The adapter the dismissal write paths use: a read-only core refuses here
+    /// note: The adapter the dismissal write paths use: a read-only core refuses here
     /// with the retained typed error instead of attempting the write.
     async fn creator_memory_writer(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_writer_binding()?;
@@ -2060,7 +2057,7 @@ impl CoreService {
         .await
     }
 
-    /// The provider adapter for one Character bearer.
+    /// note: The provider adapter for one Character bearer.
     pub(crate) async fn character_memory(
         &self,
         principal: &Principal,
@@ -2078,7 +2075,7 @@ impl CoreService {
         .await
     }
 
-    /// The Character adapter the dismissal write path uses (see
+    /// note: The Character adapter the dismissal write path uses (see
     /// [`Self::creator_memory_writer`]).
     async fn character_memory_writer(
         &self,
@@ -2098,7 +2095,7 @@ impl CoreService {
     }
 }
 
-/// Whether the provider currently reports this candidate as pending.
+/// note: Whether the provider currently reports this candidate as pending.
 async fn pending_now(memory: &MemoryAdapter, candidate_id: &str) -> CoreResult<bool> {
     Ok(memory
         .candidate(candidate_id)
@@ -2106,7 +2103,7 @@ async fn pending_now(memory: &MemoryAdapter, candidate_id: &str) -> CoreResult<b
         .is_some_and(|candidate| candidate["status"].as_str() == Some("pending")))
 }
 
-/// The subset of `candidate_ids` the provider has already consumed.
+/// note: The subset of `candidate_ids` the provider has already consumed.
 ///
 /// A dismissal consumes the provider's row while the legacy row the bridge
 /// projected it from stays in place (a provider write never touches the legacy
@@ -2133,7 +2130,7 @@ async fn consumed_candidates(
     Ok(consumed)
 }
 
-/// The `nexus_legacy` metadata block of a projected role, if this row carries
+/// note: The `nexus_legacy` metadata block of a projected role, if this row carries
 /// one (a provider-native row of another origin does not).
 fn nexus_legacy(record: &Value) -> &Value {
     record
@@ -2141,7 +2138,7 @@ fn nexus_legacy(record: &Value) -> &Value {
         .unwrap_or(&NULL_LEGACY)
 }
 
-/// Absent `nexus_legacy` block: indexing it yields `null` for every field, so
+/// note: Absent `nexus_legacy` block: indexing it yields `null` for every field, so
 /// the readers below can stay branch-free.
 static NULL_LEGACY: Value = Value::Null;
 
@@ -2156,7 +2153,7 @@ pub fn record_keywords(record: &Value) -> Vec<String> {
         })
 }
 
-/// The world provenance of one Creator record: the legacy column when the row
+/// note: The world provenance of one Creator record: the legacy column when the row
 /// is projected, else the record's own source context.
 fn creator_world_id(record: &Value) -> Option<String> {
     nexus_legacy(record)["world_id"]
@@ -2170,9 +2167,7 @@ fn creator_world_id(record: &Value) -> Option<String> {
         })
 }
 
-// ── Creator long-term memory + SOUL profile family (NXM-6/NXM-16) ────────
-//
-// The CLI's E1 (`creator memory list|create|show|edit|delete`) and E2
+// note: The CLI's E1 (`creator memory list|create|show|edit|delete`) and E2
 // (`creator soul …`) leaves used to reach the bearer files directly. They are
 // provider clients now: a Creator's long-term memories are the `nexus.*`
 // records the nine-kind bijection names (D-7), and `SOUL.md` is the one
@@ -2186,12 +2181,12 @@ fn creator_world_id(record: &Value) -> Option<String> {
 // block the bridge projects, so one rendered row reads the same before and
 // after P5's migration.
 
-/// The `nexus_legacy` slug of a Creator record.
+/// note: The `nexus_legacy` slug of a Creator record.
 fn creator_slug(record: &Value) -> Option<&str> {
     nexus_legacy(record)["slug"].as_str()
 }
 
-/// The nine authored record kinds, namespaced (D-7's lossless bijection).
+/// note: The nine authored record kinds, namespaced (D-7's lossless bijection).
 fn creator_record_kinds() -> Vec<String> {
     policy::NEXUS_MEMORY_KINDS
         .iter()
@@ -2199,7 +2194,7 @@ fn creator_record_kinds() -> Vec<String> {
         .collect()
 }
 
-/// `task_kind` → authored memory kind: the promotion mapping the review
+/// note: `task_kind` → authored memory kind: the promotion mapping the review
 /// pipeline documents (`nexus_creator_memory::review::promote_to_long_term`).
 fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     match task_kind.to_lowercase().as_str() {
@@ -2210,7 +2205,7 @@ fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     }
 }
 
-/// A stable memory idempotency key: the operation, the mutation it applies and
+/// note: A stable memory idempotency key: the operation, the mutation it applies and
 /// its payload decide the key, so a retried write replays while two different
 /// logical mutations never share one (NXM-6 fix round 1, finding F4).
 ///
@@ -2226,24 +2221,24 @@ fn creator_memory_key(op: &str, identity: &str, body: &str) -> String {
         "body": body,
     })) {
         SpokeResult::Ok(digest) => format!("e4memory:{digest}"),
-        // The three-string payload always canonicalizes; keep the spelling
+        // why: The three-string payload always canonicalizes; keep the spelling
         // total rather than reporting an unreachable interior failure.
         SpokeResult::Reject(_) => format!("e4memory:{op}:{identity}"),
     }
 }
 
-/// A provider CAS refusal (`expected_revision` did not match the stored one).
+/// note: A provider CAS refusal (`expected_revision` did not match the stored one).
 fn memory_conflict(error: &CoreError) -> bool {
     matches!(error, CoreError::ActorConflict { code, .. } if code == "version_mismatch")
 }
 
-/// The authored memory id of a freshly created record: `mem_<uuid>`, the
+/// note: The authored memory id of a freshly created record: `mem_<uuid>`, the
 /// frontmatter identity `LongTermMemory` mints and P5's migration preserves.
 fn mint_creator_memory_id() -> String {
     format!("mem_{}", uuid::Uuid::new_v4().to_string().replace('-', ""))
 }
 
-/// The provider identity and CAS revision of one record body.
+/// note: The provider identity and CAS revision of one record body.
 fn creator_record_identity(record: &Value) -> CoreResult<(String, u64)> {
     let record_id = record["record_id"]
         .as_str()
@@ -2254,7 +2249,7 @@ fn creator_record_identity(record: &Value) -> CoreResult<(String, u64)> {
     ))
 }
 
-/// The record a caller read before it prepared a mutation, carried into the
+/// note: The record a caller read before it prepared a mutation, carried into the
 /// guarded write (NXM-6 fix round 1, finding F3).
 ///
 /// An interactive editor reads a record, spends arbitrary time in the editor,
@@ -2263,14 +2258,14 @@ fn creator_record_identity(record: &Value) -> CoreResult<(String, u64)> {
 /// under the same slug — meanwhile, instead of silently overwriting it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryRevision {
-    /// The provider record id the read served.
+    /// note: The provider record id the read served.
     pub record_id: String,
-    /// The revision the read served.
+    /// note: The revision the read served.
     pub revision: u64,
 }
 
 impl MemoryRevision {
-    /// The identity and revision of one provider record body.
+    /// note: The identity and revision of one provider record body.
     fn of(record: &Value) -> CoreResult<Self> {
         let (record_id, revision) = creator_record_identity(record)?;
         Ok(Self {
@@ -2279,7 +2274,7 @@ impl MemoryRevision {
         })
     }
 
-    /// The typed stale-identity refusal: the same `version_mismatch` code the
+    /// note: The typed stale-identity refusal: the same `version_mismatch` code the
     /// provider's CAS answer renders, raised before the write instead of after.
     fn conflict(&self) -> CoreError {
         CoreError::ActorConflict {
@@ -2292,7 +2287,7 @@ impl MemoryRevision {
     }
 }
 
-/// The authored identity of one Creator memory record: `(memory_id, kind,
+/// note: The authored identity of one Creator memory record: `(memory_id, kind,
 /// source_session_ids)`, from the `nexus_legacy` block the bridge projects.
 fn creator_memory_identity(record: &Value) -> (String, String, Vec<String>) {
     let legacy = nexus_legacy(record);
@@ -2320,7 +2315,7 @@ fn creator_memory_identity(record: &Value) -> (String, String, Vec<String>) {
     (memory_id, kind, source_session_ids)
 }
 
-/// The record content of one authored long-term memory.
+/// note: The record content of one authored long-term memory.
 fn creator_memory_content(
     slug: &str,
     kind: &str,
@@ -2328,7 +2323,7 @@ fn creator_memory_content(
     body: &str,
     source_session_ids: &[String],
 ) -> Value {
-    // The row's own `updated_at` is the provider's, so the authored block holds
+    // why: The row's own `updated_at` is the provider's, so the authored block holds
     // no per-attempt timestamp: a retried write must reach the same receipt
     // payload (NXM-6 fix round 1, finding F4). Readers fall back to the record's
     // timestamp, which is the same instant for a row this family authored.
@@ -2344,7 +2339,7 @@ fn creator_memory_content(
     })
 }
 
-/// Memory kinds that feed the SOUL `## Experience` section (the aggregation's
+/// note: Memory kinds that feed the SOUL `## Experience` section (the aggregation's
 /// authored set).
 const EXPERIENCE_MEMORY_KINDS: [&str; 6] = [
     "story_summary",
@@ -2355,7 +2350,7 @@ const EXPERIENCE_MEMORY_KINDS: [&str; 6] = [
     "theme_analysis",
 ];
 
-/// Longest body excerpt one experience entry carries.
+/// note: Longest body excerpt one experience entry carries.
 const EXPERIENCE_EXCERPT_CHARS: usize = 200;
 
 /// The deterministic `## Experience` body for a set of Creator records, and how
@@ -2364,6 +2359,7 @@ const EXPERIENCE_EXCERPT_CHARS: usize = 200;
 /// shortcut: the rendering mirrors
 /// `nexus_creator_memory::experience_aggregation` (whose collector reads the
 /// legacy files); NXM-14 deletes that reader, leaving this as the only copy.
+/// upgrade: when NXM-14 removes the legacy reader.
 fn experience_markdown(records: &[Value]) -> (String, usize) {
     let mut entries: Vec<ExperienceEntry> = records
         .iter()
@@ -2410,7 +2406,7 @@ fn experience_markdown(records: &[Value]) -> (String, usize) {
     (parts.join("\n\n"), processed)
 }
 
-/// `story_summary` → `Story Summary`: the heading the aggregation renders.
+/// note: `story_summary` → `Story Summary`: the heading the aggregation renders.
 fn experience_kind_label(kind: &str) -> String {
     kind.split('_')
         .map(|word| {
@@ -2423,7 +2419,7 @@ fn experience_kind_label(kind: &str) -> String {
         .join(" ")
 }
 
-/// Truncate an entry body the way the aggregation does: the first
+/// note: Truncate an entry body the way the aggregation does: the first
 /// [`EXPERIENCE_EXCERPT_CHARS`] characters, broken at the last space, `...`.
 ///
 /// The record's text is the memory file's exact body (`legacy.rs`'s long-term
@@ -2442,7 +2438,7 @@ fn experience_excerpt(body: &str) -> String {
 }
 
 impl CoreService {
-    /// Capture one session digest into the principal's pending-review queue.
+    /// note: Capture one session digest into the principal's pending-review queue.
     ///
     /// This is the Creator arm of the Character capture family and the explicit
     /// capture parity NXM-16 adds: Host auto-`remember` stays refused (D-4), and
@@ -2485,7 +2481,7 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        // A capture without an explicit timestamp keeps none: the provider's own
+        // why: A capture without an explicit timestamp keeps none: the provider's own
         // candidate `created_at` is what the retained DTO then serves (a pending
         // row falls back to it), so a retried capture — the CLI omits the flag —
         // reaches the same receipt payload instead of regenerating a different
@@ -2540,7 +2536,7 @@ impl CoreService {
         map_wire(json!({ "success": true, "pending_id": pending_id }))
     }
 
-    /// Every Creator long-term memory record, newest first.
+    /// note: Every Creator long-term memory record, newest first.
     ///
     /// # Errors
     /// [`CoreError::AuthRequired`] when the principal fails verification and
@@ -2559,7 +2555,7 @@ impl CoreService {
             .collect()
     }
 
-    /// One Creator long-term memory record by its authored slug.
+    /// note: One Creator long-term memory record by its authored slug.
     ///
     /// # Errors
     /// As [`Self::list_creator_memories`].
@@ -2578,7 +2574,7 @@ impl CoreService {
             .transpose()
     }
 
-    /// Create one Creator long-term memory from its authored slug, kind and
+    /// note: Create one Creator long-term memory from its authored slug, kind and
     /// body. `Ok(false)` reports that the slug is already taken — the retained
     /// CLI refusal — and writes nothing.
     ///
@@ -2600,7 +2596,7 @@ impl CoreService {
         {
             return Ok(false);
         }
-        // The minted `memory_id` is the mutation's identity: a create after a
+        // why: The minted `memory_id` is the mutation's identity: a create after a
         // delete of the same slug is a new record, not a replay of the first
         // create's receipt (NXM-6 fix round 1, finding F4).
         let memory_id = mint_creator_memory_id();
@@ -2615,7 +2611,7 @@ impl CoreService {
         Ok(true)
     }
 
-    /// Replace one Creator memory's body, addressed by its authored slug.
+    /// note: Replace one Creator memory's body, addressed by its authored slug.
     ///
     /// `expected` is the record the caller read before it prepared the write (an
     /// interactive editor's read): when the slug now resolves to a different
@@ -2651,7 +2647,7 @@ impl CoreService {
         }
         let (memory_id, kind, source_session_ids) = creator_memory_identity(&record);
         let content = creator_memory_content(slug, &kind, &memory_id, body, &source_session_ids);
-        // The key names this mutation — the record and the revision it replaces
+        // why: The key names this mutation — the record and the revision it replaces
         // — so a repeated edit after an intervening one is a new mutation, while
         // repeating this exact edit reaches the same receipt (finding F4).
         let identity = format!("{}@{}", revision.record_id, revision.revision);
@@ -2670,7 +2666,7 @@ impl CoreService {
         }
     }
 
-    /// Delete one Creator memory, addressed by its authored slug.
+    /// note: Delete one Creator memory, addressed by its authored slug.
     ///
     /// `Ok(false)` reports that no live record carries the slug. A memory the
     /// bridge still projects is adopted inside the delete's guarded transaction
@@ -2689,7 +2685,7 @@ impl CoreService {
             return Ok(false);
         };
         let revision = MemoryRevision::of(&record)?;
-        // Record + revision: a delete after the same slug was re-created is a
+        // why: Record + revision: a delete after the same slug was re-created is a
         // new mutation, not a replay of the first record's tombstone (F4).
         let identity = format!("delete:{}@{}", revision.record_id, revision.revision);
         match memory
@@ -2706,7 +2702,7 @@ impl CoreService {
         }
     }
 
-    /// The Creator's authored SOUL document (the `personality` profile).
+    /// note: The Creator's authored SOUL document (the `personality` profile).
     ///
     /// # Errors
     /// As [`Self::list_creator_memories`].
@@ -2724,7 +2720,7 @@ impl CoreService {
             .transpose()
     }
 
-    /// Write the Creator's SOUL document body: create-only when
+    /// note: Write the Creator's SOUL document body: create-only when
     /// `expected_revision` is `None`, revision-checked otherwise.
     ///
     /// # Errors
@@ -2737,7 +2733,7 @@ impl CoreService {
     ) -> CoreResult<()> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
-        // Create-only (`None`) and revision-checked writes are different
+        // why: Create-only (`None`) and revision-checked writes are different
         // mutations, so the revision is part of the key (F4).
         let identity = expected_revision.map_or_else(
             || "profile@new".to_string(),
@@ -2752,7 +2748,7 @@ impl CoreService {
             .await
     }
 
-    /// Refresh the SOUL `## Experience` section from the Creator's memory
+    /// note: Refresh the SOUL `## Experience` section from the Creator's memory
     /// records (deterministic, no LLM). Returns the rendered section and how
     /// many memories contributed.
     ///
@@ -2775,7 +2771,7 @@ impl CoreService {
             .map_err(|error| internal_err("soul_parse", error))?;
         let (markdown, processed) = experience_markdown(&memory.memory_records().await?);
         soul.set_experience(markdown.clone());
-        // The key names this mutation — the profile revision it replaces plus
+        // why: The key names this mutation — the profile revision it replaces plus
         // the rendered section — so a repeated refresh after the revision moved
         // is a new mutation instead of an `IDEMPOTENCY_CONFLICT` on the old key
         // (NXM-6 fix round 1, finding F4).
@@ -2794,7 +2790,7 @@ impl CoreService {
         Ok((markdown, processed))
     }
 
-    /// Push the SOUL personality section down into the `personality-core`
+    /// note: Push the SOUL personality section down into the `personality-core`
     /// long-term memory. The SOUL document is the anchor, so its next push
     /// overwrites the memory (the authored `memory_id` and the empty
     /// `source_session_ids` are preserved).
@@ -2828,7 +2824,7 @@ impl CoreService {
                 personality,
                 &[],
             );
-            // The record and the revision it replaces name this mutation, so a
+            // why: The record and the revision it replaces name this mutation, so a
             // repeated push after an intervening write is a new mutation (F4).
             let identity = format!("{}@{}", revision.record_id, revision.revision);
             memory
@@ -2841,7 +2837,7 @@ impl CoreService {
                 .await?;
             memory_id
         } else {
-            // The minted `memory_id` is the mutation's identity: a push after
+            // why: The minted `memory_id` is the mutation's identity: a push after
             // the memory was deleted creates a new record instead of replaying
             // the deleted one's receipt (F4).
             let memory_id = mint_creator_memory_id();
@@ -2871,10 +2867,10 @@ impl CoreService {
     }
 }
 
-// ── Character memory family ──────────────────────────────────────────────
+// note: Character memory family
 
 impl CoreService {
-    /// Capture one session digest into an owned Character's pending-review
+    /// note: Capture one session digest into an owned Character's pending-review
     /// queue. Holds the per-Character activity lease across the capture (404
     /// foreign/missing, 409 `character_inactive` for an archived Character).
     ///
@@ -2905,7 +2901,7 @@ impl CoreService {
     ) -> CoreResult<CaptureCharacterPendingReviewResponse> {
         self.verify_principal(principal)?;
         let binding_id = optional_str(request.binding_id.as_ref());
-        // The activity lease is admitted before input validation, exactly as
+        // why: The activity lease is admitted before input validation, exactly as
         // the daemon handler admitted it before local-db (a foreign Character
         // is 404 even for a malformed body).
         let _lease = self
@@ -2923,7 +2919,7 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        // A capture without an explicit timestamp keeps none: the provider's own
+        // why: A capture without an explicit timestamp keeps none: the provider's own
         // candidate instant is what the pending DTO then serves, so a retried
         // capture reaches the same receipt instead of regenerating a different
         // payload (the Creator arm's F4 rule).
@@ -2934,7 +2930,7 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // The binding the legacy insert admitted is still admitted: the local
+        // why: The binding the legacy insert admitted is still admitted: the local
         // check runs inside the provider's own write transaction (D15), and a
         // nonlocal capture commits its own durable admission before the RPC
         // (D18). `remove_binding` takes the same write lock, so it cannot delete
@@ -2963,7 +2959,7 @@ impl CoreService {
                 "text": raw_digest.as_str(),
                 "structured": { "nexus_legacy": origin },
             },
-            // The placement the bridge projects for this row: a binding-local
+            // why: The placement the bridge projects for this row: a binding-local
             // capture is a context placement on that binding, a shared capture
             // carries none.
             "capture_scope": binding_id.map_or_else(
@@ -2971,7 +2967,7 @@ impl CoreService {
                 |binding| json!({ "visibility": "context", "context_id": binding }),
             ),
             "source_context_ids": binding_id.iter().collect::<Vec<_>>(),
-            // A non-empty hint keeps the advisory classifier from dropping a
+            // why: A non-empty hint keeps the advisory classifier from dropping a
             // capture: every accepted digest must reach the queue.
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": character_capture_key(&pending_id)?,
@@ -2988,7 +2984,7 @@ impl CoreService {
                 Err(error) => return Err(map_local_db_error(error)),
             }
         } else {
-            // A remote binding serves no local bridge identity: the standard
+            // why: A remote binding serves no local bridge identity: the standard
             // capture op stores the candidate under its own minted id. A
             // binding-local capture first commits its own durable admission
             // (D18, §5.1) in the same short writer transaction as the Nexus
@@ -3047,6 +3043,7 @@ impl CoreService {
     /// indefinitely (later attempts and concealed/negative provider reads never
     /// prove absence), until remote-connect's signed runtime provides a real
     /// remote binding and outcome evidence (R2).
+    /// upgrade: when remote-connect's signed runtime lands (R2).
     async fn capture_remote_binding_scoped(
         &self,
         principal: &Principal,
@@ -3056,7 +3053,7 @@ impl CoreService {
         capture: spoke_schemas::MemoryCaptureRequest,
     ) -> CoreResult<()> {
         let binding = &memory.binding;
-        // A nonlocal binding without its pinned public client identity cannot
+        // why: A nonlocal binding without its pinned public client identity cannot
         // be admitted: fail closed instead of recording under another identity.
         let Some(client_identity) = binding.client_identity() else {
             return Err(CoreError::Internal {
@@ -3078,7 +3075,7 @@ impl CoreService {
         let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
             .await
             .map_err(map_local_db_error)?;
-        // The local binding must still be this Character's active binding on an
+        // why: The local binding must still be this Character's active binding on an
         // owned active World when the attempt becomes durable — the same
         // admission the local provider's write transaction performs, in the same
         // writer transaction that makes the unknown attempt durable.
@@ -3100,7 +3097,7 @@ impl CoreService {
         .map_err(map_local_db_error)?;
         admission.commit().await.map_err(sqlx_internal)?;
 
-        // The committed receipt must identify THIS request: a provider can
+        // why: The committed receipt must identify THIS request: a provider can
         // answer with an older, still schema-valid receipt whose result belongs
         // to another key (and another namespace), and publishing its objects
         // while retiring this admission would leave this capture unprotected.
@@ -3109,7 +3106,7 @@ impl CoreService {
         match binding.port().capture(&memory.principal, capture).await {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                // A mismatched receipt returns here with the admission still in
+                // why: A mismatched receipt returns here with the admission still in
                 // place, so the binding stays unremovable.
                 let candidate_ids =
                     capture_result_candidate_ids(&body, &issued_space, &issued_key)?;
@@ -3140,7 +3137,7 @@ impl CoreService {
                 Ok(())
             }
             SpokeResult::Reject(reject) => {
-                // D18/I-000196: only a refusal that proves this attempt had no
+                // why: D18/I-000196: only a refusal that proves this attempt had no
                 // effect retires its admission. `OUTCOME_UNCERTAIN` (including a
                 // response-projection failure after commit), a retryable class,
                 // a missing/unknown class or a contradictory code all keep it;
@@ -3163,7 +3160,7 @@ impl CoreService {
         }
     }
 
-    /// Apply the D18 consequence of one definite capture refusal.
+    /// note: Apply the D18 consequence of one definite capture refusal.
     ///
     /// Retire this attempt's admission only when the result proves the attempt
     /// had no effect. An uncertain, unknown, malformed or contradictory refusal
@@ -3189,8 +3186,8 @@ impl CoreService {
         Ok(())
     }
 
-    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
-    /// List one owned Character's pending reviews (retained read; any
+    #[allow(clippy::significant_drop_tightening)] // why: the guard deliberately spans the whole operation
+    /// note: List one owned Character's pending reviews (retained read; any
     /// lifecycle status), offset-paginated.
     ///
     /// Served through the pinned `MemoryPort` (NXM-5 Task 2): the provider's
@@ -3209,7 +3206,7 @@ impl CoreService {
         offset: u32,
     ) -> CoreResult<ListCharacterPendingReviewsResponse> {
         self.verify_principal(principal)?;
-        // Retained bearer admission (404 for a foreign/missing Character)
+        // why: Retained bearer admission (404 for a foreign/missing Character)
         // precedes the provider read.
         let _admission = MemoryPipelineCtx::character_read(
             &self.inner.pool,
@@ -3252,8 +3249,8 @@ impl CoreService {
         }))
     }
 
-    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
-    /// Count one owned Character's pending reviews (retained read).
+    #[allow(clippy::significant_drop_tightening)] // why: the guard deliberately spans the whole operation
+    /// note: Count one owned Character's pending reviews (retained read).
     ///
     /// # Errors
     /// [`CoreError::NotFound`] for a foreign/missing Character and the mapped
@@ -3281,7 +3278,7 @@ impl CoreService {
         }))
     }
 
-    /// Delete one pending row from an owned Character's queue. Holds the
+    /// note: Delete one pending row from an owned Character's queue. Holds the
     /// per-Character activity lease; a missing row is `404` and mutates
     /// nothing.
     ///
@@ -3319,7 +3316,7 @@ impl CoreService {
         let missing = || not_found("pending review", &format!("'{pending_id}'"));
         let pending = pending_now(&memory, &candidate_id).await?;
         if memory.is_local() {
-            // A local binding adopts the row under the bridge's deterministic id
+            // why: A local binding adopts the row under the bridge's deterministic id
             // and consumes it in the same guarded transaction, so a row that was
             // pending can only answer through that dismissal.
             if pending {
@@ -3336,7 +3333,7 @@ impl CoreService {
                 .dismiss_provider_candidate(&candidate_id, &pending_id)
                 .await?
         {
-            // A nonlocal binding serves no projection: a candidate it really
+            // why: A nonlocal binding serves no projection: a candidate it really
             // holds under this shaped id is an ordinary provider candidate,
             // and the standard revision check runs only after its subject and
             // retained pending identity match this bearer (I-000197).
@@ -3345,7 +3342,7 @@ impl CoreService {
                 "pending_id": pending_id,
             }));
         }
-        // A capture the provider owns outright carries a minted candidate
+        // why: A capture the provider owns outright carries a minted candidate
         // id: address it through the row itself, exactly as the Creator
         // dismissal does (NXM-16).
         if let Some(row) = memory
@@ -3367,8 +3364,8 @@ impl CoreService {
         Err(missing())
     }
 
-    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
-    /// List one owned Character's memory fragments (retained read),
+    #[allow(clippy::significant_drop_tightening)] // why: the guard deliberately spans the whole operation
+    /// note: List one owned Character's memory fragments (retained read),
     /// offset-paginated.
     ///
     /// Served through the pinned `MemoryPort`: the retained scope split
@@ -3411,7 +3408,7 @@ impl CoreService {
         );
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
         let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
-        // The retained `limit + 1` overfetch, counted in FAMILY rows: one
+        // why: The retained `limit + 1` overfetch, counted in FAMILY rows: one
         // classified fragment past the page proves `has_more`. The walk stops
         // there, so it never reads or converts the whole collection, and a row
         // it never reaches cannot fail the page.
@@ -3431,7 +3428,7 @@ impl CoreService {
                     .character_fragment_origin(&record, binding_id.as_deref())
                     .await?
                 {
-                    // No proven Nexus origin: a generic record, not this family's.
+                    // why: No proven Nexus origin: a generic record, not this family's.
                     CharacterFragmentFamily::Unproven => {}
                     CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
                     CharacterFragmentFamily::Fragment(session_id) => {
@@ -3455,7 +3452,7 @@ impl CoreService {
                 None => break,
             }
         }
-        // The retained page window applies to the family, so `offset` and
+        // why: The retained page window applies to the family, so `offset` and
         // `has_more` describe fragments only.
         let next_cursor = has_more.then(|| format!("v1:{}", offset.saturating_add(limit)));
         map_wire(json!({
@@ -3464,7 +3461,7 @@ impl CoreService {
         }))
     }
 
-    /// Promote a binding-local Character fragment to shared Character memory
+    /// note: Promote a binding-local Character fragment to shared Character memory
     /// behind the per-Character activity lease. Revision-checked and atomic:
     /// a stale `expected_revision` writes nothing (409 `version_mismatch`),
     /// success clears the binding provenance and bumps the revision, and an
@@ -3516,11 +3513,11 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // The retained conflict is decided on the source placement: provider
+        // why: The retained conflict is decided on the source placement: provider
         // same-target promotion is a §7.0.4 no-op, so the adapter refuses an
         // already-shared fragment itself.
         let absent = || not_found("character memory fragment", &format!("'{fragment_id}'"));
-        // The listed id resolves through the bridge, so a legacy-projected
+        // why: The listed id resolves through the bridge, so a legacy-projected
         // fragment is promotable at all: the DTO serves the legacy
         // `fragment_id` while the provider names that row by its external id
         // (R4-F1).
@@ -3532,7 +3529,7 @@ impl CoreService {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        // R4-F2: the lease above names one Character, so the record must be that
+        // why: R4-F2: the lease above names one Character, so the record must be that
         // Character's own and a Nexus Character fragment. The read alone is
         // authorized by the principal's grants, which also cover every other
         // Character it owns, so the owner and family are checked here — before
@@ -3540,7 +3537,7 @@ impl CoreService {
         if current["subject_id"].as_str() != Some(memory.subject_id()) {
             return Err(absent());
         }
-        // The retained family contract, applied at the promotion boundary: a
+        // why: The retained family contract, applied at the promotion boundary: a
         // record with no proven Nexus origin keeps the retained non-fragment
         // answer, a record whose required identity is gone while Nexus still holds
         // positive origin evidence (its own metadata, or this binding's fact for
@@ -3562,14 +3559,14 @@ impl CoreService {
             }
             CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
         };
-        // The placement the promotion leaves. While the record is still
+        // why: The placement the promotion leaves. While the record is still
         // binding-local its own scope names it; once the promotion committed it
         // names the target, and its provenance is a client claim that need not
         // name the placement at all — so the promotion's transaction recorded the
         // old binding and a retry reads that recovery row instead of guessing
         // (R4-F3 round 2).
         let Some(source_binding) = current_binding else {
-            // The promotion already committed and only its invalidation is
+            // why: The promotion already committed and only its invalidation is
             // outstanding: finish it before answering the stable conflict, so a
             // retry never leaves the shared fragment behind a stale cache. A
             // remote binding has no local narrative cache or journal to settle.
@@ -3591,7 +3588,7 @@ impl CoreService {
                 invalid_input("expected_revision must be a non-negative fragment revision")
             })?;
         let provider_revision = u64::try_from(provider_revision).unwrap_or(u64::MAX);
-        // The validation below and the CAS above it must name the SAME provider
+        // why: The validation below and the CAS above it must name the SAME provider
         // revision: a caller whose expected revision is not the one this record
         // was read at would otherwise promote a revision whose content was never
         // validated (a concurrent replacement could slip through the CAS). That
@@ -3608,7 +3605,7 @@ impl CoreService {
                 ),
             });
         }
-        // The one retained projection: it proves every DTO-relevant value on the
+        // why: The one retained projection: it proves every DTO-relevant value on the
         // authorized record at the CAS revision, BEFORE the provider mutation,
         // and it is also the response value. The promotion commits exactly the
         // placement it requests (shared) and the CAS proves the record was at
@@ -3624,7 +3621,7 @@ impl CoreService {
         memory
             .promote_fragment(&record_id, stored_revision, source_binding.as_str())
             .await?;
-        // Retained cache semantics: exactly the affected SOUL-narrative scopes
+        // why: Retained cache semantics: exactly the affected SOUL-narrative scopes
         // (shared + the old binding) are invalidated. The cache and the
         // invalidation journal are local-provider state, so a remote binding
         // settles neither.
@@ -3633,7 +3630,7 @@ impl CoreService {
                 .await?;
             memory.finish_soul_invalidation(&record_id).await?;
         }
-        // The committed response is the value proven above: no second
+        // why: The committed response is the value proven above: no second
         // serialization of the record and no post-commit read remain, so an
         // intervening writer cannot turn this promotion into a projection
         // failure.
@@ -3654,12 +3651,13 @@ impl CoreService {
     /// shortcut: this is the one legacy-table write the rerouted promotion
     /// keeps; it disappears with the projection reroute that serves the
     /// narrative from records.
+    /// upgrade: when the projection reroute lands.
     async fn invalidate_character_soul_narratives(
         &self,
         character_id: &str,
         binding_id: Option<&str>,
     ) -> CoreResult<()> {
-        // Test-only fault: the promotion it follows has already committed, so a
+        // why: Test-only fault: the promotion it follows has already committed, so a
         // regression can prove the retry still finishes the invalidation.
         #[cfg(feature = "test-hooks")]
         if self
@@ -3684,7 +3682,7 @@ impl CoreService {
         Ok(())
     }
 
-    /// Drain a bounded slice of an owned Character's pending-review queue
+    /// note: Drain a bounded slice of an owned Character's pending-review queue
     /// (v1.190 P2-T2 contract API). Holds the per-Character activity lease
     /// across the whole batch, including file promotion and any synthesis.
     ///
@@ -3696,7 +3694,7 @@ impl CoreService {
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus the mapped pipeline/storage
     /// errors otherwise.
-    #[allow(clippy::too_many_lines)] // the bounded fetch + disposition section are one flow
+    #[allow(clippy::too_many_lines)] // why: the bounded fetch + disposition section are one flow
     pub async fn review_character_memory(
         &self,
         principal: &Principal,
@@ -3705,7 +3703,7 @@ impl CoreService {
     ) -> CoreResult<ReviewCharacterMemoryResponse> {
         self.verify_principal(principal)?;
         let binding_id = optional_str(request.binding_id.as_ref());
-        // Review drains the queue and writes provider records: hold a writable
+        // why: Review drains the queue and writes provider records: hold a writable
         // activity context — with its per-Character lease — across the batch.
         let ctx = MemoryPipelineCtx::character_write(
             self.acquire_actor_activity(
@@ -3719,7 +3717,7 @@ impl CoreService {
             &character_id,
             binding_id,
         )?;
-        // The dismissal-vs-drain authority check (fix round 1, finding F1):
+        // why: The dismissal-vs-drain authority check (fix round 1, finding F1):
         // the provider read serves pending candidates only, so a row a
         // dismissal consumed is no longer queued at all.
         let memory = self
@@ -3731,12 +3729,12 @@ impl CoreService {
             .into_iter()
             .filter(|row| pending_row_in_scope(row, binding_id))
             .collect();
-        // The retained batch bound: process at most REVIEW_BATCH_LIMIT rows;
+        // why: The retained batch bound: process at most REVIEW_BATCH_LIMIT rows;
         // the extra row proves more exist.
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
         let more_in_db = pending.len() > batch_limit;
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
-        // The check/use boundary (fix round 2, finding F1): the fetch above only
+        // why: The check/use boundary (fix round 2, finding F1): the fetch above only
         // selects the slice. This re-check runs inside the bearer's disposition
         // section when the binding is local (a remote binding relies on its
         // candidate CAS), so a dismissal can neither commit between it and the
@@ -3800,7 +3798,7 @@ fn validate_capture_input(
     )
 }
 
-/// The Character capture's idempotency key: the `pending_id` names one logical
+/// note: The Character capture's idempotency key: the `pending_id` names one logical
 /// capture, so a re-delivered digest replays the stored outcome instead of
 /// duplicating it. The arm prefix keeps it disjoint from the Creator arm's key
 /// for the same `pending_id` (both arms share the capture op's dedup namespace).
@@ -3811,7 +3809,7 @@ fn character_capture_key(pending_id: &str) -> CoreResult<String> {
     }
 }
 
-/// The capture-field validation both memory bearers share (a Character capture
+/// note: The capture-field validation both memory bearers share (a Character capture
 /// has no world, so `world_id` is `None` there).
 fn validate_capture_fields(
     pending_id: &str,
@@ -3851,7 +3849,7 @@ fn validate_capture_fields(
     Ok(())
 }
 
-/// Which provider records this adapter serves as a Nexus Character fragment,
+/// note: Which provider records this adapter serves as a Nexus Character fragment,
 /// and which it can only report as damaged.
 ///
 /// N2's adoption maps a reviewed `FragmentOnly` product **to** a core `fact`
@@ -3871,20 +3869,20 @@ fn validate_capture_fields(
 ///   fragment, and its absence of evidence says nothing about where it came from.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CharacterFragmentFamily<'a> {
-    /// A representable Character fragment: its retained session identity.
+    /// note: A representable Character fragment: its retained session identity.
     Fragment(&'a str),
-    /// Known Nexus fragment origin whose required identity is gone.
+    /// note: Known Nexus fragment origin whose required identity is gone.
     Damaged,
-    /// No proven Nexus origin: a generic provider record, not a fragment.
+    /// note: No proven Nexus origin: a generic provider record, not a fragment.
     Unproven,
 }
 
-/// The one `nexus_legacy.family` value that names the Character fragment family
+/// note: The one `nexus_legacy.family` value that names the Character fragment family
 /// (`memory_provider/legacy.rs`, `FAMILY_CHARACTER_FRAGMENTS`). Any other family
 /// names another Nexus family, so it is not Character-fragment origin.
 const CHARACTER_FRAGMENT_FAMILY: &str = "character_memory_fragments";
 
-/// Classify one provider record from its own retained metadata.
+/// note: Classify one provider record from its own retained metadata.
 ///
 /// Only an actual Character-fragment producer marker counts as the record's own
 /// origin claim: the legacy bridge's exact `family` identity, or the review
@@ -3914,7 +3912,7 @@ fn character_fragment_family(record: &Value) -> CharacterFragmentFamily<'_> {
 }
 
 impl MemoryAdapter {
-    /// Whether this binding's authoritative facts prove the record's Nexus
+    /// note: Whether this binding's authoritative facts prove the record's Nexus
     /// origin.
     ///
     /// `true` is positive origin evidence for this exact object; `false` proves
@@ -3935,7 +3933,7 @@ impl MemoryAdapter {
         .map_err(map_local_db_error)
     }
 
-    /// The retained family of one record, with every authoritative origin signal
+    /// note: The retained family of one record, with every authoritative origin signal
     /// this adapter already holds for `binding_id`.
     ///
     /// The record's own metadata is authoritative on its own; a record that lost
@@ -3960,7 +3958,7 @@ impl MemoryAdapter {
     }
 }
 
-/// The one static refusal for a fragment-origin record whose required identity
+/// note: The one static refusal for a fragment-origin record whose required identity
 /// is missing: stored-state damage, never a caller-input verdict.
 fn damaged_character_fragment() -> CoreError {
     internal_err(
@@ -3969,7 +3967,7 @@ fn damaged_character_fragment() -> CoreError {
     )
 }
 
-/// One validated provider record rendered as the retained Character fragment
+/// note: One validated provider record rendered as the retained Character fragment
 /// DTO.
 ///
 /// The caller passes the session identity [`character_fragment_family`] proved
@@ -4007,7 +4005,7 @@ fn character_fragment_from_provider(
     }))
 }
 
-/// The retained projection of one already-classified fragment record at the
+/// note: The retained projection of one already-classified fragment record at the
 /// placement and 0-based revision it currently stores.
 fn stored_character_fragment(
     record: &Value,
@@ -4019,7 +4017,7 @@ fn stored_character_fragment(
     character_fragment_from_provider(record, character_id, session_id, binding_id, revision)
 }
 
-/// One provider record rendered as the retained Creator fragment DTO.
+/// note: One provider record rendered as the retained Creator fragment DTO.
 ///
 /// The bridge keeps the legacy display fields (fragment id, keywords, world)
 /// in `nexus_legacy`, so the retained projection is identical for a projected
@@ -4042,10 +4040,10 @@ fn creator_fragment_from_provider(record: &Value) -> CoreResult<MemoryFragmentIn
     }))
 }
 
-// ── Creator memory family ────────────────────────────────────────────────
+// note: Creator memory family
 
 impl CoreService {
-    /// List the principal's pending reviews (keyset on
+    /// note: List the principal's pending reviews (keyset on
     /// `(created_at DESC, pending_id DESC)`, bounded at `limit + 1`).
     ///
     /// Served through the pinned `MemoryPort` (NXM-5 Task 2): the provider's
@@ -4098,7 +4096,7 @@ impl CoreService {
         }))
     }
 
-    /// Count the principal's pending reviews.
+    /// note: Count the principal's pending reviews.
     ///
     /// # Errors
     /// As [`Self::list_pending_reviews`].
@@ -4114,7 +4112,7 @@ impl CoreService {
         })
     }
 
-    /// Delete one of the principal's pending reviews; a missing row is `404`
+    /// note: Delete one of the principal's pending reviews; a missing row is `404`
     /// and mutates nothing.
     ///
     /// Served through the pinned `MemoryPort`. A local binding adopts the row
@@ -4149,13 +4147,13 @@ impl CoreService {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
         let candidate_id = legacy::pending_review_candidate_id(&pending_id);
-        // The retained answer for a row that is no longer queued is `404`
+        // why: The retained answer for a row that is no longer queued is `404`
         // (before the reroute the row was deleted, so a repeat dismissal found
         // nothing). The authoritative decision is still the guarded dismissal
         // below; this read only keeps that answer.
         let pending = pending_now(&memory, &candidate_id).await?;
         let dismissed = if memory.is_local() {
-            // The local bridge adopts the row under the deterministic id and
+            // why: The local bridge adopts the row under the deterministic id and
             // consumes it in the same guarded transaction.
             if pending {
                 memory.dismiss_legacy(&candidate_id).await?
@@ -4163,7 +4161,7 @@ impl CoreService {
                 false
             }
         } else {
-            // A nonlocal binding serves no projection: the shaped id only
+            // why: A nonlocal binding serves no projection: the shaped id only
             // addresses an ordinary provider candidate there, and the standard
             // revision check runs only after its subject and retained pending
             // identity match this bearer (I-000197).
@@ -4178,7 +4176,7 @@ impl CoreService {
                 pending_id,
             });
         }
-        // A row captured through the typed Creator path (NXM-16) is
+        // why: A row captured through the typed Creator path (NXM-16) is
         // provider-native: its candidate id is minted, so the retained
         // `pending_id` addresses it through the row itself instead of the
         // bridge's deterministic id.
@@ -4201,7 +4199,7 @@ impl CoreService {
         if memory.is_local() {
             return Err(self.pending_review_refusal(principal, &pending_id).await?);
         }
-        // A nonlocal binding has no local legacy queue, so the selected
+        // why: A nonlocal binding has no local legacy queue, so the selected
         // provider's "nothing pending" is the whole answer: the local ownership
         // lookup is not consulted here, and a remote miss can neither read
         // legacy rows nor surface an unrelated local ownership 403 or local
@@ -4211,7 +4209,7 @@ impl CoreService {
         })
     }
 
-    /// The retained refusal for a dismissal that found nothing to consume: a
+    /// note: The retained refusal for a dismissal that found nothing to consume: a
     /// row another Creator owns is the `pending_review` `ForbiddenReason`, an
     /// absent or already-consumed row the `NotFound` it always was. The
     /// ownership re-read is the same read-only legacy lookup the pre-reroute
@@ -4251,7 +4249,7 @@ impl CoreService {
         })
     }
 
-    /// List the principal's memory fragments with optional keyword/world
+    /// note: List the principal's memory fragments with optional keyword/world
     /// filtering, bounded at `limit`.
     ///
     /// Served through the pinned `MemoryPort`: the provider's `fact` records
@@ -4276,7 +4274,7 @@ impl CoreService {
         }
         let memory = self.creator_memory(principal).await?;
         let filter: Option<Vec<String>> = world_id.as_ref().map(|world| vec![world.clone()]);
-        // A keyword read filters after the provider read, so it must see the
+        // why: A keyword read filters after the provider read, so it must see the
         // whole set; an unfiltered read needs only its own page.
         let want = keyword.is_none().then_some(limit);
         let records = memory
@@ -4290,7 +4288,7 @@ impl CoreService {
         let mut fragments = Vec::new();
         for record in &records {
             if let Some(keyword) = keyword.as_deref() {
-                // The retained SQL matched with `LIKE`, which is
+                // why: The retained SQL matched with `LIKE`, which is
                 // case-insensitive for ASCII: a mixed-case keyword must not
                 // hide the fragment a lowercase one finds.
                 if !record_keywords(record)
@@ -4308,7 +4306,7 @@ impl CoreService {
         map_wire(json!({ "fragments": fragments }))
     }
 
-    /// Drain a bounded slice of the principal's pending-review queue
+    /// note: Drain a bounded slice of the principal's pending-review queue
     /// (V1.80 REL-01 semantics preserved: bounded fetch, deadline-aware
     /// partial progress, `has_more` drain-completion contract).
     ///
@@ -4319,7 +4317,7 @@ impl CoreService {
     ///
     /// # Errors
     /// As [`Self::review_character_memory`] for the Creator arm.
-    #[allow(clippy::too_many_lines)] // the bounded fetch + disposition section are one flow
+    #[allow(clippy::too_many_lines)] // why: the bounded fetch + disposition section are one flow
     pub async fn review_memory(
         &self,
         principal: &Principal,
@@ -4336,17 +4334,17 @@ impl CoreService {
                 ),
             });
         }
-        // The dismissal-vs-drain authority check (fix round 1, finding F1):
+        // why: The dismissal-vs-drain authority check (fix round 1, finding F1):
         // the provider read serves pending candidates only, so a row a
         // dismissal consumed is no longer queued at all.
         let memory = self.creator_memory_writer(principal).await?;
         let pending = memory.pending_rows().await?;
-        // The retained batch bound: process at most REVIEW_BATCH_LIMIT rows;
+        // why: The retained batch bound: process at most REVIEW_BATCH_LIMIT rows;
         // the extra row proves more exist.
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
         let more_in_db = pending.len() > batch_limit;
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
-        // The check/use boundary (fix round 2, finding F1): the fetch above only
+        // why: The check/use boundary (fix round 2, finding F1): the fetch above only
         // selects the slice. This re-check runs inside the bearer's disposition
         // section when the binding is local (a remote binding relies on its
         // candidate CAS), so a dismissal can neither commit between it and the
@@ -4371,7 +4369,7 @@ impl CoreService {
                 candidate_id: row.candidate_id.clone(),
                 expected_revision: row.revision,
                 input: row.review_input(principal.creator_id()),
-                // The whole Creator arm promotes; only a binding-local Character
+                // why: The whole Creator arm promotes; only a binding-local Character
                 // capture is coerced to a fragment.
                 binding_local: false,
             })
@@ -4386,7 +4384,7 @@ impl CoreService {
         .await?;
         drop(section);
 
-        // `has_more` is the drain-completion contract: `true` when the queue
+        // why: `has_more` is the drain-completion contract: `true` when the queue
         // may not be fully drained (more rows in the DB, the budget expired
         // mid-batch, or any fetched row remained pending).
         let deadline_stopped = batch.processed < processing_slice;
@@ -4405,18 +4403,18 @@ impl CoreService {
     }
 }
 
-// ── Character ToM carrier family ─────────────────────────────────────────
+// note: Character ToM carrier family
 
 const CURSOR_PREFIX: &str = "tom3:";
 const CURSOR_SEP: char = '\u{1f}';
-/// Fixed query-work bounds (fix round 1, review I4): the corpus is admitted
+/// note: Fixed query-work bounds (fix round 1, review I4): the corpus is admitted
 /// only up to these caps; exceeding them fails closed before materialization.
 const MAX_CARRIERS_PER_SCOPE: u32 = 200;
 const MAX_BELIEF_ROWS_PER_CARRIER: usize = 200;
-/// `MAX_BELIEF_ROWS_PER_CARRIER` as `i64` for compile-time SQL bind args.
+/// note: `MAX_BELIEF_ROWS_PER_CARRIER` as `i64` for compile-time SQL bind args.
 const MAX_BELIEF_ROWS_PER_CARRIER_I64: i64 = 200;
 
-/// One belief row in keyset order `(order, carrier_entry_id, row_ordinal)`.
+/// note: One belief row in keyset order `(order, carrier_entry_id, row_ordinal)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharacterTomBeliefRow {
     pub carrier_entry_id: String,
@@ -4425,7 +4423,7 @@ pub struct CharacterTomBeliefRow {
     pub carrier_recorded_at: Option<String>,
 }
 
-/// Bounded keyset page.
+/// note: Bounded keyset page.
 #[derive(Debug, Clone)]
 pub struct CharacterTomPage {
     pub items: Vec<CharacterTomBeliefRow>,
@@ -4434,20 +4432,20 @@ pub struct CharacterTomPage {
     pub next_cursor: Option<String>,
 }
 
-/// Admitted list query.
+/// note: Admitted list query.
 #[derive(Debug, Clone)]
 pub struct CharacterTomListQuery {
     pub world_id: String,
     pub binding_id: String,
     pub limit: u32,
     pub cursor: Option<String>,
-    /// Optional order filter (`1` = L1, `2` = L2) so the mind projection can
+    /// note: Optional order filter (`1` = L1, `2` = L2) so the mind projection can
     /// fill each slot with an independent bounded fetch (QC fix round 1,
     /// F-003). The public list route always passes `None`.
     pub order: Option<i64>,
 }
 
-/// Admitted record mutation (after wire DTO mapping).
+/// note: Admitted record mutation (after wire DTO mapping).
 #[derive(Debug, Clone)]
 pub struct CharacterTomRecordInput {
     pub world_id: String,
@@ -4460,7 +4458,7 @@ pub struct CharacterTomRecordInput {
     pub event_id: Option<String>,
 }
 
-/// Admitted carrier probe row: typed base columns only, never `modules_json`,
+/// note: Admitted carrier probe row: typed base columns only, never `modules_json`,
 /// so the pre-parse bound holds before any serde materialization.
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct ProbeCarrier {
@@ -4470,7 +4468,7 @@ pub struct ProbeCarrier {
     pub actor_world_binding_id: Option<String>,
 }
 
-/// Stored `modules_json` violation category, used to classify a carrier that
+/// note: Stored `modules_json` violation category, used to classify a carrier that
 /// fails the probe-ok predicate with the matching fail-closed error.
 #[derive(Debug, Clone, Copy)]
 enum ViolationKind {
@@ -4479,7 +4477,7 @@ enum ViolationKind {
     Oversized,
 }
 
-/// Reusable Character `ToM` composer (record + query).
+/// note: Reusable Character `ToM` composer (record + query).
 pub struct CharacterTomService {
     views: crate::actor_knowledge::ActorKnowledgeViewService,
     store: SqliteKbStore,
@@ -4487,7 +4485,7 @@ pub struct CharacterTomService {
 }
 
 impl CharacterTomService {
-    /// Bind the service to a workspace pool.
+    /// note: Bind the service to a workspace pool.
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
         Self {
@@ -4497,7 +4495,7 @@ impl CharacterTomService {
         }
     }
 
-    /// Resolve limit (1..=100, default 50).
+    /// note: Resolve limit (1..=100, default 50).
     ///
     /// # Errors
     ///
@@ -4506,7 +4504,7 @@ impl CharacterTomService {
         crate::actor_knowledge::ActorKnowledgeViewService::resolve_limit(raw)
     }
 
-    /// Decode opaque `(order, carrier_entry_id, row_ordinal)` cursor.
+    /// note: Decode opaque `(order, carrier_entry_id, row_ordinal)` cursor.
     ///
     /// # Errors
     ///
@@ -4531,13 +4529,13 @@ impl CharacterTomService {
         }
     }
 
-    /// Encode keyset cursor.
+    /// note: Encode keyset cursor.
     #[must_use]
     pub fn encode_cursor(order: i64, carrier_entry_id: &str, row_ordinal: u32) -> String {
         format!("{CURSOR_PREFIX}{order}{CURSOR_SEP}{carrier_entry_id}{CURSOR_SEP}{row_ordinal}")
     }
 
-    /// Keyset page over pre-sorted rows.
+    /// note: Keyset page over pre-sorted rows.
     #[must_use]
     pub fn paginate(
         mut rows: Vec<(i64, String, u32, CharacterTomBeliefRow)>,
@@ -4578,7 +4576,7 @@ impl CharacterTomService {
         }
     }
 
-    /// List Character `ToM` rows from authorized carriers only.
+    /// note: List Character `ToM` rows from authorized carriers only.
     ///
     /// Work is bounded before materialization: each owner scope admits at
     /// most `MAX_CARRIERS_PER_SCOPE` carriers and each carrier at most
@@ -4597,7 +4595,7 @@ impl CharacterTomService {
         viewer_character_id: &str,
         query: CharacterTomListQuery,
     ) -> CoreResult<CharacterTomPage> {
-        // ToM list is a retained read (§11.2): read the owned Character's
+        // why: ToM list is a retained read (§11.2): read the owned Character's
         // stored bindings and carriers with the owner + stored binding tuple,
         // not liveness. No L2 subject-reactivation requirement on historical
         // rows. Foreign/missing rows and a missing/foreign World still fail
@@ -4611,7 +4609,7 @@ impl CharacterTomService {
         .await?;
         let cursor = Self::decode_cursor(&query.cursor)?;
         let order_filter = query.order;
-        // DB-side pre-parse bounds (fix round 3): carrier counts, belief-array
+        // why: DB-side pre-parse bounds (fix round 3): carrier counts, belief-array
         // lengths, and modules JSON validity are enforced with compile-time SQL
         // before any `modules_json` text is parsed or materialized into records.
         let mut admitted_ids: Vec<String> = Vec::new();
@@ -4623,11 +4621,11 @@ impl CharacterTomService {
             let admitted = self.probe_scope_carriers(&owner).await?;
             admitted_ids.extend(admitted.into_iter().map(|c| c.key_block_id));
         }
-        // The timestamp lookup is constrained to exactly this concrete admitted
+        // why: The timestamp lookup is constrained to exactly this concrete admitted
         // carrier-id snapshot — never an owner-scope rescan — so carriers
         // inserted/changed after the probe cannot enter the result (fix round 4).
         let recorded = self.carrier_recorded_at_map(&admitted_ids).await?;
-        // Materialize exactly the probe-admitted id snapshot — never a second
+        // why: Materialize exactly the probe-admitted id snapshot — never a second
         // owner-scope rescan (QC fix round 1, F-001). Status/ownership drift,
         // invalid `modules_json`, and oversized belief arrays discovered here
         // fail closed instead of entering or silently dropping rows.
@@ -4641,7 +4639,7 @@ impl CharacterTomService {
             for (ordinal, element) in rows.iter().enumerate() {
                 let Ok(belief) = serde_json::from_value::<BeliefPropositionRaw>(element.clone())
                 else {
-                    continue; // malformed legacy element: skip, keep physical ordinal
+                    continue; // why: malformed legacy element: skip, keep physical ordinal
                 };
                 if validate_character_tom_belief_row(&belief, viewer_character_id).is_err() {
                     continue;
@@ -4670,7 +4668,7 @@ impl CharacterTomService {
         Ok(Self::paginate(keyed, cursor, query.limit))
     }
 
-    /// Record one L1/L2 belief on an authorized carrier (atomic CAS + `MindState`).
+    /// note: Record one L1/L2 belief on an authorized carrier (atomic CAS + `MindState`).
     ///
     /// # Errors
     ///
@@ -4696,7 +4694,7 @@ impl CharacterTomService {
             self.require_active_subject_binding(caller_creator_id, subject, &input.world_id)
                 .await?;
         }
-        // Pre-parse carrier probe (fix round 3): the stored `modules_json`
+        // why: Pre-parse carrier probe (fix round 3): the stored `modules_json`
         // value is type/length/validity checked via compile-time SQL before any
         // `get_knowledge_entry` / serde parse. Invalid text, a present non-array
         // `belief`, or an oversized array fail closed without mutation.
@@ -4719,7 +4717,7 @@ impl CharacterTomService {
                 _ => return Err(not_found("carrier_entry", &input.carrier_entry_id)),
             },
         }
-        // The CAS bump is a checked `+ 1` on this i64 revision; only the exact
+        // why: The CAS bump is a checked `+ 1` on this i64 revision; only the exact
         // `i64::MAX` input can overflow it, so reject that single value
         // deterministically.
         if input.expected_revision == i64::MAX {
@@ -4777,7 +4775,7 @@ impl CharacterTomService {
         Ok((input.carrier_entry_id, new_revision, mind_state_id))
     }
 
-    /// Stored admission: active owned viewer Character, active owned World,
+    /// note: Stored admission: active owned viewer Character, active owned World,
     /// and the viewer's active selected binding (P2 `ActorAdmissionService`
     /// parity). Foreign/missing rows are 404; inactive rows are 409.
     async fn admit_viewer(
@@ -4800,7 +4798,7 @@ impl CharacterTomService {
         Ok(())
     }
 
-    /// Retained-data read admission (v1.185 P0 Task 2): owned Character (any
+    /// note: Retained-data read admission (v1.185 P0 Task 2): owned Character (any
     /// status), the stored binding tuple (`binding_id` belongs to the viewer
     /// Character and targets `world_id`, any binding status), and an owned
     /// World (any status). Liveness is not required for a read; missing,
@@ -4966,7 +4964,7 @@ impl CharacterTomService {
         }
     }
 
-    /// Materialize exactly the probe-admitted carrier ids (QC fix round 1,
+    /// note: Materialize exactly the probe-admitted carrier ids (QC fix round 1,
     /// F-001) in probe-admission order. Each row is revalidated at
     /// materialization: still live, still owned by the admitted
     /// Character/binding, `modules_json` still valid JSON, belief array still
@@ -5023,7 +5021,7 @@ impl CharacterTomService {
                     Some(serde_json::from_str::<Value>(text).map_err(|_| invalid_modules_json())?)
                 }
             };
-            // Re-check the per-carrier row cap on the materialized array: a
+            // why: Re-check the per-carrier row cap on the materialized array: a
             // carrier admitted by the probe but appended before this read must
             // still fail closed instead of materializing oversized work.
             if carrier_belief_elements(modules.as_ref())?.len() > MAX_BELIEF_ROWS_PER_CARRIER {
@@ -5061,7 +5059,7 @@ impl CharacterTomService {
         }
     }
 
-    /// Latest derivative `MindState` `occurred_at` per carrier in the concrete
+    /// note: Latest derivative `MindState` `occurred_at` per carrier in the concrete
     /// admitted carrier-id set (fix round 4).
     async fn carrier_recorded_at_map(
         &self,
@@ -5093,7 +5091,7 @@ impl CharacterTomService {
         .fetch_all(&self.pool)
         .await
         .map_err(sqlx_internal)?;
-        // Exactly one latest derivative row per admitted id, matching the
+        // why: Exactly one latest derivative row per admitted id, matching the
         // `json_each` id snapshot — never a scope rescan.
         Ok(rows
             .into_iter()
@@ -5101,7 +5099,7 @@ impl CharacterTomService {
             .collect())
     }
 
-    /// Admitted carrier probe row (typed base columns only — never selects or
+    /// note: Admitted carrier probe row (typed base columns only — never selects or
     /// parses `modules_json`, so the pre-parse bound holds).
     async fn probe_scope_carriers(
         &self,
@@ -5176,7 +5174,7 @@ impl CharacterTomService {
         Ok(rows)
     }
 
-    /// Detect non-probe-ok carriers in an owner scope and map them to the
+    /// note: Detect non-probe-ok carriers in an owner scope and map them to the
     /// matching fail-closed error, before any modules parse.
     async fn probe_scope_violations(&self, owner: &KnowledgeOwnerRef) -> CoreResult<()> {
         let invalid = self
@@ -5200,7 +5198,7 @@ impl CharacterTomService {
         Ok(())
     }
 
-    /// One typed `COUNT(*)` over the scope + a violation predicate.
+    /// note: One typed `COUNT(*)` over the scope + a violation predicate.
     async fn scope_violation_count(
         &self,
         owner: &KnowledgeOwnerRef,
@@ -5290,7 +5288,7 @@ impl CharacterTomService {
         }
     }
 
-    /// Single-carrier probe for the record path. Returns the typed admitted
+    /// note: Single-carrier probe for the record path. Returns the typed admitted
     /// carrier row when probe-ok, or `None` when the carrier is absent.
     async fn probe_carrier(&self, carrier_entry_id: &str) -> CoreResult<Option<ProbeCarrier>> {
         let row = sqlx::query_as!(
@@ -5319,7 +5317,7 @@ impl CharacterTomService {
         if row.is_some() {
             return Ok(row);
         }
-        // No probe-ok row: classify the violation or report the carrier as
+        // why: No probe-ok row: classify the violation or report the carrier as
         // absent. Each check is a separate typed COUNT query.
         if self
             .carrier_violation_count(carrier_entry_id, ViolationKind::InvalidJson)
@@ -5387,7 +5385,7 @@ impl CharacterTomService {
     }
 }
 
-/// Borrow the carrier's `modules.belief` array elements.
+/// note: Borrow the carrier's `modules.belief` array elements.
 ///
 /// Malformed stored shapes fail closed: a present non-object `modules` value
 /// or a present non-array `belief` member is a deterministic
@@ -5409,7 +5407,7 @@ fn carrier_belief_elements(modules: Option<&Value>) -> CoreResult<&[Value]> {
     )
 }
 
-/// Non-NULL `modules_json` that is not valid JSON text — distinguishable from
+/// note: Non-NULL `modules_json` that is not valid JSON text — distinguishable from
 /// absent modules and from shape-malformed modules; fail-closed, never
 /// overwritten (fix round 2).
 fn invalid_modules_json() -> CoreError {
@@ -5428,7 +5426,7 @@ fn modules_malformed() -> CoreError {
     }
 }
 
-/// A probe-admitted carrier changed status or ownership before
+/// note: A probe-admitted carrier changed status or ownership before
 /// materialization (QC fix round 1, F-001): refuse the inconsistent snapshot.
 fn carrier_scope_drifted(id: &str) -> CoreError {
     CoreError::ActorConflict {
@@ -5448,7 +5446,7 @@ fn corpus_exceeded(what: &str) -> CoreError {
     }
 }
 
-/// Append `row` to `modules.belief`, preserving every unknown sibling module
+/// note: Append `row` to `modules.belief`, preserving every unknown sibling module
 /// key and existing element verbatim.
 fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) -> CoreResult<()> {
     if !modules.is_object() {
@@ -5462,7 +5460,7 @@ fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) -> CoreRes
     }
     let belief = obj.entry("belief").or_insert_with(|| json!([]));
     let rows = belief.as_array_mut().expect("checked is_array above");
-    // QC fix round 1 (F-002): never append the row that would exceed the
+    // why: QC fix round 1 (F-002): never append the row that would exceed the
     // per-carrier cap — a carrier at the cap rejects here, before any CAS or
     // MindState write, so the corpus can never become un-listable.
     if rows.len() >= MAX_BELIEF_ROWS_PER_CARRIER {
@@ -5500,7 +5498,7 @@ fn build_derivative_mind_state_wire(
     Ok(wire)
 }
 
-/// Map a generated record request into domain input + belief row.
+/// note: Map a generated record request into domain input + belief row.
 ///
 /// # Errors
 ///
@@ -5568,10 +5566,10 @@ fn map_tom_local_db(err: LocalDbError) -> CoreError {
     }
 }
 
-// ── CoreService ToM commands ─────────────────────────────────────────────
+// note: CoreService ToM commands
 
 impl CoreService {
-    /// Record one L1/L2 belief on an authorized carrier behind the
+    /// note: Record one L1/L2 belief on an authorized carrier behind the
     /// per-Character activity lease (atomic CAS + derivative `MindState`).
     ///
     /// # Errors
@@ -5587,7 +5585,7 @@ impl CoreService {
         let expected_revision = i64::try_from(request.expected_revision)
             .map_err(|_| invalid_input("expected_revision is out of range"))?;
         let input = record_input_from_request(&request, expected_revision)?;
-        // ToM record is a mutation: hold the per-Character activity lease
+        // why: ToM record is a mutation: hold the per-Character activity lease
         // across the CAS transaction (404 foreign/missing, 409 archived
         // `character_inactive`).
         let _lease = self
@@ -5610,7 +5608,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// List Character `ToM` belief rows from authorized carriers (retained
+    /// note: List Character `ToM` belief rows from authorized carriers (retained
     /// read; no activity lease).
     ///
     /// # Errors
@@ -5656,7 +5654,7 @@ impl CoreService {
     }
 }
 
-/// Project one `ToM` belief row to its wire value.
+/// note: Project one `ToM` belief row to its wire value.
 fn tom_item_value(row: &CharacterTomBeliefRow) -> CoreResult<serde_json::Value> {
     let mut value = json!({
         "carrier_entry_id": row.carrier_entry_id,
@@ -5681,7 +5679,7 @@ fn tom_item_value(row: &CharacterTomBeliefRow) -> CoreResult<serde_json::Value> 
 }
 
 impl CoreService {
-    /// P5: migrate every legacy memory-table row and bearer file of the active
+    /// note: P5: migrate every legacy memory-table row and bearer file of the active
     /// creator's workspace into provider surfaces, and publish the completion
     /// marker that flips every E4/E6/E10/E11 read to provider-only.
     ///
@@ -5749,7 +5747,7 @@ mod tests {
         .expect("wire-valid capture body")
     }
 
-    /// F2 (fix round 4): `records()` returns at most `want` rows, so `want = 1`
+    /// note: F2 (fix round 4): `records()` returns at most `want` rows, so `want = 1`
     /// is exactly one row even when the subject holds more.
     ///
     /// `records()` is `pub(crate)`, so the bound can only be pinned from inside
@@ -5843,7 +5841,7 @@ mod tests {
         );
     }
 
-    /// Boot an `EngineOwner` core over a workspace whose state DB carries the
+    /// note: Boot an `EngineOwner` core over a workspace whose state DB carries the
     /// creator row; the home, service and principal stay owned by the caller so
     /// the adapter's writer admission outlives every probe.
     async fn boot_owner_core() -> (TempDir, CoreService, Principal) {
@@ -5890,14 +5888,14 @@ mod tests {
         (tmp, core, principal)
     }
 
-    /// Capture a candidate under a second bearer's subject through the shared
+    /// note: Capture a candidate under a second bearer's subject through the shared
     /// space grant and return the provider candidate id addressing it.
     async fn foreign_candidate(memory: &MemoryAdapter) -> String {
         const FOREIGN_CREATOR: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        // The same opaque id can address another bearer's candidate; the row is
+        // why: The same opaque id can address another bearer's candidate; the row is
         // shared-scope, so the space-wide grant admits the capture and the read.
         let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
-        // The foreign bearer opt-in subject: capture admits a known subject
+        // why: The foreign bearer opt-in subject: capture admits a known subject
         // (the space-wide grant then covers the candidate operation).
         memory
             .ok(memory
@@ -5972,7 +5970,7 @@ mod tests {
         foreign["candidate_id"].as_str().unwrap().to_string()
     }
 
-    /// I-000197 (Task 4 fix 3): the retained `pending_id` addresses a candidate
+    /// note: I-000197 (Task 4 fix 3): the retained `pending_id` addresses a candidate
     /// by the bridge's deterministic (opaque) id, and the provider authorizes a
     /// candidate operation by grant coverage — the bootstrapped space-wide
     /// `admin` grant satisfies it for **any** subject. The shared dismissal
@@ -6003,7 +6001,7 @@ mod tests {
 
         let foreign_candidate_id = foreign_candidate(&memory).await;
 
-        // Another bearer's candidate under the opaque id: refused before the
+        // why: Another bearer's candidate under the opaque id: refused before the
         // CAS even though the provider grant allows the operation there.
         assert!(
             !memory
@@ -6022,7 +6020,7 @@ mod tests {
             "the refused dismissal mutated nothing"
         );
 
-        // The adapter's own candidate addressed with a different retained
+        // why: The adapter's own candidate addressed with a different retained
         // pending id: refused before the CAS as well.
         assert!(
             !memory
@@ -6037,7 +6035,7 @@ mod tests {
             "the mismatched pending identity mutated nothing"
         );
 
-        // Matched subject and retained identity: the standard CAS consumes it.
+        // why: Matched subject and retained identity: the standard CAS consumes it.
         assert!(memory
             .dismiss_provider_candidate(&own.candidate_id, "pend_identity_own")
             .await
@@ -6178,7 +6176,7 @@ mod tests {
         tx.commit().await.unwrap();
     }
 
-    /// I-000196: the production capture-refusal settlement retires an admission
+    /// note: I-000196: the production capture-refusal settlement retires an admission
     /// only for a proven no-effect refusal. Uncertain, retryable, missing/
     /// unknown-class and contradictory results keep it, against real durable
     /// state; only the `terminal` pre-effect refusal releases it.
@@ -6260,7 +6258,7 @@ mod tests {
         );
     }
 
-    /// I-000196: one attempt's definite refusal retires only its own admission;
+    /// note: I-000196: one attempt's definite refusal retires only its own admission;
     /// an outstanding sibling attempt keeps the binding protected.
     #[tokio::test]
     async fn definite_capture_reject_retires_only_its_own_admission() {
@@ -6325,7 +6323,7 @@ mod tests {
 
     const PEER_MARKER: &str = "PEER_SECRET_MARKER";
 
-    /// I-000202: the effective outcome stays unknown whenever the provider did
+    /// note: I-000202: the effective outcome stays unknown whenever the provider did
     /// not prove one — a raw `INTERNAL_ERROR` beside a contradictory `terminal`
     /// class, an `uncertain` class on any code, a missing/unknown class, and the
     /// contract's own uncertain code.
@@ -6387,7 +6385,7 @@ mod tests {
         );
     }
 
-    /// I-000202: a retained absence/consumed/conflict shortcut runs only when
+    /// note: I-000202: a retained absence/consumed/conflict shortcut runs only when
     /// the remote result proves that outcome; the local provider stays
     /// authoritative by code. The admission's no-effect proof is the same
     /// decision, narrowed to its pre-effect codes.
@@ -6460,7 +6458,7 @@ mod tests {
         )));
     }
 
-    /// The classification one hostile rejection carries: the five fields each
+    /// note: The classification one hostile rejection carries: the five fields each
     /// case below asserts, read from the retained structured carrier.
     fn refusal_fields(
         code: SpokeRejectCode,
@@ -6487,12 +6485,12 @@ mod tests {
         (code, wire_code, retry_class, family, conflict_code)
     }
 
-    /// I-000202/I-000204: the safe carrier keeps the effective classification,
+    /// note: I-000202/I-000204: the safe carrier keeps the effective classification,
     /// the retained conflict code for a proven stale-revision conflict, and no
     /// peer-controlled text.
     #[test]
     fn remote_refusal_keeps_classification_and_drops_peer_text() {
-        // An internal failure beside a contradictory `terminal` class is still
+        // why: An internal failure beside a contradictory `terminal` class is still
         // an unknown outcome, never a definite failure.
         let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::InternalError,
@@ -6505,7 +6503,7 @@ mod tests {
         assert_eq!(family, MemoryProviderRefusal::Unavailable);
         assert_eq!(conflict_code.as_deref(), None);
 
-        // A proven definite refusal keeps its family and a known peer wire code.
+        // why: A proven definite refusal keeps its family and a known peer wire code.
         let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::NotAuthorized,
             Some("terminal"),
@@ -6517,7 +6515,7 @@ mod tests {
         assert_eq!(family, MemoryProviderRefusal::Forbidden);
         assert_eq!(conflict_code.as_deref(), None);
 
-        // An uncertain outcome beside a validation code is not a definite 400,
+        // why: An uncertain outcome beside a validation code is not a definite 400,
         // and unknown peer strings never pass through.
         let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::InvalidInput,
@@ -6530,7 +6528,7 @@ mod tests {
         assert_eq!(family, MemoryProviderRefusal::Unavailable);
         assert_eq!(conflict_code.as_deref(), None);
 
-        // A proven definite stale-revision conflict retains the consumer-visible
+        // why: A proven definite stale-revision conflict retains the consumer-visible
         // `version_mismatch` code (I-000204) ...
         let (code, _, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::RevisionConflict,
@@ -6542,7 +6540,7 @@ mod tests {
         assert_eq!(family, MemoryProviderRefusal::Conflict);
         assert_eq!(conflict_code.as_deref(), Some("version_mismatch"));
 
-        // ... while an uncertain conflict never does.
+        // why: ... while an uncertain conflict never does.
         let error = remote_refusal(&hostile_reject(
             SpokeRejectCode::RevisionConflict,
             Some("uncertain"),
@@ -6561,7 +6559,7 @@ mod tests {
         assert_eq!(*family, MemoryProviderRefusal::Unavailable);
         assert_eq!(conflict_code.as_deref(), None);
 
-        // Nothing peer-authored survives the rendered or debug form.
+        // why: Nothing peer-authored survives the rendered or debug form.
         let rendered = format!(
             "{} {error:?}",
             remote_refusal(&hostile_reject(
@@ -6577,7 +6575,7 @@ mod tests {
         assert!(!rendered.contains("token=abc"));
     }
 
-    /// I-272 (fix round 3): the committed-receipt validation never echoes a
+    /// note: I-272 (fix round 3): the committed-receipt validation never echoes a
     /// peer-authored field back into the observable error. `SpaceId` admits
     /// any nonempty string, so a forged receipt can carry a private marker or
     /// a newline; the pipeline logs the very `Display` this helper returns, so
@@ -6609,7 +6607,7 @@ mod tests {
         assert_redacted_receipt_error(&error, "foreign outcome");
     }
 
-    /// The coded carrier survives while every peer-authored byte is dropped.
+    /// note: The coded carrier survives while every peer-authored byte is dropped.
     fn assert_redacted_receipt_error(error: &CoreError, branch: &str) {
         let CoreError::Internal { category } = error else {
             panic!("{branch}: expected the coded internal receipt error, got {error:?}");
@@ -6633,7 +6631,7 @@ mod tests {
         );
     }
 
-    /// A committed receipt only proves an effect for THIS request. The capture
+    /// note: A committed receipt only proves an effect for THIS request. The capture
     /// and promotion validators accept their own request's answer and refuse a
     /// schema-valid answer that belongs to another space, key, record or
     /// placement — always with a static category, never the peer's bytes.
@@ -6724,7 +6722,7 @@ mod tests {
         }
     }
 
-    /// §7.14 (I-000303): a committed dismissal receipt only proves THIS
+    /// note: §7.14 (I-000303): a committed dismissal receipt only proves THIS
     /// dismissal, and it is the gate `dismiss_native` passes before it releases
     /// the candidate's binding dependency. A provider can answer with an older,
     /// still schema-valid receipt for candidate A while B is the pending

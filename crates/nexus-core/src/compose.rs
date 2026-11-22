@@ -46,13 +46,13 @@ use serde_json::Value;
 use crate::strategy_candidates::conflict;
 use crate::{CoreError, CoreResult, CoreService, Principal, StrategyCandidate};
 
-/// One library package a creator asked to compose: an exact `{id, version}` reference. The daemon
+/// note: One library package a creator asked to compose: an exact `{id, version}` reference. The daemon
 /// resolves the content hash, so the caller never supplies one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatternPackageRef {
-    /// Registry id, which is also the package directory name.
+    /// note: Registry id, which is also the package directory name.
     pub id: String,
-    /// Exact version label from the package manifest.
+    /// note: Exact version label from the package manifest.
     pub version: String,
 }
 
@@ -62,66 +62,66 @@ impl std::fmt::Display for PatternPackageRef {
     }
 }
 
-/// `nest`: pin a library package into a new collapsed slot under `parent_node`.
+/// note: `nest`: pin a library package into a new collapsed slot under `parent_node`.
 #[derive(Debug, Clone)]
 pub struct NestOp {
-    /// Stable nest id; the region address every later operation uses.
+    /// note: Stable nest id; the region address every later operation uses.
     pub nest_id: String,
-    /// Id of the collapsed slot node this operation inserts.
+    /// note: Id of the collapsed slot node this operation inserts.
     pub parent_node: String,
-    /// Existing node the new slot is wired after: the commit writes one `linear` edge from it to
+    /// note: Existing node the new slot is wired after: the commit writes one `linear` edge from it to
     /// the slot, which is what makes the slot reachable to the walk. `None` writes no edge.
     pub attach_to: Option<String>,
-    /// Exact package to pin.
+    /// note: Exact package to pin.
     pub package: PatternPackageRef,
-    /// When the region expands into concrete nodes and edges.
+    /// note: When the region expands into concrete nodes and edges.
     pub expansion: WorkflowNestBindingExpansion,
 }
 
-/// `unnest`: flatten the collapsed region at `nest_id` into the parent level.
+/// note: `unnest`: flatten the collapsed region at `nest_id` into the parent level.
 #[derive(Debug, Clone)]
 pub struct UnnestOp {
-    /// Nest id of the region to flatten.
+    /// note: Nest id of the region to flatten.
     pub nest_id: String,
 }
 
-/// `replace_subtree`: re-pin the region at `nest_id` to another exact package.
+/// note: `replace_subtree`: re-pin the region at `nest_id` to another exact package.
 #[derive(Debug, Clone)]
 pub struct ReplaceSubtreeOp {
-    /// Nest id of the region to re-pin.
+    /// note: Nest id of the region to re-pin.
     pub nest_id: String,
-    /// Exact replacement package.
+    /// note: Exact replacement package.
     pub package: PatternPackageRef,
-    /// Expansion recorded on the re-pinned region.
+    /// note: Expansion recorded on the re-pinned region.
     pub expansion: WorkflowNestBindingExpansion,
 }
 
-/// `bind_slot`: bind one slot of the pattern pinned at `nest_id`.
+/// note: `bind_slot`: bind one slot of the pattern pinned at `nest_id`.
 #[derive(Debug, Clone)]
 pub struct BindSlotOp {
-    /// Nest id whose pattern declares the slot.
+    /// note: Nest id whose pattern declares the slot.
     pub nest_id: String,
-    /// Slot name from the package manifest.
+    /// note: Slot name from the package manifest.
     pub slot: String,
-    /// Bound value; its shape is validated against the manifest's slot kind.
+    /// note: Bound value; its shape is validated against the manifest's slot kind.
     pub value: Value,
 }
 
-/// One compose operation: exactly one per request, never a multi-operation blob.
+/// note: One compose operation: exactly one per request, never a multi-operation blob.
 #[derive(Debug, Clone)]
 pub enum ComposeOp {
-    /// Add a library pattern as a collapsed slot.
+    /// note: Add a library pattern as a collapsed slot.
     Nest(NestOp),
-    /// Flatten a pinned region into the parent level.
+    /// note: Flatten a pinned region into the parent level.
     Unnest(UnnestOp),
-    /// Swap the nested region at a nest id.
+    /// note: Swap the nested region at a nest id.
     ReplaceSubtree(ReplaceSubtreeOp),
-    /// Set one slot binding.
+    /// note: Set one slot binding.
     BindSlot(BindSlotOp),
 }
 
 impl ComposeOp {
-    /// The nest this operation addresses, named by every refusal.
+    /// note: The nest this operation addresses, named by every refusal.
     #[must_use]
     pub fn nest_id(&self) -> &str {
         match self {
@@ -133,112 +133,112 @@ impl ComposeOp {
     }
 }
 
-/// Why a compose operation was refused. Nothing was written when one is returned.
+/// why: a compose operation was refused. Nothing was written when one is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComposeRefusal {
-    /// The registry has no available package for the requested exact pin.
+    /// note: The registry has no available package for the requested exact pin.
     PackageUnavailable {
-        /// The refused operation's nest id.
+        /// note: The refused operation's nest id.
         nest_id: String,
-        /// The requested pin.
+        /// note: The requested pin.
         package: PatternPackageRef,
-        /// The reader's reason, or that no directory declares the pin.
+        /// note: The reader's reason, or that no directory declares the pin.
         reason: String,
     },
-    /// No nest in this candidate carries the requested id.
+    /// note: No nest in this candidate carries the requested id.
     UnknownNest {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
     },
-    /// A nest with this id already exists; a compose op never forks a second region.
+    /// note: A nest with this id already exists; a compose op never forks a second region.
     DuplicateNest {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
     },
-    /// The slot node the nest would insert already exists.
+    /// note: The slot node the nest would insert already exists.
     OccupiedParent {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The node id that is already taken.
+        /// note: The node id that is already taken.
         parent_node: String,
     },
-    /// `attach_to` names the slot this nest inserts, so the connecting edge would be a self-loop.
+    /// note: `attach_to` names the slot this nest inserts, so the connecting edge would be a self-loop.
     SelfAttach {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The node the request tried to both insert and attach to.
+        /// note: The node the request tried to both insert and attach to.
         node: String,
     },
-    /// `attach_to` names no node in this candidate, so the connecting edge would reach nothing.
+    /// note: `attach_to` names no node in this candidate, so the connecting edge would reach nothing.
     UnknownAttachTarget {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The requested attach target.
+        /// note: The requested attach target.
         attach_to: String,
     },
-    /// The write would close a nest-reference cycle.
+    /// note: The write would close a nest-reference cycle.
     NestCycle {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The cycle path, oldest body first.
+        /// note: The cycle path, oldest body first.
         path: Vec<String>,
     },
-    /// The write would exceed the shared nest depth bound.
+    /// note: The write would exceed the shared nest depth bound.
     NestTooDeep {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The depth the write would reach.
+        /// note: The depth the write would reach.
         depth: usize,
     },
-    /// The write would leave a structural violation the operation did not cause.
+    /// note: The write would leave a structural violation the operation did not cause.
     InvalidDocument {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// Every violation, rendered.
+        /// note: Every violation, rendered.
         violations: Vec<String>,
     },
-    /// The pinned package declares no such slot.
+    /// note: The pinned package declares no such slot.
     SlotNotDeclared {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The pattern the nest pins, as `id@version`.
+        /// note: The pattern the nest pins, as `id@version`.
         pattern: String,
-        /// The slot the request named.
+        /// note: The slot the request named.
         slot: String,
     },
-    /// The bound value does not match the manifest's slot kind.
+    /// note: The bound value does not match the manifest's slot kind.
     SlotKindMismatch {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The slot the request named.
+        /// note: The slot the request named.
         slot: String,
-        /// What the slot declaration accepts.
+        /// note: What the slot declaration accepts.
         expected: String,
     },
-    /// The package on disk no longer hashes to the pin the document recorded, so the operation
+    /// note: The package on disk no longer hashes to the pin the document recorded, so the operation
     /// would read different bytes than the document identifies.
     PinMismatch {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// The pinned package.
+        /// note: The pinned package.
         package: PatternPackageRef,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
-        /// The hash the registry now serves.
+        /// note: The hash the registry now serves.
         scanned_hash: String,
     },
-    /// The nest has no fragment body to move into the parent level, so flattening would delete
+    /// note: The nest has no fragment body to move into the parent level, so flattening would delete
     /// content rather than preserve it.
     Unflattenable {
-        /// The requested nest id.
+        /// note: The requested nest id.
         nest_id: String,
-        /// Why the child's body cannot be inlined.
+        /// why: the child's body cannot be inlined.
         reason: String,
     },
 }
 
 impl ComposeRefusal {
-    /// The stable lowercase reason a client branches on.
+    /// note: The stable lowercase reason a client branches on.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
         match self {
@@ -276,7 +276,7 @@ impl ComposeRefusal {
         }
     }
 
-    /// The non-mutating validation envelope's `details`, carrying the offending nest id and the
+    /// note: The non-mutating validation envelope's `details`, carrying the offending nest id and the
     /// cycle path or depth the shared walk reported.
     #[must_use]
     pub fn details(&self) -> Value {
@@ -344,7 +344,7 @@ impl ComposeRefusal {
         Value::Object(details)
     }
 
-    /// The core error a refused operation returns; the adapter renders `details` verbatim.
+    /// note: The core error a refused operation returns; the adapter renders `details` verbatim.
     #[must_use]
     pub fn into_error(self) -> CoreError {
         CoreError::InputValidation {
@@ -433,59 +433,59 @@ impl std::fmt::Display for ComposeRefusal {
     }
 }
 
-/// A committed candidate plus the diagnostics its content carries.
+/// note: A committed candidate plus the diagnostics its content carries.
 #[derive(Debug, Clone)]
 pub struct ComposeOutcome {
-    /// The committed candidate at the next revision.
+    /// note: The committed candidate at the next revision.
     pub candidate: StrategyCandidate,
-    /// Non-blocking findings about the committed document. Empty is the normal case.
+    /// note: Non-blocking findings about the committed document. Empty is the normal case.
     pub diagnostics: Vec<ComposeDiagnostic>,
 }
 
-/// One non-blocking finding. A diagnostic is reported, never defaulted away.
+/// note: One non-blocking finding. A diagnostic is reported, never defaulted away.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComposeDiagnostic {
-    /// A required slot of a pinned package has no binding, so the candidate cannot simulate to
+    /// note: A required slot of a pinned package has no binding, so the candidate cannot simulate to
     /// success until it is bound.
     UnboundRequiredSlot {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package.
+        /// note: The pinned package.
         package: PatternPackageRef,
-        /// The unbound slot name.
+        /// note: The unbound slot name.
         slot: String,
     },
-    /// Flattening removed the slot node, so the binding it carried has no slot to address.
+    /// note: Flattening removed the slot node, so the binding it carried has no slot to address.
     DroppedSlotBinding {
-        /// The nest that was flattened.
+        /// note: The nest that was flattened.
         nest_id: String,
-        /// The bound slot name that had to be dropped.
+        /// note: The bound slot name that had to be dropped.
         slot: String,
     },
-    /// A pin outside the current operation's reach no longer hashes to what the document
+    /// note: A pin outside the current operation's reach no longer hashes to what the document
     /// recorded. Reported, never refused: one stale region cannot wedge every other operation,
     /// and refusing here would make two stale regions refuse each other's fix.
     StalePin {
-        /// The nest that records the pin.
+        /// note: The nest that records the pin.
         nest_id: String,
-        /// The pinned package.
+        /// note: The pinned package.
         package: PatternPackageRef,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
-        /// The hash the registry now serves.
+        /// note: The hash the registry now serves.
         scanned_hash: String,
     },
-    /// A recorded pin whose package the registry does not resolve, so there are no bytes to
+    /// note: A recorded pin whose package the registry does not resolve, so there are no bytes to
     /// compare. Reported for the same reason a changed pin is: the pin cannot be confirmed today,
     /// and an approval that freezes it would claim bytes nobody can check.
     PinUnavailable {
-        /// The nest that records the pin.
+        /// note: The nest that records the pin.
         nest_id: String,
-        /// The pinned package.
+        /// note: The pinned package.
         package: PatternPackageRef,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
-        /// Why resolution failed: no directory declares the pin, or the package did not load.
+        /// why: resolution failed: no directory declares the pin, or the package did not load.
         reason: String,
     },
 }
@@ -532,7 +532,7 @@ impl std::fmt::Display for ComposeDiagnostic {
 }
 
 impl CoreService {
-    /// Apply one compose operation to the candidate at `base_revision`.
+    /// note: Apply one compose operation to the candidate at `base_revision`.
     ///
     /// The operation runs at the base the client read and the store commits it as the next
     /// revision; a stale base is the store's typed conflict. A refusal returns before the write, so
@@ -551,7 +551,7 @@ impl CoreService {
         op: ComposeOp,
     ) -> CoreResult<ComposeOutcome> {
         self.verify_principal(principal)?;
-        // The conflict class multiplies under contention, so a stale base is refused from the row
+        // why: The conflict class multiplies under contention, so a stale base is refused from the row
         // alone: never after scanning the whole pattern registry for pins it will not use.
         let current = self.read_strategy_candidate(principal, strategy_id).await?;
         if current.revision != base_revision {
@@ -575,7 +575,7 @@ impl CoreService {
         })
     }
 
-    /// Every package under `<nexus_home>/patterns`, unavailable ones included: compose resolves
+    /// note: Every package under `<nexus_home>/patterns`, unavailable ones included: compose resolves
     /// pins against the same registry the listing serves.
     pub(crate) fn compose_packages(&self) -> CoreResult<Vec<PatternPackage>> {
         let patterns_dir = self.inner.nexus_home.join("patterns");
@@ -587,7 +587,7 @@ impl CoreService {
     }
 }
 
-/// Apply one operation to a copy of `document`, then hold the result to the shared nest rules and
+/// note: Apply one operation to a copy of `document`, then hold the result to the shared nest rules and
 /// the effect rollup.
 ///
 /// The pins the operation itself resolves must still hash to what the document recorded, so a
@@ -612,7 +612,7 @@ fn apply_compose(
     Ok((next, diagnostics))
 }
 
-/// Every pin the current operation resolves and uses must still hash to what the document
+/// note: Every pin the current operation resolves and uses must still hash to what the document
 /// recorded.
 ///
 /// Only the addressed region is checked: `nest` records a new pin, `bind_slot` reads the pattern
@@ -630,7 +630,7 @@ fn verify_pins(
         ComposeOp::Unnest(payload) => &payload.nest_id,
         ComposeOp::BindSlot(payload) => &payload.nest_id,
     };
-    // An unknown nest or an unresolved child is the operation's own refusal, not this check's.
+    // why: An unknown nest or an unresolved child is the operation's own refusal, not this check's.
     let Some(nest) = document.nests.iter().find(|nest| nest.id == *nest_id) else {
         return Ok(());
     };
@@ -640,7 +640,7 @@ fn verify_pins(
     verify_pin(&nest.id, &pin, nest.child.content_hash.as_deref(), packages)
 }
 
-/// Resolve one pin and compare the scanned hash with the hash the document recorded. A pin the
+/// note: Resolve one pin and compare the scanned hash with the hash the document recorded. A pin the
 /// document left unresolved has nothing to compare and is not this check's business.
 fn verify_pin(
     nest_id: &str,
@@ -663,7 +663,7 @@ fn verify_pin(
     })
 }
 
-/// Recompute the nest policy and the effect rollup on every operation.
+/// note: Recompute the nest policy and the effect rollup on every operation.
 ///
 /// `GraphCycle` is not compose policy: outer-state loops are legal for imported presets, which is
 /// the exception the CLI's structural report already makes. Every other violation is a defect this
@@ -730,7 +730,7 @@ fn nest_pattern(
         });
     }
 
-    // The connecting edge must reach one node that already exists and is not the slot this nest
+    // why: The connecting edge must reach one node that already exists and is not the slot this nest
     // inserts: `settle` filters only `GraphCycle`, so a self-loop or an unknown target would
     // commit bytes that every later operation refuses.
     let attach_to = op.attach_to.as_deref();
@@ -762,7 +762,7 @@ fn nest_pattern(
         parent_node: op.parent_node.clone(),
         pin_policy: WorkflowNestBindingPinPolicy::Exact,
     });
-    // The walk only reaches a node an edge reaches, so the slot stays unreachable unless the
+    // why: The walk only reaches a node an edge reaches, so the slot stays unreachable unless the
     // commit wires it. The target was proven to name an existing node above.
     if let Some(attach_to) = attach_to {
         let mut taken: HashSet<String> =
@@ -779,7 +779,7 @@ fn nest_pattern(
     Ok(())
 }
 
-/// Flatten the collapsed region at `nest_id` into the parent level.
+/// note: Flatten the collapsed region at `nest_id` into the parent level.
 ///
 /// The slot's children live in the pinned fragment, never in the candidate, so flattening loads
 /// that fragment and moves its nodes, edges and its own nests into this level under fresh ids. A
@@ -822,7 +822,7 @@ fn unnest_slot(
             format!("package `{pin}` has no fragment body to move"),
         ));
     };
-    // The body's own pins become this candidate's graph, so they are checked before it moves.
+    // why: The body's own pins become this candidate's graph, so they are checked before it moves.
     verify_body_pins(body, packages, &mut HashSet::new())?;
     if let Some(lost) = lost_declarations(document, body, &parent_node) {
         return Err(unflattenable(&op.nest_id, lost));
@@ -854,7 +854,7 @@ fn unflattenable(nest_id: &str, reason: String) -> ComposeRefusal {
     }
 }
 
-/// Every pin a body records must still hash to what it recorded: flattening turns that body into
+/// note: Every pin a body records must still hash to what it recorded: flattening turns that body into
 /// this candidate's graph, so its pins are the pins the operation consumes.
 fn verify_body_pins(
     body: &WorkflowDocument,
@@ -879,7 +879,7 @@ fn verify_body_pins(
     Ok(())
 }
 
-/// The resolved pattern bodies the shared walk follows, plus the pin findings it reports.
+/// note: The resolved pattern bodies the shared walk follows, plus the pin findings it reports.
 ///
 /// For a caller that validates without writing (Approve): same index and same walk as compose,
 /// and the one [`verify_pin`] comparison: an approval refuses on the first pin it cannot confirm.
@@ -894,7 +894,7 @@ pub fn document_bodies<'a>(
     (bodies, diagnostics)
 }
 
-/// The unbound required slots of a whole document, for a caller that does not run a compose
+/// note: The unbound required slots of a whole document, for a caller that does not run a compose
 /// operation. Same declaration rule and same fragment walk as [`unbound_required_slots`].
 #[cfg(feature = "strategy-authoring")]
 pub fn document_unbound_slots(
@@ -904,7 +904,7 @@ pub fn document_unbound_slots(
     unbound_required_slots(document, &PackageIndex::new(packages))
 }
 
-/// One `{id, version, content_hash}` pin an approval freezes.
+/// note: One `{id, version, content_hash}` pin an approval freezes.
 #[cfg(feature = "execution")]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedPatternPin {
@@ -913,7 +913,7 @@ pub struct ResolvedPatternPin {
     pub content_hash: String,
 }
 
-/// Every resolved pattern pin reachable from `document`, deduped and sorted by id, version and
+/// note: Every resolved pattern pin reachable from `document`, deduped and sorted by id, version and
 /// hash so the frozen snapshot has deterministic bytes. A carrier without a recorded hash is an
 /// unresolved pin (a deferred nest) and contributes none of its own; the resolved pins its
 /// fragment records still travel, because that body will be consumed at Apply.
@@ -964,39 +964,39 @@ fn collect_resolved_pins(
     }
 }
 
-/// Why a frozen pin snapshot no longer agrees with the registry the document runs from.
+/// why: a frozen pin snapshot no longer agrees with the registry the document runs from.
 #[cfg(feature = "execution")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinVerificationFailure {
-    /// The registry now serves bytes that do not hash to the pin the document recorded.
+    /// note: The registry now serves bytes that do not hash to the pin the document recorded.
     Changed {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package.
+        /// note: The pinned package.
         package: PatternPackageRef,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
-        /// The hash the registry now serves.
+        /// note: The hash the registry now serves.
         scanned_hash: String,
     },
-    /// The registry does not resolve a pin the document records, so there are no bytes to compare.
+    /// note: The registry does not resolve a pin the document records, so there are no bytes to compare.
     Unavailable {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package.
+        /// note: The pinned package.
         package: PatternPackageRef,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
     },
-    /// The recorded snapshot cannot be compared at all: it does not decode, it disagrees with the
+    /// note: The recorded snapshot cannot be compared at all: it does not decode, it disagrees with the
     /// document it was frozen beside, or the registry itself cannot be read.
     SnapshotMismatch {
-        /// What could not be compared, and why.
+        /// note: What could not be compared, and why.
         detail: String,
     },
 }
 
-/// Confirm the pins an approval froze against the registry the document will now be read from.
+/// note: Confirm the pins an approval froze against the registry the document will now be read from.
 ///
 /// The document hash freezes the document's own bytes, not the pattern bodies it pins, so a body
 /// edited under an unchanged `id@version` passes every hash check. This is that second, narrower
@@ -1021,7 +1021,7 @@ pub fn verify_recorded_pins(
     packages: &[PatternPackage],
 ) -> Result<(), PinVerificationFailure> {
     if recorded.is_empty() {
-        // No registry read: the shortcut is reserved for a document that names no pattern package
+        // why: No registry read: the shortcut is reserved for a document that names no pattern package
         // at all. A carrier with no recorded hash is refused here rather than cleared, because the
         // fragment it loads can pin packages the empty snapshot never recorded — deciding it pins
         // nothing would mean reading the registry the shortcut exists to avoid.
@@ -1091,7 +1091,7 @@ pub fn verify_recorded_pins(
     Ok(())
 }
 
-/// A pin set as sorted `id@version=hash` labels, so the comparison is by value and order-free.
+/// note: A pin set as sorted `id@version=hash` labels, so the comparison is by value and order-free.
 #[cfg(feature = "execution")]
 fn pin_set(pins: &[ResolvedPatternPin]) -> Vec<String> {
     let mut labels: Vec<String> = pins
@@ -1103,7 +1103,7 @@ fn pin_set(pins: &[ResolvedPatternPin]) -> Vec<String> {
     labels
 }
 
-/// What flattening would lose silently: body-level declarations a moved child still refers to, and
+/// note: What flattening would lose silently: body-level declarations a moved child still refers to, and
 /// the control references the removed slot node itself owns. `None` when the move carries
 /// everything the body needs.
 ///
@@ -1175,11 +1175,11 @@ fn lost_declarations(
     ))
 }
 
-/// A flattened body's node ids remapped to this level, plus the entry and terminals they answer
+/// note: A flattened body's node ids remapped to this level, plus the entry and terminals they answer
 /// to.
 type LevelIds = (HashMap<String, String>, String, Vec<String>);
 
-/// Remap the body's node ids into this level, keeping its entry and terminals addressable.
+/// note: Remap the body's node ids into this level, keeping its entry and terminals addressable.
 ///
 /// Fragment ids are this level's ids, so every one must survive a collision with what is here. The
 /// removed slot's own ids stay reserved: reusing them would silently alias a new node to a
@@ -1210,7 +1210,7 @@ fn remap_body_ids(
     Ok((node_ids, entry, terminals))
 }
 
-/// Move the pinned body's nodes, edges and nests into the candidate level.
+/// note: Move the pinned body's nodes, edges and nests into the candidate level.
 ///
 /// Every reference the fragment records must land somewhere at this level. An edge endpoint or a
 /// nest parent that names no fragment node is a dangling reference the flatten cannot carry, so it
@@ -1256,7 +1256,7 @@ fn move_body(
         if let Some(id) = node_ids.get(&node.id) {
             moved.id.clone_from(id);
         }
-        // A reference that names no fragment node cannot survive the move: repointing it would
+        // why: A reference that names no fragment node cannot survive the move: repointing it would
         // wire a stranger's id, so it is dropped.
         moved.depends_on = node
             .depends_on
@@ -1291,7 +1291,7 @@ fn move_body(
     Ok(())
 }
 
-/// The slot bindings flattening has to drop, named one by one.
+/// note: The slot bindings flattening has to drop, named one by one.
 fn dropped_bindings(
     document: &WorkflowDocument,
     parent_node: &str,
@@ -1312,7 +1312,7 @@ fn dropped_bindings(
         })
 }
 
-/// Point everything that referenced the slot node at the flattened body's boundary nodes.
+/// note: Point everything that referenced the slot node at the flattened body's boundary nodes.
 fn retarget_wiring(
     document: &mut WorkflowDocument,
     parent_node: &str,
@@ -1385,7 +1385,7 @@ fn retarget_wiring(
     }
 }
 
-/// An id that names nothing already taken at this level: the fragment's own id when it is free,
+/// note: An id that names nothing already taken at this level: the fragment's own id when it is free,
 /// otherwise its first free `~n` successor. Deterministic, so a replay produces the same graph.
 fn fresh_id(base: &str, taken: &mut HashSet<String>) -> String {
     if taken.insert(base.to_owned()) {
@@ -1401,7 +1401,7 @@ fn fresh_id(base: &str, taken: &mut HashSet<String>) -> String {
     }
 }
 
-/// Re-pin the region at `nest_id` to another exact package.
+/// note: Re-pin the region at `nest_id` to another exact package.
 ///
 /// This is the only operation allowed to establish a new pin: the region's recorded hash is
 /// rewritten from the registry's current bytes, which is why [`verify_pins`] exempts it. Every
@@ -1420,7 +1420,7 @@ fn replace_subtree(
     };
     let parent_node = nest.parent_node.clone();
 
-    // One manifest-binding rule for explicit binding and for what a replacement retains.
+    // why: One manifest-binding rule for explicit binding and for what a replacement retains.
     if let Some(node) = document.nodes.iter().find(|node| node.id == parent_node) {
         for (slot, value) in &node.bind {
             check_binding(
@@ -1439,7 +1439,7 @@ fn replace_subtree(
         nest.expansion = op.expansion;
     }
 
-    // The region keeps its nest id and every other authored edit: only the pin changes, in place.
+    // why: The region keeps its nest id and every other authored edit: only the pin changes, in place.
     if let Some(node) = document
         .nodes
         .iter_mut()
@@ -1497,7 +1497,7 @@ fn bind_slot(
     Ok(())
 }
 
-/// The one manifest-binding rule: the slot must be declared, and the value must satisfy the
+/// note: The one manifest-binding rule: the slot must be declared, and the value must satisfy the
 /// declaration. `bind_slot` and the bindings `replace_subtree` retains are held to it alike.
 fn check_binding(
     assets: &[WorkflowAssetRef],
@@ -1527,7 +1527,7 @@ fn check_binding(
     })
 }
 
-/// What the manifest's slot kind accepts, checked on the bound value.
+/// note: What the manifest's slot kind accepts, checked on the bound value.
 fn check_slot_value(
     assets: &[WorkflowAssetRef],
     kind: NexusPatternSlotKind,
@@ -1551,7 +1551,7 @@ const fn kind_expectation(kind: NexusPatternSlotKind) -> &'static str {
     }
 }
 
-/// Every required slot of every pinned package that carries no binding, in document order,
+/// note: Every required slot of every pinned package that carries no binding, in document order,
 /// descending into the resolved pattern bodies the shared walk follows.
 fn unbound_required_slots(
     document: &WorkflowDocument,
@@ -1562,7 +1562,7 @@ fn unbound_required_slots(
     diagnostics
 }
 
-/// One document's required-slot findings plus those of every fragment its pins reach. A nested
+/// note: One document's required-slot findings plus those of every fragment its pins reach. A nested
 /// pattern's slots live on the slot node inside that fragment, so the binding is read from the
 /// document being walked, never from the candidate root.
 fn collect_unbound_required_slots(
@@ -1605,7 +1605,7 @@ fn collect_unbound_required_slots(
     }
 }
 
-/// The package registry indexed by the exact pin a compose request names.
+/// note: The package registry indexed by the exact pin a compose request names.
 struct PackageIndex<'a> {
     by_pin: HashMap<(&'a str, &'a str), &'a PatternPackage>,
 }
@@ -1617,7 +1617,7 @@ impl<'a> PackageIndex<'a> {
             let Some(manifest) = package.manifest() else {
                 continue;
             };
-            // Two directories can declare the same pin. An available one wins regardless of scan
+            // why: Two directories can declare the same pin. An available one wins regardless of scan
             // order, so a broken duplicate cannot make a readable package unresolvable; only when
             // none is available does the first scanned directory keep the pin, and its own reason
             // is the one a refusal names. The listing still reports every directory.
@@ -1641,7 +1641,7 @@ impl<'a> PackageIndex<'a> {
             .copied()
     }
 
-    /// The pattern bodies reachable from `document`, so the shared walk follows resolved fragments
+    /// note: The pattern bodies reachable from `document`, so the shared walk follows resolved fragments
     /// instead of treating every pattern pin as a leaf.
     ///
     /// Every carrier of a recorded pin is reported when the pin cannot be confirmed — a
@@ -1670,7 +1670,7 @@ impl<'a> PackageIndex<'a> {
             let Some(pin) = pinned_pattern(&nest.child) else {
                 continue;
             };
-            // The recorded hash is checked before this walk de-dupes the pin and before a package
+            // why: The recorded hash is checked before this walk de-dupes the pin and before a package
             // that failed to load is skipped, so a carrier whose bytes changed or whose package is
             // gone is always reported.
             self.report_unusable_pin(nest, &pin, diagnostics);
@@ -1702,7 +1702,7 @@ impl<'a> PackageIndex<'a> {
         }
     }
 
-    /// Report one carrier whose recorded pin cannot be confirmed against the registry, through the
+    /// note: Report one carrier whose recorded pin cannot be confirmed against the registry, through the
     /// one [`verify_pin`] comparison: bytes that changed are a [`ComposeDiagnostic::StalePin`], and
     /// a pin whose package does not resolve is a [`ComposeDiagnostic::PinUnavailable`]. A carrier
     /// with no recorded hash names nothing to confirm and is not reported.
@@ -1740,7 +1740,7 @@ impl<'a> PackageIndex<'a> {
     }
 }
 
-/// The available package for an exact pin, with its manifest and resolved content hash.
+/// note: The available package for an exact pin, with its manifest and resolved content hash.
 fn resolve<'a>(
     packages: &PackageIndex<'a>,
     nest_id: &str,
@@ -1766,7 +1766,7 @@ fn resolve<'a>(
     }
 }
 
-/// The exact pattern pin a nest child carries, when it is a resolved pattern child.
+/// note: The exact pattern pin a nest child carries, when it is a resolved pattern child.
 ///
 /// The definition is the structural validator's [`pattern_pin`], not a second copy: a pin is
 /// resolved only with both halves of `{id, version}` non-empty, and validation refuses a child that
@@ -1779,7 +1779,7 @@ fn pinned_pattern(child: &WorkflowNestChild) -> Option<PatternPackageRef> {
     })
 }
 
-/// A nest child's label, for a refusal that must name what the nest points at.
+/// note: A nest child's label, for a refusal that must name what the nest points at.
 fn child_label(child: &WorkflowNestChild) -> String {
     match child.kind {
         WorkflowNestChildKind::Pattern => PatternPackageRef {
@@ -1796,7 +1796,7 @@ fn child_label(child: &WorkflowNestChild) -> String {
     }
 }
 
-/// The collapsed slot a `nest` inserts: the exact pin and the package's declared class.
+/// note: The collapsed slot a `nest` inserts: the exact pin and the package's declared class.
 fn slot_node(
     id: &str,
     pin: &PatternPackageRef,
@@ -1847,7 +1847,7 @@ fn pattern_child(pin: &PatternPackageRef, content_hash: &str) -> WorkflowNestChi
     }
 }
 
-/// The node class a package's declared effect folds to.
+/// note: The node class a package's declared effect folds to.
 const fn class_of(class: PatternManifestEffectClass) -> WorkflowNodeEffectClass {
     match class {
         PatternManifestEffectClass::Pure => WorkflowNodeEffectClass::Pure,
@@ -1882,7 +1882,7 @@ mod tests {
             pinned_pattern(&child(Some("research-loop"), Some("1.0.0"))),
             Some(pin)
         );
-        // A pin missing or emptying either half names no package, so the resolved test compares
+        // why: A pin missing or emptying either half names no package, so the resolved test compares
         // the version too instead of falling through on a non-empty id.
         assert_eq!(pinned_pattern(&child(Some("research-loop"), None)), None);
         assert_eq!(
