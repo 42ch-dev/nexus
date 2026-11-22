@@ -190,18 +190,17 @@ async fn fixture_with_compute(
 
 /// Seed a world owned by `owner`.
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO narrative_worlds \
-            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-             time_policy, metadata_json, created_at) \
-           VALUES (?, 'ws', ?, 'Combat World', 'combat-world', \
-             'active', 'private', 'manual', '{}', datetime('now'))",
+    nexus_local_db::kb_store::seed::world_with(
+        pool,
+        nexus_local_db::kb_store::seed::WorldSeed::new(
+            world_id,
+            owner,
+            "Combat World",
+            "combat-world",
+        )
+        .with_workspace_id("ws"),
     )
-    .bind(world_id)
-    .bind(owner)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 /// Seed a second world owned by a DIFFERENT creator, plus a KB entry in it —

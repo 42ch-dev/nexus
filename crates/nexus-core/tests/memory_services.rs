@@ -33,7 +33,8 @@ use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
-use nexus_local_db::writer_protocol::{init_engine_pool, init_guarded_pool, GuardedPoolOptions};
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
+use nexus_local_db::writer_protocol::init_guarded_pool;
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
@@ -41,6 +42,8 @@ use sqlx::SqlitePool;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+mod common;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -68,47 +71,24 @@ fn assert_conflict(err: CoreError, code: &str) {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    world_with(
+        pool,
+        WorldSeed::new(world_id, owner, world_id, world_id).with_workspace_id("wrk"),
     )
-    .bind(world_id)
-    .bind(owner)
-    .bind(world_id)
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 /// Materialize the workspace shell and seed stored rows through one engine
 /// pool (released before the cores open, mirroring the daemon boot).
 async fn seed_env() -> Env {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &user_home, CREATOR, "default",
-    ))
-    .unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"\n\
-             [active_workspace_slug_by_creator]\n\
-             \"{CREATOR}\" = \"default\""
-        ),
-    )
-    .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    let common::TestHome {
+        _tmp: tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, "default");
 
     let (character_id, binding_id) = {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
         ensure_creator_row(&pool, OTHER, "Other").await.unwrap();
@@ -185,7 +165,7 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
 }
 
 async fn plain_pool(env: &Env) -> SqlitePool {
-    nexus_local_db::open_pool(&env.db_path).await.unwrap()
+    common::plain_pool(&env.db_path).await
 }
 
 async fn count_where(pool: &SqlitePool, sql: &str) -> i64 {
@@ -2339,9 +2319,7 @@ async fn seed_legacy_character_content(env: &Env) {
     // `character_run_captures` is engine-owned (§5.2 capture lane): its writer
     // guard admits only an engine-mode writer, unlike the direct-mode surfaces
     // the other seeds use.
-    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .unwrap();
+    let guarded = common::engine_pool(&env.db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     let lifecycle_epoch: i64 =
         sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
@@ -5489,9 +5467,7 @@ const MIND_SOUL: &str = "# Soul\n\nA provider-seeded Character soul.\n";
 /// global page budget silently evicting memory — and return the exact bytes of
 /// its two promoted memory files.
 async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (String, String) {
-    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .unwrap();
+    let guarded = common::engine_pool(&env.db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     let lifecycle_epoch: i64 =
         sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")

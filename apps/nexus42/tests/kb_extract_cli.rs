@@ -17,19 +17,17 @@
 
 #![allow(clippy::too_many_lines)] // one end-to-end CLI scenario per test
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
+use direct_actor::fixture_creator_id;
 use std::process::Output;
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 /// Run `creator world kb queue-extract` with `args`.
 fn queue_extract(fixture: &DirectFixture, args: &[&str]) -> Output {
@@ -65,24 +63,12 @@ fn queued_job_id(rendered: &str) -> String {
         .to_string()
 }
 
-/// The one creator the fixture registered, read from the hermetic home.
-fn fixture_creator_id(fixture: &DirectFixture) -> String {
-    std::fs::read_dir(fixture.home.path().join(".nexus42/creators"))
-        .expect("creators dir")
-        .next()
-        .expect("one creator")
-        .expect("creator entry")
-        .file_name()
-        .into_string()
-        .expect("utf8 creator id")
-}
-
 /// Queue → status round trip keeps the full human render, and the enqueue is
 /// idempotent on its `(creator, work entry, world)` key.
 #[tokio::test]
 async fn queue_extract_and_status_round_trip() {
     let fixture = DirectFixture::new().await;
-    let creator_id = fixture_creator_id(&fixture);
+    let creator_id = fixture_creator_id(fixture.home.path());
 
     let queued = queue_extract(&fixture, &["kb_smoke", "--world-id", "wld_smoke"]);
     assert!(
@@ -280,7 +266,7 @@ async fn refused_inputs_keep_their_legacy_wording() {
         stdout(&listed),
         format!(
             "No extract jobs for creator {}.\n",
-            fixture_creator_id(&fixture)
+            fixture_creator_id(fixture.home.path())
         )
     );
 }

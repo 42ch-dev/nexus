@@ -64,16 +64,9 @@ impl WorkspaceExecutor for DirectWriteExecutor {
     }
 }
 
-/// Create a fresh `SQLite` pool with all migrations applied.
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tmpdir");
-    let db_path = dir.path().join("test.db");
-    let guarded = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .expect("open_pool");
-    let pool = guarded.clone_pool();
-    (pool, dir)
-}
+mod common;
+
+use common::test_pool;
 
 /// Insert a minimal Work row for testing.
 async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
@@ -137,7 +130,7 @@ fn scaffold_input(
 
 #[tokio::test]
 async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7a").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -234,7 +227,7 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
 
 #[tokio::test]
 async fn t7b_idempotent_reinit_preserves_existing_files() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7b").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -285,7 +278,7 @@ async fn t7b_idempotent_reinit_preserves_existing_files() {
 
 #[tokio::test]
 async fn t7c_work_chapters_rows_seeded_correctly() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7c").await;
 
     let works_root = dir.path().join("Works");
@@ -370,7 +363,7 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
 
 #[tokio::test]
 async fn t7d_works_patch_world_id_existing() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_exist").await;
 
     let works_root = dir.path().join("Works");
@@ -414,7 +407,7 @@ async fn t7d_works_patch_world_id_existing() {
 async fn t7d_works_patch_world_id_none_worldless_rejected() {
     // V1.40: creating a worldless Work (world_id == None, create_world == false)
     // must fail-closed with a remediation message.
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_none").await;
 
     let works_root = dir.path().join("Works");
@@ -443,7 +436,7 @@ async fn t7d_works_patch_world_id_new_placeholder() {
     // verifies that a world_id string (simulating what a future
     // `creator world create` command would return) is correctly set on
     // the works table.
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_new").await;
 
     let works_root = dir.path().join("Works");
@@ -494,7 +487,7 @@ async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
     // Spec §3.5: binding a Work to a non-existent world is a config error.
     // Verify (1) the scaffold returns InputInvalid, (2) no FS directory was
     // created, (3) the works row is NOT patched with the bogus world_id.
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_bis").await;
 
     let works_root = dir.path().join("Works");
@@ -561,7 +554,7 @@ async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
 
 #[tokio::test]
 async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7e").await;
 
     let works_root = dir.path().join("Works");
@@ -696,7 +689,7 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
 // uppercase, oversize) or exceed the documented chapter-count range.
 
 async fn run_invalid_input(input: serde_json::Value) -> Result<serde_json::Value, String> {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7abis").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -772,7 +765,7 @@ async fn t7a_bis_chapters_over_max_rejected() {
 async fn t7a_bis_chapters_bounds_accepted() {
     // boundary check: 1 and 100 must be accepted
     for n in [1, 100] {
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = test_pool().await;
         let wid = format!("wrk_bnd_{n}");
         insert_test_work(&pool, &wid).await;
         // V1.40: seed World for FK check
@@ -803,7 +796,7 @@ async fn t7a_bis_chapters_bounds_accepted() {
 async fn t7f_partial_reinit_only_updates_listed_fields() {
     // Spec §5.4.4: re-init with only `world_id` changed must not overwrite
     // `work_ref` or `total_planned_chapters`.
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7f").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -892,7 +885,7 @@ async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
     // in `works` AND a world_id that does not exist in `narrative_worlds`.
     // V1.40: the world_id FK check fires before seed_chapters, so we get
     // a world_id-not-found error. Either way, the FS scaffold must be rolled back.
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     // intentionally do NOT call insert_test_work — no Work row exists.
 
     let works_root = dir.path().join("Works");
@@ -938,7 +931,7 @@ async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
 /// AC1: Single-volume regression — existing Works get volume=1 without user action.
 #[tokio::test]
 async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t6_ac1").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -986,7 +979,7 @@ async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
 /// AC2: Two-volume happy path — init → finalize → auto-chain picks next.
 #[tokio::test]
 async fn t6_ac2_two_volume_happy_path() {
-    let (pool, dir) = fresh_pool().await;
+    let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t6_ac2").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -1078,7 +1071,7 @@ async fn t6_ac2_two_volume_happy_path() {
 /// AC3: Volume-aware status — chapter rows include volume column.
 #[tokio::test]
 async fn t6_ac3_status_api_volume_aware_rows() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t6_ac3").await;
 
     // Seed multi-volume chapters directly

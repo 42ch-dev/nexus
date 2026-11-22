@@ -3612,7 +3612,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
- "wiremock",
 ]
 
 [[package]]
@@ -3696,7 +3695,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "hex",
- "nexus-cloud-domain",
  "nexus-contracts",
  "nexus-home-layout",
  "nexus-local-db",

@@ -55,6 +55,7 @@ pub struct SeededCharacter {
 
 /// A hermetic direct-core home with one active creator, plus authorized seed
 /// helpers for the actor graph and a runner for the real CLI child.
+#[allow(dead_code)] // targets that include this module only for `fixture_creator_id`
 pub struct DirectActor {
     fixture: DirectFixture,
     creator_id: String,
@@ -211,6 +212,30 @@ impl DirectActor {
         world_id: &str,
         canonical_name: &str,
     ) {
+        self.seed_world_character_sheet_with_body(
+            key_block_id,
+            world_id,
+            canonical_name,
+            serde_json::Map::new(),
+        )
+        .await;
+    }
+
+    /// Same seed as [`Self::seed_world_character_sheet`], with a stored
+    /// `KnowledgeEntry` body (`summary` / `attributes` / `tags`) so a test can
+    /// assert the body a read surface prints.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the seed core cannot be opened, the body fails the core's
+    /// `Novel` validation, or the entry is refused.
+    pub async fn seed_world_character_sheet_with_body(
+        &self,
+        key_block_id: &str,
+        world_id: &str,
+        canonical_name: &str,
+        body: serde_json::Map<String, serde_json::Value>,
+    ) {
         let (core, principal) = self.open_seed_core().await;
         core.patch_world_kb_entity(
             &principal,
@@ -224,6 +249,7 @@ impl DirectActor {
                             .expect("canonical name is wire-valid"),
                     ),
                     block_type: Some(NexusWorldKbEntityPatchBlockType::Character),
+                    body,
                     ..NexusWorldKbEntityPatch::default()
                 },
             },
@@ -266,7 +292,7 @@ impl DirectActor {
 
 /// The fixture home holds exactly one creator; its id is the directory name
 /// under the nexus root's `creators/`.
-fn fixture_creator_id(home: &Path) -> String {
+pub fn fixture_creator_id(home: &Path) -> String {
     let creators_root = nexus_root_from_home(home).join("creators");
     let mut entries: Vec<_> = std::fs::read_dir(&creators_root)
         .expect("read fixture creators root")

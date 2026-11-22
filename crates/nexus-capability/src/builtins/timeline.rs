@@ -183,14 +183,7 @@ impl Capability for TimelineEventAppend {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use nexus_local_db::init_engine_pool;
-
-    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-        (pool, dir)
-    }
+    use crate::pool_test_support::fresh_pool;
 
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         // SAFETY: test-only seed.
@@ -216,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeline_event_append_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let world_id = seed_world(&pool, "ctr_a").await;
         let branch = sqlx::query_scalar::<_, String>(
@@ -244,7 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeline_event_append_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         let world_id = seed_world(&pool, "ctr_a").await;
@@ -264,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeline_event_append_rejects_collision() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let world_id = seed_world(&pool, "ctr_a").await;
         let branch = sqlx::query_scalar::<_, String>(
@@ -307,7 +300,7 @@ mod tests {
     // remains.
     #[tokio::test]
     async fn timeline_event_append_explicit_id_persists_atomically() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let world_id = seed_world(&pool, "ctr_a").await;
         let branch = sqlx::query_scalar::<_, String>(

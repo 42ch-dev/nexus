@@ -698,12 +698,11 @@ mod tests {
     const WORLD: &str = "wld_t13";
 
     /// A guarded engine pool with one World owned by `CREATOR`.
-    async fn test_pool_with_world() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let pool = nexus_local_db::init_engine_pool(&dir.path().join("t13.db"))
-            .await
-            .unwrap()
-            .clone_pool();
+    ///
+    /// The tempdir is returned first so the pool (declared second at the call
+    /// site) drops before it, which Windows requires for the directory removal.
+    async fn test_pool_with_world() -> (tempfile::TempDir, sqlx::SqlitePool) {
+        let (dir, pool) = crate::pool_test_support::fresh_pool().await;
         nexus_local_db::kb_store::seed::world(
             &pool,
             WORLD,
@@ -714,7 +713,7 @@ mod tests {
             "manual",
         )
         .await;
-        (pool, dir)
+        (dir, pool)
     }
 
     /// Enqueue one queued extract job for the seeded World.
@@ -775,7 +774,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_success_persists_the_validated_candidate_and_completes_the_job() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
@@ -805,7 +804,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_model_output_cannot_choose_governance() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
@@ -839,7 +838,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_invalid_terminal_writes_nothing_and_fails_the_job() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
@@ -866,7 +865,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_protocol_failure_writes_nothing_and_fails_the_job() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
@@ -902,7 +901,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_stale_target_writes_nothing_and_fails_the_job() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
@@ -933,7 +932,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_missing_run_identity_refuses_before_touching_the_job() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
@@ -958,7 +957,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_interrupted_finalize_leaves_zero_candidates_and_no_success_terminal() {
-        let (pool, _dir) = test_pool_with_world().await;
+        let (_dir, pool) = test_pool_with_world().await;
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 

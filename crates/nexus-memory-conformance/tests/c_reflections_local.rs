@@ -33,6 +33,8 @@
 
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per row
 
+mod support;
+
 use serde_json::{json, Value};
 use spoke_operations::{
     spoke_schemas as schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
@@ -41,6 +43,8 @@ use spoke_operations::{
 use nexus_memory_provider::LocalMemoryProvider;
 use sqlx::Connection as _;
 use std::sync::Arc;
+
+use support::dto;
 
 /// C-075's granter: the provider's own provisioning identity, whose bootstrap
 /// grant is a space-wide unrestricted `admin`.
@@ -56,10 +60,6 @@ const CONTEXT: &str = "ctx_c075_a";
 /// A well-formed 64-lowercase-hex CAS token for the generate leg; the row
 /// isolates coverage, so the digest is shape-valid but arbitrary.
 const STATE_DIGEST: &str = "a7b4c2d0e9f183726554433f2e1d0c9b8a7968594a3b2c1d0e9f887766554433";
-
-fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
-    serde_json::from_value(value).expect("request payload deserializes")
-}
 
 fn principal(principal_id: &str) -> schemas::Principal {
     serde_json::from_value(json!({ "principal_id": principal_id, "extensions": {} }))

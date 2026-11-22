@@ -874,55 +874,74 @@ fn write_preset_yaml(
 /// Atomically write `content` to `target_path` using `tmp_path`, then rename.
 ///
 /// Syncs the temp file, renames, and fsyncs the parent directory. Cleans up
-/// `tmp_path` on error.
+/// `tmp_path` on rename error. The durable sequence lives in the private
+/// `crate::atomic_write` kernel; this adapter keeps the stage-specific
+/// `PresetError` codes/messages and the warning-only directory fsync policy.
 fn atomic_write_with_dir_fsync(
     target_path: &std::path::Path,
     tmp_path: &std::path::Path,
     content: &[u8],
 ) -> Result<(), PresetError> {
-    std::fs::write(tmp_path, content).map_err(|e| PresetError::Internal {
-        code: "FILE_WRITE_ERROR".to_string(),
-        message: format!("cannot write temp file {}: {e}", tmp_path.display()),
-    })?;
-
-    let file = std::fs::File::open(tmp_path).map_err(|e| PresetError::Internal {
-        code: "FILE_SYNC_ERROR".to_string(),
-        message: format!("cannot open temp file for fsync: {e}"),
-    })?;
-    file.sync_all().map_err(|e| PresetError::Internal {
-        code: "FILE_SYNC_ERROR".to_string(),
-        message: format!("cannot fsync temp file: {e}"),
-    })?;
-    drop(file);
-
-    std::fs::rename(tmp_path, target_path).map_err(|e| {
-        let _ = std::fs::remove_file(tmp_path);
-        PresetError::Internal {
-            code: "FILE_RENAME_ERROR".to_string(),
-            message: format!(
-                "cannot rename {} to {}: {e}",
-                tmp_path.display(),
-                target_path.display()
-            ),
-        }
-    })?;
-
-    // fsync parent directory so the rename is durable.
-    if let Some(parent) = target_path.parent() {
-        let dir = std::fs::File::open(parent).map_err(|e| PresetError::Internal {
-            code: "DIR_SYNC_ERROR".to_string(),
-            message: format!("cannot open bundle directory for fsync: {e}"),
-        })?;
-        if let Err(e) = dir.sync_all() {
-            tracing::warn!(
-                parent = %parent.display(),
-                error = %e,
-                "strategy patch: directory fsync failed"
-            );
+    use crate::atomic_write::Stage;
+    match crate::atomic_write::atomic_write(target_path, tmp_path, content, false) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let internal = |code: &str, message: String| PresetError::Internal {
+                code: code.to_string(),
+                message,
+            };
+            match e.stage {
+                Stage::Write => Err(internal(
+                    "FILE_WRITE_ERROR",
+                    format!(
+                        "cannot write temp file {}: {}",
+                        tmp_path.display(),
+                        e.source
+                    ),
+                )),
+                Stage::TempOpen => Err(internal(
+                    "FILE_SYNC_ERROR",
+                    format!("cannot open temp file for fsync: {}", e.source),
+                )),
+                Stage::TempSync => Err(internal(
+                    "FILE_SYNC_ERROR",
+                    format!("cannot fsync temp file: {}", e.source),
+                )),
+                Stage::Rename => {
+                    let _ = std::fs::remove_file(tmp_path);
+                    Err(internal(
+                        "FILE_RENAME_ERROR",
+                        format!(
+                            "cannot rename {} to {}: {}",
+                            tmp_path.display(),
+                            target_path.display(),
+                            e.source
+                        ),
+                    ))
+                }
+                // fsync_final is disabled on this path; keep the stage handled
+                // so the match stays total if that ever changes.
+                Stage::FinalSync => Err(internal(
+                    "FILE_SYNC_ERROR",
+                    format!("cannot fsync final file: {}", e.source),
+                )),
+                // Both directory stages run strictly after the rename, so the
+                // new bytes are already visible; only crash durability is at
+                // risk, which makes them warning-only on this path.
+                Stage::DirOpen | Stage::DirSync => {
+                    if let Some(parent) = target_path.parent() {
+                        tracing::warn!(
+                            parent = %parent.display(),
+                            stage = ?e.stage,
+                            error = %e.source,
+                            "strategy patch: directory fsync failed"
+                        );
+                    }
+                    Ok(())
+                }
+            }
         }
     }
-
-    Ok(())
 }
 
 /// Back up the existing file at `path` (if any) and return the backup bytes.

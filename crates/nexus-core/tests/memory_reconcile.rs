@@ -30,6 +30,8 @@ use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{MemoryPort, SpokeResult};
 use tempfile::TempDir;
 
+mod common;
+
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SPACE: &str = "spc_local_default";
 const SUBJECT: &str = "sbj_mira";
@@ -315,7 +317,7 @@ fn stranger() -> schemas::Principal {
 }
 
 async fn store_pool(env: &Env) -> sqlx::SqlitePool {
-    nexus_local_db::open_pool(&env.db_path).await.unwrap()
+    common::plain_pool(&env.db_path).await
 }
 
 /// The receipt id a crashed caller never saw, straight from the store.

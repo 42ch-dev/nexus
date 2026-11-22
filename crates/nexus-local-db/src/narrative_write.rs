@@ -644,16 +644,8 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
+    use crate::test_support::fresh_pool;
     use nexus_narrative::NarrativeGateway;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     async fn seed_creator(pool: &SqlitePool) {
         // SAFETY: test-only seed — uses runtime query for FK setup
@@ -670,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_world_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let result = create_world(
@@ -686,7 +678,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_world_fk_violation() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let result = create_world(
             &pool,
@@ -707,7 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_world_owned_checks_ownership() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -739,7 +731,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_success() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -771,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_auto_sequence() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -827,7 +819,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_world_not_found() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let result = append_event(
             &pool,
@@ -849,7 +841,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_invalid_world_id_prefix() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
 
         let result = append_event(
             &pool,
@@ -871,7 +863,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_list_worlds_roundtrip() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         create_world(&pool, "ctr_test", "World A", "world-a", "private", "manual")
@@ -889,7 +881,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_and_read_timeline_roundtrip() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -947,7 +939,7 @@ mod tests {
         // (provenance column + affected_key_block_ids_json) into the canon
         // helper's test — the provisional-with-provenance writer was deleted
         // pre-1.0 (QC S-dead: the canon helper owns the only provenance write).
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -1007,7 +999,7 @@ mod tests {
         // via the canon Accept path must survive the SQLite write→read cycle
         // byte-for-byte — including unknown keys inside the observation object
         // (mirrors Task 3's AC-V1164-3 seam gate).
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -1083,7 +1075,7 @@ mod tests {
         // Backward compat: writers without modules data must store NULL (no
         // modules = unrecorded per spoke handbook), and the read path maps
         // NULL → None.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -1137,7 +1129,7 @@ mod tests {
         // verbatim in `modules_json` and both read paths (get_event +
         // get_timeline) must surface it back — the checker-consumed log
         // round-trip (AC-V165-7).
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -1211,7 +1203,7 @@ mod tests {
         // `ScopeQueryPort::list_timeline_events`) filters world/branch/ids
         // only — no status filter — so the provisional observation event must
         // appear in the check scope with its modules intact.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(
@@ -1266,7 +1258,7 @@ mod tests {
     async fn test_append_event_in_tx_leaves_extensions_null() {
         // Verify backward compat: the existing `append_event_in_tx` (no
         // extensions param) writes NULL, not a default object.
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
         let world = create_world(

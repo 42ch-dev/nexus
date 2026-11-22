@@ -24,7 +24,7 @@ use nexus42::commands::creator::works::cron::{
 /// --tz Asia/Shanghai` round-trips through the DAO and re-renders on `show`.
 #[tokio::test]
 async fn cron_dao_round_trip_set_then_show() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
 
     // `set my-work --brainstorm "0 3,9,15,21 * * *" --tz Asia/Shanghai`
     let args = CronSetArgs {
@@ -61,7 +61,7 @@ async fn cron_dao_round_trip_set_then_show() {
 /// renders `disabled` for it.
 #[tokio::test]
 async fn cron_set_no_review_disables_role() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
 
     let args = CronSetArgs {
         no_review: true,
@@ -87,7 +87,7 @@ async fn cron_set_no_review_disables_role() {
 /// the canonical cron expression.
 #[tokio::test]
 async fn cron_list_across_workspace() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     // Seed a second Work.
     let other = sample_work_record("wrk_other", "other-ref");
     nexus_local_db::works::create_work(&pool, &other)
@@ -130,7 +130,7 @@ async fn cron_list_across_workspace() {
 /// AC #4: a fresh Work (NULL `schedule_json`) shows defaults on `show`.
 #[tokio::test]
 async fn cron_show_on_unset_work_uses_defaults() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     let stored = nexus_local_db::works::get_schedule_json(&pool, "wrk_seed")
         .await
         .unwrap();
@@ -149,7 +149,7 @@ async fn cron_show_on_unset_work_uses_defaults() {
 /// back to defaults.
 #[tokio::test]
 async fn cron_set_no_flags_resets_to_defaults() {
-    let pool = fresh_seeded_pool().await;
+    let (_dir, pool) = fresh_seeded_pool().await;
     // First, set a custom blob.
     let custom = apply_set_args(
         WorkSchedule::defaults(),
@@ -273,20 +273,21 @@ fn cron_list_help_documents_limit_flag() {
 
 /// Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
 /// `seed-ref`) under `ctr_test` / `default`.
-async fn fresh_seeded_pool() -> sqlx::SqlitePool {
+///
+/// Returns `(dir, pool)` so callers bind the owner first: the pool drops
+/// before the tempdir it holds open.
+async fn fresh_seeded_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
         .unwrap()
         .clone_pool();
-    // Keep the tempdir alive for the test by leaking it (test process is short-lived).
-    std::mem::forget(dir);
     let record = sample_work_record("wrk_seed", "seed-ref");
     nexus_local_db::works::create_work(&pool, &record)
         .await
         .unwrap();
-    pool
+    (dir, pool)
 }
 
 /// Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.

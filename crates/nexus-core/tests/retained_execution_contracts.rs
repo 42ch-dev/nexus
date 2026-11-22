@@ -1274,13 +1274,13 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// An engine-admitted pool over a fresh temp DB plus a seeded Work.
-async fn work_pool() -> (Arc<sqlx::SqlitePool>, TempDir) {
+async fn work_pool() -> (TempDir, Arc<sqlx::SqlitePool>) {
     let dir = tempfile::tempdir().unwrap();
     let pool = nexus_local_db::init_engine_pool(&dir.path().join("state.db"))
         .await
         .expect("engine-admitted pool")
         .clone_pool();
-    (Arc::new(pool), dir)
+    (dir, Arc::new(pool))
 }
 
 fn work_record(
@@ -1345,7 +1345,7 @@ fn every_minute_cron() -> String {
 #[tokio::test]
 #[serial_test::serial]
 async fn cron_tick_enqueues_and_admits_a_due_role() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     let work = work_record(
         "wrk_cron_due",
         "cron-due",
@@ -1391,7 +1391,7 @@ async fn cron_tick_enqueues_and_admits_a_due_role() {
 #[tokio::test]
 #[serial_test::serial]
 async fn cron_tick_with_no_due_role_is_a_no_op() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     let work = work_record(
         "wrk_cron_idle",
         "cron-idle",
@@ -1447,7 +1447,7 @@ async fn cron_tick_with_no_due_role_is_a_no_op() {
 async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
     use chrono::TimeZone;
 
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     // Two distinct Works: each role fires at most once per active schedule
     // (the idempotency guard), so the lock case needs its own Work.
     for (work_id, work_ref) in [
@@ -1540,7 +1540,7 @@ async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
 #[tokio::test]
 #[serial_test::serial]
 async fn auto_chronology_tick_advances_an_opted_in_work() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     let workspace = tempfile::tempdir().unwrap();
     let work = work_record(
         "wrk_chronology",
@@ -1684,7 +1684,7 @@ async fn review_master_schedule_count(pool: &sqlx::SqlitePool, work_id: &str) ->
 #[tokio::test]
 #[serial_test::serial]
 async fn stale_finding_sweep_is_a_no_op_without_findings() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     run_one_sweep(pool.as_ref(), 60, Some(PROVIDER), None).await;
 
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules")
@@ -1705,7 +1705,7 @@ async fn stale_finding_sweep_is_a_no_op_without_findings() {
 #[tokio::test]
 #[serial_test::serial]
 async fn stale_finding_sweep_enqueues_only_for_an_opted_in_work() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     let opted_in = work_record(
         "wrk_sweep_yes",
         "sweep-yes",
@@ -1778,7 +1778,7 @@ async fn stale_finding_sweep_enqueues_only_for_an_opted_in_work() {
 #[tokio::test]
 #[serial_test::serial]
 async fn stale_finding_sweep_ignores_fresh_and_resolved_findings() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     let mut work = work_record(
         "wrk_sweep_filter",
         "sweep-filter",
@@ -1833,7 +1833,7 @@ async fn stale_finding_sweep_ignores_fresh_and_resolved_findings() {
 #[tokio::test]
 #[serial_test::serial]
 async fn stale_finding_sweep_repeats_without_panicking() {
-    let (pool, _dir) = work_pool().await;
+    let (_dir, pool) = work_pool().await;
     let mut work = work_record(
         "wrk_sweep_repeat",
         "sweep-repeat",

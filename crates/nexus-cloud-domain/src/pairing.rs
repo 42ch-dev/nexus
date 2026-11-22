@@ -142,6 +142,8 @@ mod tests {
             PairingSource::AutoCli,
         );
         assert_eq!(pairing.pairing_source, "auto_cli");
+        assert_eq!(PairingSource::ManualWeb.as_str(), "manual_web");
+        assert_eq!(PairingSource::PlatformAuto.as_str(), "platform_auto");
         assert_eq!(pairing.status, "active");
         assert!(pairing.revoked_at.is_none());
         assert!(pairing.is_active());

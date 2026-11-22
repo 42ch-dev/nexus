@@ -34,20 +34,15 @@ const HOST_SEED: [u8; 32] = [0x42; 32];
 #[cfg(feature = "memory-remote")]
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
 
 /// Spawn the real binary and bound the WHOLE child/output lifecycle.
 ///

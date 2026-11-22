@@ -20,7 +20,7 @@ const WORLD: &str = "wld_missing_cli";
 const WORK_ID: &str = "wrk_missing_cli";
 const WORK_REF: &str = "missing-cli-novel";
 
-async fn fresh_pool_and_dir() -> (sqlx::SqlitePool, tempfile::TempDir) {
+async fn fresh_pool_and_dir() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -38,7 +38,7 @@ async fn fresh_pool_and_dir() -> (sqlx::SqlitePool, tempfile::TempDir) {
     )
     .await;
     seed_work(&pool).await;
-    (pool, dir)
+    (dir, pool)
 }
 
 async fn seed_work(pool: &sqlx::SqlitePool) {
@@ -94,7 +94,7 @@ candidates:
 
 #[tokio::test]
 async fn missing_only_lists_advisory_candidates() {
-    let (pool, dir) = fresh_pool_and_dir().await;
+    let (dir, pool) = fresh_pool_and_dir().await;
     write_missing_log(&dir);
 
     kb_pending(&pool, OWNER, WORLD, None, false, true, Some(dir.path()))
@@ -111,7 +111,7 @@ async fn missing_only_lists_advisory_candidates() {
 
 #[tokio::test]
 async fn missing_only_cross_author_returns_403() {
-    let (pool, dir) = fresh_pool_and_dir().await;
+    let (dir, pool) = fresh_pool_and_dir().await;
     write_missing_log(&dir);
 
     let err = kb_pending(&pool, OTHER, WORLD, None, false, true, Some(dir.path()))
@@ -162,7 +162,7 @@ async fn seed_candidate(pool: &sqlx::SqlitePool, canonical_name: &str, confidenc
 
 #[tokio::test]
 async fn adopt_auto_promote() {
-    let (pool, dir) = fresh_pool_and_dir().await;
+    let (dir, pool) = fresh_pool_and_dir().await;
 
     let promoted_id = seed_candidate(&pool, "Auto Promote Hero", 0.97).await;
     let skipped_id = seed_candidate(&pool, "Low Confidence Hero", 0.85).await;
@@ -236,7 +236,7 @@ async fn adopt_auto_promote() {
 
 #[tokio::test]
 async fn adopt_auto_promote_cross_author_returns_403() {
-    let (pool, dir) = fresh_pool_and_dir().await;
+    let (dir, pool) = fresh_pool_and_dir().await;
     seed_candidate(&pool, "Cross Author Hero", 0.97).await;
 
     let err = kb_adopt_auto(&pool, OTHER, WORLD, Some(dir.path()), false)

@@ -349,6 +349,7 @@ impl NovelChapterTransition {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pool_test_support::fresh_pool;
 
     #[test]
     fn test_replace_frontmatter_status() {
@@ -497,19 +498,6 @@ Body text here.";
     //    chapter currently being outlined or drafted."
     // =======================================================================
 
-    /// Create a fresh test DB with migrations and return the pool.
-    async fn fresh_pool() -> sqlx::SqlitePool {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let guarded = nexus_local_db::init_engine_pool(&db_path)
-            .await
-            .expect("open pool");
-        let pool = guarded.clone_pool();
-        // Keep the tempdir alive for the test lifetime via leak (test-only).
-        std::mem::forget(dir);
-        pool
-    }
-
     /// Insert a minimal work row with `current_chapter = 0`.
     async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
         // SAFETY: INSERT against works — runtime query.
@@ -546,7 +534,7 @@ Body text here.";
     /// `works.current_chapter`.
     #[tokio::test]
     async fn spec_4_5_7_current_chapter_advances_only_on_finalize() {
-        let pool = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_457_cc").await;
 
         // Seed 3 chapters (ch1, ch2, ch3 — all not_started, volume=1).

@@ -410,15 +410,7 @@ pub async fn insert_spoke_rule_for_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
-
-    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_pool;
 
     fn rule_row(rule_id: &str, world_id: &str) -> SpokeRuleRow {
         SpokeRuleRow {
@@ -441,7 +433,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_by_ids_returns_known_subset_and_omits_missing() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_spoke_rule_for_test(&pool, &rule_row("rule_a", "wld_1"))
             .await
             .unwrap();
@@ -483,7 +475,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_by_ids_empty_refs_returns_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         insert_spoke_rule_for_test(&pool, &rule_row("rule_a", "wld_1"))
             .await
             .unwrap();
@@ -494,7 +486,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_by_ids_all_missing_returns_empty() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let rows =
             get_spoke_rules_by_ids(&pool, &["rule_nope".to_string(), "rule_nada".to_string()])
                 .await

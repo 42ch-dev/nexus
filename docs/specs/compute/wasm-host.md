@@ -152,7 +152,11 @@ host.
 | Memory cap | 64 MiB | `max_memory_mib` | `MemoryCapExceeded` | `StoreLimitsBuilder::memory_size()` resource limiter |
 | Wall-time | 30 seconds | `max_wall_time_ms` | `WallTimeExceeded` | Epoch-interruption watchdog (see §5) |
 
-The defaults are defined as constants in `crates/nexus-wasm-host/src/sandbox.rs`:
+The defaults are defined as module-scope constants `DEFAULT_FUEL`,
+`DEFAULT_MEMORY_MIB`, and `DEFAULT_WALL_TIME` in `nexus_compute_policy`
+(`crates/nexus-compute-policy/src/lib.rs`); `SandboxConfig::default()` derives
+its limits from them, and the engine applies them via
+`crates/nexus-wasm-host/src/engine.rs`:
 
 ```rust
 pub const DEFAULT_FUEL: u64 = 10_000_000;
@@ -408,7 +412,7 @@ response into `[out_ptr, out_ptr+written)`.
 
 *Normative Master. V1.62 P2 (2026-06-23). Source material: V1.61 compass grill
 decisions Q1/Q6/Q10, `crates/nexus-wasm-host/AGENTS.md`,
-`crates/nexus-wasm-host/src/{engine,sandbox,host,error}.rs`,
+`crates/nexus-wasm-host/src/{engine,host,error}.rs`,
 `modules/README.md`. See `compute-module-abi.md` for the module-side ABI
 contract; `orchestration-engine.md` §8 for the `narrative.compute` capability
 that calls this crate.*
@@ -420,14 +424,14 @@ The normative constraints for this surface are stated in §Current state; a chan
 ## Where it lives
 
 - `crates/nexus-wasm-host/AGENTS.md`
-- `crates/nexus-wasm-host/src/sandbox.rs`
+- `nexus_compute_policy::SandboxConfig` (`crates/nexus-compute-policy/src/lib.rs`)
 - `crates/nexus-wasm-host/`
 - `modules/<id>/`
 - `modules/README.md`
 - `schemas/daemon-api/compute/`
 - `crates/nexus-wasm-host/src/error.rs`
 - `crates/nexus-wasm-host/src/host.rs`
-- `crates/nexus-wasm-host/src/{engine,sandbox,host,error}.rs`
+- `crates/nexus-wasm-host/src/{engine,host,error}.rs`
 
 ## Change obligations
 

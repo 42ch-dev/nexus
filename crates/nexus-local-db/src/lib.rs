@@ -48,7 +48,6 @@ pub mod prompt_injection;
 pub mod read_scope;
 pub mod reading;
 pub mod runtime_lock;
-pub mod soul_meta;
 pub mod soul_narrative;
 pub mod spoke_rules;
 pub mod work_chapters;
@@ -69,7 +68,7 @@ pub mod world_findings;
 pub mod world_stories;
 
 mod error;
-mod seed_shared;
+pub(crate) mod seed_shared;
 mod version;
 pub mod writer_protocol;
 
@@ -77,6 +76,11 @@ pub mod writer_protocol;
 // (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
 #[cfg(test)]
 mod test_tracing;
+
+// Test-only pool bootstraps shared by this crate's unit tests. Not a shipping
+// surface: compiled only under `cfg(test)`, never re-exported.
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use std::future::Future;
 
@@ -129,12 +133,6 @@ pub use holders::{
     HolderSubject, KnowledgeHolder, HOLDER_ENTRY_ID_PREFIX, HOLDER_MIGRATION_VERSION,
     HOLDER_STATE_INVALID_CODE,
 };
-
-// Re-export soul_meta types
-pub use soul_meta::{
-    delete as delete_soul_meta, get as get_soul_meta, upsert as upsert_soul_meta, SoulMeta,
-};
-
 // Re-export pending_review types
 pub use pending_review::{
     count_pending_reviews, create_pending_review, delete_pending_review,

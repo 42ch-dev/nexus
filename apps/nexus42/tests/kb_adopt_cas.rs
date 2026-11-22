@@ -19,7 +19,7 @@ const OWNER: &str = "ctr_cas_v151";
 const WORLD: &str = "wld_cas_v151";
 const WORK_ID: &str = "wrk_cas_v151";
 
-async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
+async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
     let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -36,7 +36,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         "manual",
     )
     .await;
-    (pool, dir)
+    (dir, pool)
 }
 
 /// Insert a pending candidate for adoption.
@@ -87,7 +87,7 @@ async fn test_kb_adopt_stale_preimage_returns_version_conflict() {
     // this is deterministic on any reasonable machine because kb_adopt's
     // sequential async operations take more than 200ms combined.
 
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
     // Spawn concurrent writer: bump version during kb_adopt's critical section.
@@ -124,7 +124,7 @@ async fn test_kb_adopt_stale_preimage_returns_version_conflict() {
 
 #[tokio::test]
 async fn test_kb_adopt_succeeds_when_version_consistent() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
     // No concurrent modification — version is 0 from insert.
@@ -148,7 +148,7 @@ async fn test_kb_adopt_succeeds_when_version_consistent() {
 
 #[tokio::test]
 async fn test_kb_adopt_already_confirmed_returns_error() {
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
     // First adopt succeeds.
@@ -168,7 +168,7 @@ async fn test_kb_adopt_already_confirmed_returns_error() {
 async fn test_cas_version_mismatch_direct() {
     // Direct test of mark_confirmed_in_tx_with_cas — the underlying function
     // that kb_adopt calls. This is the pure CAS unit test at the DAO level.
-    let (pool, _dir) = fresh_pool().await;
+    let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
     // Bump version between read and CAS write.

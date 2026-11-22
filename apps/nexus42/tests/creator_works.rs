@@ -55,26 +55,6 @@ fn works_use_requires_work_id() {
         .stderr(predicates::str::contains("WORK_ID"));
 }
 
-/// `creator works --help` lists `use` as a subcommand.
-#[test]
-fn works_help_lists_use_subcommand() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "works", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    assert!(
-        help_text.contains("use"),
-        "creator works --help must list 'use' subcommand"
-    );
-}
-
 // =============================================================================
 // `creator works completion-lock` — CLI surface
 // =============================================================================
@@ -138,7 +118,20 @@ fn works_completion_lock_release_requires_work_id() {
 // Cross-reference: `creator works` subcommand enumeration
 // =============================================================================
 
-/// Verify that `creator works --help` lists all expected subcommands.
+/// The trimmed lines clap renders between `Commands:` and the blank line that
+/// ends the block.
+fn commands_block(help_text: &str) -> Vec<&str> {
+    help_text
+        .lines()
+        .skip_while(|line| line.trim() != "Commands:")
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .collect()
+}
+
+/// Verify that `creator works --help` lists all expected subcommands in its
+/// Commands block (not as bare prose tokens).
 #[test]
 fn works_help_lists_all_expected_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -152,10 +145,14 @@ fn works_help_lists_all_expected_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
+    let names: Vec<&str> = commands_block(&help_text)
+        .iter()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
     for subcmd in &["list", "status", "use", "completion-lock", "pool"] {
         assert!(
-            help_text.contains(subcmd),
-            "creator works --help must list '{subcmd}' subcommand"
+            names.contains(subcmd),
+            "creator works --help must list '{subcmd}' in its Commands block: {help_text}"
         );
     }
 }

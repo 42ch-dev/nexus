@@ -15,14 +15,20 @@
 //! revision and content left unchanged), the invalid-field path (bad slug →
 //! `outline_validation_failed`), and the not-found path for an unknown work.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
 use assert_cmd::Command;
+use cli_support::{stderr, stdout};
 use direct::DirectFixture;
+use direct_actor::fixture_creator_id;
 use nexus_contracts::{CreateWorkRequest, CreateWorldRequest};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
-use nexus_home_layout::{nexus_root_from_home, operational_workspace_dir, workspace_state_db_path};
+use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
 use nexus_local_db::work_chapters::{self, InsertChapterParams};
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use serde_json::Value;
@@ -87,28 +93,12 @@ impl OutlineEnv {
     }
 }
 
-/// The fixture home holds exactly one creator; its id is the directory name
-/// under `~/.nexus42/creators/`.
-fn fixture_creator_id(fixture: &DirectFixture) -> String {
-    let creators_root = nexus_root_from_home(fixture.home.path()).join("creators");
-    let mut entries: Vec<_> = std::fs::read_dir(&creators_root)
-        .expect("read fixture creators root")
-        .map(|entry| entry.expect("creator dir entry").file_name())
-        .collect();
-    assert_eq!(entries.len(), 1, "fixture registers exactly one creator");
-    entries
-        .pop()
-        .expect("one creator")
-        .to_string_lossy()
-        .into_owned()
-}
-
 /// Seed one owned World, one Work bound to it (`story_ref = WORK_REF`), one
 /// chapter row and the revision-0 outline file — then release every seed
 /// writer so the CLI child can admit its own.
 async fn fresh_env() -> OutlineEnv {
     let fixture = DirectFixture::new().await;
-    let creator_id = fixture_creator_id(&fixture);
+    let creator_id = fixture_creator_id(fixture.home.path());
     let db_path = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let creative_root = fixture.home.path().join("creative");
 
@@ -207,14 +197,6 @@ async fn fresh_env() -> OutlineEnv {
         .expect("create outline dirs");
     std::fs::write(env.outline_path(), OUTLINE_REVISION_0).expect("write outline file");
     env
-}
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 // ── outline show ───────────────────────────────────────────────────────────

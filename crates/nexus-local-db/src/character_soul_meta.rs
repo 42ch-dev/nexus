@@ -1,6 +1,7 @@
 //! Character SOUL metadata persistence (v1.184 P3 Task 1).
 //!
-//! Character counterpart to [`crate::soul_meta`]: per-Character SOUL.md
+//! Character counterpart to the retired per-Creator `soul_meta` DAO (its
+//! table remains schema-only): per-Character SOUL.md
 //! metadata on the dedicated `character_soul_meta` table for fast lookups
 //! without file I/O. Authorization derives the owner from `characters`.
 

@@ -35,15 +35,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Open a fresh on-disk temp SQLite pool with migrations applied.
-async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::NamedTempFile) {
-    let db = tempfile::NamedTempFile::new().unwrap();
-    let guarded = nexus_local_db::init_engine_pool(db.path())
-        .await
-        .expect("open pool");
-    let pool = guarded.clone_pool();
-    (Arc::new(pool), db)
-}
+mod common;
+
+use common::arc_pool_file_first;
 
 /// Build a frozen v1 descriptor for tests.
 fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
@@ -257,7 +251,7 @@ async fn wait_status_survives_reopen() {
 
 #[tokio::test]
 async fn stale_graph_save_cannot_overwrite_terminal_status() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-stale".to_string());
 
@@ -326,7 +320,7 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
 
 #[tokio::test]
 async fn commit_transition_with_wrong_revision_fails() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-cas".to_string());
 
@@ -387,7 +381,7 @@ async fn commit_transition_with_wrong_revision_fails() {
 
 #[tokio::test]
 async fn commit_transition_after_terminal_fails() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-after-terminal".to_string());
 
@@ -452,7 +446,7 @@ async fn commit_transition_after_terminal_fails() {
 
 #[tokio::test]
 async fn descriptor_and_child_identity_preserved() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-child".to_string());
 
@@ -605,7 +599,7 @@ async fn recorded_retired_intake_mode_refuses_by_name() {
 
     // The recovery read over a row carrying those bytes reports the same named
     // cause, not a JSON-corruption error: `load_run` is what a restart uses.
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     sqlx::query(
         "INSERT INTO orchestration_sessions
@@ -638,7 +632,7 @@ async fn recorded_retired_intake_mode_refuses_by_name() {
 
 #[tokio::test]
 async fn v0_legacy_rows_stay_legacy_unverified() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v0 row (execution_version defaults to 0) with a running status.
@@ -676,7 +670,7 @@ async fn v0_legacy_rows_stay_legacy_unverified() {
 
 #[tokio::test]
 async fn corrupt_blobs_preserved_not_reinterpreted() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v1 row with a corrupt run_state_json blob.
@@ -881,7 +875,7 @@ async fn paused_status_survives_reopen() {
 // Critical 2: engine normal start path creates a v1 run via start_run.
 #[tokio::test]
 async fn engine_start_creates_v1_run() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -935,7 +929,7 @@ async fn engine_start_creates_v1_run() {
 // workflow store is configured; it must not leave a bare v0 storage row.
 #[tokio::test]
 async fn engine_new_session_creates_v1_run() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool);
     let sid = engine
         .new_session(
@@ -963,7 +957,7 @@ async fn engine_new_session_creates_v1_run() {
 // Critical 3: resume must be fenced against terminal states.
 #[tokio::test]
 async fn resume_after_terminal_is_refused() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -1029,7 +1023,7 @@ async fn resume_after_terminal_is_refused() {
 // Critical 4: engine-path wait produces a durable wait token.
 #[tokio::test]
 async fn engine_wait_produces_durable_wait_token() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -1124,7 +1118,7 @@ async fn engine_wait_produces_durable_wait_token() {
 
 #[tokio::test]
 async fn in_flight_marker_fences_control_signals_and_stale_transition() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -1208,7 +1202,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
 // Important 1 + 2: child identity is reconstructible and revision-fenced.
 #[tokio::test]
 async fn child_identity_and_revision_fence() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-fix".to_string());
 
@@ -1312,7 +1306,7 @@ async fn child_identity_and_revision_fence() {
 // Important 3: late graph saves are fenced against wait AND paused rows.
 #[tokio::test]
 async fn stale_save_cannot_overwrite_wait_or_paused() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     for (sid_str, status) in [
@@ -1392,7 +1386,7 @@ async fn commit_transition_refuses_v0_rows_without_mutation() {
         ),
         ("sess-v0-no-desc", None),
     ] {
-        let (pool, _db) = fresh_pool().await;
+        let (_db, pool) = arc_pool_file_first().await;
         let storage = SqliteSessionStorage::new(pool.clone());
         let descriptor_bytes = descriptor
             .as_ref()
@@ -1455,7 +1449,7 @@ async fn commit_transition_refuses_v0_rows_without_mutation() {
 // Important 5: unknown/corrupt v1 status is non-replayable, never Running.
 #[tokio::test]
 async fn unknown_v1_status_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v1 row with an unknown status value.
@@ -1486,7 +1480,7 @@ async fn unknown_v1_status_is_non_replayable() {
 // Important 5: a v1 row missing descriptor/state is non-replayable.
 #[tokio::test]
 async fn v1_row_missing_metadata_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v1 row with a missing run_descriptor_json.
@@ -1560,7 +1554,7 @@ fn wait_kind_and_prompt_phase_encode_snake_case() {
 // Important 8: legacy no-launder — start_run refuses an existing v0 row.
 #[tokio::test]
 async fn start_run_refuses_existing_v0_row() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v0 row (legacy evidence).
@@ -1615,7 +1609,7 @@ async fn start_run_refuses_existing_v0_row() {
 // Minor 1: start_run reports an accurate conflict for an already-v1 row.
 #[tokio::test]
 async fn start_run_reports_accurate_conflict_for_v1_row() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-already-v1".to_string());
 
@@ -1667,7 +1661,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
 // actual loaded preset (end-to-end, not structural only).
 #[tokio::test]
 async fn engine_start_with_loaded_preset_builds_source_identity() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -1721,7 +1715,7 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
 // checkpoint while the root commits.
 #[tokio::test]
 async fn child_cas_stale_revision_rolls_back_root() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-stale".to_string());
 
@@ -1797,7 +1791,7 @@ async fn child_cas_stale_revision_rolls_back_root() {
 // classification (never RevisionMismatch or a generic CAS failure).
 #[tokio::test]
 async fn child_cas_unknown_status_is_storage_error_even_with_revision_mismatch() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-bogus-status".to_string());
 
@@ -1858,7 +1852,7 @@ async fn child_cas_unknown_status_is_storage_error_even_with_revision_mismatch()
 // already terminal must roll back the root transition with TerminalState.
 #[tokio::test]
 async fn child_cas_terminal_child_rolls_back_root() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-term".to_string());
 
@@ -1938,7 +1932,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
 // transition succeeds rather than failing the child CAS.
 #[tokio::test]
 async fn child_cas_terminal_at_expected_revision_is_confirmed() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-term-confirm".to_string());
 
@@ -2005,7 +1999,7 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
 // identity, and run_step_internal persists the nested child checkpoint.
 #[tokio::test]
 async fn engine_nested_child_creates_v1_run() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -2125,7 +2119,7 @@ async fn engine_nested_child_creates_v1_run() {
 async fn shadowed_directory_preset_resolves_directory_source_and_version() {
     use std::fs;
 
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -2198,7 +2192,7 @@ states:
 // non-replayable — never silently reinterpreted as `running`.
 #[tokio::test]
 async fn unknown_v0_status_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v0 row with an unknown status value.
@@ -2242,7 +2236,7 @@ async fn unknown_v0_status_is_non_replayable() {
 // remain non-replayable — never coerced to zero.
 #[tokio::test]
 async fn negative_v0_revision_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v0 row with a negative state_revision.
@@ -2381,7 +2375,7 @@ async fn ordinary_cancel_rebases_graph_winners_at_intent_and_settlement() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     // Distinct writes: fencing only cancel intent leaves terminal settlement vulnerable.
     for (boundary, snapshot_read) in [("cancel intent", 2), ("cancel settlement", 3)] {
-        let (pool, _db) = fresh_pool().await;
+        let (_db, pool) = arc_pool_file_first().await;
         let storage = Arc::new(SqliteSessionStorage::new(pool));
         let racing = Arc::new(GraphSaveAfterRead {
             inner: storage.clone(),
@@ -2424,7 +2418,7 @@ async fn ordinary_cancel_rebases_graph_winners_at_intent_and_settlement() {
 async fn ordinary_pause_refuses_a_stale_graph_snapshot() {
     use nexus_orchestration::engine::{EngineError, EngineSignal};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool));
     let racing = Arc::new(GraphSaveAfterRead {
         inner: storage.clone(),
@@ -2473,7 +2467,7 @@ async fn ordinary_pause_refuses_a_stale_graph_snapshot() {
 // synchronized from each child transition).
 #[tokio::test]
 async fn engine_nested_child_runs_to_completion_then_parent_commits() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool);
 
     // Build a child graph that completes in one step (EndTask).
@@ -2571,7 +2565,7 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
 /// and replay work).
 #[tokio::test]
 async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     let inner_graph = Arc::new(
@@ -2671,7 +2665,7 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
 /// `InnerGraphTask` miss the reattachment lookup and spawn a fresh child.
 #[tokio::test]
 async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     let inner_graph = Arc::new(
@@ -2749,7 +2743,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
 /// exempt it from identity validation.
 #[tokio::test]
 async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (_storage, engine) = fresh_engine(pool.clone());
 
     let inner_graph = Arc::new(
@@ -2885,7 +2879,7 @@ async fn seed_abandoned_child_root(
 /// replacement child.
 #[tokio::test]
 async fn recovery_child_marker_reattaches_abandoned_child_without_replacement() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     let (root_sid, _child_sid) =
         seed_abandoned_child_root(&pool, &storage, &engine, &["init_intro"], "intro_graph").await;
@@ -2912,7 +2906,7 @@ async fn recovery_child_marker_reattaches_abandoned_child_without_replacement() 
 /// reattachment: recovery rejects it and mints no replacement.
 #[tokio::test]
 async fn recovery_child_marker_for_another_inner_graph_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     // `collecting_details` enters `details_graph`, not the child's
     // `intro_graph`.
@@ -2952,7 +2946,7 @@ async fn recovery_child_marker_for_another_inner_graph_is_non_replayable() {
 /// recovery rejects it and mints no replacement.
 #[tokio::test]
 async fn recovery_child_marker_conflict_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     let (root_sid, _child_sid) = seed_abandoned_child_root(
         &pool,
@@ -3077,7 +3071,7 @@ async fn restart_hydrates_child_checkpoints() {
 // restored to their pre-step values.
 #[tokio::test]
 async fn failed_child_cas_restores_root_position() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Build a parent graph: task "continue_task" → task "end_task".
@@ -3187,7 +3181,7 @@ async fn failed_child_cas_restores_root_position() {
 // same millisecond must not collide with start_run's existing-row rejection.
 #[tokio::test]
 async fn child_ids_are_collision_resistant() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (_storage, engine) = fresh_engine(pool);
 
     let parent_graph = Arc::new(
@@ -3278,7 +3272,7 @@ impl graph_flow::Task for DeterministicContinueTask {
 // lingers.
 #[tokio::test]
 async fn corrupt_child_is_non_replayable_during_recovery() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-corrupt-child".to_string());
 
@@ -3354,7 +3348,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
 // non-replayable during recovery (hydrate_children propagates).
 #[tokio::test]
 async fn child_missing_session_snapshot_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-missing-child".to_string());
 
@@ -3440,7 +3434,7 @@ impl graph_flow::Task for ConcurrentBumpRootTask {
 // older pre-step position.
 #[tokio::test]
 async fn failed_cas_restore_is_revision_fenced() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: concurrent-bump → deterministic-continue → end.
@@ -3586,7 +3580,7 @@ async fn failed_cas_restore_is_revision_fenced() {
 // revision-fenced.
 #[tokio::test]
 async fn post_effect_failure_persists_interrupted() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph whose start is an EffectTask (sets the external-effect
@@ -3697,7 +3691,7 @@ async fn post_effect_failure_persists_interrupted() {
 // is CAS-fenced restored to the pre-step position (acceptable rewind).
 #[tokio::test]
 async fn deterministic_failure_restores_pre_step_position() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     let parent_graph = Arc::new(
@@ -4097,7 +4091,7 @@ states:
 // never silently coerced to zero.
 #[tokio::test]
 async fn negative_v1_revision_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
     // Seed a v1 row with a negative state_revision.
@@ -4143,7 +4137,7 @@ async fn negative_v1_revision_is_non_replayable() {
 // Completed when the child is Failed/Cancelled at that revision.
 #[tokio::test]
 async fn child_terminal_status_mismatch_rejects_confirmation() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-mismatch".to_string());
 
@@ -4342,7 +4336,7 @@ async fn terminal_child_is_reattached_not_respawned() {
 // (Minor 1: hydrate_children must not leave a stale checkpoint on error).
 #[tokio::test]
 async fn missing_child_session_clears_stale_children_entry() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-missing-clear".to_string());
 
@@ -4420,7 +4414,7 @@ async fn missing_child_session_clears_stale_children_entry() {
 // the InnerGraphTask path and then failing the parent commit with a stale child.
 #[tokio::test]
 async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph whose start is an InnerGraphTask (drives a child end task).
@@ -4536,7 +4530,7 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
 // the check and the save — the restore must leave the newer row untouched.
 #[tokio::test]
 async fn restore_pre_step_is_single_atomic_revision_fence() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-atomic-restore".to_string());
 
@@ -4602,7 +4596,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
 // (A7), and the row/blobs are preserved verbatim.
 #[tokio::test]
 async fn negative_execution_version_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = "sess-neg-execver";
 
@@ -4646,7 +4640,7 @@ async fn negative_execution_version_is_non_replayable() {
 
 #[tokio::test]
 async fn unsupported_forward_execution_version_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = "sess-fwd-execver";
 
@@ -4696,7 +4690,7 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
 // post-failure path stays non-replayable.
 #[tokio::test]
 async fn step_in_flight_persisted_before_effect_dispatch() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: manual-wait start (Running) then end.
@@ -4761,7 +4755,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
 // the row transitions to Interrupted (never replayable) — not left running.
 #[tokio::test]
 async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: EffectTask (external effect) → end.
@@ -4842,7 +4836,7 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
 // Interrupted.
 #[tokio::test]
 async fn external_effect_marker_cleared_per_step() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: effectful continue (EffectTask → Continue, sets marker) →
@@ -5007,7 +5001,7 @@ impl graph_flow::Task for MarkerEffectTask {
 // the child, while preserving the legacy evidence for inspection.
 #[tokio::test]
 async fn v0_child_is_non_replayable_and_preserved() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let parent_sid = SessionId("par-v0-child".to_string());
     let child_id = "par-v0-child:child:1";
@@ -5066,7 +5060,7 @@ async fn v0_child_is_non_replayable_and_preserved() {
 // root row (round-2/4 contract extended to child rows).
 #[tokio::test]
 async fn negative_child_revision_is_non_replayable() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-neg-child-rev".to_string());
 
@@ -5154,7 +5148,7 @@ async fn negative_child_revision_is_non_replayable() {
 // (and unknown statuses) are excluded (A4 token retention).
 #[tokio::test]
 async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-wait-mark".to_string());
 
@@ -5253,7 +5247,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
 // (A4 token retention until an authorized successful CAS).
 #[tokio::test]
 async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-wait-restore".to_string());
 
@@ -5341,7 +5335,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
 // `runner.run` executes the task — the effect task's `run` never fires.
 #[tokio::test]
 async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: marker-effect task (external effect) → end.
@@ -5490,7 +5484,7 @@ states:
 // broad join keys.
 #[tokio::test]
 async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
-    let (pool, db) = fresh_pool().await;
+    let (db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -5645,7 +5639,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
 // rule 4 keeps working unchanged).
 #[tokio::test]
 async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
-    let (pool, db) = fresh_pool().await;
+    let (db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -5818,7 +5812,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     use nexus_orchestration::tasks::StateCompositeTask;
     use nexus_preset::manifest::{ExitWhen, LabeledNext, NextTarget, StateDefinition};
 
-    let (pool, db) = fresh_pool().await;
+    let (db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -6032,7 +6026,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
 /// `waiting_for_input` + fresh retained token and reopen as `HumanWait`.
 #[tokio::test]
 async fn engine_conditional_routed_manual_wait_keeps_token_despite_join_keys() {
-    let (pool, db) = fresh_pool().await;
+    let (db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -6219,7 +6213,7 @@ states:
 
 #[tokio::test]
 async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume() {
-    let (pool, db) = fresh_pool().await;
+    let (db, pool) = arc_pool_file_first().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -6485,7 +6479,7 @@ fn assert_hard_storage_error(err: &nexus_session_storage::StorageError, what: &s
 /// saves successfully.
 #[tokio::test]
 async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-occ-two-writer".to_string());
 
@@ -6575,7 +6569,7 @@ async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
 #[tokio::test]
 async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
     for corrupt in [-1i64, i64::MAX] {
-        let (pool, _db) = fresh_pool().await;
+        let (_db, pool) = arc_pool_file_first().await;
         let storage = SqliteSessionStorage::new(pool.clone());
         let session_id = SessionId(format!("sess-corrupt-{corrupt}"));
 
@@ -6690,7 +6684,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
 /// parent transition back atomically — never a partial parent advance.
 #[tokio::test]
 async fn corrupt_child_graph_version_fails_parent_transition_closed() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let parent = SessionId("sess-parent-corrupt-child".to_string());
     let child_id = "sess-parent-corrupt-child:child:1";
@@ -6754,7 +6748,7 @@ async fn corrupt_child_graph_version_fails_parent_transition_closed() {
 /// while durable prompt-attempt writes deliberately leave it unchanged.
 #[tokio::test]
 async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_attempts() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-graph-clock".to_string());
 
@@ -7056,7 +7050,7 @@ async fn assert_applied_entry(
 /// state and a restart rebuilds a document the run never ran.
 #[tokio::test]
 async fn preset_entries_freeze_and_run_the_strategy_apply() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, mut engine) = fresh_engine(pool);
     let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
@@ -7096,7 +7090,7 @@ async fn preset_entries_freeze_and_run_the_strategy_apply() {
 /// admitted bundle never declared, so survival alone is not the assertion.
 #[tokio::test]
 async fn applied_run_recovers_after_its_bundle_is_deleted() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let home = tempfile::tempdir().unwrap();
     let loaded = user_bundle_preset(home.path(), "applied-restart");
     let identity = AppliedRunIdentity {
@@ -7183,7 +7177,7 @@ fn user_bundle_preset(home: &std::path::Path, preset_id: &str) -> nexus_preset::
 /// to refuse, and the run is admitted as a document it never applied.
 #[tokio::test]
 async fn preset_entry_refuses_a_no_apply_user_bundle_under_ir_only() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (_, mut engine) = fresh_engine(pool.clone());
     let home = tempfile::tempdir().unwrap();
     // No `[strategy_intake]` key at all: the documented default is `ir-only`.
@@ -7228,7 +7222,7 @@ async fn preset_entry_refuses_a_no_apply_user_bundle_under_ir_only() {
 /// run would then be gated on an operator key that does not name it.
 #[tokio::test]
 async fn preset_entry_does_not_gate_an_embedded_preset() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, mut engine) = fresh_engine(pool);
     let home = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -7267,7 +7261,7 @@ async fn preset_entry_does_not_gate_an_embedded_preset() {
 /// parses) naming a file the operator never set.
 #[tokio::test]
 async fn preset_entry_without_a_home_takes_ir_only() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (_, engine) = fresh_engine(pool);
     let home = tempfile::tempdir().unwrap();
     // A config the home-less engine does not know about; it must not be read.
@@ -7302,7 +7296,7 @@ async fn preset_entry_without_a_home_takes_ir_only() {
 /// loaded bundle does not declare.
 #[tokio::test]
 async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_apply() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
@@ -7385,7 +7379,7 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
 /// executed, and recovery cannot refuse a changed embed.
 #[tokio::test]
 async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool);
     let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
@@ -7498,7 +7492,7 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
 /// for a descriptor with no recorded apply.
 #[tokio::test]
 async fn store_recovery_refuses_a_legacy_embedded_row_the_source_cannot_resolve() {
-    let (pool, _db) = fresh_pool().await;
+    let (_db, pool) = arc_pool_file_first().await;
     let (storage, mut engine) = fresh_engine(pool);
     let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =

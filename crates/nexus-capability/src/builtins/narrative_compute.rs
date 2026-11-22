@@ -562,23 +562,16 @@ async fn handle_compute_error(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wasm")]
+    use crate::pool_test_support::fresh_pool;
     use crate::state_delta;
     #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::KbStore;
-    #[cfg(feature = "wasm")]
-    use nexus_local_db::init_engine_pool;
 
     // Fixtures below serve only the executor-driven (wasm) cases; gating them
     // keeps the default-build test surface warning-free (C3).
-    #[cfg(feature = "wasm")]
-    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
-        (pool, dir)
-    }
 
     /// The explicit compute attachment real executor runs need (C3): a
     /// pool-bound capability over a real engine + warmed cache — exactly what
@@ -876,7 +869,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_rejects_cross_world_injection() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let hostile = test_contract_key_block("kb_hostile", "wld_OTHER", "Hostile");
         let err = create_new_key_blocks(&pool, "wld_admitted", std::slice::from_ref(&hostile))
             .await
@@ -891,7 +884,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_accepts_matching_world_id() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_kb").await;
         seed_world(&pool, "ctr_kb", "wld_admitted").await;
         let kb = test_contract_key_block("kb_ok", "wld_admitted", "Ok");
@@ -907,7 +900,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_missing_world() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         let cap = with_real_engine(pool);
         let err = cap
@@ -924,7 +917,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_cross_creator() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_b").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -943,7 +936,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_no_computable_blocks() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         let cap = with_real_engine(pool);
@@ -961,7 +954,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_invalid_input() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let cap = with_real_engine(pool);
         let err = cap.run(json!(42)).await.unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
@@ -976,7 +969,7 @@ mod tests {
     async fn narrative_compute_excludes_other_holders_private_rows() {
         use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_creator(&pool, "ctr_other").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -1023,7 +1016,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_fails_closed_without_a_holder() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator_without_holder(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
         seed_computable_row(&pool, "wld_a", "Shared", None, None).await;
@@ -1062,7 +1055,7 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_full_cycle() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 

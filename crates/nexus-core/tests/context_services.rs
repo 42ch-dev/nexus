@@ -11,13 +11,15 @@ use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, LocalDirectiveStore,
     ReadOnlyDirectiveStore,
 };
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams, WorkRecord,
 };
 use nexus_moment_context_assembly::directive::DirectiveStore;
 use std::path::PathBuf;
 use tempfile::TempDir;
+
+mod common;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -37,19 +39,11 @@ struct Env {
 }
 
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    world_with(
+        pool,
+        WorldSeed::new(world_id, owner, world_id, world_id).with_workspace_id("wrk"),
     )
-    .bind(world_id)
-    .bind(owner)
-    .bind(world_id)
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 fn work_record(work_id: &str, world_id: Option<&str>) -> WorkRecord {
@@ -91,29 +85,14 @@ fn work_record(work_id: &str, world_id: Option<&str>) -> WorkRecord {
 /// Materialize the workspace shell (two owned Worlds + a Work bound to
 /// World B) through one engine pool released before the core opens.
 async fn seed_env() -> Env {
-    let tmp = TempDir::new().unwrap();
-    let user_home = tmp.path().to_path_buf();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &user_home, CREATOR, "default",
-    ))
-    .unwrap();
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{CREATOR}\"\n\
-             [active_workspace_slug_by_creator]\n\
-             \"{CREATOR}\" = \"default\""
-        ),
-    )
-    .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    let common::TestHome {
+        _tmp: tmp,
+        user_home,
+        db_path,
+    } = common::seed_home(CREATOR, "default");
     let created;
     {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-            .await
-            .unwrap();
+        let guarded = common::engine_pool(&db_path, CREATOR).await;
         let pool = guarded.clone_pool();
         ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
         ensure_creator_row(&pool, OTHER, "Other").await.unwrap();
@@ -150,7 +129,7 @@ async fn seed_env() -> Env {
 
 /// A plain pool for DB-state assertions.
 async fn plain_pool(env: &Env) -> sqlx::SqlitePool {
-    nexus_local_db::open_pool(&env.db_path).await.unwrap()
+    common::plain_pool(&env.db_path).await
 }
 
 /// `(ttl_remaining, last_focused_event_id, status)` of the active row for a
@@ -214,9 +193,7 @@ async fn seed_view_fixture(env: &Env) -> ViewFixture {
     use nexus_knowledge::world_kb::KbStore as _;
     use nexus_local_db::kb_store::SqliteKbStore;
 
-    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .unwrap();
+    let guarded = common::engine_pool(&env.db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     let store = SqliteKbStore::new(pool.clone());
     let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
@@ -1095,9 +1072,7 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
 /// matching neighbour reachable only through a confirmed relation edge — the
 /// relation-hop fixture the retired daemon inspector fixture used.
 async fn seed_activation_fixture(env: &Env) {
-    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .unwrap();
+    let guarded = common::engine_pool(&env.db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     for (entry_id, name, modules) in [
         (

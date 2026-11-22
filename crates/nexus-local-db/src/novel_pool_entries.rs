@@ -388,14 +388,7 @@ pub async fn get_active_pool_entry(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
+    use crate::test_support::fresh_pool;
 
     fn seed_work(
         pool: &SqlitePool,
@@ -428,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_pool_entries_returns_all_statuses() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         seed_work(&pool, "wrk_002", "ctr_test").await.unwrap();
 
@@ -464,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_promote_demotes_prior_active() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         seed_work(&pool, "wrk_002", "ctr_test").await.unwrap();
 
@@ -490,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_archive_marks_archived() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
 
         let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
@@ -504,7 +497,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_pool_entry_completed_for_work() {
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
 
         promote_to_active(&pool, "ctr_test", "wrk_001")
@@ -527,7 +520,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
 
         {
@@ -556,7 +549,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
@@ -584,7 +577,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
@@ -611,7 +604,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         promote_to_active(&pool, "ctr_test", "wrk_001")
             .await

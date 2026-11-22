@@ -13,6 +13,9 @@
 //! `source_context_ids: []` and an omitted member are the same typed request but
 //! different wire objects, so only a raw signed invoke can send both.
 
+#[path = "support/memory_only_host.rs"]
+mod memory_only_host;
+
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -35,15 +38,8 @@ use spoke_connect::remote::{
     RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
-use spoke_operations::spoke_schemas::{
-    Finding, HostCapabilityManifest, KnowledgeEntry, MemoryCaptureRequest, Principal, Relation,
-    Rule, Scope, TimelineEvent,
-};
-use spoke_operations::{
-    jcs_sha256_hex, FindingPort, HostManifestPort, KnowledgeEntryPort, KnowledgeQueryPort,
-    MemoryPort, RelationPort, RuleQueryPort, ScopeQueryPort, SpokeReject, SpokeRejectCode,
-    SpokeResult,
-};
+use spoke_operations::spoke_schemas::{HostCapabilityManifest, MemoryCaptureRequest, Principal};
+use spoke_operations::{jcs_sha256_hex, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;
@@ -55,6 +51,8 @@ use tokio_tungstenite::WebSocketStream;
 
 use nexus_memory_conformance::{FaultPoint, FixtureMemoryProvider, PeerDirectory};
 
+use memory_only_host::MemoryOnlyHost;
+
 /// The dialing client's connect identity.
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
 /// A second allowlisted peer the operator deliberately leaves unmapped.
@@ -65,98 +63,6 @@ const HOST_SEED: [u8; 32] = [0x42; 32];
 /// The single capability both ends negotiate: the fixture serves no other
 /// family.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
-
-// ---------------------------------------------------------------------------
-// A memory-only responder host
-// ---------------------------------------------------------------------------
-
-/// The baseline half of the responder's ports face.
-///
-/// This host serves `spoke-memory` only, so `spoke-baseline` is never
-/// negotiated and the dispatch gate answers every `port.*` op before it could
-/// reach this type. The implementation exists because `RemoteServePorts` is a
-/// baseline-port supertrait, and it refuses honestly rather than fabricating
-/// knowledge entries.
-struct MemoryOnlyHost;
-
-fn no_baseline<T>() -> SpokeResult<T> {
-    SpokeResult::Reject(SpokeReject {
-        code: SpokeRejectCode::CapabilityPortMissing,
-        message: "the fixture host serves no baseline family".to_owned(),
-        details: None,
-    })
-}
-
-#[async_trait]
-impl KnowledgeEntryPort for MemoryOnlyHost {
-    async fn get_knowledge_entry(&self, _entry_id: &str) -> SpokeResult<KnowledgeEntry> {
-        no_baseline()
-    }
-
-    async fn put_knowledge_entry(
-        &self,
-        _entry: KnowledgeEntry,
-        _expected_base_revision: Option<u64>,
-    ) -> SpokeResult<KnowledgeEntry> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl RelationPort for MemoryOnlyHost {
-    async fn get_relation(&self, _relation_id: &str) -> SpokeResult<Relation> {
-        no_baseline()
-    }
-
-    async fn put_relation(
-        &self,
-        _relation: Relation,
-        _expected_base_revision: Option<u64>,
-    ) -> SpokeResult<Relation> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl KnowledgeQueryPort for MemoryOnlyHost {
-    async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl ScopeQueryPort for MemoryOnlyHost {
-    async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl FindingPort for MemoryOnlyHost {
-    async fn put_findings(&self, _findings: Vec<Finding>) -> SpokeResult<Vec<Finding>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl RuleQueryPort for MemoryOnlyHost {
-    async fn list_rules(&self, _rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
-        no_baseline()
-    }
-}
-
-#[async_trait]
-impl HostManifestPort for MemoryOnlyHost {
-    async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        no_baseline()
-    }
-
-    async fn list_peer_host_capability_manifests(
-        &self,
-    ) -> SpokeResult<Vec<HostCapabilityManifest>> {
-        no_baseline()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Session plumbing

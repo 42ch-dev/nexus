@@ -586,6 +586,7 @@ fn generate_fallback_slug() -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::test_support::fresh_pool;
 
     #[test]
     fn test_title_to_slug_basic() {
@@ -631,14 +632,6 @@ mod tests {
     // ── R-V146P4-QC3-S1: trace coverage for the 5 inspiration mutation paths.
     //    Previously only `promote_to_active` (in novel_pool_entries) had a
     //    capture test — 1 of 9 instrumented paths across both DAOs.
-
-    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
-        (pool, dir)
-    }
 
     /// Seed a works row so FK constraints (e.g. `inspiration_items.
     /// promoted_work_id` → works) are satisfied. Mirrors the helper in
@@ -707,7 +700,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
 
         {
@@ -739,7 +732,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, dir) = fresh_pool().await;
+        let (dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
 
         {
@@ -774,7 +767,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         create_inspiration_row(
             &pool,
@@ -811,7 +804,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         // Seed the inspiration row the atomic path updates in step 3.
         create_inspiration_row(
@@ -852,7 +845,7 @@ mod tests {
         let (layer, captured) = crate::test_tracing::capture_layer();
         let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        let (pool, _dir) = fresh_pool().await;
+        let (_dir, pool) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         create_inspiration_row(
             &pool,

@@ -4,9 +4,12 @@
 //! creator, no credential file. The command persists only the non-secret
 //! `[memory_provider]` table and never accepts a secret argument.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
+
 use assert_cmd::Command;
+use cli_support::{stderr, stdout};
 use std::path::PathBuf;
-use std::process::Output;
 use tempfile::TempDir;
 
 const SPACE_ID: &str = "space-alpha";
@@ -22,14 +25,6 @@ fn cli(home: &TempDir) -> Command {
 
 fn config_path(home: &TempDir) -> PathBuf {
     home.path().join(".nexus42").join("config.toml")
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
 #[test]

@@ -13,22 +13,9 @@ use sqlx::SqlitePool;
 
 // ── Test helpers ───────────────────────────────────────────────────────────
 
-/// Open a migrated in-memory pool (tempfile + forget; pattern from
-/// `supervisor_cross_volume.rs`).
-async fn test_pool() -> SqlitePool {
-    let db = tempfile::Builder::new()
-        .prefix("cron_sup_test_")
-        .suffix(".db")
-        .tempfile()
-        .unwrap();
-    let db_path = db.path().to_path_buf();
-    std::mem::forget(db);
-    let pool = nexus_local_db::init_engine_pool(&db_path)
-        .await
-        .unwrap()
-        .clone_pool();
-    pool
-}
+mod common;
+
+use common::test_pool;
 
 /// Standard healthy Work (intake complete, no lock, not completed).
 fn test_work(work_id: &str) -> WorkRecord {
@@ -117,7 +104,7 @@ async fn count_schedules(pool: &SqlitePool, work_id: &str, preset_id: &str) -> i
 /// schedule with `preset_id = novel-brainstorm`.
 #[tokio::test]
 async fn cron_fires_on_match_enqueues_brainstorm() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_fire_brain");
     // `* * * * *` matches every minute, so any `now` fires.
     seed_work(
@@ -142,7 +129,7 @@ async fn cron_fires_on_match_enqueues_brainstorm() {
 /// A write role whose cron matches enqueues `preset_id = novel-write`.
 #[tokio::test]
 async fn cron_fires_on_match_enqueues_write() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_fire_write");
     seed_work(
         &pool,
@@ -165,7 +152,7 @@ async fn cron_fires_on_match_enqueues_write() {
 /// A non-matching minute enqueues nothing (AC3 — non-match case).
 #[tokio::test]
 async fn cron_no_match_does_not_enqueue() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_nomatch");
     // `0 3 * * *` fires only at 03:00 UTC.
     seed_work(
@@ -197,7 +184,7 @@ async fn cron_no_match_does_not_enqueue() {
 /// Both roles matching the same minute enqueue two distinct schedules.
 #[tokio::test]
 async fn cron_fires_both_roles_same_minute() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_both");
     seed_work(
         &pool,
@@ -221,7 +208,7 @@ async fn cron_fires_both_roles_same_minute() {
 /// A disabled role does not fire even when its cron matches.
 #[tokio::test]
 async fn cron_skips_disabled_role() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_disabled");
     seed_work(
         &pool,
@@ -250,7 +237,7 @@ async fn cron_skips_disabled_role() {
 /// Gating: incomplete intake → skip (spec §4.3).
 #[tokio::test]
 async fn cron_skips_intake_incomplete() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let mut work = test_work("wrk_intake");
     // Use a valid non-complete intake_status (CHECK constraint:
     // pending/in_progress/complete/skipped).
@@ -273,7 +260,7 @@ async fn cron_skips_intake_incomplete() {
 /// Gating: runtime lock held → skip (spec §4.3).
 #[tokio::test]
 async fn cron_skips_runtime_locked() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_locked");
     seed_work(
         &pool,
@@ -301,7 +288,7 @@ async fn cron_skips_runtime_locked() {
 /// Gating: completion-locked → skip (spec §4.3).
 #[tokio::test]
 async fn cron_skips_completion_locked() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_done");
     seed_work(
         &pool,
@@ -332,7 +319,7 @@ async fn cron_skips_completion_locked() {
 /// second is skipped because a prior schedule is still active (pending).
 #[tokio::test]
 async fn cron_idempotent_skip_second_fire_same_minute() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_idem");
     seed_work(
         &pool,
@@ -369,7 +356,7 @@ async fn cron_idempotent_skip_second_fire_same_minute() {
 /// next cron evaluation fires again — idempotency is "active-only".
 #[tokio::test]
 async fn cron_refires_after_prior_schedule_terminal() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_refire");
     seed_work(
         &pool,
@@ -412,7 +399,7 @@ async fn cron_refires_after_prior_schedule_terminal() {
 /// write (lost-update prevention). Closes R-V150P0-W5.
 #[tokio::test]
 async fn set_schedule_json_tx_rejects_stale_preimage() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_cas");
     works::create_work(&pool, &work).await.unwrap();
 
@@ -445,7 +432,7 @@ async fn set_schedule_json_tx_rejects_stale_preimage() {
 /// The CAS applies when the pre-image matches.
 #[tokio::test]
 async fn set_schedule_json_tx_applies_on_matching_preimage() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_cas_ok");
     works::create_work(&pool, &work).await.unwrap();
     set_schedule(&pool, "wrk_cas_ok", "{\"v\":\"initial\"}").await;
@@ -472,7 +459,7 @@ async fn set_schedule_json_tx_applies_on_matching_preimage() {
 /// R-V150P0-W5 race scenario (daemon writer vs CLI writer).
 #[tokio::test]
 async fn set_schedule_json_tx_concurrent_writers_serialise() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_cas_race");
     works::create_work(&pool, &work).await.unwrap();
 
@@ -527,7 +514,7 @@ async fn set_schedule_json_tx_concurrent_writers_serialise() {
 /// CAS on a missing Work returns `MissingVersionKey` (not a false Ok(false)).
 #[tokio::test]
 async fn set_schedule_json_tx_missing_work_errors() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let mut tx = pool.begin().await.unwrap();
     let result = works::set_schedule_json_tx(
         &mut tx,
@@ -550,7 +537,7 @@ async fn set_schedule_json_tx_missing_work_errors() {
 /// `idx_works_schedule_json_nonempty` (S-001). Verified via EXPLAIN QUERY PLAN.
 #[tokio::test]
 async fn partial_index_used_in_schedule_json_scan() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
 
     // EXPLAIN QUERY PLAN returns 4 columns per step: (id, parent, notused,
     // detail) — the first three are INTEGER, the fourth is TEXT. We decode
@@ -581,7 +568,7 @@ async fn partial_index_used_in_schedule_json_scan() {
 /// not crashed.
 #[tokio::test]
 async fn cron_skips_malformed_schedule_json() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_badjson");
     seed_work(&pool, &work, "{not valid json").await;
 
@@ -600,7 +587,7 @@ async fn cron_skips_malformed_schedule_json() {
 /// excludes it). A healthy Work with an empty-string blob is likewise excluded.
 #[tokio::test]
 async fn cron_ignores_works_without_schedule_json() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_nosched");
     works::create_work(&pool, &work).await.unwrap();
     // No set_schedule call → schedule_json is NULL.
@@ -628,7 +615,8 @@ use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 /// the supervisor tick, so the Work gains an active driver.
 #[tokio::test]
 async fn cron_fire_then_tick_admits_schedule() {
-    let pool = Arc::new(test_pool().await);
+    let (_dir, pool) = test_pool().await;
+    let pool = Arc::new(pool);
     let work = test_work("wrk_admit");
     seed_work(
         &pool,
@@ -700,7 +688,7 @@ fn schedule_blob_review(
 /// does not fire.
 #[tokio::test]
 async fn cron_fires_review_role_enqueues_review_master() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_fire_review");
     // Only review enabled; brainstorm/write crons set to a non-matching slot
     // and disabled so the single fire is unambiguously the review role.
@@ -764,7 +752,7 @@ async fn cron_fires_review_role_enqueues_review_master() {
 /// fire (counted as `skipped_gated`).
 #[tokio::test]
 async fn cron_review_respects_per_work_gating() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_review_gated");
     // Only review enabled with an always-matching cron.
     seed_work(
@@ -805,7 +793,7 @@ async fn cron_review_respects_per_work_gating() {
 /// review cron fire is skipped (counted as `skipped_idempotent`).
 #[tokio::test]
 async fn cron_review_respects_idempotency() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_review_idem");
     seed_work(
         &pool,
@@ -855,7 +843,7 @@ async fn cron_review_respects_idempotency() {
 /// This is the "no review work = no review schedule" graceful-skip case.
 #[tokio::test]
 async fn cron_review_graceful_when_no_review_role_configured() {
-    let pool = test_pool().await;
+    let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_no_review");
     // Two-role blob (no `review` key) — the `review` field deserialises to
     // `None` via `#[serde(default)]`, so the evaluator no-ops it cleanly.

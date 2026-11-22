@@ -110,18 +110,6 @@ async fn assemble_default_on(
 }
 
 #[tokio::test]
-async fn dump_slots_neutral_only_golden_for_regeneration() {
-    // Temporary helper: prints the neutral-only output so the golden file can
-    // be regenerated (documented regen path, same pattern as the V1.149
-    // goldens).
-    let (narrative, kb, stage0) = build_neutral_fixture();
-    seed_neutral_stores(&kb).await;
-
-    let output = assemble_default_on(stage0, &narrative, &kb).await;
-    println!("===GOLDEN-BEGIN===\n{output}\n===GOLDEN-END===");
-}
-
-#[tokio::test]
 async fn slots_neutral_only_byte_equivalent_golden() {
     let (narrative, kb, stage0) = build_neutral_fixture();
     seed_neutral_stores(&kb).await;
@@ -162,7 +150,7 @@ async fn slots_neutral_only_byte_equivalent_golden() {
     assert_eq!(
         output, golden,
         "Golden mismatch: neutral-only World under V1.150 slot routing output has changed.\n\
-         If the change is intentional (e.g. a deliberate format update), re-generate the golden:\n\
-         Run the dump test and capture the actual output to replace the golden file."
+         If the change is intentional (e.g. a deliberate format update), update the golden\n\
+         file with the actual output."
     );
 }

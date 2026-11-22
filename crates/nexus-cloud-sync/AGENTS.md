@@ -3,15 +3,14 @@
 `nexus-cloud-sync` provides the sync mechanism for CLI ↔ Platform synchronization
 using Command, DeltaBundle, and Outbox patterns.
 
-It depends on and re-exports `nexus-cloud-domain` for User/Pairing domain
-invariants. Transport-layer code must route account lifecycle, pairing state,
-and domain↔contract conversions through that crate rather than reimplementing
-the rules locally.
+This crate no longer depends on `nexus-cloud-domain`; it does not re-export it
+for tests. User/Pairing domain invariants are owned by the `nexus-cloud-domain`
+crate and are not reimplemented here.
 
 ## Key Rules
 
 - **Contract types:** shares generated types from `nexus-contracts`. Do NOT hand-write duplicate DTOs.
-- **Cloud-domain invariants:** use `nexus-cloud-domain` for User/Pairing validation and conversions.
+- **Cloud-domain invariants:** owned by `nexus-cloud-domain`; this crate neither depends on nor re-exports it.
 - **Feature flags control module visibility.** The `legacy-sync` feature gates the cloud HTTP pipeline
   (outbox, push/pull, platform client). Daemon consumers should NOT enable this feature.
 - Crate was renamed from `nexus-sync` as part of the v1.21 local/cloud isolation.

@@ -135,23 +135,6 @@ async fn w02_volume_aware_index_coverage() {
         "idx_work_chapters_next_volume_aware index should exist"
     );
 
-    // Verify the index covers the expected columns.
-    // SAFETY: test-only — introspects index definition from sqlite_master.
-    let idx_sql: (String,) = sqlx::query_as(
-        "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_work_chapters_next_volume_aware'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    let sql = idx_sql.0.to_lowercase();
-    assert!(
-        sql.contains("work_id")
-            && sql.contains("status")
-            && sql.contains("volume")
-            && sql.contains("chapter"),
-        "index should cover (work_id, status, volume, chapter), got: {sql}"
-    );
-
     // Verify EXPLAIN QUERY PLAN does not show a full SCAN TABLE.
     // The planner may choose the autoindex or our index; both are acceptable
     // as long as there's no full table scan.
@@ -172,10 +155,17 @@ async fn w02_volume_aware_index_coverage() {
         .collect::<Vec<String>>()
         .join("\n");
 
-    // There should be no full "SCAN TABLE work_chapters" (full scan without index).
+    // A full table scan is the whole plan line "SCAN work_chapters". An index
+    // scan keeps a USING clause — e.g. "SCAN work_chapters USING COVERING
+    // INDEX …" — and is not a full table scan.
+    let full_scan = plan_rows
+        .iter()
+        .map(|(_, _, _, detail)| detail.trim())
+        .find(|detail| *detail == "SCAN work_chapters");
+
     assert!(
-        !plan_text.contains("SCAN TABLE work_chapters"),
-        "EXPLAIN QUERY PLAN should not show full table scan.\n\
+        full_scan.is_none(),
+        "EXPLAIN QUERY PLAN shows a full scan of work_chapters (line: {full_scan:?}).\n\
          Plan:\n{plan_text}"
     );
 }

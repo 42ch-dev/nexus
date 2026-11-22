@@ -7,27 +7,21 @@
 //! holder-filtered knowledge view. The memory/ToM/run family keeps its own
 //! test crates until P0-T11 migrates it.
 
+#[path = "common/cli_support.rs"]
+mod cli_support;
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
+use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
 use serde_json::Value;
-use std::process::Output;
 
 /// `WorldSheet` `KeyBlock` ids the direct-core fixture seeds (stored `kb_<hex>`).
 const SHEET_A: &str = "kb_5ee70001";
 const SHEET_B: &str = "kb_5ee70002";
 const SHEET_RETAINED: &str = "kb_5ee70003";
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_bind_remove_journey_human_and_json() {

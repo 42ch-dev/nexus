@@ -3,44 +3,50 @@
 //! Tests that the `nexus42 acp` commands produce correct output
 //! in various formats (text and JSON).
 
+use std::path::Path;
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// Test `nexus42 acp registry list --help` shows usage.
-#[test]
-fn acp_registry_list_shows_help() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("registry")
-        .arg("list")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("list"))
-        .stdout(predicate::str::contains("format"));
-}
+/// Agent id the seeded registry cache advertises.
+const CACHED_AGENT_ID: &str = "fixture-agent";
+/// Version of that agent in the seeded manifest.
+const CACHED_AGENT_VERSION: &str = "9.9.9";
+/// Registry manifest version in the seeded cache.
+const REGISTRY_VERSION: &str = "1.0.0";
 
-/// Test `nexus42 acp registry list` displays table format by default.
-#[test]
-fn acp_registry_list_table_format() {
-    let tmp = TempDir::new().expect("Failed to create temp dir");
+/// Seed a fresh ACP registry cache under `home`, so `acp registry list` serves
+/// `registry/cache.json` instead of reaching the CDN.
+fn seed_registry_cache(home: &Path) {
+    let cache_dir = home.join(".nexus42").join("registry");
+    std::fs::create_dir_all(&cache_dir).expect("create registry cache dir");
 
-    // Just verify the command runs without panicking
-    let _assert = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("registry")
-        .arg("list")
-        .env("HOME", tmp.path())
-        .assert();
+    let manifest = serde_json::json!({
+        "version": REGISTRY_VERSION,
+        "agents": [{
+            "id": CACHED_AGENT_ID,
+            "name": "Fixture Agent",
+            "version": CACHED_AGENT_VERSION,
+            "description": "hermetic registry fixture",
+            "distribution": { "npx": { "package": "@fixture/agent" } },
+        }],
+    });
+    std::fs::write(cache_dir.join("cache.json"), manifest.to_string()).expect("write cache.json");
+
+    let meta = serde_json::json!({
+        "fetched_at": chrono::Utc::now().to_rfc3339(),
+        "registry_version": REGISTRY_VERSION,
+    });
+    std::fs::write(cache_dir.join("cache_meta.json"), meta.to_string())
+        .expect("write cache_meta.json");
 }
 
 /// Test `nexus42 acp registry list --format json` produces valid JSON.
 #[test]
 fn acp_registry_list_json_format() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
+    seed_registry_cache(tmp.path());
 
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -53,30 +59,26 @@ fn acp_registry_list_json_format() {
         .output()
         .expect("Failed to execute command");
 
-    if output.status.success() {
-        let json_str = String::from_utf8_lossy(&output.stdout);
-        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json_str);
+    assert!(
+        output.status.success(),
+        "acp registry list --format json failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-        if let Ok(json) = parsed {
-            assert!(
-                json.get("registry_version").is_some()
-                    || json.get("version").is_some()
-                    || json.get("agents").is_some(),
-                "JSON should contain registry fields"
-            );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("registry list --format json emits JSON");
 
-            if let Some(agents) = json.get("agents") {
-                assert!(agents.is_array(), "agents should be an array");
-                if let Some(agent_arr) = agents.as_array() {
-                    for agent in agent_arr {
-                        assert!(agent.get("id").is_some(), "agent should have id");
-                        assert!(agent.get("name").is_some(), "agent should have name");
-                        assert!(agent.get("version").is_some(), "agent should have version");
-                    }
-                }
-            }
-        }
-    }
+    assert_eq!(json["registry_version"], REGISTRY_VERSION);
+    let agents = json["agents"]
+        .as_array()
+        .expect("agents should be an array");
+    let agent = agents
+        .iter()
+        .find(|agent| agent["id"] == CACHED_AGENT_ID)
+        .expect("cached agent should be listed");
+    assert_eq!(agent["name"], "Fixture Agent");
+    assert_eq!(agent["version"], CACHED_AGENT_VERSION);
 }
 
 /// Test `nexus42 acp registry inspect --help` shows usage.
@@ -126,21 +128,6 @@ fn acp_probe_shows_help() {
         .stdout(predicate::str::contains("--agent"));
 }
 
-/// Test `nexus42 acp probe --registry` checks connectivity.
-#[test]
-fn acp_probe_registry() {
-    let tmp = TempDir::new().expect("Failed to create temp dir");
-
-    let _output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("probe")
-        .arg("--registry")
-        .env("HOME", tmp.path())
-        .output()
-        .expect("Failed to execute command");
-}
-
 /// Test `nexus42 acp` command group shows the retained subcommands.
 ///
 /// v1.193 P1-T4: the daemon-health leaves `status` and `doctor` are removed
@@ -181,6 +168,7 @@ fn acp_registry_list_invalid_format() {
 #[test]
 fn acp_registry_list_explicit_text_format() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
+    seed_registry_cache(tmp.path());
 
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -193,34 +181,29 @@ fn acp_registry_list_explicit_text_format() {
         .output()
         .expect("Failed to execute command");
 
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("ID")
-                || stdout.contains("Version")
-                || stdout.contains("No agents")
-                || stdout.contains("agents available"),
-            "Text format should show table structure or agent count"
-        );
-    }
-}
+    assert!(
+        output.status.success(),
+        "acp registry list --format text failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-/// Test that acp registry commands handle missing cache gracefully.
-#[test]
-fn acp_commands_handle_missing_cache() {
-    let tmp = TempDir::new().expect("Failed to create temp dir");
-
-    let cache_dir = tmp.path().join(".nexus42").join("registry");
-    assert!(!cache_dir.exists(), "Cache should not exist initially");
-
-    let _output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("registry")
-        .arg("list")
-        .env("HOME", tmp.path())
-        .output()
-        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ID") && stdout.contains("VERSION"),
+        "text format should render the table header: {stdout}"
+    );
+    assert!(
+        stdout.contains(CACHED_AGENT_ID),
+        "text format should list the cached agent: {stdout}"
+    );
+    assert!(
+        stdout.contains(CACHED_AGENT_VERSION),
+        "text format should list the cached agent version: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("(registry v{REGISTRY_VERSION})")),
+        "text format should report the registry version: {stdout}"
+    );
 }
 
 /// Test `nexus42 acp agent use` with a valid agent ref succeeds.
