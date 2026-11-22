@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shortcut: dev-only launcher (standalone TS service + Web dev server), upgrade: remove when nexus-service ships a first-class dev mode.
+# shortcut: dev-only launcher (starts service, health gate, web dev server), upgrade: fold into apps/nexus-service once its own dev script can launch the web dev server itself.
 #
 #   pnpm dev
 #
