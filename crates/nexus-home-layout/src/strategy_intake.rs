@@ -11,24 +11,26 @@
 //! default-off was removed at v1.244.0 (I-000509): a config that still names it
 //! is refused with the replacement named, never mapped silently onto `ir-only`.
 //! The import/export surface has no removal boundary.
+//!
+//! see docs/specs/orchestration/strategy-composition.md
 
 use std::path::Path;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Which document a user-bundle run executes.
+/// note: which document a user-bundle run executes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StrategyIntakeMode {
-    /// IR-primary (the default and only arm): a current apply runs its
+    /// note: IR-primary (the default and only arm) — a current apply runs its
     /// document through the shared applied-document resolution; a user bundle
     /// with no current apply refuses before graph construction — never a YAML
     /// fallback.
     IrOnly,
 }
 
-/// Hand-written so a descriptor recorded while the `yaml-only` arm was live
+/// why: hand-written so a descriptor recorded while the `yaml-only` arm was live
 /// refuses by name instead of reading as an unknown variant — or, worse, as
 /// `ir-only`.
 ///
@@ -55,7 +57,7 @@ impl<'de> Deserialize<'de> for StrategyIntakeMode {
     }
 }
 
-/// Whether `preset_id` resolved to a user bundle — the only source intake
+/// invariant: whether `preset_id` resolved to a user bundle — the only source intake
 /// consults an apply (or the intake key) for.
 ///
 /// This is the ONE classification both sides of the intake gate use:
@@ -70,7 +72,7 @@ pub fn is_user_strategy_bundle(preset_id: &str, source_is_directory: bool) -> bo
     !preset_id.starts_with("_system.") && source_is_directory
 }
 
-/// Read `[strategy_intake] mode` from `<nexus_home>/config.toml` for one new
+/// note: read `[strategy_intake] mode` from `<nexus_home>/config.toml` for one new
 /// admission.
 ///
 /// A missing file, a missing `[strategy_intake]` table, or a missing `mode`
@@ -192,7 +194,7 @@ mod tests {
         );
     }
 
-    /// The removed `yaml-only` arm is refused, and the refusal names the
+    /// note: the removed `yaml-only` arm is refused, and the refusal names the
     /// replacement: an operator still carrying the key is mid-incident, so a
     /// silent fall-through to `ir-only` would change which document their
     /// bundles run without saying so (I-000509).

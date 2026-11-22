@@ -1,4 +1,6 @@
 //! SQLite FFI: install connection-local writer protocol scalar functions.
+//!
+//! see crates/nexus-storage-guard/AGENTS.md
 
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
@@ -16,19 +18,19 @@ use sqlx::sqlite::SqliteConnection;
 
 use crate::{WriterAdmission, WriterConnectionContext, WriterMode};
 
-/// Live FFI userdata boxes in this process — one per registration that supplied
-/// a destructor and has not been destroyed yet.
+/// invariant: live FFI userdata boxes in this process — one per registration that
+/// supplied a destructor and has not been destroyed yet.
 ///
-/// This is the ownership invariant itself: every `sqlite3_create_function_v2`
-/// attempt adds exactly one box and `destroy_userdata` removes exactly one, so
-/// the count returns to its previous value once a connection is torn down. It
-/// is compiled only into debug builds and exists so the ownership proof can be
-/// *asserted* from a fixture instead of inferred from observable values.
+/// Every `sqlite3_create_function_v2` attempt adds exactly one box and
+/// `destroy_userdata` removes exactly one, so the count returns to its previous
+/// value once a connection is torn down. It is compiled only into debug builds
+/// and exists so the ownership proof can be *asserted* from a fixture instead of
+/// inferred from observable values.
 #[cfg(debug_assertions)]
 static LIVE_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
 
 impl WriterConnectionContext {
-    /// Live FFI userdata boxes in this process (debug builds only).
+    /// note: live FFI userdata boxes in this process (debug builds only).
     #[cfg(debug_assertions)]
     #[must_use]
     pub fn live_registration_count() -> usize {
@@ -36,7 +38,8 @@ impl WriterConnectionContext {
     }
 }
 
-/// Per-registration userdata: one `Arc` clone per successful `sqlite3_create_function_v2`.
+/// note: per-registration userdata — one `Arc` clone per successful
+/// `sqlite3_create_function_v2`.
 ///
 /// The optional admission is the pinned OS lock-resource lease. It is kept
 /// here — not in the public, pure-metadata [`WriterConnectionContext`] — so the
@@ -45,13 +48,13 @@ impl WriterConnectionContext {
 /// fails.
 struct UserData {
     context: Arc<WriterConnectionContext>,
-    /// Pinned only for its Drop: SQLite frees this box at real disposal.
+    /// why: pinned only for its Drop — SQLite frees this box at real disposal.
     _admission: Option<Arc<WriterAdmission>>,
 }
 
 /// Drop one registration's userdata box.
 ///
-/// SQLite invokes this exactly once per registration that supplied it — including
+/// invariant: SQLite invokes this exactly once per registration that supplied it —
 /// when `sqlite3_create_function_v2` **fails** (bundled `sqlite3.h:5444-5452`). The
 /// error path must therefore never call this manually.
 unsafe extern "C" fn destroy_userdata(ptr: *mut c_void) {
@@ -197,7 +200,7 @@ fn register_scalar(
     if status == SQLITE_OK {
         Ok(())
     } else {
-        // Registration failed: SQLite already invoked `destroy_userdata` once.
+        // why: registration failed — SQLite already invoked `destroy_userdata` once.
         // Manual free here would double-free (sqlite3.h:5444-5452).
         Err(sqlx::Error::Configuration(
             format!("sqlite3_create_function_v2({name}) failed: {status}").into(),
@@ -209,7 +212,7 @@ fn register_scalar(
 ///
 /// # Ownership proof
 ///
-/// One shared [`Arc<WriterConnectionContext>`] is cloned into a distinct
+/// invariant: one shared [`Arc<WriterConnectionContext>`] is cloned into a distinct
 /// `Box<UserData>` per registration. Each box carries its own `destroy_userdata`
 /// callback. On connection close (or per-function delete) SQLite drops every
 /// successful registration's box, decrementing the `Arc` until the payload is

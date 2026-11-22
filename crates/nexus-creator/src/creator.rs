@@ -6,24 +6,26 @@
 //! **Note:** The `pair_with_user` / `unpair` methods here manage the
 //! `user_id` field on the Creator aggregate. The actual `Pairing` record
 //! creation lives in `nexus-cloud-domain`. Callers should coordinate both.
+//!
+//! see crates/nexus-creator/AGENTS.md
 
 use crate::errors::CreatorError;
 use serde::{Deserialize, Serialize};
 
-/// Creator status enum — mirrors `nexus_contracts::CreatorStatus` for local use.
+/// note: mirrors `nexus_contracts::CreatorStatus` for local use.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CreatorStatus {
-    /// Creator is active and can operate.
+    /// note: creator is active and can operate.
     Active,
-    /// Creator has been archived.
+    /// note: creator has been archived.
     Archived,
-    /// Creator has been locked (admin action).
+    /// note: creator has been locked (admin action).
     Locked,
 }
 
 impl CreatorStatus {
-    /// String representation matching wire enum values.
+    /// note: string representation matching wire enum values.
     #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
@@ -34,20 +36,20 @@ impl CreatorStatus {
     }
 }
 
-/// Registration source enum — mirrors `nexus_contracts::RegistrationSource`.
+/// note: mirrors `nexus_contracts::RegistrationSource`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RegistrationSource {
-    /// Registered via CLI.
+    /// note: registered via CLI.
     Cli,
-    /// Registered via web agent.
+    /// note: registered via web agent.
     WebAgent,
-    /// Registered via platform.
+    /// note: registered via platform.
     Platform,
 }
 
 impl RegistrationSource {
-    /// String representation matching wire enum values.
+    /// note: string representation matching wire enum values.
     #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
@@ -58,61 +60,62 @@ impl RegistrationSource {
     }
 }
 
-/// Creator style profile.
+/// note: creator style profile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StyleProfile {
-    /// Tone preferences.
+    /// note: tone preferences.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tone: Option<Vec<String>>,
-    /// Narrative preferences.
+    /// note: narrative preferences.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub narrative_preferences: Option<Vec<String>>,
-    /// Forbidden patterns.
+    /// note: forbidden patterns.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forbidden_patterns: Option<Vec<String>>,
 }
 
-/// Creator aggregate — a first-class creative agent.
+/// note: creator aggregate — a first-class creative agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Creator {
-    /// Schema version.
+    /// note: schema version.
     pub schema_version: u32,
-    /// Unique creator identifier.
+    /// note: unique creator identifier.
     pub creator_id: String,
-    /// Optional linked user ID.
+    /// note: optional linked user ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    /// Display name.
+    /// note: display name.
     pub display_name: String,
-    /// Creator status string.
+    /// note: creator status string.
     pub status: String,
-    /// Whether this creator is platform-owned.
+    /// note: whether this creator is platform-owned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_platform_owned: Option<bool>,
-    /// API key reference.
+    /// note: API key reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_ref: Option<String>,
-    /// Registration source string.
+    /// note: registration source string.
     pub registration_source: String,
-    /// Persona summary.
+    /// note: persona summary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persona_summary: Option<String>,
-    /// Style profile.
+    /// note: style profile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style_profile: Option<StyleProfile>,
-    /// Experience revision counter.
+    /// note: experience revision counter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experience_revision: Option<u64>,
-    /// Creation timestamp.
+    /// note: creation timestamp.
     pub created_at: String,
-    /// Last update timestamp.
+    /// note: last update timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
 }
 
 impl Creator {
     /// Register a new creator (independent of User).
-    /// Per roadmap §3.1.2: Creator can register without User login.
+    ///
+    /// why: per roadmap §3.1.2 a Creator can register without a User login.
     #[must_use]
     pub fn register(
         creator_id: &str,
@@ -139,9 +142,8 @@ impl Creator {
 
     /// Link this creator to a user.
     ///
-    /// Sets the `user_id` field on the Creator aggregate.
-    /// The actual `Pairing` record must be created separately in
-    /// `nexus-cloud-domain`.
+    /// note: sets only the `user_id` field — the actual `Pairing` record must be created
+    /// separately in `nexus-cloud-domain`.
     ///
     /// # Errors
     /// Returns `Err(CreatorError::InvalidState)` if not active.
@@ -160,7 +162,8 @@ impl Creator {
     /// Unlink this creator from its user.
     ///
     /// # Errors
-    /// Returns `Err(CreatorError::CreatorNotPaired)` if no user linked.
+    ///
+    /// note: returns `Err(CreatorError::CreatorNotPaired)` if no user is linked.
     pub fn unlink_user(&mut self) -> Result<(), CreatorError> {
         if self.user_id.is_none() {
             return Err(CreatorError::CreatorNotPaired);
@@ -170,7 +173,7 @@ impl Creator {
         Ok(())
     }
 
-    /// Update style profile.
+    /// note: update style profile.
     pub fn update_style_profile(
         &mut self,
         tone: Vec<String>,
@@ -193,14 +196,14 @@ impl Creator {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Increment experience revision (after experience distillation).
+    /// note: increment experience revision, after experience distillation.
     pub fn increment_experience_revision(&mut self) {
         let rev = self.experience_revision.unwrap_or(0);
         self.experience_revision = Some(rev + 1);
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Check if creator can persist experience (requires active pairing).
+    /// note: check if creator can persist experience (requires active pairing).
     #[must_use]
     pub fn can_persist_experience(&self) -> bool {
         self.user_id.is_some() && self.status == CreatorStatus::Active.as_str()
@@ -209,7 +212,8 @@ impl Creator {
     /// Archive this creator.
     ///
     /// # Errors
-    /// Returns `Err(CreatorError::AlreadyInState)` if already archived.
+    ///
+    /// note: returns `Err(CreatorError::AlreadyInState)` if already archived.
     pub fn archive(&mut self) -> Result<(), CreatorError> {
         if self.status == CreatorStatus::Archived.as_str() {
             return Err(CreatorError::AlreadyInState("archived".to_string()));
@@ -222,7 +226,8 @@ impl Creator {
     /// Lock this creator (admin action).
     ///
     /// # Errors
-    /// Returns `Err(CreatorError::AlreadyInState)` if already locked.
+    ///
+    /// note: returns `Err(CreatorError::AlreadyInState)` if already locked.
     pub fn lock(&mut self) -> Result<(), CreatorError> {
         if self.status == CreatorStatus::Locked.as_str() {
             return Err(CreatorError::AlreadyInState("locked".to_string()));
@@ -232,8 +237,6 @@ impl Creator {
         Ok(())
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::Creator> for Creator {
     fn from(c: nexus_contracts::Creator) -> Self {
@@ -416,7 +419,7 @@ mod tests {
         creator.archive().unwrap();
         assert_eq!(creator.status, "archived");
 
-        // Locking archived should work (admin override)
+        // why: locking archived must work (admin override).
         creator.lock().unwrap();
         assert_eq!(creator.status, "locked");
     }

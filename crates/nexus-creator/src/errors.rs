@@ -1,38 +1,40 @@
 //! Creator-domain error types.
 //!
 //! Subset of domain errors relevant to the Creator aggregate and local identity.
+//!
+//! see crates/nexus-creator/AGENTS.md
 
 use thiserror::Error;
 
-/// Error type for Creator aggregate and local identity operations.
+/// note: error type for Creator aggregate and local identity operations.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CreatorError {
-    /// Entity is already in the target state.
+    /// note: entity is already in the target state.
     #[error("entity is already in state: {0}")]
     AlreadyInState(String),
 
-    /// Entity is not in the expected state.
+    /// note: entity is not in the expected state.
     #[error("entity is not in expected state: expected {expected}, got {actual}")]
     InvalidState {
-        /// Expected state.
+        /// note: expected state.
         expected: String,
-        /// Actual state.
+        /// note: actual state.
         actual: String,
     },
 
-    /// Creator is not paired with a user (requires active pairing).
+    /// note: creator is not paired with a user (requires active pairing).
     #[error("creator is not paired with any user")]
     CreatorNotPaired,
 
-    /// A required field is missing or invalid.
+    /// note: a required field is missing or invalid.
     #[error("validation error: {0}")]
     ValidationError(String),
 
-    /// Invalid ID format.
+    /// note: invalid ID format.
     #[error("invalid ID format: {0}")]
     InvalidIdFormat(String),
 
-    /// Creator quota exceeded.
+    /// note: creator quota exceeded.
     #[error("creator quota exceeded: {0}")]
     CreatorQuotaExceeded(String),
 }

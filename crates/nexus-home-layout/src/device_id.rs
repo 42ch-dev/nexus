@@ -8,27 +8,29 @@
 //! value read/write. `nexus-cloud-sync::device_id` re-exports these items, so
 //! the `nexus_cloud_sync::device_id::get_or_create_device_id` call site in
 //! `apps/nexus42` is unchanged.
+//!
+//! see crates/nexus-home-layout/AGENTS.md
 
 use std::path::Path;
 
-/// Errors that can occur when reading or creating a device ID.
+/// note: errors that can occur when reading or creating a device ID.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceIdError {
-    /// Failed to read or write the device ID file.
+    /// note: failed to read or write the device ID file.
     #[error("device ID IO error: {0}")]
     Io(#[from] std::io::Error),
-    /// Failed to generate a UUID.
+    /// note: failed to generate a UUID.
     #[error("UUID generation failed: {0}")]
     Uuid(#[from] uuid::Error),
 }
 
-/// Maximum number of retries when the device-id file exists but is empty
+/// note: maximum number of retries when the device-id file exists but is empty
 /// (another thread may be writing concurrently).
 const MAX_EMPTY_RETRIES: u8 = 3;
 
 /// Get the existing device ID or create a new one.
 ///
-/// `home` is the **raw user home** (`$HOME`) — the function resolves the
+/// note: `home` is the **raw user home** (`$HOME`) — the function resolves the
 /// canonical `~/.nexus42/device-id` itself via [`crate::device_id_path`]
 /// (which joins `.nexus42`). Callers MUST NOT pre-join the nexus root:
 /// passing `$HOME/.nexus42` produces a stray `.nexus42/.nexus42/device-id`.
@@ -43,7 +45,6 @@ pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
     use std::io::Write;
     let path = crate::device_id_path(home);
 
-    // Ensure parent directory exists.
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -59,7 +60,6 @@ pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
                 let new_id = uuid::Uuid::new_v4().to_string();
                 file.write_all(new_id.as_bytes())?;
 
-                // Set 0600 permissions on Unix.
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -83,9 +83,8 @@ pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
                             ),
                         )));
                     }
-                    // Empty file — another thread may be writing.
-                    // Wait briefly and retry rather than removing,
-                    // to avoid NotFound races for concurrent readers.
+                    // why: another thread may be writing — wait and retry instead of
+                    // removing, to avoid NotFound races for concurrent readers.
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     continue;
                 }
@@ -193,7 +192,6 @@ mod tests {
         let id = get_or_create_device_id(tmp.path()).unwrap();
         assert_eq!(id, "pre-existing-uuid");
 
-        // Ensure the file was not overwritten with a new UUID.
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "pre-existing-uuid");
     }

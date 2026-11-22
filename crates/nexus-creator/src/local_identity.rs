@@ -9,18 +9,18 @@
 use crate::errors::CreatorError;
 use serde::{Deserialize, Serialize};
 
-/// Local identity type enum.
+/// note: local identity type enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalIdentityType {
-    /// Ephemeral identity — no persistent storage, disposable.
+    /// note: ephemeral — no persistent storage, disposable.
     Anonymous,
-    /// Persistent identity — stored in `SQLite`, survives restarts.
+    /// note: stored in `SQLite`, survives restarts.
     Persistent,
 }
 
 impl LocalIdentityType {
-    /// String representation matching JSON Schema enum values.
+    /// note: string representation matching JSON Schema enum values.
     #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
@@ -50,25 +50,25 @@ impl std::str::FromStr for LocalIdentityType {
 
 /// Local creator identity aggregate.
 ///
-/// Represents a creator identity that exists entirely locally, without
-/// platform dependency. Can optionally be linked to a platform Creator
-/// via the Pairing flow.
+/// note: represents a creator identity that exists entirely locally, without
+/// platform dependency; it can optionally be linked to a platform Creator via the
+/// Pairing flow.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalIdentity {
-    /// Schema version.
+    /// note: schema version.
     pub schema_version: u32,
-    /// Unique creator identifier.
+    /// note: unique creator identifier.
     pub creator_id: String,
-    /// Identity type (anonymous or persistent).
+    /// note: identity type (anonymous or persistent).
     pub identity_type: LocalIdentityType,
-    /// Optional display name.
+    /// note: optional display name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    /// Creation timestamp.
+    /// note: creation timestamp.
     pub created_at: String,
-    /// Whether linked to platform.
+    /// note: whether linked to platform.
     pub platform_linked: bool,
-    /// Optional platform creator ID.
+    /// note: optional platform creator ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform_creator_id: Option<String>,
 }
@@ -76,8 +76,8 @@ pub struct LocalIdentity {
 impl LocalIdentity {
     /// Create an anonymous (ephemeral) identity.
     ///
-    /// Generates a `ctr_anon` + random hex ID. The caller may choose
-    /// not to persist this identity — it is designed for disposable use.
+    /// note: generates a `ctr_anon` + random hex ID; the caller may choose not to persist
+    /// this identity — it is designed for disposable use.
     #[must_use]
     pub fn create_anonymous() -> Self {
         let id = generate_anonymous_id();
@@ -94,8 +94,8 @@ impl LocalIdentity {
 
     /// Create a persistent local identity.
     ///
-    /// Generates a `ctr_local` + random hex ID. The caller should persist
-    /// this identity in the local `SQLite` database.
+    /// note: generates a `ctr_local` + random hex ID; the caller should persist this
+    /// identity in the local `SQLite` database.
     #[must_use]
     pub fn create_persistent(display_name: Option<&str>) -> Self {
         let id = generate_local_id();
@@ -112,11 +112,12 @@ impl LocalIdentity {
 
     /// Link this local identity to a platform Creator.
     ///
-    /// Once linked, the identity has a corresponding platform Creator
-    /// and can participate in platform features.
+    /// note: once linked, the identity has a corresponding platform Creator and can
+    /// participate in platform features.
     ///
     /// # Errors
-    /// Returns `Err(CreatorError::...)` if validation fails.
+    /// Returns `Err(CreatorError::AlreadyInState)` when already linked, and
+    /// `Err(CreatorError::InvalidIdFormat)` when the id is not a `CreatorId`.
     pub fn link_to_platform(&mut self, platform_creator_id: &str) -> Result<(), CreatorError> {
         if self.platform_linked {
             return Err(CreatorError::AlreadyInState("platform_linked".to_string()));
@@ -132,26 +133,24 @@ impl LocalIdentity {
         Ok(())
     }
 
-    /// Check if this identity is anonymous (ephemeral).
+    /// note: check if this identity is anonymous (ephemeral).
     #[must_use]
     pub fn is_anonymous(&self) -> bool {
         self.identity_type == LocalIdentityType::Anonymous
     }
 
-    /// Check if this identity is persistent.
+    /// note: check if this identity is persistent.
     #[must_use]
     pub fn is_persistent(&self) -> bool {
         self.identity_type == LocalIdentityType::Persistent
     }
 
-    /// Check if this identity is linked to a platform Creator.
+    /// note: check if this identity is linked to a platform Creator.
     #[must_use]
     pub const fn is_linked(&self) -> bool {
         self.platform_linked
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 use nexus_contracts::local::domain::local_identity::IdentityType as ContractIdentityType;
 
@@ -193,11 +192,9 @@ impl From<LocalIdentity> for nexus_contracts::local::domain::LocalIdentity {
     }
 }
 
-// ── ID generation helpers ──────────────────────────────────────────────
-
 /// Generate an anonymous identity ID: `ctr_anon` + 12 random hex chars.
 ///
-/// Format: `ctr_anonA1b2C3d4E5f6` (within `CreatorId` `^ctr_[a-zA-Z0-9]+$` pattern).
+/// note: format `ctr_anonA1b2C3d4E5f6`, within the `CreatorId` `^ctr_[a-zA-Z0-9]+$` pattern.
 fn generate_anonymous_id() -> String {
     let random: String = uuid::Uuid::new_v4()
         .to_string()
@@ -210,7 +207,7 @@ fn generate_anonymous_id() -> String {
 
 /// Generate a persistent local identity ID: `ctr_local` + 12 random hex chars.
 ///
-/// Format: `ctr_localA1b2C3d4E5f6` (within `CreatorId` `^ctr_[a-zA-Z0-9]+$` pattern).
+/// note: format `ctr_localA1b2C3d4E5f6`, within the `CreatorId` `^ctr_[a-zA-Z0-9]+$` pattern.
 fn generate_local_id() -> String {
     let random: String = uuid::Uuid::new_v4()
         .to_string()
@@ -221,7 +218,7 @@ fn generate_local_id() -> String {
     format!("ctr_local{random}")
 }
 
-/// Validate a string matches the `CreatorId` pattern `^ctr_[a-zA-Z0-9]+$`.
+/// note: validate a string matches the `CreatorId` pattern `^ctr_[a-zA-Z0-9]+$`.
 pub fn is_valid_creator_id(s: &str) -> bool {
     s.starts_with("ctr_") && s.len() > 4 && s[4..].chars().all(|c| c.is_ascii_alphanumeric())
 }

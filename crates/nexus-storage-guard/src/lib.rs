@@ -1,6 +1,8 @@
 //! Connection-local SQLite scalar functions for the workspace writer protocol.
 //!
 //! All FFI is confined to [`sqlite`].
+//!
+//! see crates/nexus-storage-guard/AGENTS.md
 
 mod sqlite;
 
@@ -11,8 +13,8 @@ use sqlx::sqlite::SqliteConnection;
 
 /// The complete OS admission a guarded connection belongs to.
 ///
-/// These are the *originally acquired* admission lock handles: the shared
-/// migration lock and, for an engine owner, the exclusive engine lock. The
+/// invariant: these are the *originally acquired* admission lock handles — the
+/// shared migration lock and, for an engine owner, the exclusive engine lock. The
 /// writer guard and every guarded connection share ownership of one value, so
 /// the OS locks stay held exactly as long as the last real guarded connection
 /// (or the guard) exists and are released when SQLite destroys a connection's
@@ -40,7 +42,7 @@ impl std::fmt::Debug for WriterAdmission {
     }
 }
 
-/// Immutable connection-local writer context installed as SQLite userdata.
+/// note: immutable connection-local writer context, installed as SQLite userdata.
 #[derive(Debug, Clone)]
 pub struct WriterConnectionContext {
     pub writer_id: String,
@@ -50,7 +52,7 @@ pub struct WriterConnectionContext {
     pub engine_epoch: Option<i64>,
 }
 
-/// Writer admission mode mirrored in SQL as text.
+/// note: writer admission mode, mirrored in SQL as text by `as_sql`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriterMode {
     Direct,
@@ -69,7 +71,7 @@ impl WriterMode {
     }
 }
 
-/// Install the five protocol scalar functions on a single SQLite connection.
+/// note: install the five protocol scalar functions on a single SQLite connection.
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,

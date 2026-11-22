@@ -2,6 +2,8 @@
 //!
 //! Single implementation consumed by daemon, core, and CLI — includes default
 //! workspace slug fallback and legacy `config.json` migration.
+//!
+//! see crates/nexus-home-layout/AGENTS.md
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,32 +12,32 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
-/// On-disk `[memory_provider]` table of `~/.nexus42/config.toml`.
+/// note: on-disk `[memory_provider]` table of `~/.nexus42/config.toml`.
 ///
-/// Shape contract: `n3-provider-binding.md` §2.2. Remote carries only
+/// Shape contract: `docs/specs/architecture/spoke-memory-provider-binding.md`. Remote carries only
 /// references — never an identity seed, token, capability proof or credential
 /// body. Absent table and `kind = "local"` both select the local provider.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum MemoryProviderConfig {
-    /// Built-in local provider.
+    /// note: built-in local provider.
     Local,
-    /// Remote Connect provider reference.
+    /// note: remote Connect provider reference.
     Remote {
-        /// Provider space the selected authority serves.
+        /// note: provider space the selected authority serves.
         space_id: String,
-        /// Operator-provisioned credential file id (not the secret itself).
+        /// note: operator-provisioned credential file id (not the secret itself).
         credential_id: String,
-        /// `wss://` endpoint, or `ws://` for loopback tests only.
+        /// note: `wss://` endpoint, or `ws://` for loopback tests only.
         connect_endpoint: String,
-        /// Remote Ed25519 public key, 64 lowercase hex characters.
+        /// note: remote Ed25519 public key, 64 lowercase hex characters.
         remote_pubkey_hex: String,
-        /// Trusted remote peer ids (fail-closed handshake).
+        /// note: trusted remote peer ids (fail-closed handshake).
         allowlist: Vec<String>,
     },
 }
 
-/// Subset of CLI config persisted under `~/.nexus42/config.toml`.
+/// note: subset of CLI config persisted under `~/.nexus42/config.toml`.
 ///
 /// The `[memory_provider]` table is deliberately not part of this snapshot:
 /// it is written and read by the memory-provider owner only
@@ -49,7 +51,7 @@ pub struct CliConfigSnapshot {
     pub active_workspace_slug_by_creator: HashMap<String, String>,
 }
 
-/// Whether `config.toml`'s directory entry is genuinely absent.
+/// note: whether `config.toml`'s directory entry is genuinely absent.
 ///
 /// `Path::exists` follows the final link, so a dangling config link also reads
 /// as absent and would let the legacy migration fill its target. Only
@@ -64,7 +66,7 @@ fn toml_entry_absent(toml_path: &Path) -> Result<bool, anyhow::Error> {
 }
 
 impl CliConfigSnapshot {
-    /// Load from `config.toml` with automatic migration from legacy `config.json`.
+    /// note: load from `config.toml` with automatic migration from legacy `config.json`.
     ///
     /// A provisioned `config.toml` is read without any write or lock. The legacy
     /// migration publishes `config.toml`, so it takes the shared writer lock and
@@ -97,7 +99,7 @@ impl CliConfigSnapshot {
         Ok(Self::default())
     }
 
-    /// Read `config.toml` (absent/empty → defaults).
+    /// note: read `config.toml` (absent/empty → defaults).
     fn read_document(toml_path: &Path) -> Result<Self, anyhow::Error> {
         let text = std::fs::read_to_string(toml_path)?;
         if text.trim().is_empty() {
@@ -106,7 +108,7 @@ impl CliConfigSnapshot {
         Ok(toml::from_str(&text)?)
     }
 
-    /// Migrate legacy `config.json` under the shared writer lock.
+    /// note: migrate legacy `config.json` under the shared writer lock.
     ///
     /// The migration replaces the whole shared document, so it must not run
     /// beside a locked writer: it acquires the same lock and re-checks the TOML
@@ -126,7 +128,7 @@ impl CliConfigSnapshot {
         }
         let text = match std::fs::read_to_string(json_path) {
             Ok(text) => text,
-            // A concurrent loader can pass the same pre-lock check and complete
+            // why: a concurrent loader can pass the same pre-lock check and complete
             // an *empty* legacy migration first: it renames the JSON away and
             // creates no TOML. Under this lock that is the documented "no legacy
             // document" state, not a read fault. Every other I/O error (and
@@ -143,7 +145,7 @@ impl CliConfigSnapshot {
         match serde_json::from_str::<Self>(&text) {
             Ok(cfg) => {
                 let toml_str = toml::to_string_pretty(&cfg)?;
-                // Publish atomically: a concurrent reader (including the
+                // why: publish atomically — a concurrent reader (including the
                 // lock-free `ReadOnly` snapshot, I-000291) must never see a
                 // truncated `config.toml` from this legacy migration.
                 crate::config_lock::publish_document(nexus_root, &toml_str)?;
@@ -154,7 +156,7 @@ impl CliConfigSnapshot {
         }
     }
 
-    /// Load from `config.toml` without ever migrating.
+    /// note: load from `config.toml` without ever migrating.
     ///
     /// The read side of a `ReadOnly` open must not write anything: a home whose
     /// `.nexus42` is readable but not writable still serves an already-provisioned
@@ -185,11 +187,11 @@ impl CliConfigSnapshot {
         Ok(Self::default())
     }
 
-    /// Parse a legacy `config.json` snapshot without publishing or renaming it.
+    /// note: parse a legacy `config.json` snapshot without publishing or renaming it.
     fn parse_legacy_document(json_path: &Path) -> Result<Self, anyhow::Error> {
         let text = match std::fs::read_to_string(json_path) {
             Ok(text) => text,
-            // A concurrent migrator can rename the file away between the
+            // why: a concurrent migrator can rename the file away between the
             // existence test and this read: the documented "no legacy document"
             // state, not a read fault.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -234,7 +236,7 @@ pub fn resolve_state_db_path(
     Ok(crate::workspace_state_db_path(user_home, cid, &slug))
 }
 
-/// Read the active `creator_id` from CLI config (migration-aware).
+/// note: read the active `creator_id` from CLI config (migration-aware).
 #[must_use]
 pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
     if !nexus_home.is_absolute()
@@ -249,7 +251,7 @@ pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
         .and_then(|cfg| cfg.active_creator_id)
 }
 
-/// Read the active workspace slug for `creator_id` (default `"default"`).
+/// note: read the active workspace slug for `creator_id` (default `"default"`).
 #[must_use]
 pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option<String> {
     Some(
@@ -259,7 +261,7 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
     )
 }
 
-/// How `config.toml` records the workspace slug for one creator.
+/// note: how `config.toml` records the workspace slug for one creator.
 ///
 /// [`Self::Unselected`] is the "never chose" state: the rest of the process
 /// resolves that same config to the default partition through
@@ -268,18 +270,18 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
 /// treating both as an explicit selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceSlugSelection {
-    /// No slug recorded for the creator (an absent or empty entry, or no
+    /// note: no slug recorded for the creator (an absent or empty entry, or no
     /// loadable `config.toml`), with the default partition that resolution
     /// yields.
     Unselected(String),
-    /// The non-empty value recorded for the creator, verbatim: never
+    /// note: the non-empty value recorded for the creator, verbatim — never
     /// defaulted, so the caller can judge an unusable selection itself. An
     /// empty recorded value is [`Self::Unselected`], matching
     /// [`CliConfigSnapshot::workspace_slug_for_creator`].
     Recorded(String),
 }
 
-/// Read the workspace slug recorded for `creator_id`, distinguishing "never
+/// note: read the workspace slug recorded for `creator_id`, distinguishing "never
 /// selected" from "recorded".
 #[must_use]
 pub fn workspace_slug_selection(nexus_home: &Path, creator_id: &str) -> WorkspaceSlugSelection {
@@ -293,7 +295,7 @@ pub fn workspace_slug_selection(nexus_home: &Path, creator_id: &str) -> Workspac
         )
 }
 
-/// Read the optional `[memory_provider]` table.
+/// note: read the optional `[memory_provider]` table.
 ///
 /// Independent of [`CliConfigSnapshot`] so a malformed provider table fails
 /// provider selection only, never creator/workspace resolution. An absent
@@ -307,7 +309,8 @@ pub fn read_memory_provider_config(
     nexus_root: &Path,
 ) -> Result<Option<MemoryProviderConfig>, anyhow::Error> {
     let path = nexus_root.join("config.toml");
-    // I-000304: an absent entry is Local; a dangling config link's followed NotFound fails closed.
+    // why: I-000304 — an absent entry is Local; a dangling config link's followed NotFound
+    // fails closed.
     match std::fs::symlink_metadata(&path) {
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -326,7 +329,7 @@ pub fn read_memory_provider_config(
     })
 }
 
-/// Read `active_creator_id` without failing on missing config.
+/// note: read `active_creator_id` without failing on missing config.
 #[must_use]
 pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
     CliConfigSnapshot::load(nexus_root)
@@ -334,7 +337,7 @@ pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
         .and_then(|cfg| cfg.active_creator_id)
 }
 
-/// Returns `None` when no creator is selected.
+/// note: returns `None` when no creator is selected.
 #[must_use]
 pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<PathBuf> {
     let cfg = CliConfigSnapshot::load(nexus_root).ok()?;
@@ -343,7 +346,7 @@ pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<
     Some(crate::workspace_state_db_path(user_home, cid, &slug))
 }
 
-/// [`try_resolve_state_db_path`] without the legacy migration.
+/// note: [`try_resolve_state_db_path`] without the legacy migration.
 ///
 /// The read-only counterpart: a legacy `config.json` snapshot is parsed in
 /// place, so resolving the path on a non-writable home creates no lock, no
@@ -356,7 +359,7 @@ pub fn try_resolve_state_db_path_read_only(user_home: &Path, nexus_root: &Path) 
     Some(crate::workspace_state_db_path(user_home, cid, &slug))
 }
 
-/// Test-only ordering rendezvous for the legacy migration.
+/// note: test-only ordering rendezvous for the legacy migration.
 ///
 /// The migration must be past its pre-lock existence check and still held before
 /// it acquires the writer lock, so a test can commit a newer document into that
@@ -371,7 +374,7 @@ mod migration_rendezvous {
 
     static PAUSE: Mutex<Option<Pause>> = Mutex::new(None);
 
-    /// Arm the rendezvous for one home. Returns the arrival receiver and the
+    /// note: arm the rendezvous for one home. Returns the arrival receiver and the
     /// release sender; the caller observes the hold and then releases it.
     pub(super) fn arm(home: &Path) -> (Receiver<()>, Sender<()>) {
         let (arrived_tx, arrived_rx) = std::sync::mpsc::channel();
@@ -380,7 +383,7 @@ mod migration_rendezvous {
         (arrived_rx, release_tx)
     }
 
-    /// Hold the migration until the test that armed this home releases it.
+    /// note: hold the migration until the test that armed this home releases it.
     pub(super) fn hold(home: &Path) {
         let armed = {
             let mut slot = PAUSE.lock().expect("rendezvous");
@@ -400,11 +403,11 @@ mod migration_rendezvous {
 mod tests {
     use super::*;
 
-    /// The rendezvous is process-global and armed per home; the tests that use
+    /// note: the rendezvous is process-global and armed per home; the tests that use
     /// it must not overlap or one would replace the other's arming.
     static RENDEZVOUS_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// BUG-02: a legacy migration must not overwrite a newer document that a
+    /// note: BUG-02 — a legacy migration must not overwrite a newer document that a
     /// locked writer committed while the migration waited. The migration is
     /// held deterministically between its pre-lock check and the acquisition.
     #[test]
@@ -422,10 +425,10 @@ mod tests {
         let loader_root = root.clone();
         let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
 
-        // The migration passed its pre-check and is held before the lock.
+        // why: the migration passed its pre-check and is held before the lock.
         arrived.recv().expect("the migration reached the hold");
 
-        // A writer commits a newer document while the migration cannot run.
+        // why: a writer commits a newer document while the migration cannot run.
         crate::config_lock::publish_document(
             &root,
             "active_creator_id = \"ctr_new\"\n\n[agent_profile]\nname = \"kept\"\n",
@@ -454,7 +457,7 @@ mod tests {
         );
     }
 
-    /// A provisioned `config.toml` is read without taking the writer lock or
+    /// note: a provisioned `config.toml` is read without taking the writer lock or
     /// writing anything, so an unwritable home still resolves its selection.
     #[test]
     fn a_provisioned_document_is_read_without_the_lock() {
@@ -474,7 +477,7 @@ mod tests {
         );
     }
 
-    /// BUG-04: a loader that passed its pre-lock check while another loader
+    /// note: BUG-04 — a loader that passed its pre-lock check while another loader
     /// completed an *empty* legacy migration must see the documented default,
     /// not a `NotFound` fault. Only the disappeared-JSON case is treated that
     /// way; every other read error still fails.
@@ -489,10 +492,10 @@ mod tests {
         let loader_root = root.clone();
         let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
 
-        // The loader passed its pre-check and is held before the lock.
+        // why: the loader passed its pre-check and is held before the lock.
         arrived.recv().expect("the migration reached the hold");
 
-        // The concurrent loader completes the empty migration: the JSON is
+        // why: the concurrent loader completes the empty migration — the JSON is
         // renamed away and no TOML is created.
         {
             let _lock = crate::config_lock::acquire(&root).expect("the migration lock");
@@ -508,7 +511,7 @@ mod tests {
         assert_eq!(snapshot.active_creator_id, None);
     }
 
-    /// I-000304 (R5): a dangling `config.toml` link is an existing entry, not
+    /// note: I-000304 (R5) — a dangling `config.toml` link is an existing entry, not
     /// genuine absence, so a retained valid legacy document is never migrated
     /// into the link's creatable target. The link appears after the pre-lock
     /// probe and the locked recheck refuses it, leaving the JSON unmigrated.
@@ -525,10 +528,10 @@ mod tests {
         let loader_root = root.clone();
         let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
 
-        // The migration passed its pre-lock probe and is held before the lock.
+        // why: the migration passed its pre-lock probe and is held before the lock.
         arrived.recv().expect("the migration reached the hold");
 
-        // The entry appears as a link whose target does not exist.
+        // why: the entry appears as a link whose target does not exist.
         std::os::unix::fs::symlink("creatable.toml", root.join("config.toml"))
             .expect("dangling config link");
         release.send(()).expect("release the migration");

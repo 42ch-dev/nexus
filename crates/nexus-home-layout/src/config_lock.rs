@@ -30,32 +30,34 @@
 //! before the rename (through the audited `nexus-config-metadata` bridge), and a
 //! policy that cannot be captured or applied refuses the publication instead of
 //! silently widening access.
+//!
+//! see crates/nexus-home-layout/AGENTS.md
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const LOCK_FILE: &str = "config.toml.lock";
-/// A normal hold is milliseconds (a small TOML document, at most two fsyncs).
+/// why: a normal hold is milliseconds (a small TOML document, at most two fsyncs).
 /// Ten seconds is a stale heuristic, not proof of death: a paused or suspended
 /// live holder can look stale, and stealing can transiently leave two holders.
 /// Safe only because all five writers are user-paced — nothing enforces that.
 const STALE_AFTER: Duration = Duration::from_secs(10);
 const BACKOFF_START: Duration = Duration::from_millis(25);
 const BACKOFF_CAP: Duration = Duration::from_millis(500);
-/// A steal retries while the stale file cannot be unlinked (a root-owned or
+/// why: a steal retries while the stale file cannot be unlinked (a root-owned or
 /// immutable file: EACCES/EPERM). Past this deadline the acquisition fails
 /// instead of hot-looping — the same 2× stale window the service and desktop
 /// writers use.
 const STEAL_DEADLINE: Duration = Duration::from_secs(20);
-/// Bounded link-following for a symlinked `config.toml`, matching the common OS
+/// why: bounded link-following for a symlinked `config.toml`, matching the common OS
 /// limit so a link loop fails instead of spinning.
 const MAX_SYMLINK_HOPS: usize = 40;
 
-/// The held lock: unlinking on drop releases it on every return path.
+/// note: the held lock — unlinking on drop releases it on every return path.
 pub struct ConfigLock {
     path: PathBuf,
-    /// Ownership token written into the lock file; release only unlinks a lock
+    /// note: ownership token written into the lock file; release only unlinks a lock
     /// this holder still owns.
     token: String,
 }
@@ -66,7 +68,7 @@ impl Drop for ConfigLock {
     }
 }
 
-/// Release the lock, but only when this holder still owns it.
+/// note: release the lock, but only when this holder still owns it.
 ///
 /// A holder stalled past [`STALE_AFTER`] is stolen; unlinking on resume would
 /// delete the *new* owner's lock and admit a third writer into the second
@@ -84,14 +86,14 @@ fn release(path: &Path, token: &str) {
                 tracing::warn!(%error, "config.toml.lock release failed");
             }
         }
-        // Stolen or rewritten: the file belongs to another writer now.
+        // why: stolen or rewritten — the file belongs to another writer now.
         Ok(_) => tracing::warn!("config.toml.lock was stolen; leaving the new owner's lock"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => tracing::warn!(%error, "config.toml.lock release read failed"),
     }
 }
 
-/// Publish the complete `config.toml` document atomically.
+/// note: publish the complete `config.toml` document atomically.
 ///
 /// The fixed-`config.toml` caller of [`publish_document_at`]; every daemon-home
 /// writer goes through this form.
@@ -104,7 +106,7 @@ pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()
     publish_document_at(&nexus_home.join("config.toml"), contents)
 }
 
-/// Publish a complete document at `requested_path` atomically.
+/// note: publish a complete document at `requested_path` atomically.
 ///
 /// The general form of [`publish_document`]: the same probe, policy capture,
 /// sealed staging and ordered reapplication, for a target that is not the
@@ -158,7 +160,7 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
     let existing = existing_document(&target)?;
 
     if existing.is_some() {
-        // A hard link shares its inode with another path; an atomic replacement
+        // why: a hard link shares its inode with another path — an atomic replacement
         // would silently detach that path instead of updating it. The count is
         // read natively on every platform, and an indeterminate count refuses.
         if nexus_config_metadata::link_count(&target)? > 1 {
@@ -170,7 +172,7 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
                 ),
             ));
         }
-        // Retain the previous write boundary: the rename is authorized by the
+        // why: retain the previous write boundary — the rename is authorized by the
         // directory and must not replace a document this process may not write.
         let _authorized = std::fs::OpenOptions::new().write(true).open(&target)?;
     }
@@ -180,7 +182,7 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
         None => None,
     };
 
-    // The staging directory must share the target's directory: a symlinked
+    // why: the staging directory must share the target's directory — a symlinked
     // document can live outside the nexus home, and a cross-filesystem rename
     // would not be atomic (or would fail outright).
     let parent = target.parent().unwrap_or(requested_path);
@@ -194,7 +196,7 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
     after_staging(&staging_directory);
 
     let staged = stage_document(staging.file(), contents, policy.as_ref(), &staging_path);
-    // Close the staging handle before the rename publishes the bytes.
+    // why: close the staging handle before the rename publishes the bytes.
     drop(staging);
     if let Err(error) = staged {
         return Err(cleanup_staging(&staging_path, &staging_directory, error));
@@ -204,8 +206,8 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
         return Err(cleanup_staging(&staging_path, &staging_directory, error));
     }
 
-    // The target now owns the document, so the staging directory is empty. A
-    // leftover empty directory is cosmetic: report it, never fail the publish.
+    // note: the target now owns the document, so the staging directory is empty. A
+    // leftover empty directory is cosmetic — report it, never fail the publish.
     if let Err(error) = std::fs::remove_dir(&staging_directory) {
         tracing::warn!(
             %error,
@@ -216,7 +218,7 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
     Ok(())
 }
 
-/// Remove the staged file and its directory after a failed publication.
+/// note: remove the staged file and its directory after a failed publication.
 ///
 /// The primary failure keeps its kind and message; every cleanup failure and
 /// its exact leftover path is appended so the caller sees both. A failed
@@ -231,7 +233,7 @@ fn cleanup_staging(staging: &Path, directory: &Path, primary: std::io::Error) ->
         };
         match outcome {
             Ok(()) => {}
-            // Nothing was written at this path (e.g. the directory is gone).
+            // why: nothing was written at this path (e.g. the directory is gone).
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 failures.push(format!("{} could not be removed: {error}", path.display()));
@@ -252,7 +254,7 @@ fn cleanup_staging(staging: &Path, directory: &Path, primary: std::io::Error) ->
     )
 }
 
-/// Write the staged document and apply the captured access policy.
+/// note: write the staged document and apply the captured access policy.
 fn stage_document(
     file: &std::fs::File,
     contents: &str,
@@ -261,13 +263,13 @@ fn stage_document(
 ) -> std::io::Result<()> {
     let mut file = file;
     file.write_all(contents.as_bytes())?;
-    // Complete the bytes before the rename publishes them: a crash after the
+    // why: complete the bytes before the rename publishes them — a crash after the
     // rename must not leave a shorter, empty-looking document.
     file.sync_all()?;
     nexus_config_metadata::apply_after_write(policy, file, staging)
 }
 
-/// The existing document's metadata, refusing a path that is not a regular file.
+/// note: the existing document's metadata, refusing a path that is not a regular file.
 ///
 /// `PermissionDenied` is the kind every policy refusal of this module shares: the
 /// native binding maps that one kind to `forbidden`, and any other kind is a
@@ -288,7 +290,7 @@ fn existing_document(target: &Path) -> std::io::Result<Option<std::fs::Metadata>
     }
 }
 
-/// Resolve the document a publication replaces.
+/// note: resolve the document a publication replaces.
 ///
 /// A symlinked `config.toml` is followed like the in-place write did, so the
 /// link keeps pointing at the real document and the real document is replaced.
@@ -304,7 +306,7 @@ fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 if followed == MAX_SYMLINK_HOPS {
-                    // A permanent shape refusal, not a retryable I/O fault: the
+                    // why: a permanent shape refusal, not a retryable I/O fault — the
                     // `PermissionDenied` kind is what the native binding maps to
                     // `forbidden` (see `existing_document`).
                     return Err(std::io::Error::new(
@@ -329,12 +331,12 @@ fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
 
 #[cfg(test)]
 thread_local! {
-    /// Test-only fault injection: the lock file is created, but its ownership
+    /// note: test-only fault injection — the lock file is created, but its ownership
     /// token never reaches the disk.
     static FAIL_TOKEN_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// The armed side of the post-staging rendezvous: the parent directory to
+/// note: the armed side of the post-staging rendezvous — the parent directory to
 /// match, the arrival signal and the release signal.
 #[cfg(test)]
 type StagingRendezvous = (
@@ -347,19 +349,19 @@ type StagingRendezvous = (
 pub(crate) static AFTER_STAGING: std::sync::Mutex<Option<StagingRendezvous>> =
     std::sync::Mutex::new(None);
 
-/// Serializes the post-staging regressions: they share one process-wide
+/// note: serializes the post-staging regressions — they share one process-wide
 /// rendezvous slot and must not arm it concurrently.
 #[cfg(test)]
 pub(crate) static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Test-only rendezvous after the staging file exists and before any byte is
-/// written: a regression can move the target at a real publication boundary
+/// note: test-only rendezvous after the staging file exists and before any byte is
+/// written — a regression can move the target at a real publication boundary
 /// without a timing sleep. Armed by the target's parent directory (the staging
 /// directory's own parent) and disarmed once fired.
 #[cfg(test)]
 fn after_staging(staging_directory: &Path) {
     let armed = {
-        // A panic elsewhere must not turn a publication into a second panic: the
+        // why: a panic elsewhere must not turn a publication into a second panic — the
         // slot is advisory test state, so a poisoned lock is still usable.
         let mut slot = AFTER_STAGING
             .lock()
@@ -380,7 +382,7 @@ fn after_staging(staging_directory: &Path) {
     }
 }
 
-/// Exclusive-create options for the lock file.
+/// note: exclusive-create options for the lock file.
 ///
 /// Owner-only mode is applied at creation (umask can only tighten it), never a
 /// post-create chmod, so the lock is never observable at a permissive mode.
@@ -396,7 +398,7 @@ fn lock_options() -> std::fs::OpenOptions {
     options
 }
 
-/// Write the holder's line into the freshly created lock file.
+/// note: write the holder's line into the freshly created lock file.
 fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
     #[cfg(test)]
     {
@@ -407,7 +409,7 @@ fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
     writeln!(file, "{token}")
 }
 
-/// Take the lock: exclusive create, stale steal, exponential backoff.
+/// note: take the lock — exclusive create, stale steal, exponential backoff.
 ///
 /// # Errors
 /// The I/O error that prevented acquisition (permission, unremovable stale
@@ -415,7 +417,7 @@ fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
 pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
     let path = nexus_home.join(LOCK_FILE);
     std::fs::create_dir_all(nexus_home)?;
-    // The whole line, not just the UUID: release compares it byte-for-byte.
+    // why: the whole line, not just the UUID — release compares it byte-for-byte.
     let token = format!(
         "{} {} {}",
         std::process::id(),
@@ -428,7 +430,7 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
     loop {
         match lock_options().open(&path) {
             Ok(mut file) => {
-                // Diagnostics only (who/what/when); the age comes from the
+                // note: diagnostics only (who/what/when); the age comes from the
                 // mtime. The whole line is the ownership proof release checks
                 // before unlinking.
                 if let Err(write_error) = write_token(&mut file, &token) {
@@ -457,17 +459,17 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
                     .ok()
                     .and_then(|modified| SystemTime::now().duration_since(modified).ok());
                 match age {
-                    // Released between the create and the stat: retry at once.
+                    // why: released between the create and the stat — retry at once.
                     None => {}
                     Some(age) if age > STALE_AFTER => {
-                        // Stale age is a heuristic: two reclaimers can both
+                        // why: stale age is a heuristic — two reclaimers can both
                         // unlink and create, leaving two live holders, and a
                         // live slow holder can lose its lock here. Accepted only
                         // because all five writers are user-paced.
                         let started = *steal_since.get_or_insert_with(SystemTime::now);
                         match std::fs::remove_file(&path) {
                             Ok(()) => {}
-                            // Another reclaimer got there first.
+                            // why: another reclaimer got there first.
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                             Err(error) => {
                                 if !logged_unlink_error {
@@ -484,7 +486,7 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
                                 }
                             }
                         }
-                        // Back off here too: an unremovable stale lock must not
+                        // why: back off here too — an unremovable stale lock must not
                         // hot-loop the create/stat cycle.
                         std::thread::sleep(backoff);
                         backoff = (backoff * 2).min(BACKOFF_CAP);
@@ -500,7 +502,7 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
     }
 }
 
-/// The lock-file authority a denied [`acquire`] leaves the caller with
+/// note: the lock-file authority a denied [`acquire`] leaves the caller with
 /// (I-000336).
 ///
 /// `acquire` surfaces every denied step as the same `PermissionDenied`, but
@@ -511,27 +513,27 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
 /// creation — establish nothing about writer absence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockAuthority {
-    /// The lock-file create/open is denied AND the lock entry is
+    /// note: the lock-file create/open is denied AND the lock entry is
     /// independently observed absent (`symlink_metadata` → `NotFound`): no
     /// writer can hold a lock that cannot exist, the I-000291 read-only-home
     /// boundary (the home being absent altogether lands here too — no lock
     /// file and no document can exist).
     ReadOnlyHome,
-    /// A lock entry exists — hit by the create or observed by stat; another
+    /// note: a lock entry exists — hit by the create or observed by stat; another
     /// principal may hold the writer lock.
     Exists,
-    /// The probe created (and removed) the lock file: this process has the
+    /// note: the probe created (and removed) the lock file — this process has the
     /// directory-write authority every writer needs, so the denied step was
     /// something else — an ownership-token write, not a read-only home.
     Writer,
-    /// The probe could not establish the boundary — the denial's stage is
+    /// note: the probe could not establish the boundary — the denial's stage is
     /// neither create nor open, or the independent stat of the lock entry
     /// was itself refused — so nothing was proved and the caller must fail
     /// closed.
     Unproven,
 }
 
-/// Classify one denied [`acquire`] without re-deriving the read-only-home
+/// note: classify one denied [`acquire`] without re-deriving the read-only-home
 /// admission from a repeated denial.
 ///
 /// Two independent facts are required for [`LockAuthority::ReadOnlyHome`]:
@@ -561,10 +563,10 @@ pub fn probe_authority(nexus_home: &Path) -> LockAuthority {
             }
             LockAuthority::Writer
         }
-        // An entry the create ran into: another principal may hold the
+        // why: an entry the create ran into — another principal may hold the
         // writer lock.
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => LockAuthority::Exists,
-        // The create/open denial is only the first fact; the lock entry's
+        // invariant: the create/open denial is only the first fact — the lock entry's
         // absence must come from a separate stat, not from the denial.
         Err(_) => match std::fs::symlink_metadata(&path) {
             Err(stat_error) if stat_error.kind() == std::io::ErrorKind::NotFound => {
@@ -591,7 +593,7 @@ mod tests {
         home.join("config.toml")
     }
 
-    /// One lock-scoped read-modify-write: insert `key` into the config document.
+    /// note: one lock-scoped read-modify-write — insert `key` into the config document.
     fn add_key(home: &Path, key: &str) {
         let _lock = super::acquire(home).expect("config lock");
         let path = config_path(home);
@@ -601,7 +603,7 @@ mod tests {
         std::fs::write(&path, document.to_string()).expect("config write");
     }
 
-    /// A foreign process holding the lock blocks the writer for the whole hold;
+    /// note: a foreign process holding the lock blocks the writer for the whole hold;
     /// nothing about the in-process caller is visible to that holder.
     #[test]
     fn config_write_waits_while_a_foreign_process_holds_the_lock() {
@@ -634,7 +636,7 @@ mod tests {
         assert!(config_path(&home).exists());
     }
 
-    /// A lock older than 10 s is treated as stale, so the next writer steals it
+    /// note: a lock older than 10 s is treated as stale, so the next writer steals it
     /// instead of blocking behind a presumed-dead holder.
     #[test]
     fn a_stale_lock_is_stolen() {
@@ -658,8 +660,8 @@ mod tests {
         assert!(stored.contains("active_creator_id"));
     }
 
-    /// Two RMW units with different key sets interleaved on the same document.
-    /// A lost update shows as the other writer's key disappearing.
+    /// note: two RMW units with different key sets interleaved on the same document —
+    /// a lost update shows as the other writer's key disappearing.
     #[test]
     fn interleaved_rmw_units_do_not_lose_each_others_keys() {
         let tmp = tempfile::tempdir().expect("temp home");
@@ -691,7 +693,7 @@ mod tests {
         }
     }
 
-    /// MF-2 (I-000091): a stale lock that cannot be unlinked (EACCES/EPERM on
+    /// note: MF-2 (I-000091) — a stale lock that cannot be unlinked (EACCES/EPERM on
     /// a root-owned or immutable file) must fail the acquisition instead of
     /// hot-looping create/stat forever. A directory at the lock path is the
     /// portable stand-in: exclusive-create reports `EEXIST` for it and
@@ -720,7 +722,7 @@ mod tests {
             .expect_err("an unremovable stale lock is an error");
     }
 
-    /// I-000107: a token write that fails after the exclusive create leaves an
+    /// note: I-000107 — a token write that fails after the exclusive create leaves an
     /// unusable lock. Acquire must close it, unlink the file it just created,
     /// and return the lock error at once — never strand a tokenless lock.
     #[test]
@@ -745,7 +747,7 @@ mod tests {
         );
     }
 
-    /// I-000106: the lock is created owner-only, with the mode applied at
+    /// note: I-000106 — the lock is created owner-only, with the mode applied at
     /// creation (`OpenOptions::mode`), so it is never observable as 0644.
     #[cfg(unix)]
     #[test]
@@ -767,7 +769,7 @@ mod tests {
         assert!(!lock.exists(), "the writer released its own lock");
     }
 
-    /// I-000105: a lock whose line only *ends with* our token (a rewritten or
+    /// note: I-000105 — a lock whose line only *ends with* our token (a rewritten or
     /// foreign file) is not byte-identical to the held token and must never be
     /// unlinked.
     #[test]
@@ -778,7 +780,7 @@ mod tests {
 
         let guard = super::acquire(&home).expect("lock");
         let owned = std::fs::read_to_string(&lock).expect("held lock");
-        // Another writer's line prefixed onto ours: same trailing token,
+        // why: another writer's line prefixed onto ours — same trailing token,
         // different line.
         std::fs::write(&lock, format!("999999 foreign {owned}")).expect("foreign lock");
         drop(guard);
@@ -789,7 +791,7 @@ mod tests {
         );
     }
 
-    /// SF-1 (I-000092): a holder stalled past the stale window is stolen; the
+    /// note: SF-1 (I-000092) — a holder stalled past the stale window is stolen; the
     /// release on its resume must not unlink the *new* owner's lock.
     #[test]
     fn a_stolen_holder_leaves_the_new_owners_lock_in_place() {
@@ -798,7 +800,7 @@ mod tests {
         let lock = lock_path(&home);
 
         let guard = super::acquire(&home).expect("lock");
-        // Inside the read-modify-write our lock was stolen and replaced by the
+        // why: inside the read-modify-write our lock was stolen and replaced by the
         // new owner's file.
         std::fs::write(&lock, "999999 stolen\n").expect("new owner's lock");
         drop(guard);
@@ -809,7 +811,7 @@ mod tests {
         );
     }
 
-    /// I-000291: the publication half replaces the whole document by an atomic
+    /// note: I-000291 — the publication half replaces the whole document by an atomic
     /// rename, keeps the existing mode instead of loosening it, and leaves no
     /// temporary file behind for a reader to mistake for the document.
     #[cfg(unix)]
@@ -849,7 +851,7 @@ mod tests {
         );
     }
 
-    /// The general publication form publishes a document that is not the
+    /// note: the general publication form publishes a document that is not the
     /// daemon-home `config.toml` — the per-agent-host document and the
     /// encrypted connection store share this implementation — and keeps the
     /// target's policy.
@@ -890,7 +892,7 @@ mod tests {
         );
     }
 
-    /// A symlinked `config.toml` is followed like the in-place write was: the
+    /// note: a symlinked `config.toml` is followed like the in-place write was — the
     /// link survives, the document it points at is replaced atomically, and the
     /// temporary file is created beside that document.
     #[cfg(unix)]
@@ -933,7 +935,7 @@ mod tests {
         );
     }
 
-    /// SEC-01: a rename is authorized by the directory, so publishing a
+    /// note: SEC-01 — a rename is authorized by the directory, so publishing a
     /// write-denied document would bypass the in-place write boundary. The
     /// publication must refuse it and leave the document (and no temporary
     /// file) behind.
@@ -968,7 +970,7 @@ mod tests {
         assert_eq!(entries, ["config.toml"], "the temporary file was removed");
     }
 
-    /// A document path that is not a regular file is refused before any staging
+    /// note: a document path that is not a regular file is refused before any staging
     /// file is created.
     #[test]
     fn a_non_regular_document_is_refused_before_staging() {
@@ -997,7 +999,7 @@ mod tests {
         assert_eq!(entries, ["config.toml"], "no staging file was created");
     }
 
-    /// SEC-02: the staging file is created owner-only, before any byte is
+    /// note: SEC-02 — the staging file is created owner-only, before any byte is
     /// written, so the document is never exposed under a broader policy.
     #[cfg(unix)]
     #[test]
@@ -1023,7 +1025,7 @@ mod tests {
         assert_eq!(directory_mode, 0o700, "the staging directory is private");
     }
 
-    /// SEC-03: the replacement keeps the target's owner, group, mode and access
+    /// note: SEC-03 — the replacement keeps the target's owner, group, mode and access
     /// policy (ACL and extended attributes) instead of installing a fresh inode
     /// with the directory's defaults.
     #[cfg(target_os = "macos")]
@@ -1037,7 +1039,7 @@ mod tests {
         let path = config_path(&home);
         std::fs::write(&path, "active_creator_id = \"ctr_old\"\n").expect("document");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("mode");
-        // A named deny entry plus a user attribute: both belong to the policy an
+        // note: a named deny entry plus a user attribute — both belong to the policy an
         // atomic replacement must carry over.
         let acl = std::process::Command::new("chmod")
             .arg("+a")
@@ -1085,8 +1087,8 @@ mod tests {
         );
     }
 
-    /// A hard-linked document is refused: an atomic replacement would detach the
-    /// other path instead of updating it.
+    /// note: a hard-linked document is refused — an atomic replacement would detach
+    /// the other path instead of updating it.
     #[cfg(unix)]
     #[test]
     fn a_hard_linked_document_is_refused_unchanged() {
@@ -1121,7 +1123,7 @@ mod tests {
         );
     }
 
-    /// A dangling symlink whose destination is creatable publishes to the
+    /// note: a dangling symlink whose destination is creatable publishes to the
     /// destination and keeps the link (the selected contract keeps ordinary and
     /// creatable links, only refusing hard links and unsafe atomic paths).
     #[cfg(unix)]
@@ -1152,7 +1154,7 @@ mod tests {
         );
     }
 
-    /// The single staging directory in `home`.
+    /// note: the single staging directory in `home`.
     fn only_staging_directory(home: &Path) -> PathBuf {
         let mut staging: Vec<PathBuf> = std::fs::read_dir(home)
             .expect("home listing")
@@ -1167,8 +1169,8 @@ mod tests {
         staging.pop().expect("staging directory")
     }
 
-    /// Arm the post-staging rendezvous for a publisher whose target is in
-    /// `home`: it blocks after creating its staging file until released.
+    /// note: arm the post-staging rendezvous for a publisher whose target is in
+    /// `home`; it blocks after creating its staging file until released.
     fn arm_after_staging(home: &Path) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (arrived, arrival) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -1181,8 +1183,8 @@ mod tests {
         (arrival, release)
     }
 
-    /// A failure after the staging file exists must keep the old document and
-    /// remove the staged file and its directory: ordinary cleanup, at a real
+    /// note: a failure after the staging file exists must keep the old document and
+    /// remove the staged file and its directory — ordinary cleanup, at a real
     /// publication boundary instead of an injected error.
     ///
     /// The original document stays a regular file with its old bytes: a cleanup
@@ -1209,7 +1211,7 @@ mod tests {
         arrived
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
-        // The staged file disappears under the publisher, so the rename is the
+        // why: the staged file disappears under the publisher, so the rename is the
         // failing operation while the original document is still in place.
         let staging_directory = only_staging_directory(&home);
         std::fs::remove_file(staging_directory.join("config.toml"))
@@ -1238,7 +1240,7 @@ mod tests {
         );
     }
 
-    /// A post-staging failure whose cleanup also fails reports both, at a real
+    /// note: a post-staging failure whose cleanup also fails reports both, at a real
     /// publication boundary instead of constructed errors.
     ///
     /// The directory stops accepting writes, so the rename fails on the
@@ -1269,13 +1271,13 @@ mod tests {
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
         let staging_directory = only_staging_directory(&home);
-        // The sample source is created while the home is still writable; only
+        // why: the sample source is created while the home is still writable; only
         // the rename into the home is the native failure being sampled.
         let sample_source = tmp.path().join("sample-source");
         std::fs::write(&sample_source, "sample").expect("sample source");
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o500))
             .expect("the home stops accepting directory writes");
-        // Sample the native rename failure this home really produces, without
+        // why: sample the native rename failure this home really produces, without
         // moving the staged file or the document.
         let primary = std::fs::rename(&sample_source, home.join("sample-target"))
             .expect_err("the home does not accept a rename");
@@ -1285,7 +1287,7 @@ mod tests {
             .join()
             .expect("publisher thread")
             .expect_err("the rename cannot write into the home");
-        // The cleanup failure is sampled from the same leftover directory while
+        // why: the cleanup failure is sampled from the same leftover directory while
         // the home is still non-writable.
         let cleanup = std::fs::remove_dir(&staging_directory)
             .expect_err("the leftover directory cannot be removed yet");
@@ -1327,14 +1329,14 @@ mod tests {
         );
     }
 
-    /// A symlink chain of exactly the allowed length publishes; one more hop and
+    /// note: a symlink chain of exactly the allowed length publishes; one more hop and
     /// a loop are refused before any staged byte exists.
     #[cfg(unix)]
     #[test]
     fn the_symlink_hop_limit_is_enforced_at_its_boundary() {
         use std::os::unix::fs::symlink;
 
-        /// Build `links` symlinks, `config.toml` first, ending at `real.toml`.
+        /// note: build `links` symlinks, `config.toml` first, ending at `real.toml`.
         fn chain(home: &Path, links: usize) {
             for index in 0..links {
                 let name = if index == 0 {
@@ -1404,7 +1406,7 @@ mod tests {
         );
     }
 
-    /// SEC-01: an inheritance-only `writesecurity` grant on the containing
+    /// note: SEC-01 — an inheritance-only `writesecurity` grant on the containing
     /// directory must not leave the staging directory writable. Sealing removes
     /// the inherited authority and re-establishes the owner-only mode before the
     /// child file exists.

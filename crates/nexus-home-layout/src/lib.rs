@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Device ID generation and persistence (`~/.nexus42/device-id`, UUID v4).
+/// note: device ID generation and persistence (`~/.nexus42/device-id`, UUID v4).
 ///
 /// V1.148 P3 N-C0: moved here from `nexus-cloud-sync` so the path-layout SSOT
 /// also owns the value; `nexus-cloud-sync::device_id` re-exports it.
@@ -17,7 +17,7 @@ pub use active_context::MemoryProviderConfig;
 
 const NEXUS_DIR: &str = ".nexus42";
 
-/// Create the `~/.nexus42/` system directory layout and config skeleton if they
+/// note: create the `~/.nexus42/` system directory layout and config skeleton if they
 /// do not exist. Safe to call repeatedly — existing files are not overwritten.
 ///
 /// Creates the following structure:
@@ -44,10 +44,8 @@ const NEXUS_DIR: &str = ".nexus42";
 /// Returns an I/O error if directory creation or config publication fails. A
 /// failed publication is never swallowed and never reported as success.
 pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
-    // Create the nexus home root if missing
     std::fs::create_dir_all(nexus_home)?;
 
-    // System subdirectories
     std::fs::create_dir_all(nexus_home.join("skills"))?;
     std::fs::create_dir_all(nexus_home.join("presets"))?;
     std::fs::create_dir_all(nexus_home.join("modules"))?;
@@ -56,8 +54,7 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(nexus_home.join("acp").join("runs"))?;
     std::fs::create_dir_all(nexus_home.join("rules"))?;
 
-    // Write empty config.toml if it does not exist (no config.json either).
-    // I-000113: this is the fifth writer of the shared `config.toml` document,
+    // why: I-000113 — this is the fifth writer of the shared `config.toml` document,
     // so it takes the same `config.toml.lock` protocol as the CLI/service/
     // desktop/core writers. The existence check is repeated under the lock: a
     // writer that committed while this acquisition waited must not be
@@ -76,13 +73,13 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Resolve `~/.nexus42` from the user's home directory.
+/// note: resolve `~/.nexus42` from the user's home directory.
 #[must_use]
 pub fn nexus_root_from_home(home: &Path) -> PathBuf {
     home.join(NEXUS_DIR)
 }
 
-/// `$HOME/.nexus42/creators/<creator_id>/workspaces/`
+/// note: `$HOME/.nexus42/creators/<creator_id>/workspaces/`
 #[must_use]
 pub fn creator_workspaces_root(home: &Path, creator_id: &str) -> PathBuf {
     nexus_root_from_home(home)
@@ -91,19 +88,19 @@ pub fn creator_workspaces_root(home: &Path, creator_id: &str) -> PathBuf {
         .join("workspaces")
 }
 
-/// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`
+/// note: `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`
 #[must_use]
 pub fn operational_workspace_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
     creator_workspaces_root(home, creator_id).join(workspace_slug)
 }
 
-/// Workspace-local `SQLite`: `.../workspaces/<slug>/state.db`
+/// note: workspace-local `SQLite` at `.../workspaces/<slug>/state.db`
 #[must_use]
 pub fn workspace_state_db_path(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
     operational_workspace_dir(home, creator_id, workspace_slug).join("state.db")
 }
 
-/// Shared global `SQLite`: `$HOME/.nexus42/shared/global_state.db`
+/// note: shared global `SQLite` at `$HOME/.nexus42/shared/global_state.db`
 #[must_use]
 pub fn shared_global_db_path(home: &Path) -> PathBuf {
     nexus_root_from_home(home)
@@ -111,7 +108,7 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
         .join("global_state.db")
 }
 
-/// `$HOME/.nexus42/skills/` — directory for synced embedded skills.
+/// note: `$HOME/.nexus42/skills/` — directory for synced embedded skills.
 ///
 /// See `crates/nexus-orchestration/src/skill_sync.rs` for the sync logic that
 /// populates this directory.
@@ -120,7 +117,7 @@ pub fn user_skills_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("skills")
 }
 
-/// `$HOME/.nexus42/presets/` — base directory for user-installed presets.
+/// note: `$HOME/.nexus42/presets/` — base directory for user-installed presets.
 ///
 /// Each subdirectory under this path is expected to contain a `preset.yaml`.
 /// See `crates/nexus-orchestration/src/user_preset_dir.rs` for scanning logic.
@@ -130,7 +127,7 @@ pub fn user_preset_base_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("presets")
 }
 
-/// `$HOME/.nexus42/modules/` — base directory for user-installed compute
+/// note: `$HOME/.nexus42/modules/` — base directory for user-installed compute
 /// modules (V1.61 P-last T3; compass Q2 User layer).
 ///
 /// Each subdirectory `<id>/` is expected to contain `<id>.wasm` +
@@ -142,7 +139,7 @@ pub fn user_modules_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("modules")
 }
 
-/// `$HOME/.nexus42/capabilities/` — base directory for user-authored
+/// note: `$HOME/.nexus42/capabilities/` — base directory for user-authored
 /// capability descriptors (V1.172 P0, DR-10; AR-35).
 ///
 /// Each subdirectory `<name>/` is expected to contain the descriptor
@@ -158,13 +155,13 @@ pub fn user_capabilities_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("capabilities")
 }
 
-/// `$HOME/.nexus42/presets/<name>/` — path to a specific user preset bundle.
+/// note: `$HOME/.nexus42/presets/<name>/` — path to a specific user preset bundle.
 #[must_use]
 pub fn user_preset_bundle_dir(home: &Path, name: &str) -> PathBuf {
     user_preset_base_dir(home).join(name)
 }
 
-/// List user preset IDs (directory names containing `preset.yaml`) under the presets directory.
+/// note: list user preset IDs (directory names containing `preset.yaml`) under the presets directory.
 ///
 /// Returns an empty vector if the presets directory doesn't exist or can't be read.
 /// Directories starting with `_` or `.` are skipped.
@@ -185,11 +182,11 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         .filter(|e| e.path().is_dir())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            // Skip system-prefixed and hidden dirs.
+            // why: skip system-prefixed and hidden dirs.
             if name.starts_with('_') || name.starts_with('.') {
                 return None;
             }
-            // Must contain a preset.yaml to be valid.
+            // why: must contain a preset.yaml to be valid.
             if e.path().join("preset.yaml").exists() {
                 Some(name)
             } else {
@@ -199,7 +196,7 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         .collect()
 }
 
-/// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/Pool/Ideas/`
+/// note: `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/Pool/Ideas/`
 ///
 /// Creator-scoped inspiration items; lives under the operational workspace
 /// (NOT under Works/, because inspiration is a creator-level concern that
@@ -211,7 +208,7 @@ pub fn creator_inspiration_dir(home: &Path, creator_id: &str, workspace_slug: &s
         .join("Ideas")
 }
 
-/// `$HOME/.nexus42/tls/` — directory for persistent TLS certificate + key.
+/// note: `$HOME/.nexus42/tls/` — directory for persistent TLS certificate + key.
 ///
 /// The daemon creates this directory with mode `0o700` on first boot.
 /// Cert and key files are written with `0o600` (owner-only read).
@@ -221,45 +218,45 @@ pub fn tls_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("tls")
 }
 
-/// `$HOME/.nexus42/tls/cert.pem` — persistent self-signed TLS certificate.
+/// note: `$HOME/.nexus42/tls/cert.pem` — persistent self-signed TLS certificate.
 #[must_use]
 pub fn tls_cert_path(home: &Path) -> PathBuf {
     tls_dir(home).join("cert.pem")
 }
 
-/// `$HOME/.nexus42/tls/key.pem` — persistent TLS private key.
+/// note: `$HOME/.nexus42/tls/key.pem` — persistent TLS private key.
 #[must_use]
 pub fn tls_key_path(home: &Path) -> PathBuf {
     tls_dir(home).join("key.pem")
 }
 
-/// `$HOME/.nexus42/device-id` — persistent machine identifier (`UUID` v4).
+/// note: `$HOME/.nexus42/device-id` — persistent machine identifier (`UUID` v4).
 #[must_use]
 pub fn device_id_path(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("device-id")
 }
 
-/// `$HOME/.nexus42/connect/` — Connect Host (DF-72 N-C0) state directory.
+/// note: `$HOME/.nexus42/connect/` — Connect Host (DF-72 N-C0) state directory.
 #[must_use]
 pub fn connect_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("connect")
 }
 
-/// `$HOME/.nexus42/connect/identity.key` — Connect Host Ed25519 identity key
+/// note: `$HOME/.nexus42/connect/identity.key` — Connect Host Ed25519 identity key
 /// (libp2p protobuf encoding; created once with 0600).
 #[must_use]
 pub fn connect_identity_key_path(home: &Path) -> PathBuf {
     connect_dir(home).join("identity.key")
 }
 
-/// `$HOME/.nexus42/connect/allowlist.json` — Connect Host peer allowlist
+/// note: `$HOME/.nexus42/connect/allowlist.json` — Connect Host peer allowlist
 /// (`{ "peer_ids": ["12D3…", …] }`; missing file ⇒ empty ⇒ fail-closed).
 #[must_use]
 pub fn connect_allowlist_path(home: &Path) -> PathBuf {
     connect_dir(home).join("allowlist.json")
 }
 
-/// `$HOME/.nexus42/connect/issuer.key` — Connect Host capability-token issuer key.
+/// note: `$HOME/.nexus42/connect/issuer.key` — Connect Host capability-token issuer key.
 ///
 /// Ed25519 libp2p protobuf encoding; created once with 0600; DISTINCT from
 /// `identity.key` — the node identity and the token issuer are different
@@ -269,7 +266,7 @@ pub fn connect_issuer_key_path(home: &Path) -> PathBuf {
     connect_dir(home).join("issuer.key")
 }
 
-/// `$HOME/.nexus42/connect/config.json` — Connect Host operator config.
+/// note: `$HOME/.nexus42/connect/config.json` — Connect Host operator config.
 ///
 /// V1.155 P1 capability-token surface (`trusted_issuers` /
 /// `require_capability_token` / `capability_token_provider`); absent file ⇒
@@ -278,7 +275,7 @@ pub fn connect_issuer_key_path(home: &Path) -> PathBuf {
 pub fn connect_config_path(home: &Path) -> PathBuf {
     connect_dir(home).join("config.json")
 }
-/// `$HOME/.nexus42/connect/daemon.json` — peer-tools accept-loop config.
+/// note: `$HOME/.nexus42/connect/daemon.json` — peer-tools accept-loop config.
 ///
 /// (V1.174 P0, AR-67): listen host/port, `max_sessions`, invoke timeout,
 /// envelope cap. DISTINCT from `config.json` (the connect-host
@@ -289,7 +286,7 @@ pub fn connect_daemon_config_path(home: &Path) -> PathBuf {
     connect_dir(home).join("daemon.json")
 }
 
-/// `$HOME/.nexus42/connect/peer_keys.json` — preconfigured dialer keys.
+/// note: `$HOME/.nexus42/connect/peer_keys.json` — preconfigured dialer keys.
 ///
 /// Ed25519 public keys (`{ "peer_keys": { "<peer-id>": "<64-hex-chars>" }
 /// }`); missing file ⇒ empty map ⇒ fail-closed (no dialer passes the
@@ -299,7 +296,7 @@ pub fn connect_peer_keys_path(home: &Path) -> PathBuf {
     connect_dir(home).join("peer_keys.json")
 }
 
-/// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (`ADR-014`, `ADR-016` D1).
+/// note: `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (`ADR-014`, `ADR-016` D1).
 ///
 /// # Defense-in-depth
 ///
@@ -316,7 +313,7 @@ pub fn creator_soul_md_path(home: &Path, creator_id: &str) -> PathBuf {
         .join("SOUL.md")
 }
 
-/// `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/`
+/// note: `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/`
 ///
 /// Home root for one Character bearer (v1.184 P3; character-memory spec §2).
 /// Character SOUL and long-term memory files live under this directory,
@@ -339,7 +336,7 @@ pub fn character_root(home: &Path, owner_creator_id: &str, character_id: &str) -
         .join(character_id)
 }
 
-/// `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/SOUL.md`
+/// note: `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/SOUL.md`
 ///
 /// Character counterpart to [`creator_soul_md_path`] (character-memory spec §2).
 ///
@@ -352,7 +349,7 @@ pub fn character_soul_md_path(home: &Path, owner_creator_id: &str, character_id:
     character_root(home, owner_creator_id, character_id).join("SOUL.md")
 }
 
-/// `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/`
+/// note: `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/`
 ///
 /// Character long-term memory directory; individual memory files are
 /// `<slug>.md` inside it (slug safety is enforced by
@@ -374,7 +371,7 @@ pub fn character_long_term_memory_dir(
         .join("long-term")
 }
 
-/// Assert that `creator_id` does not contain path-traversal characters.
+/// note: assert that `creator_id` does not contain path-traversal characters.
 ///
 /// This is a low-overhead sanity check; `nexus-domain::is_valid_creator_id()`
 /// is the authoritative validator. This catches the most dangerous patterns:
@@ -396,7 +393,7 @@ fn assert_creator_id_safe(id: &str) {
     );
 }
 
-/// Non-panicking path-traversal validation for `creator_id`.
+/// note: non-panicking path-traversal validation for `creator_id`.
 ///
 /// Returns `Ok(())` if the ID is safe, or `Err` with a description.
 /// Same checks as [`assert_creator_id_safe`] but suitable for fallible call sites
@@ -426,7 +423,7 @@ pub fn validate_creator_id_safe(id: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Assert that `character_id` does not contain path-traversal characters.
+/// note: assert that `character_id` does not contain path-traversal characters.
 ///
 /// Same safety checks as [`assert_creator_id_safe`]: rejects empty strings,
 /// `/`, `\`, `..`, and control characters.
@@ -448,7 +445,7 @@ fn assert_character_id_safe(id: &str) {
     );
 }
 
-/// Non-panicking path-traversal validation for `character_id`.
+/// note: non-panicking path-traversal validation for `character_id`.
 ///
 /// Returns `Ok(())` if the ID is safe, or `Err` with a description.
 /// Same checks as [`assert_character_id_safe`] but suitable for fallible
@@ -482,7 +479,7 @@ pub fn validate_character_id_safe(id: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Validate a string matches the minted `CharacterId` format
+/// note: validate a string matches the minted `CharacterId` format
 /// `^chr_[0-9a-f]{32}$` (see `nexus_local_db::character::mint_character_id`).
 ///
 /// This is the authoritative Character-id format check for the memory
@@ -499,7 +496,7 @@ pub fn is_valid_character_id(s: &str) -> bool {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
-/// `$HOME/.nexus42/rules/writing-craft.md` — user override for Layer 1 rules.
+/// note: `$HOME/.nexus42/rules/writing-craft.md` — user override for Layer 1 rules.
 #[must_use]
 pub fn user_writing_craft_rules_path(home: &Path) -> PathBuf {
     nexus_root_from_home(home)
@@ -507,7 +504,7 @@ pub fn user_writing_craft_rules_path(home: &Path) -> PathBuf {
         .join("writing-craft.md")
 }
 
-/// Workspace-relative: `Works/<work_ref>/AGENTS.md` (V1.47 normative Layer 2).
+/// note: workspace-relative `Works/<work_ref>/AGENTS.md` (V1.47 normative Layer 2).
 ///
 /// V1.48 P2: `AGENTS.md` at the Work root is the preferred Layer 2 location
 /// per [novel-writing/workflow-profile.md §5.5.4]. The legacy
@@ -517,7 +514,7 @@ pub fn work_agents_md_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
     workspace_dir.join("Works").join(work_ref).join("AGENTS.md")
 }
 
-/// Workspace-relative: `Works/<work_ref>/Rules/novel-rules.md` (legacy Layer 2).
+/// note: workspace-relative `Works/<work_ref>/Rules/novel-rules.md` (legacy Layer 2).
 ///
 /// V1.48 P2: this path is read-only fallback for Works scaffolded before
 /// the `AGENTS.md` migration. New scaffolds write [`work_agents_md_path`]
@@ -531,7 +528,7 @@ pub fn work_novel_rules_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
         .join("novel-rules.md")
 }
 
-/// Workspace-relative: `Works/<work_ref>/Rules/novel-rules-history.md` (Layer 3 audit trail).
+/// note: workspace-relative `Works/<work_ref>/Rules/novel-rules-history.md` (Layer 3 audit trail).
 #[must_use]
 pub fn work_novel_rules_history_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
     workspace_dir
@@ -541,7 +538,7 @@ pub fn work_novel_rules_history_path(workspace_dir: &Path, work_ref: &str) -> Pa
         .join("novel-rules-history.md")
 }
 
-/// Workspace-relative: `Works/<work_ref>/Logs/<subdir>/` (DF-66).
+/// note: workspace-relative `Works/<work_ref>/Logs/<subdir>/` (DF-66).
 ///
 /// Returns the path for one of the four Logs subdirectories.
 /// `subdir` must be one of: `brainstorm`, `write`, `review`, `publish`.
@@ -554,27 +551,27 @@ pub fn work_logs_subdir(workspace_dir: &Path, work_ref: &str, subdir: &str) -> P
         .join(subdir)
 }
 
-/// `$HOME/.nexus42/acp/runs` — base directory for run trace storage.
+/// note: `$HOME/.nexus42/acp/runs` — base directory for run trace storage.
 #[must_use]
 pub fn acp_runs_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("acp").join("runs")
 }
 
-/// `$HOME/.nexus42/acp/runs/<run_id>/` — directory for a specific run.
+/// note: `$HOME/.nexus42/acp/runs/<run_id>/` — directory for a specific run.
 #[must_use]
 pub fn acp_run_dir(home: &Path, run_id: &str) -> PathBuf {
     acp_runs_dir(home).join(run_id)
 }
 
-/// `$HOME/.nexus42/acp/runs/<run_id>/trace.jsonl` — trace event log for a run.
+/// note: `$HOME/.nexus42/acp/runs/<run_id>/trace.jsonl` — trace event log for a run.
 #[must_use]
 pub fn acp_run_trace_file(home: &Path, run_id: &str) -> PathBuf {
     acp_run_dir(home, run_id).join("trace.jsonl")
 }
 
-// ── Workspace path validation (DF-31 skeleton) ─────────────────────────
+// note: workspace path validation (DF-31 skeleton) lives below.
 
-/// Validate that a workspace-relative `path` is safe to use.
+/// note: validate that a workspace-relative `path` is safe to use.
 ///
 /// Rejects:
 /// - Empty strings
@@ -602,7 +599,7 @@ pub fn validate_workspace_path_safe(path: &str) -> std::result::Result<(), Strin
     if path.is_empty() {
         return Err("workspace path must not be empty".to_string());
     }
-    // Reject absolute paths — workspace.open only accepts relative paths
+    // invariant: workspace.open only accepts relative paths, so an absolute path is rejected.
     if path.starts_with('/') || path.starts_with('\\') {
         return Err(format!(
             "workspace path must be relative, got absolute path: {path:?} — rejected for safety"
@@ -621,7 +618,7 @@ pub fn validate_workspace_path_safe(path: &str) -> std::result::Result<(), Strin
     Ok(())
 }
 
-/// Validate that a user-supplied run/capability-call ID is safe to use in a file path.
+/// note: validate that a user-supplied run/capability-call ID is safe to use in a file path.
 ///
 /// Rejects empty strings, path separators (`/`, `\`), traversal sequences (`..`),
 /// and control characters.
@@ -653,7 +650,7 @@ pub fn validate_run_id_safe(id: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Sanitize a user-supplied `entry_id` for use in a file path.
+/// note: sanitize a user-supplied `entry_id` for use in a file path.
 ///
 /// Rejects path separators (`/`, `\`), traversal sequences (`..`), and control characters.
 /// This prevents path-traversal attacks in KB entry operations.
@@ -694,7 +691,7 @@ pub fn sanitize_entry_id(id: &str) -> std::result::Result<&str, String> {
 mod tests {
     use super::*;
 
-    /// Test-only rendezvous at the pre-lock existence check: the startup path
+    /// note: test-only rendezvous at the pre-lock existence check — the startup path
     /// calls it before acquiring `config.toml.lock`, so a test can order a
     /// concurrent document write strictly into the acquisition wait — the
     /// window the under-lock re-check exists to cover — with no fixed wait.
@@ -702,7 +699,7 @@ mod tests {
         Option<(std::path::PathBuf, std::sync::Arc<std::sync::Barrier>)>,
     > = std::sync::Mutex::new(None);
 
-    /// Blocks the startup caller until the test that installed the rendezvous
+    /// note: blocks the startup caller until the test that installed the rendezvous
     /// for this home arrives.
     pub fn after_existence_check(home: &std::path::Path) {
         let barrier = AFTER_EXISTENCE_CHECK
@@ -895,8 +892,6 @@ mod tests {
         let _ = creator_soul_md_path(&home, "ctr_\x00null");
     }
 
-    // ── validate_creator_id_safe tests ────────────────────────
-
     #[test]
     fn validate_creator_id_safe_accepts_valid() {
         assert!(validate_creator_id_safe("crt_abc123").is_ok());
@@ -925,8 +920,6 @@ mod tests {
         let err = validate_creator_id_safe("ctr_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
-
-    // ── sanitize_entry_id tests ──────────────────────────
 
     #[test]
     fn sanitize_entry_id_returns_valid_borrow() {
@@ -967,8 +960,6 @@ mod tests {
         assert!(err.contains("control characters"));
     }
 
-    // ── ACP trace path helpers ──────────────────────────────────────────
-
     #[test]
     fn acp_runs_dir_layout() {
         let home = PathBuf::from("/fake/home");
@@ -995,8 +986,6 @@ mod tests {
             PathBuf::from("/fake/home/.nexus42/acp/runs/run_abc/trace.jsonl")
         );
     }
-
-    // ── validate_run_id_safe tests ──────────────────────────────────────
 
     #[test]
     fn validate_run_id_safe_accepts_valid() {
@@ -1032,8 +1021,6 @@ mod tests {
         let err = validate_run_id_safe("run_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
-
-    // ── Workspace path validation (DF-31 skeleton) ────────────────────────
 
     #[test]
     fn validate_workspace_path_safe_accepts_valid() {
@@ -1071,8 +1058,6 @@ mod tests {
         let err = validate_workspace_path_safe("path_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
-
-    // ── Rules and Logs path helpers (V1.39 P3) ───────────────────────────
 
     #[test]
     fn user_writing_craft_rules_path_layout() {
@@ -1123,9 +1108,8 @@ mod tests {
         );
     }
 
-    // ── Character home layout (v1.184 P3 Task 2) ────────────────────────
-    //
-    // Canonical Character bearer paths (character-memory spec §2):
+    // note: character home layout (v1.184 P3 Task 2) — canonical Character bearer paths
+    // (character-memory spec §2):
     //   $HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/SOUL.md
     //   $HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/<slug>.md
 
@@ -1185,7 +1169,7 @@ mod tests {
             mem.starts_with(&root),
             "memory dir must stay under the Character root"
         );
-        // Character files live under the OWNER's creator tree, never at the
+        // invariant: character files live under the OWNER's creator tree, never at the
         // creator root itself or in a sibling creator's tree.
         let owner_root = PathBuf::from("/h/.nexus42/creators/ctr_owner");
         assert!(root.starts_with(&owner_root));
@@ -1253,7 +1237,7 @@ mod tests {
 
     #[test]
     fn is_valid_character_id_matches_minted_format() {
-        // Minted by `nexus_local_db::character::mint_character_id` as
+        // note: minted by `nexus_local_db::character::mint_character_id` as
         // `chr_` + 32 lowercase hex.
         assert!(is_valid_character_id(
             "chr_0123456789abcdef0123456789abcdef"
@@ -1265,16 +1249,16 @@ mod tests {
             "ctr_0123456789abcdef0123456789abcdef"
         ));
         assert!(!is_valid_character_id("chr_"));
-        assert!(!is_valid_character_id("chr_0123456789abcdef")); // too short
+        assert!(!is_valid_character_id("chr_0123456789abcdef")); // note: too short
         assert!(!is_valid_character_id(
             "chr_0123456789abcdef0123456789abcdef00"
-        )); // too long
+        )); // note: too long
         assert!(!is_valid_character_id(
             "chr_0123456789ABCDEF0123456789ABCDEF"
-        )); // uppercase
+        )); // note: uppercase
         assert!(!is_valid_character_id(
             "chr_0123456789abcdef0123456789abcdeg"
-        )); // non-hex
+        )); // note: non-hex
         assert!(!is_valid_character_id("chr_../escape"));
         assert!(!is_valid_character_id("chr_a/b"));
         assert!(!is_valid_character_id("chr_a\\b"));
@@ -1287,7 +1271,7 @@ mod tests {
         ));
     }
 
-    /// I-000113: the startup skeleton write is the fifth `config.toml` writer,
+    /// note: I-000113 — the startup skeleton write is the fifth `config.toml` writer,
     /// so it waits for a foreign holder of `config.toml.lock` instead of
     /// writing beside it.
     #[test]
@@ -1326,7 +1310,7 @@ mod tests {
         assert!(!lock.exists(), "the startup write released its own lock");
     }
 
-    /// The existence check is repeated under the lock: a document committed
+    /// note: the existence check is repeated under the lock — a document committed
     /// while the startup acquisition waited must not be overwritten with the
     /// empty skeleton. The rendezvous orders the commit strictly after the
     /// pre-lock check and before the lock acquisition, so the window is
@@ -1348,8 +1332,8 @@ mod tests {
             std::thread::spawn(move || ensure_system_layout(&home).expect("system layout"))
         };
 
-        // Startup is past its pre-lock existence check and cannot acquire
-        // until the foreign lock is released: no timing assumption.
+        // why: startup is past its pre-lock existence check and cannot acquire
+        // until the foreign lock is released — no timing assumption.
         barrier.wait();
         std::fs::write(
             home.join("config.toml"),
@@ -1367,7 +1351,7 @@ mod tests {
         );
     }
 
-    /// A failure after the staging file exists must not be reported as a
+    /// note: a failure after the staging file exists must not be reported as a
     /// published skeleton: the startup writer propagates the error, leaves no
     /// `config.toml` and no staging residue, and releases its own lock.
     #[cfg(unix)]
@@ -1400,8 +1384,8 @@ mod tests {
         arrival
             .recv_timeout(Duration::from_secs(30))
             .expect("the startup writer reached the staging boundary");
-        // The staged file disappears under the publisher, so the rename is the
-        // failing operation: the skeleton is never published.
+        // why: the staged file disappears under the publisher, so the rename is the
+        // failing operation — the skeleton is never published.
         let staging: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
             .filter_map(Result::ok)

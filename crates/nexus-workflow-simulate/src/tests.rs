@@ -1,6 +1,8 @@
 //! Static-walk behavior: reachability, wait classification, nest rollup, determinism and the
 //! zero-dispatch proof. Fixtures are IR documents in their wire shape, parsed through the same
 //! generated contract the route carries.
+//!
+//! see docs/specs/orchestration/strategy-simulation.md
 
 use super::*;
 
@@ -12,7 +14,7 @@ fn simulate(document: &WorkflowDocument) -> SimulationTrajectory {
     simulate_document(document).expect("simulation succeeds")
 }
 
-/// A judged state that reaches a manual wait node, with a global pause signal.
+/// note: a judged state that reaches a manual wait node, with a global pause signal.
 const WAITS_AND_JUDGE: &str = r#"{
     "ir_version": 0,
     "id": "waits-and-judge",
@@ -76,7 +78,7 @@ fn walk_reaches_the_default_branch_and_classifies_waits() {
     );
 }
 
-/// A deferred slot is one opaque node: its region never joins the walk or the rollup.
+/// note: a deferred slot is one opaque node — its region never joins the walk or the rollup.
 const DEFERRED_NEST: &str = r#"{
     "ir_version": 0,
     "id": "deferred-nest",
@@ -127,7 +129,7 @@ fn deferred_nest_stays_one_opaque_node() {
     );
 }
 
-/// Two expanded nest levels; the deepest child writes a candidate.
+/// note: two expanded nest levels; the deepest child writes a candidate.
 const TWO_LEVEL_NEST: &str = r#"{
     "ir_version": 0,
     "id": "two-level-nest",
@@ -257,7 +259,7 @@ fn the_same_document_serializes_to_identical_bytes_twice() {
     assert_eq!(first, second);
 }
 
-/// A capability-bearing candidate: the walk sees the `enter` action and never resolves it.
+/// note: a capability-bearing candidate — the walk sees the `enter` action and never resolves it.
 const CAPABILITY_BEARING: &str = r#"{
     "ir_version": 0,
     "id": "capability-bearing",
@@ -289,7 +291,7 @@ const CAPABILITY_BEARING: &str = r#"{
 
 #[test]
 fn a_capability_bearing_document_simulates_without_resolving_the_capability() {
-    // The zero-dispatch property is structural: this crate links no registry to resolve
+    // why: the zero-dispatch property is structural — this crate links no registry to resolve
     // against, so the walk can only read the declared action.
     let trajectory = simulate_document(&document(CAPABILITY_BEARING))
         .expect("a capability-bearing document still simulates");

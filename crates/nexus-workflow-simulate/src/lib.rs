@@ -14,6 +14,8 @@
 //! hash), so its body carries no nodes or edges in a candidate. Structural validation does not
 //! reject a producer that materialized a deferred body *and* made it edge-reachable; that body
 //! would then be walked and rolled up.
+//!
+//! see crates/nexus-workflow-simulate/AGENTS.md
 
 use nexus_contracts::generated::daemon_api::orchestration::simulation_trajectory::{
     SimulationPredictedWait, SimulationPredictedWaitReason,
@@ -25,29 +27,30 @@ use nexus_workflow_ir::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// v0 emits exactly one level: reachability, default branch only.
+/// note: v0 emits exactly one level — reachability, default branch only.
 const SIMULATION_LEVEL: &str = "reachability";
-/// Trajectory contract revision for this shape.
+
+/// note: trajectory contract revision for this shape.
 const SCHEMA_VERSION: i64 = 1;
 
-/// A deterministic reason the trajectory cannot be produced.
+/// note: a deterministic reason the trajectory cannot be produced.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SimulationError {
-    /// The declared entry is not a node of this document.
+    /// note: the declared entry is not a node of this document.
     #[error("entry node `{0}` is not declared")]
     EntryNotFound(String),
-    /// A judged node must declare exactly one `default` edge to a node of this document;
-    /// never guess a branch and never claim a branch whose target cannot be walked.
+    /// invariant: a judged node must declare exactly one `default` edge to a node of this
+    /// document; never guess a branch and never claim a branch whose target cannot be walked.
     #[error(
         "judge node `{node}` declares {count} walkable `default` edges; exactly one is required"
     )]
     JudgeBranch { node: String, count: usize },
-    /// The approval identity cannot be computed over this document.
+    /// note: the approval identity cannot be computed over this document.
     #[error(transparent)]
     Hash(#[from] nexus_workflow_ir::CanonicalHashError),
 }
 
-/// Walk `document` from its entry and return the deterministic trajectory.
+/// note: walk `document` from its entry and return the deterministic trajectory.
 ///
 /// # Errors
 ///
@@ -98,7 +101,7 @@ pub fn simulate_document(
             .as_ref()
             .is_some_and(|exit| exit.kind == WorkflowExitWhenKind::LlmJudge);
         let next: Vec<&str> = if judged {
-            // A default edge to an undeclared node is not a branch the walk can follow, so it
+            // why: a default edge to an undeclared node is not a branch the walk can follow, so it
             // does not count: a judge whose only default edge dangles is refused like a
             // judge with no default edge, never reported as successfully stubbed.
             let defaults: Vec<&str> = outgoing
@@ -120,14 +123,14 @@ pub fn simulate_document(
             outgoing.iter().map(|edge| edge.to.as_str()).collect()
         };
         for target in next {
-            // An edge to an undeclared node is not reachable without a node to walk.
+            // why: an edge to an undeclared node is not reachable without a node to walk.
             if by_id.contains_key(target) && seen.insert(target) {
                 queue.push_back(target);
             }
         }
     }
 
-    // Signal pauses are document-global: the IR gives them no target node.
+    // why: signal pauses are document-global — the IR gives them no target node.
     for signal in &document.signals {
         if signal.action == WorkflowSignalBindingAction::Pause {
             waits.push(SimulationPredictedWait {
@@ -139,7 +142,7 @@ pub fn simulate_document(
 
     let mut nodes_visited: Vec<String> = visited.iter().map(|node| node.id.clone()).collect();
     nodes_visited.sort_unstable();
-    // Same prediction can be recorded from two visiting paths; the contract is a set.
+    // why: the same prediction can be recorded from two visiting paths — the contract is a set.
     waits.sort_by(|left, right| (left.reason, &left.subject).cmp(&(right.reason, &right.subject)));
     waits.dedup_by(|left, right| left.reason == right.reason && left.subject == right.subject);
     let mut stubbed_judges: Vec<String> = stubbed_judges
@@ -148,8 +151,8 @@ pub fn simulate_document(
         .collect();
     stubbed_judges.sort_unstable();
 
-    // The generated `Ord` is the contract order `pure < read < write_candidate < external`,
-    // so the rollup is one max over visited nodes and their expanded descendants.
+    // invariant: the generated `Ord` is the contract order `pure < read < write_candidate <
+    // external`, so the rollup is one max over visited nodes and their expanded descendants.
     let effect = visited
         .iter()
         .map(|node| node.effect_class)
@@ -167,7 +170,7 @@ pub fn simulate_document(
     })
 }
 
-/// The one conversion from the IR effect lattice to the trajectory wire enum.
+/// invariant: the only conversion from the IR effect lattice to the trajectory wire enum.
 const fn effect_summary(effect: WorkflowNodeEffectClass) -> SimulationTrajectoryEffectSummary {
     match effect {
         WorkflowNodeEffectClass::Pure => SimulationTrajectoryEffectSummary::Pure,
