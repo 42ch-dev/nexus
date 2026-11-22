@@ -8,6 +8,8 @@
 //!   cached count without streaming keyword JSON.
 //! - Fingerprint cache: when fragments change, the count is recomputed
 //!   soundly and the cache is updated.
+// why: an under-count would silently admit the gate, so the count and cache are
+// pinned against the streaming ceiling and the fingerprint.
 
 #![allow(clippy::unwrap_used)]
 
@@ -15,7 +17,7 @@ use nexus_local_db::{
     build_stats_fingerprint, init_pool, memory_fragment, soul_narrative_fragment_stats,
 };
 
-/// Helper: create a memory fragment with given keywords.
+/// note: Helper — create a memory fragment with given keywords.
 async fn insert_fragment(pool: &sqlx::SqlitePool, creator_id: &str, keywords: &[&str], idx: usize) {
     let keywords_json = serde_json::to_string(&keywords).unwrap();
     let record = memory_fragment::MemoryFragmentRecord {
@@ -33,7 +35,7 @@ async fn insert_fragment(pool: &sqlx::SqlitePool, creator_id: &str, keywords: &[
         .unwrap();
 }
 
-/// Creator with ≥20 distinct keywords spread across many fragments
+/// note: Creator with ≥20 distinct keywords spread across many fragments
 /// → gate passes (`distinct_keyword_count` ≥ 20). Above the threshold the
 /// returned value is the threshold-saturated count (20), not the exact
 /// total — the gate only needs the `>= 20?` predicate.
@@ -44,7 +46,7 @@ async fn distinct_keywords_at_least_20_across_many_fragments() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_test_many";
 
-    // Insert 30 fragments, each with one unique keyword.
+    // note: insert 30 fragments, each with one unique keyword.
     // Total distinct: 30 (well above the gate threshold of 20).
     for i in 0..30 {
         let kw = format!("unique_kw_{i}");
@@ -55,15 +57,15 @@ async fn distinct_keywords_at_least_20_across_many_fragments() {
         .await
         .unwrap();
 
-    // Fragment count should be 30.
+    // invariant: fragment count is 30.
     assert_eq!(stats.fragment_count, 30);
-    // Threshold-saturated count reports 20 (the gate sees `>= 20`).
+    // note: threshold-saturated count reports 20 (the gate sees `>= 20`).
     assert_eq!(stats.distinct_keyword_count, 20);
-    // Gate check: >= 20 → passes (NOT insufficient_data).
+    // invariant: gate check `>= 20` passes (NOT insufficient_data).
     assert!(stats.distinct_keyword_count >= 20);
 }
 
-/// Creator with <20 distinct keywords → gate fails, exact count is correct.
+/// note: Creator with <20 distinct keywords → gate fails, exact count is correct.
 #[tokio::test]
 async fn distinct_keywords_below_20_gate_fails() {
     let dir = tempfile::tempdir().unwrap();
@@ -71,7 +73,7 @@ async fn distinct_keywords_below_20_gate_fails() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_test_few";
 
-    // Insert 5 fragments, each with one keyword. Some keywords repeat.
+    // note: insert 5 fragments, each with one keyword; some keywords repeat.
     let keywords_sequence = ["kw_a", "kw_b", "kw_c", "kw_a", "kw_d"];
     for (i, kw) in keywords_sequence.iter().enumerate() {
         insert_fragment(&pool, creator_id, &[kw], i).await;
@@ -81,15 +83,15 @@ async fn distinct_keywords_below_20_gate_fails() {
         .await
         .unwrap();
 
-    // Fragment count should be 5.
+    // invariant: fragment count is 5.
     assert_eq!(stats.fragment_count, 5);
-    // Distinct keyword count should be exactly 4 (kw_a appears twice).
+    // invariant: distinct keyword count is exactly 4 (kw_a appears twice).
     assert_eq!(stats.distinct_keyword_count, 4);
-    // Gate check: < 20 → fails (insufficient_data).
+    // invariant: gate check `< 20` fails (insufficient_data).
     assert!(stats.distinct_keyword_count < 20);
 }
 
-/// Creator with exactly 20 distinct keywords → gate passes at threshold.
+/// note: Creator with exactly 20 distinct keywords → gate passes at threshold.
 #[tokio::test]
 async fn distinct_keywords_exactly_20_gate_passes() {
     let dir = tempfile::tempdir().unwrap();
@@ -97,7 +99,7 @@ async fn distinct_keywords_exactly_20_gate_passes() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_test_exact";
 
-    // Insert 20 fragments, each with one unique keyword.
+    // note: insert 20 fragments, each with one unique keyword.
     for i in 0..20 {
         let kw = format!("kw_{i}");
         insert_fragment(&pool, creator_id, &[&kw], i).await;
@@ -109,11 +111,11 @@ async fn distinct_keywords_exactly_20_gate_passes() {
 
     assert_eq!(stats.fragment_count, 20);
     assert_eq!(stats.distinct_keyword_count, 20);
-    // Gate check: == 20 → passes (NOT insufficient_data).
+    // invariant: gate check `== 20` passes (NOT insufficient_data).
     assert!(stats.distinct_keyword_count >= 20);
 }
 
-/// Creator with ≥20 distinct keywords but many duplicate keywords in fragments
+/// note: Creator with ≥20 distinct keywords but many duplicate keywords in fragments
 /// → gate still passes (distinct count is sound). Above the threshold the
 /// reported value is the threshold-saturated count (20).
 #[tokio::test]
@@ -123,10 +125,10 @@ async fn distinct_keywords_with_duplicates_still_sound() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_test_dupes";
 
-    // Insert 50 fragments, but only 25 distinct keywords (many duplicates).
+    // note: insert 50 fragments, but only 25 distinct keywords (many duplicates).
     // 25 distinct > 20 → gate passes.
     for i in 0..50 {
-        let kw_idx = i % 25; // Only 25 distinct keywords
+        let kw_idx = i % 25; // note: only 25 distinct keywords
         let kw = format!("kw_{kw_idx}");
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
@@ -136,12 +138,12 @@ async fn distinct_keywords_with_duplicates_still_sound() {
         .unwrap();
 
     assert_eq!(stats.fragment_count, 50);
-    // Threshold-saturated count reports 20 (the gate sees `>= 20`).
+    // note: threshold-saturated count reports 20 (the gate sees `>= 20`).
     assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
 }
 
-/// Creator with no fragments → zero distinct keywords, gate fails.
+/// note: Creator with no fragments → zero distinct keywords, gate fails.
 #[tokio::test]
 async fn no_fragments_zero_distinct() {
     let dir = tempfile::tempdir().unwrap();
@@ -158,9 +160,9 @@ async fn no_fragments_zero_distinct() {
     assert!(stats.distinct_keyword_count < 20);
 }
 
-// ── Fingerprint cache regression tests ──────────────────────────────
+// note: fingerprint cache regression tests.
 
-/// Seed a narrative cache row with a known distinct-keyword count and
+/// note: Seed a narrative cache row with a known distinct-keyword count and
 /// fingerprint, so the fingerprint-cache read path can be tested.
 async fn seed_narrative_cache(
     pool: &sqlx::SqlitePool,
@@ -182,8 +184,8 @@ async fn seed_narrative_cache(
     .bind(creator_id)
     .bind("cached narrative text")
     .bind(&now)
-    .bind(0_i64) // fragment_count_at_generation — doesn't matter for stats cache test
-    .bind(None::<String>) // max_fragment_created_at_at_generation
+    .bind(0_i64) // note: fragment_count_at_generation — irrelevant to the stats-cache case
+    .bind(None::<String>) // note: max_fragment_created_at_at_generation stays unset
     .bind(distinct_keyword_count_cache)
     .bind(stats_fingerprint)
     .bind(&now)
@@ -193,7 +195,7 @@ async fn seed_narrative_cache(
     .unwrap();
 }
 
-/// Cached read with UNCHANGED fragments: the fingerprint matches, so
+/// note: Cached read with UNCHANGED fragments — the fingerprint matches, so
 /// `soul_narrative_fragment_stats` returns the cached distinct count
 /// without scanning keyword JSON.
 #[tokio::test]
@@ -203,13 +205,13 @@ async fn fingerprint_cache_unchanged_fragments_returns_cached_count() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_cache_hit";
 
-    // Insert 25 fragments (25 distinct keywords).
+    // note: insert 25 fragments (25 distinct keywords).
     for i in 0..25 {
         let kw = format!("kw_{i}");
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    // Query the actual max_created_at from the DB so the fingerprint matches.
+    // note: query the actual max_created_at from the DB so the fingerprint matches.
     let max_created_at: Option<String> =
         sqlx::query_scalar("SELECT MAX(created_at) FROM memory_fragments WHERE creator_id = ?")
             .bind(creator_id)
@@ -217,7 +219,7 @@ async fn fingerprint_cache_unchanged_fragments_returns_cached_count() {
             .await
             .unwrap();
 
-    // Seed a cache row with a known count (999) and matching fingerprint.
+    // note: seed a cache row with a known count (999) and matching fingerprint.
     let fingerprint = build_stats_fingerprint(25, max_created_at.as_deref());
     seed_narrative_cache(&pool, creator_id, 999, &fingerprint).await;
 
@@ -225,13 +227,13 @@ async fn fingerprint_cache_unchanged_fragments_returns_cached_count() {
         .await
         .unwrap();
 
-    // Fingerprint matches → should return the CACHED count (999), not 25.
+    // invariant: fingerprint matches → returns the CACHED count (999), not 25.
     assert_eq!(stats.fragment_count, 25);
     assert_eq!(stats.distinct_keyword_count, 999);
     assert!(stats.distinct_keyword_count >= 20);
 }
 
-/// Cached read AFTER a new fragment (fingerprint changes) → recomputes
+/// note: Cached read AFTER a new fragment (fingerprint changes) → recomputes
 /// soundly and updates the cache with the new count.
 #[tokio::test]
 async fn fingerprint_cache_changed_fragments_recomputes() {
@@ -240,13 +242,13 @@ async fn fingerprint_cache_changed_fragments_recomputes() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_cache_miss";
 
-    // Insert 25 fragments (25 distinct keywords).
+    // note: insert 25 fragments (25 distinct keywords).
     for i in 0..25 {
         let kw = format!("kw_{i}");
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    // Seed a cache row with an OLD fingerprint (fragment_count=10).
+    // note: seed a cache row with an OLD fingerprint (fragment_count=10).
     let old_fingerprint = build_stats_fingerprint(10, None);
     seed_narrative_cache(&pool, creator_id, 999, &old_fingerprint).await;
 
@@ -254,19 +256,19 @@ async fn fingerprint_cache_changed_fragments_recomputes() {
         .await
         .unwrap();
 
-    // Fingerprint mismatch → should recompute, returning the threshold-saturated count (20).
+    // invariant: fingerprint mismatch → recompute, returning the threshold-saturated count (20).
     assert_eq!(stats.fragment_count, 25);
     assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
 
-    // Second call with unchanged fragments → should now return cached 20.
+    // note: second call with unchanged fragments returns the cached 20.
     let (stats2, _cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
     assert_eq!(stats2.distinct_keyword_count, 20);
 }
 
-/// No cache row exists (ungenerated case) → computes soundly, then
+/// note: No cache row exists (ungenerated case) → computes soundly, then
 /// creates a stats-only row (G3 fix) so the next poll hits the fingerprint
 /// cache without re-scanning keyword JSON.
 #[tokio::test]
@@ -276,7 +278,7 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_no_cache";
 
-    // Insert 22 fragments (22 distinct keywords) — no narrative row.
+    // note: insert 22 fragments (22 distinct keywords), no narrative row.
     for i in 0..22 {
         let kw = format!("kw_{i}");
         insert_fragment(&pool, creator_id, &[&kw], i).await;
@@ -286,12 +288,12 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         .await
         .unwrap();
 
-    // Should compute from scratch — no cache to serve from. Above-threshold
+    // note: should compute from scratch — no cache to serve from. Above-threshold
     // count is threshold-saturated (20).
     assert_eq!(stats.fragment_count, 22);
     assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
-    // After first call, a stats-only row should exist (G3 fix).
+    // note: after the first call, a stats-only row exists (G3 fix).
     assert!(cached.is_some(), "G3: stats-only row should be created");
     let cached = cached.unwrap();
     assert!(cached.narrative.is_none(), "stats-only: narrative is NULL");
@@ -302,7 +304,7 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
     assert_eq!(cached.distinct_keyword_count_cache, 20);
     assert!(cached.stats_fingerprint.is_some());
 
-    // Second call with unchanged fragments → fingerprint cache hit.
+    // note: second call with unchanged fragments hits the fingerprint cache.
     let (stats2, cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
@@ -313,7 +315,7 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
     assert!(cached2.is_some());
 }
 
-/// Cache with zero fragments: fingerprint "0:" matches → returns cached 0.
+/// note: Cache with zero fragments — fingerprint "0:" matches, so the cached 0 is returned.
 #[tokio::test]
 async fn fingerprint_cache_zero_fragments_returns_cached_zero() {
     let dir = tempfile::tempdir().unwrap();
@@ -321,7 +323,7 @@ async fn fingerprint_cache_zero_fragments_returns_cached_zero() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_cache_zero";
 
-    // No fragments inserted.
+    // note: no fragments inserted.
     let fingerprint = build_stats_fingerprint(0, None);
     seed_narrative_cache(&pool, creator_id, 0, &fingerprint).await;
 
