@@ -12,7 +12,6 @@ pub use nexus_contracts::local::orchestration::preset_gate::*;
 
 use std::path::{Path, PathBuf};
 
-
 /// note: Work fields available for gate evaluation (snapshot at enqueue time).
 #[derive(Debug, Clone)]
 pub struct WorkSnapshot {
@@ -184,7 +183,6 @@ pub trait PreviousPresetLookup: Send + Sync {
     >;
 }
 
-
 /// note: Internal error during gate evaluation (not a gate failure per se).
 #[derive(Debug, thiserror::Error)]
 pub enum GateEvalError {
@@ -204,7 +202,6 @@ pub enum GateEvalError {
     #[error("unknown work field: {0}")]
     UnknownField(String),
 }
-
 
 /// note: Evaluate a list of gates against the given context.
 ///
@@ -311,7 +308,6 @@ pub async fn evaluate_gates(
     }
 }
 
-
 /// note: Evaluate a `work_field` gate operator against the actual value.
 fn evaluate_work_field_op(op: &GateOp, actual: Option<&serde_json::Value>) -> bool {
     match op {
@@ -396,7 +392,6 @@ fn previous_preset_remediation(preset: &str) -> String {
     }
 }
 
-
 /// note: Audit record for a forced gate bypass.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForceGatesAudit {
@@ -411,7 +406,6 @@ pub struct ForceGatesAudit {
     /// note: ISO-8601 timestamp.
     pub timestamp: String,
 }
-
 
 #[cfg(test)]
 mod tests {

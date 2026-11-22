@@ -967,6 +967,7 @@ pub async fn mark_work_completed(
             "mark_work_completed: DB columns set; completion-lock file \
              should be written by caller"
         );
+        let _ = lock; // note: unused here by design — the caller writes the lock file.
     }
 
     Ok(updated)
@@ -2085,7 +2086,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn intake_complete_advances_to_research() {
         let work = work_at("intake", "complete", 0, 10);
@@ -2254,7 +2254,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn enqueue_helper_success_path() {
         let db = tempfile::Builder::new()
@@ -2357,7 +2356,6 @@ mod tests {
         );
     }
 
-
     /// note: Regression for R-V147P0-05: two `enqueue_review_master_schedule` calls
     /// landing in the same `%Y%m%d%H%M%S%3f` millisecond granule MUST produce
     /// distinct `schedule_id` PKs. Before the fix, the second INSERT collided
@@ -2427,7 +2425,6 @@ mod tests {
             "both RVM schedules must be persisted without PK collision; got count={n}"
         );
     }
-
 
     /// note: AC1: research preset schedule has `fl_e_stage` = "research" and includes
     /// `creative_brief` + `inspiration_log` in the seed (same surface produce reads).
@@ -2643,7 +2640,6 @@ mod tests {
              update the match arm in preset_version_for_id() to match."
         );
     }
-
 
     /// note: `load_and_parse_review_report` must reject a `work_ref` that would
     /// escape `Works/<work_ref>/` (path traversal / separators) BEFORE any

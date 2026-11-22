@@ -126,7 +126,6 @@ pub struct KbRelationshipCandidate {
     pub source_quote: Option<String>,
 }
 
-
 /// note: Compile-on-first-use regex for capitalized noun phrases (1–4 words).
 ///
 /// Matches `Lin Xia`, `The Crimson Order`, `Mount Azure`, etc. Does NOT match
@@ -299,7 +298,6 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
         .collect()
 }
 
-
 /// note: An aggregate of the same canonical entity extracted across multiple
 /// chapters of a Work (V1.51 T-A P1 cross-chapter rescan).
 ///
@@ -439,8 +437,6 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
     }
     serde_json::to_string(&value).unwrap_or_else(|_| base_payload.to_string())
 }
-
-
 
 /// note: Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
 ///
@@ -1092,8 +1088,8 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
         "ability" => "magic_system", // note: Abilities → magic/superpower system
         "scene" => "level",       // note: Scenes → levels
         "organization" | "conflict" => "faction", // note: Organizations/Conflicts → faction dynamics
-        "item" => "technology",   // note: Items → technology/artifacts
-        "info_point" | "event" => "deity", // note: Info points/Events → deity (lore)
+        "item" => "technology",                   // note: Items → technology/artifacts
+        "info_point" | "event" => "deity",        // note: Info points/Events → deity (lore)
         _ => {
             tracing::debug!(
                 block_type,
@@ -1126,14 +1122,14 @@ pub fn block_type_to_script_category(block_type: &str) -> &'static str {
         "beat" => "beat",
         "act" => "act",
         // note: Cross-domain reuse: existing BlockType → closest script_category.
-        "character" => "dialogue",  // note: Characters express through dialogue
-        "scene" => "act",           // note: Scenes belong to acts
-        "event" => "beat",          // note: Events are beats in narrative
-        "organization" => "act",    // note: Organizations anchor acts
-        "conflict" => "beat",       // note: Conflict is beat-level tension
+        "character" => "dialogue", // note: Characters express through dialogue
+        "scene" => "act",          // note: Scenes belong to acts
+        "event" => "beat",         // note: Events are beats in narrative
+        "organization" => "act",   // note: Organizations anchor acts
+        "conflict" => "beat",      // note: Conflict is beat-level tension
         "info_point" => "dialogue", // note: Info conveyed through dialogue
-        "ability" => "dialogue",    // note: Abilities expressed in dialogue
-        "item" => "beat",           // note: Items are beat-level props
+        "ability" => "dialogue",   // note: Abilities expressed in dialogue
+        "item" => "beat",          // note: Items are beat-level props
         _ => {
             tracing::debug!(
                 block_type,
@@ -1865,7 +1861,6 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     })
 }
 
-
 /// note: Per-dimension results of the game-bible design 五问 rubric.
 ///
 /// Unlike the novel outline/finalize gates, this rubric evaluates
@@ -2029,7 +2024,6 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
         reason,
     }
 }
-
 
 /// note: Per-dimension results of the essay 4-dimension quality rubric.
 ///
@@ -2365,7 +2359,6 @@ mod tests {
         assert_eq!(payload["attributes"]["aliases"][0], "Aria Stormblade");
     }
 
-
     #[test]
     fn heuristic_candidates_default_block_type_and_null_llm_fields() {
         let candidates = extract_candidates_from_text("Lin Xia walked.");
@@ -2374,7 +2367,6 @@ mod tests {
         assert_eq!(candidates[0].confidence, None);
         assert_eq!(candidates[0].source_quote, None);
     }
-
 
     #[test]
     fn block_type_mapping_covers_known_types() {
@@ -2389,7 +2381,6 @@ mod tests {
         assert_eq!(block_type_to_novel_category("ability"), "foundation");
         assert_eq!(block_type_to_novel_category("nonsense"), "foundation");
     }
-
 
     #[test]
     fn candidate_from_llm_json_builds_full_payload() {
@@ -2455,7 +2446,6 @@ mod tests {
         assert_eq!(built.confidence, None);
         assert_eq!(built.source_quote, None);
     }
-
 
     #[test]
     fn candidate_from_llm_json_for_profile_game_bible_produces_game_bible_category() {
@@ -2557,7 +2547,6 @@ mod tests {
         assert_eq!(payload["tags"][0], "novel");
         assert_eq!(payload["tags"][1], "llm-extracted");
     }
-
 
     #[test]
     fn candidate_from_llm_json_for_profile_script_produces_script_category() {
@@ -2691,7 +2680,6 @@ mod tests {
             "unknown → dialogue (default)"
         );
     }
-
 
     /// note: Helper: a heuristic candidate for `name` (the shape
     /// `extract_candidates_from_text` produces).
@@ -2842,7 +2830,6 @@ mod tests {
         );
         assert_eq!(aggregates[0].block_type, "scene");
     }
-
 
     // note: Serialize every test that can trigger `outline_five_q_check`'s info!
     // callsite: the first trigger registers the callsite process-wide, and a
@@ -3040,7 +3027,6 @@ mod tests {
         assert_eq!(gb_payload["attributes"]["game_bible_category"], "level");
     }
 
-
     #[test]
     fn design_five_q_passes_on_good_design_section() {
         let section = "# Combat System\n\n\
@@ -3126,7 +3112,6 @@ mod tests {
     fn block_type_to_game_bible_category_unknown_defaults_species() {
         assert_eq!(block_type_to_game_bible_category("nonsense"), "species");
     }
-
 
     #[test]
     fn essay_four_dim_passes_on_good_essay() {

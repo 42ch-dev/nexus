@@ -2428,7 +2428,6 @@ states:
         use std::collections::{BTreeMap, HashMap};
         use std::sync::{Arc, Mutex};
 
-
         /// note: `entry` / `outer_state` / capability enter / rule exit / linear edge /
         /// terminal node. The IR document lists `review` first so that `entry`
         /// cannot be satisfied positionally.
@@ -2940,7 +2939,6 @@ states:
             "provenance": {"source": "compose"}
         }"#;
 
-
         /// note: Shared logs for everything a scripted run can observe.
         #[derive(Default, Clone)]
         struct Recorder {
@@ -3069,7 +3067,6 @@ states:
                 })
             }
         }
-
 
         /// note: One intake's built graph, the manifest it was built from and its
         /// normalized projection.
@@ -3436,7 +3433,6 @@ states:
                 })
                 .collect()
         }
-
 
         #[tokio::test]
         async fn parity_entry_selects_the_declared_initial_task() {

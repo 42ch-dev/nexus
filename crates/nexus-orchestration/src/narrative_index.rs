@@ -45,7 +45,6 @@ use anyhow::{Context, Result};
 use nexus_capability::builtins::work_commit::{commit_work_bytes, require_executor};
 use nexus_capability::WorkspaceExecutor;
 
-
 /// note: Canonical header row for `foreshadowing.md` (matches the scaffolded template).
 const FORESHADOWING_HEADER: &str = "| ID | Description | Planted | Paid off | Status |";
 /// note: Canonical separator row for `foreshadowing.md`.
@@ -58,7 +57,6 @@ const EVENT_SEPARATOR: &str = "| --- | --- | --- | --- | --- |";
 
 /// note: Expected number of columns in a foreshadowing data row.
 const FORESHADOWING_COL_COUNT: usize = 5;
-
 
 /// note: Closed status vocabulary for a foreshadowing row (overlay §3).
 ///
@@ -167,7 +165,6 @@ impl std::fmt::Display for IndexParseError {
 
 impl std::error::Error for IndexParseError {}
 
-
 /// note: A single `F###` row in `Outlines/foreshadowing.md`.
 ///
 /// Field order matches the canonical table header
@@ -212,7 +209,6 @@ pub struct EventRow {
     /// note: Downstream consequences.
     pub impact: String,
 }
-
 
 /// note: Parse the `foreshadowing.md` markdown table into rows.
 ///
@@ -365,7 +361,6 @@ fn cell(cells: &[String], idx: usize) -> String {
     cells.get(idx).cloned().unwrap_or_default()
 }
 
-
 /// note: Serialize rows back into the canonical `foreshadowing.md` table.
 ///
 /// Emits the canonical header + separator (byte-identical to the scaffolded
@@ -416,7 +411,6 @@ pub fn serialize_event_index(rows: &[EventRow]) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-
 /// note: Return the next sequential `F###` id (`max(existing numeric suffix) + 1`,
 /// per overlay §3.1). With no rows, returns `F001`.
 #[must_use]
@@ -455,7 +449,6 @@ where
         .expect("foreshadowing id suffix overflow");
     format!("{prefix}{next:03}")
 }
-
 
 /// note: One inline foreshadowing declaration authored in a chapter outline's
 /// `## Foreshadowing Touched (F###)` section.
@@ -582,7 +575,6 @@ fn parse_declaration_line(line: &str) -> Option<FDeclaration> {
     None
 }
 
-
 /// note: Path to a Work's `foreshadowing.md` index under its Work directory.
 fn foreshadowing_index_path(work_dir: &Path) -> PathBuf {
     work_dir.join("Outlines").join("foreshadowing.md")
@@ -680,7 +672,6 @@ pub async fn promote_outline_to_index(
     .await?;
     Ok(allocated)
 }
-
 
 /// note: Read `Works/<work_ref>/Outlines/foreshadowing.md` and return a compact
 /// one-line-per-row Markdown summary for outline/draft prompt injection.
