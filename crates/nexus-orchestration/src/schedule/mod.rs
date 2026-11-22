@@ -1,4 +1,5 @@
 //! Schedule supervision and core-context derivation (WS7).
+// note: the pure admission gate, supervisor, cron evaluator and derivation live in the submodules below.
 //!
 //! - [`admission`] — pure-function admission gate per spec §5.1
 //! - [`supervisor`] — `ScheduleSupervisor` with `tick()` / `on_session_terminal()`

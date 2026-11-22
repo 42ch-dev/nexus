@@ -16,7 +16,7 @@ use nexus_local_db::SqlitePool;
 use serde::de::Error as _;
 use tokio::sync::Mutex;
 
-/// Error type for core context operations.
+/// note: Error type for core context operations.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreContextError {
     #[error("database error: {0}")]
@@ -29,14 +29,14 @@ pub enum CoreContextError {
     UserEditValidation(String),
     #[error("version {1} not found for schedule {0}")]
     VersionNotFound(String, u32),
-    /// The schedule pointer no longer named the version an append derived
+    /// note: The schedule pointer no longer named the version an append derived
     /// from, so the append (and its immutable version row) was rolled back.
     ///
     /// A version race never produces an orphan successful version: the caller
     /// re-reads the pointer and retries against the committed winner.
     #[error("core context version race on schedule {0}: the pointer no longer names version {1}")]
     VersionRace(String, u32),
-    /// More than one schedule names the same run as its
+    /// note: More than one schedule names the same run as its
     /// `current_session_id`, so "the schedule that owns this run" has no
     /// single answer.
     ///
@@ -49,7 +49,7 @@ pub enum CoreContextError {
          refusing to choose one"
     )]
     AmbiguousOwnership(String, usize, String),
-    /// A USER edit reached the writer for a schedule that had already settled.
+    /// note: A USER edit reached the writer for a schedule that had already settled.
     ///
     /// Admitted INSIDE the append transaction (see [`CoreContextManager::apply`]),
     /// so it covers the whole window between a caller's pre-check and this
@@ -67,7 +67,7 @@ pub enum CoreContextError {
     Serde(#[from] serde_json::Error),
 }
 
-/// Manages immutable, versioned `core_context` for a schedule.
+/// note: Manages immutable, versioned `core_context` for a schedule.
 ///
 /// Each `apply()` call appends a new row to `core_context_versions` and
 /// bumps `creator_schedules.current_core_context_version`.
@@ -79,14 +79,14 @@ pub enum CoreContextError {
 /// each other.
 pub struct CoreContextManager {
     pool: Arc<SqlitePool>,
-    /// Per-schedule write guards. Each schedule gets its own Mutex<()> entry.
+    /// note: Per-schedule write guards. Each schedule gets its own Mutex<()> entry.
     /// This allows concurrent writes to *different* schedules while
     /// maintaining per-schedule safety (R6).
     schedule_guards: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl CoreContextManager {
-    /// Create a new manager backed by the given shared `SQLite` pool.
+    /// note: Create a new manager backed by the given shared `SQLite` pool.
     #[must_use]
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
@@ -95,7 +95,7 @@ impl CoreContextManager {
         }
     }
 
-    /// Remove the per-schedule guard for a terminal schedule.
+    /// note: Remove the per-schedule guard for a terminal schedule.
     ///
     /// Callers (schedule supervisor) should invoke this when a schedule reaches
     /// Completed/Cancelled/Failed status to prevent the `schedule_guards`
@@ -112,7 +112,7 @@ impl CoreContextManager {
         guards.remove(&key);
     }
 
-    /// Get or create a per-schedule write guard.
+    /// note: Get or create a per-schedule write guard.
     ///
     /// Returns an `Arc<Mutex<()>>` for the given schedule. The Arc allows
     /// cloning so the lock can be held while the `HashMap` is not locked.
@@ -125,7 +125,7 @@ impl CoreContextManager {
             .clone()
     }
 
-    /// Apply the seed step to create version 0 of `core_context`.
+    /// note: Apply the seed step to create version 0 of `core_context`.
     ///
     /// Per spec §6.2, the seed is version 0 (not 1).
     /// This must be called before any [`apply`] call for the schedule.
@@ -140,7 +140,7 @@ impl CoreContextManager {
         raw: &str,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // R6: Per-schedule lock to prevent version chain corruption.
+        // note: R6: Per-schedule lock to prevent version chain corruption.
         let guard = self.schedule_guard(schedule_id).await;
         let _lock = guard.lock().await;
 
@@ -151,7 +151,6 @@ impl CoreContextManager {
             body: raw.to_string(),
         };
 
-        // Serialize payload and derivation for storage
         let payload_kind = "text";
         let content_bytes = serde_json::to_vec(&new_payload)?;
         let step = DerivationStep::Seed {
@@ -164,11 +163,10 @@ impl CoreContextManager {
             CoreContextAuthor::System => ("system", None),
         };
 
-        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        // note: Pre-own all bind params (borrow lifetime rules for sqlx macros).
         let schedule_id_owned = schedule_id.0.clone();
         let version_i64 = i64::from(new_version.0);
 
-        // Insert version 0 row
         sqlx::query!(
             r#"INSERT INTO core_context_versions
                (schedule_id, version, payload_kind, content,
@@ -188,7 +186,6 @@ impl CoreContextManager {
         .execute(&*self.pool)
         .await?;
 
-        // Set the schedule's current_core_context_version to 0
         sqlx::query!(
             "UPDATE creator_schedules
              SET current_core_context_version = ?, updated_at = ?
@@ -210,7 +207,7 @@ impl CoreContextManager {
         })
     }
 
-    /// Apply a derivation step to produce the next version of `core_context`.
+    /// note: Apply a derivation step to produce the next version of `core_context`.
     ///
     /// - Reads the schedule's current version (the pointer) and that version's
     ///   payload.
@@ -250,7 +247,7 @@ impl CoreContextManager {
         step: DerivationStep,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // R6: Per-schedule lock. The lock serializes THIS manager's writers on
+        // note: R6: Per-schedule lock. The lock serializes THIS manager's writers on
         // one schedule; the transaction below is what makes the
         // version+pointer pair atomic against every other writer.
         let guard = self.schedule_guard(schedule_id).await;
@@ -259,14 +256,14 @@ impl CoreContextManager {
         let now = chrono::Utc::now().timestamp();
         let schedule_id_owned = schedule_id.0.clone();
 
-        // `BEGIN IMMEDIATE` takes the Creator-DB writer lock up front, so the
+        // why: `BEGIN IMMEDIATE` takes the Creator-DB writer lock up front, so the
         // read-derive-insert-advance sequence is never split by another writer
         // (and never has to upgrade a read lock mid-transaction).
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| CoreContextError::Database(begin_error(e)))?;
 
-        // The schedule row's pointer is the version authority. `status` is read
+        // note: The schedule row's pointer is the version authority. `status` is read
         // in the SAME statement — and the same `BEGIN IMMEDIATE` transaction —
         // because the USER-edit admission below must be atomic with the append:
         // a settlement that committed before this transaction took the writer
@@ -281,7 +278,7 @@ impl CoreContextManager {
         .await?
         .ok_or_else(|| CoreContextError::NotFound(schedule_id.0.clone()))?;
 
-        // Terminal admission for USER edits: an edit must not land on a
+        // note: Terminal admission for USER edits: an edit must not land on a
         // schedule that already settled. Gated on the author, so every system
         // derivation keeps writing (a terminal schedule still receives its
         // final context). The whole transaction rolls back — no immutable
@@ -297,7 +294,7 @@ impl CoreContextManager {
         let current_version = CoreContextVersion(u32::try_from(current).unwrap_or_default());
         let new_version = CoreContextVersion(current_version.0 + 1);
 
-        // Compute new payload from the previous (pointed-at) content.
+        // note: Compute new payload from the previous (pointed-at) content.
         let previous_payload = Some(
             read_version_in_tx(&mut tx, &schedule_id_owned, current_version)
                 .await?
@@ -306,7 +303,6 @@ impl CoreContextManager {
 
         let new_payload = apply_step(previous_payload.as_ref(), &step, &author)?;
 
-        // Serialize payload and derivation for storage
         let payload_kind = match &new_payload {
             CoreContextPayload::Text { .. } => "text",
             CoreContextPayload::Struct { .. } => "struct",
@@ -322,7 +318,7 @@ impl CoreContextManager {
         let derivation_kind = derivation_kind_str(&step);
         let version_i64 = i64::from(new_version.0);
 
-        // Runtime `sqlx::query` (not the compile-time macro) for the new
+        // note: Runtime `sqlx::query` (not the compile-time macro) for the new
         // statements: they carry no `.sqlx` offline entry, and this is the
         // same convention the supervisor's admission transaction uses.
         sqlx::query(
@@ -344,7 +340,7 @@ impl CoreContextManager {
         .execute(&mut *tx)
         .await?;
 
-        // Conditional pointer advance: the append is only durable together
+        // note: Conditional pointer advance: the append is only durable together
         // with the pointer that names it.
         let advanced = sqlx::query(
             "UPDATE creator_schedules
@@ -379,7 +375,7 @@ impl CoreContextManager {
         })
     }
 
-    /// Apply a preset hook derivation step.
+    /// note: Apply a preset hook derivation step.
     ///
     /// **Strict subset**: only `EditOp::Append` and `EditOp::StructMerge` are
     /// allowed. `EditOp::Replace` and `EditOp::StructRemove` are rejected.
@@ -396,7 +392,7 @@ impl CoreContextManager {
         hook_name: &str,
         op: EditOp,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // Validate: preset hooks only allow Append or StructMerge
+        // note: Validate: preset hooks only allow Append or StructMerge
         match &op {
             EditOp::Append { .. } | EditOp::StructMerge { .. } => {}
             EditOp::Replace { .. } | EditOp::StructRemove { .. } => {
@@ -406,7 +402,7 @@ impl CoreContextManager {
             }
         }
 
-        // For PresetHook, we need to combine the hook metadata with the op.
+        // note: For PresetHook, we need to combine the hook metadata with the op.
         // The DerivationStep::PresetHook doesn't carry the op directly,
         // so we use apply_user_edit to actually apply the op, but wrap it.
         // Actually, looking at the spec more carefully: PresetHook is a derivation
@@ -416,7 +412,7 @@ impl CoreContextManager {
         // The simplest approach: store the op in the derivation_detail via
         // a custom wrapper, but for V1.4 let's just apply the op directly.
 
-        // We need to apply the edit op but record it as a PresetHook derivation.
+        // note: We need to apply the edit op but record it as a PresetHook derivation.
         // Let's do a direct implementation:
         // R6: Per-schedule lock to prevent version chain corruption.
         let guard = self.schedule_guard(schedule_id).await;
@@ -439,7 +435,7 @@ impl CoreContextManager {
         };
         let content_bytes = serde_json::to_vec(&new_payload)?;
 
-        // For PresetHook derivation_detail, store a JSON with op details
+        // note: For PresetHook derivation_detail, store a JSON with op details
         let detail_json = serde_json::json!({
             "state_id": state_id,
             "hook_name": hook_name,
@@ -447,7 +443,7 @@ impl CoreContextManager {
         });
         let derivation_json = serde_json::to_string(&detail_json)?;
 
-        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        // note: Pre-own all bind params (borrow lifetime rules for sqlx macros).
         let schedule_id_owned = schedule_id.0.clone();
         let version_i64 = i64::from(new_version.0);
 
@@ -468,7 +464,6 @@ impl CoreContextManager {
         .execute(&*self.pool)
         .await?;
 
-        // Bump the schedule's current_core_context_version
         sqlx::query!(
             "UPDATE creator_schedules
              SET current_core_context_version = ?, updated_at = ?
@@ -495,7 +490,7 @@ impl CoreContextManager {
         })
     }
 
-    /// Apply an LLM summarization derivation step (V1.5).
+    /// note: Apply an LLM summarization derivation step (V1.5).
     ///
     /// Takes the LLM-produced summary text and the prompt hash, writes a new
     /// `core_context_versions` row with `derivation_kind = 'llm_summarize'`.
@@ -511,7 +506,7 @@ impl CoreContextManager {
         prompt_hash: [u8; 32],
         capability_name: &str,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // R6: Per-schedule lock to prevent version chain corruption.
+        // note: R6: Per-schedule lock to prevent version chain corruption.
         let guard = self.schedule_guard(schedule_id).await;
         let _lock = guard.lock().await;
         let now = chrono::Utc::now().timestamp();
@@ -529,7 +524,7 @@ impl CoreContextManager {
         let step = DerivationStep::llm_summarize(capability_name.to_string(), prompt_hash);
         let derivation_json = serde_json::to_string(&step)?;
 
-        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        // note: Pre-own all bind params (borrow lifetime rules for sqlx macros).
         let schedule_id_owned = schedule_id.0.clone();
         let version_i64 = i64::from(new_version.0);
 
@@ -550,7 +545,6 @@ impl CoreContextManager {
         .execute(&*self.pool)
         .await?;
 
-        // Bump the schedule's current_core_context_version
         sqlx::query!(
             "UPDATE creator_schedules
              SET current_core_context_version = ?, updated_at = ?
@@ -572,7 +566,7 @@ impl CoreContextManager {
         })
     }
 
-    /// Apply a user edit derivation step.
+    /// note: Apply a user edit derivation step.
     ///
     /// **H3**: `EditOp::Replace` is rejected to prevent overwriting
     /// system-managed fields (seed data, LLM summaries). Only `Append`,
@@ -586,7 +580,7 @@ impl CoreContextManager {
         op: EditOp,
         source_user: Option<String>,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // H3: Reject Replace to protect system-managed fields.
+        // note: H3: Reject Replace to protect system-managed fields.
         if matches!(op, EditOp::Replace { .. }) {
             return Err(CoreContextError::UserEditValidation(
                 "EditOp::Replace is not allowed for user edits; use Append or StructMerge instead"
@@ -600,7 +594,7 @@ impl CoreContextManager {
         self.apply(schedule_id, step, author).await
     }
 
-    /// Get the current (latest) version number for a schedule.
+    /// note: Get the current (latest) version number for a schedule.
     ///
     /// # Errors
     /// Returns [`CoreContextError`] if database query fails.
@@ -623,7 +617,7 @@ impl CoreContextManager {
         )
     }
 
-    /// Read a specific version of `core_context` for a schedule.
+    /// note: Read a specific version of `core_context` for a schedule.
     ///
     /// # Errors
     /// Returns [`CoreContextError`] if database query or deserialization fails.
@@ -632,7 +626,7 @@ impl CoreContextManager {
         schedule_id: &ScheduleId,
         version: CoreContextVersion,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        // note: Pre-own all bind params (borrow lifetime rules for sqlx macros).
         let schedule_id_owned = schedule_id.0.clone();
         let version_i64 = i64::from(version.0);
         let row = sqlx::query_as!(
@@ -652,7 +646,7 @@ impl CoreContextManager {
         row.into_record()
     }
 
-    /// Read the COMMITTED `core_context` head of the schedule that owns one run.
+    /// note: Read the COMMITTED `core_context` head of the schedule that owns one run.
     ///
     /// `session_id` is a durable root run id; a run is schedule-owned exactly
     /// while some `creator_schedules` row names it as its `current_session_id`
@@ -690,7 +684,7 @@ impl CoreContextManager {
         .fetch_all(&*self.pool)
         .await?;
         let (schedule_id, version) = match rows.len() {
-            // No owning schedule: the run carries no core-context contract.
+            // invariant: No owning schedule: the run carries no core-context contract.
             0 => return Ok(None),
             1 => rows.remove(0),
             owners => {
@@ -716,7 +710,7 @@ impl CoreContextManager {
         Ok(Some(record))
     }
 
-    /// Read the current (latest) snapshot of `core_context` for a schedule.
+    /// note: Read the current (latest) snapshot of `core_context` for a schedule.
     ///
     /// # Errors
     /// Returns [`CoreContextError`] if database query or deserialization fails.
@@ -729,7 +723,7 @@ impl CoreContextManager {
     }
 }
 
-/// Internal row mapping for reading `core_context_versions`.
+/// note: Internal row mapping for reading `core_context_versions`.
 #[derive(sqlx::FromRow)]
 struct CoreContextVersionRow {
     schedule_id: String,
@@ -770,7 +764,7 @@ impl CoreContextVersionRow {
     }
 }
 
-/// Read one `core_context_versions` row through an OPEN transaction.
+/// note: Read one `core_context_versions` row through an OPEN transaction.
 ///
 /// The append path reads the version it derives from through the same
 /// transaction that inserts the next one, so the payload can never come from a
@@ -801,7 +795,7 @@ async fn read_version_in_tx(
     row.into_record()
 }
 
-/// Map a `nexus_local_db` transaction-open failure onto the sqlx error this
+/// note: Map a `nexus_local_db` transaction-open failure onto the sqlx error this
 /// module's error type carries (the local-db wrapper preserves the source
 /// `sqlx::Error`; every other local-db refusal is a plain protocol error).
 fn begin_error(err: nexus_local_db::LocalDbError) -> sqlx::Error {
@@ -811,7 +805,7 @@ fn begin_error(err: nexus_local_db::LocalDbError) -> sqlx::Error {
     }
 }
 
-/// Reconstruct a [`DerivationStep`] from stored `derivation_kind` + `derivation_detail`.
+/// note: Reconstruct a [`DerivationStep`] from stored `derivation_kind` + `derivation_detail`.
 fn reconstruct_derivation(
     kind: &str,
     detail: Option<&[u8]>,
@@ -866,7 +860,7 @@ fn reconstruct_derivation(
     }
 }
 
-/// Apply a [`DerivationStep`] to compute the new payload from the previous one.
+/// note: Apply a [`DerivationStep`] to compute the new payload from the previous one.
 fn apply_step(
     previous: Option<&CoreContextPayload>,
     step: &DerivationStep,
@@ -876,7 +870,7 @@ fn apply_step(
         DerivationStep::Seed { raw } => Ok(CoreContextPayload::Text { body: raw.clone() }),
         DerivationStep::UserEdit { op, .. } => apply_edit_op(previous, op),
         DerivationStep::PresetHook { .. } => {
-            // PresetHook via apply() uses the op stored in derivation_detail
+            // note: PresetHook via apply() uses the op stored in derivation_detail
             // This path is used when apply() is called directly with a PresetHook step.
             // For the correct behavior, use apply_preset_hook() instead.
             Ok(previous.cloned().unwrap_or(CoreContextPayload::Text {
@@ -884,13 +878,13 @@ fn apply_step(
             }))
         }
         DerivationStep::LlmSummarize { .. } => {
-            // V1.5+; not emitted by V1.4 code
+            // note: V1.5+; not emitted by V1.4 code
             Ok(previous.cloned().unwrap_or(CoreContextPayload::Text {
                 body: String::new(),
             }))
         }
         DerivationStep::PresetSeedExpansion { .. } => {
-            // V1.4 plumbing only; no actual expansion yet
+            // note: V1.4 plumbing only; no actual expansion yet
             Ok(previous.cloned().unwrap_or(CoreContextPayload::Text {
                 body: String::new(),
             }))
@@ -898,7 +892,7 @@ fn apply_step(
     }
 }
 
-/// Apply an [`EditOp`] to transform the payload.
+/// note: Apply an [`EditOp`] to transform the payload.
 fn apply_edit_op(
     previous: Option<&CoreContextPayload>,
     op: &EditOp,
@@ -943,7 +937,7 @@ fn apply_edit_op(
     }
 }
 
-/// Simple recursive JSON merge (patch keys overwrite base keys).
+/// note: Simple recursive JSON merge (patch keys overwrite base keys).
 fn json_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json::Value {
     match (base, patch) {
         (serde_json::Value::Object(base_map), serde_json::Value::Object(patch_map)) => {
@@ -961,7 +955,7 @@ fn json_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json
     }
 }
 
-/// Whether a stored `creator_schedules.status` is terminal for USER edits.
+/// note: Whether a stored `creator_schedules.status` is terminal for USER edits.
 ///
 /// The same three values the Core pre-check names, and the same set the
 /// supervisor's own admission queries exclude (`status NOT IN ('completed',
@@ -971,7 +965,7 @@ fn terminal_status(status: &str) -> bool {
     matches!(status, "completed" | "cancelled" | "failed")
 }
 
-/// Map a [`DerivationStep`] to its storage string tag.
+/// note: Map a [`DerivationStep`] to its storage string tag.
 const fn derivation_kind_str(step: &DerivationStep) -> &'static str {
     match step {
         DerivationStep::Seed { .. } => "seed",
@@ -990,7 +984,7 @@ mod tests {
         ScheduleId,
     };
 
-    /// Helper: create a fresh test DB with migrations and return the pool.
+    /// note: Helper: create a fresh test DB with migrations and return the pool.
     async fn fresh_pool() -> (Arc<SqlitePool>, tempfile::NamedTempFile) {
         let db = tempfile::NamedTempFile::new().unwrap();
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -1000,7 +994,7 @@ mod tests {
         (Arc::new(pool), db)
     }
 
-    /// Helper: insert a minimal schedule row for testing.
+    /// note: Helper: insert a minimal schedule row for testing.
     async fn insert_test_schedule(pool: &SqlitePool, schedule_id: &str) {
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper that inserts a minimal schedule row for test setup.
@@ -1027,7 +1021,6 @@ mod tests {
         let sid = ScheduleId("01A".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // v0 from seed:
         let record0 = mgr
             .apply_seed(
                 &sid,
@@ -1044,7 +1037,6 @@ mod tests {
             CoreContextVersion(0)
         );
 
-        // v1 from user edit:
         let record1 = mgr
             .apply_user_edit(
                 &sid,
@@ -1061,7 +1053,6 @@ mod tests {
             CoreContextVersion(1)
         );
 
-        // Read v1 content — should contain both parts
         let content = mgr.read(&sid, CoreContextVersion(1)).await.unwrap();
         match &content.content {
             CoreContextPayload::Text { body } => {
@@ -1079,12 +1070,11 @@ mod tests {
         let sid = ScheduleId("01A".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(&sid, "v0", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // PresetHook with EditOp::Replace should be rejected:
+        // note: PresetHook with EditOp::Replace should be rejected:
         let err = mgr
             .apply_preset_hook(
                 &sid,
@@ -1106,12 +1096,10 @@ mod tests {
         let sid = ScheduleId("01A".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // PresetHook with Append should succeed
         let record = mgr
             .apply_preset_hook(
                 &sid,
@@ -1125,7 +1113,6 @@ mod tests {
             .unwrap();
         assert_eq!(record.version, CoreContextVersion(1));
 
-        // Content should be concatenated
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
         match &snapshot.content {
             CoreContextPayload::Text { body } => {
@@ -1142,12 +1129,10 @@ mod tests {
         let sid = ScheduleId("01A".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(&sid, "first", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // Append v1
         mgr.apply_user_edit(
             &sid,
             EditOp::Append {
@@ -1158,7 +1143,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Append v2 (using Append instead of Replace, which is now rejected for user edits)
         mgr.apply_user_edit(
             &sid,
             EditOp::Append {
@@ -1177,7 +1161,6 @@ mod tests {
         }
     }
 
-    // ---------- H3: Replace rejected in user edit ----------
 
     #[tokio::test]
     async fn user_edit_rejects_replace() {
@@ -1186,12 +1169,10 @@ mod tests {
         let sid = ScheduleId("01A".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(&sid, "initial seed", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // User edit with Replace should be rejected
         let err = mgr
             .apply_user_edit(
                 &sid,
@@ -1205,7 +1186,6 @@ mod tests {
         assert!(err.to_string().contains("Replace"));
         assert!(err.to_string().contains("not allowed"));
 
-        // Version should still be 0
         assert_eq!(
             mgr.current_version(&sid).await.unwrap(),
             CoreContextVersion(0),
@@ -1220,12 +1200,10 @@ mod tests {
         let sid = ScheduleId("01A".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0 with struct
         mgr.apply_seed(&sid, "{}", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // User edit with StructMerge should succeed
         let record = mgr
             .apply_user_edit(
                 &sid,
@@ -1239,9 +1217,8 @@ mod tests {
         assert_eq!(record.version, CoreContextVersion(1));
     }
 
-    // ---------- P1: terminal admission for USER edits ----------
 
-    /// Settle a schedule exactly as the supervisor does: the stored status is
+    /// note: Settle a schedule exactly as the supervisor does: the stored status is
     /// the lowercase `snake_case` name, and the three terminal values are the
     /// ones the user-edit admission refuses.
     async fn settle_schedule(pool: &SqlitePool, schedule_id: &str, status: &str) {
@@ -1258,7 +1235,7 @@ mod tests {
         .unwrap();
     }
 
-    /// How many immutable `core_context_versions` rows `schedule_id` owns.
+    /// note: How many immutable `core_context_versions` rows `schedule_id` owns.
     async fn version_row_count(pool: &SqlitePool, schedule_id: &str) -> i64 {
         sqlx::query_scalar("SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?")
             .bind(schedule_id)
@@ -1267,7 +1244,7 @@ mod tests {
             .unwrap()
     }
 
-    /// A user edit that reaches the writer AFTER the schedule settled must be
+    /// note: A user edit that reaches the writer AFTER the schedule settled must be
     /// refused by the append transaction itself — the status admission lives in
     /// the same `BEGIN IMMEDIATE` transaction as the insert and the conditional
     /// pointer advance, so the settlement cannot slip into the window between a
@@ -1330,7 +1307,7 @@ mod tests {
                 "{status}: the committed payload is untouched"
             );
 
-            // The exemption is deliberate: a system derivation still writes the
+            // why: The exemption is deliberate: a system derivation still writes the
             // terminal schedule's final context — only the USER edit is fenced.
             let record = mgr
                 .apply_llm_summarize(&sid, "final summary", [0u8; 32], "context.summarize")
@@ -1354,9 +1331,8 @@ mod tests {
         assert_eq!(merged["c"], 4);
     }
 
-    // ---------- head_for_run: run → owning schedule resolution ----------
 
-    /// Helper: name `session_id` as `schedule_id`'s owned run.
+    /// note: Helper: name `session_id` as `schedule_id`'s owned run.
     ///
     /// `creator_schedules.current_session_id` is a real FK, so the session row
     /// exists first — the same shape a durable run has when a schedule owns it.
@@ -1387,7 +1363,7 @@ mod tests {
         .unwrap();
     }
 
-    /// `head_for_run` resolves the exact committed version of the ONE schedule
+    /// note: `head_for_run` resolves the exact committed version of the ONE schedule
     /// that names the run, reports `None` when no schedule does, and REFUSES
     /// when two schedules claim the same run: the ownership the whole
     /// core-context contract rests on has no single answer, so picking the row
@@ -1420,7 +1396,7 @@ mod tests {
             "a run no schedule names carries no core-context contract"
         );
 
-        // A second schedule naming the SAME run: the context schedule is
+        // note: A second schedule naming the SAME run: the context schedule is
         // ambiguous, so the lookup must fail closed rather than choose one.
         let second = ScheduleId("HEAD-SECOND".to_string());
         insert_test_schedule(&mgr.pool, &second.0).await;
@@ -1440,7 +1416,6 @@ mod tests {
         );
     }
 
-    // ---------- R6: Per-schedule version bump race ----------
 
     #[tokio::test]
     async fn r6_concurrent_apply_same_schedule_produces_sequential_versions() {
@@ -1451,7 +1426,6 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid_a.0).await;
         insert_test_schedule(&mgr.pool, &sid_b_id.0).await;
 
-        // Seed both
         mgr.apply_seed(&sid_a, "A-initial", CoreContextAuthor::System)
             .await
             .unwrap();
@@ -1459,7 +1433,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Concurrently apply to both schedules
         let mgr_clone = Arc::clone(&mgr);
         let sid_a_clone = sid_a.clone();
         let sid_b_id_clone = sid_b_id.clone();
@@ -1496,12 +1469,10 @@ mod tests {
         let v_a = h1.await.unwrap();
         let v_b = h2.await.unwrap();
 
-        // Both should succeed with version 1
         assert_eq!(v_a, CoreContextVersion(1));
         assert_eq!(v_b, CoreContextVersion(1));
     }
 
-    // ---------- V1.5: LLM Summarize derivation ----------
 
     #[tokio::test]
     async fn llm_summarize_writes_version_with_correct_derivation_kind() {
@@ -1510,7 +1481,6 @@ mod tests {
         let sid = ScheduleId("LLM-SUM1".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(
             &sid,
             "initial context about bees",
@@ -1519,7 +1489,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Apply LLM summarize
         let prompt_hash = [0xABu8; 32];
         let record = mgr
             .apply_llm_summarize(
@@ -1531,10 +1500,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Should be version 1
         assert_eq!(record.version, CoreContextVersion(1));
 
-        // Content should be the summary
         match &record.content {
             CoreContextPayload::Text { body } => {
                 assert_eq!(body, "Summarized: a story about bees and honey.");
@@ -1542,7 +1509,6 @@ mod tests {
             CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
 
-        // Derivation should be LlmSummarize
         match &record.derivation {
             DerivationStep::LlmSummarize {
                 capability,
@@ -1555,7 +1521,6 @@ mod tests {
             other => panic!("expected LlmSummarize derivation, got: {other:?}"),
         }
 
-        // Verify current version bumped to 1
         assert_eq!(
             mgr.current_version(&sid).await.unwrap(),
             CoreContextVersion(1)
@@ -1569,18 +1534,15 @@ mod tests {
         let sid = ScheduleId("LLM-RT1".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(&sid, "seed data", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // Apply LLM summarize
         let prompt_hash = [0x42u8; 32];
         mgr.apply_llm_summarize(&sid, "LLM summary v1", prompt_hash, "context.summarize")
             .await
             .unwrap();
 
-        // Read back v1 and verify derivation_kind is 'llm_summarize'
         let record = mgr.read(&sid, CoreContextVersion(1)).await.unwrap();
         match &record.derivation {
             DerivationStep::LlmSummarize { capability, .. } => {
@@ -1597,12 +1559,10 @@ mod tests {
         let sid = ScheduleId("LLM-MIX1".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0
         mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // v1: user edit
         mgr.apply_user_edit(
             &sid,
             EditOp::Append {
@@ -1613,7 +1573,6 @@ mod tests {
         .await
         .unwrap();
 
-        // v2: preset hook
         mgr.apply_preset_hook(
             &sid,
             "st1",
@@ -1625,7 +1584,6 @@ mod tests {
         .await
         .unwrap();
 
-        // v3: LLM summarize
         let record = mgr
             .apply_llm_summarize(&sid, "Final summary", [0u8; 32], "context.summarize")
             .await
@@ -1639,12 +1597,10 @@ mod tests {
             CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
 
-        // Verify current snapshot is the LLM summary
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
         assert_eq!(snapshot.version, CoreContextVersion(3));
     }
 
-    // ---------- R7: cleanup_guard tests ----------
 
     #[tokio::test]
     async fn cleanup_guard_removes_entry_and_allows_new_guard() {
@@ -1653,19 +1609,13 @@ mod tests {
         let sid = ScheduleId("R7-CLEANUP1".to_string());
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
-        // Seed v0 — this creates the per-schedule guard
+        // note: Seed v0 — this creates the per-schedule guard
         mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
             .await
             .unwrap();
 
-        // Verify guard exists (schedule_guards has an entry for sid)
-        // We can't inspect the HashMap directly (it's private), but we can
-        // verify behavior: after cleanup, a new operation should still work
-        // with a freshly created guard.
         mgr.cleanup_guard(&sid).await;
 
-        // After cleanup, applying a new edit should still work
-        // (a new guard is created on demand by schedule_guard)
         let record = mgr
             .apply_user_edit(
                 &sid,
@@ -1683,7 +1633,6 @@ mod tests {
             "new guard should be created after cleanup"
         );
 
-        // Verify the content
         match &record.content {
             CoreContextPayload::Text { body } => {
                 assert_eq!(body, "initial after cleanup");
@@ -1698,7 +1647,7 @@ mod tests {
         let mgr = CoreContextManager::new(pool);
         let sid = ScheduleId("R7-NONEXISTENT".to_string());
 
-        // Cleanup on a schedule that was never used — should not panic
+        // note: Cleanup on a schedule that was never used — should not panic
         mgr.cleanup_guard(&sid).await;
     }
 }

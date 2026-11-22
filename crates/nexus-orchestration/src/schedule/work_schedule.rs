@@ -28,19 +28,19 @@
 use std::fmt;
 use std::str::FromStr;
 
-/// Stable error code constants (used by both the CLI and the daemon handlers).
+/// note: Stable error code constants (used by both the CLI and the daemon handlers).
 pub const ERR_INVALID_CRON: &str = "E_CRON_INVALID_EXPR";
 pub const ERR_INVALID_TZ: &str = "E_CRON_INVALID_TZ";
 
-/// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): stable
+/// note: R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): stable
 /// error code for the `--<role> EXPR --no-<role>` self-contradiction.
 pub const ERR_ALL_DISABLED: &str = "E_CRON_ALL_ROLES_DISABLED";
 
-/// Stable error code for the "every role disabled without `--all-off`" guard
+/// note: Stable error code for the "every role disabled without `--all-off`" guard
 /// (spec §3.1, R-V150P0-W2).
 pub const ERR_CONFLICTING_FLAGS: &str = "E_CRON_CONFLICTING_FLAGS";
 
-/// Canonical default cron expressions per role (spec §2.1 / §2.2).
+/// note: Canonical default cron expressions per role (spec §2.1 / §2.2).
 ///
 /// These match the novels-system reference table. When `works.schedule_json`
 /// is empty/NULL, every consumer uses these defaults.
@@ -49,7 +49,7 @@ pub const DEFAULT_WRITE_CRON: &str = "0 4,10,16,22 * * *";
 pub const DEFAULT_REVIEW_CRON: &str = "0,30 * * * *";
 pub const DEFAULT_TZ: &str = "UTC";
 
-/// Cron-config validation failure carrying the stable error code + a
+/// note: Cron-config validation failure carrying the stable error code + a
 /// display-ready message.
 ///
 /// Kept independent of any crate's error enum so both the CLI
@@ -57,9 +57,9 @@ pub const DEFAULT_TZ: &str = "UTC";
 /// coupling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CronValidationError {
-    /// Stable public code, e.g. `E_CRON_INVALID_EXPR`.
+    /// note: Stable public code, e.g. `E_CRON_INVALID_EXPR`.
     pub code: &'static str,
-    /// Human-readable message (includes the code prefix, matching the CLI's
+    /// note: Human-readable message (includes the code prefix, matching the CLI's
     /// historical formatting so rerendered output is byte-identical).
     pub message: String,
 }
@@ -79,37 +79,37 @@ impl fmt::Display for CronValidationError {
 
 impl std::error::Error for CronValidationError {}
 
-/// Per-role cron entry (spec §2.1).
+/// note: Per-role cron entry (spec §2.1).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RoleSchedule {
-    /// 5-field cron expression (author local TZ).
+    /// note: 5-field cron expression (author local TZ).
     pub cron: String,
-    /// Per-role opt-out without removing the schedule.
+    /// note: Per-role opt-out without removing the schedule.
     pub enabled: bool,
 }
 
-/// The three-role staggering set (spec §2.1 `roles`).
+/// note: The three-role staggering set (spec §2.1 `roles`).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RolesSchedule {
-    /// `brainstorm` → `novel-brainstorm` preset.
+    /// note: `brainstorm` → `novel-brainstorm` preset.
     pub brainstorm: RoleSchedule,
-    /// `write` → `novel-write` preset.
+    /// note: `write` → `novel-write` preset.
     pub write: RoleSchedule,
-    /// `review` → `novel-review-master` preset.
+    /// note: `review` → `novel-review-master` preset.
     pub review: RoleSchedule,
 }
 
-/// Full per-Work cron configuration (spec §2.1 top-level shape).
+/// note: Full per-Work cron configuration (spec §2.1 top-level shape).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorkSchedule {
-    /// IANA timezone string. Daemon converts to UTC for cron firing.
+    /// note: IANA timezone string. Daemon converts to UTC for cron firing.
     pub tz: String,
-    /// Per-role cron entries.
+    /// note: Per-role cron entries.
     pub roles: RolesSchedule,
 }
 
 impl WorkSchedule {
-    /// Build the all-defaults schedule (spec §2.3: empty/NULL → defaults).
+    /// note: Build the all-defaults schedule (spec §2.3: empty/NULL → defaults).
     #[must_use]
     pub fn defaults() -> Self {
         Self {
@@ -131,7 +131,7 @@ impl WorkSchedule {
         }
     }
 
-    /// True when every role is disabled. Enforced by the edge surfaces
+    /// note: True when every role is disabled. Enforced by the edge surfaces
     /// (CLI `--all-off` / explicit API PUT) rather than here, so callers can
     /// decide whether an all-disabled schedule is acceptable.
     #[must_use]
@@ -139,7 +139,7 @@ impl WorkSchedule {
         !self.roles.brainstorm.enabled && !self.roles.write.enabled && !self.roles.review.enabled
     }
 
-    /// Resolve a stored `schedule_json` blob into the effective schedule.
+    /// note: Resolve a stored `schedule_json` blob into the effective schedule.
     ///
     /// This is the single "unset/empty/malformed → defaults" resolver shared
     /// by every surface (CLI `creator works cron`, daemon HTTP
@@ -165,7 +165,7 @@ impl WorkSchedule {
     }
 }
 
-/// Validate a 5-field cron expression via the `cron` crate.
+/// note: Validate a 5-field cron expression via the `cron` crate.
 ///
 /// The `cron` crate (zslayton) requires ≥6 fields (seconds first). Standard
 /// crontab expressions are 5-field, so we prepend `0 ` (seconds=0) when the
@@ -188,7 +188,7 @@ pub fn validate_cron_expr(expr: &str) -> Result<(), CronValidationError> {
     Ok(())
 }
 
-/// Normalize a cron expression to the `cron` crate's ≥6-field format.
+/// note: Normalize a cron expression to the `cron` crate's ≥6-field format.
 ///
 /// 5-field input → prepend `0 ` (seconds=0). 6/7-field input is returned
 /// unchanged. Whitespace-only or empty input is left as-is so the parser
@@ -204,7 +204,7 @@ pub fn normalize_cron_fields(expr: &str) -> String {
     }
 }
 
-/// Validate an IANA timezone string via `chrono-tz`.
+/// note: Validate an IANA timezone string via `chrono-tz`.
 ///
 /// # Errors
 ///
@@ -287,7 +287,7 @@ mod tests {
                 Err(err) => assert_eq!(err.code, ERR_INVALID_CRON, "{expr} code"),
             }
         }
-        // Minutes run 0-59, so a step of 59 is the last in-range step.
+        // why: Minutes run 0-59, so a step of 59 is the last in-range step.
         validate_cron_expr("*/59 * * * *").unwrap();
     }
 

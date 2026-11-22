@@ -1,4 +1,5 @@
 //! Pure-function admission gate for schedule concurrency (spec §5.1).
+// note: these types and the [`admit`] function are intentionally async- and DB-free so every rule is unit-testable.
 //!
 //! These types and the [`admit`] function are intentionally free of async /
 //! database logic so that unit tests can cover every rule without a DB.
@@ -12,26 +13,26 @@ use std::collections::{HashMap, HashSet};
 use nexus_contracts::local::schedule::ParallelWithIds;
 use nexus_contracts::local::schedule::{Schedule, ScheduleConcurrency, ScheduleId};
 
-/// The set of currently-running [`Schedule`] IDs, keyed by creator.
+/// note: The set of currently-running [`Schedule`] IDs, keyed by creator.
 ///
 /// Used by [`admit`] to enforce per-creator concurrency rules.
 /// Each entry maps `creator_id → set of running schedule IDs`.
 #[derive(Debug, Clone, Default)]
 pub struct RunningSet {
-    /// Creator-scoped running schedule IDs.
+    /// note: Creator-scoped running schedule IDs.
     by_creator: HashMap<String, HashSet<ScheduleId>>,
-    /// Flat set of all running IDs (for quick `contains` checks).
+    /// note: Flat set of all running IDs (for quick `contains` checks).
     all_ids: HashSet<ScheduleId>,
 }
 
 impl RunningSet {
-    /// Empty running set — no schedules are running.
+    /// note: Empty running set — no schedules are running.
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
-    /// Build a [`RunningSet`] from a list of [`Schedule`]s.
+    /// note: Build a [`RunningSet`] from a list of [`Schedule`]s.
     ///
     /// Only the IDs are retained; callers are responsible for filtering to
     /// `ScheduleStatus::Running` before calling this.
@@ -52,7 +53,7 @@ impl RunningSet {
         }
     }
 
-    /// Build a [`RunningSet`] directly from a set of `(creator_id, schedule_id)` pairs.
+    /// note: Build a [`RunningSet`] directly from a set of `(creator_id, schedule_id)` pairs.
     ///
     /// Used internally by the supervisor to construct a scoped running set.
     pub(crate) fn from_entries(entries: HashSet<(String, ScheduleId)>) -> Self {
@@ -71,7 +72,7 @@ impl RunningSet {
         }
     }
 
-    /// Returns `true` if no schedules are running for the given creator.
+    /// note: Returns `true` if no schedules are running for the given creator.
     #[must_use]
     pub fn is_empty_for_creator(&self, creator_id: &str) -> bool {
         self.by_creator
@@ -79,19 +80,19 @@ impl RunningSet {
             .is_none_or(std::collections::HashSet::is_empty)
     }
 
-    /// Returns `true` if no schedules are running at all.
+    /// note: Returns `true` if no schedules are running at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.all_ids.is_empty()
     }
 
-    /// Returns `true` if the given schedule ID is currently running.
+    /// note: Returns `true` if the given schedule ID is currently running.
     #[must_use]
     pub fn contains(&self, id: &ScheduleId) -> bool {
         self.all_ids.contains(id)
     }
 
-    /// Returns the set of running schedule IDs for a specific creator.
+    /// note: Returns the set of running schedule IDs for a specific creator.
     fn ids_for_creator(&self, creator_id: &str) -> Vec<&ScheduleId> {
         self.by_creator
             .get(creator_id)
@@ -99,7 +100,7 @@ impl RunningSet {
     }
 }
 
-/// The set of schedule IDs that have reached a terminal "success" status
+/// note: The set of schedule IDs that have reached a terminal "success" status
 /// (Completed or Cancelled) for dependency satisfaction.
 ///
 /// A dependency is considered *satisfied* when its ID appears in this set.
@@ -111,13 +112,13 @@ pub struct CompletedSet {
 }
 
 impl CompletedSet {
-    /// Empty completed set — no schedules have completed.
+    /// note: Empty completed set — no schedules have completed.
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
-    /// Build from a list of completed schedule IDs.
+    /// note: Build from a list of completed schedule IDs.
     #[must_use]
     pub fn from(ids: Vec<ScheduleId>) -> Self {
         Self {
@@ -125,14 +126,14 @@ impl CompletedSet {
         }
     }
 
-    /// Returns `true` if the given schedule ID is completed/cancelled.
+    /// note: Returns `true` if the given schedule ID is completed/cancelled.
     #[must_use]
     pub fn contains(&self, id: &ScheduleId) -> bool {
         self.ids.contains(id)
     }
 }
 
-/// Evaluate whether `candidate` may be admitted to start running.
+/// note: Evaluate whether `candidate` may be admitted to start running.
 ///
 /// Returns `true` if all three conditions are met:
 ///
@@ -149,12 +150,10 @@ impl CompletedSet {
 ///    constraint is enforced at the `AcpPromptTask` dispatch site.
 #[must_use]
 pub fn admit(candidate: &Schedule, running: &RunningSet, completed: &CompletedSet) -> bool {
-    // 1. Concurrency gate
     if !check_concurrency(candidate, running) {
         return false;
     }
 
-    // 2. Dependency gate
     for dep in &candidate.depends_on {
         if !completed.contains(dep) {
             return false;
@@ -168,14 +167,14 @@ fn check_concurrency(candidate: &Schedule, running: &RunningSet) -> bool {
     match &candidate.concurrency {
         ScheduleConcurrency::Serial => running.is_empty_for_creator(&candidate.creator_id),
         ScheduleConcurrency::ParallelWith(whitelist) => {
-            // Every running schedule for this creator must be in the whitelist.
+            // invariant: Every running schedule for this creator must be in the whitelist.
             // Schedules from other creators are irrelevant.
             let creator_ids = running.ids_for_creator(&candidate.creator_id);
             creator_ids
                 .iter()
                 .all(|id| whitelist.schedule_ids.contains(id))
         }
-        ScheduleConcurrency::ParallelAny => true, // ACP serialization at dispatch site
+        ScheduleConcurrency::ParallelAny => true, // note: ACP serialization at dispatch site
     }
 }
 
@@ -221,7 +220,7 @@ mod tests {
 
     #[test]
     fn serial_allows_different_creator_running() {
-        // Creator A serial schedule should not be blocked by creator B's serial schedule
+        // note: Creator A serial schedule should not be blocked by creator B's serial schedule
         let p = sched("A", "creator-a", ScheduleConcurrency::Serial, vec![]);
         let r = RunningSet::from(vec![sched(
             "B",
@@ -254,7 +253,7 @@ mod tests {
 
     #[test]
     fn parallel_with_ignores_other_creator_running() {
-        // Creator A's ParallelWith should not consider creator B's running schedules
+        // note: Creator A's ParallelWith should not consider creator B's running schedules
         let p = sched(
             "A",
             "creator-a",
@@ -263,7 +262,7 @@ mod tests {
             }),
             vec![],
         );
-        // Creator B has a running schedule "Z" not in the whitelist
+        // note: Creator B has a running schedule "Z" not in the whitelist
         let r = RunningSet::from(vec![sched(
             "Z",
             "creator-b",
@@ -275,7 +274,7 @@ mod tests {
 
     #[test]
     fn cross_creator_dependency_still_works() {
-        // Creator B's schedule can depend on creator A's completed schedule
+        // note: Creator B's schedule can depend on creator A's completed schedule
         let p = sched("B", "creator-b", ScheduleConcurrency::Serial, vec!["A"]);
         let completed = CompletedSet::from(vec![ScheduleId("A".to_string())]);
         assert!(admit(&p, &RunningSet::empty(), &completed));

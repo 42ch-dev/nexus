@@ -25,11 +25,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
 
-/// Errors from Task execution.
+/// note: Errors from Task execution.
 #[derive(Error, Debug)]
 pub enum TaskExecError {
     #[error("capability not found: {0}")]
@@ -42,11 +39,8 @@ pub enum TaskExecError {
     InvalidInput(String),
 }
 
-// ---------------------------------------------------------------------------
-// CapabilityTask
-// ---------------------------------------------------------------------------
 
-/// Resolves a capability by name, runs it, and stores the result.
+/// note: Resolves a capability by name, runs it, and stores the result.
 ///
 /// Input (via Context):
 /// - `_capability_name` (String): dot-separated capability name
@@ -68,7 +62,7 @@ impl Task for CapabilityTask {
         let name: String = context.get("_capability_name").unwrap_or_default();
         let input: Value = context.get("_capability_input").unwrap_or(Value::Null);
 
-        // Resolve the capability (C3 contract): a reserved-only name —
+        // note: Resolve the capability (C3 contract): a reserved-only name —
         // admitted without a binding in this build — refuses BEFORE any
         // effect with the same TaskResult shape run() would produce for its
         // worker refusal; unknown names keep the existing not-found refusal.
@@ -90,7 +84,7 @@ impl Task for CapabilityTask {
             }
         };
 
-        // A capability invocation may perform an external effect (capability
+        // note: A capability invocation may perform an external effect (capability
         // calls can trigger provider/prompt/host activity). Mark the step as
         // having performed a potentially-external effect so a failed
         // post-effect `commit_transition` can persist an interrupted
@@ -117,11 +111,8 @@ impl Task for CapabilityTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuleCheckTask
-// ---------------------------------------------------------------------------
 
-/// Pure function evaluation over Context.
+/// note: Pure function evaluation over Context.
 ///
 /// Reads `_rule` from context, evaluates a simple condition, and returns
 /// `NextAction::Continue` if true or `NextAction::WaitForInput` if false.
@@ -165,11 +156,8 @@ impl Task for RuleCheckTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ManualWaitTask
-// ---------------------------------------------------------------------------
 
-/// Returns `NextAction::WaitForInput`. CLI `advance` resumes.
+/// note: Returns `NextAction::WaitForInput`. CLI `advance` resumes.
 pub struct ManualWaitTask;
 
 #[async_trait]
@@ -189,11 +177,8 @@ impl Task for ManualWaitTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// InnerGraphTask
-// ---------------------------------------------------------------------------
 
-/// Launches a child Session over a named inner graph (§3.4 graph-of-graphs).
+/// note: Launches a child Session over a named inner graph (§3.4 graph-of-graphs).
 ///
 /// On `run(ctx)`:
 /// 1. Inherits `core_context.*` and `preset.input.*` from parent context.
@@ -203,20 +188,20 @@ impl Task for ManualWaitTask {
 /// 5. Writes into parent `ctx["state.<parent_state>.output"]`.
 /// 6. Returns `NextAction::Continue`.
 pub struct InnerGraphTask {
-    /// Reference to the orchestration engine for spawning child sessions.
+    /// note: Reference to the orchestration engine for spawning child sessions.
     engine: Arc<dyn OrchestrationEngine>,
-    /// The inner graph to execute.
+    /// note: The inner graph to execute.
     inner_graph: Arc<Graph>,
-    /// The ID of the parent state (for output namespacing).
+    /// note: The ID of the parent state (for output namespacing).
     parent_state_id: String,
-    /// The key in parent context where the parent session ID is stored.
+    /// note: The key in parent context where the parent session ID is stored.
     parent_session_id_key: String,
-    /// Output binding (e.g. "select.text") — which node's output to export.
+    /// note: Output binding (e.g. "select.text") — which node's output to export.
     output_binding: Option<String>,
 }
 
 impl InnerGraphTask {
-    /// Create a new `InnerGraphTask`.
+    /// note: Create a new `InnerGraphTask`.
     ///
     /// `parent_session_id_key` is the context key where the parent session ID
     /// can be found (e.g. `"_session_id"`).
@@ -248,7 +233,7 @@ impl Task for InnerGraphTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // 0. Current-step hygiene: child-wait markers from an earlier step
+        // note: 0. Current-step hygiene: child-wait markers from an earlier step
         //    must never leak into this one's boundary (round-4 Critical 2).
         //    Cleared here; re-set only when THIS step parks at a child
         //    human wait.
@@ -256,7 +241,6 @@ impl Task for InnerGraphTask {
         context.set("_child_wait_session", Value::Null)?;
         context.set("_child_wait_task", Value::Null)?;
 
-        // 1. Read the parent session ID from context.
         let parent_session_id: String =
             context.get(&self.parent_session_id_key).unwrap_or_default();
 
@@ -266,14 +250,11 @@ impl Task for InnerGraphTask {
             ));
         }
 
-        // 2. Build the initial context for the child session.
-        //    Inherit `core_context.*` and `preset.input.*` from parent.
-        //    Use namespace "wrap" so inner nodes can't overwrite parent `state.*`.
         let child_ctx = graph_flow::Context::new();
 
-        // Copy core_context.* keys from parent.
+        // note: Copy core_context.* keys from parent.
         for key_prefix in &["core_context", "preset.input"] {
-            // Context serializes as `{"data": {...}, "chat_history": {...}}`;
+            // note: Context serializes as `{"data": {...}, "chat_history": {...}}`;
             // the flat `preset.input.*` / `core_context.*` keys live in the
             // `data` map. Iterate THAT map, not the top-level envelope —
             // otherwise no key ever matches the prefix and the child loses
@@ -294,7 +275,7 @@ impl Task for InnerGraphTask {
             }
         }
 
-        // 3. Attach an existing persisted child session (recovery, Important 4)
+        // note: 3. Attach an existing persisted child session (recovery, Important 4)
         //    or spawn a new one. After a parent restarts with its cursor
         //    still at this inner-graph task, recovery hydrates the persisted
         //    child rows into the engine's children map; we reattach the
@@ -321,7 +302,7 @@ impl Task for InnerGraphTask {
                     ))
                 })?
             }
-            // A7 rule 2 (P3 T1 rereview-2 P1): a persisted child row whose
+            // note: A7 rule 2 (P3 T1 rereview-2 P1): a persisted child row whose
             // descriptor no longer matches the trusted root is non-replayable.
             // Fail closed — never mint a fresh child id and replay the work.
             Err(e) => {
@@ -331,7 +312,7 @@ impl Task for InnerGraphTask {
             }
         };
 
-        // Driving an inner graph session is itself an external effect: the
+        // note: Driving an inner graph session is itself an external effect: the
         // child may run capability/prompt/host-tool effects (or have run them
         // pre-crash — the persisted child carries a completed effect that must
         // not be replayed). Propagate the effect marker to the parent so a
@@ -341,7 +322,7 @@ impl Task for InnerGraphTask {
         // engine clears the marker after a successful parent checkpoint.
         context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true)?;
 
-        // A reattached child that is already terminal (its durable checkpoint
+        // note: A reattached child that is already terminal (its durable checkpoint
         // was persisted before the parent committed past this inner graph)
         // must NOT be re-stepped — its completed prompt/effect work would be
         // replayed. Consume it directly: read its terminal output below and
@@ -353,7 +334,7 @@ impl Task for InnerGraphTask {
             .await
             .is_ok_and(|s| s.is_terminal());
 
-        // 4. Poll child session to completion (only for a non-terminal child —
+        // note: 4. Poll child session to completion (only for a non-terminal child —
         //    a terminal reattached child is consumed, never re-stepped,
         //    Round-5 Important 1).
         let mut child_wait = None;
@@ -371,7 +352,7 @@ impl Task for InnerGraphTask {
                         reason,
                         next_task_id,
                     } => {
-                        // Resume the child if it paused (shouldn't happen for
+                        // note: Resume the child if it paused (shouldn't happen for
                         // rule-only inner graphs, but handle gracefully).
                         let _ = self
                             .engine
@@ -385,7 +366,7 @@ impl Task for InnerGraphTask {
                         );
                     }
                     crate::engine::StepOutcome::WaitingForInput { response } => {
-                        // Round-4 Critical 2 (A4): a supported inner-graph child
+                        // note: Round-4 Critical 2 (A4): a supported inner-graph child
                         // waiting for human input MUST NOT be auto-resumed by the
                         // inner poller (auto-approval bypass). Preserve the
                         // child's WaitRecord and propagate the wait to the parent:
@@ -403,7 +384,7 @@ impl Task for InnerGraphTask {
             }
         }
 
-        // 5a. Round-4 Critical 2: a child human wait must make THIS parent
+        // note: 5a. Round-4 Critical 2: a child human wait must make THIS parent
         //     step return `WaitForInput` (never Continue) so the engine
         //     persists the parent as `waiting_for_input` with a fresh A4
         //     token naming the exact waiting child. The child's persisted
@@ -435,7 +416,6 @@ impl Task for InnerGraphTask {
             ));
         }
 
-        // 5. Read output_binding from child final context.
         let output_value = if let Some(ref binding) = self.output_binding {
             let child_ctx = self.engine.get_context(&child_sid).await.map_err(|e| {
                 graph_flow::GraphError::TaskExecutionFailed(format!(
@@ -443,7 +423,7 @@ impl Task for InnerGraphTask {
                 ))
             })?;
 
-            // Try to read as nodes.<node_id>.text first, then as-is.
+            // note: Try to read as nodes.<node_id>.text first, then as-is.
             let node_key = format!("nodes.{binding}");
             let direct: Option<String> = child_ctx.get(binding);
             let namespaced: Option<String> = child_ctx.get(&node_key);
@@ -452,11 +432,10 @@ impl Task for InnerGraphTask {
             String::new()
         };
 
-        // 6. Write into parent context: state.<parent_state>.output
         let output_key = format!("state.{}.output", self.parent_state_id);
         context.set(&output_key, output_value.clone())?;
 
-        // Also store the child session ID for debugging.
+        // note: Also store the child session ID for debugging.
         context.set(
             format!("_inner_child_session_{}", self.parent_state_id),
             child_sid.0,
@@ -477,11 +456,8 @@ impl Task for InnerGraphTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// LlmJudgeTask — invokes judge.llm (or judge.rule) via capability registry
-// ---------------------------------------------------------------------------
 
-/// Evaluates an LLM judge exit condition by invoking the `judge.llm`
+/// note: Evaluates an LLM judge exit condition by invoking the `judge.llm`
 /// capability through the [`CapabilityRegistry`].
 ///
 /// Flow:
@@ -496,16 +472,16 @@ impl Task for InnerGraphTask {
 ///
 /// Design: `orchestration-engine.md` §4.4.1, compass §2.5.
 pub struct LlmJudgeTask {
-    /// Path to the judge prompt template (relative to bundle root).
+    /// note: Path to the judge prompt template (relative to bundle root).
     template: String,
-    /// Capability name to invoke (default: `judge.llm`).
+    /// note: Capability name to invoke (default: `judge.llm`).
     capability_name: String,
-    /// Shared capability registry.
+    /// note: Shared capability registry.
     registry: Arc<CapabilityRegistry>,
 }
 
 impl LlmJudgeTask {
-    /// Create a new `LlmJudgeTask`.
+    /// note: Create a new `LlmJudgeTask`.
     #[must_use]
     pub const fn new(
         template: String,
@@ -519,19 +495,18 @@ impl LlmJudgeTask {
         }
     }
 
-    /// Render the template and invoke the judge capability.
+    /// note: Render the template and invoke the judge capability.
     async fn evaluate(
         &self,
         context: &graph_flow::Context,
     ) -> Result<(bool, String), graph_flow::GraphError> {
-        // 1. Render the prompt template.
         let payload = build_nested_payload(context);
         let prompt = render_core_context_template(&self.template, &payload).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "judge template render failed, using raw template");
             self.template.clone()
         });
 
-        // 2. Build capability input with security-injected identity.
+        // note: 2. Build capability input with security-injected identity.
         let creator_id: String = context.get("_creator_id").unwrap_or_default();
         let session_id: String = context.get("_session_id").unwrap_or_default();
 
@@ -547,7 +522,7 @@ impl LlmJudgeTask {
             }
         }
 
-        // 3. Resolve the capability from the registry (C3 contract: a
+        // note: 3. Resolve the capability from the registry (C3 contract: a
         // reserved-only name — admitted without a binding in this build —
         // refuses with the existing WorkerUnavailable BEFORE any effect;
         // unknown names keep the existing not-found refusal).
@@ -571,7 +546,6 @@ impl LlmJudgeTask {
             }
         };
 
-        // 4. Invoke the capability.
         match cap.run(input).await {
             Ok(output) => {
                 let result = output
@@ -586,7 +560,7 @@ impl LlmJudgeTask {
                 Ok((result, reason))
             }
             Err(CapabilityError::WorkerUnavailable) => {
-                // No worker IPC available — cannot evaluate LLM judge.
+                // invariant: No worker IPC available — cannot evaluate LLM judge.
                 // Log and return NOGO so the state waits rather than advancing
                 // without evaluation (safe default).
                 //
@@ -613,9 +587,6 @@ impl LlmJudgeTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// LlmExtractTask — invokes nexus.llm.extract via capability registry (V1.51 T-A P0)
-// ---------------------------------------------------------------------------
 
 /// Extract World KB candidates by invoking the `nexus.llm.extract` capability
 /// through the [`CapabilityRegistry`].
@@ -656,16 +627,16 @@ impl LlmJudgeTask {
 // wires it into the runtime graph.
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct LlmExtractTask {
-    /// Extraction instruction template (rendered against the context).
+    /// note: Extraction instruction template (rendered against the context).
     template: String,
-    /// Capability name to invoke (default: `nexus.llm.extract`).
+    /// note: Capability name to invoke (default: `nexus.llm.extract`).
     capability_name: String,
-    /// Shared capability registry.
+    /// note: Shared capability registry.
     registry: Arc<CapabilityRegistry>,
 }
 
 impl LlmExtractTask {
-    /// Create a new `LlmExtractTask`.
+    /// note: Create a new `LlmExtractTask`.
     #[must_use]
     pub const fn new(
         template: String,
@@ -679,7 +650,7 @@ impl LlmExtractTask {
         }
     }
 
-    /// Render the template and invoke the extract capability.
+    /// note: Render the template and invoke the extract capability.
     ///
     /// Returns [`LlmExtractOutcome`] so the caller can distinguish:
     /// - `Candidates(vec)` — LLM returned candidates (may be empty).
@@ -702,18 +673,17 @@ impl LlmExtractTask {
         &self,
         context: &graph_flow::Context,
     ) -> Result<crate::quality_loop::LlmExtractOutcome, graph_flow::GraphError> {
-        // 1. Render the extraction template.
         let payload = build_nested_payload(context);
         let prompt = render_core_context_template(&self.template, &payload).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "extract template render failed, using raw template");
             self.template.clone()
         });
 
-        // 2. Read chapter prose, identity, and work_profile from the context.
+        // note: 2. Read chapter prose, identity, and work_profile from the context.
         let chapter_prose: String = context.get("chapter_prose").unwrap_or_default();
         let creator_id: String = context.get("_creator_id").unwrap_or_default();
         let session_id: String = context.get("_session_id").unwrap_or_default();
-        // v1.191 P1 T13: the trusted extraction target + admitted source
+        // note: v1.191 P1 T13: the trusted extraction target + admitted source
         // identity the orchestration caller resolved from stored state. The
         // capability refuses a missing target rather than extracting under an
         // invented policy, so the task surfaces that refusal to its caller.
@@ -737,14 +707,14 @@ impl LlmExtractTask {
             }
         };
         let source_id: String = context.get("_extract_source_id").unwrap_or_default();
-        // V1.55 P2 fix-wave (F-001): read work_profile from context so the
+        // why: V1.55 P2 fix-wave (F-001): read work_profile from context so the
         // extraction path produces profile-aware payloads. Defaults to "novel"
         // for backward compatibility with existing callers.
         let work_profile: String = context
             .get("work_profile")
             .unwrap_or_else(|| "novel".to_string());
 
-        // 3. Use the shared extraction path (closes R-V151Q3-W001).
+        // note: 3. Use the shared extraction path (closes R-V151Q3-W001).
         Ok(crate::quality_loop::run_llm_extract(
             Some(&self.registry),
             &self.capability_name,
@@ -760,22 +730,19 @@ impl LlmExtractTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Join clock (DR-06, v1.179 — bounded join deadlines)
-// ---------------------------------------------------------------------------
 
-/// Millisecond clock source for bounded-join deadlines (DR-06).
+/// note: Millisecond clock source for bounded-join deadlines (DR-06).
 ///
 /// A production impl ([`SystemJoinClock`]) plus a hermetic-test mock
 /// ([`DeterministicClock`]) at millisecond resolution, which the `timeout_ms`
 /// join deadline requires. Time is read as milliseconds since an arbitrary
 /// fixed epoch — only differences are meaningful.
 pub trait JoinClock: Send + Sync {
-    /// Current time in milliseconds since an arbitrary fixed epoch.
+    /// note: Current time in milliseconds since an arbitrary fixed epoch.
     fn now_ms(&self) -> u64;
 }
 
-/// Production clock: `SystemTime` wall time.
+/// note: Production clock: `SystemTime` wall time.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemJoinClock;
 
@@ -787,7 +754,7 @@ impl JoinClock for SystemJoinClock {
     }
 }
 
-/// Deterministic clock for hermetic timeout tests (DR-06).
+/// note: Deterministic clock for hermetic timeout tests (DR-06).
 ///
 /// Starts at a fixed value and advances only when [`Self::advance`] is
 /// called, so join-deadline branches can be exercised without sleeping.
@@ -797,7 +764,7 @@ pub struct DeterministicClock {
 }
 
 impl DeterministicClock {
-    /// Create a deterministic clock at `start_ms`.
+    /// note: Create a deterministic clock at `start_ms`.
     #[must_use]
     pub const fn new(start_ms: u64) -> Self {
         Self {
@@ -805,7 +772,7 @@ impl DeterministicClock {
         }
     }
 
-    /// Advance the clock by `delta_ms`.
+    /// note: Advance the clock by `delta_ms`.
     pub fn advance(&self, delta_ms: u64) {
         self.now_ms
             .fetch_add(delta_ms, std::sync::atomic::Ordering::SeqCst);
@@ -817,11 +784,8 @@ impl JoinClock for DeterministicClock {
         self.now_ms.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
-// ---------------------------------------------------------------------------
-// StateCompositeTask (outer graph — per §8.2)
-// ---------------------------------------------------------------------------
 
-/// Composite task for an outer-graph state node.
+/// note: Composite task for an outer-graph state node.
 ///
 /// Encodes the full lifecycle of one state:
 /// 1. Run enter actions (capability calls, inner graph launch).
@@ -841,88 +805,88 @@ pub struct StateCompositeTask {
     terminal: bool,
     enter_actions: Vec<EnterAction>,
     exit_when: Option<ExitWhen>,
-    /// Transition target (linear, go/nogo, or conditional).
+    /// note: Transition target (linear, go/nogo, or conditional).
     next: Option<NextTarget>,
-    /// Orchestration engine reference (for spawning child sessions).
+    /// note: Orchestration engine reference (for spawning child sessions).
     engine: Option<Arc<dyn OrchestrationEngine>>,
-    /// Named inner graphs keyed by name.
+    /// note: Named inner graphs keyed by name.
     inner_graphs: std::collections::HashMap<String, Arc<Graph>>,
-    /// Output bindings for inner graphs: `inner_graph_name` → binding string.
+    /// note: Output bindings for inner graphs: `inner_graph_name` → binding string.
     output_bindings: std::collections::HashMap<String, String>,
-    /// Shared capability registry (injected by the engine; falls back to builtins if None).
+    /// note: Shared capability registry (injected by the engine; falls back to builtins if None).
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
-    /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    /// note: Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
-    /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+    /// note: Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
     merge_kind: Option<MergeKind>,
-    /// Expected number of incoming labeled edges for merge nodes.
+    /// note: Expected number of incoming labeled edges for merge nodes.
     ///
     /// Populated by the loader/graph-builder when wiring the outer graph.
     /// Used at runtime to evaluate merge conditions (all/any/quorum).
     expected_incoming: usize,
-    /// Pre-computed merge key ("_merge_{id}") to avoid per-tick allocation (W-QC3-2).
+    /// why: Pre-computed merge key ("_merge_{id}") to avoid per-tick allocation (W-QC3-2).
     merge_key: String,
-    /// Converge (merge-point) config for states with explicit `converge:` declaration
+    /// note: Converge (merge-point) config for states with explicit `converge:` declaration
     /// (V1.56 P2 fix-wave, H-001/W-002).
     converge: Option<ConvergeConfig>,
-    /// Converge-predecessor tracking key ("_`converge_arrivals`_{id}").
+    /// note: Converge-predecessor tracking key ("_`converge_arrivals`_{id}").
     converge_key: String,
-    /// Predecessor task IDs for this converge node (populated at graph build time).
+    /// note: Predecessor task IDs for this converge node (populated at graph build time).
     converge_predecessors: std::collections::HashSet<String>,
-    /// Pre-compiled expression AST for this state's conditional branches (M-004).
+    /// note: Pre-compiled expression AST for this state's conditional branches (M-004).
     ///
     /// Parsed once at task construction time; reused across transitions.
     /// `None` means this state has no conditional/branches next, or parse failed.
     cached_expr: Option<CachedExpressions>,
-    /// Optional workspace session state for expression evaluation (V1.56 P3).
+    /// note: Optional workspace session state for expression evaluation (V1.56 P3).
     ///
     /// When set, `build_context_json()` exposes this as a nested `workspace`
     /// object. Tests set this directly; in production the engine populates it
     /// from the active workspace session.
     workspace_state: Option<serde_json::Value>,
-    /// Live workspace state provider (v1.188 P3): resolves the
+    /// note: Live workspace state provider (v1.188 P3): resolves the
     /// `_context.workspace` object from the daemon's shared workspace
     /// authority at expression-evaluation time. Wired by the production
     /// loader; `None` for engines/tests without a provider.
     workspace_state_provider: Option<Arc<dyn nexus_capability::WorkspaceStateProvider>>,
-    /// Bounded-join deadline in milliseconds for this state's join gate
+    /// note: Bounded-join deadline in milliseconds for this state's join gate
     /// (DR-06, v1.179). `None` = unbounded wait (legacy behaviour).
     timeout_ms: Option<u64>,
-    /// Reroute target when the join deadline fires (DR-06, v1.179).
+    /// note: Reroute target when the join deadline fires (DR-06, v1.179).
     ///
     /// `None` = fail with the typed `converge_timeout:` error.
     on_timeout: Option<String>,
-    /// Millisecond clock for join-deadline checks (DR-06, v1.179).
+    /// note: Millisecond clock for join-deadline checks (DR-06, v1.179).
     ///
     /// Defaults to [`SystemJoinClock`]; tests inject [`DeterministicClock`]
     /// via [`Self::with_join_clock`].
     clock: Arc<dyn JoinClock>,
 }
 
-/// Pre-compiled expression ASTs for conditional routing (V1.56 P2 fix-wave, M-004).
+/// note: Pre-compiled expression ASTs for conditional routing (V1.56 P2 fix-wave, M-004).
 ///
 /// V1.56 P3: extended with context dependency flags so the runtime knows
 /// whether to invoke `registry.refresh` or query workspace session state
 /// before evaluating branches.
 #[derive(Clone)]
 struct CachedExpressions {
-    /// Parsed expressions + their target state IDs.
+    /// note: Parsed expressions + their target state IDs.
     branches: Vec<(nexus_preset::expr::Expr, String)>,
-    /// Default target when no branch matches.
+    /// note: Default target when no branch matches.
     default: String,
-    /// Any branch expression references `_context.registry_refresh.*`
+    /// note: Any branch expression references `_context.registry_refresh.*`
     needs_registry_refresh: bool,
-    /// Any branch expression references `_context.workspace.*`
+    /// note: Any branch expression references `_context.workspace.*`
     needs_workspace: bool,
 }
 
 impl StateCompositeTask {
-    /// Build a composite task from a manifest state definition (basic, no engine).
+    /// note: Build a composite task from a manifest state definition (basic, no engine).
     ///
     /// Inner graph actions will fail at runtime if no engine is set.
     #[must_use]
     pub fn from_manifest(state: &StateDefinition) -> Self {
-        // M-004: pre-compile expression AST at construction time.
+        // note: M-004: pre-compile expression AST at construction time.
         let cached_expr = Self::build_expr_cache(state.next.as_ref());
 
         Self {
@@ -951,14 +915,14 @@ impl StateCompositeTask {
         }
     }
 
-    /// Set the orchestration engine reference.
+    /// note: Set the orchestration engine reference.
     #[must_use]
     pub fn with_engine(mut self, engine: Arc<dyn OrchestrationEngine>) -> Self {
         self.engine = Some(engine);
         self
     }
 
-    /// Set the inner graphs map.
+    /// note: Set the inner graphs map.
     #[must_use]
     pub fn with_inner_graphs(
         mut self,
@@ -968,7 +932,7 @@ impl StateCompositeTask {
         self
     }
 
-    /// Set the output bindings map.
+    /// note: Set the output bindings map.
     #[must_use]
     pub fn with_output_bindings(
         mut self,
@@ -978,14 +942,14 @@ impl StateCompositeTask {
         self
     }
 
-    /// Set the shared capability registry.
+    /// note: Set the shared capability registry.
     #[must_use]
     pub fn with_registry(mut self, registry: std::sync::Arc<CapabilityRegistry>) -> Self {
         self.registry = Some(registry);
         self
     }
 
-    /// Set the daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    /// note: Set the daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     #[must_use]
     pub fn with_daemon_tool_dispatch(
         mut self,
@@ -995,21 +959,21 @@ impl StateCompositeTask {
         self
     }
 
-    /// Set the expected number of incoming labeled edges for merge tracking (V1.52 T-B P1).
+    /// note: Set the expected number of incoming labeled edges for merge tracking (V1.52 T-B P1).
     #[must_use]
     pub const fn with_expected_incoming(mut self, count: usize) -> Self {
         self.expected_incoming = count;
         self
     }
 
-    /// Set the converge predecessor task IDs (V1.56 P2 fix-wave, H-001).
+    /// note: Set the converge predecessor task IDs (V1.56 P2 fix-wave, H-001).
     #[must_use]
     pub fn with_converge_predecessors(mut self, preds: HashSet<String>) -> Self {
         self.converge_predecessors = preds;
         self
     }
 
-    /// Set the millisecond clock used for join-deadline checks (DR-06, v1.179).
+    /// note: Set the millisecond clock used for join-deadline checks (DR-06, v1.179).
     ///
     /// Production leaves the default [`SystemJoinClock`]; hermetic tests
     /// inject [`DeterministicClock`] to exercise timeout branches without
@@ -1020,7 +984,7 @@ impl StateCompositeTask {
         self
     }
 
-    /// Set a fixed workspace session state for expression evaluation (V1.56 P3).
+    /// note: Set a fixed workspace session state for expression evaluation (V1.56 P3).
     ///
     /// When set, `build_context_json()` exposes this value as a nested
     /// `workspace` object, accessible in expressions as
@@ -1034,7 +998,7 @@ impl StateCompositeTask {
         self
     }
 
-    /// Set the live workspace state provider (v1.188 P3).
+    /// note: Set the live workspace state provider (v1.188 P3).
     ///
     /// Wired by `build_wired_outer_graph` from the engine, so every preset
     /// state resolves `_context.workspace.*` against the shared workspace
@@ -1049,7 +1013,7 @@ impl StateCompositeTask {
         self
     }
 
-    /// Pre-compile expression AST for conditional/branches next (M-004).
+    /// note: Pre-compile expression AST for conditional/branches next (M-004).
     ///
     /// Parses each branch's `when` expression once at construction time;
     /// returns `None` if the state has no conditional next or all parses fail.
@@ -1071,7 +1035,7 @@ impl StateCompositeTask {
         for rule in rules {
             match nexus_preset::expr::parse(&rule.when) {
                 Ok(ast) => {
-                    // V1.56 P3: scan expression for context dependencies.
+                    // note: V1.56 P3: scan expression for context dependencies.
                     let deps = nexus_preset::expr::scan_context_deps(&ast);
                     needs_registry_refresh = needs_registry_refresh || deps.needs_registry_refresh;
                     needs_workspace = needs_workspace || deps.needs_workspace;
@@ -1095,7 +1059,7 @@ impl StateCompositeTask {
         })
     }
 
-    /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
+    /// note: Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
     ///
     /// For embedded presets, reads the template content from the compiled-in
     /// bundle. If the file doesn't exist (e.g. test fixtures using inline
@@ -1124,7 +1088,7 @@ impl StateCompositeTask {
         self
     }
 
-    /// Determine the `NextAction` after judge evaluation.
+    /// note: Determine the `NextAction` after judge evaluation.
     ///
     /// When `next` is `GoNogo`, both GO and NOGO advance via `Continue`
     /// (the conditional edge routes to the correct target).
@@ -1137,7 +1101,7 @@ impl StateCompositeTask {
     fn judge_next_action(&self, judge_result: bool) -> NextAction {
         match &self.next {
             Some(NextTarget::GoNogo(_) | NextTarget::Branches(_) | NextTarget::Conditional(_)) => {
-                // Conditional/Branches routing handles both GO and NOGO via
+                // note: Conditional/Branches routing handles both GO and NOGO via
                 // resolve_expression_target (step 2.5).
                 NextAction::Continue
             }
@@ -1146,7 +1110,7 @@ impl StateCompositeTask {
         }
     }
 
-    /// V1.52 T-B P0: resolve labeled routing target from judge output.
+    /// note: V1.52 T-B P0: resolve labeled routing target from judge output.
     ///
     /// Scans the judge's output text (`judge_reason`) for known label
     /// strings declared in `next` edges. On match, writes the matched
@@ -1166,7 +1130,7 @@ impl StateCompositeTask {
         context: &graph_flow::Context,
         judge_reason: &str,
     ) -> Result<NextAction, graph_flow::GraphError> {
-        // Collect candidate (label, target) pairs from the next target.
+        // note: Collect candidate (label, target) pairs from the next target.
         // Sort by descending label length to prevent shorter labels (e.g. "go")
         // from matching as substrings of longer labels (e.g. "nogo").
         let mut candidates: Vec<(&str, &str)> = match &self.next {
@@ -1175,7 +1139,7 @@ impl StateCompositeTask {
                 .map(|e| (e.label.as_str(), e.target.as_str()))
                 .collect(),
             Some(NextTarget::GoNogo(go_nogo)) => {
-                // W-QC3-2: binary→Labeled auto-conversion.
+                // note: W-QC3-2: binary→Labeled auto-conversion.
                 vec![("go", go_nogo.go.as_str()), ("nogo", go_nogo.nogo.as_str())]
             }
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
@@ -1189,9 +1153,9 @@ impl StateCompositeTask {
 
         for (label, target) in &candidates {
             if judge_reason.contains(label) {
-                // W-001: write matched label to context for observability.
+                // note: W-001: write matched label to context for observability.
                 context.set("_judge_label", (*label).to_string())?;
-                // V1.52 T-B P1: record label arrival for merge tracking.
+                // note: V1.52 T-B P1: record label arrival for merge tracking.
                 // If target is a merge node, _merge_<target_id> accumulates labels.
                 // Non-merge targets ignore this key.
                 let merge_key = format!("_merge_{target}");
@@ -1200,13 +1164,13 @@ impl StateCompositeTask {
                     arrived.push((*label).to_string());
                 }
                 context.set(&merge_key, arrived)?;
-                // V1.56 P2 fix-wave (H-001): also record converge arrival.
+                // note: V1.56 P2 fix-wave (H-001): also record converge arrival.
                 Self::record_converge_arrival(context, target, &self.id)?;
                 return Ok(NextAction::GoTo((*target).to_string()));
             }
         }
 
-        // W-QC3-3: no-match → deterministic fail (not silent stall).
+        // note: W-QC3-3: no-match → deterministic fail (not silent stall).
         let known_labels: Vec<String> = candidates.iter().map(|(l, _)| (*l).to_string()).collect();
         let excerpt = if judge_reason.len() > 200 {
             format!("{}...", &judge_reason[..200])
@@ -1224,7 +1188,7 @@ impl StateCompositeTask {
         )))
     }
 
-    /// V1.56 P2: resolve expression-based conditional routing target.
+    /// note: V1.56 P2: resolve expression-based conditional routing target.
     ///
     /// Uses pre-compiled expression AST (M-004) for performance. Evaluates each
     /// branch's `when` expression against the context, returning the first matching
@@ -1253,15 +1217,14 @@ impl StateCompositeTask {
                         target = %target,
                         "expression branch matched"
                     );
-                    // V1.56 P2 fix-wave (H-001): record arrival at converge target.
+                    // note: V1.56 P2 fix-wave (H-001): record arrival at converge target.
                     Self::record_converge_arrival(context, target, &self.id)?;
                     return Ok(NextAction::GoTo(target.clone()));
                 }
                 Ok(false) => {
-                    // Continue to next branch.
                 }
                 Err(e) => {
-                    // M-006: propagate expression eval failures, don't swallow.
+                    // note: M-006: propagate expression eval failures, don't swallow.
                     tracing::error!(
                         state_id = %self.id,
                         branch_index = i,
@@ -1276,18 +1239,18 @@ impl StateCompositeTask {
             }
         }
 
-        // No branch matched — use default.
+        // invariant: No branch matched — use default.
         tracing::debug!(
             state_id = %self.id,
             default = %cache.default,
             "no expression branch matched, falling back to default"
         );
-        // V1.56 P2 fix-wave (H-001): record arrival at converge target for default branch too.
+        // note: V1.56 P2 fix-wave (H-001): record arrival at converge target for default branch too.
         Self::record_converge_arrival(context, &cache.default, &self.id)?;
         Ok(NextAction::GoTo(cache.default.clone()))
     }
 
-    /// Record a converge arrival for the given target state (V1.56 P2 fix-wave, H-001).
+    /// note: Record a converge arrival for the given target state (V1.56 P2 fix-wave, H-001).
     ///
     /// Writes `source_id` into `_converge_arrivals_{target}` (per-source tracking via
     /// `HashSet` for automatic dedup). Each distinct predecessor's `source_id` is
@@ -1328,14 +1291,14 @@ impl StateCompositeTask {
         let mut arrived: std::collections::HashSet<String> =
             context.get(&converge_key).unwrap_or_default();
         if arrived.insert(source_id.to_string()) {
-            // New predecessor arrival — persist the updated set.
+            // note: New predecessor arrival — persist the updated set.
             context.set(&converge_key, arrived)?;
         }
-        // else: duplicate arrival from same source → idempotent no-op.
+        // note: else: duplicate arrival from same source → idempotent no-op.
         Ok(())
     }
 
-    /// Set or clear the CURRENT-GATE scheduler-park marker for `state_id`
+    /// note: Set or clear the CURRENT-GATE scheduler-park marker for `state_id`
     /// (round 4, Critical 1).
     ///
     /// The gated `StateCompositeTask` writes `_gate_park_{state_id}` = `true`
@@ -1362,7 +1325,7 @@ impl StateCompositeTask {
         Ok(())
     }
 
-    /// Bounded-join deadline check for one waiting tick (DR-06, v1.179).
+    /// note: Bounded-join deadline check for one waiting tick (DR-06, v1.179).
     ///
     /// No-op unless this state sets `timeout_ms`. On the first waiting tick
     /// records `_join_wait_start_{id}` in the context; every subsequent tick
@@ -1411,7 +1374,7 @@ impl StateCompositeTask {
             return Ok(None);
         }
 
-        // Deadline exceeded — clear arrivals + wait-start for the next cycle.
+        // note: Deadline exceeded — clear arrivals + wait-start for the next cycle.
         let arrivals_key = if gate == "merge" {
             &self.merge_key
         } else {
@@ -1419,7 +1382,7 @@ impl StateCompositeTask {
         };
         context.set(arrivals_key, Value::Null)?;
         context.set(&wait_start_key, Value::Null)?;
-        // Round-4 Critical 1: the join is no longer parked — the deadline
+        // note: Round-4 Critical 1: the join is no longer parked — the deadline
         // fired (reroute or typed failure). Clear the current-gate marker
         // so a later WaitForInput outcome at this state is never misread
         // as a scheduler park.
@@ -1459,7 +1422,7 @@ impl StateCompositeTask {
         )))
     }
 
-    /// Inject context dependencies before expression evaluation (V1.56 P3).
+    /// note: Inject context dependencies before expression evaluation (V1.56 P3).
     ///
     /// Called before `resolve_expression_target()` to populate
     /// `__registry_refresh_output` and `__workspace_state` in the context
@@ -1477,7 +1440,7 @@ impl StateCompositeTask {
         Ok(())
     }
 
-    /// Invoke `registry.refresh` capability and store output in context.
+    /// note: Invoke `registry.refresh` capability and store output in context.
     ///
     /// If the capability registry is unavailable, falls back to a minimal
     /// synthetic output so expressions don't fail on missing fields.
@@ -1489,7 +1452,7 @@ impl StateCompositeTask {
         &self,
         context: &graph_flow::Context,
     ) -> graph_flow::Result<()> {
-        // Check if we already have registry output (avoid redundant invocation).
+        // note: Check if we already have registry output (avoid redundant invocation).
         if context
             .get::<serde_json::Value>("__registry_refresh_output")
             .is_some()
@@ -1499,7 +1462,6 @@ impl StateCompositeTask {
         }
 
         let output = if let Some(registry) = &self.registry {
-            // Try to invoke the registered capability.
             if let Some(cap) = registry.get("registry.refresh") {
                 let start = std::time::Instant::now();
                 match cap.run(serde_json::json!({})).await {
@@ -1535,7 +1497,7 @@ impl StateCompositeTask {
                 synthetic_registry_output()
             }
         } else {
-            // No registry available — use synthetic fallback.
+            // invariant: No registry available — use synthetic fallback.
             tracing::info!(
                 capability = "registry.refresh",
                 duration_ms = 0u128,
@@ -1549,7 +1511,7 @@ impl StateCompositeTask {
         Ok(())
     }
 
-    /// Inject workspace session state into context for expression evaluation.
+    /// note: Inject workspace session state into context for expression evaluation.
     ///
     /// If `self.workspace_state` is set (e.g., by tests), uses that.
     /// Otherwise, injects a minimal default state so expressions referencing
@@ -1562,7 +1524,7 @@ impl StateCompositeTask {
         &self,
         context: &graph_flow::Context,
     ) -> graph_flow::Result<()> {
-        // Check if already injected (avoid clobbering).
+        // note: Check if already injected (avoid clobbering).
         if context
             .get::<serde_json::Value>("__workspace_state")
             .is_some()
@@ -1573,7 +1535,7 @@ impl StateCompositeTask {
             return Ok(());
         }
 
-        // Production path: resolve live state from the workspace authority.
+        // note: Production path: resolve live state from the workspace authority.
         if let Some(provider) = &self.workspace_state_provider {
             if let Some(ws_state) = provider.workspace_state().await {
                 tracing::debug!(
@@ -1591,7 +1553,7 @@ impl StateCompositeTask {
             );
         }
 
-        // Explicit-override path (tests, pre-snapshotted callers).
+        // note: Explicit-override path (tests, pre-snapshotted callers).
         let Some(ws_state) = self.workspace_state.clone() else {
             tracing::debug!(
                 state_id = %self.id,
@@ -1609,7 +1571,7 @@ impl StateCompositeTask {
     }
 }
 
-/// Build a minimal synthetic `RegistryRefreshOutput` as a fallback for
+/// note: Build a minimal synthetic `RegistryRefreshOutput` as a fallback for
 /// expression evaluation when the capability is unavailable (V1.56 P3).
 ///
 /// # `source` value semantics (R-V156P3-S001)
@@ -1638,7 +1600,7 @@ fn synthetic_registry_output() -> serde_json::Value {
     })
 }
 
-/// Build a JSON object from context keys for expression evaluation.
+/// note: Build a JSON object from context keys for expression evaluation.
 ///
 /// V1.56 P2 fix-wave (M-003): extended to expose user-set context values
 /// in addition to the fixed set of orchestration keys. All key-value pairs
@@ -1648,7 +1610,6 @@ fn synthetic_registry_output() -> serde_json::Value {
 /// `registry_refresh` object and `__workspace_state` as a nested
 /// `workspace` object when the runtime has populated those context keys.
 fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
-    // Known orchestration keys that expressions may reference.
     let known_keys = [
         "_judge_result",
         "_judge_reason",
@@ -1663,14 +1624,13 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
 
     let mut map = serde_json::Map::new();
 
-    // Include known orchestration keys.
     for key in &known_keys {
         if let Some(val) = context.get::<serde_json::Value>(key) {
             map.insert(key.to_string(), val);
         }
     }
 
-    // M-003: also include all user-set context values.
+    // note: M-003: also include all user-set context values.
     // We serialize the full context data map and merge.
     if let Ok(serialized) = serde_json::to_value(context) {
         if let Some(data) = serialized
@@ -1679,7 +1639,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
             .and_then(|d| d.as_object())
         {
             for (key, value) in data {
-                // Skip internal/hidden keys (start with double underscore).
+                // note: Skip internal/hidden keys (start with double underscore).
                 if key.starts_with("__") {
                     continue;
                 }
@@ -1690,15 +1650,15 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
         }
     }
 
-    // V1.56 P3: expose registry.refresh output as a nested object.
+    // note: V1.56 P3: expose registry.refresh output as a nested object.
     if let Some(reg_output) = context.get::<serde_json::Value>("__registry_refresh_output") {
-        // Translate camelCase capability output fields to snake_case
+        // note: Translate camelCase capability output fields to snake_case
         // context fields for expression grammar consistency.
         let reg_obj = registry_output_to_context(&reg_output);
         map.insert("registry_refresh".to_string(), reg_obj);
     }
 
-    // V1.56 P3: expose workspace session state as a nested object.
+    // note: V1.56 P3: expose workspace session state as a nested object.
     if let Some(ws_state) = context.get::<serde_json::Value>("__workspace_state") {
         map.insert("workspace".to_string(), ws_state);
     }
@@ -1706,7 +1666,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
-/// Translate `RegistryRefreshOutput` (camelCase) to `snake_case` context object.
+/// note: Translate `RegistryRefreshOutput` (camelCase) to `snake_case` context object.
 ///
 /// The capability returns camelCase JSON fields; expressions use `snake_case`
 /// (`_context.registry_refresh.snapshot_version` not
@@ -1717,7 +1677,7 @@ fn registry_output_to_context(output: &serde_json::Value) -> serde_json::Value {
         return serde_json::Value::Null;
     };
 
-    // R-V156P3-S003 fix: map all 9 RegistryRefreshOutput fields (previously
+    // note: R-V156P3-S003 fix: map all 9 RegistryRefreshOutput fields (previously
     // only 5 were mapped; cache_age_ms, generated_at, fetch_timeout_ms,
     // and max_retries were silently dropped).
     let source = obj
@@ -1781,7 +1741,7 @@ impl Task for StateCompositeTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // Check if this is a re-execution after resume.
+        // note: Check if this is a re-execution after resume.
         // After ManualWait returns WaitForInput, the engine signals Resume
         // and re-runs this task. On the second run, we should skip the wait
         // and just Continue.
@@ -1790,14 +1750,14 @@ impl Task for StateCompositeTask {
         let resumed: bool = context.get(&resume_key).unwrap_or(false);
 
         if resumed {
-            // Already went through the full lifecycle before the wait.
+            // note: Already went through the full lifecycle before the wait.
             // Just continue to the next state.
             let response = Some(format!("state '{}': resumed, continuing", self.id));
             tracing::debug!(state_id = %self.id, terminal = self.terminal, "state resumed");
             return Ok(TaskResult::new(response, NextAction::Continue));
         }
 
-        // 0.5. V1.52 T-B P1: Merge node gate.
+        // note: 0.5. V1.52 T-B P1: Merge node gate.
         // If this state has incoming labeled edges, check whether enough have
         // arrived before processing enter actions. When `merge:` is absent but
         // expected_incoming > 0, the default is WaitAll (W-QC1-1).
@@ -1813,7 +1773,7 @@ impl Task for StateCompositeTask {
             };
 
             if !condition_met {
-                // DR-06: bounded join — reroute or fail typed when the
+                // note: DR-06: bounded join — reroute or fail typed when the
                 // deadline has elapsed (no-op when timeout_ms is absent).
                 if let Some(timeout_result) = self.join_timeout_tick(
                     &context,
@@ -1831,7 +1791,7 @@ impl Task for StateCompositeTask {
                     merge_kind = ?merge_kind,
                     "merge node waiting for more incoming labeled edges"
                 );
-                // Round-4 Critical 1: write the CURRENT-GATE park marker so
+                // note: Round-4 Critical 1: write the CURRENT-GATE park marker so
                 // the engine classifies this WaitingForInput outcome as a
                 // scheduler park (paused + tokenless). Historical/broad join
                 // keys written by labeled/conditional ROUTING are not
@@ -1846,9 +1806,9 @@ impl Task for StateCompositeTask {
                 ));
             }
 
-            // Merge condition met — clear arrivals for next cycle.
+            // note: Merge condition met — clear arrivals for next cycle.
             context.set(&self.merge_key, serde_json::Value::Null)?;
-            // Success-leave: the join has passed, so the gate is no longer
+            // why: Success-leave: the join has passed, so the gate is no longer
             // parked (a later re-entry at this state must never be misread
             // as a scheduler park).
             Self::set_gate_park(&context, &self.id, false)?;
@@ -1859,7 +1819,7 @@ impl Task for StateCompositeTask {
             );
         }
 
-        // 0.6. V1.56 P2 fix-wave (H-001/W-002): Converge (merge-point) gate.
+        // note: 0.6. V1.56 P2 fix-wave (H-001/W-002): Converge (merge-point) gate.
         // For states with explicit `converge:` config, track arrivals from
         // connected predecessors and enforce the declared converge strategy.
         if let Some(ref converge_config) = self.converge {
@@ -1876,7 +1836,7 @@ impl Task for StateCompositeTask {
 
                 if !condition_met {
                     let state_id = self.id.clone();
-                    // DR-06: bounded join — reroute or fail typed when the
+                    // note: DR-06: bounded join — reroute or fail typed when the
                     // deadline has elapsed (no-op when timeout_ms is absent).
                     if let Some(timeout_result) =
                         self.join_timeout_tick(&context, "converge", arrived_count, expected)?
@@ -1890,7 +1850,7 @@ impl Task for StateCompositeTask {
                         strategy = ?converge_config.strategy,
                         "converge node waiting for more incoming edges"
                     );
-                    // Round-4 Critical 1: CURRENT-GATE park marker (see the
+                    // note: Round-4 Critical 1: CURRENT-GATE park marker (see the
                     // merge gate above).
                     Self::set_gate_park(&context, &self.id, true)?;
                     return Ok(TaskResult::new(
@@ -1902,9 +1862,9 @@ impl Task for StateCompositeTask {
                     ));
                 }
 
-                // Converge condition met — clear arrivals for next cycle.
+                // note: Converge condition met — clear arrivals for next cycle.
                 context.set(&self.converge_key, serde_json::Value::Null)?;
-                // Success-leave: the join has passed (see merge gate above).
+                // note: Success-leave: the join has passed (see merge gate above).
                 Self::set_gate_park(&context, &self.id, false)?;
                 tracing::info!(
                     state_id = %self.id,
@@ -1915,7 +1875,7 @@ impl Task for StateCompositeTask {
             }
         }
 
-        // F-001 (v1.179 QC fix): the join has LEFT — every present gate
+        // note: F-001 (v1.179 QC fix): the join has LEFT — every present gate
         // passed (§0.5/§0.6 return early while waiting), so retire the
         // shared wait-start with the join cycle. A merge-success tick whose
         // converge gate still waits returns inside §0.6 and never reaches
@@ -1929,13 +1889,12 @@ impl Task for StateCompositeTask {
             context.set(format!("_join_wait_start_{}", self.id), Value::Null)?;
         }
 
-        // 1. Process enter actions.
         for action in &self.enter_actions {
             match action {
                 EnterAction::Capability { name, args } => {
                     context.set("_capability_name", name.clone())?;
 
-                    // C-V133P2-01: Template-render capability args.
+                    // note: C-V133P2-01: Template-render capability args.
                     // Preset YAML args may contain {{preset.input.*}} or
                     // {{state.*.output}} placeholders. We render them against
                     // the engine context BEFORE identity injection, so
@@ -1945,7 +1904,7 @@ impl Task for StateCompositeTask {
                         cap_input = Value::Object(serde_json::Map::new());
                     }
 
-                    // Render every string value in the args through handlebars.
+                    // note: Render every string value in the args through handlebars.
                     // Fail-closed: if a placeholder references a non-existent
                     // key, the render will fail and the capability is NOT called
                     // with literal "{{...}}" placeholders.
@@ -1953,7 +1912,7 @@ impl Task for StateCompositeTask {
                     cap_input = render_value_templates(&cap_input, &payload)?;
 
                     if let Some(obj) = cap_input.as_object_mut() {
-                        // Security (SEC-V131-01): inject trusted identity from
+                        // note: Security (SEC-V131-01): inject trusted identity from
                         // engine context into capability args. Capabilities read
                         // `_creator_id` / `_session_id` from their input; the
                         // orchestration engine must set them at the invocation
@@ -1972,7 +1931,7 @@ impl Task for StateCompositeTask {
                         }
                     }
                     context.set("_capability_input", cap_input)?;
-                    // One invocation, one result: the PREVIOUS invocation's
+                    // note: One invocation, one result: the PREVIOUS invocation's
                     // result keys are cleared here — AFTER this invocation's
                     // args were rendered above (a preset may legitimately read
                     // the previous output while rendering, e.g.
@@ -1991,14 +1950,13 @@ impl Task for StateCompositeTask {
                     });
                     let cap_task = CapabilityTask { registry };
                     let cap_result = cap_task.run(context.clone()).await?;
-                    // If capability task errored, propagate but still continue
+                    // note: If capability task errored, propagate but still continue
                     // so the state machine doesn't get stuck.
                     if let Some(status_msg) = &cap_result.status_message {
                         context.set("_enter_error", status_msg.clone())?;
                     }
                 }
                 EnterAction::InnerGraph { name } => {
-                    // Spawn a child session for the inner graph.
                     let inner_graph = self.inner_graphs.get(name.as_str());
                     let output_binding = self.output_bindings.get(name.as_str()).cloned();
 
@@ -2012,12 +1970,11 @@ impl Task for StateCompositeTask {
                         );
                         inner_task.run(context.clone()).await?;
                     } else if inner_graph.is_none() {
-                        // Inner graph not found in the map — error.
                         return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
                             "InnerGraphTask: inner graph '{name}' not found"
                         )));
                     } else {
-                        // No engine set — use fallback stub behavior.
+                        // invariant: No engine set — use fallback stub behavior.
                         context.set("_inner_graph_name", name.clone())?;
                         context.set(
                             format!("_inner_graph_error_{name}"),
@@ -2026,7 +1983,7 @@ impl Task for StateCompositeTask {
                     }
                 }
                 EnterAction::HostTool { tool_name, args } => {
-                    // DF-47 (V1.42 P3): invoke daemon-side nexus.* tool.
+                    // note: DF-47 (V1.42 P3): invoke daemon-side nexus.* tool.
                     // The dispatch slot is injected by the engine at graph
                     // construction time via `with_daemon_tool_dispatch`.
                     let dispatch = self.daemon_tool_dispatch.as_ref();
@@ -2048,10 +2005,9 @@ impl Task for StateCompositeTask {
             }
         }
 
-        // 2. Evaluate exit_when.
         let next_action = match &self.exit_when {
             None => {
-                // No exit condition — terminal state or just ends.
+                // invariant: No exit condition — terminal state or just ends.
                 if self.terminal {
                     NextAction::End
                 } else {
@@ -2059,13 +2015,13 @@ impl Task for StateCompositeTask {
                 }
             }
             Some(ExitWhen::Manual) => {
-                // Mark that enter actions have been processed; next run after
+                // note: Mark that enter actions have been processed; next run after
                 // resume will skip straight to Continue.
                 context.set(resume_key, true)?;
                 NextAction::WaitForInput
             }
             Some(ExitWhen::Rule) => {
-                // The unit `ExitWhen::Rule` (bare `exit_when: kind: rule`)
+                // note: The unit `ExitWhen::Rule` (bare `exit_when: kind: rule`)
                 // contract is "transition as soon as the enter action
                 // completes" (TD-V131-08, locked by
                 // `memory_augmented_rule_exit_is_explicit_always_true`).
@@ -2087,7 +2043,7 @@ impl Task for StateCompositeTask {
                 ref judge_capability,
                 ref min_interval,
             }) => {
-                // V1.33: invoke judge.llm capability through the registry.
+                // note: V1.33: invoke judge.llm capability through the registry.
                 // Render template_file → build prompt → call capability → GO/NOGO.
                 let template = template_file.as_deref().unwrap_or("");
                 if template.is_empty() {
@@ -2108,7 +2064,7 @@ impl Task for StateCompositeTask {
                         .clone()
                         .unwrap_or_else(|| Arc::new(CapabilityRegistry::with_builtins()));
 
-                    // min_interval throttle: skip evaluation if last
+                    // note: min_interval throttle: skip evaluation if last
                     // evaluation was too recent.
                     //
                     // R-V156P3-S002 (yield-point audit): every branch in this
@@ -2136,7 +2092,7 @@ impl Task for StateCompositeTask {
                                             interval = %interval_str,
                                             "llm_judge: min_interval not elapsed, keeping previous result"
                                         );
-                                        // Return the previous judge result.
+                                        // note: Return the previous judge result.
                                         let prev_result: bool =
                                             context.get("_judge_result").unwrap_or(false);
                                         let prev_reason: String =
@@ -2144,7 +2100,7 @@ impl Task for StateCompositeTask {
                                                 "min_interval throttle: reusing previous result"
                                                     .to_string()
                                             });
-                                        // V1.56 P3: inject context dependencies before
+                                        // note: V1.56 P3: inject context dependencies before
                                         // expression routing. Must happen before the
                                         // return because we need the .await point.
                                         self.inject_context_deps(&context).await?;
@@ -2152,7 +2108,7 @@ impl Task for StateCompositeTask {
                                         let next_action = if self.terminal {
                                             NextAction::End
                                         } else {
-                                            // V1.56 P2 fix-wave (H-002): throttle path
+                                            // note: V1.56 P2 fix-wave (H-002): throttle path
                                             // must delegate to resolve_expression_target for
                                             // Conditional/Branches variants.
                                             // resolve_labeled_target rejects them.
@@ -2184,7 +2140,7 @@ impl Task for StateCompositeTask {
                         LlmJudgeTask::new(template.to_string(), cap_name.to_string(), registry);
                     let (result, reason) = judge_task.evaluate(&context).await?;
 
-                    // Record timestamp for min_interval throttle.
+                    // note: Record timestamp for min_interval throttle.
                     if min_interval.is_some() {
                         let throttle_key = format!("_judge_last_eval_{}", self.id);
                         context.set(throttle_key, chrono::Utc::now().to_rfc3339())?;
@@ -2193,7 +2149,7 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result)?;
                     context.set("_judge_reason", reason.clone())?;
 
-                    // V1.52 T-B P0: for Labeled or GoNogo next, route via
+                    // note: V1.52 T-B P0: for Labeled or GoNogo next, route via
                     // resolve_labeled_target (GoTo). For Linear/None, use
                     // the existing judge_next_action(bool) path.
                     if matches!(
@@ -2202,26 +2158,23 @@ impl Task for StateCompositeTask {
                     ) {
                         self.resolve_labeled_target(&context, &reason)?
                     } else {
-                        // V1.42 P2: when next is Linear/None, GO advances
+                        // note: V1.42 P2: when next is Linear/None, GO advances
                         // but NOGO waits.
                         self.judge_next_action(result)
                     }
                 }
             }
             Some(ExitWhen::GraphComplete) => {
-                // Inner graph completion propagates Continue.
-                // (InnerGraphTask handles the actual child session; here we just
-                // continue since the inner graph ran as part of enter actions.)
                 NextAction::Continue
             }
             Some(ExitWhen::Timer { .. }) => {
-                // Timer not yet implemented for V1.4; treat as manual wait.
+                // note: Timer not yet implemented for V1.4; treat as manual wait.
                 context.set(resume_key, true)?;
                 NextAction::WaitForInput
             }
         };
 
-        // 2.5. V1.56 P2: Expression-based conditional routing.
+        // note: 2.5. V1.56 P2: Expression-based conditional routing.
         // For states with Conditional/Branches next (any exit_when), evaluate
         // expressions and route to the matching target.
         // V1.56 P2 fix-wave (M-006): errors now propagated via ?.
@@ -2234,7 +2187,7 @@ impl Task for StateCompositeTask {
             _ => next_action,
         };
 
-        // 3. Terminal override — always End regardless of exit_when.
+        // note: 3. Terminal override — always End regardless of exit_when.
         let final_action = if self.terminal {
             NextAction::End
         } else {
@@ -2251,11 +2204,8 @@ impl Task for StateCompositeTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// InnerGraphNodeTask (inner graph nodes — per §8.2, WS-E T5)
-// ---------------------------------------------------------------------------
 
-/// A task for a node within an inner graph.
+/// note: A task for a node within an inner graph.
 ///
 /// §8.2 mapping:
 /// - `kind=acp_prompt` → `AcpPromptTask` through the Host plane.
@@ -2269,24 +2219,24 @@ impl Task for StateCompositeTask {
 /// Backward compatible: if no session identity is available, uses `"default"`.
 pub struct InnerGraphNodeTask {
     id: String,
-    /// Production prompt executor. `None` for stub/test mode.
+    /// note: Production prompt executor. `None` for stub/test mode.
     executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
-    /// Per-run coordinator cancellation tokens (A1).
+    /// note: Per-run coordinator cancellation tokens (A1).
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-    /// Template file path (resolved relative to preset bundle root).
+    /// note: Template file path (resolved relative to preset bundle root).
     template: String,
-    /// Tool policy for this node.
+    /// note: Tool policy for this node.
     tool_policy: ToolPolicy,
-    /// Explicit `session_id` (if preset resolution already determined it).
+    /// note: Explicit `session_id` (if preset resolution already determined it).
     session_id: Option<String>,
-    /// Agent role reference (if node has `agent` field — resolved binding).
+    /// note: Agent role reference (if node has `agent` field — resolved binding).
     agent_ref: Option<String>,
 }
 
 impl InnerGraphNodeTask {
-    /// Create a new inner graph node task (stub mode, no executor).
+    /// note: Create a new inner graph node task (stub mode, no executor).
     ///
     /// Used by preset loader for initial graph construction. The real task
     /// is wired at runtime when the executor and session cancels are available.
@@ -2305,21 +2255,21 @@ impl InnerGraphNodeTask {
         }
     }
 
-    /// Builder-style `session_id` setter.
+    /// note: Builder-style `session_id` setter.
     #[must_use]
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
 
-    /// Builder-style `agent_ref` setter.
+    /// note: Builder-style `agent_ref` setter.
     #[must_use]
     pub fn with_agent_ref(mut self, agent_ref: impl Into<String>) -> Self {
         self.agent_ref = Some(agent_ref.into());
         self
     }
 
-    /// Builder-style prompt executor setter (A1).
+    /// note: Builder-style prompt executor setter (A1).
     #[must_use]
     pub fn with_prompt_executor(
         mut self,
@@ -2329,7 +2279,7 @@ impl InnerGraphNodeTask {
         self
     }
 
-    /// Builder-style session cancels setter (A1).
+    /// note: Builder-style session cancels setter (A1).
     #[must_use]
     pub fn with_session_cancels(
         mut self,
@@ -2343,21 +2293,21 @@ impl InnerGraphNodeTask {
         self
     }
 
-    /// Builder-style template setter.
+    /// note: Builder-style template setter.
     #[must_use]
     pub fn with_template(mut self, template: impl Into<String>) -> Self {
         self.template = template.into();
         self
     }
 
-    /// Builder-style `tool_policy` setter.
+    /// note: Builder-style `tool_policy` setter.
     #[must_use]
     pub const fn with_tool_policy(mut self, tool_policy: ToolPolicy) -> Self {
         self.tool_policy = tool_policy;
         self
     }
 
-    /// Resolve the durable orchestration run id for this node.
+    /// note: Resolve the durable orchestration run id for this node.
     ///
     /// An explicit id is used by already-bound callers. Otherwise the engine's
     /// trusted `_session_id` context value identifies the run. Agent role
@@ -2395,11 +2345,11 @@ impl Task for InnerGraphNodeTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // Resolve session_id for this node (WS-E T5). M-002: a missing
+        // note: Resolve session_id for this node (WS-E T5). M-002: a missing
         // trusted identity refuses the node execution.
         let session_id = self.resolve_session_id(&context)?;
 
-        // If we have a prompt executor, delegate to AcpPromptTask.
+        // note: If we have a prompt executor, delegate to AcpPromptTask.
         if let Some(executor) = &self.executor {
             let mut acp_task = AcpPromptTask::new(
                 Some(executor.clone()),
@@ -2413,7 +2363,7 @@ impl Task for InnerGraphNodeTask {
                 acp_task = acp_task.with_agent_ref(agent_ref.clone());
             }
             let result = acp_task.run(context.clone()).await?;
-            // Inner-graph presets bind outputs as `<node>.text` /
+            // note: Inner-graph presets bind outputs as `<node>.text` /
             // `<node>.output`, which `InnerGraphTask` resolves via the
             // `nodes.<binding>` key. `AcpPromptTask` stores
             // `state.<node>.output`; mirror it into the node-namespaced keys
@@ -2429,7 +2379,7 @@ impl Task for InnerGraphNodeTask {
             return Ok(result);
         }
 
-        // Stub mode: no executor — refuse with a typed failure, never a
+        // note: Stub mode: no executor — refuse with a typed failure, never a
         // placeholder success (A1: no echo/worker fallback).
         tracing::debug!(
             node_id = %self.id,
@@ -2445,11 +2395,8 @@ impl Task for InnerGraphNodeTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AcpPromptTask (dispatches prompt through the Host plane)
-// ---------------------------------------------------------------------------
 
-/// A task that sends a prompt to an ACP agent through the Host plane (A1).
+/// note: A task that sends a prompt to an ACP agent through the Host plane (A1).
 ///
 /// Design: `orchestration-engine.md` §4.4 (`AcpPromptTask` row) + A1.
 ///
@@ -2460,28 +2407,28 @@ impl Task for InnerGraphNodeTask {
 /// 3. Stores `result.full_text` at `ctx["state.<state_id>.output"]`.
 /// 4. Returns `TaskResult { response: Some(full_text), next_action: NextAction::Continue }`.
 pub struct AcpPromptTask {
-    /// Production prompt executor. `None` for test stub mode.
+    /// note: Production prompt executor. `None` for test stub mode.
     executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
-    /// Per-run coordinator cancellation tokens (A1).
+    /// note: Per-run coordinator cancellation tokens (A1).
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-    /// State ID this task belongs to (for context key namespacing).
+    /// note: State ID this task belongs to (for context key namespacing).
     state_id: String,
-    /// Prompt template (handlebars syntax).
+    /// note: Prompt template (handlebars syntax).
     template: String,
-    /// Tool policy for this prompt.
+    /// note: Tool policy for this prompt.
     tool_policy: ToolPolicy,
-    /// Session ID for multi-agent routing (WS-E T5).
+    /// note: Session ID for multi-agent routing (WS-E T5).
     /// Routes the prompt to a specific agent slot within the worker.
     /// Default `"default"` for backward compatibility with single-agent workers.
     session_id: String,
-    /// Optional role key used to resolve the run's frozen provider binding.
+    /// note: Optional role key used to resolve the run's frozen provider binding.
     agent_ref: Option<String>,
 }
 
 impl AcpPromptTask {
-    /// Create a new `AcpPromptTask`.
+    /// note: Create a new `AcpPromptTask`.
     ///
     /// `executor`: the production prompt executor. Can be `None` for test mode
     /// where the task operates in stub mode.
@@ -2511,7 +2458,7 @@ impl AcpPromptTask {
         }
     }
 
-    /// Test helper: create an `AcpPromptTask` with a prompt executor directly.
+    /// note: Test helper: create an `AcpPromptTask` with a prompt executor directly.
     pub fn new_for_test(
         executor: std::sync::Arc<dyn nexus_capability::PromptExecutor>,
         state_id: impl Into<String>,
@@ -2531,7 +2478,7 @@ impl AcpPromptTask {
         }
     }
 
-    /// Create an `AcpPromptTask` with explicit `session_id` (WS-E T5).
+    /// note: Create an `AcpPromptTask` with explicit `session_id` (WS-E T5).
     ///
     /// Convenience constructor for multi-agent presets where the `session_id`
     /// is known at task creation time.
@@ -2558,14 +2505,14 @@ impl AcpPromptTask {
         }
     }
 
-    /// Select a role key from the run's frozen agent bindings.
+    /// note: Select a role key from the run's frozen agent bindings.
     #[must_use]
     pub fn with_agent_ref(mut self, agent_ref: impl Into<String>) -> Self {
         self.agent_ref = Some(agent_ref.into());
         self
     }
 
-    /// Render the prompt template using handlebars against a nested JSON payload.
+    /// note: Render the prompt template using handlebars against a nested JSON payload.
     ///
     /// Renders the prompt template using handlebars against a nested JSON payload.
     ///
@@ -2596,12 +2543,10 @@ impl Task for AcpPromptTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // 1. Render the template.
         let prompt = self.render_template(&context);
 
-        // 2. If we have a prompt executor, dispatch through the Host plane.
         let full_text = if let Some(ref executor) = self.executor {
-            // Resolve the coordinator cancellation token for this run (A1).
+            // note: Resolve the coordinator cancellation token for this run (A1).
             // FAIL-CLOSED: an unregistered run refuses with the typed
             // `CancellationUnavailable` — a fresh token would be
             // uncancellable by any coordinator. The run admission path
@@ -2616,7 +2561,7 @@ impl Task for AcpPromptTask {
                 ))
             })?;
 
-            // Dispatching a prompt to an external agent is an external
+            // note: Dispatching a prompt to an external agent is an external
             // effect — mark the step so a failed post-effect commit persists
             // an interrupted disposition rather than blindly rewinding
             // (Important 3).
@@ -2640,37 +2585,31 @@ impl Task for AcpPromptTask {
 
             result.full_text
         } else {
-            // Stub mode: no executor — refuse with a typed failure, never a
+            // note: Stub mode: no executor — refuse with a typed failure, never a
             // placeholder success (A1: no echo/worker fallback).
             return Err(graph_flow::GraphError::TaskExecutionFailed(
                 "acp_prompt: no prompt executor available (unconfigured provider)".into(),
             ));
         };
 
-        // 3. Add to chat history.
         context.add_assistant_message(full_text.clone());
 
-        // 4. Store output at state.<state_id>.output.
         let output_key = format!("state.{}.output", self.state_id);
         context.set(&output_key, full_text.clone())?;
 
-        // 5. Return TaskResult.
         Ok(TaskResult::new(Some(full_text), NextAction::Continue))
     }
 }
 
-// ---------------------------------------------------------------------------
-// CoreContext template rendering (DF-11)
-// ---------------------------------------------------------------------------
 
-/// Static Handlebars registry — avoids per-call allocation overhead.
+/// note: Static Handlebars registry — avoids per-call allocation overhead.
 ///
 /// Uses `no_escape` mode to preserve plain-text fidelity in prompts
 /// (avoids HTML-encoding `&`, `<`, `>` etc.).
 static HANDLEBARS: std::sync::OnceLock<handlebars::Handlebars<'static>> =
     std::sync::OnceLock::new();
 
-/// Return a reference to the shared Handlebars registry.
+/// note: Return a reference to the shared Handlebars registry.
 ///
 /// The registry is initialized once with `no_escape` mode and reused
 /// across all template renders for the process lifetime.
@@ -2682,7 +2621,7 @@ fn handlebars_registry() -> &'static handlebars::Handlebars<'static> {
     })
 }
 
-/// Render a handlebars template against a JSON payload.
+/// note: Render a handlebars template against a JSON payload.
 ///
 /// Used by the orchestration engine to substitute `CoreContext` values into
 /// prompt templates. Supports nested path access (e.g. `{{world.title}}`).
@@ -2701,7 +2640,7 @@ pub fn render_core_context_template(
         .map_err(Into::into)
 }
 
-/// Render a handlebars template in strict mode — missing variables cause
+/// note: Render a handlebars template in strict mode — missing variables cause
 /// an error instead of silently rendering as empty string.
 ///
 /// Used for capability arg template rendering (C-V133P2-01) where silent
@@ -2717,7 +2656,7 @@ fn render_strict_template(template: &str, payload: &serde_json::Value) -> anyhow
     reg.render_template(template, payload).map_err(Into::into)
 }
 
-/// Recursively render all string values in a JSON value as handlebars templates.
+/// note: Recursively render all string values in a JSON value as handlebars templates.
 ///
 /// C-V133P2-01: Walks the JSON tree; for every string value, renders it as a
 /// handlebars template against `payload`. Non-string values (numbers, booleans,
@@ -2738,7 +2677,7 @@ fn value_contains_template(value: &serde_json::Value) -> bool {
     }
 }
 
-/// Returns an error if any string value contains a template placeholder that
+/// note: Returns an error if any string value contains a template placeholder that
 /// fails to render (e.g. `{{nonexistent.key}}`). This is fail-closed: the
 /// capability is NOT called with literal "{{...}}" placeholders.
 fn render_value_templates(
@@ -2768,12 +2707,12 @@ fn render_value_templates(
                 .collect::<Result<_, _>>()?;
             Ok(serde_json::Value::Array(rendered_arr))
         }
-        // Numbers, booleans, null — pass through unchanged.
+        // note: Numbers, booleans, null — pass through unchanged.
         other => Ok(other.clone()),
     }
 }
 
-/// Build a nested JSON object from flat dot-separated context keys.
+/// note: Build a nested JSON object from flat dot-separated context keys.
 ///
 /// For example, keys like `core_context.version` become
 /// `{"core_context": {"version": ...}}`. This allows handlebars templates
@@ -2783,7 +2722,7 @@ fn build_nested_payload(context: &graph_flow::Context) -> serde_json::Value {
         return serde_json::json!({});
     };
 
-    // serialized Context is {"data": {...}, "chat_history": {...}} —
+    // note: serialized Context is {"data": {...}, "chat_history": {...}} —
     // extract just the data map.
     let data = serialized
         .as_object()
@@ -2799,7 +2738,7 @@ fn build_nested_payload(context: &graph_flow::Context) -> serde_json::Value {
     serde_json::Value::Object(root)
 }
 
-/// Insert a value at a dot-separated path, creating intermediate objects.
+/// note: Insert a value at a dot-separated path, creating intermediate objects.
 fn insert_nested(
     map: &mut serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -2822,18 +2761,15 @@ fn insert_nested(
     current.insert(leaf.to_string(), value);
 }
 
-// ---------------------------------------------------------------------------
-// HostToolCallTask — invoke a nexus.* tool from a schedule tick (DF-47, V1.42 P3)
-// ---------------------------------------------------------------------------
 
-/// Type alias for the dispatch slot used by `HostToolCallTask`.
+/// note: Type alias for the dispatch slot used by `HostToolCallTask`.
 /// Wraps an `Arc<Mutex<Option<Arc<dyn DaemonToolDispatch>>>>` for interior
 /// mutability without consuming the dispatch on use.
 type DaemonDispatchSlot = std::sync::Arc<
     std::sync::Mutex<Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>>,
 >;
 
-/// A task that calls a `nexus.*` host tool through the daemon's unified registry.
+/// note: A task that calls a `nexus.*` host tool through the daemon's unified registry.
 ///
 /// Production wiring for DF-47: the schedule executor can invoke read-only
 /// (or mutating) `nexus.*` tools on a configured stage in-process. The call
@@ -2843,20 +2779,20 @@ type DaemonDispatchSlot = std::sync::Arc<
 ///
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 pub struct HostToolCallTask {
-    /// Daemon-side tool dispatch provider (test-oriented, wraps Arc<Mutex<Option<...>>>).
+    /// note: Daemon-side tool dispatch provider (test-oriented, wraps Arc<Mutex<Option<...>>>).
     dispatch: Option<DaemonDispatchSlot>,
-    /// Direct dispatch reference (production path, no Mutex overhead).
+    /// note: Direct dispatch reference (production path, no Mutex overhead).
     direct_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
-    /// Tool name, e.g. `"nexus.orchestration.schedule_status"`.
+    /// note: Tool name, e.g. `"nexus.orchestration.schedule_status"`.
     tool_name: String,
-    /// Tool parameters (may contain template references rendered at runtime).
+    /// note: Tool parameters (may contain template references rendered at runtime).
     args: serde_json::Value,
-    /// Unique task id for logging.
+    /// note: Unique task id for logging.
     task_id: String,
 }
 
 impl HostToolCallTask {
-    /// Create a new `HostToolCallTask`.
+    /// note: Create a new `HostToolCallTask`.
     ///
     /// `dispatch`: the daemon-side tool dispatch provider. `None` for test stub mode.
     /// `task_id`: unique identifier for this task instance.
@@ -2878,7 +2814,7 @@ impl HostToolCallTask {
         }
     }
 
-    /// Create with a direct dispatch reference (production path from `StateCompositeTask`).
+    /// note: Create with a direct dispatch reference (production path from `StateCompositeTask`).
     ///
     /// This avoids the `Mutex<Option<...>>` wrapper used by the test-oriented `new()`.
     /// The dispatch is stored directly; `run()` skips the lock/unlock overhead.
@@ -2898,7 +2834,7 @@ impl HostToolCallTask {
         }
     }
 
-    /// Create in stub mode (no daemon dispatch, for testing).
+    /// note: Create in stub mode (no daemon dispatch, for testing).
     #[must_use]
     pub fn new_stub(
         task_id: impl Into<String>,
@@ -2925,7 +2861,7 @@ impl Task for HostToolCallTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // T7 (qc3 W-02): short-circuit template rendering when args contain no
+        // note: T7 (qc3 W-02): short-circuit template rendering when args contain no
         // placeholders. Avoids serializing the full context + handlebars walk
         // for trivial calls like `{"work_id": "..."}`.
         let rendered_args = if value_contains_template(&self.args) {
@@ -2935,7 +2871,7 @@ impl Task for HostToolCallTask {
             self.args.clone()
         };
 
-        // Generate a request_id for traceability.
+        // note: Generate a request_id for traceability.
         let request_id = format!(
             "host_tool_{}_{}",
             self.tool_name.replace('.', "_"),
@@ -2943,7 +2879,7 @@ impl Task for HostToolCallTask {
         );
 
         let result_value = if let Some(ref dispatch_ref) = self.direct_dispatch {
-            // Production path (direct): call through injected dispatch.
+            // note: Production path (direct): call through injected dispatch.
             // A host-tool dispatch is an external effect — mark the step so a
             // failed post-effect commit persists an interrupted disposition
             // rather than blindly rewinding (Important 3).
@@ -2958,7 +2894,7 @@ impl Task for HostToolCallTask {
                     ))
                 })?
         } else if let Some(ref dispatch_arc) = self.dispatch {
-            // Test-oriented path: call through Mutex-wrapped dispatch slot.
+            // note: Test-oriented path: call through Mutex-wrapped dispatch slot.
             // A host-tool dispatch is an external effect (Important 3).
             context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true)?;
             let dispatch = {
@@ -2987,7 +2923,7 @@ impl Task for HostToolCallTask {
                     ))
                 })?
         } else {
-            // Stub mode: return a synthetic result.
+            // note: Stub mode: return a synthetic result.
             serde_json::json!({
                 "stub": true,
                 "tool_name": self.tool_name,
@@ -2996,7 +2932,6 @@ impl Task for HostToolCallTask {
             })
         };
 
-        // Store the result in context for downstream nodes.
         let context_key = format!("host_tool.{}.result", self.task_id);
         context.set(&context_key, &result_value)?;
         context.set("_last_host_tool_result", &result_value)?;
@@ -3014,11 +2949,8 @@ impl Task for HostToolCallTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
-/// Parse an ISO-8601 duration string (e.g. `"PT6H"`, `"PT1H30M"`) into a
+/// note: Parse an ISO-8601 duration string (e.g. `"PT6H"`, `"PT1H30M"`) into a
 /// `chrono::Duration`.
 ///
 /// Supports days (D), hours (H), minutes (M after T), and seconds (S).
@@ -3036,14 +2968,14 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
     }
     let body = &s[1..];
 
-    // Parse optional days (before T) and optional time part (after T).
+    // note: Parse optional days (before T) and optional time part (after T).
     let mut days: i64 = 0;
     let mut hours: i64 = 0;
     let mut minutes: i64 = 0;
     let mut seconds: i64 = 0;
 
     if let Some(time_part) = body.strip_prefix('T') {
-        // Time-only form: PT6H, PT30M, PT1H30M15S
+        // note: Time-only form: PT6H, PT30M, PT1H30M15S
         if time_part.is_empty() {
             tracing::warn!(input = %s, "min_interval: empty time part after 'T'");
             return None;
@@ -3080,7 +3012,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
             return None;
         }
     } else {
-        // Date-part only: P1D, P7D (no T separator)
+        // note: Date-part only: P1D, P7D (no T separator)
         let mut num_buf = String::new();
         for ch in body.chars() {
             match ch {
@@ -3151,7 +3083,7 @@ mod tests {
             Some("n1.text".to_string()),
         );
         let ctx = graph_flow::Context::new();
-        // No _session_id set — should fail.
+        // invariant: No _session_id set — should fail.
         let result = task.run(ctx).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -3181,7 +3113,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_judge_task_with_mock_worker_go() {
-        // Prove LlmJudgeTask invokes judge.llm capability and maps GO → Continue.
+        // note: Prove LlmJudgeTask invokes judge.llm capability and maps GO → Continue.
         // Use the registry with a mock worker that returns "GO".
         use nexus_capability::CapabilityRuntimeDeps;
 
@@ -3227,7 +3159,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_judge_task_with_mock_worker_nogo() {
-        // Prove LlmJudgeTask maps NOGO → false.
+        // note: Prove LlmJudgeTask maps NOGO → false.
         use nexus_capability::CapabilityRuntimeDeps;
 
         struct MockNogoProvider;
@@ -3275,7 +3207,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_judge_task_no_worker_returns_nogo() {
-        // Without a worker, judge.llm returns WorkerUnavailable.
+        // note: Without a worker, judge.llm returns WorkerUnavailable.
         // LlmJudgeTask maps this to NOGO (safe default: wait, don't advance).
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let judge_task = LlmJudgeTask::new(
@@ -3293,7 +3225,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_judge_task_missing_capability_errors() {
-        // Unknown capability name → TaskExecutionFailed.
+        // note: Unknown capability name → TaskExecutionFailed.
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let judge_task = LlmJudgeTask::new(
             "test".to_string(),
@@ -3308,9 +3240,8 @@ mod tests {
         assert!(err.contains("not found"), "error: {err}");
     }
 
-    // ── V1.51 T-A P0: LlmExtractTask — golden input → golden Vec<KbCandidate> ──
 
-    /// Mock worker that returns a fixed JSON candidates payload for
+    /// note: Mock worker that returns a fixed JSON candidates payload for
     /// `nexus.llm.extract`. Used by the `LlmExtractTask` hermetic tests.
     struct MockExtractProvider {
         response: String,
@@ -3330,10 +3261,10 @@ mod tests {
         }
     }
 
-    /// The extraction run identity the `LlmExtractTask` fixtures run under.
+    /// note: The extraction run identity the `LlmExtractTask` fixtures run under.
     const EXTRACT_TASK_SESSION: &str = "sess_extract_task";
 
-    /// Decorate a task context with the trusted extraction context the
+    /// note: Decorate a task context with the trusted extraction context the
     /// production caller resolves from stored state before the model runs
     /// (v1.191 P1 T13, durable §§3, 8): the target policy and the admitted
     /// chapter artifact, plus the real run identity.
@@ -3359,7 +3290,7 @@ mod tests {
     fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
         use nexus_capability::CapabilityRuntimeDeps;
         let map = session_cancels_with_default();
-        // The capability resolves the coordinator token of the fixture's run id
+        // note: The capability resolves the coordinator token of the fixture's run id
         // (fail-closed contract) before the prompt reaches the mock executor.
         map.write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -3380,7 +3311,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_task_with_mock_worker_returns_candidates() {
-        // Golden LLM response → golden LlmExtractOutcome::Candidates.
+        // note: Golden LLM response → golden LlmExtractOutcome::Candidates.
         let registry = extract_registry_with_mock(
             r#"{"candidates":[
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.95,"source_quote":"Lin Xia drew her blade."},
@@ -3417,7 +3348,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_task_no_worker_returns_unavailable() {
-        // No worker → WorkerUnavailable is explicit, not an empty Vec contract
+        // invariant: No worker → WorkerUnavailable is explicit, not an empty Vec contract
         // (closes R-V151Q3-W002).
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let task = LlmExtractTask::new(
@@ -3439,7 +3370,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_task_missing_capability_returns_refused() {
-        // Unknown capability name → the run is refused (v1.191 P1 T13 review
+        // note: Unknown capability name → the run is refused (v1.191 P1 T13 review
         // I2: a missing extractor is not a worker outage, so the outcome must
         // not invite a heuristic stand-in).
         let registry = Arc::new(CapabilityRegistry::with_builtins());
@@ -3464,7 +3395,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_task_malformed_llm_json_returns_empty_candidates() {
-        // Malformed LLM response → capability returns empty candidates;
+        // note: Malformed LLM response → capability returns empty candidates;
         // task surfaces them as Candidates(vec![]) (best-effort, no error).
         let registry = extract_registry_with_mock("not json at all");
         let task = LlmExtractTask::new(
@@ -3485,7 +3416,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_unified_path_uses_quality_loop_mapping() {
-        // Regression for R-V151Q3-W001: LlmExtractTask must use the same
+        // note: Regression for R-V151Q3-W001: LlmExtractTask must use the same
         // LLM→KbCandidate mapping as the review-time hook, including derived
         // novel_category in the proposed_payload.
         let registry = extract_registry_with_mock(
@@ -3511,7 +3442,7 @@ mod tests {
         assert_eq!(payload["block_type"], "scene");
     }
 
-    /// V1.55 P2 fix-wave (F-001): production-path coverage — `LlmExtractTask`
+    /// note: V1.55 P2 fix-wave (F-001): production-path coverage — `LlmExtractTask`
     /// with `work_profile = "game_bible"` must produce a game-bible-shaped
     /// candidate (`game_bible_category` set, `novel_category` absent, tags include
     /// `"game-bible"`). This exercises the full production path through
@@ -3549,17 +3480,15 @@ mod tests {
 
         let payload: serde_json::Value =
             serde_json::from_str(&candidates[0].proposed_payload).unwrap();
-        // game_bible_category must be set (faction → faction in direct mapping)
+        // note: game_bible_category must be set (faction → faction in direct mapping)
         assert_eq!(
             payload["attributes"]["game_bible_category"], "faction",
             "game_bible_category should be 'faction' for block_type=faction"
         );
-        // novel_category must NOT be present
         assert!(
             payload["attributes"]["novel_category"].is_null(),
             "novel_category must be absent from game-bible candidate"
         );
-        // Tags must include "game-bible" and "llm-extracted"
         let tags = payload["tags"].as_array().expect("tags should be an array");
         let tag_strings: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
         assert!(
@@ -3570,13 +3499,11 @@ mod tests {
             tag_strings.contains(&"llm-extracted"),
             "tags should include 'llm-extracted': {tag_strings:?}"
         );
-        // block_type in payload matches
         assert_eq!(payload["block_type"], "faction");
     }
 
-    // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────
 
-    /// Mock worker provider whose response is controlled at runtime.
+    /// note: Mock worker provider whose response is controlled at runtime.
     struct ControlledMockProvider {
         response: std::sync::Mutex<String>,
     }
@@ -3604,7 +3531,7 @@ mod tests {
         }
     }
 
-    /// T5: novel-writing gathering exit with GO → Continue.
+    /// note: T5: novel-writing gathering exit with GO → Continue.
     #[tokio::test]
     async fn state_composite_llm_judge_go_continues() {
         use nexus_capability::CapabilityRuntimeDeps;
@@ -3653,12 +3580,11 @@ mod tests {
             result.next_action
         );
 
-        // Verify judge context was stored.
         let judge_result: bool = ctx.get("_judge_result").unwrap();
         assert!(judge_result, "judge_result should be true for GO");
     }
 
-    /// T5: novel-writing gathering exit with NOGO → `WaitForInput`.
+    /// note: T5: novel-writing gathering exit with NOGO → `WaitForInput`.
     #[tokio::test]
     async fn state_composite_llm_judge_nogo_waits() {
         use nexus_capability::CapabilityRuntimeDeps;
@@ -3711,7 +3637,7 @@ mod tests {
         assert!(!judge_result, "judge_result should be false for NOGO");
     }
 
-    /// T5: `llm_judge` without worker IPC → `WaitForInput` (safe fallback).
+    /// note: T5: `llm_judge` without worker IPC → `WaitForInput` (safe fallback).
     #[tokio::test]
     async fn state_composite_llm_judge_no_worker_waits() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
@@ -3722,7 +3648,7 @@ mod tests {
             enter: vec![],
             exit_when: Some(ExitWhen::LlmJudge {
                 template_file: Some("Evaluate: is gathering complete?".to_string()),
-                judge_capability: None, // defaults to judge.llm
+                judge_capability: None, // note: defaults to judge.llm
                 min_interval: None,
             }),
             next: Some(nexus_preset::manifest::NextTarget::Linear(
@@ -3748,7 +3674,7 @@ mod tests {
         );
     }
 
-    /// T5: `llm_judge` with empty `template_file` → `WaitForInput`.
+    /// note: T5: `llm_judge` with empty `template_file` → `WaitForInput`.
     #[tokio::test]
     async fn state_composite_llm_judge_empty_template_waits() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
@@ -3784,9 +3710,8 @@ mod tests {
         );
     }
 
-    // ── R-V133P3-02: template_file resolution tests ─────────────────────
 
-    /// Proves that `with_resolved_template` loads actual file content from
+    /// note: Proves that `with_resolved_template` loads actual file content from
     /// the embedded `novel-writing` preset bundle for `prompts/gathering-exit.md`.
     #[test]
     fn with_resolved_template_loads_embedded_file() {
@@ -3811,7 +3736,7 @@ mod tests {
         let task =
             StateCompositeTask::from_manifest(&state_def).with_resolved_template("novel-writing");
 
-        // After resolution, the template_file should contain actual file content
+        // note: After resolution, the template_file should contain actual file content
         // (not the path string "prompts/gathering-exit.md").
         if let Some(ExitWhen::LlmJudge {
             ref template_file, ..
@@ -3826,7 +3751,6 @@ mod tests {
                 !resolved.contains("prompts/gathering-exit.md"),
                 "template_file should contain file content, not the path itself"
             );
-            // The actual file should contain some meaningful template content.
             assert!(
                 resolved.len() > 50,
                 "resolved template should be substantial (got {} bytes)",
@@ -3837,7 +3761,7 @@ mod tests {
         }
     }
 
-    /// Proves that `with_resolved_template` keeps inline strings for unknown
+    /// note: Proves that `with_resolved_template` keeps inline strings for unknown
     /// preset IDs (backward compat for tests using inline templates).
     #[test]
     fn with_resolved_template_preserves_inline_for_unknown_preset() {
@@ -3866,7 +3790,6 @@ mod tests {
             ref template_file, ..
         }) = task.exit_when
         {
-            // Should keep the original inline string.
             assert_eq!(
                 template_file.as_deref(),
                 Some("Evaluate: is gathering complete?")
@@ -3876,7 +3799,6 @@ mod tests {
         }
     }
 
-    // ── parse_iso8601_duration tests ──────────────────────────────────
 
     #[test]
     fn parse_duration_hours() {
@@ -3902,21 +3824,21 @@ mod tests {
         assert_eq!(dur.num_seconds(), 45);
     }
 
-    /// R-V133P3-03: P1D (1 day) support.
+    /// note: R-V133P3-03: P1D (1 day) support.
     #[test]
     fn parse_duration_days() {
         let dur = parse_iso8601_duration("P1D").unwrap();
         assert_eq!(dur.num_hours(), 24);
     }
 
-    /// R-V133P3-03: P7D (7 days) support.
+    /// note: R-V133P3-03: P7D (7 days) support.
     #[test]
     fn parse_duration_seven_days() {
         let dur = parse_iso8601_duration("P7D").unwrap();
         assert_eq!(dur.num_days(), 7);
     }
 
-    /// R-V133P3-03: months/years are unsupported with warn.
+    /// note: R-V133P3-03: months/years are unsupported with warn.
     #[test]
     fn parse_duration_rejects_months() {
         assert!(parse_iso8601_duration("P1M").is_none());
@@ -3958,7 +3880,7 @@ mod tests {
         std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()))
     }
 
-    /// Shared cancellation map with a coordinator token registered for the
+    /// note: Shared cancellation map with a coordinator token registered for the
     /// given run id (the fail-closed contract: a prompt consumer with NO
     /// registered token refuses `CancellationUnavailable`; production runs
     /// register at admission, tests must do the same).
@@ -3977,7 +3899,7 @@ mod tests {
         map
     }
 
-    /// Shared cancellation map registering the `"default"` run (the run id
+    /// note: Shared cancellation map registering the `"default"` run (the run id
     /// unbound capability inputs resolve to when no `_session_id` is set).
     fn session_cancels_with_default() -> std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
@@ -3987,15 +3909,15 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_task_stub_mode_refuses() {
-        // A1: no executor — refuse with a typed failure, never a placeholder
+        // note: A1: no executor — refuse with a typed failure, never a placeholder
         // success (no echo/worker fallback).
         let task = AcpPromptTask::new(
-            None, // no executor — stub mode
+            None, // invariant: no executor — stub mode
             empty_session_cancels(),
             "test-state",
             "Hello {{core_context.version}}",
             ToolPolicy::DenyAll,
-            None, // default session_id
+            None, // invariant: default session_id
         );
         let ctx = graph_flow::Context::new();
         ctx.set("core_context.version", "42").unwrap();
@@ -4010,7 +3932,7 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_task_nested_handlebars_rendering() {
-        // QC2-W-001: prove nested path rendering ({{world.title}}) works
+        // note: QC2-W-001: prove nested path rendering ({{world.title}}) works
         // through the real AcpPromptTask execution path.
         let task = AcpPromptTask::new(
             None,
@@ -4029,7 +3951,7 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_task_no_escape_preserves_special_chars() {
-        // QC2-S-001: handlebars must NOT HTML-escape prompt values.
+        // note: QC2-S-001: handlebars must NOT HTML-escape prompt values.
         let task = AcpPromptTask::new(
             None,
             empty_session_cancels(),
@@ -4046,7 +3968,7 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_task_stores_output_in_context() {
-        // A1: with a mock executor, the agent output lands at
+        // note: A1: with a mock executor, the agent output lands at
         // state.<state_id>.output.
         struct MockExecutor;
 
@@ -4071,7 +3993,7 @@ mod tests {
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
-            None, // default session_id
+            None, // invariant: default session_id
         );
         let ctx = graph_flow::Context::new();
         let result = task.run(ctx.clone()).await.unwrap();
@@ -4080,7 +4002,7 @@ mod tests {
         assert_eq!(result.response.as_deref(), Some(stored.as_str()));
     }
 
-    /// T1 review (Critical 1): the external-effect marker must be durably
+    /// note: T1 review (Critical 1): the external-effect marker must be durably
     /// written BEFORE the external dispatch — a failed marker write aborts
     /// before dispatch, so no external effect ever runs unmarked. `Context`
     /// clones share the underlying map, so the executor observes the marker
@@ -4134,14 +4056,14 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_task_with_explicit_session_id() {
-        // WS-E T5: test session_id field
+        // note: WS-E T5: test session_id field
         let task = AcpPromptTask::new(
             None,
             empty_session_cancels(),
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
-            Some("writer_session".to_string()), // explicit session_id
+            Some("writer_session".to_string()), // note: explicit session_id
         );
         let ctx = graph_flow::Context::new();
         let result = task.run(ctx.clone()).await;
@@ -4150,7 +4072,7 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_task_with_session_id_method() {
-        // WS-E T5: test with_session_id constructor
+        // note: WS-E T5: test with_session_id constructor
         let task = AcpPromptTask::with_session_id(
             None,
             empty_session_cancels(),
@@ -4166,7 +4088,7 @@ mod tests {
 
     #[tokio::test]
     async fn inner_graph_node_task_stub_mode_with_session_id() {
-        // WS-E T5: InnerGraphNodeTask should track session_id even in stub mode.
+        // note: WS-E T5: InnerGraphNodeTask should track session_id even in stub mode.
         // A1: no executor — refuse with a typed failure, never a placeholder.
         let task = InnerGraphNodeTask::new("n1").with_session_id("writer_session");
         let ctx = graph_flow::Context::new();
@@ -4181,7 +4103,7 @@ mod tests {
 
     #[tokio::test]
     async fn inner_graph_node_task_missing_identity_refuses() {
-        // M-002: no explicit session_id and no trusted `_session_id` in the
+        // note: M-002: no explicit session_id and no trusted `_session_id` in the
         // context → the node refuses with a typed graph error; there is no
         // magic `default` fallback run id.
         let task = InnerGraphNodeTask::new("n1");
@@ -4220,7 +4142,6 @@ mod tests {
         );
     }
 
-    // ── R-V113-003: OnceLock determinism regression test ──────────
 
     #[test]
     fn core_context_template_repeated_renders_are_deterministic() {
@@ -4261,7 +4182,7 @@ mod tests {
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
             >,
         > = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
-        // The identity regressions run an unbound capability path whose run
+        // note: The identity regressions run an unbound capability path whose run
         // id resolves to the trusted `_session_id` injected by the engine —
         // register the coordinator tokens for the known test run ids (and
         // "default" for unbound paths) so the prompt consumer reaches the
@@ -4284,18 +4205,12 @@ mod tests {
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
 
-    // ── SEC-V131-01: Caller-boundary identity injection regression ────
-    //
-    // Proves that when the orchestration engine invokes a capability via
-    // StateCompositeTask, the trusted `_creator_id` / `_session_id` from
-    // the engine context are injected into the capability's input args.
-    // Without this fix, capabilities receive "default" for both fields.
 
     #[tokio::test]
     async fn sec_v131_01_state_composite_injects_trusted_identity_into_capability() {
         use nexus_preset::manifest::EnterAction;
 
-        // Build a StateCompositeTask with one enter action: acp.prompt
+        // note: Build a StateCompositeTask with one enter action: acp.prompt
         // (standalone mode — no worker IPC needed for this regression).
         let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
@@ -4320,7 +4235,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def)
             .with_registry(identity_registry(executor.clone()));
 
-        // Simulate the engine setting identity in context (as start_session does).
+        // note: Simulate the engine setting identity in context (as start_session does).
         let ctx = graph_flow::Context::new();
         ctx.set("_creator_id", "creator_alice").unwrap();
         ctx.set("_session_id", "sess_42ch_001").unwrap();
@@ -4344,7 +4259,7 @@ mod tests {
     async fn sec_v131_01_engine_overwrites_spoofed_identity_in_preset_args() {
         use nexus_preset::manifest::EnterAction;
 
-        // Preset YAML tries to spoof _creator_id / _session_id in args.
+        // note: Preset YAML tries to spoof _creator_id / _session_id in args.
         // The engine MUST overwrite these with trusted values from context.
         let state_def = nexus_preset::manifest::StateDefinition {
             id: "spoof_test".into(),
@@ -4430,9 +4345,8 @@ mod tests {
         );
     }
 
-    // ── C-V133P2-01: Capability arg template rendering tests ──────────
 
-    /// Proves that `render_value_templates` renders string placeholders
+    /// note: Proves that `render_value_templates` renders string placeholders
     /// in a JSON object against the context payload.
     #[test]
     fn render_value_templates_renders_nested_placeholders() {
@@ -4467,7 +4381,7 @@ mod tests {
         assert_eq!(tags[1], "hardcoded");
     }
 
-    /// Proves that `render_value_templates` fails-closed when a placeholder
+    /// note: Proves that `render_value_templates` fails-closed when a placeholder
     /// references a non-existent key.
     #[test]
     fn render_value_templates_fails_closed_on_missing_key() {
@@ -4492,7 +4406,7 @@ mod tests {
         );
     }
 
-    /// C-V133P2-01 integration: `StateCompositeTask` renders capability args
+    /// note: C-V133P2-01 integration: `StateCompositeTask` renders capability args
     /// through the template engine before passing to the capability.
     ///
     /// This test loads the actual engine context with preset.input and
@@ -4531,7 +4445,7 @@ mod tests {
         ctx.set("_session_id", "sess_test").unwrap();
         ctx.set("preset.input.work_id", "wrk_rendered_123").unwrap();
 
-        // Simulate what InnerGraphTask would write after synthesizing:
+        // note: Simulate what InnerGraphTask would write after synthesizing:
         // state.synthesizing.output = the JSON string of the brief
         let brief = serde_json::json!({
             "brief_schema_version": 1,
@@ -4557,7 +4471,6 @@ mod tests {
             "task should complete successfully"
         );
 
-        // Verify the capability received RENDERED args
         let cap_input: serde_json::Value = ctx.get("_capability_input").unwrap_or(Value::Null);
         assert_eq!(
             cap_input["workId"], "wrk_rendered_123",
@@ -4568,12 +4481,11 @@ mod tests {
             serde_json::to_string(&brief).unwrap(),
             "briefText should be rendered, not literal placeholder: {cap_input}"
         );
-        // Verify identity injection still works after template rendering
+        // note: Verify identity injection still works after template rendering
         assert_eq!(cap_input["_creator_id"], "ctr_test");
         assert_eq!(cap_input["_session_id"], "sess_test");
     }
 
-    // ── V1.42 P2 T4: judge_next_action unit tests ──────────────────────
 
     fn make_composite_with_next(next: Option<NextTarget>) -> StateCompositeTask {
         StateCompositeTask {
@@ -4643,7 +4555,7 @@ mod tests {
 
     #[test]
     fn judge_next_action_gonogo_nogo_also_advances() {
-        // Key V1.42 behavior: NOGO with GoNogo next → Continue (edge routes to nogo target).
+        // note: Key V1.42 behavior: NOGO with GoNogo next → Continue (edge routes to nogo target).
         let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
             go: "go_state".to_string(),
             nogo: "nogo_state".to_string(),
@@ -4654,7 +4566,6 @@ mod tests {
         ));
     }
 
-    // ── V1.52 T-B P0: resolve_labeled_target unit tests ─────────────────
 
     fn make_labeled_edges(labels: &[(&str, &str)]) -> Vec<LabeledNext> {
         labels
@@ -4683,7 +4594,7 @@ mod tests {
 
     #[test]
     fn resolve_labeled_target_multi_label_first_match() {
-        // First matching label (in edge order) should win.
+        // note: First matching label (in edge order) should win.
         let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[
             ("research", "state_research"),
             ("outline", "state_outline"),
@@ -4695,7 +4606,7 @@ mod tests {
             "I recommend to research more, but outline is also possible",
         );
         assert!(result.is_ok());
-        // "research" appears first in both the text and the edge list.
+        // note: "research" appears first in both the text and the edge list.
         assert_eq!(
             result.unwrap(),
             NextAction::GoTo("state_research".to_string())
@@ -4704,7 +4615,7 @@ mod tests {
 
     #[test]
     fn resolve_labeled_target_no_match_errors() {
-        // W-QC3-3: no-match MUST NOT stall (return WaitForInput).
+        // note: W-QC3-3: no-match MUST NOT stall (return WaitForInput).
         // Instead, return Err with diagnostic info.
         let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[
             ("outline", "state_outline"),
@@ -4727,7 +4638,7 @@ mod tests {
 
     #[test]
     fn resolve_labeled_target_non_labeled_next_returns_ok_wait() {
-        // Non-Labeled next (e.g., Linear) should return Ok(WaitForInput).
+        // note: Non-Labeled next (e.g., Linear) should return Ok(WaitForInput).
         let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
         let ctx = graph_flow::Context::new();
         let result = task.resolve_labeled_target(&ctx, "anything");
@@ -4746,7 +4657,7 @@ mod tests {
 
     #[test]
     fn resolve_labeled_target_writes_judge_label_context() {
-        // W-001: context._judge_label must be written on successful match.
+        // note: W-001: context._judge_label must be written on successful match.
         let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[(
             "outline",
             "state_outline",
@@ -4763,7 +4674,7 @@ mod tests {
 
     #[test]
     fn resolve_labeled_target_gonogo_auto_conversion_go_match() {
-        // W-QC3-2: binary GoNogo edges auto-converted to labeled routing.
+        // note: W-QC3-2: binary GoNogo edges auto-converted to labeled routing.
         let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
             go: "state_go".to_string(),
             nogo: "state_nogo".to_string(),
@@ -4788,7 +4699,7 @@ mod tests {
 
     #[test]
     fn resolve_labeled_target_gonogo_auto_conversion_no_match_errors() {
-        // Auto-converted GoNogo edges also error on no-match.
+        // note: Auto-converted GoNogo edges also error on no-match.
         let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
             go: "state_go".to_string(),
             nogo: "state_nogo".to_string(),
@@ -4800,24 +4711,23 @@ mod tests {
         assert!(err.contains("no label matched"), "error: {err}");
     }
 
-    // ── V1.52 T-B P1: wait-all default enforcement (W-QC1-1) ────────────
 
     #[tokio::test]
     async fn merge_wait_all_default_enforced_when_merge_absent() {
-        // A state with 2 incoming labeled edges but NO explicit `merge:`
+        // note: A state with 2 incoming labeled edges but NO explicit `merge:`
         // field MUST still enforce wait-all semantics (default).
         let task = StateCompositeTask {
             id: "merged".to_string(),
             terminal: false,
             enter_actions: vec![],
-            exit_when: None, // no exit condition → Continue after gate passes
+            exit_when: None, // note: no exit condition → Continue after gate passes
             next: Some(NextTarget::Linear("done".to_string())),
             engine: None,
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
             registry: None,
             daemon_tool_dispatch: None,
-            merge_kind: None, // absent from YAML
+            merge_kind: None, // note: absent from YAML
             expected_incoming: 2,
             merge_key: "_merge_merged".to_string(),
             converge: None,
@@ -4833,7 +4743,6 @@ mod tests {
 
         let ctx = graph_flow::Context::new();
 
-        // With 0 arrivals → should wait (default wait-all enforces gate).
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),
@@ -4841,7 +4750,6 @@ mod tests {
             result.next_action
         );
 
-        // With 1 arrival → should still wait (wait-all needs all 2).
         ctx.set("_merge_merged", serde_json::json!(["label_a"]))
             .unwrap();
         let result = task.run(ctx.clone()).await.unwrap();
@@ -4851,7 +4759,6 @@ mod tests {
             result.next_action
         );
 
-        // With 2 arrivals → should continue.
         ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"]))
             .unwrap();
         let result = task.run(ctx.clone()).await.unwrap();
@@ -4862,9 +4769,8 @@ mod tests {
         );
     }
 
-    // ── V1.56 P3: registry.refresh conditional edges ──────────────────
 
-    /// Build a state with `Branches` next for expression routing.
+    /// note: Build a state with `Branches` next for expression routing.
     fn make_branches_task(
         state_id: &str,
         branches: Vec<ConditionalRule>,
@@ -4904,7 +4810,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_synthetic_branch() {
-        // When registry.refresh returns synthetic output, the expression
+        // note: When registry.refresh returns synthetic output, the expression
         // `_context.registry_refresh.source == 'synthetic'` should match.
         let task = make_branches_task(
             "check_registry",
@@ -4927,7 +4833,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_network_branch() {
-        // Pre-set CDN-like output to simulate a successful network fetch.
+        // note: Pre-set CDN-like output to simulate a successful network fetch.
         let task = make_branches_task(
             "check_registry",
             vec![ConditionalRule {
@@ -4938,7 +4844,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
-        // Inject synthetic CDN output into the context before the task runs.
+        // note: Inject synthetic CDN output into the context before the task runs.
         ctx.set(
             "__registry_refresh_output",
             serde_json::json!({
@@ -4966,7 +4872,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_fallback_branch() {
-        // Inject fallback output (CDN failure → synthetic_fallback).
+        // note: Inject fallback output (CDN failure → synthetic_fallback).
         let task = make_branches_task(
             "check_registry",
             vec![ConditionalRule {
@@ -5004,7 +4910,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_capability_count_threshold() {
-        // capability_count > 50 should match when capabilityCount is 100.
+        // note: capability_count > 50 should match when capabilityCount is 100.
         let task = make_branches_task(
             "check_registry",
             vec![ConditionalRule {
@@ -5042,7 +4948,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_capability_count_below_threshold_goes_default() {
-        // capability_count > 50 should NOT match when capabilityCount is 30.
+        // note: capability_count > 50 should NOT match when capabilityCount is 30.
         let task = make_branches_task(
             "check_registry",
             vec![ConditionalRule {
@@ -5078,11 +4984,10 @@ mod tests {
         );
     }
 
-    // ── V1.56 P3: workspace.open/commit branch inputs ─────────────────
 
     #[tokio::test]
     async fn workspace_no_conflict_continues() {
-        // When no conflict, `_context.workspace.committed` is false,
+        // note: When no conflict, `_context.workspace.committed` is false,
         // so `!_context.workspace.committed` should be true → continue.
         let task = make_branches_task(
             "check_workspace",
@@ -5116,7 +5021,7 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_conflict_resolves() {
-        // When committed is true, route to resolve_conflict.
+        // note: When committed is true, route to resolve_conflict.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
@@ -5147,7 +5052,7 @@ mod tests {
         );
     }
 
-    /// Live workspace state provider used by the production-wiring proof.
+    /// note: Live workspace state provider used by the production-wiring proof.
     struct FixedWorkspaceStateProvider(serde_json::Value);
 
     #[async_trait]
@@ -5159,7 +5064,7 @@ mod tests {
 
     #[tokio::test]
     async fn preset_workflow_resolves_workspace_branch_from_provider() {
-        // The SAME conditional-edge shape a preset declares, wired the way
+        // note: The SAME conditional-edge shape a preset declares, wired the way
         // `build_wired_outer_graph` wires it: the context carries NO
         // `__workspace_state`, so the branch can only resolve if the live
         // provider is consulted at evaluation time.
@@ -5192,7 +5097,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_workspace_state_wins_over_fixed_snapshot() {
-        // A stale fixed snapshot must never mask the live authority.
+        // note: A stale fixed snapshot must never mask the live authority.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
@@ -5226,7 +5131,7 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_changes_count_threshold() {
-        // change_count > 3 → route to review_state.
+        // note: change_count > 3 → route to review_state.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
@@ -5259,7 +5164,7 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_changes_count_below_threshold_goes_default() {
-        // change_count > 3 should NOT match when change_count is 2.
+        // note: change_count > 3 should NOT match when change_count is 2.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
@@ -5292,7 +5197,7 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_default_state_when_no_state_injected() {
-        // When no workspace state is set, the default values should be used:
+        // note: When no workspace state is set, the default values should be used:
         // committed = false, so `_context.workspace.committed` is false.
         let task = make_branches_task(
             "check_workspace",
@@ -5304,7 +5209,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
-        // No workspace state injected — the task uses its own default.
+        // invariant: No workspace state injected — the task uses its own default.
         let result = task.run(ctx).await.unwrap();
 
         assert!(
@@ -5316,7 +5221,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_refresh_only_invoked_when_needed() {
-        // Task with no registry references should NOT invoke registry.refresh.
+        // note: Task with no registry references should NOT invoke registry.refresh.
         let task = make_branches_task(
             "check_simple",
             vec![ConditionalRule {
