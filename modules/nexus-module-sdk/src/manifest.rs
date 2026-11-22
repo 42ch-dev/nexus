@@ -1,4 +1,5 @@
-//! Manifest helper + sandbox defaults (AR-6).
+//! see docs/specs/compute/compute-module-abi.md — manifest helper + sandbox
+//! defaults (AR-6).
 //!
 //! [`ModuleManifest`] is a field-for-field mirror of the host-side type in
 //! `nexus-module-manifest` (extracted from `crates/nexus-wasm-host/src/manifest.rs`
@@ -15,52 +16,52 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Default fuel budget: 10 million instructions. Mirrors
+/// note: default fuel budget — 10 million instructions; mirrors
 /// `crates/nexus-wasm-host/src/sandbox.rs` `DEFAULT_FUEL`.
 pub const DEFAULT_FUEL: u64 = 10_000_000;
 
-/// Default memory cap: 64 MiB. Mirrors `sandbox.rs` `DEFAULT_MEMORY_MIB`.
+/// note: default memory cap — 64 MiB; mirrors `sandbox.rs` `DEFAULT_MEMORY_MIB`.
 pub const DEFAULT_MEMORY_MIB: u32 = 64;
 
-/// Default wall-time limit: 30 seconds (the manifest JSON carries
-/// milliseconds). Mirrors `sandbox.rs` `DEFAULT_WALL_TIME`.
+/// note: default wall-time limit — 30 seconds (the manifest JSON carries
+/// milliseconds); mirrors `sandbox.rs` `DEFAULT_WALL_TIME`.
 pub const DEFAULT_WALL_TIME_MS: u64 = 30_000;
 
-/// Whitelisted host functions a module may import.
+/// note: whitelisted host functions a module may import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostFunction {
-    /// `nexus::kb_read` — read a `KeyBlock` by ID from the invocation snapshot.
+    /// note: `nexus::kb_read` — read a `KeyBlock` by ID from the invocation snapshot.
     KbRead,
-    /// `nexus::narrative_query` — query narrative context.
+    /// note: `nexus::narrative_query` — query narrative context.
     NarrativeQuery,
 }
 
-/// Module schemas — inline JSON-Schema fragments for per-module
-/// input/output validation (V1.62 manifest dynamics).
+/// note: inline JSON-Schema fragments for per-module input/output validation
+/// (V1.62 manifest dynamics).
 ///
 /// Every sub-field is optional: a manifest may declare none, some, or
 /// all four fragments. Omitted fields → no validation for that aspect.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[allow(clippy::derive_partial_eq_without_eq)]
-// ^ `serde_json::Value` in field types does not implement `Eq`.
+// why: `serde_json::Value` in field types does not implement `Eq`.
 pub struct ModuleSchemas {
-    /// Per-BlockType attribute shape fragments (immutable compute params).
-    /// Keyed by `block_type` (e.g. "character"). Skipped if absent.
+    /// note: per-BlockType attribute shape fragments (immutable compute params),
+    /// keyed by `block_type` (e.g. "character"); skipped if absent.
     #[serde(default)]
     pub key_block_attributes: Option<HashMap<String, serde_json::Value>>,
-    /// Per-BlockType state shape fragments (mutable runtime data).
+    /// note: per-BlockType state shape fragments (mutable runtime data).
     #[serde(default)]
     pub key_block_state: Option<HashMap<String, serde_json::Value>>,
-    /// Shape for the `ComputeInput.invocation` freeform field.
+    /// note: shape for the `ComputeInput.invocation` freeform field.
     #[serde(default)]
     pub invocation: Option<serde_json::Value>,
-    /// Shape for the `ComputeOutput.battle_report` freeform field.
+    /// note: shape for the `ComputeOutput.battle_report` freeform field.
     #[serde(default)]
     pub battle_report: Option<serde_json::Value>,
 }
 
-/// Module manifest (`manifest.json`) — full contract mirror (AR-6).
+/// note: full contract mirror of `manifest.json` (AR-6).
 ///
 /// Required 7 (`module_id`, `name`, `version`, `nexus_abi_version`,
 /// `required_key_block_types`, `compute_export`, `init_export`) + optional 8
@@ -80,10 +81,10 @@ pub struct ModuleManifest {
     pub description: Option<String>,
     #[serde(default)]
     pub author: Option<String>,
-    /// Whitelisted host functions the module may call. Defaults to none.
+    /// note: whitelisted host functions the module may call; defaults to none.
     #[serde(default)]
     pub host_functions: Vec<HostFunction>,
-    /// Inline JSON-Schema fragments for input/output validation (V1.62).
+    /// note: inline JSON-Schema fragments for input/output validation (V1.62).
     /// When declared, the host validates `KeyBlocks`, invocation, and
     /// `battle_report` against these shapes. Omitted → no validation.
     #[serde(default)]
@@ -96,7 +97,7 @@ pub struct ModuleManifest {
     pub max_memory_mib: Option<u32>,
     #[serde(default)]
     pub max_wall_time_ms: Option<u64>,
-    /// SHA-256 of the compiled `.wasm` bytes this manifest pairs with
+    /// note: SHA-256 of the compiled `.wasm` bytes this manifest pairs with
     /// (64 lowercase hex chars). When present, the loader verifies
     /// content-based pairing and rejects a mismatched pair.
     #[serde(default)]
@@ -104,7 +105,7 @@ pub struct ModuleManifest {
 }
 
 impl ModuleManifest {
-    /// Validate the manifest against the V1 contract (AR-6).
+    /// note: validates against the V1 contract (AR-6).
     ///
     /// Checks: required-field presence (non-empty identity/export strings —
     /// `init_export` MAY be empty when the module has no init export, ABI
@@ -120,11 +121,11 @@ impl ModuleManifest {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // Required-field presence: the typed struct guarantees the fields
-        // exist; the meaningful check is that the identity/export strings
-        // are non-empty. `init_export` is deliberately excluded — the ABI
-        // allows an empty `init_export` when the module has no init export
-        // (the real host and existing host fixtures use `init_export: ""`).
+        // why: the typed struct guarantees the fields exist; the meaningful
+        // check is that the identity/export strings are non-empty.
+        // `init_export` is deliberately excluded — the ABI allows an empty
+        // `init_export` when the module has no init export (the real host and
+        // existing host fixtures use `init_export: ""`).
         for (field, value) in [
             ("module_id", self.module_id.as_str()),
             ("name", self.name.as_str()),
@@ -136,11 +137,11 @@ impl ModuleManifest {
             }
         }
 
-        // `host_functions ⊆ ["kb_read", "narrative_query"]` is enforced
+        // why: `host_functions ⊆ ["kb_read", "narrative_query"]` is enforced
         // structurally by the `HostFunction` enum (serde rejects unknown
         // names at parse time), so no runtime check is needed here.
 
-        // Module-id path-safety (P0 QC fix wave, qc2 W-1 mirror): the id
+        // why: module-id path-safety (P0 QC fix wave, qc2 W-1 mirror) — the id
         // becomes a directory name under `dist/<id>/` (build) and
         // `~/.nexus42/modules/<id>/` (install), so a traversal id must fail
         // validation. Mirrors `nexus-home-layout::validate_run_id_safe`
@@ -157,7 +158,7 @@ impl ModuleManifest {
             ));
         }
 
-        // The DR-49 pin: the SDK refuses V2 concepts.
+        // invariant: the DR-49 pin — the SDK refuses V2 concepts.
         if self.nexus_abi_version != 1 {
             errors.push(format!(
                 "nexus_abi_version must be 1 (ABI V1), got {}",
@@ -243,9 +244,9 @@ mod tests {
 
     #[test]
     fn validate_accepts_empty_init_export() {
-        // ABI §7.1: `init_export` may be empty when the module has no init
-        // export (the real host and existing host fixtures use
-        // `init_export: ""`). `compute_export` must still be non-empty.
+        // note: ABI §7.1 — `init_export` may be empty when the module has no init
+        // export (the real host and existing host fixtures use `init_export: ""`);
+        // `compute_export` must still be non-empty.
         let mut m = valid_manifest();
         m.init_export = String::new();
         assert!(m.validate().is_ok());
@@ -274,10 +275,10 @@ mod tests {
     #[test]
     fn validate_rejects_bad_wasm_sha256_formats() {
         for bad in [
-            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F", // uppercase
-            "abc",                                                              // too short
-            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",  // 63 chars
-            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g", // non-hex
+            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F",
+            "abc",
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g",
         ] {
             let mut m = valid_manifest();
             m.wasm_sha256 = Some(bad.to_string());
@@ -344,8 +345,8 @@ mod tests {
 
     #[test]
     fn validate_rejects_path_traversal_module_id() {
-        // qc2 W-1 mirror: the module id becomes a directory name in the
-        // store — traversal values must fail validation, not just the CLI
+        // why: qc2 W-1 mirror — the module id becomes a directory name in the
+        // store, so traversal values must fail validation, not just the CLI
         // guard (same corpus as nexus-module-manifest).
         for bad in ["../evil", "a/b", "a\\b", "a..b", "a\u{0}b"] {
             let mut m = valid_manifest();
@@ -359,7 +360,7 @@ mod tests {
         }
     }
 
-    /// Shared invalid-manifest corpus (qc1 S-1): this file is asserted by
+    /// note: shared invalid-manifest corpus (qc1 S-1) — this file is asserted by
     /// BOTH validators (this crate and nexus-module-manifest's validate()).
     /// The corpus lives in this crate's fixtures dir and is include_str!'d
     /// from the mirror crate too — a build break on deletion, so the two
@@ -413,7 +414,7 @@ mod tests {
 
     #[test]
     fn sandbox_defaults_match_host() {
-        // Mirrors crates/nexus-wasm-host/src/sandbox.rs L22–28.
+        // note: mirrors crates/nexus-wasm-host/src/sandbox.rs L22–28.
         assert_eq!(DEFAULT_FUEL, 10_000_000);
         assert_eq!(DEFAULT_MEMORY_MIB, 64);
         assert_eq!(DEFAULT_WALL_TIME_MS, 30_000);

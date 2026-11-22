@@ -1,6 +1,6 @@
 //! Module manifest (`manifest.json`) types and validation core.
 //!
-//! Extracted from `crates/nexus-wasm-host/src/manifest.rs` (V1.170 P0, AR-8)
+//! see crates/nexus-wasm-host/src/manifest.rs — extracted (V1.170 P0, AR-8)
 //! so the host, the `nexus42 compute` CLI, and module tooling share ONE
 //! manifest contract. `nexus-wasm-host` re-exports these types unchanged.
 //!
@@ -43,37 +43,37 @@ use std::fmt::Write as _;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostFunction {
-    /// `nexus::kb_read` — read a `KeyBlock` by ID from the invocation snapshot.
+    /// note: `nexus::kb_read` — read a `KeyBlock` by ID from the invocation snapshot.
     KbRead,
-    /// `nexus::narrative_query` — query narrative context.
+    /// note: `nexus::narrative_query` — query narrative context.
     NarrativeQuery,
 }
 
-/// Module schemas — inline JSON-Schema fragments for per-module
-/// input/output validation (V1.62 manifest dynamics).
+/// note: inline JSON-Schema fragments for per-module input/output validation
+/// (V1.62 manifest dynamics).
 ///
 /// Every sub-field is optional: a manifest may declare none, some, or
 /// all four fragments. Omitted fields → no validation for that aspect.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[allow(clippy::derive_partial_eq_without_eq)]
-// ^ `serde_json::Value` in field types does not implement `Eq`.
+// why: `serde_json::Value` in field types does not implement `Eq`.
 pub struct ModuleSchemas {
-    /// Per-BlockType attribute shape fragments (immutable compute params).
-    /// Keyed by `block_type` (e.g. "character"). Skipped if absent.
+    /// note: per-BlockType attribute shape fragments (immutable compute params),
+    /// keyed by `block_type` (e.g. "character"); skipped if absent.
     #[serde(default)]
     pub key_block_attributes: Option<HashMap<String, serde_json::Value>>,
-    /// Per-BlockType state shape fragments (mutable runtime data).
+    /// note: per-BlockType state shape fragments (mutable runtime data).
     #[serde(default)]
     pub key_block_state: Option<HashMap<String, serde_json::Value>>,
-    /// Shape for the `ComputeInput.invocation` freeform field.
+    /// note: shape for the `ComputeInput.invocation` freeform field.
     #[serde(default)]
     pub invocation: Option<serde_json::Value>,
-    /// Shape for the `ComputeOutput.battle_report` freeform field.
+    /// note: shape for the `ComputeOutput.battle_report` freeform field.
     #[serde(default)]
     pub battle_report: Option<serde_json::Value>,
 }
 
-/// Module manifest (`manifest.json`).
+/// note: the on-disk `manifest.json` shipped beside the compiled `.wasm`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModuleManifest {
     pub module_id: String,
@@ -87,10 +87,10 @@ pub struct ModuleManifest {
     pub description: Option<String>,
     #[serde(default)]
     pub author: Option<String>,
-    /// Whitelisted host functions the module may call. Defaults to none.
+    /// note: whitelisted host functions the module may call; defaults to none.
     #[serde(default)]
     pub host_functions: Vec<HostFunction>,
-    /// Inline JSON-Schema fragments for input/output validation (V1.62).
+    /// note: inline JSON-Schema fragments for input/output validation (V1.62).
     /// When declared, the host validates `KeyBlocks`, invocation, and
     /// `battle_report` against these shapes. Omitted → no validation.
     #[serde(default)]
@@ -103,7 +103,7 @@ pub struct ModuleManifest {
     pub max_memory_mib: Option<u32>,
     #[serde(default)]
     pub max_wall_time_ms: Option<u64>,
-    /// SHA-256 of the compiled `.wasm` bytes this manifest pairs with
+    /// note: SHA-256 of the compiled `.wasm` bytes this manifest pairs with
     /// (64 lowercase hex chars). Operators SHOULD set this: when present,
     /// the loader verifies content-based pairing — the loaded bytes must
     /// hash to this value — and rejects a mismatched pair before it can
@@ -118,13 +118,13 @@ pub struct ModuleManifest {
 }
 
 impl ModuleManifest {
-    /// Whether the module is permitted to call the given host function.
+    /// note: whether the module is permitted to call the given host function.
     #[must_use]
     pub fn allows(&self, f: HostFunction) -> bool {
         self.host_functions.contains(&f)
     }
 
-    /// Verify content-based pairing: when `wasm_sha256` is set, `wasm_bytes`
+    /// note: content-based pairing — when `wasm_sha256` is set, `wasm_bytes`
     /// must hash to the declared value (64 lowercase hex chars). A mismatch
     /// means the `.wasm` and `manifest.json` are not the pair the manifest
     /// declares — e.g. an operator swapped in a new `.wasm` without updating
@@ -155,8 +155,7 @@ impl ModuleManifest {
         }
     }
 
-    /// Validate the manifest against the V1 contract (AR-6 checks, CLI-facing
-    /// copy).
+    /// note: validates against the V1 contract (AR-6 checks, CLI-facing copy).
     ///
     /// Checks: required-field presence (non-empty identity/export strings —
     /// `init_export` MAY be empty when the module has no init export, ABI
@@ -177,11 +176,11 @@ impl ModuleManifest {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // Required-field presence: the typed struct guarantees the fields
-        // exist; the meaningful check is that the identity/export strings
-        // are non-empty. `init_export` is deliberately excluded — the ABI
-        // allows an empty `init_export` when the module has no init export
-        // (the real host and existing host fixtures use `init_export: ""`).
+        // why: the typed struct guarantees the fields exist; the meaningful
+        // check is that the identity/export strings are non-empty.
+        // `init_export` is deliberately excluded — the ABI allows an empty
+        // `init_export` when the module has no init export (the real host and
+        // existing host fixtures use `init_export: ""`).
         for (field, value) in [
             ("module_id", self.module_id.as_str()),
             ("name", self.name.as_str()),
@@ -193,11 +192,11 @@ impl ModuleManifest {
             }
         }
 
-        // `host_functions ⊆ ["kb_read", "narrative_query"]` is enforced
+        // why: `host_functions ⊆ ["kb_read", "narrative_query"]` is enforced
         // structurally by the `HostFunction` enum (serde rejects unknown
         // names at parse time), so no runtime check is needed here.
 
-        // Module-id path-safety (P0 QC fix wave, qc2 W-1): the id becomes a
+        // why: module-id path-safety (P0 QC fix wave, qc2 W-1) — the id becomes a
         // directory name under `dist/<id>/` (build) and
         // `~/.nexus42/modules/<id>/` (install, the daemon's warm_dir scan
         // contract), so a traversal id must fail validation — `validate`
@@ -217,7 +216,7 @@ impl ModuleManifest {
             ));
         }
 
-        // The DR-49 pin: the ABI refuses V2 concepts.
+        // invariant: the DR-49 pin — the ABI refuses V2 concepts.
         if self.nexus_abi_version != 1 {
             errors.push(format!(
                 "nexus_abi_version must be 1 (ABI V1), got {}",
@@ -354,7 +353,7 @@ mod tests {
 
     #[test]
     fn manifest_without_schemas_is_backward_compat() {
-        // V1.61 manifests omit `schemas` → deserializes with schemas = None.
+        // note: V1.61 manifests omit `schemas` → deserializes with schemas = None.
         let json = r#"{
             "module_id": "legacy-mod",
             "name": "Legacy Module",
@@ -370,7 +369,7 @@ mod tests {
 
     #[test]
     fn manifest_with_empty_schemas_object() {
-        // A manifest with `schemas: {}` should parse with all sub-fields None.
+        // note: a manifest with `schemas: {}` parses with all sub-fields None.
         let json = r#"{
             "module_id": "empty-schemas",
             "name": "Empty Schemas",
@@ -393,7 +392,7 @@ mod tests {
 
     #[test]
     fn wasm_sha256_field_is_backward_compat_absent() {
-        // V1.154 manifests omit `wasm_sha256` → deserializes with None and
+        // note: V1.154 manifests omit `wasm_sha256` → deserializes with None and
         // verification is skipped (legacy stat-fence fallback).
         let json = r#"{
             "module_id": "legacy-mod",
@@ -469,7 +468,7 @@ mod tests {
         );
     }
 
-    // ── validate() — mirrors `nexus-module-sdk`'s AR-6 validate tests ─────
+    // note: validate() tests mirror `nexus-module-sdk`'s AR-6 validate tests.
 
     fn valid_manifest() -> ModuleManifest {
         ModuleManifest {
@@ -499,9 +498,9 @@ mod tests {
 
     #[test]
     fn validate_accepts_empty_init_export() {
-        // ABI §7.1: `init_export` may be empty when the module has no init
-        // export (the real host and existing host fixtures use
-        // `init_export: ""`). `compute_export` must still be non-empty.
+        // note: ABI §7.1 — `init_export` may be empty when the module has no init
+        // export (the real host and existing host fixtures use `init_export: ""`);
+        // `compute_export` must still be non-empty.
         let mut m = valid_manifest();
         m.init_export = String::new();
         assert!(m.validate().is_ok());
@@ -530,10 +529,10 @@ mod tests {
     #[test]
     fn validate_rejects_bad_wasm_sha256_formats() {
         for bad in [
-            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F", // uppercase
-            "abc",                                                              // too short
-            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",  // 63 chars
-            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g", // non-hex
+            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F",
+            "abc",
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g",
         ] {
             let mut m = valid_manifest();
             m.wasm_sha256 = Some(bad.to_string());
@@ -600,7 +599,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_path_traversal_module_id() {
-        // qc2 W-1: the module id becomes a directory name in the store —
+        // why: qc2 W-1 — the module id becomes a directory name in the store, so
         // traversal values must fail validation, not just the CLI guard.
         for bad in ["../evil", "a/b", "a\\b", "a..b", "a\u{0}b"] {
             let mut m = valid_manifest();
@@ -614,8 +613,8 @@ mod tests {
         }
     }
 
-    /// Invalid-manifest corpus (qc1 S-1): this package owns its copy; the SDK
-    /// mirror has an identical one, and `tooling/check-module-sdk-drift.sh`
+    /// note: invalid-manifest corpus (qc1 S-1) — this package owns its copy; the
+    /// SDK mirror has an identical one, and `tooling/check-module-sdk-drift.sh`
     /// asserts value parity — a build break if the corpus is deleted, so the
     /// two cannot silently diverge. Add new invalid cases to both files.
     const INVALID_MANIFESTS: &str = include_str!("../tests/fixtures/invalid-manifests.json");

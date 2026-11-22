@@ -1,6 +1,6 @@
 //! `template-dice` — SDK hello-world demo module (dice tick).
 //!
-//! The scaffold for new Nexus compute modules (see `modules/README.md`).
+//! see modules/README.md — the scaffold for new Nexus compute modules.
 //! It demonstrates the full `nexus-module-sdk` authoring surface:
 //!
 //! - [`nexus_entry!`] generates the three ABI exports (`alloc`, `init`,
@@ -37,22 +37,21 @@ use nexus_module_sdk::{
     nexus_entry, ComputeInput, ComputeOutput, DeltaOp, ModuleError, StateDeltaOp,
 };
 
-/// Default die sides when `invocation.sides` is absent.
+/// why: a six-sided die is the classic default when the invocation omits `sides`.
 const DEFAULT_SIDES: i64 = 6;
 
-/// Computable state path fragment under the target block's state:
-/// `<block_type>.dice`.
+/// note: fragment of the computable state path `<block_type>.dice`.
 const DICE_STATE_KEY: &str = "dice";
 
-/// Resolve the block's type name: spoke `entry_type` (canonical since
-/// V1.139) with legacy domain `block_type` fallback.
+/// note: prefers spoke `entry_type` (canonical since V1.139), falls back to
+/// legacy domain `block_type`.
 fn block_type_of(kb: &Value) -> Option<&str> {
     kb.get("entry_type")
         .and_then(Value::as_str)
         .or_else(|| kb.get("block_type").and_then(Value::as_str))
 }
 
-/// Deterministic 64-bit FNV-1a over the roll seed (no RNG on wasm32).
+/// note: 64-bit FNV-1a hash of the roll seed — wasm32 has no RNG.
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
@@ -62,11 +61,11 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Module entry (V1 fn form). [`nexus_entry!`] wires it to the `alloc` /
-/// `init` / `compute` exports.
+/// note: V1 fn-form entry; [`nexus_entry!`] wires it to the `alloc` / `init` /
+/// `compute` exports.
 fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
-    // `required_key_block_types` selects what the host bundles; an empty
-    // snapshot means the module cannot tick anything.
+    // why: the host bundles `required_key_block_types`; an empty snapshot
+    // leaves nothing to tick.
     let block = input
         .key_blocks
         .first()
@@ -74,7 +73,7 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let block_type = block_type_of(block).unwrap_or("unknown");
     let block_id = entry_id_of(block).unwrap_or("block").to_string();
 
-    // Die sides: module-declared invocation param, default 6.
+    // note: `sides` is a module-declared invocation param, default 6.
     let sides = input
         .invocation
         .get("sides")
@@ -82,9 +81,9 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
         .filter(|s| *s > 0)
         .unwrap_or(DEFAULT_SIDES);
 
-    // Prior tick count seeds the roll. Canonical spoke shape nests state by
-    // block type (`body.state.<block_type>.dice.ticks`); the legacy domain
-    // shape keeps it flat (`body.state.dice.ticks`).
+    // note: canonical spoke state nests by block type
+    // (`body.state.<block_type>.dice.ticks`); legacy domain state is flat
+    // (`body.state.dice.ticks`).
     let ticks = read_int_f64(
         block,
         &["body", "state", block_type, DICE_STATE_KEY, "ticks"],
@@ -98,10 +97,9 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let seed = format!("{world_id}:{block_id}:{ticks}");
     let roll = (fnv1a64(seed.as_bytes()) % sides as u64) as i64 + 1;
 
-    // One `set` op on the computable state path `<block_type>.dice` — the
-    // whole dice state lands atomically and applies even on a first tick
-    // (the host rejects a delta into a missing intermediate object, so the
-    // module writes the object wholesale instead of a nested field).
+    // why: the host rejects a delta into a missing intermediate object, so the
+    // module writes the whole `<block_type>.dice` object in one `set` — that
+    // applies atomically even on a first tick.
     let state_delta = vec![StateDeltaOp {
         op: DeltaOp::Set,
         path: format!("{block_type}.{DICE_STATE_KEY}"),
@@ -112,8 +110,8 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
         })),
     }];
 
-    // Timeline event mirroring basic-combat's state_update shape; the host
-    // stamps authoritative timestamps when it applies the event.
+    // note: mirrors basic-combat's `state_update` shape; the host stamps
+    // authoritative timestamps on apply.
     let timeline_events = vec![json!({
         "schema_version": 1,
         "timeline_event_id": timeline_event_id("dice", &[&block_id]),
@@ -152,7 +150,7 @@ mod tests {
     use super::*;
     use nexus_module_sdk::WorldRef;
 
-    /// Build a synthetic input: one character block with `dice.ticks` state.
+    /// note: one character block with `dice.ticks` state.
     fn tick_input(world_id: &str, ticks: i64, sides: Option<i64>) -> ComputeInput {
         ComputeInput {
             schema_version: 1,
@@ -179,11 +177,9 @@ mod tests {
         let out1 = dice_tick(tick_input("wld_1", 3, None)).expect("tick succeeds");
         let out2 = dice_tick(tick_input("wld_1", 3, None)).expect("tick succeeds");
 
-        // Same input → same roll (deterministic module).
+        // why: deterministic module — the same input must produce the same roll.
         assert_eq!(out1.battle_report["roll"], out2.battle_report["roll"]);
 
-        // The delta targets the computable state path and carries the new
-        // dice state.
         assert_eq!(out1.state_delta.len(), 1);
         assert_eq!(out1.state_delta[0].op, DeltaOp::Set);
         assert_eq!(out1.state_delta[0].path, "character.dice");
@@ -196,7 +192,6 @@ mod tests {
         let roll = dice["last_roll"].as_i64().expect("roll is an int");
         assert!((1..=6).contains(&roll));
 
-        // Timeline event + report.
         assert_eq!(out1.timeline_events.len(), 1);
         assert_eq!(out1.battle_report["kind"], "dice");
         assert_eq!(out1.battle_report["roll"], json!(roll));

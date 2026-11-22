@@ -1,5 +1,5 @@
-//! `nexus-module-test` — ABI-conformance mini-host for Nexus compute modules
-//! (V1.170 P0, AR-10).
+//! see docs/specs/compute/compute-module-abi.md — `nexus-module-test`:
+//! ABI-conformance mini-host for Nexus compute modules (V1.170 P0, AR-10).
 //!
 //! A standalone, publishable test harness that module crates add as a
 //! host-target **dev-dependency**. It compiles a module's `.wasm` with
@@ -50,40 +50,40 @@ use wasmtime::{
     Caller, Config, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc,
 };
 
-/// Sentinel returned by host functions when the lookup yields nothing
+/// note: sentinel returned by host functions when the lookup yields nothing
 /// (mirrors `nexus-wasm-host::host::RET_NOT_FOUND`).
 const RET_NOT_FOUND: i64 = -1;
-/// Sentinel returned when the caller's output buffer is too small (mirrors
+/// note: sentinel returned when the caller's output buffer is too small (mirrors
 /// `nexus-wasm-host::host::RET_OVERFLOW`).
 const RET_OVERFLOW: i64 = -2;
-/// Output buffer reserved in module memory (mirrors the real host's 1 MiB
+/// note: output buffer reserved in module memory (mirrors the real host's 1 MiB
 /// reservation in `compute.rs` `OUTPUT_BUFFER_BYTES`).
 const OUTPUT_BUFFER_BYTES: u32 = 1 << 20;
 
-/// Errors produced by one mini-host invocation (AR-10 typed error mapping).
+/// note: errors produced by one mini-host invocation (AR-10 typed error mapping).
 #[derive(Debug)]
 pub enum MiniHostError {
-    /// The wasm bytes failed to compile/validate or the instance failed to
+    /// note: the wasm bytes failed to compile/validate or the instance failed to
     /// instantiate — including a module importing a `nexus::*` function the
     /// manifest did not whitelist (the whitelist is enforced by linker
     /// registration, exactly like the real host).
     Instantiation(String),
-    /// A required export (`memory`, `alloc`, or the manifest's
+    /// note: a required export (`memory`, `alloc`, or the manifest's
     /// `compute_export`) is missing.
     MissingExport(String),
-    /// The module's `compute` returned `-1` — the module-level failure
+    /// note: the module's `compute` returned `-1` — the module-level failure
     /// sentinel (AR-5 mapping).
     ModuleFailed,
-    /// The module's `compute` returned `-2` — output buffer too small.
+    /// note: the module's `compute` returned `-2` — output buffer too small.
     OutputTooSmall,
-    /// The module's `compute` returned an unknown negative sentinel.
+    /// note: the module's `compute` returned an unknown negative sentinel.
     UnknownSentinel(i64),
-    /// The module trapped during execution.
+    /// note: the module trapped during execution.
     Trap(String),
-    /// The SDK-side envelope failed to (de)serialize (cannot normally happen
+    /// note: the SDK-side envelope failed to (de)serialize (cannot normally happen
     /// for the typed types).
     Serialization(String),
-    /// The output JSON could not be deserialized as a [`ComputeOutput`].
+    /// note: the output JSON could not be deserialized as a [`ComputeOutput`].
     InvalidOutput(String),
 }
 
@@ -109,7 +109,7 @@ impl fmt::Display for MiniHostError {
 
 impl std::error::Error for MiniHostError {}
 
-/// Read-only snapshot served to host functions during one invocation.
+/// note: read-only snapshot served to host functions during one invocation.
 ///
 /// Mirrors `nexus-wasm-host::HostContext`: `key_blocks` are indexed by the
 /// spoke `entry_id` field (O(1) `kb_read`), and `narrative_query` returns the
@@ -125,10 +125,10 @@ impl InvocationState {
         let mut key_blocks = HashMap::new();
         for kb in &input.key_blocks {
             if let Ok(json) = serde_json::to_value(kb) {
-                // Index `entry_id` first with `key_block_id` fallback (I7):
+                // why: index `entry_id` first with `key_block_id` fallback (I7) —
                 // the canonical fixture (and the real host's basic_combat
                 // fixture) use `key_block_id`, while spoke-produced blocks
-                // use `entry_id` — same accessor semantics as the SDK's
+                // use `entry_id`; same accessor semantics as the SDK's
                 // `entry_id_of` (AR-3).
                 let id = kb
                     .get("entry_id")
@@ -155,12 +155,12 @@ impl InvocationState {
 }
 
 fn new_engine() -> Result<Engine, MiniHostError> {
-    // Match the real host's admission set in both invocations and ABI probes.
+    // why: match the real host's admission set in both invocations and ABI probes.
     let mut config = Config::new();
     config.wasm_gc(false);
     config.wasm_function_references(false);
     config.wasm_exceptions(false);
-    // Wasmtime 49 enables the wide-arithmetic proposal by default; the real
+    // why: Wasmtime 49 enables the wide-arithmetic proposal by default; the real
     // host disables it (`nexus-wasm-host/src/engine.rs`), so the mini-host must
     // reject the same modules — otherwise ABI probes would admit modules the
     // runtime host refuses.
@@ -168,7 +168,7 @@ fn new_engine() -> Result<Engine, MiniHostError> {
     Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))
 }
 
-/// Run one stateless compute invocation against a module's compiled bytes.
+/// note: runs one stateless compute invocation against a module's compiled bytes.
 ///
 /// # Errors
 ///
@@ -193,13 +193,13 @@ pub fn run(
         .instantiate(&mut store, &module)
         .map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
 
-    // Optional one-shot `init` (the manifest's `init_export`; a declared-but-
-    // not-exported name is skipped, exactly like the real host).
+    // note: optional one-shot `init` (the manifest's `init_export`; a declared-
+    // but-not-exported name is skipped, exactly like the real host).
     if let Some(init) = optional_export::<(), ()>(&mut store, &instance, &manifest.init_export) {
         init.call(&mut store, ()).map_err(map_call_error)?;
     }
 
-    // The host places input and reserves output inside the module's own
+    // note: the host places input and reserves output inside the module's own
     // linear memory through the module's allocator.
     let alloc = required_export::<u32, u32>(&mut store, &instance, "alloc")?;
     let in_len = u32::try_from(input_bytes.len()).unwrap_or(u32::MAX);
@@ -243,7 +243,7 @@ pub fn run(
         .map_err(|e| MiniHostError::InvalidOutput(format!("{e} (module wrote {written} bytes)")))
 }
 
-/// Register the whitelisted host imports on a [`Linker`].
+/// note: registers the whitelisted host imports on a [`Linker`].
 ///
 /// Only the functions listed in `manifest.host_functions` are linked. A module
 /// that imports a non-registered `nexus::*` function fails instantiation —
@@ -319,12 +319,12 @@ fn register_host_imports(
     Ok(())
 }
 
-/// Fetch the calling instance's exported linear `memory`.
+/// note: fetches the calling instance's exported linear `memory`.
 fn current_memory<T>(caller: &mut Caller<'_, T>) -> Option<Memory> {
     caller.get_export("memory").and_then(Extern::into_memory)
 }
 
-/// Read `len` bytes from `[ptr, ptr+len)` out of the instance memory.
+/// note: reads `len` bytes from `[ptr, ptr+len)` out of the instance memory.
 fn read_bytes<T>(caller: &Caller<'_, T>, mem: &Memory, ptr: u32, len: u32) -> Option<Vec<u8>> {
     let len = usize::try_from(len).ok()?;
     let ptr = usize::try_from(ptr).ok()?;
@@ -333,8 +333,8 @@ fn read_bytes<T>(caller: &Caller<'_, T>, mem: &Memory, ptr: u32, len: u32) -> Op
     Some(buf)
 }
 
-/// Write `bytes` to `[ptr, ptr+bytes.len())`, respecting `cap`. Returns the
-/// number of bytes written or the overflow sentinel.
+/// note: writes `bytes` to `[ptr, ptr+bytes.len())`, respecting `cap`; returns
+/// the number of bytes written or the overflow sentinel.
 fn write_or_overflow<T>(
     caller: &mut Caller<'_, T>,
     mem: &Memory,
@@ -349,8 +349,8 @@ fn write_or_overflow<T>(
     Ok(i64::try_from(bytes.len()).unwrap_or(RET_OVERFLOW))
 }
 
-/// Look up an optional export (used for `init` — a missing export is not an
-/// error).
+/// note: looks up an optional export (used for `init` — a missing export is not
+/// an error).
 fn optional_export<Params, Returns>(
     store: &mut Store<InvocationState>,
     instance: &Instance,
@@ -363,8 +363,8 @@ where
     instance.get_typed_func(store, name).ok()
 }
 
-/// Look up a required export, returning [`MiniHostError::MissingExport`] when
-/// absent.
+/// note: looks up a required export, returning [`MiniHostError::MissingExport`]
+/// when absent.
 fn required_export<Params, Returns>(
     store: &mut Store<InvocationState>,
     instance: &Instance,
@@ -379,7 +379,7 @@ where
         .map_err(|_| MiniHostError::MissingExport(name.to_string()))
 }
 
-/// Map a wasmtime call error to a [`MiniHostError::Trap`].
+/// note: maps a wasmtime call error to a [`MiniHostError::Trap`].
 fn map_call_error(e: wasmtime::Error) -> MiniHostError {
     MiniHostError::Trap(e.to_string())
 }
@@ -390,7 +390,7 @@ mod tests {
     use nexus_module_sdk::WorldRef;
     use serde_json::json;
 
-    /// Minimal valid manifest for a probe module.
+    /// note: minimal valid manifest for a probe module.
     fn manifest() -> ModuleManifest {
         ModuleManifest {
             module_id: "probe".to_string(),
@@ -426,7 +426,7 @@ mod tests {
         }
     }
 
-    /// Bump-allocating module skeleton with optional imports, `init`, and a
+    /// note: bump-allocating module skeleton with optional imports, `init`, and a
     /// `compute` body.
     fn module_wat(imports: &str, init: &str, compute_body: &str) -> String {
         format!(
@@ -446,14 +446,14 @@ mod tests {
         )
     }
 
-    /// A module whose `compute` returns a fixed (negative) sentinel.
+    /// note: a module whose `compute` returns a fixed (negative) sentinel.
     fn sentinel_module_wat(sentinel: i64) -> String {
         module_wat("", "", &format!("(i64.const {sentinel})"))
     }
 
-    /// A module that echoes a static envelope into the output buffer.
+    /// note: a module that echoes a static envelope into the output buffer.
     fn echo_module_wat(envelope: &str) -> String {
-        // The envelope is embedded as a wat string literal — escape quotes.
+        // why: the envelope is embedded as a wat string literal — escape quotes.
         let escaped = envelope.replace('\\', "\\\\").replace('"', "\\\"");
         format!(
             r#"(module
@@ -474,8 +474,8 @@ mod tests {
         )
     }
 
-    /// Drive `compute` directly and return the raw i64, bypassing envelope
-    /// parsing (host-import probing).
+    /// note: drives `compute` directly and returns the raw i64, bypassing
+    /// envelope parsing (host-import probing).
     fn raw_compute(
         wasm: &[u8],
         manifest: &ModuleManifest,
@@ -542,7 +542,7 @@ mod tests {
 
     #[test]
     fn unwhitelisted_nexus_import_fails_instantiation() {
-        // The ABI whitelist is enforced by linker registration: a module
+        // why: the ABI whitelist is enforced by linker registration — a module
         // importing a function the manifest did not whitelist fails
         // instantiation even when it is not one of the real host functions.
         let wat = r#"(module
@@ -557,8 +557,8 @@ mod tests {
 
     #[test]
     fn init_declared_but_absent_is_skipped() {
-        // Declared `init_export` with no matching export → skipped (optional
-        // export), and compute still runs (returns -1 → ModuleFailed).
+        // note: declared `init_export` with no matching export → skipped
+        // (optional export), and compute still runs (returns -1 → ModuleFailed).
         let wat = r#"(module
   (memory (export "memory") 32)
   (global $heap (mut i32) (i32.const 1024))
@@ -587,11 +587,11 @@ mod tests {
         assert!(matches!(err, MiniHostError::Trap(_)), "{err}");
     }
 
-    // ── host-import probing (whitelisted imports, -1/-2 sentinels) ────────
+    // note: host-import probing — whitelisted imports, `-1`/`-2` sentinels.
 
-    /// Module whose `compute` calls `kb_read` with a static id and copies the
-    /// host response to a fixed probe address, returning the host's return
-    /// value verbatim. `probe_addr` must not collide with the out buffer.
+    /// note: module whose `compute` calls `kb_read` with a static id and copies
+    /// the host response to a fixed probe address, returning the host's return
+    /// value verbatim; `probe_addr` must not collide with the out buffer.
     fn kb_read_module(id: &str, out_cap: u32) -> String {
         format!(
             r#"(module
@@ -609,7 +609,7 @@ mod tests {
         )
     }
 
-    /// Read `len` bytes at `addr` from the instance memory after a compute
+    /// note: reads `len` bytes at `addr` from the instance memory after a compute
     /// call (probe helper).
     fn read_probe(
         wasm: &[u8],
@@ -656,8 +656,8 @@ mod tests {
 
     #[test]
     fn kb_read_indexes_key_block_id_fallback() {
-        // I7: the canonical fixture (fixtures/combat-input.json) indexes its
-        // blocks by `key_block_id`, not `entry_id` — the mini-host must serve
+        // why: I7 — the canonical fixture (fixtures/combat-input.json) indexes its
+        // blocks by `key_block_id`, not `entry_id`, so the mini-host must serve
         // `kb_read("kb_atk")` against it (fixture parity with the real host).
         let fixture: ComputeInput =
             serde_json::from_str(include_str!("../fixtures/combat-input.json"))
@@ -719,7 +719,7 @@ mod tests {
 
     #[test]
     fn manifest_whitelist_gates_host_imports() {
-        // A module calling kb_read while the manifest whitelists nothing →
+        // why: a module calling kb_read while the manifest whitelists nothing →
         // the import is not linked → instantiation fails (whitelist
         // enforcement, like the real host).
         let wat = r#"(module
@@ -734,7 +734,7 @@ mod tests {
 
     #[test]
     fn rejects_newly_default_enabled_proposals() {
-        // Wasmtime 47+ enables the GC / function-references / exceptions
+        // why: Wasmtime 47+ enables the GC / function-references / exceptions
         // proposals by default; the mini-host pins them OFF to match the real
         // host's module-admission set. A module requiring the exceptions
         // proposal (`try_table`) must fail validation, not instantiate.

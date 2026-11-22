@@ -1,4 +1,5 @@
-//! Golden-fixture round-trip tests (V1.170 P0, AR-7 drift-guard layer 1).
+//! see docs/specs/compute/compute-module-abi.md §4/§5 — golden-fixture
+//! round-trip tests (V1.170 P0, AR-7 drift-guard layer 1).
 //!
 //! `fixtures/compute-input.golden.json` + `compute-output.golden.json` are
 //! extracted from the canonical envelope samples (compute-module-abi.md §4/§5,
@@ -17,8 +18,8 @@ use serde_json::Value;
 const INPUT_GOLDEN: &str = include_str!("fixtures/compute-input.golden.json");
 const OUTPUT_GOLDEN: &str = include_str!("fixtures/compute-output.golden.json");
 
-/// Parse a golden fixture to a typed value and assert the reserialized JSON
-/// is value-equal to the original (no field loss, rename, or reorder).
+/// note: parses a golden fixture to a typed value and asserts the reserialized
+/// JSON is value-equal to the original (no field loss, rename, or reorder).
 fn assert_round_trip<T>(golden: &str) -> T
 where
     T: serde::de::DeserializeOwned + serde::Serialize,
@@ -39,7 +40,7 @@ where
 fn compute_input_golden_round_trips_and_typed_fields_survive() {
     let input: ComputeInput = assert_round_trip(INPUT_GOLDEN);
 
-    // Typed-field survival (AR-3): the envelope skeleton is typed, the
+    // note: typed-field survival (AR-3) — the envelope skeleton is typed, the
     // high-churn parts stay opaque `Value` passthroughs.
     assert_eq!(input.schema_version, 1);
     assert_eq!(input.world_ref.world_id.as_deref(), Some("w_abc123"));
@@ -58,7 +59,7 @@ fn compute_input_golden_round_trips_and_typed_fields_survive() {
 fn compute_output_golden_round_trips_with_delta_op_enum() {
     let output: ComputeOutput = assert_round_trip(OUTPUT_GOLDEN);
 
-    // Typed-field survival (AR-3): state_delta items are typed
+    // note: typed-field survival (AR-3) — state_delta items are typed
     // (`DeltaOp` serde-renamed to the wire `add`/`sub`/`set`).
     assert_eq!(output.schema_version, 1);
     assert_eq!(output.state_delta.len(), 1);

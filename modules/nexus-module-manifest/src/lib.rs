@@ -1,8 +1,8 @@
 //! Shared compute-module manifest contract + `wasm_sha256` injection.
 //!
-//! Extracted from `crates/nexus-wasm-host` (V1.170 P0, AR-8) so the host, the
-//! `nexus42 compute` CLI, and module tooling share ONE manifest contract and
-//! ONE content-hash injection implementation:
+//! see crates/nexus-wasm-host/src/manifest.rs — extracted (V1.170 P0, AR-8)
+//! so the host, the `nexus42 compute` CLI, and module tooling share ONE
+//! manifest contract and ONE content-hash injection implementation:
 //!
 //! - [`manifest`] — `ModuleManifest` / `HostFunction` / `ModuleSchemas` types
 //!   plus the validation core (`allows`, `verify_wasm_sha256`), moved verbatim
@@ -23,7 +23,7 @@ use std::path::Path;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// Lowercase hex encoding (avoids the `format_collect` lint and a hex dep).
+/// why: avoids the `format_collect` lint and a hex dependency.
 fn hex_encode(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -36,11 +36,11 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// Inject `wasm_sha256` into a staged `manifest.json`, computed from the
 /// staged `.wasm` bytes.
 ///
-/// Semantics are identical to the original `nexus-wasm-host` build.rs helper
-/// (V1.170 P0, AR-8): the manifest at `manifest_path` is rewritten in place
-/// with a `wasm_sha256` field set to the lowercase-hex SHA-256 of the bytes
-/// at `wasm_path`. The embedded/staged manifest always declares the hash of
-/// the artifact it ships with, so a content-based pairing check can never
+/// note: semantics are identical to the original `nexus-wasm-host` build.rs
+/// helper (V1.170 P0, AR-8): the manifest at `manifest_path` is rewritten in
+/// place with a `wasm_sha256` field set to the lowercase-hex SHA-256 of the
+/// bytes at `wasm_path`. The embedded/staged manifest always declares the hash
+/// of the artifact it ships with, so a content-based pairing check can never
 /// reject the pair. The source manifest is left untouched by callers (they
 /// stage a copy first); if the source carries a `wasm_sha256` of its own,
 /// this value (derived from the actual compiled bytes) wins in the staged
@@ -90,8 +90,8 @@ pub fn inject_wasm_sha256(id: &str, wasm_path: &Path, manifest_path: &Path) -> R
 mod tests {
     use super::*;
 
-    /// The staged manifest must end up with the lowercase-hex SHA-256 of the
-    /// staged wasm bytes, with the source manifest left untouched and any
+    /// note: the staged manifest must end up with the lowercase-hex SHA-256 of
+    /// the staged wasm bytes, with the source manifest left untouched and any
     /// source `wasm_sha256` overridden by the computed value.
     #[test]
     fn inject_wasm_sha256_stages_computed_hash() {
@@ -127,9 +127,9 @@ mod tests {
         assert_eq!(staged["module_id"].as_str(), Some("mod"));
     }
 
-    /// The injected manifest must be byte-stable: re-injecting the same pair
-    /// produces identical bytes (the byte-identical bar for the AR-8
-    /// refactor — same field order, same serialization).
+    /// note: byte-stable injection — re-injecting the same pair produces
+    /// identical bytes (the byte-identical bar for the AR-8 refactor: same
+    /// field order, same serialization).
     #[test]
     fn inject_wasm_sha256_is_byte_stable() {
         let dir = tempfile::tempdir().expect("tempdir");

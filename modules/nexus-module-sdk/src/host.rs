@@ -1,4 +1,4 @@
-//! Host-import wrappers (AR-4).
+//! Host-import wrappers (AR-4; contract §3).
 //!
 //! A module may import up to two host functions from the `nexus` module
 //! namespace. The host registers only the functions the module's manifest
@@ -27,26 +27,22 @@
 //! | `-1`   | Not found / unsupported query. |
 //! | `-2`   | `out_cap` too small for the response. |
 
-/// Sentinel returned by host functions when the lookup yields nothing.
+/// note: sentinel returned by host functions when the lookup yields nothing.
 pub const RET_NOT_FOUND: i64 = -1;
-/// Sentinel returned when the caller's output buffer is too small.
+/// note: sentinel returned when the caller's output buffer is too small.
 pub const RET_OVERFLOW: i64 = -2;
 
-/// Errors returned by host functions, mapped from the ABI sentinels
-/// (host.rs L41–43, ABI §6.3).
+/// note: host-function errors mapped from the ABI sentinels (host.rs L41–43,
+/// ABI §6.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostError {
-    /// `-1` — the lookup yielded nothing.
     NotFound,
-    /// `-2` — the caller's output buffer was too small.
     OutputTooSmall,
-    /// Any other negative return value.
     Unknown(i64),
 }
 
-// Raw host imports, whitelisted by the ABI (compute-module-abi.md §3).
-// Declared in a private submodule so the safe wrappers below can use the
-// same names.
+// why: declared in a private submodule so the safe wrappers below can use the
+// same names; whitelisted by the ABI (compute-module-abi.md §3).
 mod raw {
     #[link(wasm_import_module = "nexus")]
     extern "C" {
@@ -55,7 +51,7 @@ mod raw {
     }
 }
 
-/// Read a `KeyBlock` by ID from the invocation snapshot.
+/// note: reads a `KeyBlock` by ID from the invocation snapshot.
 ///
 /// Allocates the request and output buffers via the module's own `alloc`,
 /// passes `(ptr, len, out_ptr, out_cap)`, and reads the response. Request and
@@ -68,7 +64,6 @@ pub fn kb_read(id: &str, out_cap: u32) -> Result<Vec<u8>, HostError> {
     )
 }
 
-/// Query narrative context.
 pub fn narrative_query(query: &str, out_cap: u32) -> Result<Vec<u8>, HostError> {
     call_host(
         |ptr, len, out_ptr| unsafe { raw::narrative_query(ptr, len, out_ptr, out_cap) },
@@ -98,7 +93,7 @@ where
     Ok(bytes)
 }
 
-/// Map a host-function return value to the number of bytes written.
+/// note: maps a host-function return value to the number of bytes written.
 ///
 /// Rejects the AR-4 sentinels via [`map_host_ret`] AND any positive count
 /// beyond the caller's buffer (qc2 S-2): a conforming host returns `-2`
@@ -115,7 +110,7 @@ fn checked_written(ret: i64, out_cap: u32) -> Result<usize, HostError> {
     Ok(ret as usize)
 }
 
-/// Map a host-function return value to the typed error (AR-4 sentinel
+/// note: maps a host-function return value to the typed error (AR-4 sentinel
 /// mapping): `>= 0` → success (bytes written), `-1` → not found, `-2` →
 /// output too small, any other negative → unknown.
 fn map_host_ret(ret: i64) -> Result<(), HostError> {
@@ -143,7 +138,7 @@ mod tests {
 
     #[test]
     fn checked_written_rejects_ret_exceeding_out_cap() {
-        // qc2 S-2: a host return larger than the allocated out_cap must not
+        // why: qc2 S-2 — a host return larger than the allocated out_cap must not
         // be trusted (from_raw_parts would read past the leaked buffer) —
         // rejected as OutputTooSmall, the same condition as the `-2`
         // sentinel. (Tested on the helper: call_host itself writes into

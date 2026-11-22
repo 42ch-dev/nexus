@@ -1,19 +1,19 @@
-//! Key-block accessor helpers (AR-3), generalized from
-//! `modules/basic-combat/src/lib.rs` L274–336.
+//! see modules/basic-combat/src/lib.rs L274–336 — key-block accessor helpers
+//! (AR-3), generalized from there.
 
 use serde_json::Value;
 
-/// Resolve a key block's identity: spoke `entry_id` (canonical since V1.139)
-/// with legacy domain `key_block_id` fallback.
+/// note: resolves a key block's identity — spoke `entry_id` (canonical since
+/// V1.139), falling back to legacy domain `key_block_id`.
 pub fn entry_id_of(kb: &Value) -> Option<&str> {
     kb.get("entry_id")
         .and_then(Value::as_str)
         .or_else(|| kb.get("key_block_id").and_then(Value::as_str))
 }
 
-/// Whether a key block is of the given kind: spoke `entry_type` (canonical
-/// since V1.139) with legacy domain `block_type` fallback. Replaces the
-/// basic-combat `is_character` helper (`is_kind(kb, "character")`).
+/// note: whether a key block is of the given kind — spoke `entry_type`
+/// (canonical since V1.139), falling back to legacy domain `block_type`.
+/// Replaces the basic-combat `is_character` helper (`is_kind(kb, "character")`).
 pub fn is_kind(kb: &Value, kind: &str) -> bool {
     kb.get("entry_type")
         .and_then(Value::as_str)
@@ -21,9 +21,9 @@ pub fn is_kind(kb: &Value, kind: &str) -> bool {
         == Some(kind)
 }
 
-/// Read an integer attribute from a key block. Supports both the legacy
-/// domain flat-object form (`body.attributes.base_atk`) and the canonical
-/// spoke ERC721-array form (`body.attributes[].trait_type`/`value`).
+/// note: reads an integer attribute from a key block, supporting both the
+/// legacy domain flat-object form (`body.attributes.base_atk`) and the
+/// canonical spoke ERC721-array form (`body.attributes[].trait_type`/`value`).
 ///
 /// Spoke attribute values round-trip as JSON floats (`20.0` — the spoke
 /// `BodyAttributeValue` number variant is an f64, and the
@@ -34,7 +34,7 @@ pub fn read_attr_int(kb: &Value, trait_name: &str) -> Option<i64> {
     if let Some(v) = read_int(kb, &["body", "attributes", trait_name]) {
         return Some(v);
     }
-    // Flat-object form carrying spoke round-tripped float values (`20.0`):
+    // why: flat-object form carries spoke round-tripped float values (`20.0`);
     // `as_i64` misses f64-backed numbers, so fall back to the float read.
     if let Some(v) = read_int_f64(kb, &["body", "attributes", trait_name]) {
         return Some(v);
@@ -51,7 +51,7 @@ pub fn read_attr_int(kb: &Value, trait_name: &str) -> Option<i64> {
     })
 }
 
-/// Read a nested integer along a JSON path; returns `None` on any miss.
+/// note: reads a nested integer along a JSON path; `None` on any miss.
 pub fn read_int(value: &Value, path: &[&str]) -> Option<i64> {
     let mut cur = value;
     for seg in path {
@@ -60,7 +60,7 @@ pub fn read_int(value: &Value, path: &[&str]) -> Option<i64> {
     cur.as_i64()
 }
 
-/// Read a nested number along a JSON path as an integer, accepting
+/// note: reads a nested number along a JSON path as an integer, accepting
 /// f64-backed JSON numbers (`20.0`) that `as_i64` misses.
 pub fn read_int_f64(value: &Value, path: &[&str]) -> Option<i64> {
     let mut cur = value;
@@ -70,7 +70,7 @@ pub fn read_int_f64(value: &Value, path: &[&str]) -> Option<i64> {
     cur.as_f64().map(|f| f as i64)
 }
 
-/// Emit a wire-valid `evt_*` timeline id (alphanumeric suffix only).
+/// note: emits a wire-valid `evt_*` timeline id (alphanumeric suffix only).
 ///
 /// Generalized from basic-combat's `wire_timeline_event_id` (lib.rs
 /// L116–126): `timeline_event_id("combat", &[attacker_id, defender_id])`
@@ -116,8 +116,8 @@ mod tests {
         assert!(is_kind(&legacy, "character"));
     }
 
-    /// The `nexus-spoke-adapter` key-block conversion emits spoke attribute
-    /// values as f64-backed JSON numbers in the FLAT form
+    /// why: the `nexus-spoke-adapter` key-block conversion emits spoke attribute
+    /// values as f64-backed JSON numbers in the flat form
     /// (`body.attributes.base_atk` = `20.0` — the spoke `BodyAttributeValue`
     /// number variant is an f64). `read_attr_int` must accept them on the
     /// flat path exactly like the array path already did.
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_def"), Some(5));
     }
 
-    /// Integer-valued flat attributes keep working (legacy domain form).
+    /// note: integer-valued flat attributes keep working (legacy domain form).
     #[test]
     fn flat_object_attributes_accept_integer_values() {
         let kb = json!({
@@ -146,8 +146,8 @@ mod tests {
         assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
     }
 
-    /// The canonical ERC721-array form still accepts both int and float
-    /// values (unchanged behavior — regression pin).
+    /// note: the canonical ERC721-array form accepts both int and float
+    /// values (regression pin).
     #[test]
     fn array_attributes_accept_int_and_float_values() {
         let kb = json!({
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(read_int_f64(&value, &["body", "nope"]), None);
     }
 
-    /// `timeline_event_id` must produce the same wire-valid id as
+    /// note: `timeline_event_id` must produce the same wire-valid id as
     /// basic-combat's `wire_timeline_event_id` for the same inputs.
     #[test]
     fn timeline_event_id_matches_basic_combat_semantics() {

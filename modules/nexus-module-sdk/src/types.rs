@@ -1,4 +1,5 @@
-//! Typed compute envelope skeleton (AR-3).
+//! see docs/specs/compute/compute-module-abi.md — typed compute envelope
+//! skeleton (AR-3).
 //!
 //! Field-level split, verified against
 //! `schemas/daemon-api/compute/compute-{input,output}.schema.json`: the
@@ -13,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// World and timeline locator for one invocation.
+/// note: world and timeline locator for one invocation.
 ///
 /// Every field is optional on the wire: the compute-input schema declares
 /// `world_ref` required but its inner properties are not, and the host's
@@ -31,39 +32,39 @@ pub struct WorldRef {
     pub timeline_head_event_id: Option<String>,
 }
 
-/// Standard input envelope passed into a WASM compute module.
+/// note: standard input envelope passed into a WASM compute module.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ComputeInput {
     pub schema_version: u32,
     pub world_ref: WorldRef,
-    /// Snapshot of KnowledgeEntry records relevant to this invocation
+    /// note: snapshot of KnowledgeEntry records relevant to this invocation
     /// (opaque objects — spoke `KnowledgeEntry` JSON, V1.139 fallback).
     pub key_blocks: Vec<serde_json::Value>,
-    /// Narrative position context (module-declared shape). Optional on the
-    /// wire; absent → `Null`.
+    /// note: narrative position context (module-declared shape); optional on the
+    /// wire, absent → `Null`.
     #[serde(default)]
     pub narrative_state: serde_json::Value,
-    /// Module-defined input parameters (freeform object). Optional on the
-    /// wire; absent → `Null`.
+    /// note: module-defined input parameters (freeform object); optional on the
+    /// wire, absent → `Null`.
     #[serde(default)]
     pub invocation: serde_json::Value,
 }
 
-/// A single state delta operation.
+/// note: a single state delta operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StateDeltaOp {
     pub op: DeltaOp,
-    /// Dotted state path within the target KnowledgeEntry body
+    /// note: dotted state path within the target KnowledgeEntry body
     /// (e.g. `character.current_hp`).
     pub path: String,
-    /// KnowledgeEntry `entry_id` the delta applies to. Omitted → the host
+    /// note: KnowledgeEntry `entry_id` the delta applies to; omitted → the host
     /// applies the delta to the entry implied by the capability context.
     pub target_key_block_id: Option<String>,
-    /// Value for `set`, or numeric delta for `add`/`sub`.
+    /// note: value for `set`, or numeric delta for `add`/`sub`.
     pub value: Option<serde_json::Value>,
 }
 
-/// Delta operation: add (increment numeric), sub (decrement numeric), set
+/// note: delta operation — add (increment numeric), sub (decrement numeric), set
 /// (replace value).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -73,18 +74,18 @@ pub enum DeltaOp {
     Set,
 }
 
-/// Standard 4-part output envelope returned by a WASM compute module.
+/// note: standard 4-part output envelope returned by a WASM compute module.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ComputeOutput {
     pub schema_version: u32,
-    /// Ordered list of +/-/set state operations to apply.
+    /// note: ordered list of +/-/set state operations to apply.
     pub state_delta: Vec<StateDeltaOp>,
-    /// Timeline events to append (opaque —
+    /// note: timeline events to append (opaque —
     /// `schemas/domain/timeline-event.schema.json`).
     pub timeline_events: Vec<serde_json::Value>,
-    /// New KnowledgeEntry records the module creates (opaque objects).
+    /// note: new KnowledgeEntry records the module creates (opaque objects).
     pub new_key_blocks: Vec<serde_json::Value>,
-    /// Module-declared freeform report (kept open via
+    /// note: module-declared freeform report (kept open via
     /// `additionalProperties: true`).
     pub battle_report: serde_json::Value,
 }
@@ -94,7 +95,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The canonical envelope sample (ABI §4, mirroring the compute-input
+    /// note: the canonical envelope sample (ABI §4, mirroring the compute-input
     /// schema contract) must deserialize with typed-field survival.
     #[test]
     fn compute_input_round_trip_preserves_typed_fields() {
@@ -126,8 +127,8 @@ mod tests {
         assert_eq!(reserialized["key_blocks"][0]["key_block_id"], "kb_atk");
     }
 
-    /// The additive versioning policy: unknown envelope fields are ignored,
-    /// never rejected (ABI §9.1).
+    /// invariant: the additive versioning policy — unknown envelope fields are
+    /// ignored, never rejected (ABI §9.1).
     #[test]
     fn compute_input_ignores_unknown_fields() {
         let raw = r#"{
@@ -140,7 +141,7 @@ mod tests {
         assert_eq!(input.schema_version, 1);
     }
 
-    /// `narrative_state` / `invocation` are optional on the wire (schema
+    /// note: `narrative_state` / `invocation` are optional on the wire (schema
     /// `required` lists only schema_version/world_ref/key_blocks).
     #[test]
     fn compute_input_optional_fields_default_to_null() {
@@ -154,7 +155,7 @@ mod tests {
         assert!(input.invocation.is_null());
     }
 
-    /// `world_ref` inner fields are all optional on the wire (the schema
+    /// note: `world_ref` inner fields are all optional on the wire (the schema
     /// requires `world_ref` itself, not its properties; the host's generated
     /// type mirrors that). The real-host killing-blow fixture sends only
     /// `world_id` — the SDK must accept it (AR-11 byte-compat bar).
@@ -171,8 +172,8 @@ mod tests {
         assert_eq!(input.world_ref.timeline_head_event_id, None);
     }
 
-    /// The canonical output sample (ABI §5) must round-trip with the delta-op
-    /// enum surviving serde.
+    /// note: the canonical output sample (ABI §5) must round-trip with the
+    /// delta-op enum surviving serde.
     #[test]
     fn compute_output_round_trip_preserves_delta_ops() {
         let raw = r#"{
@@ -204,7 +205,7 @@ mod tests {
         assert_eq!(reserialized["state_delta"][1]["op"], "set");
     }
 
-    /// Delta op serde names are the wire values `add`/`sub`/`set`.
+    /// note: delta op serde names are the wire values `add`/`sub`/`set`.
     #[test]
     fn delta_op_serde_names() {
         assert_eq!(serde_json::to_string(&DeltaOp::Add).unwrap(), "\"add\"");

@@ -1,4 +1,5 @@
-//! Fixture conformance for the mini-host (V1.170 P0, AR-10).
+//! see docs/specs/compute/compute-module-abi.md — fixture conformance for the
+//! mini-host (V1.170 P0, AR-10).
 //!
 //! `fixtures/combat-input.json` is the canonical input fixture — SSOT copied
 //! from `crates/nexus-wasm-host/tests/basic_combat.rs` (the
@@ -23,7 +24,7 @@ fn fixture_input() -> ComputeInput {
     serde_json::from_str(FIXTURE).expect("canonical fixture must parse as ComputeInput")
 }
 
-/// A minimal ABI-conformant module that echoes a fixed output envelope.
+/// note: a minimal ABI-conformant module that echoes a fixed output envelope.
 fn echo_module() -> Vec<u8> {
     let envelope = r#"{"schema_version":1,"state_delta":[],"timeline_events":[],"new_key_blocks":[],"battle_report":{"kind":"probe"}}"#;
     let escaped = envelope.replace('\\', "\\\\").replace('"', "\\\"");
@@ -97,9 +98,9 @@ fn fixture_parses_as_compute_input() {
     assert_eq!(input.invocation["defender_id"], "kb_def");
 }
 
-/// Wasmtime 49 turns the wide-arithmetic proposal ON by default (it is part of
-/// the `WASM3` default feature set). The mini-host pins it OFF in `new_engine`
-/// so its admission set stays identical to the real host's
+/// why: Wasmtime 49 turns the wide-arithmetic proposal ON by default (it is
+/// part of the `WASM3` default feature set). The mini-host pins it OFF in
+/// `new_engine` so its admission set stays identical to the real host's
 /// (`crates/nexus-wasm-host/src/engine.rs`): a module whose code section uses
 /// `i64.add128` / `i64.mul_wide_*` must fail to compile, not silently become
 /// admissible.
@@ -127,7 +128,7 @@ fn wide_arithmetic_module_is_rejected() {
 
 #[test]
 fn fixture_runs_through_mini_host() {
-    // The canonical fixture drives a full mini-host invocation: the input
+    // note: the canonical fixture drives a full mini-host invocation — the input
     // envelope is serialized into module memory, `init` + `compute` run, and
     // the output envelope is parsed back into the SDK type.
     let wasm = echo_module();
@@ -141,7 +142,7 @@ fn fixture_runs_through_mini_host() {
 
 #[test]
 fn real_basic_combat_artifact_conformance() {
-    // Full conformance against a real compiled module. Env-gated: enabled
+    // note: full conformance against a real compiled module. Env-gated — enabled
     // by the AR-12 module-dx CI leg, which MUST set the env pair (the CI
     // step asserts the artifact files exist before invoking, qc3 F-003).
     // This SKIP path is a fail-open convenience for LOCAL DEV ONLY — a CI
@@ -166,7 +167,7 @@ fn real_basic_combat_artifact_conformance() {
 
     let output = run(&wasm, &manifest, &fixture_input()).expect("real module runs");
 
-    // The 4-part contract, mirrored from the real-host test
+    // note: the 4-part contract, mirrored from the real-host test
     // (crates/nexus-wasm-host/tests/basic_combat.rs).
     let delta = output
         .state_delta
@@ -185,8 +186,8 @@ fn real_basic_combat_artifact_conformance() {
     assert_eq!(output.battle_report["kind"], "combat");
 }
 
-/// Conformance against the in-repo `modules/_template` scaffold (qc3
-/// F-002): the template is the author-copying starting point, so CI must
+/// note: conformance against the in-repo `modules/_template` scaffold (qc3
+/// F-002) — the template is the author-copying starting point, so CI must
 /// compile it AND prove it runs through the mini-host with the canonical
 /// fixture. Env-gated like the basic-combat conformance; the module-dx CI
 /// leg asserts the artifact pair exists before invoking (same fail-open
@@ -209,16 +210,16 @@ fn real_template_artifact_conformance() {
         std::fs::read_to_string(&manifest_path).expect("read NEXUS_MODULE_TEST_MANIFEST");
     let manifest: ModuleManifest =
         serde_json::from_str(&manifest_json).expect("manifest parses as ModuleManifest");
-    // The extracted-validator equivalent: the template's manifest must pass
-    // the full SDK validate() contract (incl. the module_id path-safety
+    // note: the extracted-validator equivalent — the template's manifest must
+    // pass the full SDK validate() contract (incl. the module_id path-safety
     // guard, qc2 W-1).
     manifest.validate().expect("template manifest is valid");
 
     let output = run(&wasm, &manifest, &fixture_input()).expect("template runs");
 
-    // The template is a "dice tick": it ticks the FIRST bundled key block's
-    // `<block_type>.dice` state path and emits a `dice` battle report. The
-    // canonical combat fixture bundles character blocks, so the tick lands
+    // note: the template is a "dice tick" — it ticks the FIRST bundled key
+    // block's `<block_type>.dice` state path and emits a `dice` battle report.
+    // The canonical combat fixture bundles character blocks, so the tick lands
     // on `character.dice`.
     assert_eq!(output.schema_version, 1);
     let tick = output

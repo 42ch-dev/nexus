@@ -1,4 +1,5 @@
-//! Official SDK for Nexus compute modules (V1.170 P0, AR-1..AR-6).
+//! see docs/specs/compute/compute-module-abi.md — official SDK for Nexus
+//! compute modules (V1.170 P0, AR-1..AR-6).
 //!
 //! A compute module is a **stateless pure function**: it receives a
 //! [`ComputeInput`] envelope from the host and returns a 4-part
@@ -43,16 +44,15 @@ pub use manifest::{
 };
 pub use types::{ComputeInput, ComputeOutput, DeltaOp, StateDeltaOp, WorldRef};
 
-// Global allocator for wasm32-unknown-unknown (std provides none on this
-// target). dlmalloc grows linear memory on demand; the host's memory cap
-// bounds it. Host-target builds keep std's allocator so SDK unit tests run
-// on the host.
+// why: std provides no global allocator on wasm32-unknown-unknown; dlmalloc
+// grows linear memory on demand, bounded by the host's memory cap. Host-target
+// builds keep std's allocator so SDK unit tests run on the host.
 #[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static A: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
-/// User-facing entry point for a compute module — a trait, not a hardcoded
-/// signature.
+/// note: user-facing entry point for a compute module — a trait, not a
+/// hardcoded signature.
 ///
 /// V1's only entry form is a plain function
 /// `fn(ComputeInput) -> Result<ComputeOutput, ModuleError>` (see the blanket
@@ -60,16 +60,16 @@ static A: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 /// context argument **additively** (ABI §9.1, DR-49 posture) without breaking
 /// V1 modules.
 pub trait NexusModule {
-    /// Resolve one compute invocation.
+    /// note: resolves one compute invocation.
     fn compute(&self, input: ComputeInput) -> Result<ComputeOutput, ModuleError>;
 
-    /// One-shot initialization. No-op by default; called once after
+    /// note: one-shot initialization — no-op by default; called once after
     /// instantiation when the manifest declares `init_export`.
     fn init(&mut self) {}
 }
 
-/// Blanket impl: any `fn(ComputeInput) -> Result<ComputeOutput, ModuleError>`
-/// is a [`NexusModule`] (V1's only entry form).
+/// note: any `fn(ComputeInput) -> Result<ComputeOutput, ModuleError>` is a
+/// [`NexusModule`] (V1's only entry form).
 impl<F> NexusModule for F
 where
     F: Fn(ComputeInput) -> Result<ComputeOutput, ModuleError>,
@@ -79,7 +79,7 @@ where
     }
 }
 
-/// Generate the three ABI exports for a module (AR-2).
+/// note: generates the three ABI exports for a module (AR-2).
 ///
 /// Invocation:
 ///
@@ -124,7 +124,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// A minimal module entry used by the macro + trait tests.
+    /// note: a minimal module entry used by the macro + trait tests.
     fn echo_compute(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
         Ok(ComputeOutput {
             schema_version: input.schema_version,
@@ -135,7 +135,7 @@ mod tests {
         })
     }
 
-    /// The macro must expand to the three ABI exports wired to the shims
+    /// note: the macro must expand to the three ABI exports wired to the shims
     /// (AR-2). The full round-trip through linear memory runs on wasm32 (real
     /// host integration tests); on the host we verify the expansion compiles
     /// and the generated `compute` reaches the shim's sentinel path without
@@ -144,19 +144,19 @@ mod tests {
     fn nexus_entry_macro_expands_to_working_exports() {
         nexus_entry!(echo_compute);
 
-        // `init` is a no-op export.
+        // note: `init` is a no-op export.
         init();
 
-        // `alloc` returns a pointer into a leaked buffer (no crash on host).
+        // note: `alloc` returns a pointer into a leaked buffer (no crash on host).
         let _ptr = alloc(16);
 
-        // `compute` with an empty input must return the InputMalformed
+        // why: `compute` with an empty input must return the InputMalformed
         // sentinel (-1) without dereferencing the (null) pointers.
         assert_eq!(compute(0, 0, 0, 0), -1);
     }
 
-    /// The blanket impl must accept a plain fn item directly (V1's only entry
-    /// form), not just through the macro (AR-2).
+    /// note: the blanket impl must accept a plain fn item directly (V1's only
+    /// entry form), not just through the macro (AR-2).
     #[test]
     fn blanket_impl_accepts_fn_item() {
         fn double(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {

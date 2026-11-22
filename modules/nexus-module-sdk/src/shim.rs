@@ -1,4 +1,5 @@
-//! ABI export shims (AR-2): `alloc`, `init`, `compute`.
+//! see docs/specs/compute/compute-module-abi.md — ABI export shims (AR-2):
+//! `alloc`, `init`, `compute`.
 //!
 //! These are the bodies behind the exports [`nexus_entry!`](crate::nexus_entry)
 //! generates. Module authors never call them directly.
@@ -7,8 +8,9 @@ use crate::error::{write_output, ModuleError};
 use crate::types::ComputeInput;
 use crate::NexusModule;
 
-/// Allocate `len` bytes in linear memory and return the pointer. The host uses
-/// this to place the input JSON and reserve an output buffer inside our memory.
+/// note: allocates `len` bytes in linear memory and returns the pointer; the
+/// host uses this to place the input JSON and reserve an output buffer inside
+/// our memory.
 ///
 /// Memory is intentionally leaked: each `compute()` call runs in a fresh
 /// per-invocation instance (compass Q6), so the instance is discarded right
@@ -16,16 +18,16 @@ use crate::NexusModule;
 pub fn alloc(len: u32) -> u32 {
     let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
     let ptr_val = buf.as_mut_ptr() as u32;
-    std::mem::forget(buf); // leak; host will read/write these bytes
+    std::mem::forget(buf); // why: the host reads/writes these bytes after the call
     ptr_val
 }
 
-/// One-shot initialization. No-op for V1 modules (the
+/// note: one-shot initialization — no-op for V1 modules (the
 /// [`NexusModule::init`] default is a no-op too); the export exists so the
 /// host's `init_export` contract is satisfied.
 pub fn init() {}
 
-/// Run a single compute invocation.
+/// note: runs a single compute invocation.
 ///
 /// Reads a `ComputeInput` JSON envelope from `[in_ptr, in_ptr+in_len)`,
 /// delegates to `module`, and writes the `ComputeOutput` JSON envelope into
@@ -63,7 +65,7 @@ fn compute_inner<N: NexusModule>(
     Ok(bytes.len())
 }
 
-/// Pure invocation pipeline: deserialize → delegate → serialize.
+/// note: pure invocation pipeline — deserialize → delegate → serialize.
 ///
 /// Kept separate from the pointer marshalling so the SDK's host-target unit
 /// tests can exercise the full pipeline without linear-memory addresses
@@ -123,8 +125,8 @@ mod tests {
         assert_eq!(err, ModuleError::InputMalformed);
     }
 
-    /// The pointer-based `compute` entry must reject an empty input without
-    /// touching memory (host-safe check of the sentinel path; the full
+    /// note: the pointer-based `compute` entry must reject an empty input
+    /// without touching memory (host-safe check of the sentinel path; the full
     /// round-trip through linear memory is exercised by the real-host
     /// integration tests on wasm32).
     #[test]
