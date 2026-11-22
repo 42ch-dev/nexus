@@ -48,6 +48,7 @@ use serde_json::{json, Map, Value};
 // deliberately does not re-export them (that would widen its public API), so
 // the example reaches for them directly — `spoke-operations` is already a crate
 // dependency and examples are not part of the lib's public surface.
+// upgrade: re-export from the adapter when examples become a supported public surface.
 use spoke_operations::{spoke_ok, spoke_reject};
 
 // ── In-memory BaselinePorts mock ───────────────────────────────────────
@@ -61,6 +62,7 @@ use spoke_operations::{spoke_ok, spoke_reject};
 // simplify: `Mutex` for interior mutability — the 0.9.1 port traits are
 // `#[async_trait] async fn` (Send futures), so the mock must be `Sync`.
 // A production adapter backs these ports with real storage.
+// upgrade: replace with a lock-free mock when the port traits stop requiring Send/Sync.
 
 /// note: In-memory store implementing spoke's seven baseline port families.
 ///
