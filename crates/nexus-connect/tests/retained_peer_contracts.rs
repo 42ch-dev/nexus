@@ -114,7 +114,6 @@ const TOOL_ROTATED_NEW: &str = "tools.t10rl.rotated";
 const TOOL_RESERVED_BUILTIN: &str = "tools.fixture.builtin";
 const TOOL_RESERVED_CONTROL: &str = "tools.fixture.admitted";
 
-
 /// note: A dialer hello manifest advertising `tools` with the given `(input,
 /// output)` schemas.
 fn dialer_manifest_with_schemas(
@@ -213,7 +212,6 @@ impl Transport for OrderingTransport {
     }
 }
 
-
 /// note: an echo tool handler: answers with the arguments echoed back.
 fn echo_handler() -> ToolHandler {
     Arc::new(|args: Value| {
@@ -232,7 +230,6 @@ fn parked_handler(park: Arc<Notify>) -> ToolHandler {
         }) as BoxFuture<'static, SpokeResult<Value>>
     })
 }
-
 
 struct PeerHarness {
     addr: std::net::SocketAddr,
@@ -366,7 +363,6 @@ async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
     }
     cond()
 }
-
 
 /// note: A (client, server) pair of [`WsTransport`]s over a real `TcpListener`
 /// on `127.0.0.1:0`.
@@ -650,7 +646,6 @@ async fn ws_transport_golden_path_handshake_and_reverse_invoke() {
     adapter.close();
     responder.close();
 }
-
 
 /// note: MIGRATED from `peer_session.rs::second_session_same_peer_replaces_first`.
 ///
@@ -974,7 +969,6 @@ async fn accept_gate_bounds_registered_and_in_flight_connections() {
     }
     harness.stop(&allowlist).await;
 }
-
 
 // why: embedded-only imports (the cases below are the `embedded-mcp` half of
 // this target; the transport/session/boot cases above need `connect-client`
@@ -1360,7 +1354,6 @@ async fn embedded_row_with_non_object_input_is_registered_but_unlisted() {
     drop(shutdown_tx);
     harness.stop(&[peer_id]).await;
 }
-
 
 /// note: MIGRATED from `authz_hello.rs::negotiation_journey_intersection_and_non_advertised_denied`
 /// and `peer_tool.rs::peer_deny_wire_code_survives_to_http_error_details_verbatim`.

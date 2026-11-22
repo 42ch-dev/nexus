@@ -567,7 +567,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn digest_missing_when_both_files_absent() {
         let home = isolated_home();
@@ -629,7 +628,6 @@ mod tests {
             other => panic!("unreadable expected, got {other:?}"),
         }
     }
-
 
     /// note: drive the generic loop over a fixed poll sequence. Each iteration
     /// performs exactly one poll; the loop stops once the sequence is
@@ -824,7 +822,6 @@ mod tests {
         assert_eq!(applies.load(Ordering::SeqCst), 2);
     }
 
-
     /// note: 32 bytes for a valid hex key fixture (64 hex chars).
     const KEY_HEX: &str = "aaeda92ed0c29f28527c9c6d934c7ae4ad2d27a198c85e12a8a86c93be695e58";
 
@@ -923,7 +920,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn holder_swap_replaces_generation_in_flight_clones_keep_last_good() {
         let boot_config = PeerToolsConfig {
@@ -948,7 +944,6 @@ mod tests {
         // still sees the old generation.
         assert_eq!(in_flight.config.peer_ids, vec!["peer-a"]);
     }
-
 
     fn manifest_with_tools(tools: &[&str]) -> HostCapabilityManifest {
         let mut capabilities: Vec<String> = vec!["spoke-baseline".to_owned()];

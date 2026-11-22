@@ -494,7 +494,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn absent_policy_keys_default_to_first_stays_empty_rank() {
         // DF-91: a `daemon.json` without the new keys must parse as
@@ -615,7 +614,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn authz_hello_allowlist_umbrella_rejected() {
         for entry in ["tools", "tools.*", "tools.t4", "tools.t4.*"] {
@@ -701,7 +699,6 @@ mod tests {
         assert_eq!(config.peer_ids, vec!["peer-1".to_owned()]);
     }
 
-
     #[test]
     fn authz_hello_peer_keys_missing_file_is_empty() {
         let home = isolated_home();
@@ -770,7 +767,6 @@ mod tests {
             Err(ConnectConfigError::InvalidPeerKeys(_))
         ));
     }
-
 
     #[test]
     fn absent_mcp_visibility_defaults_to_empty() {
