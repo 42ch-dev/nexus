@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * @nexus/design-tokens — token projection consistency gate.
- *
+ *note: 
  * Regenerates from the DESIGN pair in memory and compares the three derived
  * checked-in artifacts byte-for-byte to what the compiler would produce today.
  * Also asserts coverage/parity guarantees the compiler enforces on load:
@@ -44,7 +44,7 @@ async function main() {
     }
   }
 
-  // No stale serif/source-string pins may survive in any generated artifact.
+  // note: No stale serif/source-string pins may survive in any generated artifact.
   const tokensCss = await readFile(join(repoRoot, OUTPUTS[0].rel), 'utf8');
   if (tokensCss.includes("'Source Serif 4'") || tokensCss.includes('source-serif-4-latin-')) {
     console.error('FAIL: generated tokens.css still carries a stale Source Serif 4 pin');
@@ -54,7 +54,7 @@ async function main() {
     console.error('FAIL: generated tokens.css references the retired Canvas Chromatic Hygiene appendix');
     failed += 1;
   }
-  // The generated header must cite current DESIGN sections and be deterministic.
+  // why: The generated header must cite current DESIGN sections and be deterministic.
   if (!/\*\s*Source sections: DESIGN\.md/.test(tokensCss)) {
     console.error('FAIL: generated tokens.css header does not carry a DESIGN source pointer');
     failed += 1;

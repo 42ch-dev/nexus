@@ -28,14 +28,14 @@ import {
   writeRepoFile,
 } from "./test-harness.mjs";
 
-/** Repository-root-relative discovery path the checker reads. */
+/** note: Repository-root-relative discovery path the checker reads. */
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
 const CONSUMER_FIXTURES_DIR = join(REPO_ROOT, CONSUMER_FIXTURES_PATH);
-/** Checked-in accounting every fixture repo must carry. */
+/** why: Checked-in accounting every fixture repo must carry. */
 const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
 
 /**
- * Accounting document for a fixture repo: every carrier entry, either with the
+ * note: Accounting document for a fixture repo: every carrier entry, either with the
  * fixture that consumes it or explicitly without one and why.
  *
  * @param {Record<string, string | null>} entries
@@ -59,11 +59,11 @@ function consumerAccounting(entries) {
   )}\n`;
 }
 
-/** Kept in sync with the checker's scratch prefix. */
+/** note: Kept in sync with the checker's scratch prefix. */
 const SCRATCH_PREFIX = "nexus-contract-package-";
 
 /**
- * Dependency-free standalone crate: `cargo package --offline` needs no registry
+ * note: Dependency-free standalone crate: `cargo package --offline` needs no registry
  * for it, so the script's run loop is testable without a network.
  */
 const TINY_CRATE_DIR = "tiny-contract";
@@ -79,7 +79,7 @@ const TINY_MANIFEST = [
 ].join("\n");
 
 /**
- * Fixture repo whose carrier names only the tiny crate.
+ * why: Fixture repo whose carrier names only the tiny crate.
  *
  * @param {{ withSource?: boolean }} [options]
  * @returns {string}
@@ -103,18 +103,18 @@ function tinyFixture(options = {}) {
   if (options.withSource !== false) {
     files[`${TINY_CRATE_DIR}/src/lib.rs`] = "pub fn tiny() {}\n";
   }
-  // Declared fixture-less: the entry has no consumer and the accounting says so.
+  // note: Declared fixture-less: the entry has no consumer and the accounting says so.
   files[CONSUMER_ACCOUNTING_PATH] = consumerAccounting({
     "nexus-tiny-contract": null,
   });
   const dir = createTempRepo({ files });
-  // Staging derives its path list from Git, as it does in a real checkout.
+  // note: Staging derives its path list from Git, as it does in a real checkout.
   initGitRepo(dir);
   return dir;
 }
 
 /**
- * Temp repo whose carrier names only a standalone fixture subject copied from
+ * why: Temp repo whose carrier names only a standalone fixture subject copied from
  * `<caseDir>/subject`, with `<caseDir>/consumer` installed under the discovery
  * path the checker reads for that entry.
  *
@@ -152,14 +152,14 @@ function consumerFixtureRepo(caseDir, entryName, options = {}) {
     consumerAccounting({ [entryName]: entryName }),
   );
   if (options.initGit !== false) {
-    // Staging derives its path list from Git, as it does in a real checkout.
+    // note: Staging derives its path list from Git, as it does in a real checkout.
     initGitRepo(dir);
   }
   return dir;
 }
 
 /**
- * Disposable scratch dirs currently present in the checker's scratch parent.
+ * note: Disposable scratch dirs currently present in the checker's scratch parent.
  *
  * @returns {string[]}
  */
@@ -198,7 +198,7 @@ test("every carrier entry is packaged and reported with archive evidence", () =>
     assert.deepEqual(row.dependencies, []);
     assert.equal(row.consumer, null);
 
-    // Staging never runs Cargo against the source checkout.
+    // why: Staging never runs Cargo against the source checkout.
     assert.equal(readFileSync(join(dir, "Cargo.lock"), "utf8"), lockBefore);
   } finally {
     cleanupTempRepo(dir);
@@ -206,7 +206,7 @@ test("every carrier entry is packaged and reported with archive evidence", () =>
 });
 
 test("a crate Cargo refuses to pack fails the report and names the first failure", () => {
-  // No `src/lib.rs`: Cargo has no target to package.
+  // note: No `src/lib.rs`: Cargo has no target to package.
   const dir = tinyFixture({ withSource: false });
   try {
     const report = checkContractPackageability(dir);
@@ -263,7 +263,7 @@ test("staging fails closed when Git cannot list the working source", () => {
         2,
       )}\n`,
     );
-    // No `initGitRepo`: a source tree Git cannot list must fail closed instead
+    // why: No `initGitRepo`: a source tree Git cannot list must fail closed instead
     // of falling back to a verbatim, ignore-blind copy.
     assert.throws(
       () => checkContractPackageability(dir),
@@ -305,7 +305,7 @@ test("staging leaves gitignored working files out of the packed archive", () => 
     initGit: false,
   });
   try {
-    // A build script the archive must not carry. If the gitignored file leaked
+    // why: A build script the archive must not carry. If the gitignored file leaked
     // into staging, Cargo would pack it and the consumer build would run it.
     writeRepoFile(dir, ".gitignore", "build.rs\n");
     writeRepoFile(
@@ -348,7 +348,7 @@ test("an archive missing a packed module fails the consumer with a named cause a
     assert.equal(row.archive.file, "nexus-fixture-generated-0.1.0.crate");
     assert.equal(row.consumer.ok, false);
     assert.match(row.consumer.cause, /consumer run failed/);
-    // The generated module the lib needs was never packed.
+    // why: The generated module the lib needs was never packed.
     assert.match(row.consumer.output, /generated/);
     assert.equal(row.cause, row.consumer.cause);
   } finally {
@@ -443,7 +443,7 @@ test("a consumer-supplied Cargo config is refused before any resolution", () => 
       row.consumer.cause,
       /consumer fixture supplies its own Cargo config/,
     );
-    // The guard fires before any Cargo invocation: nothing was declared,
+    // why: The guard fires before any Cargo invocation: nothing was declared,
     // patched or resolved, and Cargo produced no output.
     assert.deepEqual(row.consumer.declared, []);
     assert.deepEqual(row.consumer.patched, []);
@@ -456,7 +456,7 @@ test("a consumer-supplied Cargo config is refused before any resolution", () => 
 });
 
 /**
- * Contract crates the real consumer fixtures resolve. Every one is a member of
+ * note: Contract crates the real consumer fixtures resolve. Every one is a member of
  * the temp workspace so workspace inheritance and `[workspace.dependencies]`
  * stay the product's own; only the entries a case names in its carrier pack.
  */
@@ -469,7 +469,7 @@ const CONSUMER_CLOSURE = [
 ];
 
 /**
- * Temp repo carrying the real contract crates, sources included, with one
+ * note: Temp repo carrying the real contract crates, sources included, with one
  * consumer fixture installed under the discovery path the checker reads. The
  * workspace root is the real root manifest with its member list narrowed to
  * the closure, so the fixture inherits the product dependency table instead of
@@ -491,7 +491,7 @@ function realConsumerRepo(entryName, entries) {
       `members = [\n${members}\n]`,
     ),
   );
-  // The product lock keeps every registry version resolvable offline.
+  // why: The product lock keeps every registry version resolvable offline.
   cpSync(join(REPO_ROOT, "Cargo.lock"), join(dir, "Cargo.lock"));
   for (const name of CONSUMER_CLOSURE) {
     cpSync(join(REPO_ROOT, "crates", name), join(dir, "crates", name), {
@@ -531,7 +531,7 @@ function realConsumerRepo(entryName, entries) {
 }
 
 /**
- * The report row for one packed entry.
+ * note: The report row for one packed entry.
  *
  * @param {import("./check-contract-packageability.mjs").PackageabilityReport} report
  * @param {string} name
@@ -543,7 +543,7 @@ function rowFor(report, name) {
 }
 
 /**
- * Temp repo carrying standalone `modules/*` contract crates, sources included,
+ * note: Temp repo carrying standalone `modules/*` contract crates, sources included,
  * with one consumer fixture installed under the discovery path the checker
  * reads. Standalone crates cannot be workspace members, so the root is an empty
  * virtual workspace and the carriers are the only entries that pack.
@@ -558,7 +558,7 @@ function moduleConsumerRepo(entryName, modules) {
   for (const name of modules) {
     cpSync(join(REPO_ROOT, "modules", name), join(dir, "modules", name), {
       recursive: true,
-      // A local build dir is not source: the real checkout leaves it untracked.
+      // note: A local build dir is not source: the real checkout leaves it untracked.
       filter: (source) => source.split("/").at(-1) !== "target",
     });
   }
@@ -614,7 +614,7 @@ test("the contracts consumer round-trips a generated object from its archive", (
     );
     assert.equal(consumed.source, `archive:${row.archive.sha256}`);
     assert.ok(consumed.manifest.includes("archives"), consumed.manifest);
-    // The compiled program asserts every field; its own line is the proof it
+    // note: The compiled program asserts every field; its own line is the proof it
     // ran to the end of its checks.
     assert.match(
       row.consumer.output,
@@ -644,7 +644,7 @@ test("the workflow-ir consumer rejects a dangling reference from its archive", (
     for (const patched of row.consumer.patched) {
       assert.equal(
         patched.sha256,
-        /** @type {{sha256: string}} */ (rowFor(report, patched.name).archive)
+        /** note: @type {{sha256: string}} */ (rowFor(report, patched.name).archive)
           .sha256,
       );
     }
@@ -674,7 +674,7 @@ test("the pattern consumer scans every packed package and pins its template memb
       row.consumer.patched.map((patched) => patched.name),
       ["nexus-contracts", "nexus-pattern", "nexus-workflow-ir"],
     );
-    // The registry root the consumer scans is written from the archive's own
+    // note: The registry root the consumer scans is written from the archive's own
     // packed fixture members, so this line is archive evidence: all three
     // shipped directories load and all three templates match their IR hashes.
     assert.match(
@@ -693,7 +693,7 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
     "nexus-pattern",
   ]);
   try {
-    // Every shipped member is embedded through `nexus_pattern::fixtures`, so
+    // note: Every shipped member is embedded through `nexus_pattern::fixtures`, so
     // dropping one from the tracked source must break the consumer build rather
     // than leave a smaller archive that still passes. `verdict.md` is the member
     // the package's own tests never read, which is exactly the gap I-000533
@@ -709,7 +709,7 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
 
     const report = checkContractPackageability(dir);
     assert.equal(report.ok, false);
-    // This fixture carries one consumer, so failing it also withdraws the
+    // note: This fixture carries one consumer, so failing it also withdraws the
     // coverage proof of the archives it consumes; the failing consumer keeps
     // its own named cause below.
     assert.notEqual(report.firstFailure, null);
@@ -718,7 +718,7 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
     assert.equal(row.ok, false);
     assert.equal(row.consumer.ok, false);
     assert.match(row.consumer.cause, /consumer run failed/);
-    // The failure must come from the extracted archive and name the omitted file.
+    // why: The failure must come from the extracted archive and name the omitted file.
     assert.match(
       row.consumer.output,
       /archives\/nexus-pattern\/nexus-pattern-[\d.]+\/src\/\.\.\/tests\/fixtures\/patterns\/step-with-judge\/templates\/verdict\.md/,
@@ -747,12 +747,12 @@ test("the module-sdk consumer builds a wasm32 guest through nexus_entry and the 
       /nexus-module-sdk host API validated consumer-probe/,
     );
 
-    // The guest is real wasm32 output built from the same extracted archive.
+    // note: The guest is real wasm32 output built from the same extracted archive.
     assert.match(row.consumer.guest.artifact, /\.wasm$/);
     assert.ok(row.consumer.guest.bytes > 8, String(row.consumer.guest.bytes));
     assert.match(row.consumer.guest.sha256, /^[0-9a-f]{64}$/);
 
-    // And the guest declares the SDK only: no host-side crate can ride along.
+    // why: And the guest declares the SDK only: no host-side crate can ride along.
     const guestManifest = readFileSync(
       join(CONSUMER_FIXTURES_DIR, "nexus-module-sdk/guest/Cargo.toml"),
       "utf8",
@@ -806,7 +806,7 @@ test("the module-test consumer runs its ABI tests against the dev-dependency fro
       row.consumer.patched.map((patched) => patched.name),
       ["nexus-module-sdk", "nexus-module-test"],
     );
-    // The mini-host is a dev-dependency, so the fixture must ship a test target
+    // why: The mini-host is a dev-dependency, so the fixture must ship a test target
     // and the checker must have run it with `cargo test`.
     assert.equal(row.consumer.mode, "test");
     assert.match(row.consumer.output, /running 2 tests/);
@@ -853,13 +853,13 @@ test("the narrative consumer reads a world and its KbStore entries from archives
       /nexus-narrative read back world wld_consumer with entry kb_/,
     );
 
-    // Both packages are positively consumed from their own archives, and the
+    // note: Both packages are positively consumed from their own archives, and the
     // knowledge package needs no fixture of its own to earn that evidence.
     for (const name of ["nexus-contracts", "nexus-knowledge", "nexus-narrative"]) {
       const resolved = row.consumer.resolved.find((entry) => entry.name === name);
       assert.equal(
         resolved.source,
-        `archive:${/** @type {{sha256: string}} */ (rowFor(report, name).archive).sha256}`,
+        `archive:${/** note: @type {{sha256: string}} */ (rowFor(report, name).archive).sha256}`,
       );
       assert.ok(resolved.manifest.includes("archives"), resolved.manifest);
       assert.equal(
@@ -869,7 +869,7 @@ test("the narrative consumer reads a world and its KbStore entries from archives
       );
     }
     assert.equal(rowFor(report, "nexus-knowledge").consumer, null);
-    // Knowledge has no runner of its own: its coverage names the fixture whose
+    // note: Knowledge has no runner of its own: its coverage names the fixture whose
     // resolved graph pulled the archive in.
     assert.deepEqual(rowFor(report, "nexus-knowledge").coveredBy, [
       `${CONSUMER_FIXTURES_PATH}/nexus-narrative`,
@@ -891,7 +891,7 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
       "../../.agents/skills/probe",
       join(dir, ".claude/skills/probe"),
     );
-    // A link may point at a path that is not materialized in this checkout; it
+    // note: A link may point at a path that is not materialized in this checkout; it
     // is still one tree entry with its own bytes, and staging must copy it.
     symlinkSync("../../.agents/skills/absent", join(dir, ".claude/skills/absent"));
     gitOk(dir, ["add", "-A"]);
@@ -907,14 +907,14 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
 
     const report = checkContractPackageability(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
-    // The whole point: an unchanged checkout of a revision that contains a
+    // note: The whole point: an unchanged checkout of a revision that contains a
     // relative link must verify as that revision, or no plan can use the
     // receipt (`unclean-evidence`).
     assert.equal(report.source.clean, true, JSON.stringify(report.source));
     assert.equal(report.source.mismatch, undefined);
     const sha = report.source.sha;
 
-    // Staging preserves link bytes; the comparison still catches a retarget,
+    // why: Staging preserves link bytes; the comparison still catches a retarget,
     // so this is not a check that stopped checking.
     const stage = mkdtempSync(join(tmpdir(), "nexus-stage-link-"));
     try {
@@ -941,7 +941,7 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
 test("an archive no passing consumer consumes fails as a pack-only result", () => {
   const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
   try {
-    // A second entry that packs but that no consumer fixture names: its own
+    // why: A second entry that packs but that no consumer fixture names: its own
     // fixture is absent and nothing else consumes it.
     writeRepoFile(dir, `${TINY_CRATE_DIR}/Cargo.toml`, TINY_MANIFEST);
     writeRepoFile(dir, `${TINY_CRATE_DIR}/src/lib.rs`, "pub fn tiny() {}\n");
@@ -963,7 +963,7 @@ test("an archive no passing consumer consumes fails as a pack-only result", () =
         2,
       )}\n`,
     );
-    // The second entry is declared fixture-less; nothing consumes it.
+    // note: The second entry is declared fixture-less; nothing consumes it.
     writeRepoFile(
       dir,
       CONSUMER_ACCOUNTING_PATH,
@@ -981,7 +981,7 @@ test("an archive no passing consumer consumes fails as a pack-only result", () =
       uncovered.cause,
       "pack-only: no passing consumer consumes nexus-tiny-contract",
     );
-    // The covered entry keeps its own consumer proof; coverage is a per-archive
+    // why: The covered entry keeps its own consumer proof; coverage is a per-archive
     // requirement, not a global switch.
     const covered = rowFor(report, "nexus-fixture-public");
     assert.equal(covered.ok, true, covered.cause ?? "");
@@ -1008,7 +1008,7 @@ test("--require-clean refuses a dirty tree and emits no receipt", () => {
     assert.match(refused.stderr, /refused: unclean-evidence/);
     assert.equal(refused.stdout.trim(), "", "no receipt on an unclean tree");
 
-    // The plain check still reports the same tree and exits 0: the assertion is
+    // why: The plain check still reports the same tree and exits 0: the assertion is
     // opt-in for the step that produces evidence.
     const plain = runReleaseScript(
       "check-contract-packageability.mjs",
@@ -1023,7 +1023,7 @@ test("--require-clean refuses a dirty tree and emits no receipt", () => {
 });
 
 test("a filtered path is compared by the blob Git stores, not its working-tree bytes", () => {
-  // The repository tracks binary assets through an LFS clean filter, so a
+  // why: The repository tracks binary assets through an LFS clean filter, so a
   // stored blob is a pointer rather than the checkout's bytes. Comparing the
   // staged file raw reported every clean checkout as unclean; the comparison
   // must run Git's own conversion over the staged copy.
@@ -1084,7 +1084,7 @@ test("a patch a consumer declares but never resolves does not count as coverage"
         2,
       )}\n`,
     );
-    // An optional dependency no feature enables: Cargo still lists it as a
+    // why: An optional dependency no feature enables: Cargo still lists it as a
     // declared dependency (so the checker supplies the patch), but it never
     // enters the resolved graph, and the fixture itself still builds and runs.
     // `patched` therefore says the archive was offered, not that anything used
@@ -1122,7 +1122,7 @@ test("a patch a consumer declares but never resolves does not count as coverage"
     assert.equal(report.ok, false);
     const row = rowFor(report, "nexus-tiny-contract");
     assert.equal(row.ok, false);
-    // The fixture ran and the archive was offered to it — the row still fails,
+    // why: The fixture ran and the archive was offered to it — the row still fails,
     // because nothing resolved that archive.
     assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
     assert.deepEqual(
@@ -1138,7 +1138,7 @@ test("a patch a consumer declares but never resolves does not count as coverage"
       row.cause,
       "unresolved-coverage: nexus-tiny-contract was patched into a consumer but resolution never used its archive",
     );
-    // Nothing resolved the archive, so no fixture is named as its proof.
+    // why: Nothing resolved the archive, so no fixture is named as its proof.
     assert.equal(row.coveredBy, null);
   } finally {
     cleanupTempRepo(dir);
@@ -1161,7 +1161,7 @@ test("a repository without the consumer accounting fails instead of packing", ()
 test("removing a declared fixture fails until the accounting is edited", () => {
   const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
   try {
-    // The fixture directory is deleted and the accounting still declares it:
+    // why: The fixture directory is deleted and the accounting still declares it:
     // "fixtures were removed" must not read as "no fixtures by design".
     rmSync(join(dir, CONSUMER_FIXTURES_PATH, "nexus-fixture-public"), {
       recursive: true,
@@ -1172,7 +1172,7 @@ test("removing a declared fixture fails until the accounting is edited", () => {
       /consumer accounting failed: .*nexus-fixture-public declares the fixture nexus-fixture-public, which is not in the tree/,
     );
 
-    // The deliberate edit — declare the entry fixture-less, with a reason —
+    // note: The deliberate edit — declare the entry fixture-less, with a reason —
     // makes the same tree a legitimate pack-only run.
     writeRepoFile(
       dir,
@@ -1195,7 +1195,7 @@ test("removing a declared fixture fails until the accounting is edited", () => {
 });
 
 test("the declared fixture directory is the one that runs", () => {
-  // A renamed fixture — directory and accounting record changed together — is
+  // note: A renamed fixture — directory and accounting record changed together — is
   // an accepted deliberate act. The record names the directory that runs, so
   // the evidence cannot describe a fixture the run never staged, and a declared
   // runner cannot be skipped while the row stays green through another
@@ -1222,7 +1222,7 @@ test("the declared fixture directory is the one that runs", () => {
 });
 
 test("declaring another entry's fixture fails as a misdirected declaration", () => {
-  // `nexus-workflow-ir` declares the `nexus-contracts` fixture, which consumes
+  // note: `nexus-workflow-ir` declares the `nexus-contracts` fixture, which consumes
   // contracts only, while the `nexus-pattern` fixture is what actually resolves
   // the workflow-ir archive. The row must not stay green on the pattern
   // fixture's coverage: the declared runner is a claim about its own entry.
@@ -1253,7 +1253,7 @@ test("declaring another entry's fixture fails as a misdirected declaration", () 
     assert.equal(report.ok, false);
     const misdirected = rowFor(report, "nexus-workflow-ir");
     assert.equal(misdirected.ok, false);
-    // The declared runner ran and passed; the archive it never used is still
+    // why: The declared runner ran and passed; the archive it never used is still
     // consumed by another fixture, so this is not a coverage gap.
     assert.equal(misdirected.consumer.ok, true, misdirected.consumer.cause ?? "");
     assert.equal(
@@ -1265,7 +1265,7 @@ test("declaring another entry's fixture fails as a misdirected declaration", () 
       `misdirected-fixture: nexus-workflow-ir declares ${CONSUMER_FIXTURES_PATH}/nexus-contracts, but only ${CONSUMER_FIXTURES_PATH}/nexus-pattern resolved its archive`,
     );
     assert.equal(misdirected.coveredBy, null);
-    // A declaration naming the fixture that did resolve the entry stays green.
+    // note: A declaration naming the fixture that did resolve the entry stays green.
     for (const name of ["nexus-contracts", "nexus-pattern"]) {
       const row = rowFor(report, name);
       assert.equal(row.ok, true, row.cause ?? "");

@@ -1,5 +1,5 @@
 /**
- * Electron utility-process owner of the app-managed TypeScript service
+ * note: Electron utility-process owner of the app-managed TypeScript service
  * (v1.192 P0-T4). Loaded only via `utilityProcess.fork` — never in the
  * sandboxed renderer.
  *
@@ -51,7 +51,7 @@ if (!port) {
 
 const post = (message: unknown): void => port.postMessage(message);
 
-/** Main-owned trusted launch payload; `startService` re-validates every field. */
+/** note: Main-owned trusted launch payload; `startService` re-validates every field. */
 function requireServiceOptions(payload: unknown): ServiceOptions {
   if (!payload || typeof payload !== 'object') {
     throw utilityError('invalid_input', 'start payload must be the trusted service options');
@@ -65,11 +65,11 @@ function requireServiceOptions(payload: unknown): ServiceOptions {
   if (!('port' in payload) || typeof payload.port !== 'number') {
     throw utilityError('invalid_input', 'start requires a port');
   }
-  const options = payload as ServiceOptions; // home/host/port admitted above; service validates the rest
+  const options = payload as ServiceOptions; // note: home/host/port admitted above; service validates the rest
   return options;
 }
 
-/** Reset carries the trusted home only, after main confirmed the service close. */
+/** why: Reset carries the trusted home only, after main confirmed the service close. */
 function requireResetHome(payload: unknown): string {
   if (!payload || typeof payload !== 'object' || !('home' in payload)) {
     throw utilityError('invalid_input', 'reset-local-state requires the trusted home');
@@ -91,7 +91,7 @@ function closeBudgetExceeded(): Promise<never> {
 }
 
 /**
- * Cooperative close inside the frozen 5s budget. A confirmed report releases
+ * note: Cooperative close inside the frozen 5s budget. A confirmed report releases
  * the handle; an unconfirmed close retains it (and the published discovery) so
  * a retry can still confirm cleanup — never a successful forced cleanup.
  */
@@ -132,7 +132,7 @@ async function dispatch(request: UtilityRequest): Promise<unknown> {
       }
       state.running = running;
       state.serviceState = 'running';
-      // The published, schema-derived discovery of the service that just
+      // note: The published, schema-derived discovery of the service that just
       // reached readiness — the same record `startService` returns.
       post({ type: 'service-ready', generation: request.generation, discovery: running.discovery } satisfies ServiceReadyMessage);
       return { discovery: running.discovery };
@@ -173,7 +173,7 @@ async function handleMessage(raw: unknown): Promise<void> {
       inFlight = false;
     }
   } catch (error) {
-    // A frame that failed admission cannot be correlated beyond its own ids.
+    // why: A frame that failed admission cannot be correlated beyond its own ids.
     post(utilityErr(generation, request_id, utilityMessageCode(error), utilityMessageText(error)));
   }
 }

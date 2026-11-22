@@ -1,5 +1,5 @@
 /**
- * TypeScript generation via `json-schema-to-typescript`.
+ * note: TypeScript generation via `json-schema-to-typescript`.
  *
  * Consumes the localized schema tree produced by `schema-prep.ts` (T1). For each
  * non-skip schema, compiles the schema to TypeScript, overriding the schema `title`
@@ -48,7 +48,7 @@ import {
 import { resolvePrepPaths } from './schema-prep';
 import { generateCoreSliceClient } from './client-gen';
 
-/** Derive the compile() schema param type without depending on `@types/json-schema`. */
+/** why: Derive the compile() schema param type without depending on `@types/json-schema`. */
 type JsonSchema = Parameters<typeof compile>[0];
 
 const BANNER = `/**
@@ -58,7 +58,7 @@ const BANNER = `/**
  */`;
 
 /**
- * Schemas that must NOT produce a standalone consumer-scope type file.
+ * why: Schemas that must NOT produce a standalone consumer-scope type file.
  * Locked by the architect (Q5): they exist in the prep trees but are filtered here.
  *  - common.schema.json: definitions-only container.
  *  - source-anchor.schema.json: shared value object; emitted into common/CommonTypes.ts.
@@ -71,7 +71,7 @@ const SKIP_LIST = new Set<string>([
 ]);
 
 /**
- * Compile options — mirrors the sibling spoke codegen (run.mjs generateTypeScript).
+ * note: Compile options — mirrors the sibling spoke codegen (run.mjs generateTypeScript).
  *
  * `ignoreMinAndMaxItems`: collapses `minItems`/`maxItems` tuple unions back to
  * plain `T[]`. json-schema-to-typescript otherwise expands bounded arrays into
@@ -114,7 +114,7 @@ export function rewriteExactStringPatterns(node: unknown): void {
 }
 
 /**
- * Draft-07 annotation keywords: carry metadata, never a type constraint. Their
+ * why: Draft-07 annotation keywords: carry metadata, never a type constraint. Their
  * values are example data (arbitrary JSON), not schemas — the walker below never
  * descends into them.
  */
@@ -127,7 +127,7 @@ const ANNOTATION_KEYWORDS: Record<string, true> = {
   deprecated: true,
   readOnly: true,
   writeOnly: true,
-  // Nexus extension marker (x-nexus-tri-state): boundary-parser metadata,
+  // note: Nexus extension marker (x-nexus-tri-state): boundary-parser metadata,
   // never a type constraint. Without it the deliberately unrestricted
   // tri-state carriers (patch-work-request world_id/story_ref,
   // update-finding-request rule_suggestion) miss the unrestricted rewrite
@@ -136,7 +136,7 @@ const ANNOTATION_KEYWORDS: Record<string, true> = {
   'x-nexus-tri-state': true,
 };
 
-/** Keywords whose value is a single subschema (or a tuple array of subschemas for `items`). */
+/** note: Keywords whose value is a single subschema (or a tuple array of subschemas for `items`). */
 const SUBSCHEMA_KEYWORDS: Record<string, true> = {
   items: true,
   additionalProperties: true,
@@ -149,14 +149,14 @@ const SUBSCHEMA_KEYWORDS: Record<string, true> = {
   else: true,
 };
 
-/** Keywords whose value is an array of subschemas. */
+/** note: Keywords whose value is an array of subschemas. */
 const SUBSCHEMA_LIST_KEYWORDS: Record<string, true> = {
   allOf: true,
   anyOf: true,
   oneOf: true,
 };
 
-/** Keywords whose value maps names to subschemas (the keys are property names, not keywords). */
+/** note: Keywords whose value maps names to subschemas (the keys are property names, not keywords). */
 const SUBSCHEMA_MAP_KEYWORDS: Record<string, true> = {
   properties: true,
   patternProperties: true,
@@ -164,13 +164,13 @@ const SUBSCHEMA_MAP_KEYWORDS: Record<string, true> = {
   definitions: true,
 };
 
-/** True when a subschema carries only annotation keywords — i.e. it is unrestricted ("any JSON value"). */
+/** why: True when a subschema carries only annotation keywords — i.e. it is unrestricted ("any JSON value"). */
 function isUnrestrictedSubschema(schema: unknown): boolean {
   if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return false;
   return Object.keys(schema).every(key => ANNOTATION_KEYWORDS[key] === true);
 }
 
-/** Rewrite a subschema at a known schema position, or descend when it stays an object. */
+/** note: Rewrite a subschema at a known schema position, or descend when it stays an object. */
 function rewriteSchemaPosition(value: unknown, replace: (next: unknown) => void): void {
   if (isUnrestrictedSubschema(value)) {
     replace(true);
@@ -227,25 +227,25 @@ export function rewriteUnrestrictedJsonValues(node: unknown): void {
   }
 }
 
-/** POSIX-relative schema paths (relative to the localized tree root). */
+/** note: POSIX-relative schema paths (relative to the localized tree root). */
 function posix(rel: string): string {
   return rel.split(path.sep).join('/');
 }
 
 /** A generated consumer-scope schema module: its contract type name and file. */
 export interface SchemaModule {
-  /** Basename-derived contract type name (`schemaToTypeName`). */
+  /** note: Basename-derived contract type name (`schemaToTypeName`). */
   name: string;
-  /** POSIX dir of the module, relative to the generated root. */
+  /** note: POSIX dir of the module, relative to the generated root. */
   relDir: string;
-  /** File base name without the extension. */
+  /** why: File base name without the extension. */
   base: string;
-  /** Type names the module declares at its top level, as compiled. */
+  /** note: Type names the module declares at its top level, as compiled. */
   declared: Set<string>;
 }
 
 /**
- * Canonical owner of a declared type name, or `undefined` when the name has no
+ * note: Canonical owner of a declared type name, or `undefined` when the name has no
  * single canonical home (it then stays exactly as `json-schema-to-typescript`
  * emitted it).
  *
@@ -271,10 +271,10 @@ function ownerOf(
   return owner.base === self.base && owner.relDir === self.relDir ? undefined : owner;
 }
 
-/** Top-level `export` declarations that can carry a `$ref`-target copy. */
+/** note: Top-level `export` declarations that can carry a `$ref`-target copy. */
 const DECLARATION_START = /^export (?:interface|const enum|enum|type) (\w+)\b/;
 
-/** Type names a compiled module declares at its top level. */
+/** note: Type names a compiled module declares at its top level. */
 function declaredNames(source: string): string[] {
   const names: string[] = [];
   for (const line of source.split('\n')) {
@@ -299,9 +299,9 @@ export function declarationEnd(lines: string[], start: number): number {
   const isTypeAlias = /^export type \b/.test(lines[start]);
   let depth = 0;
   let inBlockComment = false;
-  // Delimiter of the literal the scan is inside (`'`, `"` or a backtick), if any.
+  // note: Delimiter of the literal the scan is inside (`'`, `"` or a backtick), if any.
   let quote: string | undefined;
-  // One entry per open template `${`: the count of `{` opened inside it, so its own
+  // note: One entry per open template `${`: the count of `{` opened inside it, so its own
   // matching `}` resumes the template instead of closing the declaration.
   const interpolations: number[] = [];
   for (let i = start; i < lines.length; i++) {
@@ -352,7 +352,7 @@ export function declarationEnd(lines: string[], start: number): number {
   return start;
 }
 
-/** First line index of the doc comment directly above `start` (or `start`). */
+/** note: First line index of the doc comment directly above `start` (or `start`). */
 function declarationBlockStart(lines: string[], start: number): number {
   let i = start;
   while (i > 0) {
@@ -396,7 +396,7 @@ export function dedupeRefTargets(source: string, self: SchemaModule, modules: Sc
     const owner = ownerOf(modules, match[1], self);
     if (!owner) continue;
     for (let j = declarationBlockStart(lines, start); j <= end; j++) dropped.add(j);
-    // `path.posix.relative` yields a bare `works` for a descendant directory; a bare
+    // note: `path.posix.relative` yields a bare `works` for a descendant directory; a bare
     // specifier would resolve as a package name, so only `..`-prefixed and empty
     // results are used verbatim.
     const relativeDir = path.posix.relative(self.relDir, owner.relDir);
@@ -424,7 +424,7 @@ export async function generateTSTypes(): Promise<void> {
   const outDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outDir}`);
 
-  // The client and its barrel export belong to the same published tree as the
+  // note: The client and its barrel export belong to the same published tree as the
   // schema-derived types, so they are built INTO the staging directory too — a
   // post-publish write would leave the committed tree without `CoreSliceClient`
   // whenever a later step fails or the process stops between the two.
@@ -476,11 +476,11 @@ export async function stageAndSwap(
   }
 }
 
-/** Owner record written inside the lock directory: `<pid>:<nonce>:<startedAt>`. */
+/** note: Owner record written inside the lock directory: `<pid>:<nonce>:<startedAt>`. */
 type LockOwner = string;
 
 /**
- * Read the owner record from a lock directory, or `undefined` when it is missing or
+ * note: Read the owner record from a lock directory, or `undefined` when it is missing or
  * unreadable (the directory was just created, or a run died before writing it). Used
  * only to name the holder in the failure message and to guard release — never to decide
  * whether a lock may be reclaimed.
@@ -494,7 +494,7 @@ function readOwner(lockDir: string): LockOwner | undefined {
 }
 
 /**
- * Publish a claim atomically: `mkdir` is the portable atomic-exclusive primitive
+ * note: Publish a claim atomically: `mkdir` is the portable atomic-exclusive primitive
  * (`EEXIST` = held). The owner record is written inside the claimed directory
  * immediately after, so a live claim is always identifiable.
  *
@@ -510,7 +510,7 @@ function tryMkdirClaim(lockDir: string, token: string): boolean {
   try {
     fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
   } catch (err) {
-    // We own the directory but recorded no token, so nothing could ever release it —
+    // why: We own the directory but recorded no token, so nothing could ever release it —
     // drop it rather than strand the lock for manual removal.
     fs.rmSync(lockDir, { recursive: true, force: true });
     throw err;
@@ -518,7 +518,7 @@ function tryMkdirClaim(lockDir: string, token: string): boolean {
   return true;
 }
 
-/** Remove the lock directory only while it still carries this claim's owner record. */
+/** why: Remove the lock directory only while it still carries this claim's owner record. */
 function releaseOwned(lockDir: string, token: string): void {
   if (readOwner(lockDir) === token) {
     fs.rmSync(lockDir, { recursive: true, force: true });
@@ -551,22 +551,22 @@ export function acquirePublicationLock(outDir: string): () => void {
 }
 
 /**
- * Restore or clear the recovery material a previous interrupted publication left, so a
+ * why: Restore or clear the recovery material a previous interrupted publication left, so a
  * later run never removes it unrecovered. No-op unless a backup exists.
  */
 function recoverInterruptedPublication(outDir: string): void {
   const backupDir = `${outDir}.backup`;
   if (!fs.existsSync(backupDir)) return;
   if (fs.existsSync(outDir)) {
-    // The replacement landed; the retired tree is stale litter.
+    // note: The replacement landed; the retired tree is stale litter.
     fs.rmSync(backupDir, { recursive: true, force: true });
     return;
   }
-  // Killed before the replacement landed; the retired tree is the committed one.
+  // note: Killed before the replacement landed; the retired tree is the committed one.
   fs.renameSync(backupDir, outDir);
 }
 
-/** Retire the committed tree, land the staged one, then drop the retired copy. */
+/** note: Retire the committed tree, land the staged one, then drop the retired copy. */
 function publishTree(stageDir: string, outDir: string): void {
   const backupDir = `${outDir}.backup`;
   if (fs.existsSync(outDir)) fs.renameSync(outDir, backupDir);
@@ -580,7 +580,7 @@ function publishTree(stageDir: string, outDir: string): void {
 }
 
 /**
- * Build the tree under `outDir`, which is the staging dir during a normal run.
+ * note: Build the tree under `outDir`, which is the staging dir during a normal run.
  * Regeneration is authoritative — the caller swaps the whole directory in, so a
  * failure here leaves the previously generated tree untouched.
  */
@@ -589,7 +589,7 @@ async function buildGeneratedTree(
   srcSchemasDir: string,
   outDir: string,
 ): Promise<void> {
-  // v1.184 P1 T3 fix1: rewrite exact-string pattern discriminants across the
+  // note: v1.184 P1 T3 fix1: rewrite exact-string pattern discriminants across the
   // whole localized tree BEFORE compiling. compile() resolves cross-file $ref
   // bodies from disk, so rewriting only the root schema left nested oneOf
   // discriminants (actor_kind / owner kind) widened to plain `string`.
@@ -604,7 +604,7 @@ async function buildGeneratedTree(
   const emitRel = allRel.filter(rel => !SKIP_LIST.has(rel));
   const skipped = allRel.filter(rel => SKIP_LIST.has(rel));
 
-  // Canonical owner index for the `$ref`-target dedupe pass: one entry per emitted
+  // note: Canonical owner index for the `$ref`-target dedupe pass: one entry per emitted
   // schema, keyed by its basename-derived contract type name. The declared names are
   // filled in from the compiled output below — the pass may only point a type at a
   // module that actually declares it.
@@ -615,10 +615,10 @@ async function buildGeneratedTree(
     declared: new Set<string>(),
   }));
 
-  // 1. Synthetic common module: common definitions + SourceAnchor (skip-listed but referenced).
+  // why: 1. Synthetic common module: common definitions + SourceAnchor (skip-listed but referenced).
   await generateCommonTypesModule(localizedDir, outDir);
 
-  // 2. Per-schema files: compile the whole tree first, so the dedupe pass sees every
+  // why: 2. Per-schema files: compile the whole tree first, so the dedupe pass sees every
   // module's declarations before any file is written.
   const compiled = new Map<string, string>();
   const versionRows: Array<{ typeName: string; version: number; relDir: string; base: string; rel: string }> = [];
@@ -649,10 +649,10 @@ async function buildGeneratedTree(
     writeFile(path.join(outDir, ...relDir.split('/'), `${base}.ts`), `${BANNER}\n\n${ts}\n`);
   }
 
-  // 3. Per-subdir barrel index.ts files (named root exports only).
+  // why: 3. Per-subdir barrel index.ts files (named root exports only).
   writeSubdirBarrels(outDir, emitRel);
 
-  // 4. Root index.ts: flat subdir re-exports + SCHEMA_VERSIONS + LATEST_SCHEMA_VERSION.
+  // note: 4. Root index.ts: flat subdir re-exports + SCHEMA_VERSIONS + LATEST_SCHEMA_VERSION.
   writeRootIndex(outDir, versionRows);
 
   logger.success(
@@ -660,11 +660,11 @@ async function buildGeneratedTree(
   );
 }
 
-/** Load a localized schema, override its `title` to the canonical type name, compile. */
+/** note: Load a localized schema, override its `title` to the canonical type name, compile. */
 async function compileSchema(localizedDir: string, rel: string, typeName: string): Promise<string> {
   const abs = path.join(localizedDir, ...rel.split('/'));
   const schema = readJSON<Record<string, unknown>>(abs) as JsonSchema;
-  // Override `Nexus <Name>` product prefix → canonical basename-derived name.
+  // note: Override `Nexus <Name>` product prefix → canonical basename-derived name.
   (schema as Record<string, unknown>).title = typeName;
   rewriteExactStringPatterns(schema);
   const ts = await compile(schema, typeName, { ...COMPILE_OPTS, cwd: path.dirname(abs) });
@@ -672,7 +672,7 @@ async function compileSchema(localizedDir: string, rel: string, typeName: string
 }
 
 /**
- * Emit `common/CommonTypes.ts` from `common.schema.json` (52 definition-keyed types) and
+ * note: Emit `common/CommonTypes.ts` from `common.schema.json` (52 definition-keyed types) and
  * `source-anchor.schema.json` (the `SourceAnchor` value object). Neither schema carries
  * cross-file `$ref`, so the two outputs concatenate without intra-file duplicate
  * declarations. These types stay barrel-importable via `common/index.ts` → root.
@@ -695,7 +695,7 @@ async function generateCommonTypesModule(localizedDir: string, outDir: string): 
 }
 
 /**
- * Write `<relDir>/index.ts` for every leaf subdir that has generated files. Each barrel
+ * note: Write `<relDir>/index.ts` for every leaf subdir that has generated files. Each barrel
  * uses named root exports (one per file) so inline `declareExternallyReferenced`
  * declarations are not re-exported. The `common` subdir also re-exports `CommonTypes`.
  */
@@ -724,7 +724,7 @@ function writeSubdirBarrels(outDir: string, emitRel: string[]): void {
 }
 
 /**
- * Root `index.ts`: `export *` from each consumer-scope subdir (including `common`),
+ * note: Root `index.ts`: `export *` from each consumer-scope subdir (including `common`),
  * then the `SCHEMA_VERSIONS` record (key = basename-derived type name, value = the
  * schema's `schema_version`) and `LATEST_SCHEMA_VERSION` (max). Rows are ordered by
  * schema path so output is stable.

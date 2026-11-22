@@ -51,7 +51,7 @@ import sys
 root = os.environ["ROOT"]
 allowlist_path = os.path.join(root, "tooling", "work-artifact-write-allowlist.tsv")
 
-# Named top-level inventoried modules (rules_history.rs was removed in P2).
+# note: Named top-level inventoried modules (rules_history.rs was removed in P2).
 NAMED = [
     "crates/nexus-core/src/owner/capabilities.rs",
     "crates/nexus-local-db/src/work_chapters.rs",
@@ -73,7 +73,7 @@ FN_RE = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 IMPL_FOR_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+[^{]*?\bfor\s+([A-Za-z_]\w*)")
 IMPL_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+([A-Za-z_]\w*)")
 
-# The one non-Work direct write allowed without an allowlist row: the
+# why: The one non-Work direct write allowed without an allowlist row: the
 # guarded-write else-branch of `execute_write_file`, which routes every
 # `WorkPath::Artifact` to the port before reaching this call. Exact
 # (path, symbol) -> expected count; any other function is a violation.
@@ -137,7 +137,7 @@ def enclosing_symbol(lines, idx):
             if m:
                 impl = m.group(1)
             elif line.startswith("}"):
-                # Column-0 `}` closes a top-level item: any earlier `impl` is a
+                # note: Column-0 `}` closes a top-level item: any earlier `impl` is a
                 # sibling, not an ancestor.
                 impl_locked = True
         if fn and impl:
@@ -191,7 +191,7 @@ def test_module_spans(rel, lines):
             i = end + 1
             continue
         if ITEM_RE.match(lines[j]):
-            # Test-only non-module item (e.g. a ledger const): not a cut point,
+            # why: Test-only non-module item (e.g. a ledger const): not a cut point,
             # so production below it stays visible.
             i += 1
             continue
@@ -209,7 +209,7 @@ def scan_file(path, base):
     for idx, line in enumerate(lines):
         if idx in skip:
             continue
-        # Count every call, not every matching line: two direct writes on one
+        # note: Count every call, not every matching line: two direct writes on one
         # line must register as two hits.
         occurrences = len(WRITE_RE.findall(line))
         if occurrences:
@@ -328,7 +328,7 @@ try:
     sys.exit(main(sys.argv[1:]))
 except SystemExit:
     raise
-except Exception as exc:  # F-005: annotate, never dump a traceback
+except Exception as exc:  # why: F-005: annotate, never dump a traceback
     print(f"::error::work artifact write guard crashed: {exc!r}")
     sys.exit(1)
 PY

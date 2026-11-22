@@ -15,7 +15,7 @@ import {
 } from "./test-harness.mjs";
 
 /**
- * Assert every version surface of a fixture repo carries `version`, and every
+ * note: Assert every version surface of a fixture repo carries `version`, and every
  * `Cargo.lock` member row the version its bracket requires.
  */
 function assertFixtureVersion(dir, version) {
@@ -40,7 +40,7 @@ test("fixture repos pin the fixed baseline, not the repository version", () => {
 });
 
 test("fixture repos ignore the source repository version", () => {
-  // A source whose surfaces carry neither the baseline nor an obvious value:
+  // note: A source whose surfaces carry neither the baseline nor an obvious value:
   // the fixture must still come out at the pinned baseline, which is what lets
   // every test hard-code FIXTURE_BASELINE_VERSION / FIXTURE_TARGET_VERSION
   // independently of the live release number.

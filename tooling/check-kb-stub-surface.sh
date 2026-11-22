@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# check-kb-stub-surface.sh — knowledge-entry seam structural guard (I-000590).
+# why: check-kb-stub-surface.sh — knowledge-entry seam structural guard (I-000590).
 #
 # The in-memory `KnowledgeEntryPort` stub is only meaningful while the conversion
 # seam it is driven through keeps one owner per direction. This gate asserts,
@@ -71,7 +70,6 @@
 # Exit codes:
 #   0 — surface matches: one owner per mapper, no parallel port
 #   1 — mismatch, missing source tree, or self-test failure
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -86,12 +84,12 @@ fail() {
   exit 1
 }
 
-# Emits `MAPPER <name> <path> <line> <prefix>` for each declaration of a mapper
+# note: Emits `MAPPER <name> <path> <line> <prefix>` for each declaration of a mapper
 # and `PORT <path> <line>` for each `KnowledgePort` trait/impl. `<prefix>` is the
 # declaration text before `fn` with runs of whitespace collapsed (`pub`,
 # `pub(crate)`, `unsafe`, or empty), so a split declaration still classifies.
 scan() {
-  # Both halves run from the scanned root: the file list stays relative.
+  # note: Both halves run from the scanned root: the file list stays relative.
   # Tracked mode is decided by the checkout itself: asking `git` would let a
   # broken `git` fall back to a filesystem walk over a partial tree.
   ( cd "$SCAN_ROOT" || exit 1
@@ -101,7 +99,7 @@ scan() {
         exit 1
       fi
     else
-      # Fixture trees need not carry an `apps/` root.
+      # note: Fixture trees need not carry an `apps/` root.
       if ! find crates -type f -name '*.rs' > "$SCRATCH"; then
         echo "FAIL: find failed while listing sources under $SCAN_ROOT/crates" >&2
         exit 1
@@ -114,7 +112,7 @@ scan() {
       fi
     fi
 
-    # Zero files means the root or pathspec is wrong, never "clean".
+    # why: Zero files means the root or pathspec is wrong, never "clean".
     if [ ! -s "$SCRATCH" ]; then
       echo "FAIL: no .rs files found under crates/ or apps/ in $SCAN_ROOT — wrong root or pathspec" >&2
       exit 1
@@ -124,7 +122,7 @@ scan() {
 use strict;
 use warnings;
 
-# Returns the source with every non-code character replaced by a space, keeping
+# note: Returns the source with every non-code character replaced by a space, keeping
 # newlines so byte offsets and line numbers survive. Code characters are copied
 # verbatim, so this can never hide a declaration that is real code.
 sub project_code {
@@ -144,7 +142,7 @@ sub project_code {
     my $c = substr($src, $i, 1);
     my $two = substr($src, $i, 2);
 
-    # `//` to end of line; the newline itself stays code-handled next.
+    # note: `//` to end of line; the newline itself stays code-handled next.
     if ($two eq '//') {
       my $end = index($src, "\n", $i);
       $end = $n if $end < 0;
@@ -153,7 +151,7 @@ sub project_code {
       next;
     }
 
-    # `/* ... */` with nesting depth, as Rust allows.
+    # note: `/* ... */` with nesting depth, as Rust allows.
     if ($two eq '/*') {
       my ($depth, $j) = (0, $i);
       while ($j < $n) {
@@ -169,7 +167,7 @@ sub project_code {
       next;
     }
 
-    # `"..."` or `r"..."` / `r#"..."#` (also `br#"…"#`, `cr#"…"#`).
+    # note: `"..."` or `r"..."` / `r#"..."#` (also `br#"…"#`, `cr#"…"#`).
     if ($c eq '"') {
       my $hashes = 0;
       $hashes++ while $i - $hashes - 1 >= 0 && substr($src, $i - $hashes - 1, 1) eq '#';
@@ -195,7 +193,7 @@ sub project_code {
       next;
     }
 
-    # `'x'`, `'\n'`, `'\u{…}'` are literals; `'a` is a lifetime and stays code.
+    # note: `'x'`, `'\n'`, `'\u{…}'` are literals; `'a` is a lifetime and stays code.
     if ($c eq "'") {
       my $next = substr($src, $i + 1, 1);
       my $j;
@@ -236,7 +234,7 @@ while (my $path = <$list>) {
   my $code = project_code($src);
 
   for my $name (@names) {
-    # `[<(]` accepts a generic parameter list without parsing its nesting
+    # why: `[<(]` accepts a generic parameter list without parsing its nesting
     # (`fn f<T: Into<U>>`): the token after the name is `<` or `(` exactly when
     # this is a declaration, so a generic definition cannot hide from the count.
     # `(?:r\#)?` treats the raw spelling as the same Rust identifier (`#` is
@@ -270,7 +268,7 @@ check() {
   [ -d "$SCAN_ROOT/crates" ] || fail "no crates/ directory under $SCAN_ROOT"
   SCRATCH="$(mktemp "${TMPDIR:-/tmp}/kb-stub-surface.XXXXXX")"
   trap 'rm -f "$SCRATCH"' EXIT
-  # A scan failure (unreadable tracked file, failed listing) aborts; it never
+  # why: A scan failure (unreadable tracked file, failed listing) aborts; it never
   # degrades to a partial corpus that could pass.
   hits="$(scan)" || { rm -f "$SCRATCH"; exit 1; }
 
@@ -310,7 +308,7 @@ check() {
   echo "PASS: knowledge-entry seam surface is intact"
 }
 
-# Writes a minimal valid fixture tree: both mappers in the allowed owner, an
+# note: Writes a minimal valid fixture tree: both mappers in the allowed owner, an
 # unrelated `KnowledgeEntryPort` impl, and a comment plus string literals that
 # name a mapper, so a scan that counts non-code text fails the clean case.
 make_valid_fixture() {
@@ -365,19 +363,19 @@ selftest() {
     make_valid_fixture "$work/$case_dir"
   done
 
-  # missing: one direction has no definition at all.
+  # note: missing: one direction has no definition at all.
   sed '/^pub fn spoke_to_knowledge_record/,/^}/d' \
     "$work/missing/$OWNER" > "$work/missing/$OWNER.tmp"
   mv "$work/missing/$OWNER.tmp" "$work/missing/$OWNER"
 
-  # duplicate: a second copy of the same mapper elsewhere.
+  # note: duplicate: a second copy of the same mapper elsewhere.
   cat > "$work/duplicate/crates/consumer/src/extra.rs" <<'RS'
 pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {
     Wire::from(entry)
 }
 RS
 
-  # line-comment: a `//` line must not swallow the genuine `pub(crate)`
+  # why: line-comment: a `//` line must not swallow the genuine `pub(crate)`
   # declaration on the following line.
   { echo '// The mapper lives on the next line; this comment must not hide it.'
     cat "$work/line-comment/$OWNER"
@@ -385,7 +383,7 @@ RS
     > "$work/line-comment/$OWNER.tmp"
   mv "$work/line-comment/$OWNER.tmp" "$work/line-comment/$OWNER"
 
-  # block-string: a `/*` inside a string must not open a comment that swallows
+  # why: block-string: a `/*` inside a string must not open a comment that swallows
   # the `pub(crate)` declaration after it.
   { echo 'const PATTERN: &str = "crates/*/*.rs";'
     cat "$work/block-string/$OWNER"
@@ -393,7 +391,7 @@ RS
     > "$work/block-string/$OWNER.tmp"
   mv "$work/block-string/$OWNER.tmp" "$work/block-string/$OWNER"
 
-  # split-visibility: `pub(crate)` and `fn mapper(` on separate lines.
+  # note: split-visibility: `pub(crate)` and `fn mapper(` on separate lines.
   cat > "$work/split-visibility/$OWNER" <<'RS'
 pub(crate)
 fn knowledge_record_to_spoke(entry: &Record) -> Wire {
@@ -405,7 +403,7 @@ pub fn spoke_to_knowledge_record(entry: Wire) -> Record {
 }
 RS
 
-  # generic-duplicate: a generic declaration whose bound nests `>` plus the
+  # note: generic-duplicate: a generic declaration whose bound nests `>` plus the
   # plain owner declaration is two definitions of the same mapper.
   cat > "$work/generic-duplicate/crates/consumer/src/extra.rs" <<'RS'
 pub fn knowledge_record_to_spoke<T: Into<Record>>(entry: T) -> Wire {
@@ -413,7 +411,7 @@ pub fn knowledge_record_to_spoke<T: Into<Record>>(entry: T) -> Wire {
 }
 RS
 
-  # raw-duplicate: `r#name` and `name` are the same identifier, so a foreign
+  # why: raw-duplicate: `r#name` and `name` are the same identifier, so a foreign
   # declaration under the raw spelling is a second definition.
   cat > "$work/raw-duplicate/crates/consumer/src/extra.rs" <<'RS'
 pub fn r#knowledge_record_to_spoke(entry: &Record) -> Wire {
@@ -421,7 +419,7 @@ pub fn r#knowledge_record_to_spoke(entry: &Record) -> Wire {
 }
 RS
 
-  # comment-only: the real declaration is gone; a comment holds the only
+  # why: comment-only: the real declaration is gone; a comment holds the only
   # declaration-shaped text, which must not count as the mapper.
   sed '/^\/\/\/ The seam/,/^}/d' \
     "$work/comment-only/$OWNER" > "$work/comment-only/$OWNER.tmp"
@@ -432,7 +430,7 @@ RS
 // }
 RS
 
-  # string-only: same, but the declaration-shaped text sits in a string.
+  # why: string-only: same, but the declaration-shaped text sits in a string.
   sed '/^\/\/\/ The seam/,/^}/d' \
     "$work/string-only/$OWNER" > "$work/string-only/$OWNER.tmp"
   mv "$work/string-only/$OWNER.tmp" "$work/string-only/$OWNER"
@@ -440,7 +438,7 @@ RS
 const SIGNATURE: &str = "pub fn knowledge_record_to_spoke(entry: &Record) -> Wire {";
 RS
 
-  # parallel: a second knowledge port trait and its impl.
+  # note: parallel: a second knowledge port trait and its impl.
   cat > "$work/parallel/crates/consumer/src/extra.rs" <<'RS'
 pub trait KnowledgePort {
     fn put(&self);

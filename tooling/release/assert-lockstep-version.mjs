@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Assert the Nexus version surfaces are in lockstep.
+ * note: Assert the Nexus version surfaces are in lockstep.
  *
  * Checks the five hand-written surfaces (`Cargo.toml` `[workspace.package]`,
  * root `package.json`, `apps/desktop-electron/package.json`,
@@ -46,6 +46,7 @@ import {
 } from "./version-surfaces.mjs";
 
 /**
+ * note: contract for `LockstepReport`.
  * @typedef {object} LockstepReport
  * @property {boolean} ok
  * @property {string | null} version Canonical version when the four agree.
@@ -56,7 +57,7 @@ import {
  */
 
 /**
- * File contents, or `null` when the path does not exist.
+ * note: File contents, or `null` when the path does not exist.
  *
  * @param {string} path
  * @returns {string | null}
@@ -77,12 +78,12 @@ function readOptionalFile(path) {
  * @returns {LockstepReport}
  */
 export function checkLockstep(repoRoot) {
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const problems = [];
   const surfaces = readSurfaceVersions(repoRoot);
   const versions = new Set(surfaces.map((surface) => surface.version));
   const ok = versions.size === 1;
-  const productVersion = ok ? /** @type {string} */ ([...versions][0]) : null;
+  const productVersion = ok ? /** note: @type {string} */ ([...versions][0]) : null;
   if (!ok) {
     problems.push(
       `version surfaces disagree: ${surfaces
@@ -114,7 +115,7 @@ export function checkLockstep(repoRoot) {
     problems.push(`${CARGO_LOCK_PATH}: missing`);
   }
 
-  // A crate dropped from the carrier stops being checked, so the bracket must
+  // why: A crate dropped from the carrier stops being checked, so the bracket must
   // be complete: outside the root workspace there is no inherited version, so a
   // crate Cargo would publish can only version on its own and belongs here. The
   // other direction — a listed crate that goes back to inheriting — is caught
@@ -131,7 +132,7 @@ export function checkLockstep(repoRoot) {
     );
   }
 
-  /** @type {{ name: string; version: string; lock: string }[]} */
+  /** note: @type {{ name: string; version: string; lock: string }[]} */
   const contractRows = [];
   for (const entry of contractEntries) {
     const literal = parseCargoPackageVersion(
@@ -144,7 +145,7 @@ export function checkLockstep(repoRoot) {
       );
       continue;
     }
-    // The lockfile that owns the crate's resolution: the root workspace for a
+    // note: The lockfile that owns the crate's resolution: the root workspace for a
     // member, otherwise the standalone workspace rooted next to the manifest.
     // A crate pinned by neither is unchecked, so it fails instead.
     const entryLockPath = memberNames.has(entry.name)
@@ -177,7 +178,7 @@ export function checkLockstep(repoRoot) {
     }
   }
 
-  /** @type {{ name: string; version: string | null }[]} */
+  /** note: @type {{ name: string; version: string | null }[]} */
   const lockMembers = [];
   for (const member of members) {
     const pinned =
@@ -216,13 +217,14 @@ export function checkLockstep(repoRoot) {
 }
 
 /**
+ * note: contract for `printReport`.
  * @param {LockstepReport} report
  */
 function printReport(report) {
   for (const surface of report.surfaces) {
     console.log(`  ${surface.path.padEnd(48)} ${surface.version}`);
   }
-  // The independent contract crates version on their own and are printed in
+  // note: The independent contract crates version on their own and are printed in
   // the bracket below; folding them in here would show a second version on a
   // green run and erase the pass/fail signal. Only product-version members
   // belong on this line, so on `ok` it names exactly the decided version.
@@ -237,7 +239,7 @@ function printReport(report) {
       lockVersions.size === 1 ? [...lockVersions][0] : [...lockVersions].join(", ")
     } (${report.lockMembers.length} workspace members)`,
   );
-  // Printed, not exempted: the independent crates and the lockfile that pins
+  // note: Printed, not exempted: the independent crates and the lockfile that pins
   // each one, so a crate missing from this list is visible before it passes.
   console.log(
     `  ${VERSION_BRACKETS_PATH} (${report.contract.length} independent crates):`,

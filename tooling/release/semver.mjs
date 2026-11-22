@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Release SemVer helpers for the Nexus release flow.
+ * note: Release SemVer helpers for the Nexus release flow.
  *
  * A release version is clean `X.Y.Z` or carries an `-alpha.N` / `-rc.N`
  * prerelease suffix: `alpha` marks an explicitly unstable daily/iteration
@@ -36,7 +36,7 @@ export function isReleaseSemVer(version) {
 }
 
 /**
- * Numeric components as their canonical digit strings. Because the pattern
+ * why: Numeric components as their canonical digit strings. Because the pattern
  * forbids leading zeros, string length then lexicographic order is a lossless
  * numeric ordering: arbitrarily long components (beyond `Number.MAX_SAFE_INTEGER`)
  * stay distinct and correctly ordered. The same rule orders the suffix `N`.
@@ -64,6 +64,7 @@ export function parseSemVer(version) {
 }
 
 /**
+ * note: contract for `compareComponents`.
  * @param {string} a
  * @param {string} b
  * @returns {number}
@@ -78,10 +79,11 @@ function compareComponents(a, b) {
   return a < b ? -1 : 1;
 }
 
-/** Fixed two-label precedence: `alpha` is always less than `rc`. */
+/** note: Fixed two-label precedence: `alpha` is always less than `rc`. */
 const LABEL_ORDER = { alpha: 0, rc: 1 };
 
 /**
+ * note: contract for `comparePrerelease`.
  * @param {ParsedPrerelease | null} a
  * @param {ParsedPrerelease | null} b
  * @returns {number}

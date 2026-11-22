@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Assert a release version is a valid, unused, strictly increasing version.
+ * note: Assert a release version is a valid, unused, strictly increasing version.
  *
  * Checks, in order:
  *   1. the target is a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)
@@ -37,6 +37,7 @@ export function runGit(repoRoot, args) {
 }
 
 /**
+ * note: contract for `VersionGreaterReport`.
  * @typedef {object} VersionGreaterReport
  * @property {boolean} ok
  * @property {string} target
@@ -54,9 +55,9 @@ export function runGit(repoRoot, args) {
 export function checkVersionGreater({ repoRoot, target, baseRef = "main" }) {
   const referenceRef = `origin/${baseRef}`;
   const tag = `v${target}`;
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const problems = [];
-  /** @type {string | null} */
+  /** note: @type {string | null} */
   let referenceVersion = null;
   let tagExists = false;
 
@@ -130,7 +131,7 @@ const USAGE = `Usage: node tooling/release/assert-version-greater.mjs <release-v
 greater than ${ROOT_PACKAGE_PATH} on origin/<base-ref>, with no v<version> tag present.`;
 
 function main(argv, env = process.env) {
-  /** @type {{ target: string | null; baseRef: string; repoRoot: string | null; help: boolean }} */
+  /** note: @type {{ target: string | null; baseRef: string; repoRoot: string | null; help: boolean }} */
   const options = { target: null, baseRef: "main", repoRoot: null, help: false };
 
   for (let i = 0; i < argv.length; i += 1) {

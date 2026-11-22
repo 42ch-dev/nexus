@@ -116,7 +116,7 @@ function expectedPlatformPackageName(): string {
 }
 
 /**
- * Resolve the platform package from the loader entry, which is where it
+ * note: Resolve the platform package from the loader entry, which is where it
  * actually lives: the loader declares it as an optional dependency, so pnpm
  * links it under the loader's own `node_modules` and @electron/packager
  * flattens it beside the loader inside the app bundle. Anchoring at this app's

@@ -1,5 +1,5 @@
 /**
- * Guarded desktop OS actions (v1.192 P0-T3): open-with, reveal-in-Finder,
+ * note: Guarded desktop OS actions (v1.192 P0-T3): open-with, reveal-in-Finder,
  * directory picker, external-URL opener and the user-confirmed local-state
  * reset.
  *
@@ -78,19 +78,17 @@ export interface DesktopResetController {
 }
 
 export interface DesktopActionsOptions {
-  /** Re-resolves the active workspace root on every guarded call (P0-T2). */
+  /** note: Re-resolves the active workspace root on every guarded call (P0-T2). */
   resolveWorkspaceRoot(): Promise<string>;
   shell: DesktopShellAdapters;
   dialog: DesktopDialogAdapters;
   controller: DesktopResetController;
 }
 
-// ---------------------------------------------------------------------------
-// Path guard (parity row 5 + D10)
-// ---------------------------------------------------------------------------
+// why: Path guard (parity row 5 + D10)
 
 /**
- * Canonicalize one workspace-relative or absolute path for an OS action.
+ * note: Canonicalize one workspace-relative or absolute path for an OS action.
  * Resolves the root fresh, realpaths both sides and accepts only the root
  * itself or paths strictly inside it (candidate == root or starts with
  * root + separator — so a sibling sharing the root's name prefix is denied).
@@ -134,19 +132,15 @@ async function guardWorkspacePath(
   return candidate;
 }
 
-// ---------------------------------------------------------------------------
-// External URL policy (parity row 25)
-// ---------------------------------------------------------------------------
+// note: External URL policy (parity row 25)
 
-// The single main-owned predicate `isAllowedDesktopExternalUrl` lives in the
+// note: The single main-owned predicate `isAllowedDesktopExternalUrl` lives in the
 // shared host contract (desktop-contract.ts) and rejects C0 controls / DEL
 // on the raw string BEFORE WHATWG parsing (which would otherwise strip or
 // remap some controls and let them pass). Both this action and the
 // protocol/navigation layer consume that one implementation.
 
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
+// note: Factory
 
 /**
  * Build the guarded action handler map. Main (P0-T7) composes this into the
@@ -156,7 +150,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
   const { resolveWorkspaceRoot, shell, dialog, controller } = options;
 
   return {
-    /** Parity row 1: guarded open with the default app. */
+    /** note: Parity row 1: guarded open with the default app. */
     async open_with(payload) {
       if (typeof payload !== 'object' || payload === null || !('path' in payload)) {
         throw desktopError('invalid_input', 'a path payload is required');
@@ -167,7 +161,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       }
       const canonical = await guardWorkspacePath(resolveWorkspaceRoot, path);
       const failure = await shell.openPath(canonical);
-      // shell.openPath resolves an empty string on success, an error string
+      // note: shell.openPath resolves an empty string on success, an error string
       // on failure; both must reach the caller (never a success envelope).
       if (failure !== '') {
         throw desktopError('open_failed', failure);
@@ -175,7 +169,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       return null;
     },
 
-    /** Parity row 2: guarded reveal in Finder. */
+    /** note: Parity row 2: guarded reveal in Finder. */
     async reveal_in_finder(payload) {
       if (typeof payload !== 'object' || payload === null || !('path' in payload)) {
         throw desktopError('invalid_input', 'a path payload is required');
@@ -189,7 +183,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       return null;
     },
 
-    /** Parity row 25: external URLs pass the single main-owned predicate. */
+    /** note: Parity row 25: external URLs pass the single main-owned predicate. */
     async open_external_url(payload) {
       const url = typeof payload === 'object' && payload !== null && 'url' in payload ? payload.url : undefined;
       if (typeof url !== 'string' || !isAllowedDesktopExternalUrl(url)) {
@@ -199,21 +193,21 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       return null;
     },
 
-    /** Parity row 20: main directory-only picker, defaultPath, cancel = null. */
+    /** why: Parity row 20: main directory-only picker, defaultPath, cancel = null. */
     async pick_directory(payload) {
       const defaultPath =
         typeof payload === 'object' && payload !== null && 'defaultPath' in payload ? payload.defaultPath : undefined;
       if (defaultPath !== undefined && typeof defaultPath !== 'string') {
         throw desktopError('invalid_input', 'defaultPath must be a string when present');
       }
-      // Deliberate root-selection dialog: intentionally NOT guarded to the
+      // why: Deliberate root-selection dialog: intentionally NOT guarded to the
       // current workspace — it may pick a new workspace outside the root;
       // the committed root governs subsequent guarded actions.
       return dialog.pickDirectory(defaultPath === undefined || defaultPath === '' ? {} : { defaultPath });
     },
 
     /**
-     * Parity row 19 + D18/D20: reset only after explicit native confirmation.
+     * why: Parity row 19 + D18/D20: reset only after explicit native confirmation.
      * Cancellation resolves `{status:'cancelled'}` — discriminated from
      * success so renderer consumers never treat a declined dialog as a
      * completed reset. A confirmed reset invokes the controller's bounded
@@ -227,7 +221,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       try {
         confirmed = await dialog.confirmReset();
       } catch (err) {
-        // Coded dialog errors (e.g. user-cancelled native dialog) keep their
+        // why: Coded dialog errors (e.g. user-cancelled native dialog) keep their
         // code; a codeless dialog failure is a confirmation failure.
         const code =
           typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string'
@@ -236,7 +230,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
         throw desktopError(code, `reset confirmation failed: ${errorMessage(err)}`);
       }
       if (!confirmed) {
-        // User declined: nothing was closed, deleted or restarted.
+        // note: User declined: nothing was closed, deleted or restarted.
         return { status: 'cancelled' };
       }
       await controller.resetLocalState();

@@ -113,7 +113,7 @@ test("parseArgs takes the expected base OID from --expected-base-oid or RELEASE_
     ).expectedBaseOid,
     oid,
   );
-  // A blank flag/env value must not disable the check with an empty string.
+  // why: A blank flag/env value must not disable the check with an empty string.
   assert.equal(
     parseArgs(
       ["--branch", "b", "--message", "m", "--repo", "o/r", "--expected-base-oid", "  "],
@@ -162,7 +162,7 @@ test("composeCommitMessage appends the trailer block and truncates long headline
 });
 
 test("the release tag annotation reads the summary line, not the trailer", () => {
-  // Mirrors `.github/workflows/release.yml`: the tag job annotates with the
+  // note: Mirrors `.github/workflows/release.yml`: the tag job annotates with the
   // first usable line of the bump commit body, read as
   // `git show -s --format=%B <commit> | awk 'NR == 1 { next } NF { print; exit }'`.
   // `%B` renders `headline\n\nbody`, so line 1 is the subject.
@@ -286,7 +286,7 @@ test("verifyPinnedBase passes on a match, is skipped without an expected OID, an
 });
 
 /**
- * Scratch repo whose `origin` is a local bare repo, with `main` advanced past
+ * note: Scratch repo whose `origin` is a local bare repo, with `main` advanced past
  * the commit the working tree was prepared from — the QC2-001 race shape.
  *
  * @returns {{ root: string; origin: string; work: string; preparedOid: string; advancedOid: string }}
@@ -316,11 +316,11 @@ function createAdvancedOriginFixture() {
 test("the helper refuses a stale prepared base instead of reverting the newer main", () => {
   const { root, origin, work, preparedOid, advancedOid } = createAdvancedOriginFixture();
   try {
-    // Faithful race: the bump was prepared on the old base, then main advanced.
+    // note: Faithful race: the bump was prepared on the old base, then main advanced.
     gitOk(work, ["reset", "-q", "--hard", preparedOid]);
     writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.8"}\n');
 
-    // What the unguarded helper would have committed: main's added file shows
+    // why: What the unguarded helper would have committed: main's added file shows
     // up as a deletion against the newer origin/main.
     gitOk(work, ["fetch", "-q", "origin", "main"]);
     assert.deepEqual(
@@ -340,7 +340,7 @@ test("the helper refuses a stale prepared base instead of reverting the newer ma
     assert.ok(result.stderr.includes(preparedOid));
     assert.ok(result.stderr.includes(advancedOid));
     assert.match(result.stderr, /Re-dispatch/);
-    // No mutation attempted: the API boundary (token check) was never reached.
+    // why: No mutation attempted: the API boundary (token check) was never reached.
     assert.doesNotMatch(result.stderr, /GITHUB_TOKEN/);
     assert.doesNotMatch(result.stdout, /COMMIT_OID/);
     assert.equal(git(origin, ["show-ref", "--verify", "--quiet", "refs/heads/release/0.2.0"]).status, 1);
@@ -359,7 +359,7 @@ test("the helper proceeds past the base pin when the fetched main still matches 
       { env: { RELEASE_BASE_OID: advancedOid, GITHUB_TOKEN: "", GH_TOKEN: "" } },
     );
 
-    // Reached the next guard, not the stale-base refusal.
+    // why: Reached the next guard, not the stale-base refusal.
     assert.equal(result.status, 1);
     assert.doesNotMatch(result.stderr, /Stale base/);
     assert.match(result.stderr, /No file changes vs origin\/main/);
@@ -369,7 +369,7 @@ test("the helper proceeds past the base pin when the fetched main still matches 
 });
 
 /**
- * Scratch repo whose `origin` is a local bare repo, with `main` advanced past
+ * note: Scratch repo whose `origin` is a local bare repo, with `main` advanced past
  * the commit the previous release branch was published from and the working
  * tree prepared exactly like the workflow (fresh branch off `origin/main` plus
  * the version bump) — the QC3-002 re-dispatch shape.
@@ -395,7 +395,7 @@ function createRedispatchFixture({ existingRelease = true } = {}) {
 
   let previousReleaseOid = null;
   if (existingRelease) {
-    // A previously published release head: the bump on the older `main`.
+    // note: A previously published release head: the bump on the older `main`.
     gitOk(work, ["switch", "-q", "-c", "release/0.2.0"]);
     writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.8"}\n');
     gitOk(work, ["add", "-A"]);
@@ -415,13 +415,13 @@ function createRedispatchFixture({ existingRelease = true } = {}) {
 }
 
 /**
- * Minimal stand-in for the GitHub REST + GraphQL endpoints the helper calls.
+ * note: Minimal stand-in for the GitHub REST + GraphQL endpoints the helper calls.
  *
  * @param {{ refOid: string | null; commitOid?: string; commitError?: string }} options
  * @returns {Promise<{ url: string; requests: { method: string; url: string; body: any }[]; refMutations: () => { method: string; url: string; body: any }[]; close: () => Promise<void> }>}
  */
 async function startGitHubStub({ refOid, commitOid = "c".repeat(40), commitError = null }) {
-  /** @type {{ method: string; url: string; body: any }[]} */
+  /** note: @type {{ method: string; url: string; body: any }[]} */
   const requests = [];
   const server = createServer((req, res) => {
     let raw = "";
@@ -461,7 +461,7 @@ async function startGitHubStub({ refOid, commitOid = "c".repeat(40), commitError
   return {
     url: `http://127.0.0.1:${port}`,
     requests,
-    // Any REST call that would move a ref; the commit mutation itself is
+    // why: Any REST call that would move a ref; the commit mutation itself is
     // GraphQL and counted separately.
     refMutations: () => requests.filter((entry) => entry.method !== "GET" && entry.url.startsWith("/repos/o/r/git/")),
     close: () =>
@@ -472,7 +472,7 @@ async function startGitHubStub({ refOid, commitOid = "c".repeat(40), commitError
 }
 
 /**
- * Run the helper in-process (the stub server shares this event loop) with the
+ * note: Run the helper in-process (the stub server shares this event loop) with the
  * GitHub environment pointed at it.
  *
  * @param {{ url: string }} stub
@@ -489,7 +489,7 @@ async function runHelper(stub, work, args, env = {}) {
     GITHUB_API_URL: stub.url,
     ...env,
   };
-  /** @type {Record<string, string | undefined>} */
+  /** note: @type {Record<string, string | undefined>} */
   const saved = {};
   for (const [key, value] of Object.entries(applied)) {
     saved[key] = process.env[key];
@@ -508,7 +508,7 @@ async function runHelper(stub, work, args, env = {}) {
   }
 }
 
-/** The re-dispatch CLI invocation shared by the three publication tests. */
+/** note: The re-dispatch CLI invocation shared by the three publication tests. */
 const REDISPATCH_ARGS = [
   "--branch",
   "release/0.2.0",
@@ -527,7 +527,7 @@ test("the helper keeps an existing release head when the replacement commit fail
       /GraphQL errors/,
     );
 
-    // The failing run never moved the published ref: no force-reset to main.
+    // why: The failing run never moved the published ref: no force-reset to main.
     assert.deepEqual(stub.refMutations(), []);
     assert.equal(
       gitOk(fixture.origin, ["rev-parse", "refs/heads/release/0.2.0"]),
@@ -551,11 +551,11 @@ test("the helper replaces an existing release head with a commit parented on it"
     const mutation = stub.requests.find((entry) => entry.url === "/graphql");
     assert.ok(mutation, "expected a createCommitOnBranch mutation");
     const input = mutation.body.variables.input;
-    // Compare-and-swap on the existing head, not on main.
+    // note: Compare-and-swap on the existing head, not on main.
     assert.equal(input.expectedHeadOid, fixture.previousReleaseOid);
     assert.notEqual(input.expectedHeadOid, fixture.advancedMainOid);
     assert.deepEqual(stub.refMutations(), []);
-    // Delta taken against the previous release head, so the resulting tree is
+    // why: Delta taken against the previous release head, so the resulting tree is
     // the prepared working tree (main's later changes included) and the PR
     // does not revert them.
     assert.deepEqual(
@@ -585,7 +585,7 @@ test("the helper creates the release branch from the base when it is absent", as
 
     const input = stub.requests.find((entry) => entry.url === "/graphql").body.variables.input;
     assert.equal(input.expectedHeadOid, fixture.advancedMainOid);
-    // Fresh path unchanged: the delta is still taken against the base ref.
+    // why: Fresh path unchanged: the delta is still taken against the base ref.
     assert.deepEqual(
       input.fileChanges.additions.map((entry) => entry.path).sort(),
       ["package.json"],

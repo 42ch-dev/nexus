@@ -100,7 +100,7 @@ describe('buildDereferencedSchemaTree', () => {
   });
 
   it('rejects absolute file $ref outside localizedDir', async () => {
-    // mkdtempSync — avoids CodeQL js/insecure-temporary-file (predictable tmp paths).
+    // why: mkdtempSync — avoids CodeQL js/insecure-temporary-file (predictable tmp paths).
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-abs-'));
     tempDirs.push(outsideDir);
     const outsideFile = path.join(outsideDir, 'outside.schema.json');
@@ -128,7 +128,7 @@ describe('assertPathWithinRoot', () => {
     tempDirs.push(confinedRoot, outsideDir);
     fs.writeFileSync(path.join(outsideDir, 'secret.json'), JSON.stringify({ type: 'string' }));
 
-    // Symlink inside confinedRoot pointing out — realpath must resolve it and throw.
+    // safety: Symlink inside confinedRoot pointing out — realpath must resolve it and throw.
     fs.symlinkSync(outsideDir, path.join(confinedRoot, 'escape'));
 
     expect(() =>

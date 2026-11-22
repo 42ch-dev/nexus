@@ -1,4 +1,5 @@
 //! Generate Rust wire types from Nexus JSON Schemas using [`typify`].
+// note: see tooling/codegen/README.md
 //!
 //! Consumes the **dereferenced** schema tree produced by `tooling/codegen`
 //! stage 1 (`schema-prep.ts` → `.schemas-dereferenced/`). Dereferenced schemas
@@ -58,7 +59,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process;
 use typify::{TypeSpace, TypeSpaceSettings};
 
-/// Schemas excluded from generation — matched against their path relative to the
+/// note: Schemas excluded from generation — matched against their path relative to the
 /// schemas dir (POSIX slashes). Definitions-only files emit no root type, and
 /// `bundle-refinement` is a canonical-skip reference schema.
 const SKIP_SCHEMAS: &[&str] = &[
@@ -68,7 +69,7 @@ const SKIP_SCHEMAS: &[&str] = &[
     "core/provider-host-event.schema.json",
 ];
 
-/// Resolve the repository root: `NEXUS_REPO_ROOT` env, else
+/// note: Resolve the repository root: `NEXUS_REPO_ROOT` env, else
 /// `CARGO_MANIFEST_DIR/../../..` (the monorepo root, from `tooling/codegen/rust-gen/`).
 fn repo_root() -> PathBuf {
     if let Ok(root) = env::var("NEXUS_REPO_ROOT") {
@@ -80,14 +81,14 @@ fn repo_root() -> PathBuf {
         .expect("repo root: CARGO_MANIFEST_DIR/../../.. must resolve to the monorepo root")
 }
 
-/// Dereferenced schema tree consumed by `typify` (self-contained schemas).
+/// note: Dereferenced schema tree consumed by `typify` (self-contained schemas).
 fn deref_schemas_dir(root: &Path) -> PathBuf {
     env::var("NEXUS_DEREF_SCHEMAS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| root.join("tooling/codegen/.schemas-dereferenced"))
 }
 
-/// Original `schemas/` tree. The dereferenced tree is the `typify` input; this
+/// note: Original `schemas/` tree. The dereferenced tree is the `typify` input; this
 /// is resolved only to log the canonical source root for the operator.
 fn source_schemas_dir(root: &Path) -> PathBuf {
     env::var("NEXUS_SRC_SCHEMAS_DIR")
@@ -95,12 +96,12 @@ fn source_schemas_dir(root: &Path) -> PathBuf {
         .unwrap_or_else(|_| root.join("schemas"))
 }
 
-/// Convert a kebab-case path segment to a valid Rust module name (`-` → `_`).
+/// note: Convert a kebab-case path segment to a valid Rust module name (`-` → `_`).
 fn to_rust_module_name(segment: &str) -> String {
     segment.replace('-', "_")
 }
 
-/// Derive the canonical contract type name from a schema file name, mirroring the
+/// note: Derive the canonical contract type name from a schema file name, mirroring the
 /// TypeScript generator's `schemaToTypeName` (`tooling/codegen/src/utils.ts`) so
 /// Rust and TypeScript agree on type names regardless of how the schema `title`
 /// is phrased (Nexus titles carry a `"Nexus <Name>"` product prefix).
@@ -130,7 +131,7 @@ fn schema_type_name(file_name: &str) -> String {
         .collect()
 }
 
-/// Decide whether a schema's barrel export should be a glob (`true`) or a specific
+/// note: Decide whether a schema's barrel export should be a glob (`true`) or a specific
 /// type re-export (`false`), mirroring the sibling spoke `export_mode_for_schema`
 /// heuristic. Reads the **source** schema's `title` (via `$NEXUS_SRC_SCHEMAS_DIR`),
 /// NOT the dereferenced tree: a single-word title (no spaces) → specific export;
@@ -145,7 +146,7 @@ fn schema_type_name(file_name: &str) -> String {
 /// never reach here (they are filtered by `SKIP_SCHEMAS`).
 fn export_mode_for_schema(src_schema_path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(src_schema_path) else {
-        // Source schema unreadable — default to the safe glob (re-exports everything).
+        // note: Source schema unreadable — default to the safe glob (re-exports everything).
         return true;
     };
     let Ok(raw) = serde_json::from_str::<Value>(&content) else {
@@ -159,7 +160,7 @@ fn export_mode_for_schema(src_schema_path: &Path) -> bool {
     true
 }
 
-/// Read the top-level `schema_version` integer from a **source** schema. The
+/// note: Read the top-level `schema_version` integer from a **source** schema. The
 /// dereferenced tree inlines this stamp into `properties.schema_version` (the
 /// field definition), losing the top-level contract version, so it must be read
 /// from `$NEXUS_SRC_SCHEMAS_DIR/<path>`. Used to build `SCHEMA_VERSIONS`.
@@ -179,7 +180,7 @@ fn read_schema_version(src_schema_path: &Path) -> Result<u32, String> {
         })
 }
 
-/// Build the output `.rs` path for a schema, mirroring its tree position with
+/// note: Build the output `.rs` path for a schema, mirroring its tree position with
 /// Rust module naming. E.g. `daemon-api/canvas/outline/work-outline.schema.json`
 /// → `…/daemon_api/canvas/outline/work_outline.rs`.
 fn output_path(out_root: &Path, rel: &Path) -> PathBuf {
@@ -209,7 +210,7 @@ fn output_path(out_root: &Path, rel: &Path) -> PathBuf {
         .join(format!("{}.rs", to_rust_module_name(stem)))
 }
 
-/// typify's `maxLength`/`minLength` checks use UTF-8 `value.len()`. JSON Schema
+/// note: typify's `maxLength`/`minLength` checks use UTF-8 `value.len()`. JSON Schema
 /// draft-07 counts Unicode scalars, so rewrite every generated length check.
 /// Trim rejection is not a JSON Schema keyword. Inject it only into Character
 /// `display_name` newtypes — including copies typify emits when a response DTO
@@ -219,7 +220,7 @@ fn is_character_display_name_type(type_name: &str) -> bool {
     type_name.contains("Character") && type_name.ends_with("DisplayName")
 }
 
-/// typify 0.10 validates in `TryFrom<&str>`: `FromStr` delegates to it and
+/// note: typify 0.10 validates in `TryFrom<&str>`: `FromStr` delegates to it and
 /// serde's `Deserialize` calls `TryFrom<String>` (which forwards to the `&str`
 /// impl), so the trim guard belongs on `TryFrom<&str>` only — one authoritative
 /// check covering parse, serde and direct conversion. Matching is AST-based, so
@@ -277,14 +278,14 @@ fn inject_character_display_name_trim(file: &mut syn::File) -> Result<(), String
     }
 }
 
-/// Schema extension marker (`x-nexus-tri-state: true`) for nullable PATCH
+/// note: Schema extension marker (`x-nexus-tri-state: true`) for nullable PATCH
 /// properties whose three wire states — omitted (keep), `null` (clear),
 /// value (set) — must survive serde. A plain optional property deserializes
 /// explicit `null` to `None`, which erases the clear state, so the generated
 /// field additionally carries a presence-preserving deserializer.
 const TRI_STATE_MARKER: &str = "x-nexus-tri-state";
 
-/// Collect the marked property names of a source schema, in declaration order.
+/// note: Collect the marked property names of a source schema, in declaration order.
 fn tri_state_fields(src_schema_path: &Path) -> Vec<String> {
     let Ok(content) = fs::read_to_string(src_schema_path) else {
         return Vec::new();
@@ -306,7 +307,7 @@ fn tri_state_fields(src_schema_path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Inject `#[serde(default, deserialize_with = …)]` into the marked fields of
+/// note: Inject `#[serde(default, deserialize_with = …)]` into the marked fields of
 /// the emitted root struct. The generated field type is already
 /// `Option<serde_json::Value>` (the schema keeps the property unrestricted);
 /// only the attribute is added, so every unmarked optional field keeps the
@@ -332,7 +333,7 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         return rust.to_string();
     };
     let open = start + open;
-    // Walk to the matching close brace of the root struct.
+    // note: Walk to the matching close brace of the root struct.
     let mut depth = 0i32;
     let mut close = open;
     for (offset, ch) in rust[open..].char_indices() {
@@ -362,7 +363,7 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         let Some(attr_at) = body[..at].rfind("# [") else {
             continue;
         };
-        // typify 0.8 no longer emits `default` for an optional `Option` field;
+        // note: typify 0.8 no longer emits `default` for an optional `Option` field;
         // a field that carries `deserialize_with` makes serde reject omission,
         // so the presence-preserving attribute must carry `default` itself.
         let attribute = concat!(
@@ -373,7 +374,7 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
     }
     format!("{head}{body}{tail}")
 }
-/// Schema extension marker for boolean fields whose accepted wire value is true.
+/// note: Schema extension marker for boolean fields whose accepted wire value is true.
 const LITERAL_TRUE_MARKER: &str = "x-nexus-literal-true";
 
 fn literal_true_fields(src_schema_path: &Path) -> Vec<String> {
@@ -450,7 +451,7 @@ fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
     rust.replace("value . len ()", "value . chars () . count ()")
 }
 
-/// A path relative to the schemas dir, rendered with POSIX separators, for
+/// note: A path relative to the schemas dir, rendered with POSIX separators, for
 /// skip-list matching (independent of platform path separators).
 fn rel_posix(path: &Path) -> String {
     path.components()
@@ -462,7 +463,7 @@ fn rel_posix(path: &Path) -> String {
         .join("/")
 }
 
-/// Wire schemas whose serialized object-key order is part of a compatibility pin.
+/// note: Wire schemas whose serialized object-key order is part of a compatibility pin.
 /// `typify` emits fields in BTreeMap (alphabetical) order; we restore the source
 /// schema `properties` insertion order so omitted-optional JSON stays byte-stable.
 const PRESERVE_PROPERTY_ORDER: &[&str] = &[
@@ -472,7 +473,7 @@ const PRESERVE_PROPERTY_ORDER: &[&str] = &[
     "daemon-api/agent-host/session-viewpoint.schema.json",
 ];
 
-/// Property names from a source schema object, in JSON insertion order
+/// note: Property names from a source schema object, in JSON insertion order
 /// (`serde_json` `preserve_order`).
 fn source_property_order(schema: &Value) -> Vec<String> {
     schema
@@ -608,7 +609,7 @@ fn reorder_root_struct_fields(rust: &str, type_name: &str, order: &[String]) -> 
     rust.to_string()
 }
 
-/// Restore `NexusSessionViewpoint` field order from the source viewpoint schema
+/// note: Restore `NexusSessionViewpoint` field order from the source viewpoint schema
 /// whenever typify inlines that type (create/single/list carriers).
 fn apply_nested_session_viewpoint_order(rust: &str, src_schema_path: &Path) -> String {
     if !rust.contains("pub struct NexusSessionViewpoint {") {
@@ -628,7 +629,7 @@ fn apply_nested_session_viewpoint_order(rust: &str, src_schema_path: &Path) -> S
     reorder_root_struct_fields(rust, "NexusSessionViewpoint", &order)
 }
 
-/// Mirror typify's convert_case Pascal naming for a schema `title`
+/// note: Mirror typify's convert_case Pascal naming for a schema `title`
 /// (`"Nexus CharacterDetail"` → `NexusCharacterDetail`).
 fn title_to_type_name(title: &str) -> String {
     title
@@ -643,7 +644,7 @@ fn title_to_type_name(title: &str) -> String {
         .collect()
 }
 
-/// Rename identifier-prefixed occurrences of `from` to `to`. A match counts
+/// note: Rename identifier-prefixed occurrences of `from` to `to`. A match counts
 /// when the preceding char is not part of an identifier, so derived names
 /// (`NexusXBuilder`, `NexusXNested`) shift coherently with the root rename.
 fn rename_identifier_prefix(rust: &str, from: &str, to: &str) -> String {
@@ -670,16 +671,16 @@ fn rename_identifier_prefix(rust: &str, from: &str, to: &str) -> String {
     out
 }
 
-/// Canonical home of a generated `$ref` target: the standalone module that owns
+/// note: Canonical home of a generated `$ref` target: the standalone module that owns
 /// the name. `module` is relative to `crate::generated` (e.g.
 /// `core::works::work_pool_entry`).
 struct RefTargetEntry {
-    /// Basename-derived contract name of the schema this module was generated for
+    /// note: Basename-derived contract name of the schema this module was generated for
     /// (`WorkPoolEntry`, `TimelineEventInfo`).
     root: String,
-    /// Module path relative to `crate::generated`.
+    /// note: Module path relative to `crate::generated`.
     module: String,
-    /// Type names the module declares at its top level, as emitted.
+    /// note: Type names the module declares at its top level, as emitted.
     declared: BTreeSet<String>,
 }
 
@@ -688,7 +689,7 @@ struct RefTargetIndex {
 }
 
 impl RefTargetIndex {
-    /// Resolve the owner module of a declared type name, or `None` when the name has
+    /// note: Resolve the owner module of a declared type name, or `None` when the name has
     /// no unique canonical home (it then stays exactly as `typify` emitted it).
     ///
     /// A name is owned when exactly one generated module both *declares* it and is
@@ -717,7 +718,7 @@ impl RefTargetIndex {
     }
 }
 
-/// Module path of a schema's generated file, relative to `crate::generated`
+/// note: Module path of a schema's generated file, relative to `crate::generated`
 /// (`core/works/work-pool-entry.schema.json` → `core::works::work_pool_entry`).
 fn generated_module_path(rel: &Path) -> String {
     let mut segments: Vec<String> = rel
@@ -734,7 +735,7 @@ fn generated_module_path(rel: &Path) -> String {
     segments.join("::")
 }
 
-/// The identifier an item declares or implements for: `pub struct X` → `X`,
+/// note: The identifier an item declares or implements for: `pub struct X` → `X`,
 /// `impl X { … }` / `impl From<…> for X` → `X`.
 fn item_type_ident(item: &syn::Item) -> Option<String> {
     match item {
@@ -750,7 +751,7 @@ fn item_type_ident(item: &syn::Item) -> Option<String> {
     }
 }
 
-/// Type names a module declares at its top level, as emitted.
+/// note: Type names a module declares at its top level, as emitted.
 fn declared_type_names(items: &[syn::Item]) -> BTreeSet<String> {
     items
         .iter()
@@ -764,7 +765,7 @@ fn declared_type_names(items: &[syn::Item]) -> BTreeSet<String> {
         .collect()
 }
 
-/// Drop every declaration/impl of a duplicated name, recursing into the generated
+/// note: Drop every declaration/impl of a duplicated name, recursing into the generated
 /// submodules: `typify` emits the inline copy's builder (and any nested helper)
 /// there too, so the copy must leave as one unit.
 fn prune_duplicate_items(items: &mut Vec<syn::Item>, duplicates: &BTreeSet<String>) {
@@ -778,7 +779,7 @@ fn prune_duplicate_items(items: &mut Vec<syn::Item>, duplicates: &BTreeSet<Strin
     }
 }
 
-/// True when `haystack` mentions `ident` as a whole word.
+/// note: True when `haystack` mentions `ident` as a whole word.
 fn mentions_ident(haystack: &str, ident: &str) -> bool {
     let bytes = haystack.as_bytes();
     let mut from = 0;
@@ -799,7 +800,7 @@ fn is_ident_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
-/// Remove the inline duplicates of `$ref` targets from a generated module so the
+/// why: Remove the inline duplicates of `$ref` targets from a generated module so the
 /// standalone module stays the single canonical home, then import what the pruned
 /// module still uses.
 ///
@@ -827,7 +828,7 @@ fn dedupe_ref_targets(
     let names: BTreeSet<String> = duplicates.keys().cloned().collect();
     prune_duplicate_items(&mut file.items, &names);
 
-    // A removed copy can be referenced only from another removed item (a nested
+    // why: A removed copy can be referenced only from another removed item (a nested
     // helper of the copy); import just the names the pruned module still uses.
     let pruned = prettyplease::unparse(file);
     let mut imports: Vec<syn::Item> = Vec::new();
@@ -848,14 +849,14 @@ fn dedupe_ref_targets(
     Ok(())
 }
 
-/// True when `path` ends in the given trait/type segment.
+/// note: True when `path` ends in the given trait/type segment.
 fn path_ends_with(path: &syn::Path, segment: &str) -> bool {
     path.segments
         .last()
         .is_some_and(|last| last.ident == segment)
 }
 
-/// The local type name a generated impl targets: a single-segment path (`Pid`)
+/// note: The local type name a generated impl targets: a single-segment path (`Pid`)
 /// or an explicit `self::` prefix (`self::Pid`). Any other multi-segment path
 /// names a different type and is rejected — never matched by suffix.
 fn local_self_type(ty: &syn::Type) -> Option<String> {
@@ -873,7 +874,7 @@ fn local_self_type(ty: &syn::Type) -> Option<String> {
     }
 }
 
-/// True when `ty` is `&str`.
+/// note: True when `ty` is `&str`.
 fn is_str_ref(ty: &syn::Type) -> bool {
     matches!(
         ty,
@@ -882,7 +883,7 @@ fn is_str_ref(ty: &syn::Type) -> bool {
     )
 }
 
-/// True when `block` is `impl TryFrom<&str> for _` (any path spelling of the
+/// note: True when `block` is `impl TryFrom<&str> for _` (any path spelling of the
 /// trait, e.g. `::core::convert::TryFrom`).
 fn try_from_str_impl(block: &syn::ItemImpl) -> bool {
     let Some((trait_path, _)) = block.trait_.as_ref() else {
@@ -900,7 +901,7 @@ fn try_from_str_impl(block: &syn::ItemImpl) -> bool {
     matches!(args.args.first(), Some(syn::GenericArgument::Type(arg)) if is_str_ref(arg))
 }
 
-/// True when `stmt` is the injected `if value.trim() != value { return Err(..) }`
+/// note: True when `stmt` is the injected `if value.trim() != value { return Err(..) }`
 /// guard, so a second pass cannot stack a duplicate.
 fn is_trim_guard(stmt: &syn::Stmt) -> bool {
     let syn::Stmt::Expr(syn::Expr::If(if_expr), _) = stmt else {
@@ -919,12 +920,12 @@ fn is_trim_guard(stmt: &syn::Stmt) -> bool {
         && matches!(&*binary.right, syn::Expr::Path(path) if path.path.is_ident("value"))
 }
 
-/// Primitive integers a generated newtype may wrap.
+/// note: Primitive integers a generated newtype may wrap.
 const PRIMITIVE_INTS: &[&str] = &[
     "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
 ];
 
-/// `Some(primitive)` when `ty` is exactly one of [`PRIMITIVE_INTS`].
+/// invariant: `Some(primitive)` when `ty` is exactly one of [`PRIMITIVE_INTS`].
 fn primitive_int(ty: &syn::Type) -> Option<&'static str> {
     let syn::Type::Path(path) = ty else {
         return None;
@@ -938,7 +939,7 @@ fn primitive_int(ty: &syn::Type) -> Option<&'static str> {
         .find(|primitive| path.path.is_ident(primitive))
 }
 
-/// Local single-field tuple structs over a primitive integer: name → primitive.
+/// note: Local single-field tuple structs over a primitive integer: name → primitive.
 fn primitive_tuple_newtypes(items: &[syn::Item]) -> BTreeMap<String, &'static str> {
     let mut newtypes = BTreeMap::new();
     for item in items {
@@ -960,7 +961,7 @@ fn primitive_tuple_newtypes(items: &[syn::Item]) -> BTreeMap<String, &'static st
     newtypes
 }
 
-/// The primitive an integer-shaped newtype parses into, read from its
+/// note: The primitive an integer-shaped newtype parses into, read from its
 /// `type Err = <u64 as ::std::str::FromStr>::Err;` associated type. Requires the
 /// qself trait to be `FromStr` and the qself type to be a primitive integer.
 fn from_str_err_primitive(items: &[syn::ImplItem]) -> Option<&'static str> {
@@ -991,7 +992,7 @@ fn from_str_err_primitive(items: &[syn::ImplItem]) -> Option<&'static str> {
     })
 }
 
-/// `Some((name, borrowed))` for `impl TryFrom<&str> for <name>` (`borrowed`) and
+/// note: `Some((name, borrowed))` for `impl TryFrom<&str> for <name>` (`borrowed`) and
 /// `impl TryFrom<String> for <name>` (`owned`).
 fn try_from_target(item: &syn::Item) -> Option<(String, bool)> {
     let syn::Item::Impl(block) = item else {
@@ -1019,7 +1020,7 @@ fn try_from_target(item: &syn::Item) -> Option<(String, bool)> {
     Some((local_self_type(&block.self_ty)?, borrowed))
 }
 
-/// typify 0.10 only emits `TryFrom<&str>` / `TryFrom<String>` for string
+/// why: typify 0.10 only emits `TryFrom<&str>` / `TryFrom<String>` for string
 /// newtypes, which drops two public conversions from primitive newtypes (e.g.
 /// `Pid(pub u64)`); restore whichever of the two is missing (borrowed and owned
 /// checked independently) as delegations to the generated `FromStr` so the 0.8
@@ -1040,7 +1041,7 @@ fn restore_primitive_newtype_try_from(file: &mut syn::File) -> Result<(), String
         let Some(name) = local_self_type(&block.self_ty) else {
             continue;
         };
-        // Only a local tuple newtype whose field is the same primitive the
+        // why: Only a local tuple newtype whose field is the same primitive the
         // `FromStr` impl parses into qualifies; everything else is skipped.
         let Some(inner) = from_str_err_primitive(&block.items) else {
             continue;
@@ -1081,7 +1082,7 @@ fn restore_primitive_newtype_try_from(file: &mut syn::File) -> Result<(), String
     Ok(())
 }
 
-/// Formatting pass: render a module as pretty Rust after removing any
+/// note: Formatting pass: render a module as pretty Rust after removing any
 /// `$ref`-target duplicate.
 fn render_module_body(
     file: &mut syn::File,
@@ -1094,7 +1095,7 @@ fn render_module_body(
     Ok(prettyplease::unparse(file))
 }
 
-/// Generate Rust source for a single schema via `typify` and return the module
+/// note: Generate Rust source for a single schema via `typify` and return the module
 /// body (schema header excluded).
 ///
 /// `rel` is the schema's path relative to the schemas dir (POSIX or platform); the
@@ -1109,7 +1110,7 @@ fn generate_schema_rust(
     let mut schema: Schema = serde_json::from_str(&content)
         .map_err(|err| format!("invalid JSON Schema in {}: {err}", schema_path.display()))?;
 
-    // Override the schema `title` to the basename-derived PascalCase name BEFORE
+    // note: Override the schema `title` to the basename-derived PascalCase name BEFORE
     // handing it to `typify`. Without this, `typify` names the root type from the
     // raw title (e.g. `"Nexus World Entity"` → `NexusWorldEntity`, `"Nexus Delta"`
     // → `NexusDelta`) or emits no root type at all when the title is absent
@@ -1129,7 +1130,7 @@ fn generate_schema_rust(
         .ok_or_else(|| format!("root schema must be an object: {}", schema_path.display()))?
         .insert("title".to_owned(), Value::String(type_name.clone()));
 
-    // Root-level `allOf` wrappers (alias schemas sharing a single underlying
+    // note: Root-level `allOf` wrappers (alias schemas sharing a single underlying
     // definition): the prep stage inlines the referenced schema verbatim, so
     // typify names the merged root type from the REFERENCED member's `title`
     // (e.g. `NexusCharacterDetail`), drifting from the basename-derived TS
@@ -1145,7 +1146,7 @@ fn generate_schema_rust(
         .and_then(|title| title.as_str())
         .map(title_to_type_name);
 
-    // Cross the schemars schema through JSON rather than coupling to typify's
+    // why: Cross the schemars schema through JSON rather than coupling to typify's
     // own schema representation.
     let typify_schema = serde_json::from_value(schema.to_value())
         .map_err(|err| format!("invalid typify input in {}: {err}", schema_path.display()))?;
@@ -1196,21 +1197,21 @@ fn generate_schema_rust(
     Ok(rust)
 }
 
-/// A generated `.rs` module, tracked so the barrel `mod.rs` files can declare and
+/// why: A generated `.rs` module, tracked so the barrel `mod.rs` files can declare and
 /// re-export it. `out_rel` is relative to the output root.
 struct GeneratedModule {
-    /// Path relative to the output root, e.g. `daemon_api/canvas/outline/work_outline.rs`.
+    /// note: Path relative to the output root, e.g. `daemon_api/canvas/outline/work_outline.rs`.
     out_rel: PathBuf,
-    /// Snake_case Rust module name, e.g. `work_outline`.
+    /// note: Snake_case Rust module name, e.g. `work_outline`.
     rust_mod: String,
-    /// `true` → `pub use <rust_mod>::*;` (glob). `false` → specific type re-export.
+    /// note: `true` → `pub use <rust_mod>::*;` (glob). `false` → specific type re-export.
     export_all: bool,
-    /// When `export_all == false`, the basename-derived type name to re-export
+    /// note: When `export_all == false`, the basename-derived type name to re-export
     /// (matches the emitted Rust struct after T1's title override).
     export_type: Option<String>,
 }
 
-/// Write a single `mod.rs` barrel for `dir`. Mirrors the spoke `write_mod_rs` shape
+/// note: Write a single `mod.rs` barrel for `dir`. Mirrors the spoke `write_mod_rs` shape
 /// (nested `pub mod` declarations followed by flat `pub use` re-exports), adapted
 /// for nexus: the root additionally carries `#![allow(ambiguous_glob_reexports)]`
 /// and the `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` constants (consumers and the
@@ -1236,7 +1237,7 @@ fn write_mod_rs(
             "//! Scope submodule names can collide (e.g. `domain::memory` vs `daemon_api::memory`);".into(),
             "//! the flat TYPE re-exports are all unique, so the module-name ambiguity is benign.".into(),
             "#![allow(ambiguous_glob_reexports)]".into(),
-            // The clippy allows below are emitted into the generated file as
+            // note: The clippy allows below are emitted into the generated file as
             // `//` *string* lines (not Rust comments here) so the justification
             // travels with the generated code. See plan v1.138 T4 (architect Q4).
             "// Clippy: typify-generated code is machine output. The allows below are the".into(),
@@ -1311,11 +1312,11 @@ fn write_mod_rs(
         .unwrap_or_else(|err| panic!("write mod.rs {}: {err}", dir.display()));
 }
 
-/// Write a `mod.rs` barrel for every directory in the generated tree. A directory
+/// note: Write a `mod.rs` barrel for every directory in the generated tree. A directory
 /// gets a barrel iff it directly contains `.rs` schema files or a subdirectory that
 /// (transitively) does — every ancestor of a generated file up to the output root.
 fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: &[(String, u32)]) {
-    // Directories that directly contain a generated `.rs` file.
+    // note: Directories that directly contain a generated `.rs` file.
     let mut file_dirs: BTreeSet<PathBuf> = BTreeSet::new();
     for m in modules {
         let abs = out_root.join(&m.out_rel);
@@ -1324,7 +1325,7 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
         }
     }
 
-    // Every ancestor up to (and including) the output root needs a barrel too.
+    // note: Every ancestor up to (and including) the output root needs a barrel too.
     let mut all_dirs: BTreeSet<PathBuf> = BTreeSet::new();
     all_dirs.insert(out_root.to_path_buf());
     for dir in &file_dirs {
@@ -1341,7 +1342,7 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
     for dir in &all_dirs {
         let is_root = dir == out_root;
 
-        // Immediate subdirectories of `dir` that participate in the tree.
+        // note: Immediate subdirectories of `dir` that participate in the tree.
         let mut child_dirs: Vec<String> = all_dirs
             .iter()
             .filter(|other| other.parent() == Some(dir.as_path()))
@@ -1349,7 +1350,7 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
             .collect();
         child_dirs.sort();
 
-        // Modules directly inside `dir`.
+        // note: Modules directly inside `dir`.
         let mut dir_modules: Vec<&GeneratedModule> = modules
             .iter()
             .filter(|m| out_root.join(&m.out_rel).parent() == Some(dir.as_path()))
@@ -1373,7 +1374,7 @@ fn main() {
     }
 }
 
-/// Resolve the lane inputs, then regenerate the Rust contract tree via stage-and-swap.
+/// note: Resolve the lane inputs, then regenerate the Rust contract tree via stage-and-swap.
 fn run() -> Result<(), String> {
     let root = repo_root();
     let deref_dir = deref_schemas_dir(&root);
@@ -1394,7 +1395,7 @@ fn run() -> Result<(), String> {
         );
     }
 
-    // Stage-and-swap: generate the tree under a sibling staging dir and replace the
+    // note: Stage-and-swap: generate the tree under a sibling staging dir and replace the
     // committed tree (bespoke, stale or partial) only once every write succeeded. A
     // failed or aborted run therefore leaves the previous generated tree intact instead
     // of pruning it mid-window; stray files from a previous generator (e.g. a
@@ -1404,7 +1405,7 @@ fn run() -> Result<(), String> {
     })
 }
 
-/// Generate every schema module and barrel `mod.rs` into `stage_root`, keeping the
+/// note: Generate every schema module and barrel `mod.rs` into `stage_root`, keeping the
 /// bookkeeping paths (`out_path` / `out_rel`) relative to the final `out_root` so the
 /// swap stays a plain directory rename.
 fn generate_tree(
@@ -1425,17 +1426,17 @@ fn generate_tree(
 
     let mut generated: BTreeSet<PathBuf> = BTreeSet::new();
     let mut generated_modules: Vec<GeneratedModule> = Vec::new();
-    /// One generated module, held in memory until the whole tree generated
+    /// note: One generated module, held in memory until the whole tree generated
     /// cleanly: the formatting/dedupe pass runs before anything is written.
     struct PendingModule {
         out_path: PathBuf,
         rel: PathBuf,
-        /// Basename-derived contract name of the schema (the module's root type).
+        /// note: Basename-derived contract name of the schema (the module's root type).
         root_name: String,
         body: String,
     }
     let mut pending: Vec<PendingModule> = Vec::new();
-    // `(type_name, schema_version)` pairs in filesystem-walk order (the loop iterates
+    // note: `(type_name, schema_version)` pairs in filesystem-walk order (the loop iterates
     // sorted schema paths), matching the committed `SCHEMA_VERSIONS` ordering.
     let mut schema_versions: Vec<(String, u32)> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
@@ -1469,7 +1470,7 @@ fn generate_tree(
             }
         }
 
-        // Export mode + schema_version are read from the SOURCE schema (the deref
+        // note: Export mode + schema_version are read from the SOURCE schema (the deref
         // tree loses the top-level `schema_version` stamp and keeps the raw title).
         let src_path = src_dir.join(rel);
         let export_all = export_mode_for_schema(&src_path);
@@ -1516,7 +1517,7 @@ fn generate_tree(
         ));
     }
 
-    // Formatting pass + `$ref` dedupe, then write. Every module is parsed before the
+    // note: Formatting pass + `$ref` dedupe, then write. Every module is parsed before the
     // first write, so the owner index sees the type names modules actually declare
     // and a render failure cannot leave a partially written tree.
     let mut parsed: Vec<(PathBuf, PathBuf, String, syn::File)> = Vec::new();
@@ -1609,7 +1610,7 @@ fn generate_tree(
         );
     }
 
-    // Write the barrel `mod.rs` for every directory in the tree (root gets the
+    // note: Write the barrel `mod.rs` for every directory in the tree (root gets the
     // `#![allow(...)]` attr + `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION`).
     write_barrels(stage_root, &generated_modules, &schema_versions);
 
@@ -1622,7 +1623,7 @@ fn generate_tree(
     Ok(())
 }
 
-/// Sibling staging directory for `out_root`: same parent, so the final swap is a single
+/// why: Sibling staging directory for `out_root`: same parent, so the final swap is a single
 /// rename within one filesystem.
 fn staging_root(out_root: &Path) -> PathBuf {
     let name = out_root
@@ -1631,7 +1632,7 @@ fn staging_root(out_root: &Path) -> PathBuf {
     out_root.with_file_name(format!("{}.staging", name.to_string_lossy()))
 }
 
-/// Sibling path holding the committed tree while it is retired for a swap: same parent,
+/// note: Sibling path holding the committed tree while it is retired for a swap: same parent,
 /// so retiring it and dropping it are renames/removals within one filesystem.
 fn backup_root(out_root: &Path) -> PathBuf {
     let name = out_root
@@ -1640,7 +1641,7 @@ fn backup_root(out_root: &Path) -> PathBuf {
     out_root.with_file_name(format!("{}.backup", name.to_string_lossy()))
 }
 
-/// Sibling advisory lock file guarding one output directory's whole publication
+/// note: Sibling advisory lock file guarding one output directory's whole publication
 /// lifecycle, so overlapping invocations cannot share its staging/backup siblings.
 fn lock_root(out_root: &Path) -> PathBuf {
     let name = out_root
@@ -1649,7 +1650,7 @@ fn lock_root(out_root: &Path) -> PathBuf {
     out_root.with_file_name(format!("{}.lock", name.to_string_lossy()))
 }
 
-/// Take the exclusive per-output-directory publication lock, or fail when another run
+/// why: Take the exclusive per-output-directory publication lock, or fail when another run
 /// holds it. Backed by the OS advisory file lock (`std::fs::File::try_lock`), which the
 /// OS releases when the holder exits — so a crashed run cannot wedge the next one. Only
 /// the advisory lock is stateful; the zero-byte lock file is kept beside the output.
@@ -1671,7 +1672,7 @@ fn acquire_publication_lock(out_root: &Path) -> Result<fs::File, String> {
     }
 }
 
-/// Generate into a sibling staging tree and swap it into place only after `build`
+/// why: Generate into a sibling staging tree and swap it into place only after `build`
 /// succeeds, so a failed, aborted or crashed run cannot prune the existing tree.
 ///
 /// Replacement is *recoverable*, not atomic — `std::fs` exposes no portable directory
@@ -1694,7 +1695,7 @@ where
 {
     let _lock = acquire_publication_lock(out_root)?;
     let stage_root = staging_root(out_root);
-    // Recover (or clear) whatever a previous interrupted publication left behind before
+    // note: Recover (or clear) whatever a previous interrupted publication left behind before
     // this run could overwrite the recovery material.
     recover_interrupted_publication(out_root)?;
     if stage_root.exists() {
@@ -1712,7 +1713,7 @@ where
     publish(&stage_root, out_root)
 }
 
-/// Restore or clear the recovery material a previous interrupted publication left, so a
+/// why: Restore or clear the recovery material a previous interrupted publication left, so a
 /// later run never removes it unrecovered. No-op when no backup exists.
 fn recover_interrupted_publication(out_root: &Path) -> Result<(), String> {
     let backup_root = backup_root(out_root);
@@ -1720,11 +1721,11 @@ fn recover_interrupted_publication(out_root: &Path) -> Result<(), String> {
         return Ok(());
     }
     if out_root.exists() {
-        // The replacement landed; the retired tree is stale litter.
+        // note: The replacement landed; the retired tree is stale litter.
         return fs::remove_dir_all(&backup_root)
             .map_err(|err| format!("remove retired generated tree: {err}"));
     }
-    // Killed before the replacement landed; the retired tree is the committed one.
+    // note: Killed before the replacement landed; the retired tree is the committed one.
     fs::rename(&backup_root, out_root).map_err(|err| {
         format!(
             "restore previous generated tree from {}: {err}",
@@ -1733,7 +1734,7 @@ fn recover_interrupted_publication(out_root: &Path) -> Result<(), String> {
     })
 }
 
-/// Retire the committed tree, land the staged one, then drop the retired copy. A failed
+/// note: Retire the committed tree, land the staged one, then drop the retired copy. A failed
 /// swap restores the retired tree before returning the error.
 fn publish(stage_root: &Path, out_root: &Path) -> Result<(), String> {
     let backup_root = backup_root(out_root);
@@ -1762,7 +1763,7 @@ fn publish(stage_root: &Path, out_root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// Scratch dir under the system temp dir — same filesystem as the staged tree, so
+    /// note: Scratch dir under the system temp dir — same filesystem as the staged tree, so
     /// the swap is a real rename.
     fn scratch(tag: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!("nexus-rust-gen-{tag}-{}", process::id()));
@@ -1779,7 +1780,7 @@ mod tests {
         fs::write(out_root.join("kept.rs"), "// committed").unwrap();
 
         let err = stage_and_swap(&out_root, |stage_root| {
-            // A build that dies mid-write must not prune the committed tree.
+            // why: A build that dies mid-write must not prune the committed tree.
             fs::write(stage_root.join("half.rs"), "// partial").unwrap();
             Err("boom".to_string())
         })
@@ -1826,7 +1827,7 @@ mod tests {
         fs::create_dir_all(&out_root).unwrap();
         fs::write(out_root.join("kept.rs"), "// committed").unwrap();
 
-        // Force the swap rename to fail: the staged tree is absent when publication runs.
+        // why: Force the swap rename to fail: the staged tree is absent when publication runs.
         let err = publish(&staging_root(&out_root), &out_root).unwrap_err();
         assert!(
             err.contains("swap staging tree into place"),
@@ -1844,7 +1845,7 @@ mod tests {
     fn recovers_an_interrupted_publication() {
         let sandbox = scratch("recover");
         let out_root = sandbox.join("generated");
-        // Simulate a kill after the old tree was retired but before the swap landed.
+        // why: Simulate a kill after the old tree was retired but before the swap landed.
         fs::create_dir_all(backup_root(&out_root)).unwrap();
         fs::write(backup_root(&out_root).join("kept.rs"), "// committed").unwrap();
 
@@ -1877,7 +1878,7 @@ mod tests {
             })
         });
 
-        // The first run holds the lock across its whole build; the second must fail
+        // why: The first run holds the lock across its whole build; the second must fail
         // rather than clear the staging tree out from under it.
         locked_rx.recv().unwrap();
         let err = stage_and_swap(&out_root, |_| Ok(())).unwrap_err();
@@ -1890,7 +1891,7 @@ mod tests {
         holder.join().unwrap().unwrap();
         assert!(out_root.join("first.rs").exists());
 
-        // The lock is released with its holder, so the next run proceeds normally.
+        // why: The lock is released with its holder, so the next run proceeds normally.
         stage_and_swap(&out_root, |stage_root| {
             fs::write(stage_root.join("second.rs"), "// second").unwrap();
             Ok(())

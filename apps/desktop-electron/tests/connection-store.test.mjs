@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Connection store tests (v1.192 P0-T5).
+ * note: Connection store tests (v1.192 P0-T5).
  *
  * Defends D-18 against the legacy-host behavior: the secret is never read
  * back to the renderer projection, there is NO plaintext write fallback,
@@ -63,7 +63,7 @@ const unavailableStorage = {
 };
 
 /**
- * Encryption works, but the produced bytes cannot be read back — the state
+ * why: Encryption works, but the produced bytes cannot be read back — the state
  * `ConnectionStore.persist` refuses before publication.
  */
 const encryptOnlyStorage = {
@@ -87,7 +87,7 @@ function makeDeps(t, overrides = {}) {
 const BASE_CONFIG = { endpointUrl: ENDPOINT, hasApiKey: true, active: true };
 
 /**
- * Deps whose next publication is suspended until `release()`, so a regression
+ * why: Deps whose next publication is suspended until `release()`, so a regression
  * can overlap two mutations at a real await boundary instead of a sleep.
  */
 function holdNextPublication(t) {
@@ -121,7 +121,7 @@ function holdNextPublication(t) {
 }
 
 /**
- * A group this process may assign that differs from its effective gid, or null
+ * note: A group this process may assign that differs from its effective gid, or null
  * when it belongs to no other group. Without one a staged-and-renamed file
  * always inherits the process egid, so a captured-group assertion cannot fail.
  */
@@ -130,9 +130,7 @@ function foreignGroup() {
   return process.getgroups?.().find((gid) => gid !== egid) ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Secret isolation
-// ---------------------------------------------------------------------------
+// safety: Secret isolation
 
 test('saved config round-trips as a redacted projection; secret never read back', async (t) => {
   const deps = makeDeps(t);
@@ -146,12 +144,12 @@ test('saved config round-trips as a redacted projection; secret never read back'
   assert.equal(loaded?.hasApiKey, true);
   assert.ok(!loaded || !('apiKey' in loaded));
 
-  // On-disk bytes must be ciphertext, never the plaintext key.
+  // why: On-disk bytes must be ciphertext, never the plaintext key.
   const onDisk = readFileSync(deps.filePath, 'utf8');
   assert.ok(!onDisk.includes('sk-live-secret'), 'plaintext key must never hit disk');
   assert.ok(onDisk.includes('credential'));
 
-  // Main-side injection authority sees the real key (never over IPC).
+  // safety: Main-side injection authority sees the real key (never over IPC).
   const auth = store.getAuth();
   assert.equal(auth?.endpointOrigin, 'https://daemon.example.com:8443');
   assert.equal(auth?.apiKey, 'sk-live-secret');
@@ -173,7 +171,7 @@ test('credential keep retains the key only for the same endpoint', async (t) => 
   assert.equal(kept.hasApiKey, true);
   assert.equal(store.getAuth()?.apiKey, 'sk-1');
 
-  // Endpoint change with keep: the old endpoint's credential never carries.
+  // safety: Endpoint change with keep: the old endpoint's credential never carries.
   const moved = await store.set(
     { endpointUrl: 'https://other.example.com', hasApiKey: true },
     { action: 'keep' },
@@ -190,9 +188,7 @@ test('empty replace explicitly clears the credential', async (t) => {
   assert.equal(store.getAuth(), null);
 });
 
-// ---------------------------------------------------------------------------
-// D-18: no plaintext write fallback; failed encryption non-destructive
-// ---------------------------------------------------------------------------
+// note: D-18: no plaintext write fallback; failed encryption non-destructive
 
 test('encryption unavailable: set fails with structured error and writes nothing', async (t) => {
   const deps = makeDeps(t, { storage: unavailableStorage });
@@ -215,14 +211,12 @@ test('failed encryption is non-destructive: previous state survives', async (t) 
     () => broken.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-after' }),
     (err) => errorCode(err) === 'secure_storage_unavailable',
   );
-  // Reopen healthy: the pre-failure credential must be fully intact.
+  // safety: Reopen healthy: the pre-failure credential must be fully intact.
   const healthy = await ConnectionStore.open(deps);
   assert.equal(healthy.getAuth()?.apiKey, 'sk-before');
 });
 
-// ---------------------------------------------------------------------------
-// Clear + one-time legacy import
-// ---------------------------------------------------------------------------
+// note: Clear + one-time legacy import
 
 test('clear removes stored material; reopen never reimports legacy (durable tombstone)', async (t) => {
   const deps = makeDeps(t);
@@ -251,7 +245,7 @@ test('clear removes stored material; reopen never reimports legacy (durable tomb
   assert.equal(existsSync(markerPath), true, 'clear writes a durable tombstone');
   assert.ok(!readFileSync(markerPath, 'utf8').includes('sk-legacy'), 'tombstone is non-secret');
 
-  // Reopen after clear: the untouched legacy key must NOT be re-imported.
+  // why: Reopen after clear: the untouched legacy key must NOT be re-imported.
   const reopened = await ConnectionStore.open(withLegacy);
   assert.equal(legacyReads, 1, 'cleared tombstone honored: no reimport on reopen');
   assert.equal(legacyCleanups, 1, 'a cleared store owns no material: nothing to clean up');
@@ -269,7 +263,7 @@ test('cleared tombstone survives a failed encryption attempt non-destructively',
   const markerPath = join(deps.filePath, '..', 'connection-config.cleared');
   assert.equal(existsSync(markerPath), true);
 
-  // Open with encryption unavailable and legacy present: the tombstone must
+  // why: Open with encryption unavailable and legacy present: the tombstone must
   // keep the import path closed and survive untouched — nothing encrypted,
   // nothing written, marker bytes intact, no legacy source removed.
   let cleanups = 0;
@@ -319,7 +313,7 @@ test('legacy migration removes both sources only after the encrypted store is pe
     ...deps,
     readLegacy: async () => readFileSync(legacyPath, 'utf8'),
     cleanupLegacy: async () => {
-      // Observed from inside the cleanup call: by the time either legacy
+      // note: Observed from inside the cleanup call: by the time either legacy
       // source is removed the encrypted store must exist on disk, must not
       // contain the plaintext, and must decrypt again.
       const onDisk = JSON.parse(readFileSync(deps.filePath, 'utf8'));
@@ -328,7 +322,7 @@ test('legacy migration removes both sources only after the encrypted store is pe
         decrypted: deps.storage.decryptString(new Uint8Array(Buffer.from(onDisk.credential, 'base64'))),
         legacyStillPresent: existsSync(legacyPath),
       });
-      rmSync(legacyPath, { force: true }); // the JSON target the adapter removes
+      rmSync(legacyPath, { force: true }); // note: the JSON target the adapter removes
     },
   });
 
@@ -344,7 +338,7 @@ test('legacy migration removes both sources only after the encrypted store is pe
 });
 
 test('legacy migration removes nothing when encryption or the encrypted write is refused', async (t) => {
-  // (1) Encryption unavailable: the plaintext original must survive.
+  // why: (1) Encryption unavailable: the plaintext original must survive.
   const denied = makeDeps(t, { storage: unavailableStorage });
   const deniedLegacy = join(denied.filePath, '..', 'connection_config.json');
   writeFileSync(deniedLegacy, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy' }));
@@ -364,7 +358,7 @@ test('legacy migration removes nothing when encryption or the encrypted write is
   assert.ok(readFileSync(deniedLegacy, 'utf8').includes('sk-legacy'), 'the legacy source is preserved');
   assert.equal(existsSync(denied.filePath), false, 'nothing was written in the clear');
 
-  // (2) The encrypted bytes cannot be read back: persist() refuses before
+  // why: (2) The encrypted bytes cannot be read back: persist() refuses before
   // publication, so the legacy source must survive that too.
   const unreadable = makeDeps(t, { storage: encryptOnlyStorage });
   const unreadableLegacy = join(unreadable.filePath, '..', 'connection_config.json');
@@ -389,7 +383,7 @@ test('a refused legacy cleanup still activates the encrypted store and keeps the
   const legacyPath = join(deps.filePath, '..', 'connection_config.json');
   writeFileSync(legacyPath, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true }));
 
-  // A refusal carrying both a secret and command output, exactly like a real
+  // safety: A refusal carrying both a secret and command output, exactly like a real
   // /usr/bin/security failure — neither may surface.
   const refusal = Object.assign(new Error('security: sk-legacy could not be removed'), {
     code: 1,
@@ -403,11 +397,11 @@ test('a refused legacy cleanup still activates the encrypted store and keeps the
     },
   });
 
-  // A refusal never blocks activation: the encrypted store is authoritative.
+  // why: A refusal never blocks activation: the encrypted store is authoritative.
   assert.equal(store.getAuth()?.apiKey, 'sk-legacy', 'the working encrypted session survives the refusal');
   assert.deepEqual(await store.get(), { endpointUrl: ENDPOINT, hasApiKey: true, active: true });
 
-  // ...but the migration is never reported as clean while the plaintext stays.
+  // why: ...but the migration is never reported as clean while the plaintext stays.
   const failure = store.legacyCleanupFailure;
   assert.ok(failure !== null, 'the refused cleanup is observable, not swallowed');
   assert.equal(errorCode(failure), 'legacy_credential_cleanup_failed');
@@ -430,7 +424,7 @@ test('a normal reopen finishes an interrupted legacy cleanup idempotently', asyn
   const legacyPath = join(deps.filePath, '..', 'connection_config.json');
   writeFileSync(legacyPath, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true }));
 
-  // Interrupted migration: the authorized store lands, the removal is refused.
+  // note: Interrupted migration: the authorized store lands, the removal is refused.
   const refused = await ConnectionStore.open({
     ...deps,
     readLegacy: async () => readFileSync(legacyPath, 'utf8'),
@@ -441,7 +435,7 @@ test('a normal reopen finishes an interrupted legacy cleanup idempotently', asyn
   assert.equal(refused.getAuth()?.apiKey, 'sk-legacy');
   assert.equal(errorCode(refused.legacyCleanupFailure), 'legacy_credential_cleanup_failed');
 
-  // The ordinary reopen never reads the legacy source: the encrypted store is
+  // why: The ordinary reopen never reads the legacy source: the encrypted store is
   // authoritative — and it completes the cleanup the first open could not.
   const cleanups = [];
   const reopenDeps = {
@@ -451,7 +445,7 @@ test('a normal reopen finishes an interrupted legacy cleanup idempotently', asyn
     },
     cleanupLegacy: async () => {
       cleanups.push('cleanup');
-      rmSync(legacyPath, { force: true }); // already-absent targets are success
+      rmSync(legacyPath, { force: true }); // note: already-absent targets are success
     },
   };
   const first = await ConnectionStore.open(reopenDeps);
@@ -459,7 +453,7 @@ test('a normal reopen finishes an interrupted legacy cleanup idempotently', asyn
   assert.equal(existsSync(legacyPath), false, 'the interrupted cleanup is finished');
   assert.equal(first.legacyCleanupFailure, null, 'a completed cleanup leaves no failure behind');
 
-  // Reopening again re-runs the now-no-op cleanup: idempotent, same store.
+  // note: Reopening again re-runs the now-no-op cleanup: idempotent, same store.
   const second = await ConnectionStore.open(reopenDeps);
   assert.deepEqual(cleanups, ['cleanup', 'cleanup'], 'every open of the store re-runs the cleanup');
   assert.equal(second.legacyCleanupFailure, null);
@@ -522,10 +516,8 @@ test('encryption unavailable aborts legacy import with structured error and no p
   assert.equal(cleanups, 0, 'a refused import removes no legacy source');
 });
 
-// ---------------------------------------------------------------------------
-// Endpoint admission (v1.194 P1-T2): ONE strict root-service grammar at the
+// note: Endpoint admission (v1.194 P1-T2): ONE strict root-service grammar at the
 // direct-set, persisted and legacy boundaries
-// ---------------------------------------------------------------------------
 
 test('rejected endpoint values never write or replace the stored connection config', async (t) => {
   const deps = makeDeps(t);
@@ -539,7 +531,7 @@ test('rejected endpoint values never write or replace the stored connection conf
     'file:///etc/passwd',
     'https://*.example.com',
     'http://user:pass@daemon.example.com:8443',
-    // Empty delimiters / dot-segment paths that WHATWG normalizes away.
+    // note: Empty delimiters / dot-segment paths that WHATWG normalizes away.
     'https://daemon.example.com?',
     'https://daemon.example.com#',
     'http://@daemon.example.com',
@@ -589,7 +581,7 @@ test('raw-form endpoints are refused on the persisted load path and never re-imp
 
     assert.equal(await store.get(), null, `not activated: ${endpointUrl}`);
     assert.equal(store.getAuth(), null, `no auth authority: ${endpointUrl}`);
-    // The endpoint-validation rejection is its own secure_store_corrupt branch;
+    // note: The endpoint-validation rejection is its own secure_store_corrupt branch;
     // its sanitized message must stay distinct from the malformed-shape branch.
     assert.equal(
       errorCode(store.openFailure),
@@ -615,7 +607,7 @@ test('a persisted remote endpoint with a trailing slash reloads verbatim with it
     { action: 'replace', value: 'sk-remote' },
   );
 
-  // Reopen through readFile: the success path keeps the saved string and
+  // why: Reopen through readFile: the success path keeps the saved string and
   // projects the exact origin that desktop auth pins.
   const reopened = await ConnectionStore.open(deps);
   assert.deepEqual(await reopened.get(), { endpointUrl: stored, hasApiKey: true, active: true });
@@ -654,14 +646,14 @@ test('an invalid stored endpoint is not activated and never triggers the legacy 
     'the invalid bytes stay on disk for recovery',
   );
 
-  // Recovery is the user saving a valid config over the invalid one.
+  // note: Recovery is the user saving a valid config over the invalid one.
   await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-new' });
   assert.equal((await ConnectionStore.open(deps)).getAuth()?.apiKey, 'sk-new');
 });
 
 test('an unreadable existing store differs from an absent one: no legacy import, bytes preserved', async (t) => {
   const deps = makeDeps(t);
-  mkdirSync(deps.filePath); // reading a directory fails with a non-ENOENT error
+  mkdirSync(deps.filePath); // why: reading a directory fails with a non-ENOENT error
   let legacyReads = 0;
   let legacyCleanups = 0;
   const unreadable = await ConnectionStore.open({
@@ -679,7 +671,7 @@ test('an unreadable existing store differs from an absent one: no legacy import,
   assert.equal(await unreadable.get(), null);
   assert.equal(statSync(deps.filePath).isDirectory(), true, 'the unreadable bytes are preserved');
 
-  // Counterpart: the same deps with no file at all (ENOENT) DO import once —
+  // note: Counterpart: the same deps with no file at all (ENOENT) DO import once —
   // and only then remove the legacy sources.
   const absentDeps = makeDeps(t);
   let absentReads = 0;
@@ -723,27 +715,25 @@ test('a legacy import with an unsupported endpoint persists nothing and keeps th
   assert.ok(readFileSync(legacyPath, 'utf8').includes('sk-legacy'), 'legacy recovery bytes stay untouched');
 });
 
-// ---------------------------------------------------------------------------
-// Diagnosis capture (v1.202 P2-T1): open() retains the typed failure
-// ---------------------------------------------------------------------------
+// note: Diagnosis capture (v1.202 P2-T1): open() retains the typed failure
 
 test('openFailure captures the typed classification without changing the inactive-store contract', async (t) => {
-  // Healthy / fresh install: no store file at all → openFailure stays null.
+  // note: Healthy / fresh install: no store file at all → openFailure stays null.
   const freshDeps = makeDeps(t);
   const fresh = await ConnectionStore.open(freshDeps);
   assert.equal(fresh.openFailure, null, 'ENOENT is the fresh-install path, not a failure');
   assert.equal(await fresh.get(), null);
 
-  // Existing-but-unreadable store file → secure_store_unreadable, bytes kept.
+  // why: Existing-but-unreadable store file → secure_store_unreadable, bytes kept.
   const unreadableDeps = makeDeps(t);
-  mkdirSync(unreadableDeps.filePath); // a non-ENOENT read failure
+  mkdirSync(unreadableDeps.filePath); // note: a non-ENOENT read failure
   const unreadable = await ConnectionStore.open(unreadableDeps);
   assert.equal(errorCode(unreadable.openFailure), 'secure_store_unreadable');
   assert.equal(await unreadable.get(), null, 'still not activated');
   assert.equal(unreadable.getAuth(), null);
   assert.equal(statSync(unreadableDeps.filePath).isDirectory(), true, 'the bytes stay on disk');
 
-  // Corrupt store bytes → secure_store_corrupt, bytes preserved verbatim.
+  // note: Corrupt store bytes → secure_store_corrupt, bytes preserved verbatim.
   const corruptDeps = makeDeps(t);
   writeFileSync(corruptDeps.filePath, '{ not json');
   const corrupt = await ConnectionStore.open(corruptDeps);
@@ -751,7 +741,7 @@ test('openFailure captures the typed classification without changing the inactiv
   assert.equal(await corrupt.get(), null, 'still not activated');
   assert.equal(readFileSync(corruptDeps.filePath, 'utf8'), '{ not json', 'bytes preserved');
 
-  // Healthy store → openFailure stays null (no diagnostic surface).
+  // note: Healthy store → openFailure stays null (no diagnostic surface).
   const healthyDeps = makeDeps(t);
   const healthy = await ConnectionStore.open(healthyDeps);
   await healthy.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-1' });
@@ -760,9 +750,7 @@ test('openFailure captures the typed classification without changing the inactiv
   assert.equal(reopened.getAuth()?.apiKey, 'sk-1');
 });
 
-// ---------------------------------------------------------------------------
-// Diagnosis capture (v1.202 P2-T3): permission denial and every corrupt shape
-// ---------------------------------------------------------------------------
+// note: Diagnosis capture (v1.202 P2-T3): permission denial and every corrupt shape
 
 test('a permission-denied store file is openFailure secure_store_unreadable (readFileSync EACCES)', async (t) => {
   if (process.getuid?.() === 0) {
@@ -793,7 +781,7 @@ test('a permission-denied store file is openFailure secure_store_unreadable (rea
 });
 
 test('a corrupt store shape is openFailure secure_store_corrupt (invalid v1 shape or undecryptable credential)', async (t) => {
-  // Valid JSON that is not a v1 store.
+  // note: Valid JSON that is not a v1 store.
   const shapeDeps = makeDeps(t);
   const shapeBytes = JSON.stringify({ version: 2, config: { endpointUrl: ENDPOINT, hasApiKey: false } });
   writeFileSync(shapeDeps.filePath, shapeBytes);
@@ -803,7 +791,7 @@ test('a corrupt store shape is openFailure secure_store_corrupt (invalid v1 shap
   assert.equal(await shapeless.get(), null);
   assert.equal(readFileSync(shapeDeps.filePath, 'utf8'), shapeBytes, 'bytes preserved verbatim');
 
-  // Structurally valid store whose stored credential cannot be decrypted.
+  // safety: Structurally valid store whose stored credential cannot be decrypted.
   const credDeps = makeDeps(t, { storage: encryptOnlyStorage });
   const credBytes = JSON.stringify({
     version: 1,
@@ -819,9 +807,7 @@ test('a corrupt store shape is openFailure secure_store_corrupt (invalid v1 shap
   assert.equal(readFileSync(credDeps.filePath, 'utf8'), credBytes, 'bytes preserved verbatim');
 });
 
-// ---------------------------------------------------------------------------
-// File permissions
-// ---------------------------------------------------------------------------
+// note: File permissions
 
 test('store directory and file use 0700/0600', async (t) => {
   const deps = makeDeps(t);
@@ -833,9 +819,7 @@ test('store directory and file use 0700/0600', async (t) => {
   assert.equal(fileMode, 0o600);
 });
 
-// ---------------------------------------------------------------------------
-// Native publication: refusal and policy preservation
-// ---------------------------------------------------------------------------
+// note: Native publication: refusal and policy preservation
 
 test('a write-denied store refuses, keeps ciphertext and state, and never leaks the key', async (t) => {
   if (process.getuid?.() === 0) {
@@ -860,7 +844,7 @@ test('a write-denied store refuses, keeps ciphertext and state, and never leaks 
         () => null,
         (rejection) => rejection,
       );
-    // The envelope the store wraps must be content-free too: a future
+    // why: The envelope the store wraps must be content-free too: a future
     // regression that put the key in `details` would pass a message-only
     // assertion.
     wire = await publishDocument(deps.filePath, '{"credential":"sk-envelope-secret"}').then(
@@ -880,7 +864,7 @@ test('a write-denied store refuses, keeps ciphertext and state, and never leaks 
   assert.ok(!surfaces.includes('sk-live-secret'), 'the stored plaintext key never surfaces');
   assert.ok(!surfaces.includes('sk-next-secret'), 'the refused plaintext key never surfaces');
   assert.equal(wire?.code, 'forbidden', 'the native refusal is a policy refusal');
-  // An empty `details` is not serialised at all, so absence and `{}` both mean
+  // note: An empty `details` is not serialised at all, so absence and `{}` both mean
   // content-free; a populated one fails here.
   assert.deepEqual(wire?.details ?? {}, {}, 'the refusal envelope carries no details');
   assert.ok(
@@ -912,7 +896,7 @@ test('an existing 0640 store keeps its mode and group on set', async (t) => {
   assert.equal(store.getAuth()?.apiKey, 'sk-1');
 });
 
-// A directory occupying the tombstone path makes the marker publication refuse
+// note: A directory occupying the tombstone path makes the marker publication refuse
 // on every platform while the store file itself stays removable — the shape in
 // which the removal order is directly observable.
 function blockMarker(t) {
@@ -962,11 +946,9 @@ test('after a refused clear the next open loads the store and imports no legacy 
   );
 });
 
-// ---------------------------------------------------------------------------
-// Mutation ordering: one gate per store
-// ---------------------------------------------------------------------------
+// note: Mutation ordering: one gate per store
 
-// The injected publication seam only exists in the gated store: without it
+// why: The injected publication seam only exists in the gated store: without it
 // these two hang at `hold.started`, which the timeout turns into a failure.
 test('a completed clear is not undone by an earlier in-flight save', { timeout: 10_000 }, async (t) => {
   const { deps, arm } = holdNextPublication(t);
@@ -974,7 +956,7 @@ test('a completed clear is not undone by an earlier in-flight save', { timeout: 
 
   const hold = arm();
   const saving = store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
-  await hold.started; // the save is suspended inside its publication
+  await hold.started; // note: the save is suspended inside its publication
   const clearing = store.delete();
   hold.release();
   await Promise.all([saving, clearing]);
@@ -984,7 +966,7 @@ test('a completed clear is not undone by an earlier in-flight save', { timeout: 
   assert.equal(existsSync(deps.filePath), false, 'the earlier save did not republish the store');
 });
 
-// The held operation must be the REPLACE: only `keep` reads the previous
+// why: The held operation must be the REPLACE: only `keep` reads the previous
 // credential, so a queued `keep` over a still-`sk-old` state is what republishes
 // the replaced key when the derivation reads state before the gate resolves.
 test('a keep queued behind a held replace retains the published key', { timeout: 10_000 }, async (t) => {
@@ -994,7 +976,7 @@ test('a keep queued behind a held replace retains the published key', { timeout:
 
   const hold = arm();
   const replacing = store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-new' });
-  await hold.started; // the replacement is suspended inside its publication
+  await hold.started; // note: the replacement is suspended inside its publication
   const keeping = store.set({ ...BASE_CONFIG }, { action: 'keep' });
   hold.release();
   await Promise.all([replacing, keeping]);

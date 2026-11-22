@@ -1,5 +1,5 @@
 /**
- * Schema localization + dereference layer.
+ * note: Schema localization + dereference layer.
  *
  * Two-stage preparation ported from the sibling spoke repo's codegen orchestrator
  * (spoke tooling/codegen/src/run.mjs): the only adaptation is the base URI
@@ -38,13 +38,13 @@ export const NEXUS_SCHEMA_BASE = 'https://nexus42.invalid/schemas/';
 
 /** Resolved prep-layer paths (env-overridable per the architect-locked contract). */
 export interface SchemaPrepPaths {
-  /** Repository root (drives default resolution for the other paths). */
+  /** note: Repository root (drives default resolution for the other paths). */
   repoRoot: string;
-  /** Source JSON Schema tree (`schemas/`). */
+  /** note: Source JSON Schema tree (`schemas/`). */
   srcSchemasDir: string;
-  /** Intermediate localized tree (internal scratch dir, not env-configurable). */
+  /** note: Intermediate localized tree (internal scratch dir, not env-configurable). */
   localizedDir: string;
-  /** Dereferenced output tree, consumed by downstream generators (P1 typify / T2 jstt). */
+  /** note: Dereferenced output tree, consumed by downstream generators (P1 typify / T2 jstt). */
   derefSchemasDir: string;
 }
 

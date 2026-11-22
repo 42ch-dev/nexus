@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UI guardrails — wrapper drift & Design Studio boundary checks.
+# note: UI guardrails — wrapper drift & Design Studio boundary checks.
 # Mirrors `.github/workflows/ci.yml` job `ui-guardrails`.
 # Usage (from repository root): bash tooling/check-ui-guardrails.sh
 #
@@ -18,12 +18,12 @@ cd "$ROOT"
 
 VIOLATIONS=0
 
-# Single SSOT for promoted UI primitives (R-V1100P1QC1-W002).
+# note: Single SSOT for promoted UI primitives (R-V1100P1QC1-W002).
 # Drives both wrapper-candidate paths and Studio @web-ui/* bans.
 # When promoting a new primitive: append here only — do not duplicate lists below.
 PROMOTED_PRIMITIVES=(button badge card input label textarea select tabs)
 
-# ── helper: check file(s) for forbidden pattern ──
+# note: helper: check file(s) for forbidden pattern
 # Usage: forbid "label" "pattern" file1 [file2 ...]
 #   "pattern" is an egrep regex; use single quotes.
 forbid() {
@@ -38,7 +38,7 @@ forbid() {
   fi
 }
 
-# ── helper: check that every @web-ui/* import in a file carries a transitional annotation ──
+# note: helper: check that every @web-ui/* import in a file carries a transitional annotation
 # Convention (per apps/design-studio/AGENTS.md): annotation must be on the line containing the quoted module path.
 # "transitional" keyword is the canonical signal; both // @web-ui/<name> — transitional … and // transitional — … are accepted.
 # Detection is anchored on the quoted module path (e.g. '@web-ui/button') because it is a single lexical token that cannot be split across lines, so the check is fully robust against multiline import formatting.
@@ -52,7 +52,7 @@ check_webui_annotations() {
 
   local any_unannotated=0
   while IFS= read -r line; do
-    # line format: "<num>:<content>"
+    # note: line format: "<num>:<content>"
     # Accept both:
     #   // @web-ui/<name> — transitional …   (canonical per spec)
     #   // transitional — …                  (existing format, pre-T1)
@@ -64,7 +64,7 @@ check_webui_annotations() {
 
   if [ "$any_unannotated" -eq 1 ]; then
     echo "❌ Studio: @web-ui/* imports missing transitional annotation in $file"
-    # Print the offending lines again for clarity
+    # note: Print the offending lines again for clarity
     while IFS= read -r line; do
       if ! echo "$line" | grep -qE 'transitional'; then
         echo "  → $line"
@@ -76,7 +76,7 @@ check_webui_annotations() {
 
 echo "==> Checking promoted-wrapper forbidden imports..."
 
-# Wrapper file list — derived from PROMOTED_PRIMITIVES (SSOT above).
+# note: Wrapper file list — derived from PROMOTED_PRIMITIVES (SSOT above).
 # A file is a "wrapper" iff it contains a re-export from @42ch/nexus-ui.
 WRAPPER_DIR="apps/web/src/components/ui"
 WRAPPER_CANDIDATES=()
@@ -96,7 +96,7 @@ if [ ${#WRAPPER_EXISTING[@]} -eq 0 ]; then
 else
   echo "   Scanning ${#WRAPPER_EXISTING[@]} confirmed wrapper file(s): ${WRAPPER_EXISTING[*]}"
 
-  # Forbidden patterns in promoted wrappers.
+  # note: Forbidden patterns in promoted wrappers.
   # Matches ANY import/require of the forbidden dependency (not just top-level).
   # The public `export { … } from '@42ch/nexus-ui'` and `import type` are NOT matched.
 
@@ -125,56 +125,56 @@ if [ ${#STUDIO_FILES[@]} -eq 0 ]; then
 else
   echo "   Scanning ${#STUDIO_FILES[@]} Studio source file(s)"
 
-  # ── Forbidden import patterns in Design Studio ──
+  # note: Forbidden import patterns in Design Studio
 
-  # Web product pages (relative path from studio into web)
+  # note: Web product pages (relative path from studio into web)
   forbid "Studio: imports web product pages" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/pages\/" \
     "${STUDIO_FILES[@]}"
 
-  # Web layout shells
+  # note: Web layout shells
   forbid "Studio: imports web layout shells" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/components\/layout\/" \
     "${STUDIO_FILES[@]}"
 
-  # Web settings modules (allowed only via @web-settings/*)
+  # why: Web settings modules (allowed only via @web-settings/*)
   forbid "Studio: imports web settings modules" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/components\/settings\/" \
     "${STUDIO_FILES[@]}"
 
-  # Web daemon transport / client
+  # note: Web daemon transport / client
   forbid "Studio: imports daemon client/transport" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/lib\/nexus\/" \
     "${STUDIO_FILES[@]}"
 
-  # Web product hooks
+  # note: Web product hooks
   forbid "Studio: imports web product hooks" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/hooks\/" \
     "${STUDIO_FILES[@]}"
 
-  # Web app providers / contexts
+  # note: Web app providers / contexts
   forbid "Studio: imports web providers/contexts" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/(providers|contexts)\/" \
     "${STUDIO_FILES[@]}"
 
-  # Wire contracts (studio is not an ACP consumer)
+  # note: Wire contracts (studio is not an ACP consumer)
   forbid "Studio: imports @42ch/nexus-contracts" \
     "import\s+.*from\s+['\"]@42ch\/nexus-contracts['\"]" \
     "${STUDIO_FILES[@]}"
 
-  # Deep import into @42ch/nexus-ui internals (must use public API)
+  # why: Deep import into @42ch/nexus-ui internals (must use public API)
   forbid "Studio: deep-imports @42ch/nexus-ui/src/*" \
     "import\s+.*from\s+['\"]@42ch\/nexus-ui\/src\/" \
     "${STUDIO_FILES[@]}"
 
-  # ── @web-ui/* annotation enforcement ──
+  # note: @web-ui/* annotation enforcement
   echo ""
   echo "   Checking @web-ui/* transitional annotations..."
   for f in "${STUDIO_FILES[@]}"; do
     check_webui_annotations "$f"
   done
 
-  # ── @web-ui/* for already-promoted primitives (from PROMOTED_PRIMITIVES) ──
+  # note: @web-ui/* for already-promoted primitives (from PROMOTED_PRIMITIVES)
   # These must be imported from @42ch/nexus-ui, not @web-ui/*
   echo ""
   echo "   Checking @web-ui/* for already-promoted primitives..."
@@ -196,7 +196,7 @@ check_cn_parity() {
   local pkg_barrel="packages/nexus-ui/src/index.ts"
   local web_cn="apps/web/src/lib/utils.ts"
 
-  # ── 1. Package cn.ts must exist and own the extendTailwindMerge config ──
+  # note: 1. Package cn.ts must exist and own the extendTailwindMerge config
   if [ ! -f "$pkg_cn" ]; then
     echo "❌ cn consolidation: missing $pkg_cn"
     VIOLATIONS=$((VIOLATIONS + 1))
@@ -209,7 +209,7 @@ check_cn_parity() {
   fi
   echo "   ✅ $pkg_cn owns extendTailwindMerge (SSOT)."
 
-  # ── 2. Package barrel must export cn ──
+  # note: 2. Package barrel must export cn
   if ! grep -qE "export\s+\{\s*cn\s*\}" "$pkg_barrel" 2>/dev/null; then
     echo "❌ cn consolidation: $pkg_barrel does not export cn"
     VIOLATIONS=$((VIOLATIONS + 1))
@@ -217,14 +217,14 @@ check_cn_parity() {
   fi
   echo "   ✅ $pkg_barrel exports cn."
 
-  # ── 3. Web utils.ts must be a thin re-export (no local implementation) ──
+  # note: 3. Web utils.ts must be a thin re-export (no local implementation)
   if [ ! -f "$web_cn" ]; then
     echo "❌ cn consolidation: missing $web_cn"
     VIOLATIONS=$((VIOLATIONS + 1))
     return
   fi
 
-  # Re-export check: must import/re-export cn from @42ch/nexus-ui
+  # why: Re-export check: must import/re-export cn from @42ch/nexus-ui
   if ! grep -qE "export\s+\{\s*cn\s*\}\s*from\s+['\"]@42ch/nexus-ui['\"]" "$web_cn" 2>/dev/null; then
     echo "❌ cn consolidation: $web_cn must re-export cn from @42ch/nexus-ui (e.g. 'export { cn } from \"@42ch/nexus-ui\"')"
     VIOLATIONS=$((VIOLATIONS + 1))
@@ -232,7 +232,7 @@ check_cn_parity() {
     echo "   ✅ $web_cn re-exports cn from @42ch/nexus-ui."
   fi
 
-  # Must NOT contain a local extendTailwindMerge implementation.
+  # why: Must NOT contain a local extendTailwindMerge implementation.
   # Check for actual import/require of tailwind-merge (not just the word in comments).
   if grep -qE "(import|require).*tailwind-merge" "$web_cn" 2>/dev/null; then
     echo "❌ cn consolidation: $web_cn imports tailwind-merge locally (must delegate to @42ch/nexus-ui)"
@@ -241,17 +241,17 @@ check_cn_parity() {
     echo "   ✅ $web_cn has no local tailwind-merge import."
   fi
 
-  # ── 4. No other file duplicates extendTailwindMerge config ──
+  # note: 4. No other file duplicates extendTailwindMerge config
   # Search for duplicate extendTailwindMerge across the repo (exclude the SSOT file).
   local dupes
   dupes=$(grep -rl 'extendTailwindMerge' apps/ --include='*.ts' --include='*.tsx' 2>/dev/null | grep -v 'node_modules' | grep -v 'packages/nexus-ui/src/lib/cn.ts' || true)
   if [ -n "$dupes" ]; then
     for d in $dupes; do
-      # Files that are re-exports with just 'export { cn } from...' are fine
+      # note: Files that are re-exports with just 'export { cn } from...' are fine
       if grep -qE "from\s+['\"]@42ch/nexus-ui['\"]" "$d" 2>/dev/null && ! grep -qE "import.*extendTailwindMerge" "$d" 2>/dev/null; then
         continue
       fi
-      # Any other file with extendTailwindMerge is a duplicate
+      # note: Any other file with extendTailwindMerge is a duplicate
       if grep -qE "import.*extendTailwindMerge|require.*extendTailwindMerge|from.*tailwind-merge" "$d" 2>/dev/null; then
         echo "❌ cn consolidation: duplicate extendTailwindMerge config in $d (authority is $pkg_cn)"
         VIOLATIONS=$((VIOLATIONS + 1))
@@ -259,8 +259,8 @@ check_cn_parity() {
     done
   fi
   if [ "${dupes:-}" = "" ] || [ "$VIOLATIONS" -eq 0 ]; then
-    # Re-check: only flag increase means a dupe was found; avoid noisy "pass" when no-dupes but other violations exist.
-    : # pass — no new violations from dupe scan
+    # why: Re-check: only flag increase means a dupe was found; avoid noisy "pass" when no-dupes but other violations exist.
+    : # note: pass — no new violations from dupe scan
   fi
 }
 
@@ -268,7 +268,6 @@ check_cn_parity
 
 echo ""
 echo ""
-# ── Summary ──
 if [ "$VIOLATIONS" -eq 0 ]; then
   echo "✅ All UI guardrail checks passed."
   exit 0

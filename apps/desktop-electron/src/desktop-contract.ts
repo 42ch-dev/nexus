@@ -10,9 +10,7 @@
  * `docs/specs/surfaces/desktop-shell.md` (Electron rewrite target, P0-T9).
  */
 
-// ---------------------------------------------------------------------------
-// Channels and bridge identity
-// ---------------------------------------------------------------------------
+// note: Channels and bridge identity
 
 export const DESKTOP_BRIDGE_VERSION = 1;
 
@@ -31,13 +29,11 @@ export const DESKTOP_STATUS_CHANNEL = 'nexus:desktop:status-changed';
 /** Preload → main synchronous trusted-runtime fetch (nonsecret metadata only). */
 export const DESKTOP_RUNTIME_CHANNEL = 'nexus:desktop:runtime';
 
-// ---------------------------------------------------------------------------
-// Bounds (frozen)
-// ---------------------------------------------------------------------------
+// note: Bounds (frozen)
 
-export const MAX_REQUEST_BYTES = 1024 * 1024; // total serialized request AND response
-export const MAX_STATUS_BYTES = 4 * 1024; // status event frame
-export const MAX_DIAGNOSTIC_BYTES = 2 * 1024; // status detail tail
+export const MAX_REQUEST_BYTES = 1024 * 1024; // note: total serialized request AND response
+export const MAX_STATUS_BYTES = 4 * 1024; // note: status event frame
+export const MAX_DIAGNOSTIC_BYTES = 2 * 1024; // note: status detail tail
 export const MAX_PATH_BYTES = 4096;
 export const MAX_URL_BYTES = 8192;
 export const MAX_CREATOR_ID_BYTES = 256;
@@ -53,7 +49,7 @@ export const LIFECYCLE_RESTART_TIMEOUT_MS = 25_000;
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
-/** NUL, C0 controls and DEL are rejected in every path/URL/id-bearing field. */
+/** note: NUL, C0 controls and DEL are rejected in every path/URL/id-bearing field. */
 function hasControlChars(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
     const code = value.charCodeAt(i);
@@ -62,9 +58,7 @@ function hasControlChars(value: string): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Operations (closed union — frozen host contract table)
-// ---------------------------------------------------------------------------
+// note: Operations (closed union — frozen host contract table)
 
 export const DESKTOP_OPERATIONS = [
   'open_with',
@@ -109,9 +103,7 @@ export type NullPayloadOperations =
   | 'reset_local_database'
   | 'toggle_maximize_window';
 
-// ---------------------------------------------------------------------------
-// Domain types
-// ---------------------------------------------------------------------------
+// note: Domain types
 
 export type EntranceId = 'developer' | 'content-creator';
 
@@ -163,9 +155,7 @@ export interface DesktopRuntimeMetadata {
  */
 export type ResetLocalDatabaseResult = { status: 'confirmed' } | { status: 'cancelled' };
 
-// ---------------------------------------------------------------------------
-// Per-operation payload / result maps (typed invoke surface)
-// ---------------------------------------------------------------------------
+// note: Per-operation payload / result maps (typed invoke surface)
 
 export interface DesktopOperationPayload {
   open_with: { path: string };
@@ -222,9 +212,7 @@ export interface DesktopOperationResult {
   toggle_maximize_window: null;
 }
 
-// ---------------------------------------------------------------------------
-// Envelope
-// ---------------------------------------------------------------------------
+// note: Envelope
 
 export interface DesktopRequest {
   version: typeof DESKTOP_ENVELOPE_VERSION;
@@ -249,9 +237,7 @@ export interface DesktopFailure {
 
 export type DesktopResponse = DesktopSuccess | DesktopFailure;
 
-// ---------------------------------------------------------------------------
-// Error helpers (proof error-envelope pattern, reused)
-// ---------------------------------------------------------------------------
+// note: Error helpers (proof error-envelope pattern, reused)
 
 export function desktopError(code: string, message: string): Error {
   const err = new Error(message) as Error & { code: string };
@@ -294,7 +280,7 @@ export function desktopOk(request_id: string, result: unknown): DesktopSuccess {
   return response;
 }
 
-/** Machine-readable error codes are short identifiers; longer ones collapse. */
+/** note: Machine-readable error codes are short identifiers; longer ones collapse. */
 const MAX_ERROR_CODE_CHARS = 64;
 
 /**
@@ -315,7 +301,7 @@ export function desktopErr(request_id: string, code: string, message: string): D
     error: { code: boundedCode, message: msg },
   });
   let boundedMessage = typeof message === 'string' ? message : String(message);
-  // Trim the message until the complete frame fits; JSON escaping overhead is
+  // safety: Trim the message until the complete frame fits; JSON escaping overhead is
   // covered by measuring the built envelope, not just the raw string bytes.
   let response = build(boundedMessage);
   while (jsonBytes(response) > MAX_REQUEST_BYTES && boundedMessage.length > 0) {
@@ -338,9 +324,7 @@ export function isDesktopResponse(value: unknown): value is DesktopResponse {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Encoding / validation primitives (TextEncoder — host-agnostic)
-// ---------------------------------------------------------------------------
+// note: Encoding / validation primitives (TextEncoder — host-agnostic)
 
 const encoder = new TextEncoder();
 
@@ -391,7 +375,7 @@ function optionalBoundedString(
   return value;
 }
 
-/** Closed object shape: exact key set, no extras, no arrays, no null. */
+/** note: Closed object shape: exact key set, no extras, no arrays, no null. */
 function exactObject(value: unknown, keys: readonly string[], what: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw desktopError('invalid_input', `${what} must be an object`);
@@ -426,7 +410,7 @@ function validatePublicConnectionConfig(raw: unknown): PublicConnectionConfig {
     throw desktopError('invalid_input', 'hasApiKey must be a boolean');
   }
   const endpointUrl = boundedString(body, 'endpointUrl', MAX_URL_BYTES, 'endpointUrl');
-  // Unsupported endpoints are refused at the IPC boundary, before any effect.
+  // note: Unsupported endpoints are refused at the IPC boundary, before any effect.
   connectionEndpointOrigin(endpointUrl);
   const config: PublicConnectionConfig = {
     endpointUrl,
@@ -608,9 +592,7 @@ export const DESKTOP_BRIDGE_MANIFEST = {
   operations: DESKTOP_OPERATIONS,
 } as const;
 
-// ---------------------------------------------------------------------------
-// Status frame + runtime metadata bounds (preload and main both enforce)
-// ---------------------------------------------------------------------------
+// note: Status frame + runtime metadata bounds (preload and main both enforce)
 
 export function assertDesktopStatusFrame(raw: unknown): DaemonStatus {
   const body = exactObject(raw, ['state', 'version', 'port', 'detail'], 'status frame');
@@ -656,8 +638,7 @@ export function parseDesktopRuntimeMetadata(raw: unknown): DesktopRuntimeMetadat
   return { localEndpoint };
 }
 
-// ---------------------------------------------------------------------------
-// Remote service endpoint grammar (v1.194 P1-T2) — the ONE strict
+// note: Remote service endpoint grammar (v1.194 P1-T2) — the ONE strict
 // root-service http(s) endpoint grammar, shared by the IPC payload
 // validator, `ConnectionStore` (direct set, persisted and legacy input) and
 // the CSP origin boundary. This is the remote Nexus service endpoint, NOT
@@ -666,7 +647,6 @@ export function parseDesktopRuntimeMetadata(raw: unknown): DesktopRuntimeMetadat
 // supported. Checked on the RAW string before any parsing — WHATWG URL
 // normalization strips/remaps some C0 controls and maps `\` to `/`, so a
 // post-parse check alone would accept control/backslash-bearing input.
-// ---------------------------------------------------------------------------
 
 /**
  * Validate a remote service endpoint and return its parsed exact origin.
@@ -712,7 +692,7 @@ export function connectionEndpointOrigin(endpointUrl: unknown): string {
   if (parsed.pathname !== '' && parsed.pathname !== '/') {
     throw desktopError('invalid_input', 'endpointUrl must be a root service URL');
   }
-  // The normalized fields above cannot see the forms WHATWG collapses into
+  // why: The normalized fields above cannot see the forms WHATWG collapses into
   // the root origin before they are assigned: the EMPTY `?` / `#` / `@` / `:@`
   // delimiters, an empty `:port`, and dot-segment paths (`/.`, `/..`) all
   // leave `.search`/`.hash`/`.username`/`.pathname` at their root values.
@@ -742,14 +722,12 @@ export function connectionEndpointOrigin(endpointUrl: unknown): string {
   return parsed.origin;
 }
 
-// ---------------------------------------------------------------------------
-// External URL policy — the ONE main-owned predicate (parity row 25), shared
+// note: External URL policy — the ONE main-owned predicate (parity row 25), shared
 // by the protocol/navigation layer (P0-T1) and the `open_external_url`
 // action (P0-T3). Checked on the RAW input string before any parsing:
 // WHATWG URL normalization strips/remaps some C0 controls, so a post-parse
 // check alone would accept control-bearing input. http/https with a
 // nonempty host only; no userinfo, no surrounding whitespace, no controls.
-// ---------------------------------------------------------------------------
 
 export function isAllowedDesktopExternalUrl(url: unknown): boolean {
   if (typeof url !== 'string' || url.length === 0) return false;
@@ -768,17 +746,15 @@ export function isAllowedDesktopExternalUrl(url: unknown): boolean {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// App origin (nexus://app) — shared by desktop-ipc sender checks and
+// note: App origin (nexus://app) — shared by desktop-ipc sender checks and
 // protocol navigation policy. Dev HMR origins are opt-in, never default.
-// ---------------------------------------------------------------------------
 
 export const DESKTOP_SCHEME = 'nexus';
 export const DESKTOP_HOST = 'app';
 export const DESKTOP_ORIGIN = 'nexus://app';
 
 export interface DesktopOriginOptions {
-  /** Explicitly launched dev HMR on localhost:5173 only. */
+  /** why: Explicitly launched dev HMR on localhost:5173 only. */
   dev?: boolean;
 }
 
@@ -805,9 +781,7 @@ export function isDesktopAppOrigin(url: string, options?: DesktopOriginOptions):
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Preload bridge surface (window.nexusDesktop, version 1)
-// ---------------------------------------------------------------------------
+// note: Preload bridge surface (window.nexusDesktop, version 1)
 
 export interface DesktopBridge {
   version: typeof DESKTOP_BRIDGE_VERSION;
@@ -820,7 +794,7 @@ export interface DesktopBridge {
         : [payload: DesktopOperationPayload[O]]
     ): Promise<DesktopOperationResult[O]>;
   };
-  /** Returns an unsubscribe function; never passes Electron event objects. */
+  /** why: Returns an unsubscribe function; never passes Electron event objects. */
   onStatusChanged(listener: (status: DaemonStatus) => void): () => void;
 }
 

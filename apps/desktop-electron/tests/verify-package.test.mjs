@@ -10,7 +10,7 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const verifier = join(scriptsDir, '..', 'scripts', 'verify-package.mjs');
 
 /**
- * Governed desktop product version from `resources/product.json`. The receipt
+ * note: Governed desktop product version from `resources/product.json`. The receipt
  * and the mocked Info.plist below both carry it, so the verifier's
  * `CFBundleShortVersionString === receipt.version` check stays anchored to the
  * real release version instead of a drifting literal.
@@ -31,7 +31,7 @@ function writeExecutable(path, source) {
 }
 
 /**
- * Minimal published-package fixture honoring the (e-i) resources layout, with
+ * note: Minimal published-package fixture honoring the (e-i) resources layout, with
  * per-test overrides for the layout files under test.
  */
 function buildLayoutFixture(root, { productJson, includeIcon = true, includeRuntimeIcon = true } = {}) {
@@ -145,7 +145,7 @@ test('resources layout without the app icon fails package verification', () => {
 test('resources layout without the runtime app icon fails package verification', () => {
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-package-'));
   try {
-    // The packaging-only `.icns` is present, but the decodable runtime PNG the
+    // why: The packaging-only `.icns` is present, but the decodable runtime PNG the
     // changed host loads for the Dock image (resources/icons/app-icon.png) is
     // not: static verification must reject such a package.
     const { packageDir, commandBin } = buildLayoutFixture(root, { includeRuntimeIcon: false });
@@ -197,11 +197,11 @@ test('missing minimum-macOS load command fails package verification', () => {
     writeFileSync(join(appPath, 'Info.plist'), 'fixture plist');
     writeFileSync(join(appPath, 'MacOS', 'Nexus'), 'missing-minos Mach-O fixture');
 
-    // The app-executable Mach-O header inspection runs BEFORE
+    // note: The app-executable Mach-O header inspection runs BEFORE
     // `verifyResourcesLayout`, so this fixture trips the minos check without
     // ever consulting the resources layout — no layout seeding is needed here.
 
-    // Keep the fixture independent of host Mach-O tools while preserving the
+    // why: Keep the fixture independent of host Mach-O tools while preserving the
     // verifier's real CLI path: file reports Mach-O, otool reports no floor.
     writeExecutable(join(commandBin, 'file'), '#!/bin/sh\nprintf "%s\\n" "Mach-O 64-bit executable arm64"\n');
     writeExecutable(join(commandBin, 'otool'), '#!/bin/sh\nprintf "%s\\n" "Load command 0"\n');

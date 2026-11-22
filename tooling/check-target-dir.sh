@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assert this checkout builds into its own scoped CARGO_TARGET_DIR.
+# note: Assert this checkout builds into its own scoped CARGO_TARGET_DIR.
 #
 # `.envrc` decides the dir per checkout; a manual `export` in the session
 # overrides it, and cargo reuses a fresh-looking `rmeta` another checkout

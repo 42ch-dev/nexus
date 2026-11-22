@@ -134,18 +134,17 @@ set -euo pipefail
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 export CARGO_TARGET_DIR
 
-# --- helpers --------------------------------------------------------------
 
 fail() {
   echo "::error::graph pin failed: $1"
   exit 1
 }
 
-# cargo_tree <args...>
+# note: cargo_tree <args...>
 # Single place every probe resolves its workspace, so `--manifest-path` reaches
 # all of them (fixture workspaces) and the default run stays byte-identical.
 cargo_tree() {
-  # QC-fix round 3 (QC2-F003): the wrapper carries NO network policy.
+  # note: QC-fix round 3 (QC2-F003): the wrapper carries NO network policy.
   # Offline-ness is decided by the CALLER's environment, not by whether a
   # manifest path was passed: fixture runs set `CARGO_NET_OFFLINE=true` in
   # their spawn env (cargoEnv()), so path-only fixtures stay isolated, while
@@ -159,31 +158,31 @@ cargo_tree() {
   fi
 }
 
-# assert_empty <spec> <features> <package>
+# note: assert_empty <spec> <features> <package>
 assert_empty() {
   local crate="$1"; shift
   local feats="$1"; shift
   local pkg="$1"
-  # QC-fix S-a: capture the cargo-tree exit status. A FAILING `cargo tree`
+  # note: QC-fix S-a: capture the cargo-tree exit status. A FAILING `cargo tree`
   # (typo'd package/feature, crate not in the workspace) yields empty output
   # and a zero count — with `|| true` that false-greened the "absent" pin.
   local out status=0
-  # `|| status=$?` (not a bare capture) so a failing cargo tree does NOT
+  # why: `|| status=$?` (not a bare capture) so a failing cargo tree does NOT
   # trip `set -e` before we can inspect its status (QC-fix S-a); `status`
   # defaults to 0 so `set -u` stays satisfied on success.
   out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
   local count
-  # Only count `<pkg> v<ver>` rows (an empty `-i` report prints a bare
+  # why: Only count `<pkg> v<ver>` rows (an empty `-i` report prints a bare
   # "package not found" line; tree output also carries parent crate rows
   # like `nexus-spoke-adapter v0.1.0` that must not be counted).
   count=$(grep -c "^$pkg v[0-9]" <<<"$out" || true)
   if [[ "$status" -ne 0 ]]; then
-    # `cargo tree -i <absent>` exits 101 with "did not match any packages" —
+    # note: `cargo tree -i <absent>` exits 101 with "did not match any packages" —
     # that IS the normal absence signal. Any OTHER nonzero outcome (feature
     # typo, invalid invocation, crate not in workspace) is a real tool
     # failure and must fail the pin instead of false-greening the count.
     if grep -qF "package ID specification \`$pkg\` did not match any packages" <<<"$out"; then
-      : # legitimate absence — the zero-count check below confirms it
+      : # note: legitimate absence — the zero-count check below confirms it
     else
       fail "cargo tree for $crate $feats (probe $pkg) failed (exit $status): $out"
     fi
@@ -194,7 +193,7 @@ assert_empty() {
   echo "ok: $pkg absent from $crate $feats"
 }
 
-# assert_exactly_one <crate> <features...> <package>
+# note: assert_exactly_one <crate> <features...> <package>
 # Asserts the package resolves to EXACTLY ONE version in the cohort (the
 # anti-version-split guard). No version value is asserted: requirements live
 # in the manifests (single source of truth) and dependency bumps must not
@@ -203,21 +202,21 @@ assert_exactly_one() {
   local crate="$1"; shift
   local feats="$1"; shift
   local pkg="$1"
-  # QC-fix S-a: propagate the cargo-tree exit status (a failed invocation
+  # note: QC-fix S-a: propagate the cargo-tree exit status (a failed invocation
   # must fail the pin loudly, not just yield an empty/one-line result).
   local out status=0
-  # `|| status=$?` so a failing cargo tree does NOT trip `set -e` before
+  # why: `|| status=$?` so a failing cargo tree does NOT trip `set -e` before
   # the status check (QC-fix S-a); `status` defaults to 0 for success.
   out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
   local versions
   versions=$(grep "^$pkg v[0-9]" <<<"$out" | sed -E 's/.* v([^ ]+).*/\1/' | sort -u || true)
   local count
-  # Count NONEMPTY rows: `wc -l` over an empty here-string counts its trailing
+  # note: Count NONEMPTY rows: `wc -l` over an empty here-string counts its trailing
   # newline, so a successful query that matched no package reported one
   # "version" and passed the exact-one pin. An empty set is zero, never one.
   count=$(sed '/^$/d' <<<"$versions" | wc -l | tr -d ' ')
   if [[ "$status" -ne 0 ]]; then
-    # Same absence tolerance as assert_empty: a package legitimately absent
+    # note: Same absence tolerance as assert_empty: a package legitimately absent
     # from the resolved graph (feature off) exits 101 with the canonical
     # message. Exact-one pins only ever hit this when the feature gate that
     # pulls the package is off — treat as absent-passthrough only if the
@@ -233,7 +232,7 @@ assert_exactly_one() {
   echo "ok: $pkg single version ($versions) for $crate $feats"
 }
 
-# assert_features <crate> <features...> <package> <feature-list>
+# note: assert_features <crate> <features...> <package> <feature-list>
 # Resolves the package's ONE version/feature pair in the cohort and compares
 # the FEATURE half. Used for the selected-edge evidence the cohort table
 # requires (graph-flow featureless; spoke-adapter explicit `compute`). No
@@ -249,7 +248,7 @@ assert_features() {
     fail "feature probe for $pkg in $crate ${feats:-<default>} failed (exit $status): $out"
   fi
   local pairs
-  # `{p}` prints `<name> v<version> [(<path>)]`; keep only the version + the
+  # why: `{p}` prints `<name> v<version> [(<path>)]`; keep only the version + the
   # resolved feature list, deduplicated (the inverted tree repeats a package's
   # parents, never its own row).
   pairs=$(grep -oE "^$pkg v[^ ]+( \([^)]*\))? feats=\[[^]]*\]" <<<"$out" \
@@ -267,7 +266,7 @@ assert_features() {
   echo "ok: $pkg v$got_ver $got_feats for $crate ${feats:-<default>}"
 }
 
-# assert_features_include <crate> <features...> <package> <feature>
+# note: assert_features_include <crate> <features...> <package> <feature>
 # Asserts the package's ONE resolved feature list CONTAINS <feature>.
 #
 # The shipped selectors resolve long feature sets this guard does not own
@@ -299,7 +298,7 @@ assert_features_include() {
   echo "ok: $pkg selects feature $want for $crate ${feats:-<default>}"
 }
 
-# assert_features_exclude <crate> <features...> <package> <feature>
+# note: assert_features_exclude <crate> <features...> <package> <feature>
 # Asserts the package's ONE resolved feature list does NOT contain <feature>.
 # The negative twin of assert_features_include: a feature-level absence cannot
 # be expressed by the package probes above, and an exact whole-set pin would
@@ -327,7 +326,7 @@ assert_features_exclude() {
   echo "ok: $pkg keeps feature $unwanted unselected for $crate ${feats:-<default>}"
 }
 
-# assert_graph_nonempty <crate> <features>
+# note: assert_graph_nonempty <crate> <features>
 # Positive control for every absence pin: `cargo tree -i <pkg>` reports the
 # same "did not match any packages" for a package that is absent from the
 # resolved graph AND for a probe whose root resolved nothing, so a cohort with
@@ -337,14 +336,14 @@ assert_graph_nonempty() {
   local crate="$1"; shift
   local feats="$1"
   local out err status=0
-  # QC-fix round 2 (E): the temp file is removed on BOTH paths via an EXIT
+  # note: QC-fix round 2 (E): the temp file is removed on BOTH paths via an EXIT
   # trap — `fail` exits the script and would otherwise leak it.
   # QC-fix round 3 (QC1-09): the target dir is passed EXPLICITLY — BSD
   # mktemp ignores `TMPDIR`, so a bare `mktemp` never lands in the per-case
   # dir the fixture suite inspects and the cleanup assertion is vacuous.
   err=$(mktemp "${TMPDIR:-/tmp}/nexus-graph-pins-census.XXXXXXXX")
   trap 'rm -f "$err"' EXIT
-  # QC-fix round 2 (B / QC2-F004): `--prefix none` makes the census
+  # note: QC-fix round 2 (B / QC2-F004): `--prefix none` makes the census
   # rendering-independent — no Unicode glyphs and no ASCII `|--` prefixes,
   # so line-anchored `name vX` rows are stable under any Cargo rendering.
   # stderr stays OUT of the census (QC2-F002); the exit status carries the
@@ -353,14 +352,14 @@ assert_graph_nonempty() {
   if [[ "$status" -ne 0 ]]; then
     fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
-  # QC2-F002: forward residual stderr on SUCCESS so legitimate warnings stay
+  # note: QC2-F002: forward residual stderr on SUCCESS so legitimate warnings stay
   # visible without entering the census.
   if [[ -s "$err" ]]; then
     cat "$err" >&2
   fi
   rm -f "$err"
   trap - EXIT
-  # Line-anchored rows of an explicitly un-prefixed tree: path text cannot
+  # why: Line-anchored rows of an explicitly un-prefixed tree: path text cannot
   # contribute a phantom package (QC2-F002), each package counted once.
   local packages
   packages=$(grep -E '^[A-Za-z0-9_.-]+ v[0-9]' <<<"$out" \
@@ -373,7 +372,7 @@ assert_graph_nonempty() {
   echo "ok: $crate ${feats:-<default>} resolves $((rows - 1)) distinct dependency package(s)"
 }
 
-# assert_no_dependencies <crate> <features>
+# note: assert_no_dependencies <crate> <features>
 # Positive root AND leaf proof in one probe: the package must resolve (an
 # absent or mistyped root fails the cargo tree invocation outright — no
 # vacuous green), and its resolved normal/build tree must name ONLY the root
@@ -383,18 +382,18 @@ assert_no_dependencies() {
   local crate="$1"; shift
   local feats="$1"
   local out err status=0
-  # QC-fix round 2 (E): EXIT trap so a failing census cleans up too.
+  # why: QC-fix round 2 (E): EXIT trap so a failing census cleans up too.
   # QC-fix round 3 (QC1-09): explicit target dir — BSD mktemp ignores TMPDIR.
   err=$(mktemp "${TMPDIR:-/tmp}/nexus-graph-pins-census.XXXXXXXX")
   trap 'rm -f "$err"' EXIT
-  # QC-fix round 2 (B / QC2-F004): `--prefix none` + line-anchored rows —
+  # note: QC-fix round 2 (B / QC2-F004): `--prefix none` + line-anchored rows —
   # identical under Unicode and ASCII rendering, so a `|--`-prefixed ASCII
   # child row can never be dropped. stderr stays out of the census (QC2-F002).
   out=$(cargo_tree -p "$crate" $feats --locked --edges normal,build --prefix none 2>"$err") || status=$?
   if [[ "$status" -ne 0 ]]; then
     fail "graph probe for $crate ${feats:-<default>} failed (exit $status): $out$(cat "$err")"
   fi
-  # QC2-F002: forward residual stderr on success, outside the census.
+  # note: QC2-F002: forward residual stderr on success, outside the census.
   if [[ -s "$err" ]]; then
     cat "$err" >&2
   fi
@@ -408,7 +407,7 @@ assert_no_dependencies() {
   if [[ "$rows" -ne 1 ]]; then
     fail "$crate ${feats:-<default>} must resolve with ZERO dependencies, got $rows package(s): $out"
   fi
-  # QC-fix (QC2-F002): the sole row must BE the requested root — a census
+  # why: QC-fix (QC2-F002): the sole row must BE the requested root — a census
   # that matched anything else resolved the wrong graph.
   if [[ "$packages" != "$crate" ]]; then
     fail "$crate ${feats:-<default>}: zero-dependency census matched '$packages', expected the root itself"
@@ -416,11 +415,11 @@ assert_no_dependencies() {
   echo "ok: $crate ${feats:-<default>} resolves with zero dependencies (root only)"
 }
 
-# --- cohort selection / manifest override -----------------------------------
+# note: cohort selection / manifest override
 
 COHORT=""
 MANIFEST_PATH=""
-# The checker-owned authoring consumer. Its rows always resolve against THIS
+# note: The checker-owned authoring consumer. Its rows always resolve against THIS
 # manifest: the cohort's subject is the checked-in file, so a caller's
 # `--manifest-path` cannot replace the consumer under test.
 AUTHORING_CONSUMER_MANIFEST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixtures/authoring-cohorts/Cargo.toml"
@@ -464,26 +463,26 @@ fi
 # `docs/specs/architecture/rust-core-service-boundary.md` §3.2.
 if [[ "$COHORT" == "domain" ]]; then
   assert_graph_nonempty nexus-core "--no-default-features"
-  # `domain` selects no feature: core's own resolved set stays empty.
+  # note: `domain` selects no feature: core's own resolved set stays empty.
   assert_features nexus-core "--no-default-features" nexus-core ""
   assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
   assert_features nexus-core "--no-default-features" nexus-memory-provider "default"
   assert_exactly_one nexus-core "--no-default-features" spoke-operations
-  # The provider's own forwarding edge is what carries `MemoryPort` into the
+  # note: The provider's own forwarding edge is what carries `MemoryPort` into the
   # domain graph; pin it separately from core's direct spoke-operations edge.
   assert_exactly_one nexus-memory-provider "--no-default-features" spoke-operations
 
-  # Engine + durable execution. The Simulate walk rides `nexus-orchestration`
+  # note: Engine + durable execution. The Simulate walk rides `nexus-orchestration`
   # (`nexus-orchestration/simulate`), so its absence is this pin.
   assert_empty nexus-core "--no-default-features" nexus-orchestration
   assert_empty nexus-core "--no-default-features" nexus-execution
   assert_empty nexus-core "--no-default-features" nexus-session-storage
   assert_empty nexus-core "--no-default-features" graph-flow
-  # Host planes.
+  # note: Host planes.
   assert_empty nexus-core "--no-default-features" nexus-agent-host
   assert_empty nexus-core "--no-default-features" nexus-acp-host
   assert_empty nexus-core "--no-default-features" nexus-wasm-host
-  # Connect planes.
+  # note: Connect planes.
   assert_empty nexus-core "--no-default-features" nexus-connect
   assert_empty nexus-core "--no-default-features" spoke-connect
   assert_empty nexus-core "--no-default-features" libp2p
@@ -493,7 +492,7 @@ if [[ "$COHORT" == "domain" ]]; then
   exit 0
 fi
 
-# --- scoped cohort: private compute policy (v1.249 compute-policy P2) -------
+# note: scoped cohort: private compute policy (v1.249 compute-policy P2)
 # The private std-only policy leaf (v1.249): `nexus-compute-policy` resolves
 # as the positive root with ZERO normal/build dependencies, so ANY dependency
 # it gains — an engine, durable-execution, storage, Host, WASM or Connect
@@ -506,7 +505,7 @@ fi
 # resolved with `-p` from this workspace, so their isolation stays with the
 # public-package readiness checks outside this guard.
 if [[ "$COHORT" == "policy" ]]; then
-  # QC-fix (v1.249 QC1-02 / QC2-F001): the leaf pin runs under EVERY target
+  # note: QC-fix (v1.249 QC1-02 / QC2-F001): the leaf pin runs under EVERY target
   # and EVERY feature selection, not just the host target with default
   # features — a target- or feature-scoped dependency edge is invisible to
   # the host-default selectors (the feature-gated fixture in
@@ -516,7 +515,7 @@ if [[ "$COHORT" == "policy" ]]; then
   # a platform that never ships the public package would still be counted.
   assert_no_dependencies nexus-compute-policy "--all-features --target all"
 
-  # The eleven former `assert_empty nexus-compute-policy …` back-edge probes
+  # note: The eleven former `assert_empty nexus-compute-policy …` back-edge probes
   # (nexus-orchestration, nexus-execution, nexus-session-storage, graph-flow,
   # nexus-agent-host, nexus-acp-host, nexus-wasm-host, nexus-connect,
   # spoke-connect, libp2p, rmcp) are DELETED: under a zero-dependency root
@@ -531,7 +530,7 @@ if [[ "$COHORT" == "policy" ]]; then
   exit 0
 fi
 
-# --- scoped cohort: canonical catalog (v1.249 S4) --------------------------
+# note: scoped cohort: canonical catalog (v1.249 S4)
 # The cohort the pure canonical host-tool catalog compiles into: `nexus-core`
 # with its DEFAULT features. Its selection is empty today, so the shape matches
 # `domain`; the cohort stays separate so the catalog keeps its own proof when
@@ -541,28 +540,28 @@ fi
 # Connect plane appears.
 if [[ "$COHORT" == "catalog" ]]; then
   assert_graph_nonempty nexus-core ""
-  # Core's own resolved set stays the empty default.
+  # note: Core's own resolved set stays the empty default.
   assert_features nexus-core "" nexus-core "default"
-  # Positive authority + storage.
+  # note: Positive authority + storage.
   assert_exactly_one nexus-core "" nexus-memory-provider
   assert_features nexus-core "" nexus-memory-provider "default"
   assert_exactly_one nexus-core "" spoke-operations
-  # The adapter is a normal edge of the domain, but featureless: the compute
+  # why: The adapter is a normal edge of the domain, but featureless: the compute
   # half (`compute` → the WASM host) is what this pin keeps out.
   assert_exactly_one nexus-core "" nexus-spoke-adapter
   assert_features nexus-core "" nexus-spoke-adapter ""
 
-  # Engine + durable execution (the Simulate walk rides `nexus-orchestration`).
+  # note: Engine + durable execution (the Simulate walk rides `nexus-orchestration`).
   assert_empty nexus-core "" nexus-orchestration
   assert_empty nexus-core "" nexus-execution
   assert_empty nexus-core "" nexus-session-storage
   assert_empty nexus-core "" graph-flow
-  # Host planes.
+  # note: Host planes.
   assert_empty nexus-core "" nexus-agent-host
   assert_empty nexus-core "" nexus-acp-host
-  # Compute plane.
+  # note: Compute plane.
   assert_empty nexus-core "" nexus-wasm-host
-  # Connect planes.
+  # note: Connect planes.
   assert_empty nexus-core "" nexus-connect
   assert_empty nexus-core "" spoke-connect
   assert_empty nexus-core "" libp2p
@@ -572,7 +571,7 @@ if [[ "$COHORT" == "catalog" ]]; then
   exit 0
 fi
 
-# --- scoped cohort: enabled capability graph (v1.249 C4) --------------------
+# note: scoped cohort: enabled capability graph (v1.249 C4)
 # The capability extraction's integration proof, in four rows:
 #
 #  (1) The ENABLED Connect library. `connect-client,embedded-mcp` is the widest
@@ -613,7 +612,7 @@ if [[ "$COHORT" == "capability" ]]; then
   assert_empty nexus-connect "$CONNECT_ENABLED" nexus-session-storage
   assert_empty nexus-connect "$CONNECT_ENABLED" graph-flow
 
-  # Row (2), two SELECTIONS with two claims — never one row standing in for the
+  # why: Row (2), two SELECTIONS with two claims — never one row standing in for the
   # other (`--no-default-features` and the default selection coincide today only
   # because `nexus-capability` declares `default = []`; a future
   # `default = ["wasm"]` changes the ordinary build alone).
@@ -621,13 +620,13 @@ if [[ "$COHORT" == "capability" ]]; then
   # Explicit `--no-default-features`: the bare crate carries no WASM edge.
   assert_graph_nonempty nexus-capability "--no-default-features"
   assert_empty nexus-capability "--no-default-features" nexus-wasm-host
-  # DEFAULT selection (no flag): the build `cargo build -p nexus-capability`
+  # note: DEFAULT selection (no flag): the build `cargo build -p nexus-capability`
   # produces carries no WASM edge. This is the row the claim "default excludes
   # WASM" belongs to; the fixture suite flips `default = ["wasm"]` to prove it
   # fails while the row above still passes.
   assert_graph_nonempty nexus-capability ""
   assert_empty nexus-capability "" nexus-wasm-host
-  # Row (3): an EXPLICIT compute selection binds the REAL WASM host.
+  # note: Row (3): an EXPLICIT compute selection binds the REAL WASM host.
   assert_exactly_one nexus-capability "--features wasm" nexus-wasm-host
 
   assert_exactly_one nexus-core-node "" nexus-capability
@@ -639,7 +638,7 @@ if [[ "$COHORT" == "capability" ]]; then
   exit 0
 fi
 
-# --- scoped cohort: authoring consumer (v1.249 A3) --------------------------
+# note: scoped cohort: authoring consumer (v1.249 A3)
 # One claim in three parts: strategy authoring is a SELECTED surface, never an
 # implicit one.
 #
@@ -666,13 +665,13 @@ fi
 #     BOTH: a consumer gets the Host plane by selecting it, never by selecting
 #     authoring.
 if [[ "$COHORT" == "authoring" ]]; then
-  # (1) Shipped authoring selectors.
+  # note: (1) Shipped authoring selectors.
   assert_exactly_one nexus42 "" nexus-workflow-simulate
   assert_features_include nexus42 "" nexus-core strategy-authoring
   assert_exactly_one nexus-core-node "" nexus-workflow-simulate
   assert_features_include nexus-core-node "" nexus-core strategy-authoring
 
-  # (2) Non-authoring selections link no simulator. Each negative row carries
+  # note: (2) Non-authoring selections link no simulator. Each negative row carries
   # its OWN positive control: `assert_empty` tolerates Cargo's unmatched-package
   # diagnostic, so an empty or otherwise unresolvable root would report "absent"
   # exactly like a valid selection. The census runs first, on the same root and
@@ -681,7 +680,7 @@ if [[ "$COHORT" == "authoring" ]]; then
   assert_empty nexus-core "--features compute" nexus-workflow-simulate
   assert_graph_nonempty nexus-core "--no-default-features"
   assert_empty nexus-core "--no-default-features" nexus-workflow-simulate
-  # The Connect-only runtime is the third run-only plane. It must stay
+  # why: The Connect-only runtime is the third run-only plane. It must stay
   # simulator-free in BOTH halves: the package absent from the graph, and the
   # authoring feature absent from core's resolved set — forwarding only the
   # feature would pull the package with it, and a stray direct dependency would
@@ -690,7 +689,7 @@ if [[ "$COHORT" == "authoring" ]]; then
   assert_features_exclude nexus42 "--no-default-features --features connect-host" nexus-core strategy-authoring
   assert_empty nexus42 "--no-default-features --features connect-host" nexus-workflow-simulate
 
-  # (3) The consumer, against ITS OWN manifest — the checked-in file is the
+  # note: (3) The consumer, against ITS OWN manifest — the checked-in file is the
   # subject here, so a caller's `--manifest-path` cannot substitute for it.
   MANIFEST_PATH="$AUTHORING_CONSUMER_MANIFEST"
   assert_graph_nonempty authoring-cohorts ""
@@ -707,7 +706,7 @@ if [[ "$COHORT" == "authoring" ]]; then
   exit 0
 fi
 
-# --- scoped cohort: Connect product/library split (v1.249 S6) ----------------
+# note: scoped cohort: Connect product/library split (v1.249 S6)
 # One claim in two halves: the shipped Connect product is engine-free WITHOUT
 # being core-free, and the library it serves does not depend back on core.
 #
@@ -737,7 +736,7 @@ if [[ "$COHORT" == "connect" ]]; then
   CONNECT_PRODUCT="--no-default-features --features connect-host"
   CONNECT_LIBRARY="--no-default-features --features connect-client,embedded-mcp"
 
-  # (1) Library first: the product reaches the library through its own
+  # note: (1) Library first: the product reaches the library through its own
   # `nexus-connect` edge, so a real back-edge into the library would also fail
   # the product rows below. Probing the library half first keeps such a
   # regression attributable to the library row instead of the downstream app.
@@ -747,14 +746,14 @@ if [[ "$COHORT" == "connect" ]]; then
   assert_exactly_one nexus-connect "$CONNECT_LIBRARY" spoke-connect
   assert_exactly_one nexus-connect "$CONNECT_LIBRARY" libp2p
   assert_exactly_one nexus-connect "$CONNECT_LIBRARY" rmcp
-  # ...and depends back on none of core or the engine/store/graph planes.
+  # note: ...and depends back on none of core or the engine/store/graph planes.
   assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-core
   assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-orchestration
   assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-execution
   assert_empty nexus-connect "$CONNECT_LIBRARY" nexus-session-storage
   assert_empty nexus-connect "$CONNECT_LIBRARY" graph-flow
 
-  # (2) Product: retained domain/storage/transport/compute.
+  # note: (2) Product: retained domain/storage/transport/compute.
   assert_graph_nonempty nexus42 "$CONNECT_PRODUCT"
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-core
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-memory-provider
@@ -763,15 +762,15 @@ if [[ "$COHORT" == "connect" ]]; then
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-connect
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" spoke-connect
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" libp2p
-  # The compute half is the EXPLICIT spoke-adapter edge, not an inherited
+  # note: The compute half is the EXPLICIT spoke-adapter edge, not an inherited
   # default: pin the feature AND the real WASM host it binds.
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-spoke-adapter
   assert_features nexus42 "$CONNECT_PRODUCT" nexus-spoke-adapter "compute"
   assert_exactly_one nexus42 "$CONNECT_PRODUCT" nexus-wasm-host
-  # Connect-only never implies the CLI cohort.
+  # why: Connect-only never implies the CLI cohort.
   assert_features nexus42 "$CONNECT_PRODUCT" nexus42 "connect-host"
 
-  # (2) Product: engine/store/graph, authoring, Host/ACP and rmcp stay out.
+  # note: (2) Product: engine/store/graph, authoring, Host/ACP and rmcp stay out.
   assert_empty nexus42 "$CONNECT_PRODUCT" nexus-orchestration
   assert_empty nexus42 "$CONNECT_PRODUCT" nexus-execution
   assert_empty nexus42 "$CONNECT_PRODUCT" nexus-session-storage
@@ -785,28 +784,28 @@ if [[ "$COHORT" == "connect" ]]; then
   exit 0
 fi
 
-# --- ordinary CLI (cli,default) --------------------------------------------
+# note: ordinary CLI (cli,default)
 
 assert_empty nexus42 "" spoke-connect
 assert_empty nexus42 "" libp2p
 assert_empty nexus42 "" rmcp
 assert_exactly_one nexus42 "" spoke-operations
-# ACP rides the unconditional nexus-acp-host normal edge of the local
+# note: ACP rides the unconditional nexus-acp-host normal edge of the local
 # ACP spawning the ordinary CLI keeps. Exactly one stable-v1 core.
 assert_exactly_one nexus42 "" agent-client-protocol
-# Resolved set stays the empty default: the SDK declares `default = []` and
+# note: Resolved set stays the empty default: the SDK declares `default = []` and
 # the probe prints that default feature's name; any opt-in capability appends
 # to the list and fails this probe — that is what the assertion is for.
 assert_features nexus42 "" agent-client-protocol "default"
-# v3 opt-in contract: the pin enables no opt-in capability feature, so the
+# why: v3 opt-in contract: the pin enables no opt-in capability feature, so the
 # crates the SDK's `process` / `stdio` features would pull stay absent.
 assert_empty nexus42 "" async-process
 assert_empty nexus42 "" blocking
-# graph-flow exactly once (chronology/cron/ops library edges), with NO
+# note: graph-flow exactly once (chronology/cron/ops library edges), with NO
 # default features (no `postgres`, no `rig`) — asserted below via feats=[].
 assert_exactly_one nexus42 "" graph-flow
 
-# --- Connect-only runtime (connect-host, no defaults) -----------------------
+# note: Connect-only runtime (connect-host, no defaults)
 
 assert_exactly_one nexus42 "--no-default-features --features connect-host" spoke-connect
 assert_exactly_one nexus42 "--no-default-features --features connect-host" libp2p
@@ -814,7 +813,7 @@ assert_exactly_one nexus42 "--no-default-features --features connect-host" spoke
 assert_empty nexus42 "--no-default-features --features connect-host" rmcp
 assert_empty nexus42 "--no-default-features --features connect-host" agent-client-protocol
 
-# --- optional CLI Connect (cli + connect-host) ------------------------------
+# note: optional CLI Connect (cli + connect-host)
 
 assert_exactly_one nexus42 "--features connect-host" spoke-connect
 assert_exactly_one nexus42 "--features connect-host" libp2p
@@ -822,7 +821,7 @@ assert_exactly_one nexus42 "--features connect-host" spoke-operations
 assert_exactly_one nexus42 "--features connect-host" agent-client-protocol
 assert_empty nexus42 "--features connect-host" rmcp
 
-# --- core domain (no defaults) ----------------------------------------------
+# note: core domain (no defaults)
 
 assert_empty nexus-core "--no-default-features" spoke-connect
 assert_empty nexus-core "--no-default-features" libp2p
@@ -832,17 +831,17 @@ assert_empty nexus-core "--no-default-features" nexus-wasm-host
 assert_empty nexus-core "--no-default-features" nexus-agent-host
 assert_empty nexus-core "--no-default-features" nexus-acp-host
 assert_empty nexus-core "--no-default-features" nexus-orchestration
-# v1.245: the run engine is an OPTIONAL edge enabled only by core's `execution`
+# why: v1.245: the run engine is an OPTIONAL edge enabled only by core's `execution`
 # feature. This pin is what makes "absent from the default dependency graph"
 # checkable instead of resting on the `optional = true` declaration alone.
 assert_empty nexus-core "--no-default-features" nexus-execution
 assert_exactly_one nexus-core "--no-default-features" spoke-operations
-# The forward half of the same edge: with `execution` on, core resolves the
+# note: The forward half of the same edge: with `execution` on, core resolves the
 # extracted engine exactly once (no version split between the worked edge and
 # the dev-time self-reference).
 assert_exactly_one nexus-core "--features execution" nexus-execution
 
-# --- core MCP/peer library + Connect-host product cohort --------------------
+# note: core MCP/peer library + Connect-host product cohort
 # v1.196 P1-T1: the cohort's public peer API (peer-tool types, capability and
 # async-trait) is execution-owned, so `connect-client` implies `execution` and
 # the resolved normal feature set is asserted exactly below. Graph structure
@@ -855,7 +854,7 @@ assert_exactly_one nexus-core "--features execution" nexus-execution
 # tolerated: it is the visible mark of the one edge the extraction added, and a
 # `dep:` rewrite would keep the same dependency while hiding it from this pin.
 
-# v1.207 P2 / v249 cutover: `connect-host` is the Connect-host product cohort —
+# note: v1.207 P2 / v249 cutover: `connect-host` is the Connect-host product cohort —
 # the WS accept loop + peer-tools event lane the shipped `nexus-runtime` boots,
 # carrying NO rmcp (the reverse-invoke/operator bridge is not a Connect-host
 # surface) and NO execution (v249 removed the implicit engine edge; the retained
@@ -875,13 +874,13 @@ for feats in "--no-default-features --features connect-client" "--no-default-fea
   assert_exactly_one nexus-core "$feats" spoke-operations
 done
 
-# The cohorts resolve distinct feature sets (`connect-client` = `connect-host`
+# note: The cohorts resolve distinct feature sets (`connect-client` = `connect-host`
 # + rmcp; `embedded-mcp` additionally implies `connect-client`), and
 # `execution` implies `operation-id`, so each closure is asserted separately.
 assert_features nexus-core "--no-default-features --features connect-client" nexus-core "connect-client,connect-host,execution,nexus-connect,operation-id"
 assert_features nexus-core "--no-default-features --features embedded-mcp" nexus-core "connect-client,connect-host,embedded-mcp,execution,nexus-connect,operation-id"
 
-# --- nexus-connect default graph -------------------------------------------
+# note: nexus-connect default graph
 # v1.244: the extracted Connect stack must not depend back on the crate that
 # depends on it. `--no-default-features` is the whole-crate fan-in proof: the
 # unfeatured graph is three crates, so a core or orchestration edge reaching
@@ -889,14 +888,14 @@ assert_features nexus-core "--no-default-features --features embedded-mcp" nexus
 assert_empty nexus-connect "--no-default-features" nexus-core
 assert_empty nexus-connect "--no-default-features" nexus-orchestration
 
-# --- nexus-execution default graph -----------------------------------------
+# note: nexus-execution default graph
 # v1.245: the extracted run engine must not depend back on the crate that
 # composes it. `--no-default-features` is the whole-crate fan-in proof: the
 # unfeatured graph names no core, so an edge reaching this pin means the
 # extraction direction reversed.
 assert_empty nexus-execution "--no-default-features" nexus-core
 
-# --- nexus-memory-provider default graph -----------------------------------
+# note: nexus-memory-provider default graph
 # v1.245: the extracted in-process memory provider must not depend back on the
 # crate that opens it, nor on the orchestration layer. The edge runs
 # `nexus-core → nexus-memory-provider` only.
@@ -911,9 +910,9 @@ assert_empty nexus-memory-provider "--no-default-features" nexus-core
 assert_empty nexus-memory-provider "--no-default-features" nexus-orchestration
 assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
 
-# --- native/TS host (nexus-core-node) ---------------------------------------
+# note: native/TS host (nexus-core-node)
 
-# v1.195 P0-T5: the native cohort resolves the hosted production factory's
+# note: v1.195 P0-T5: the native cohort resolves the hosted production factory's
 # both halves (`execution` + `provider-host`); v1.195 P2-T3 adds the `compute`
 # runtime that same factory installs (ONE WASM engine/cache/serializer).
 # `execution` implies `operation-id` (v1.207 P3-T1), so it appears in the set;
@@ -923,17 +922,17 @@ assert_exactly_one nexus-core "--no-default-features" nexus-memory-provider
 # `strategy-authoring` explicitly — execution alone links no authoring surface.
 # The set stays EXACT, so any other selection change still fails this pin.
 assert_features nexus-core-node "" nexus-core "compute,default,execution,nexus-connect,operation-id,provider-host,strategy-authoring"
-# The cohort edge is real, not a feature-flag claim: the Host plane the hosted
+# note: The cohort edge is real, not a feature-flag claim: the Host plane the hosted
 # factory composes resolves in the node cohort.
 assert_exactly_one nexus-core-node "" nexus-agent-host
 
-# --- selected-edge feature evidence -----------------------------------------
+# note: selected-edge feature evidence
 
 for crate in nexus-orchestration nexus42 nexus-core-node; do
   assert_features "$crate" "" graph-flow ""
 done
 
-# V249 C3: the engine no longer carries a direct spoke-adapter edge, so the
+# why: V249 C3: the engine no longer carries a direct spoke-adapter edge, so the
 # ordinary CLI cohort resolves the adapter FEATURELESS — the compute half
 # (`default` = `compute` → nexus-wasm-host) that used to ride in through
 # `nexus-orchestration` is gone. That is the accidental-WASM removal this plan
@@ -941,7 +940,7 @@ done
 # ships loses a surface, and the Connect cohort below states its compute edge
 # explicitly instead of inheriting one.
 assert_features nexus42 "" nexus-spoke-adapter ""
-# Since v1.207 P2 the Connect-only lane boots nexus-core's peer-tools event
+# why: Since v1.207 P2 the Connect-only lane boots nexus-core's peer-tools event
 # lane. Since V249 C3 the compute half comes from the app's EXPLICIT
 # `nexus-spoke-adapter/compute` feature entry (peer compute + shared WASM cache
 # stay retained Connect behavior) rather than orchestration's `default`, so the

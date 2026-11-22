@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bump the Nexus release version across every version surface.
+ * note: Bump the Nexus release version across every version surface.
  *
  * Files written (all in one step, never committed by this script):
  *   - `Cargo.toml` `[workspace.package].version`
@@ -32,6 +32,7 @@ import { checkLockstep } from "./assert-lockstep-version.mjs";
 import { isReleaseSemVer, isSemVerGreater } from "./semver.mjs";
 
 /**
+ * note: contract for `BumpReport`.
  * @typedef {object} BumpReport
  * @property {boolean} ok
  * @property {string} from
@@ -46,7 +47,7 @@ import { isReleaseSemVer, isSemVerGreater } from "./semver.mjs";
  * @returns {BumpReport}
  */
 export function bumpVersion({ repoRoot, target }) {
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const problems = [];
 
   if (!isReleaseSemVer(target)) {
@@ -115,7 +116,7 @@ Bumps ${LOCKSTEP_PATHS.join(", ")} and ${CARGO_LOCK_PATH}, then re-checks lockst
 Does not commit, tag, or touch CHANGELOG.md.`;
 
 function main(argv, env = process.env) {
-  /** @type {{ target: string | null; repoRoot: string | null; help: boolean }} */
+  /** note: @type {{ target: string | null; repoRoot: string | null; help: boolean }} */
   const options = { target: null, repoRoot: null, help: false };
 
   for (let i = 0; i < argv.length; i += 1) {

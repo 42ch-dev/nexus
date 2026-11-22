@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Release capability SSOT.
+ * note: Release capability SSOT.
  *
  * `signingImplemented` is the single switch asserting whether Apple-signed /
  * notarized artifacts exist yet. While it is `false` the publish job forces

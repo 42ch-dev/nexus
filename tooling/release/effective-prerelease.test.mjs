@@ -58,15 +58,15 @@ test("parsePrereleaseTrailer fails closed when a readable value has a garbled du
 });
 
 test("garbled duplicates force a prerelease even with signing implemented", () => {
-  /** Mirrors the release pipeline: an unreadable trailer means prerelease. */
+  /** note: Mirrors the release pipeline: an unreadable trailer means prerelease. */
   const effectiveFromMessage = (message, signing) => {
     const trailer = parsePrereleaseTrailer(message);
     return effectivePrerelease(trailer ?? true, signing);
   };
 
-  // Readable `false` alone: signing implemented publishes a real Release.
+  // note: Readable `false` alone: signing implemented publishes a real Release.
   assert.equal(effectiveFromMessage("msg\n\nNexus-Prerelease: false\n", true), false);
-  // Same message plus any garbled duplicate: fail closed back to prerelease.
+  // why: Same message plus any garbled duplicate: fail closed back to prerelease.
   for (const garbled of [
     "Nexus-Prerelease:",
     "Nexus-Prerelease: false extra",
@@ -81,18 +81,18 @@ test("garbled duplicates force a prerelease even with signing implemented", () =
 });
 
 test("effectivePrerelease is toggle OR 'signing unimplemented'", () => {
-  // Signing unimplemented (today): every Release is a prerelease.
+  // note: Signing unimplemented (today): every Release is a prerelease.
   assert.equal(effectivePrerelease(true, false), true);
   assert.equal(effectivePrerelease(false, false), true);
-  // Signing implemented: the dispatch toggle decides.
+  // note: Signing implemented: the dispatch toggle decides.
   assert.equal(effectivePrerelease(true, true), true);
   assert.equal(effectivePrerelease(false, true), false);
-  // Default argument is the release-config SSOT.
+  // note: Default argument is the release-config SSOT.
   assert.equal(effectivePrerelease(false), true);
 });
 
 test("a suffixed release version forces a prerelease regardless of toggle or signing", () => {
-  // The suffix disjunct dominates the full-release path: even with signing
+  // note: The suffix disjunct dominates the full-release path: even with signing
   // implemented and an explicit `prerelease: false`, alpha/rc stays prerelease.
   assert.equal(effectivePrerelease(false, true, "0.2.0-alpha.1"), true);
   assert.equal(effectivePrerelease(false, true, "0.2.0-rc.1"), true);
@@ -101,30 +101,30 @@ test("a suffixed release version forces a prerelease regardless of toggle or sig
 });
 
 test("a clean release version keeps today's matrix", () => {
-  // Signing unimplemented (today): every Release is a prerelease.
+  // note: Signing unimplemented (today): every Release is a prerelease.
   assert.equal(effectivePrerelease(false, false, "0.2.0"), true);
-  // Signing implemented: the dispatch toggle decides.
+  // note: Signing implemented: the dispatch toggle decides.
   assert.equal(effectivePrerelease(true, true, "0.2.0"), true);
   assert.equal(effectivePrerelease(false, true, "0.2.0"), false);
-  // An absent version leaves the suffix disjunct inert.
+  // note: An absent version leaves the suffix disjunct inert.
   assert.equal(effectivePrerelease(false, true), false);
   assert.equal(effectivePrerelease(false, true, null), false);
 });
 
 test("a missing toggle fails closed to prerelease even for a clean version with signing implemented", () => {
-  // Regression (I1): the version-only `--version` path leaves the toggle unset.
+  // why: Regression (I1): the version-only `--version` path leaves the toggle unset.
   // A clean version alone must NOT open a full release — that still requires an
   // explicit `prerelease=false` opt-out, so an unset (null/undefined) toggle
   // fails closed regardless of signing or the version shape.
   assert.equal(effectivePrerelease(null, true, "0.2.0"), true);
   assert.equal(effectivePrerelease(undefined, true, "0.2.0"), true);
-  // The explicit opt-out is the only full-release path, and only for a clean version.
+  // why: The explicit opt-out is the only full-release path, and only for a clean version.
   assert.equal(effectivePrerelease(false, true, "0.2.0"), false);
   assert.equal(effectivePrerelease(false, true, "0.2.0-rc.1"), true);
 });
 
 test("an unreadable release version fails closed to prerelease", () => {
-  // Not a well-formed release version: refuse to publish it as a full release.
+  // note: Not a well-formed release version: refuse to publish it as a full release.
   assert.equal(effectivePrerelease(false, true, "0.2.0-beta.1"), true);
   assert.equal(effectivePrerelease(false, true, "not-a-version"), true);
 });
@@ -180,7 +180,7 @@ test("CLI reads the trailer from a message file and fails closed when absent", (
     );
     assert.equal(garbled.status, 0);
     assert.equal(garbled.stdout, "true\n");
-    // A readable `false` must not win over the garbled duplicate next to it.
+    // why: A readable `false` must not win over the garbled duplicate next to it.
     assert.match(garbled.stderr, /failing closed to prerelease/);
     assert.match(garbled.stderr, /\(trailer-missing/);
   } finally {
@@ -212,7 +212,7 @@ test("CLI --version forces a prerelease for a suffixed version", () => {
 
     const clean = runReleaseScript("effective-prerelease.mjs", ["--version", "0.2.0"], dir);
     assert.equal(clean.status, 0, clean.stderr);
-    // Signing is unimplemented, so even the clean version is a prerelease today.
+    // note: Signing is unimplemented, so even the clean version is a prerelease today.
     assert.equal(clean.stdout, "true\n");
     assert.match(clean.stderr, /version=0\.2\.0/);
   } finally {

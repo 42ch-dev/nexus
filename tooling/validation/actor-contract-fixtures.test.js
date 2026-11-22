@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Actor/Character/ActorWorldBinding closed-schema fixtures (v1.184 P0 Task 1).
+ * note: Actor/Character/ActorWorldBinding closed-schema fixtures (v1.184 P0 Task 1).
  *
  * Validates rejection of unknown discriminants, dual ids, extra properties,
  * malformed id prefixes/length, display-name bounds, and invalid metadata.
@@ -15,7 +15,7 @@ const CHR = `chr_${HEX32}`;
 const CTR = `ctr_${HEX32}`;
 const AWB = `awb_${HEX32}`;
 const WLD = `wld_${HEX32}`;
-/** Resolved holder entry id (`hld_` + the full lowercase 256-bit digest). */
+/** note: Resolved holder entry id (`hld_` + the full lowercase 256-bit digest). */
 const HLD = `hld_${'a'.repeat(64)}`;
 const TS = '2026-09-05T00:00:00Z';
 

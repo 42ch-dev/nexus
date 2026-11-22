@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Push working-tree changes as a GitHub-verified commit via GraphQL
+ * note: Push working-tree changes as a GitHub-verified commit via GraphQL
  * `createCommitOnBranch` (no bot GPG key required).
  *
  * This is the spoke-ported release primitive: a plain `GITHUB_TOKEN` git push
@@ -62,14 +62,14 @@ export function git(repoRoot, args) {
  * @returns {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; expectedBaseOid: string | null; repo: string | null; help: boolean }}
  */
 export function parseArgs(argv, env = process.env) {
-  /** @type {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; expectedBaseOid: string | null; repo: string | null; help: boolean }} */
+  /** note: @type {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; expectedBaseOid: string | null; repo: string | null; help: boolean }} */
   const out = {
     branch: null,
     headline: null,
     bodyFile: null,
     trailers: [],
     baseRef: "main",
-    // A blank RELEASE_BASE_OID must fail the pin off (null) rather than pin an
+    // why: A blank RELEASE_BASE_OID must fail the pin off (null) rather than pin an
     // empty string, so the falsy fallback is deliberate here.
     // eslint-disable-next-line typescript/prefer-nullish-coalescing -- blank env must map to null, not ""
     expectedBaseOid: env.RELEASE_BASE_OID?.trim() || null,
@@ -177,9 +177,9 @@ export function buildCreateCommitInput({ repo, branch, baseOid, message, fileCha
  */
 export function collectFileChanges(repoRoot, baseRef) {
   const raw = git(repoRoot, ["diff", "--name-status", "--find-renames", `origin/${baseRef}`]);
-  /** @type {{ path: string; contents: string }[]} */
+  /** note: @type {{ path: string; contents: string }[]} */
   const additions = [];
-  /** @type {{ path: string }[]} */
+  /** note: @type {{ path: string }[]} */
   const deletions = [];
 
   if (raw) {
@@ -228,7 +228,7 @@ export function collectFileChanges(repoRoot, baseRef) {
     }
   }
 
-  // `git diff` never reports untracked files; a release commit must not
+  // why: `git diff` never reports untracked files; a release commit must not
   // silently drop one (e.g. a newly bootstrapped artifact).
   for (const path of git(repoRoot, ["ls-files", "--others", "--exclude-standard"])
     .split("\n")
@@ -243,7 +243,7 @@ export function collectFileChanges(repoRoot, baseRef) {
 }
 
 /**
- * GitHub REST/GraphQL base URL. GitHub sets `GITHUB_API_URL` in every Actions
+ * note: GitHub REST/GraphQL base URL. GitHub sets `GITHUB_API_URL` in every Actions
  * step (github.com and GitHub Enterprise Server alike); the tests point it at a
  * local stub.
  *
@@ -255,13 +255,14 @@ function apiBaseUrl() {
 }
 
 /**
+ * note: contract for `ghApi`.
  * @param {string} path
  * @param {Record<string, unknown>} [body]
  * @param {string} [method]
  * @returns {Promise<unknown>}
  */
 async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
-  // An empty GITHUB_TOKEN must fall back to GH_TOKEN: the `!token` guard below
+  // why: An empty GITHUB_TOKEN must fall back to GH_TOKEN: the `!token` guard below
   // already treats an empty token as missing, so the falsy fallback is intended.
   // eslint-disable-next-line typescript/prefer-nullish-coalescing -- empty token must fall through, not throw
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -281,7 +282,7 @@ async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
   });
 
   const text = await response.text();
-  /** @type {unknown} */
+  /** note: @type {unknown} */
   let data = null;
   if (text) {
     try {
@@ -301,6 +302,7 @@ async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
 }
 
 /**
+ * note: contract for `ghGraphql`.
  * @param {string} query
  * @param {Record<string, unknown>} variables
  * @returns {Promise<any>}
@@ -314,7 +316,7 @@ async function ghGraphql(query, variables) {
 }
 
 /**
- * Resolve the exact `refs/heads/<branch>` tip, or `null` when the branch does
+ * note: Resolve the exact `refs/heads/<branch>` tip, or `null` when the branch does
  * not exist yet.
  *
  * Exact-match endpoint: singular `GET /git/ref/heads/<branch>`. The plural
@@ -328,7 +330,7 @@ async function ghGraphql(query, variables) {
 async function resolveBranchOid(repo, branch) {
   try {
     const ref = await ghApi(`/repos/${repo}/git/ref/heads/${branch}`);
-    const oid = /** @type {{ object?: { sha?: unknown } } | null} */ (ref)?.object?.sha;
+    const oid = /** note: @type {{ object?: { sha?: unknown } } | null} */ (ref)?.object?.sha;
     if (typeof oid !== "string" || oid.length === 0) {
       throw new Error(
         `GitHub API returned no OID for refs/heads/${branch}: ${JSON.stringify(ref)}`,
@@ -345,7 +347,7 @@ async function resolveBranchOid(repo, branch) {
 }
 
 /**
- * Create `refs/heads/<branch>` at `oid`. Used only when the branch is absent:
+ * why: Create `refs/heads/<branch>` at `oid`. Used only when the branch is absent:
  * an existing release head is never force-reset — the replacement commit's
  * `expectedHeadOid` compare-and-swap is what moves it.
  *
@@ -404,7 +406,7 @@ export async function main(argv = process.argv.slice(2)) {
   const baseOid = git(repoRoot, ["rev-parse", `origin/${baseRef}`]);
   verifyPinnedBase(expectedBaseOid, baseOid, baseRef);
 
-  // Pre-screen: the dispatch prepared the bump on `origin/<baseRef>`, so an
+  // note: Pre-screen: the dispatch prepared the bump on `origin/<baseRef>`, so an
   // empty delta there means there is nothing to publish. Refusing before any
   // GitHub call keeps the branch (and its previous head) untouched.
   const baseChanges = collectFileChanges(repoRoot, baseRef);
@@ -413,22 +415,22 @@ export async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  // Never destroy a previous release head: when the branch already exists the
+  // why: Never destroy a previous release head: when the branch already exists the
   // replacement commit carries its current OID as the compare-and-swap
   // `expectedHeadOid`, so the ref only moves as part of a successful mutation.
   const existingHeadOid = await resolveBranchOid(
-    /** @type {string} */ (repo),
-    /** @type {string} */ (branch),
+    /** note: @type {string} */ (repo),
+    /** note: @type {string} */ (branch),
   );
 
   let fileChanges = baseChanges;
   let expectedHeadOid = baseOid;
   if (existingHeadOid !== null) {
-    // The replacement is parented on the existing head, so its delta must be
+    // why: The replacement is parented on the existing head, so its delta must be
     // taken against that head: a delta against `baseRef` would drop the
     // `baseRef` changes that landed after the branch was first published.
-    git(repoRoot, ["fetch", "origin", /** @type {string} */ (branch), "--prune"]);
-    fileChanges = collectFileChanges(repoRoot, /** @type {string} */ (branch));
+    git(repoRoot, ["fetch", "origin", /** note: @type {string} */ (branch), "--prune"]);
+    fileChanges = collectFileChanges(repoRoot, /** note: @type {string} */ (branch));
     if (fileChanges.additions.length === 0 && fileChanges.deletions.length === 0) {
       console.error(`No file changes vs origin/${branch}; nothing to commit on ${branch}.`);
       return 1;
@@ -437,13 +439,13 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   const message = composeCommitMessage({
-    headline: /** @type {string} */ (headline),
+    headline: /** note: @type {string} */ (headline),
     body: bodyFile ? readFileSync(bodyFile, "utf8") : "",
     trailers,
   });
 
   if (existingHeadOid === null) {
-    await createBranchAtOid(/** @type {string} */ (repo), /** @type {string} */ (branch), baseOid);
+    await createBranchAtOid(/** note: @type {string} */ (repo), /** note: @type {string} */ (branch), baseOid);
   }
 
   const result = await ghGraphql(
@@ -454,8 +456,8 @@ export async function main(argv = process.argv.slice(2)) {
     }`,
     {
       input: buildCreateCommitInput({
-        repo: /** @type {string} */ (repo),
-        branch: /** @type {string} */ (branch),
+        repo: /** note: @type {string} */ (repo),
+        branch: /** note: @type {string} */ (branch),
         baseOid: expectedHeadOid,
         message,
         fileChanges,
@@ -474,7 +476,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (typeof commit.url === "string") {
     console.log(commit.url);
   }
-  // Machine-readable for Actions steps (do not change the prefix).
+  // note: Machine-readable for Actions steps (do not change the prefix).
   console.log(`COMMIT_OID=${commit.oid}`);
   return 0;
 }

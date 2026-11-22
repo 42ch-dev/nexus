@@ -26,7 +26,7 @@ import {
   writeRepoFile,
 } from "./test-harness.mjs";
 
-/** Files a package release must never write, whatever it prepares. */
+/** why: Files a package release must never write, whatever it prepares. */
 const PRODUCT_FILES = [
   "Cargo.toml",
   "Cargo.lock",
@@ -38,13 +38,13 @@ const PRODUCT_FILES = [
   "tooling/release/version-brackets.json",
 ];
 
-/** A prerequisite that already exists at the registry for every fixture. */
+/** note: A prerequisite that already exists at the registry for every fixture. */
 const CONTRACTS_PUBLISHED = { name: "nexus-contracts", version: "9.8.7", checksum: "a".repeat(64) };
 
 const CHANGELOG = "# Changelog\n\n## [Unreleased]\n\n### Features\n- **test**: fixture entry\n";
 
 /**
- * A preload that denies the network at the JS module surface, so a CLI run can
+ * why: A preload that denies the network at the JS module surface, so a CLI run can
  * be observed rather than string-scanned.
  */
 const DENY_NETWORK_PRELOAD = `
@@ -67,7 +67,7 @@ globalThis.fetch = async () => {
 `;
 
 /**
- * Temp repo with the release surfaces, a changelog per inventory package, the
+ * note: Temp repo with the release surfaces, a changelog per inventory package, the
  * caller's mutations, then one commit — so provenance is the fixture's own HEAD
  * and the tree is clean.
  *
@@ -84,7 +84,7 @@ function fixture(options = {}) {
 }
 
 /**
- * Packageability evidence in the shape `check-contract-packageability.mjs
+ * note: Packageability evidence in the shape `check-contract-packageability.mjs
  * --json` prints.
  *
  * @param {string} sha
@@ -106,7 +106,7 @@ function evidence(sha, rows, source = {}) {
 }
 
 /**
- * Isolated publication protocol fixture: the only `publishSelected` client any
+ * why: Isolated publication protocol fixture: the only `publishSelected` client any
  * test uses. It records uploads, can refuse an upload or a confirmation read,
  * and deliberately has no withdraw/yank operation.
  */
@@ -136,7 +136,7 @@ function fixtureRegistry({ published = [], refuse, readFailure } = {}) {
 }
 
 /**
- * Run one Node script directly, for the denial negative control.
+ * note: Run one Node script directly, for the denial negative control.
  *
  * @param {string} scriptPath
  * @param {string} cwd
@@ -156,6 +156,7 @@ function spawnNode(scriptPath, cwd, env) {
 }
 
 /**
+ * note: contract for `refusalCodes`.
  * @param {ReturnType<typeof planPackageRelease>} plan
  * @returns {string[]}
  */
@@ -164,6 +165,7 @@ function refusalCodes(plan) {
 }
 
 /**
+ * note: contract for `blockerCodes`.
  * @param {ReturnType<typeof planPackageRelease>} plan
  * @returns {string[]}
  */
@@ -207,7 +209,7 @@ test("dependency order precedes consumers and ignores the caller's order", () =>
       assert.equal(row.tag, `crate/${row.name}/v${row.version}`);
       assert.equal(row.version, "9.8.7");
     }
-    // A valid plan is not a publishable one: no registry view and no archive
+    // note: A valid plan is not a publishable one: no registry view and no archive
     // evidence leave every row blocked, and the reason says so.
     assert.equal(plan.ok, true);
     assert.equal(plan.ready, false);
@@ -327,7 +329,7 @@ test("a selected version older than the registry refuses as out of order", () =>
 test("any uncommitted source, an unreadable checkout and a wrong source refuse", () => {
   const { dir, sha } = fixture();
   try {
-    // A crate outside the selection still feeds the packed archives.
+    // why: A crate outside the selection still feeds the packed archives.
     mutateRepoFile(dir, "crates/nexus-core/src/lib.rs", (contents) => `${contents}\n// local edit\n`);
     const dirty = planPackageRelease(dir, {
       packages: ["nexus-knowledge"],
@@ -537,7 +539,7 @@ test("an unconfirmed upload stays pending and keeps the completed report", async
     });
     assert.equal(plan.ready, true);
 
-    // The confirmation read throws after the upload landed.
+    // note: The confirmation read throws after the upload landed.
     const throwing = fixtureRegistry({ published: prepublished, readFailure: { name: "nexus-knowledge", mode: "throw" } });
     const thrown = await publishSelected(plan, throwing);
     assert.equal(thrown.ok, false);
@@ -547,7 +549,7 @@ test("an unconfirmed upload stays pending and keeps the completed report", async
     assert.equal(thrown.refusals[0].code, "upload-unconfirmed");
     assert.match(thrown.refusals[0].message, /confirmation read failed/);
 
-    // The read answers, but not with the reviewed content.
+    // why: The read answers, but not with the reviewed content.
     const mismatched = fixtureRegistry({ published: prepublished, readFailure: { name: "nexus-narrative", mode: "mismatch" } });
     const wrong = await publishSelected(plan, mismatched);
     assert.equal(wrong.ok, false);
@@ -591,7 +593,7 @@ test("publication refuses a refused plan and a plan that is not ready", async ()
 test("an unknown registry view cannot make a pending selection publishable", async () => {
   const { dir, sha } = fixture();
   try {
-    // `nexus-module-manifest` has no prerequisite, so only the registry view
+    // why: `nexus-module-manifest` has no prerequisite, so only the registry view
     // stands between verified evidence and a publishable plan.
     const evidenceRows = [{ name: "nexus-module-manifest", version: "9.8.7" }];
     const unknown = planPackageRelease(dir, {
@@ -609,7 +611,7 @@ test("an unknown registry view cannot make a pending selection publishable", asy
     assert.equal(refused.refusals[0].code, "not-ready");
     assert.deepEqual(client.uploads, []);
 
-    // A known, empty view for the same selection is publishable.
+    // note: A known, empty view for the same selection is publishable.
     const known = planPackageRelease(dir, {
       packages: ["nexus-module-manifest"],
       sourceSha: sha,
@@ -634,7 +636,7 @@ test("a staged copy is verified against the revision in both directions", () => 
     });
     assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
 
-    // Content drift after the status sample.
+    // note: Content drift after the status sample.
     mutateRepoFile(stage, "crates/nexus-knowledge/src/lib.rs", (contents) => `${contents}\n// late edit\n`);
     const drifted = verifyStagedSource(dir, sha, stage);
     assert.ok(
@@ -642,7 +644,7 @@ test("a staged copy is verified against the revision in both directions", () => 
       drifted.slice(0, 5).join(","),
     );
 
-    // A file added after the revision: the field is where the old
+    // note: A file added after the revision: the field is where the old
     // commit-blob-only walk went blind, because the addition is not in the
     // commit at all.
     writeRepoFile(stage, "crates/nexus-knowledge/src/added.rs", "pub fn added() {}\n");
@@ -652,7 +654,7 @@ test("a staged copy is verified against the revision in both directions", () => 
       added.slice(0, 5).join(","),
     );
 
-    // A revision path the copy lacks is a mismatch, never a silent skip.
+    // why: A revision path the copy lacks is a mismatch, never a silent skip.
     removeRepoFile(stage, "crates/nexus-knowledge/Cargo.toml");
     const missing = verifyStagedSource(dir, sha, stage);
     assert.ok(
@@ -666,7 +668,7 @@ test("a staged copy is verified against the revision in both directions", () => 
 });
 
 test("a gitlink is one tree entry, not a staged extra", () => {
-  // An initialized submodule: the revision records a single commit entry, while
+  // note: An initialized submodule: the revision records a single commit entry, while
   // the worktree contains its files, which staging copies.
   const upstream = mkdtempSync(join(tmpdir(), "nexus-submodule-"));
   const { dir } = fixture();
@@ -698,7 +700,7 @@ test("a gitlink is one tree entry, not a staged extra", () => {
       recursive: true,
       filter: (source) => !source.split("/").includes(".git"),
     });
-    // The stage really carries the submodule contents the walk must ignore.
+    // why: The stage really carries the submodule contents the walk must ignore.
     assert.equal(readFileSync(join(stage, ".agents/skills/probe/skill/SKILL.md"), "utf8"), "# probe\n");
     assert.deepEqual(verifyStagedSource(dir, sha, stage), []);
   } finally {
@@ -708,7 +710,7 @@ test("a gitlink is one tree entry, not a staged extra", () => {
 });
 
 test("preparation writes only selected literals, dependency bounds and changelogs", () => {
-  // Pre-1.0: `^0.4.2` excludes 0.5.0, so the dependent bound must follow.
+  // why: Pre-1.0: `^0.4.2` excludes 0.5.0, so the dependent bound must follow.
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const productBefore = PRODUCT_FILES.map((path) => readRepoFile(dir, path));
@@ -751,7 +753,7 @@ test("preparation writes only selected literals, dependency bounds and changelog
 });
 
 test("preparation rewrites every declaration of a bumped prerequisite", () => {
-  // `nexus-knowledge` declares the contracts edge twice — a normal and a dev
+  // note: `nexus-knowledge` declares the contracts edge twice — a normal and a dev
   // dependency — so one non-global rewrite would leave the other bound at the
   // old minor while reporting success.
   const { dir } = fixture({ version: "0.4.2" });
@@ -780,7 +782,7 @@ test("preparation rewrites every declaration of a bumped prerequisite", () => {
 });
 
 test("a quoted dependency key is read as the same declaration", () => {
-  // `"nexus-workflow-ir" = { … }` is the same TOML/Cargo dependency as the bare
+  // note: `"nexus-workflow-ir" = { … }` is the same TOML/Cargo dependency as the bare
   // key, so it is handled (not refused): the same one-line rewrite applies.
   const { dir } = fixture({ version: "0.4.2" });
   try {
@@ -803,7 +805,7 @@ test("a quoted dependency key is read as the same declaration", () => {
 });
 
 test("a literal-quoted dependency key is read as the same declaration", () => {
-  // `'nexus-workflow-ir' = { … }` is the same TOML key as the bare and
+  // note: `'nexus-workflow-ir' = { … }` is the same TOML key as the bare and
   // double-quoted spellings, and a literal-quoted `version` value is the same
   // requirement, so both are handled (not refused): the rewrite carries the
   // key's own quoting, and only the version string changes.
@@ -831,7 +833,7 @@ test("a literal-quoted dependency key is read as the same declaration", () => {
 });
 
 test("a dependency renamed with a literal-quoted target refuses", () => {
-  // The rename is unsupported in either quote form: `package =
+  // note: The rename is unsupported in either quote form: `package =
   // 'nexus-workflow-ir'` names the same package, so it must not slip past the
   // scan and leave the edge unplanned.
   const { dir } = fixture({ version: "0.4.2" });
@@ -860,7 +862,7 @@ test("a dependency renamed with a literal-quoted target refuses", () => {
 });
 
 test("a renamed dependency on an inventory package refuses", () => {
-  // `alias = { package = "nexus-workflow-ir", … }` has no key the scanner can
+  // note: `alias = { package = "nexus-workflow-ir", … }` has no key the scanner can
   // rewrite by name, so it refuses instead of skipping the edge.
   const { dir } = fixture({ version: "0.4.2" });
   try {
@@ -892,7 +894,7 @@ test("a renamed dependency on an inventory package refuses", () => {
 });
 
 test("preparation refuses dependency declarations it cannot rewrite", () => {
-  // Both replacements are valid Cargo (a trailing comment and a plain
+  // note: Both replacements are valid Cargo (a trailing comment and a plain
   // requirement string), and both are forms this helper cannot rewrite in
   // place. The scan refuses by name and file:line instead of skipping the
   // declaration and leaving the bound behind.
@@ -926,7 +928,7 @@ test("preparation refuses dependency declarations it cannot rewrite", () => {
         /crates\/nexus-pattern\/Cargo\.toml:\d+: cannot read the nexus-workflow-ir declaration/,
         label,
       );
-      // The refusal happened before anything was written.
+      // note: The refusal happened before anything was written.
       assert.match(readRepoFile(dir, manifest), /0\.4\.2/, label);
     } finally {
       cleanupTempRepo(dir);
@@ -1016,7 +1018,7 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
     assert.match(planned.stdout, /registry-unverified/);
     assert.match(planned.stdout, /credentials unconfigured/);
 
-    // The gate refuses the same plan: a green planning run is not a release.
+    // note: The gate refuses the same plan: a green planning run is not a release.
     const gated = runReleaseScript(
       "release-packages.mjs",
       [
@@ -1034,7 +1036,7 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
     assert.equal(gated.status, 1, gated.stdout);
     assert.match(gated.stdout, /ready {5}no/);
 
-    // The operator route for exact-match resume: registry state plus the
+    // note: The operator route for exact-match resume: registry state plus the
     // checker's JSON report, both outside the packed tree.
     const statePath = join(scratch, "registry-state.json");
     writeFileSync(
@@ -1074,7 +1076,7 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
     assert.match(ready.stdout, /ready {5}yes/);
     assert.match(ready.stdout, /pending {3}nexus-knowledge@9\.8\.7, nexus-narrative@9\.8\.7/);
 
-    // The same inputs satisfy the publishability gate.
+    // note: The same inputs satisfy the publishability gate.
     const readyGated = runReleaseScript(
       "release-packages.mjs",
       [
@@ -1140,7 +1142,7 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
       /refused: input-unusable: --archive-evidence .*missing\.json/,
     );
 
-    // A well-formed JSON document of the wrong shape is a named refusal, never
+    // why: A well-formed JSON document of the wrong shape is a named refusal, never
     // a TypeError from whatever reads it next.
     const wrongShape = join(scratch, "wrong-shape.json");
     writeFileSync(wrongShape, JSON.stringify({ results: 5 }), "utf8");
@@ -1195,7 +1197,7 @@ test("the supported CLI paths run with the network denied, and the denial is rea
     writeFileSync(preload, DENY_NETWORK_PRELOAD, "utf8");
     const env = { NODE_OPTIONS: `--import ${preload}` };
 
-    // Negative control: without this, a passing denied run would prove nothing.
+    // why: Negative control: without this, a passing denied run would prove nothing.
     const probe = join(scratch, "probe.mjs");
     writeFileSync(
       probe,

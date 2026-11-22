@@ -1,5 +1,5 @@
 /**
- * Quit gate for the desktop host (v1.192 P0-T6).
+ * note: Quit gate for the desktop host (v1.192 P0-T6).
  *
  * One serialized decision per quit — the plan's "actual quit goes through this
  * single-flight dialog" — over the three frozen choices (parity row 21):
@@ -36,9 +36,7 @@ import type { DaemonStatus } from './desktop-contract.js';
 import { sanitizeInheritedEnv } from './env.js';
 import { utilityError, utilityMessageText, type DetachedServiceHandoff } from './service-controller.js';
 
-// ---------------------------------------------------------------------------
-// Quit gate (Stop Service & Quit / Keep Service & Quit / Cancel)
-// ---------------------------------------------------------------------------
+// why: Quit gate (Stop Service & Quit / Keep Service & Quit / Cancel)
 
 /** The three frozen choices (parity row 21). */
 export type QuitChoice = 'stop' | 'keep' | 'cancel';
@@ -52,11 +50,11 @@ export type QuitChoice = 'stop' | 'keep' | 'cancel';
  * report nothing.
  */
 export interface QuitOutcome {
-  /** Whether the app may quit. */
+  /** note: Whether the app may quit. */
   allowed: boolean;
-  /** The branch that ran; `null` when no choice was produced (dismissal, dialog failure). */
+  /** note: The branch that ran; `null` when no choice was produced (dismissal, dialog failure). */
   choice: QuitChoice | null;
-  /** Actionable reason for a refusal, or the interruption notice for a Keep. */
+  /** why: Actionable reason for a refusal, or the interruption notice for a Keep. */
   detail?: string;
 }
 
@@ -70,22 +68,22 @@ export const KEEP_INTERRUPTED_DETAIL =
 
 /** The subset of the P0-T4 controller this gate drives. */
 export interface QuitServiceController {
-  /** Authenticated instance/epoch-bound stop; an unconfirmed close rejects. */
+  /** note: Authenticated instance/epoch-bound stop; an unconfirmed close rejects. */
   stopExplicit(): Promise<void>;
-  /** Confirmed close plus detached handoff; throws when it cannot transfer. */
+  /** why: Confirmed close plus detached handoff; throws when it cannot transfer. */
   keepForQuit(): Promise<void>;
-  /** Frozen status snapshot `{state, version?, port, detail?}`. */
+  /** note: Frozen status snapshot `{state, version?, port, detail?}`. */
   getStatus(): DaemonStatus;
 }
 
 export interface DesktopQuitControllerOptions {
   controller: QuitServiceController;
   /**
-   * Main-owned dialog for the three frozen choices. A dismissed dialog resolves
+   * note: Main-owned dialog for the three frozen choices. A dismissed dialog resolves
    * `null` and counts as Cancel.
    */
   chooseQuitChoice(status: DaemonStatus): Promise<QuitChoice | null>;
-  /** Main-owned user-visible outcome; see {@link QuitOutcome} for when it is called. */
+  /** note: Main-owned user-visible outcome; see {@link QuitOutcome} for when it is called. */
   reportQuitOutcome(outcome: QuitOutcome): void;
 }
 
@@ -93,7 +91,7 @@ export class DesktopQuitController {
   private readonly controller: QuitServiceController;
   private readonly chooseQuitChoice: (status: DaemonStatus) => Promise<QuitChoice | null>;
   private readonly reportQuitOutcome: (outcome: QuitOutcome) => void;
-  /** Single-flight: `before-quit` re-raises while a decision is running. */
+  /** note: Single-flight: `before-quit` re-raises while a decision is running. */
   private inFlight: Promise<boolean> | null = null;
 
   constructor(options: DesktopQuitControllerOptions) {
@@ -102,7 +100,7 @@ export class DesktopQuitController {
     this.reportQuitOutcome = options.reportQuitOutcome;
   }
 
-  /** Single-flight quit decision; `true` means the app may quit. */
+  /** note: Single-flight quit decision; `true` means the app may quit. */
   requestQuit(): Promise<boolean> {
     if (this.inFlight) return this.inFlight;
     const flight = this.decide().finally(() => {
@@ -114,7 +112,7 @@ export class DesktopQuitController {
 
   private async decide(): Promise<boolean> {
     const status = this.controller.getStatus();
-    // Shipped semantics (retired native-host quit prompt): with
+    // note: Shipped semantics (retired native-host quit prompt): with
     // nothing this app runs or is attached to, there is no service to stop or
     // keep, so the quit is not gated by a dialog.
     if (status.state === 'stopped') return true;
@@ -157,18 +155,16 @@ export class DesktopQuitController {
   }
 
   private report(allowed: boolean, choice: QuitChoice | null, detail: string): void {
-    // The decision is already made; a broken reporter must not change it.
+    // why: The decision is already made; a broken reporter must not change it.
     try {
       this.reportQuitOutcome({ allowed, choice, detail });
     } catch {
-      // ignored
+      // why: ignored
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Detached handoff (the D-21 Keep transfer target)
-// ---------------------------------------------------------------------------
+// why: Detached handoff (the D-21 Keep transfer target)
 
 /** Minimum standalone Node for the detached service (`package.json` `engines`). */
 export const DETACHED_SERVICE_NODE_VERSION = '22.22.0';
@@ -177,13 +173,13 @@ const NODE_VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)/;
 const NODE_PROBE_TIMEOUT_MS = 5_000;
 
 export interface DetachedHandoffOptions {
-  /** Absolute packaged standalone service entry (`dist/main.js`), resolved by main. */
+  /** note: Absolute packaged standalone service entry (`dist/main.js`), resolved by main. */
   serviceEntry: string;
-  /** Trusted standalone Node executable; default: the first `node` on `PATH`. */
+  /** note: Trusted standalone Node executable; default: the first `node` on `PATH`. */
   nodeExecutable?: string;
-  /** Trusted child environment; default `sanitizeInheritedEnv(process.env)`, as for the utility owner. */
+  /** note: Trusted child environment; default `sanitizeInheritedEnv(process.env)`, as for the utility owner. */
   env?: NodeJS.ProcessEnv;
-  /** Deadline for the `<node> --version` probe. */
+  /** note: Deadline for the `<node> --version` probe. */
   probeTimeoutMs?: number;
 }
 
@@ -220,7 +216,7 @@ export function findNodeOnPath(env: NodeJS.ProcessEnv = process.env): string | n
   if (!path) return null;
   for (const dir of path.split(delimiter)) {
     if (dir === '') continue;
-    // `stat`, not `lstat`: a Node installed by a package manager is legitimately
+    // note: `stat`, not `lstat`: a Node installed by a package manager is legitimately
     // a symlink. The strict no-symlink posture applies to user-home records.
     const candidate = join(dir, 'node');
     try {
@@ -257,11 +253,11 @@ function probeNodeVersion(
 
 function assertServiceEntry(serviceEntry: string): void {
   try {
-    // Bundle-resolved path (main-owned), so a symlink is followed rather than
+    // safety: Bundle-resolved path (main-owned), so a symlink is followed rather than
     // refused; only the packaged regular file counts as available.
     if (statSync(serviceEntry).isFile()) return;
   } catch {
-    // falls through to the actionable error
+    // note: falls through to the actionable error
   }
   throw utilityError('unavailable', `the packaged service entry is not a readable file: ${serviceEntry}`);
 }
@@ -322,7 +318,7 @@ export function createDetachedServiceHandoff(options: DetachedHandoffOptions): D
       assertServiceEntry(serviceEntry);
       let child: ChildProcess;
       try {
-        // `detached` + `unref` + `stdio:'ignore'`: the child holds no pipe and no
+        // note: `detached` + `unref` + `stdio:'ignore'`: the child holds no pipe and no
         // process group of the exiting parent, so it is the one owner left.
         child = spawn(
           node,

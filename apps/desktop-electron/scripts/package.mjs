@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Nexus unsigned Electron package driver.
+ * note: Nexus unsigned Electron package driver.
  *
  * This entry point has one lane: native-architecture, unsigned macOS packaging.
  * It never discovers credentials, invokes signing tools, or fetches dependencies.
@@ -292,7 +292,7 @@ function appFileManifest(appPath) {
 }
 
 function readdirSyncSafe(path) {
-  // Dynamic import is unnecessary here; keeping this helper explicit makes the
+  // note: Dynamic import is unnecessary here; keeping this helper explicit makes the
   // manifest traversal easy to audit against symlink checks.
   return readdirSync(path, { withFileTypes: true }).filter((entry) => !entry.isSymbolicLink());
 }

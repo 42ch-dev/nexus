@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# check-module-sdk-drift.sh — Compute-module SDK drift gate (V1.170 P0, AR-7)
+# note: check-module-sdk-drift.sh — Compute-module SDK drift gate (V1.170 P0, AR-7)
 #
 # Three gates (all python3 — python3 is already used in ci.yml):
 #
@@ -26,7 +25,6 @@
 # Exit codes:
 #   0 — All wire fields mirrored in the SDK AND fixtures are value-identical
 #   1 — Drift detected
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -79,7 +77,7 @@ check(
 state_delta_items = output_schema["properties"]["state_delta"]["items"]["properties"]
 check("compute-output.state_delta[]", set(state_delta_items), "StateDeltaOp")
 
-# Delta-op enum mirror: every wire op value must have a `DeltaOp` variant
+# why: Delta-op enum mirror: every wire op value must have a `DeltaOp` variant
 # (serde `rename_all = "lowercase"` maps Add|Sub|Set -> add|sub|set).
 wire_ops = set(state_delta_items["op"]["enum"])
 enum_body = re.search(r"pub enum DeltaOp\s*\{(.*?)\n\}", sdk_types, re.S)
@@ -87,7 +85,7 @@ if not enum_body:
     print("FAIL: `DeltaOp` enum not found in types-module")
     sys.exit(1)
 sdk_ops = set(re.findall(r"\b(Add|Sub|Set)\b", enum_body.group(1)))
-# Each wire value's capitalized variant must exist (Add|Sub|Set -> add|sub|set).
+# why: Each wire value's capitalized variant must exist (Add|Sub|Set -> add|sub|set).
 missing_ops = sorted(op for op in wire_ops if op.capitalize() not in sdk_ops)
 if missing_ops:
     print("FAIL: wire op enum value(s) with no `DeltaOp` variant: " + ", ".join(missing_ops))
@@ -109,7 +107,7 @@ test_path = root / "crates/nexus-wasm-host/tests/basic_combat.rs"
 
 fixture = json.loads(fixture_path.read_text())
 test_src = test_path.read_text()
-# Anchor the extraction to the `combat_input()` function body (qc3 F-001):
+# note: Anchor the extraction to the `combat_input()` function body (qc3 F-001):
 # basic_combat.rs contains TWO raw-string JSON blocks (the combat-input
 # fixture in `combat_input()` and the killing-blow input in
 # `killing_blow_marks_defender_not_alive()`), so an unanchored first-match
@@ -120,7 +118,7 @@ if not m:
     print("FAIL: could not extract the inline `combat_input()` JSON from basic_combat.rs")
     sys.exit(1)
 inline = json.loads(m.group(1))
-# Structural sanity: the combat fixture bundles attacker `kb_atk` (the
+# note: Structural sanity: the combat fixture bundles attacker `kb_atk` (the
 # killing-blow fixture uses `kb_a`/`kb_d` under `wld_kill`), so a wrong-block
 # extraction fails closed here rather than silently passing.
 if not any(

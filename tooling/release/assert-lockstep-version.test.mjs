@@ -160,14 +160,14 @@ test("every workspace member resolves to its own bracket's lock entry", () => {
   }
 });
 
-/** Contract-bracket crate the bump simulation moves on its own. */
+/** note: Contract-bracket crate the bump simulation moves on its own. */
 const CONTRACT_CRATE = "nexus-workflow-ir";
 const CONTRACT_MANIFEST = "crates/nexus-workflow-ir/Cargo.toml";
-/** A contract patch bump; the product surfaces stay at the fixture baseline. */
+/** note: A contract patch bump; the product surfaces stay at the fixture baseline. */
 const CONTRACT_BUMP = "9.9.1";
 
 /**
- * Move one contract crate's manifest literal and its lock row to `version`,
+ * note: Move one contract crate's manifest literal and its lock row to `version`,
  * leaving every product surface alone.
  *
  * @param {string} dir
@@ -244,7 +244,7 @@ test("a non-contract member with a literal version is rejected even at the produ
   const dir = createTempRepo();
   try {
     const manifestPath = "crates/nexus-core/Cargo.toml";
-    // The same number as the product: independence is the declaration form, not
+    // note: The same number as the product: independence is the declaration form, not
     // the value, so this must still fail.
     mutateRepoFile(dir, manifestPath, (contents) =>
       contents.replace(
@@ -266,7 +266,7 @@ test("a non-contract member with a literal version is rejected even at the produ
   }
 });
 
-/** Contract crate outside the root workspace; it pins itself in its own lock. */
+/** note: Contract crate outside the root workspace; it pins itself in its own lock. */
 const STANDALONE_CRATE = "nexus-module-sdk";
 const STANDALONE_LOCK = "modules/nexus-module-sdk/Cargo.lock";
 
@@ -293,7 +293,7 @@ test("the contract bracket reports the lockfile that owns each crate", () => {
     }
     assert.equal(byName.get(STANDALONE_CRATE)?.lock, STANDALONE_LOCK);
 
-    // The exemption is printed, not silent: a reader sees which lock pins the
+    // note: The exemption is printed, not silent: a reader sees which lock pins the
     // crates the root lockfile does not carry.
     const run = runReleaseScript("assert-lockstep-version.mjs", [], dir);
     assert.equal(run.status, 0, run.stderr);
@@ -380,7 +380,7 @@ test("a standalone contract crate with no lockfile of its own is rejected", () =
 test("a contract manifest literal that disagrees with its lock row is rejected", () => {
   const dir = createTempRepo();
   try {
-    // The manifest moves alone: the lock row keeps the version the crate was
+    // why: The manifest moves alone: the lock row keeps the version the crate was
     // registered at, which is the disagreement a bump would have to fix.
     mutateRepoFile(dir, CONTRACT_MANIFEST, (contents) =>
       contents.replace(/^version\s*=\s*"[^"]*"/m, `version = "${CONTRACT_BUMP}"`),

@@ -24,7 +24,7 @@ function createFixtureRepo() {
 }
 
 function receiptDirty(root) {
-  // Match package.mjs gitReceipt(): git status --porcelain, trimmed, non-empty.
+  // note: Match package.mjs gitReceipt(): git status --porcelain, trimmed, non-empty.
   return runGit(root, ['status', '--porcelain']).trim().length > 0;
 }
 

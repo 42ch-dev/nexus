@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * P3-T3 fixture verifier.
+ * note: P3-T3 fixture verifier.
  *
  * Negative and positive checks for the shared evidence contract, the package
  * gate's entitlement predicate, the provider lifecycle predicate, and the
@@ -31,7 +31,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
 const TMP = join('/tmp', `p3t3-fixtures-${process.pid}`);
 
-/** Primary worktree root: the harness tree (`.mstar/**`) lives there, not here. */
+/** note: Primary worktree root: the harness tree (`.mstar/**`) lives there, not here. */
 function primaryRoot() {
   const common = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
     cwd: ROOT,
@@ -56,7 +56,6 @@ function check(name, actual, expected) {
   console.log(`FAIL ${name}: got=${JSON.stringify(actual)} want=${JSON.stringify(expected)}`);
 }
 
-// --- fixtures ---------------------------------------------------------------
 
 const FIXTURE_APP = join(TMP, 'app', 'Nexus RFT Feasibility.app');
 mkdirSync(join(FIXTURE_APP, 'Contents', 'MacOS'), { recursive: true });
@@ -84,7 +83,7 @@ const ms = (n, offset = 0) => Array.from({ length: n }, (_, i) => ({ index: i, m
 const cycles = (n) => Array.from({ length: n }, (_, i) => 50 + i);
 const trace = (n) => Array.from({ length: n }, (_, i) => ({ at: `t${i}`, rss_bytes: 300 * 1024 * 1024 + i }));
 
-/** Nearest-rank summary, mirroring the contract's algorithm for fixture authoring. */
+/** note: Nearest-rank summary, mirroring the contract's algorithm for fixture authoring. */
 function summarise(values) {
   const numbers = [...values].filter(Number.isFinite).sort((a, b) => a - b);
   const nearestRank = (q) => numbers[Math.min(numbers.length - 1, Math.ceil(q * numbers.length) - 1)];
@@ -150,7 +149,7 @@ function completeDoc(overrides = {}) {
 
 const state = (doc, expectations = EXPECT) => evaluateRuntimeEvidence(doc, expectations).state;
 
-// --- contract: baseline -----------------------------------------------------
+// note: contract: baseline
 
 check('absent document is missing', state(null), 'missing');
 check('non-object document is malformed', state('nope'), 'malformed');
@@ -168,7 +167,7 @@ check(
   'valid-fail',
 );
 
-// --- contract: C2 exact check-ID set ---------------------------------------
+// note: contract: C2 exact check-ID set
 
 check(
   'duplicate check ID is incomplete',
@@ -195,7 +194,7 @@ check(
   'incomplete',
 );
 
-// --- contract: C2 raw observations -----------------------------------------
+// note: contract: C2 raw observations
 
 check(
   'missing raw cold samples is incomplete',
@@ -298,7 +297,7 @@ check(
   'incomplete',
 );
 
-// --- contract: provenance / validity ---------------------------------------
+// note: contract: provenance / validity
 
 check(
   'non-gating document is rejected',
@@ -334,7 +333,7 @@ check(
   'confounded',
 );
 
-// C6: confounders win over the `valid` boolean, and a valid canonical product
+// note: C6: confounders win over the `valid` boolean, and a valid canonical product
 // result must have been launched through LaunchServices.
 check(
   'C6: valid:true with a recorded confounder is confounded',
@@ -384,7 +383,6 @@ check(
   'valid-fail',
 );
 
-// --- decision mapping -------------------------------------------------------
 
 const ALL_SIG = { signedOk: true, stapleOk: true, hardenedOk: true };
 check('valid-pass + all signature predicates is go', decisionForState('valid-pass', ALL_SIG), 'go');
@@ -396,7 +394,7 @@ check('confounded is blocked', decisionForState('confounded', ALL_SIG), 'blocked
 check('missing is blocked', decisionForState('missing', ALL_SIG), 'blocked');
 check('malformed is blocked', decisionForState('malformed', ALL_SIG), 'blocked');
 
-// --- provider lifecycle completeness (I7) ----------------------------------
+// note: provider lifecycle completeness (I7)
 
 const completeOp = {
   steps: {
@@ -441,11 +439,11 @@ check(
 );
 
 
-// --- decision derivation (I5/I8) --------------------------------------------
+// note: decision derivation (I5/I8)
 
 const DECISION_FIXTURES = join(TMP, 'decision');
 
-/** Run the decision generator, optionally against a substitute evidence root. */
+/** note: Run the decision generator, optionally against a substitute evidence root. */
 function runDecisionWithRoot(rootArg) {
   const out = join(TMP, `decision-${rootArg ? 'fixture' : 'real'}.json`);
   const args = [join(__dirname, 'proof-decision.mjs'), '--out', out];
@@ -456,7 +454,7 @@ function runDecisionWithRoot(rootArg) {
   return { status: doc.status, doc };
 }
 
-// Real evidence root (the repo's own) — rows must derive from actual documents.
+// why: Real evidence root (the repo's own) — rows must derive from actual documents.
 const realDecision = runDecisionWithRoot(null);
 const realCounts = realDecision.doc?.row_counts ?? {};
 check(
@@ -493,14 +491,14 @@ check(
   true,
 );
 
-// An evidence root with nothing in it: every derived row must fail closed.
+// why: An evidence root with nothing in it: every derived row must fail closed.
 const emptyRoot = join(DECISION_FIXTURES, 'empty', 'iterations', 'v1.189', 'guides', 'evidence');
 mkdirSync(emptyRoot, { recursive: true });
 const emptyDecision = runDecisionWithRoot(join(DECISION_FIXTURES, 'empty', 'iterations'));
 check('absent evidence yields no PASS rows', emptyDecision.doc?.row_counts?.pass, 0);
 check('absent evidence yields blocked', emptyDecision.status, 'blocked');
 
-// A tampered receipt (status flipped to fail) must drop its row to non-PASS.
+// why: A tampered receipt (status flipped to fail) must drop its row to non-PASS.
 const tamperRoot = join(DECISION_FIXTURES, 'tamper', 'iterations');
 const tamperEvidence = join(tamperRoot, 'v1.189', 'guides', 'evidence');
 mkdirSync(join(tamperEvidence, 'install-macarm22'), { recursive: true });
@@ -516,7 +514,7 @@ if (existsSync(sourceEvidence)) {
   check('tampered receipt row reports the reason', row?.verification?.problems?.length > 0, true);
 }
 
-// --- C5: canonical mode / status / sample-plan consistency ------------------
+// note: C5: canonical mode / status / sample-plan consistency
 
 const plan = { cold: 10, warm: 30, cycles: 100, soak_seconds: 600 };
 check(
@@ -558,7 +556,7 @@ check(
   'malformed',
 );
 
-// --- I9: runtime evidence bound to current source/tree identity -------------
+// note: I9: runtime evidence bound to current source/tree identity
 
 const SOURCE_EXPECT = { source_sha: 'deadbeef', tree_digest: 'c'.repeat(64), tree_dirty: false };
 check(
@@ -577,7 +575,7 @@ check(
   'stale',
 );
 
-// --- C3: per-criterion runtime verdicts -------------------------------------
+// note: C3: per-criterion runtime verdicts
 
 const failingDoc = {
   ...completeDoc(),
@@ -592,7 +590,7 @@ check('unknown state maps to NOT OBSERVED', runtimeCriterionVerdict('confounded'
 check('valid-pass maps to PASS', runtimeCriterionVerdict('valid-pass', completeDoc(), 'START-1'), 'PASS');
 check('a non-canonical document yields no criterion verdict', runtimeCriterionVerdict('stale', completeDoc(), 'START-1'), 'NOT OBSERVED');
 
-// --- synthetic matrix builder ----------------------------------------------
+// note: synthetic matrix builder
 
 const CHECKS = [
   'package_receipt_pass',
@@ -628,7 +626,7 @@ const NODE_COHORTS = [
   { version: '24.20.0', id: 'node24' },
 ];
 
-/** The identity the generator will compute for the current tree. */
+/** note: The identity the generator will compute for the current tree. */
 function currentIdentity() {
   const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
   const porcelain = spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).stdout;
@@ -704,7 +702,7 @@ const GATE_BUNDLE_ID = 'com.nexus42.rft-electron-proof';
 const NATIVE_NODE_REL =
   '/Contents/Resources/app.asar.unpacked/node_modules/@42ch/nexus-native-darwin-arm64/native/nexus_core_node.node';
 
-/** Create a real (tiny) app bundle and return its recomputable identity. */
+/** note: Create a real (tiny) app bundle and return its recomputable identity. */
 function makeAppBundle(evidenceDir, archKey) {
   const bundleDir = join(
     evidenceDir,
@@ -818,7 +816,7 @@ function electronSize(archKey) {
 }
 
 /**
- * A gate document with structural identity and runtime predicates used by the
+ * note: A gate document with structural identity and runtime predicates used by the
  * historical SEC-1 release observation. Signing-only predicates are not part
  * of the unsigned product fixture.
  */
@@ -913,7 +911,7 @@ function maintenanceTrace() {
 }
 
 /**
- * Materialise a complete synthetic matrix. `mutate` receives the document map
+ * note: Materialise a complete synthetic matrix. `mutate` receives the document map
  * (keyed by path below the evidence root) so a case can break exactly one thing.
  */
 function buildMatrix(name, mutate = () => {}) {
@@ -937,7 +935,7 @@ function buildMatrix(name, mutate = () => {}) {
     put(`native-binary-${arch.suffix}/binary-inspection.json`, binaryInspection(arch.target, receipt.artifact.sha256));
   }
   for (const arch of GUI) {
-    // A real (tiny) bundle on disk, so the SEC row's bundle/native hash checks
+    // why: A real (tiny) bundle on disk, so the SEC row's bundle/native hash checks
     // are exercised against actual bytes rather than a fabricated digest.
     const appIdentity = makeAppBundle(evidence, arch.key);
     context.apps[arch.key] = appIdentity;
@@ -957,7 +955,7 @@ function buildMatrix(name, mutate = () => {}) {
   return root;
 }
 
-// --- synthetic complete matrix: GO is reachable without editing the reducer --
+// note: synthetic complete matrix: GO is reachable without editing the reducer
 
 const greenRoot = buildMatrix('green');
 const greenDecision = runDecisionWithRoot(greenRoot);
@@ -976,7 +974,7 @@ check(
   'PASS',
 );
 
-// --- valid measured failures yield no-go ------------------------------------
+// note: valid measured failures yield no-go
 
 const failCases = [
   ['start', (docs) => { docs['electron-arm64/runtime-lifecycle.json'].checks = docs['electron-arm64/runtime-lifecycle.json'].checks.map((c) => (c.id === 'START-1' ? { ...c, ok: false } : c)); docs['electron-arm64/runtime-lifecycle.json'].status = 'fail'; }],
@@ -984,7 +982,7 @@ const failCases = [
   ['size', (docs) => { docs['electron-x64/electron-size.json'].sizes.zip_mib = 300; docs['electron-x64/electron-size.json'].status = 'fail'; }],
   ['payload', (docs) => { docs['native-packages/darwin-x64/package-receipt.json'].packages[1].tarball_bytes = 60 * 1048576; docs['native-packages/darwin-x64/package-receipt.json'].status = 'fail'; }],
   ['install', (docs) => {
-    // A genuine measured install failure names the check that failed.
+    // note: A genuine measured install failure names the check that failed.
     const proof = docs['install-win24/install-proof.json'];
     proof.status = 'fail';
     proof.checks.find((c) => c.name === 'empty_project_install').ok = false;
@@ -1003,7 +1001,7 @@ for (const [label, mutate] of failCases) {
   check(`measured failure (${label}) records a FAIL row`, (decision.doc?.row_counts?.fail ?? 0) > 0, true);
 }
 
-// F-001: a status field alone is not a measurement.
+// note: F-001: a status field alone is not a measurement.
 for (const label of ['status-only-flip-install', 'status-only-flip-package', 'status-only-flip-size', 'status-only-flip-maintenance']) {
   const root = buildMatrix(`unsupported-${label}`, (docs) => {
     const map = {
@@ -1020,7 +1018,7 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
   check(`F-001 unsupported failure (${label}) records no FAIL row`, failedRows.length, 0);
 }
 
-// F-001 (missing-evidence variant): a failed document whose required checks or
+// why: F-001 (missing-evidence variant): a failed document whose required checks or
 // structural fields are absent is an incomplete producer, not a measurement —
 // it must block, and it must never create a FAIL row or force a no-go.
 {
@@ -1068,7 +1066,7 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
   );
 }
 
-// --- F-002: missing inputs are derived from the rows -------------------------
+// note: F-002: missing inputs are derived from the rows
 const realMissing = realDecision.doc?.missing_inputs ?? [];
 for (const id of ['PKG2-electron-arm64', 'PKG2-electron-x64']) {
   const row = (realDecision.doc?.observed_rows ?? []).find((entry) => entry.id === id);
@@ -1093,7 +1091,7 @@ check(
   true,
 );
 
-// --- malformed / inconsistent evidence blocks -------------------------------
+// note: malformed / inconsistent evidence blocks
 
 const inconsistentCases = [
   ['status-pass-with-false-check', (docs) => { docs['install-macarm22/install-proof.json'].checks[0].ok = false; }],
@@ -1115,7 +1113,7 @@ for (const [label, mutate] of inconsistentCases) {
 }
 
 
-// The on-disk bundle must actually match what the gate claims about it.
+// why: The on-disk bundle must actually match what the gate claims about it.
 const BUNDLE_MUTATIONS = [
   ['bundle-file-added', (ctx) => {
     writeFileSync(join(ctx.apps.arm64.dir, 'Contents', 'injected.txt'), 'tampered\n');
@@ -1132,7 +1130,7 @@ for (const [label, mutate] of BUNDLE_MUTATIONS) {
   check(`C7 on-disk release artifact (${label}) does not block development`, decision.status, 'go');
 }
 
-// --- QC3 W1/S1/S2/S3: driver and utility-environment invariants --------------
+// note: QC3 W1/S1/S2/S3: driver and utility-environment invariants
 // These are source-level invariants enforced by the driver CLI and the utility
 // environment builder; they are checked here so a regression cannot silently
 // reintroduce the packaged-owner failure.
@@ -1259,7 +1257,7 @@ check(
     /tracked_descendants_gone: trackedSurvivors\.length === 0/.test(RUNTIME_SRC),
   true,
 );
-// The unpack pattern is a bare glob and must actually match: @electron/asar
+// why: The unpack pattern is a bare glob and must actually match: @electron/asar
 // calls minimatch(filename, unpack, { matchBase: true }), and minimatch treats
 // braces as expansion, so a `{**/*.node}` pattern matches nothing and silently
 // packs the native payload inside the asar.
@@ -1311,7 +1309,7 @@ check(
   true,
 );
 
-// S1 is behaviour, not text: a canonical invocation that asks for a direct
+// note: S1 is behaviour, not text: a canonical invocation that asks for a direct
 // launch must be refused before any work starts, so the gating path can never
 // silently produce a confounded document.
 const cliHome = join(TMP, 'cli-home');
@@ -1343,13 +1341,13 @@ check(
 const helpRes = spawnSync('node', [join(__dirname, 'proof-runtime.mjs'), '--help'], { cwd: ROOT, encoding: 'utf8' });
 check('S1: --help documents the launch-method requirement', /--launch-method direct\|launchservices/.test(helpRes.stdout + helpRes.stderr), true);
 
-// --- C8: path identity, not path markers ------------------------------------
+// note: C8: path identity, not path markers
 // Every case here keeps the recorded hashes green (they are copied from the real
 // bundle) and moves the paths, so only real path identity can reject it.
 
 const PATH_SUBSTITUTION_CASES = [
   ['gate-app-path-other-dir-same-arch-marker', (docs, ctx) => {
-    // A different bundle whose path still contains `darwin-arm64`.
+    // why: A different bundle whose path still contains `darwin-arm64`.
     const decoy = join(ctx.evidence, 'decoy', 'darwin-arm64', 'Nexus RFT Feasibility.app');
     cpSync(ctx.apps.arm64.dir, decoy, { recursive: true });
     const decoyReal = realpathSync(decoy);
@@ -1398,7 +1396,7 @@ for (const [label, mutate] of PATH_SUBSTITUTION_CASES) {
   check(`C8 substitution (${label}) names a path predicate`, (row?.verification?.problems ?? []).some((p) => /app_path|app_realpath|native_node_path_relative/.test(p)), true);
 }
 
-// A symlinked app path must canonicalize to the same bundle, not a different one.
+// why: A symlinked app path must canonicalize to the same bundle, not a different one.
 const SYMLINK_CASE = buildMatrix('path-symlink-alias', (docs, ctx) => {
   const aliasRoot = join(ctx.evidence, 'alias');
   mkdirSync(aliasRoot, { recursive: true });
@@ -1440,7 +1438,7 @@ check(
   true,
 );
 
-// --- strengthened predicate coverage: a green status cannot carry a bad body --
+// note: strengthened predicate coverage: a green status cannot carry a bad body
 
 const BODY_CASES = [
   ['install-extra-false-check', (docs) => {
@@ -1469,7 +1467,7 @@ for (const [label, mutate] of BODY_CASES) {
 }
 
 
-// --- I11: per-arch Electron size rows are independently missing -------------
+// note: I11: per-arch Electron size rows are independently missing
 
 const halfRoot = buildMatrix('half-size', (docs) => {
   delete docs['electron-x64/electron-size.json'];

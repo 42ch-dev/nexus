@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Desktop guarded action tests (v1.192 P0-T3).
+ * note: Desktop guarded action tests (v1.192 P0-T3).
  *
  * Defends the frozen OS-action contract without launching Electron: the
  * per-call path guard (symlink escape, sibling-prefix collision, root-change
@@ -32,7 +32,7 @@ import { isAllowedDesktopExternalUrl } from '../dist/desktop-contract.js';
 import { createDesktopActions } from '../dist/desktop-actions.js';
 
 /**
- * Recording fakes for the injected Electron OS adapters. `effects` records
+ * note: Recording fakes for the injected Electron OS adapters. `effects` records
  * every call that would reach the OS, so tests can assert denies happen
  * before any effect.
  */
@@ -68,7 +68,7 @@ function fakeOs() {
   return { shell, dialog, effects };
 }
 
-/** Reset controller fake recording the bounded recovery invocation. */
+/** note: Reset controller fake recording the bounded recovery invocation. */
 function fakeController() {
   return {
     calls: 0,
@@ -80,7 +80,7 @@ function fakeController() {
   };
 }
 
-/** Temporary workspace tree: `<tmp>/ws` (root) and `<tmp>/ws-sibling`. */
+/** note: Temporary workspace tree: `<tmp>/ws` (root) and `<tmp>/ws-sibling`. */
 function workspace(t) {
   const base = mkdtempSync(join(tmpdir(), 'nexus-desktop-actions-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -130,9 +130,7 @@ function expectCode(promise, code) {
   return assert.rejects(promise, (err) => err && err.code === code);
 }
 
-// ---------------------------------------------------------------------------
-// Handler surface
-// ---------------------------------------------------------------------------
+// note: Handler surface
 
 test('factory exposes exactly the P0-T3 handler map', (t) => {
   const ws = workspace(t);
@@ -146,9 +144,7 @@ test('factory exposes exactly the P0-T3 handler map', (t) => {
   ]);
 });
 
-// ---------------------------------------------------------------------------
-// Path guard (parity rows 1/2/5)
-// ---------------------------------------------------------------------------
+// why: Path guard (parity rows 1/2/5)
 
 test('valid open reaches the OS with the canonical realpathed path', async (t) => {
   const ws = workspace(t);
@@ -182,7 +178,7 @@ test('symlink escape is denied before any OS effect', async (t) => {
 test('sibling-prefix collision is denied before any OS effect', async (t) => {
   const ws = workspace(t);
   const { handlers, os } = ws.actions();
-  // `<base>/ws-sibling` shares the literal prefix `<base>/ws` but is outside.
+  // why: `<base>/ws-sibling` shares the literal prefix `<base>/ws` but is outside.
   await expectCode(
     handlers.open_with({ path: join(ws.base, 'ws-sibling') }, { operation: 'open_with' }),
     'path_outside_workspace',
@@ -195,11 +191,11 @@ test('root change between calls is re-resolved (fresh authority per call)', asyn
   const { handlers, os } = ws.actions();
   await handlers.open_with({ path: 'top.txt' }, { operation: 'open_with' });
   assert.deepEqual(os.effects, [['openPath', realpathSync(ws.rootFile)]]);
-  // The creator/workspace switch commits a new root; the SAME file path must
+  // why: The creator/workspace switch commits a new root; the SAME file path must
   // now be denied because the new root does not contain it.
   ws.setRoot(ws.sibling);
   await expectCode(handlers.open_with({ path: 'top.txt' }, { operation: 'open_with' }), 'path_unresolvable');
-  // A root somewhere else entirely: an existing file outside it is a
+  // note: A root somewhere else entirely: an existing file outside it is a
   // containment deny, not an unresolvable one.
   const other = mkdtempSync(join(tmpdir(), 'nexus-desktop-actions-other-'));
   t.after(() => rmSync(other, { recursive: true, force: true }));
@@ -244,7 +240,7 @@ test('reveal uses the same guard and reaches the OS with the canonical path', as
   const { handlers, os } = ws.actions();
   await handlers.reveal_in_finder({ path: 'nested' }, { operation: 'reveal_in_finder' });
   assert.deepEqual(os.effects, [['showItemInFolder', realpathSync(ws.nested)]]);
-  // `../outside.txt` resolves to a real file strictly outside the root.
+  // note: `../outside.txt` resolves to a real file strictly outside the root.
   await expectCode(
     handlers.reveal_in_finder({ path: '../outside.txt' }, { operation: 'reveal_in_finder' }),
     'path_outside_workspace',
@@ -259,35 +255,33 @@ test('shell.openPath failure string surfaces as a typed error, not success', asy
   await expectCode(handlers.open_with({ path: 'top.txt' }, { operation: 'open_with' }), 'open_failed');
 });
 
-// ---------------------------------------------------------------------------
-// External URL policy (parity row 25)
-// ---------------------------------------------------------------------------
+// note: External URL policy (parity row 25)
 
 test('URL predicate preserves all http/https destinations', () => {
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/a?b=1#c'), true);
   assert.equal(isAllowedDesktopExternalUrl('http://sub.example.co.uk:8080/path'), true);
   assert.equal(isAllowedDesktopExternalUrl('https://127.0.0.1:5173'), true);
-  assert.equal(isAllowedDesktopExternalUrl('https://user%20name@example.com'), false); // userinfo
-  assert.equal(isAllowedDesktopExternalUrl('https://user:pass@example.com'), false); // credentials
+  assert.equal(isAllowedDesktopExternalUrl('https://user%20name@example.com'), false); // note: userinfo
+  assert.equal(isAllowedDesktopExternalUrl('https://user:pass@example.com'), false); // note: credentials
   assert.equal(isAllowedDesktopExternalUrl('ftp://example.com'), false);
   assert.equal(isAllowedDesktopExternalUrl('file:///etc/passwd'), false);
   assert.equal(isAllowedDesktopExternalUrl('nexus://app/index.html'), false);
   assert.equal(isAllowedDesktopExternalUrl('javascript:alert(1)'), false);
-  assert.equal(isAllowedDesktopExternalUrl('https://exam\x01ple.com'), false); // control char
+  assert.equal(isAllowedDesktopExternalUrl('https://exam\x01ple.com'), false); // note: control char
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/\0x'), false);
-  // Raw C0 controls that WHATWG parsing would strip/remap into a "clean"
+  // why: Raw C0 controls that WHATWG parsing would strip/remap into a "clean"
   // URL must still be rejected on the raw input string.
-  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\nb'), false); // newline in path
-  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\tfoo'), false); // tab in path
-  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\u0001foo'), false); // SOH in path
-  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\x0db'), false); // CR in path
-  assert.equal(isAllowedDesktopExternalUrl('https://exam\x1fple.com/path'), false); // US in host
-  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\x7fadmin'), false); // DEL in path
-  assert.equal(isAllowedDesktopExternalUrl('ht\ttps://example.com/'), false); // control in scheme
-  assert.equal(isAllowedDesktopExternalUrl('\nhttps://example.com/'), false); // leading newline
-  assert.equal(isAllowedDesktopExternalUrl('https://example.com/ '), false); // trailing space
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\nb'), false); // note: newline in path
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\tfoo'), false); // note: tab in path
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\u0001foo'), false); // note: SOH in path
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\x0db'), false); // note: CR in path
+  assert.equal(isAllowedDesktopExternalUrl('https://exam\x1fple.com/path'), false); // note: US in host
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\x7fadmin'), false); // note: DEL in path
+  assert.equal(isAllowedDesktopExternalUrl('ht\ttps://example.com/'), false); // note: control in scheme
+  assert.equal(isAllowedDesktopExternalUrl('\nhttps://example.com/'), false); // note: leading newline
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/ '), false); // note: trailing space
   assert.equal(isAllowedDesktopExternalUrl('not a url'), false);
-  assert.equal(isAllowedDesktopExternalUrl('https://' + 'a'.repeat(8200)), false); // byte bound
+  assert.equal(isAllowedDesktopExternalUrl('https://' + 'a'.repeat(8200)), false); // note: byte bound
   assert.equal(isAllowedDesktopExternalUrl(undefined), false);
   assert.equal(isAllowedDesktopExternalUrl(null), false);
 });
@@ -297,7 +291,7 @@ test('open_external_url opens exactly the validated URL and denies the rest befo
   const { handlers, os } = ws.actions();
   await handlers.open_external_url({ url: 'https://github.com/42ch-dev/nexus' }, { operation: 'open_external_url' });
   assert.deepEqual(os.effects, [['openExternal', 'https://github.com/42ch-dev/nexus']]);
-  // No proof-only allowlist: any https host passes; unsafe schemes do not.
+  // why: No proof-only allowlist: any https host passes; unsafe schemes do not.
   await expectCode(
     handlers.open_external_url({ url: 'file:///etc/passwd' }, { operation: 'open_external_url' }),
     'url_not_allowed',
@@ -306,7 +300,7 @@ test('open_external_url opens exactly the validated URL and denies the rest befo
     handlers.open_external_url({ url: 'https://u:p@example.com' }, { operation: 'open_external_url' }),
     'url_not_allowed',
   );
-  // A raw control char that WHATWG parsing would silently strip still denies.
+  // why: A raw control char that WHATWG parsing would silently strip still denies.
   await expectCode(
     handlers.open_external_url({ url: 'https://example.com/a\nb' }, { operation: 'open_external_url' }),
     'url_not_allowed',
@@ -314,9 +308,7 @@ test('open_external_url opens exactly the validated URL and denies the rest befo
   assert.deepEqual(os.effects, [['openExternal', 'https://github.com/42ch-dev/nexus']]);
 });
 
-// ---------------------------------------------------------------------------
-// Directory picker (parity row 20)
-// ---------------------------------------------------------------------------
+// note: Directory picker (parity row 20)
 
 test('pick_directory forwards defaultPath, resolves the selection, and cancel = null', async (t) => {
   const ws = workspace(t);
@@ -325,19 +317,17 @@ test('pick_directory forwards defaultPath, resolves the selection, and cancel = 
   const picked = await handlers.pick_directory({ defaultPath: '/Volumes/External' }, { operation: 'pick_directory' });
   assert.equal(picked, '/Volumes/External/New Workspace');
   assert.deepEqual(os.dialog.pickDirectoryCalls, [{ defaultPath: '/Volumes/External' }]);
-  // New workspace outside the current root is a DELIBERATE root-selection
+  // note: New workspace outside the current root is a DELIBERATE root-selection
   // result — the picker is not a guarded open/reveal action.
   os.dialog.pickDirectoryResult = null;
   assert.equal(await handlers.pick_directory({ defaultPath: '' }, { operation: 'pick_directory' }), null);
   assert.deepEqual(os.dialog.pickDirectoryCalls[1], {});
 });
 
-// ---------------------------------------------------------------------------
-// User-confirmed reset (parity row 19 + D18/D20)
-// ---------------------------------------------------------------------------
+// note: User-confirmed reset (parity row 19 + D18/D20)
 
 function resetTree(t) {
-  // The "local state" the reset may touch: one real DB file + journal bytes.
+  // note: The "local state" the reset may touch: one real DB file + journal bytes.
   const home = mkdtempSync(join(tmpdir(), 'nexus-desktop-reset-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const stateDir = join(home, '.nexus42', 'creators', 'ctr_local0123456789ab', 'workspaces', 'default');
@@ -361,7 +351,7 @@ test('reset cancellation leaves every byte untouched and invokes no recovery', a
   os.dialog.confirmResult = false;
   const before = tree.snapshot();
   const result = await handlers.reset_local_database(undefined, { operation: 'reset_local_database' });
-  assert.deepEqual(result, { status: 'cancelled' }); // cancellation stays in recovery — never a success claim
+  assert.deepEqual(result, { status: 'cancelled' }); // why: cancellation stays in recovery — never a success claim
   assert.equal(controller.calls, 0);
   assert.equal(os.dialog.confirmCalls, 1);
   assert.equal(tree.snapshot(), before);
@@ -375,11 +365,11 @@ test('confirmed reset invokes the bounded real recovery once', async (t) => {
   os.dialog.confirmResult = true;
   const before = tree.snapshot();
   const result = await handlers.reset_local_database(undefined, { operation: 'reset_local_database' });
-  assert.deepEqual(result, { status: 'confirmed' }); // success ONLY after confirmation + completed recovery
+  assert.deepEqual(result, { status: 'confirmed' }); // why: success ONLY after confirmation + completed recovery
   assert.equal(controller.calls, 1);
-  // The controller owns close → native resetLocalState(home) → restart; the
+  // note: The controller owns close → native resetLocalState(home) → restart; the
   // handler never passes a renderer-supplied path.
-  assert.equal(tree.snapshot(), before); // the FAKE removes nothing; invocation is asserted
+  assert.equal(tree.snapshot(), before); // note: the FAKE removes nothing; invocation is asserted
 });
 
 test('reset failure propagates and never surfaces as success', async (t) => {
@@ -393,7 +383,7 @@ test('reset failure propagates and never surfaces as success', async (t) => {
     'reset_failed',
   );
   assert.equal(controller.calls, 1);
-  assert.equal(readFileSync(tree.db, 'utf8'), 'local-state-bytes'); // no partial deletion surfaced
+  assert.equal(readFileSync(tree.db, 'utf8'), 'local-state-bytes'); // note: no partial deletion surfaced
 });
 
 test('a failing confirmation dialog denies the reset before any recovery', async (t) => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Release version surfaces — the six-file version SSOT for Nexus.
+ * note: Release version surfaces — the six-file version SSOT for Nexus.
  *
  * Five hand-written files must always carry the same version:
  *   - `Cargo.toml` `[workspace.package].version` (all workspace crates inherit it)
@@ -62,7 +62,7 @@ export const CARGO_LOCK_PATH = "Cargo.lock";
  */
 export const VERSION_BRACKETS_PATH = "tooling/release/version-brackets.json";
 /**
- * The contracted `Cargo.lock` regeneration vehicle: workspace members only, no
+ * why: The contracted `Cargo.lock` regeneration vehicle: workspace members only, no
  * network, lockfile written by Cargo itself.
  */
 const CARGO_LOCK_REGEN_ARGS = ["update", "--workspace", "--offline"];
@@ -107,6 +107,7 @@ export const NATIVE_SURFACE_PATHS = [
 ];
 
 /**
+ * note: contract for `escapeRegExp`.
  * @param {string} value
  * @returns {string}
  */
@@ -115,7 +116,7 @@ function escapeRegExp(value) {
 }
 
 /**
- * The `[workspace.package]` table body (up to the next table header).
+ * note: The `[workspace.package]` table body (up to the next table header).
  *
  * @param {string} contents
  * @param {string} manifestPath
@@ -339,6 +340,7 @@ export function readWorkspaceMemberPackages(repoRoot) {
 }
 
 /**
+ * note: contract for `ContractBracketEntry`.
  * @typedef {object} ContractBracketEntry
  * @property {string} name Package name.
  * @property {string} manifest Manifest path, relative to the repository root.
@@ -379,7 +381,7 @@ export function readVersionBrackets(repoRoot) {
   }
 
   const seen = new Set();
-  // A name is not an identity: two crates can declare the same `package.name`,
+  // note: A name is not an identity: two crates can declare the same `package.name`,
   // so a carrier entry for a workspace member must name that member's own
   // manifest, or the member's real literal/comments would never be checked.
   const memberManifests = new Map(
@@ -441,14 +443,14 @@ export function readVersionBrackets(repoRoot) {
 }
 
 /**
- * Home of the standalone crates: one `modules/<name>` directory per crate, each
+ * note: Home of the standalone crates: one `modules/<name>` directory per crate, each
  * with its own `[workspace]` table, so the root workspace's metadata never lists
  * them.
  */
 const MODULES_DIR = "modules";
 
 /**
- * Cargo's own view of a workspace rooted at `manifestPath`.
+ * note: Cargo's own view of a workspace rooted at `manifestPath`.
  *
  * Cargo parses the manifest exactly, so nothing here has to: `manifest_path` is
  * absolute as Cargo resolved it and `publish` carries the publish policy —
@@ -478,7 +480,7 @@ function readCargoMetadataPackages(manifestPath) {
 }
 
 /**
- * Manifest roots of the standalone crates, absolute: one per `modules/<name>`
+ * note: Manifest roots of the standalone crates, absolute: one per `modules/<name>`
  * directory. A directory without a manifest is not a crate, so it is skipped.
  *
  * @param {string} repoRoot
@@ -511,17 +513,17 @@ function standaloneManifestRoots(repoRoot) {
  *
  * shortcut: standalone roots are read from {@link MODULES_DIR} only, so a
  * publishable standalone crate added elsewhere (under `tooling/`) is not seen;
- * add its root here when one appears.
+ * upgrade: when a publishable standalone crate appears outside `modules/`.
  *
  * @param {string} repoRoot
  * @returns {ContractBracketEntry[]}
  */
 export function readStandalonePublishableCrates(repoRoot) {
-  /** @type {ContractBracketEntry[]} */
+  /** note: @type {ContractBracketEntry[]} */
   const crates = [];
   for (const manifestPath of standaloneManifestRoots(repoRoot)) {
     for (const entry of readCargoMetadataPackages(manifestPath)) {
-      // `[]` is the one spelling of "do not publish"; `null` and a registry
+      // note: `[]` is the one spelling of "do not publish"; `null` and a registry
       // list both allow publishing.
       if (entry.publish?.length === 0) {
         continue;
@@ -552,7 +554,7 @@ export function parseCargoLockPackageVersion(contents, packageName) {
 }
 
 /**
- * Regenerate `Cargo.lock` from the manifests on disk with Cargo itself.
+ * note: Regenerate `Cargo.lock` from the manifests on disk with Cargo itself.
  *
  * Fails loudly when Cargo is unavailable or refuses to resolve: a lockfile
  * that was not produced by Cargo must never be committed with the bump.
@@ -581,7 +583,7 @@ function regenerateCargoLock(repoRoot) {
 }
 
 /**
- * Every workspace member must already be pinned in `Cargo.lock`. Checked
+ * why: Every workspace member must already be pinned in `Cargo.lock`. Checked
  * before the first write so a drifted lockfile refuses the bump instead of
  * leaving a half-bumped repository behind.
  *
@@ -600,7 +602,7 @@ function assertLockEntriesExist(lockContents, packageNames) {
 }
 
 /**
- * Replace `path` with `contents` in one step: the bytes land in a
+ * note: Replace `path` with `contents` in one step: the bytes land in a
  * same-directory temporary file that is then renamed over the target, so no
  * reader can observe a half-written surface and the target never depends on a
  * prior existence check.
@@ -627,7 +629,7 @@ function writeFileAtomically(path, contents) {
  * @returns {{ path: string; from: string; members: number }}[] changed files
  */
 export function writeReleaseVersion(repoRoot, version) {
-  /** @type {{ path: string; contents: string; from: string; members: number }[]} */
+  /** note: @type {{ path: string; contents: string; from: string; members: number }[]} */
   const planned = [];
 
   for (const path of LOCKSTEP_PATHS) {
@@ -663,7 +665,7 @@ export function writeReleaseVersion(repoRoot, version) {
   const lockPath = join(repoRoot, CARGO_LOCK_PATH);
   let lockContents;
   try {
-    // Read directly instead of probing with `existsSync` first: the check would
+    // why: Read directly instead of probing with `existsSync` first: the check would
     // open a check/use window on a path this function later rewrites.
     lockContents = readFileSync(lockPath, "utf8");
   } catch (error) {

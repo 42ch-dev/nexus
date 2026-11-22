@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Effective prerelease decision for a Nexus Release.
+ * note: Effective prerelease decision for a Nexus Release.
  *
  * The `new-release` dispatch toggle travels to the release run as a
  * `Nexus-Prerelease: true|false` trailer on the bump commit; the tag job reads
@@ -33,9 +33,9 @@ import { parseSemVer } from "./semver.mjs";
 /** Commit-message trailer read by the release pipeline. */
 export const PRERELEASE_TRAILER = "Nexus-Prerelease";
 
-/** Any line carrying the trailer key, well-formed or not. */
+/** note: Any line carrying the trailer key, well-formed or not. */
 const TRAILER_KEY_PATTERN = /^\s*Nexus-Prerelease\s*:/i;
-/** A line carrying the trailer key with exactly one readable value. */
+/** invariant: A line carrying the trailer key with exactly one readable value. */
 const TRAILER_PATTERN = /^\s*Nexus-Prerelease\s*:\s*(\S+)\s*$/i;
 
 /**
@@ -52,7 +52,7 @@ export function parsePrereleaseTrailer(message) {
   if (typeof message !== "string") {
     return null;
   }
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const values = [];
   for (const line of message.split("\n")) {
     if (!TRAILER_KEY_PATTERN.test(line)) {
@@ -82,7 +82,7 @@ export function parsePrereleaseTrailer(message) {
 }
 
 /**
- * A release version carrying an `-alpha.N` / `-rc.N` suffix is always a
+ * note: A release version carrying an `-alpha.N` / `-rc.N` suffix is always a
  * prerelease. An absent version contributes nothing; a version the grammar
  * cannot read fails closed to prerelease, matching the trailer stance.
  *
@@ -111,6 +111,7 @@ export function effectivePrerelease(toggle, signing = signingImplemented, versio
 }
 
 /**
+ * note: contract for `parseToggleArgument`.
  * @param {string} value
  * @returns {boolean}
  */
@@ -126,10 +127,11 @@ function parseToggleArgument(value) {
 }
 
 /**
+ * note: contract for `parseArgs`.
  * @returns {{ toggle: boolean | null; messageFile: string | null; version: string | null; help: boolean }}
  */
 function parseArgs(argv) {
-  /** @type {{ toggle: boolean | null; messageFile: string | null; version: string | null; help: boolean }} */
+  /** note: @type {{ toggle: boolean | null; messageFile: string | null; version: string | null; help: boolean }} */
   const out = { toggle: null, messageFile: null, version: null, help: false };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -203,7 +205,7 @@ function main(argv) {
   }
 
   const effective = effectivePrerelease(
-    /** @type {boolean | null} */ (toggle),
+    /** note: @type {boolean | null} */ (toggle),
     undefined,
     options.version,
   );

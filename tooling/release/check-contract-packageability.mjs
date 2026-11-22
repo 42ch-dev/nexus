@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Contract bracket packageability — prove every contract crate can be packed
+ * note: Contract bracket packageability — prove every contract crate can be packed
  * and consumed from its own archive.
  *
  * For each entry in `VERSION_BRACKETS_PATH` this
@@ -81,11 +81,11 @@ import { readVersionBrackets, resolveRepoRoot } from "./version-surfaces.mjs";
 
 const PACKAGE_ARGS = ["package", "--no-verify", "--allow-dirty", "--offline"];
 
-/** Consumer fixtures, each declared by name in the accounting below. */
+/** note: Consumer fixtures, each declared by name in the accounting below. */
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
 
 /**
- * Checked-in accounting of the fixture set, one record per carrier entry:
+ * note: Checked-in accounting of the fixture set, one record per carrier entry:
  *
  *   { "<package>": { "fixture": "<dir name>" } }
  *   { "<package>": { "fixture": null, "reason": "<why none>" } }
@@ -102,21 +102,21 @@ const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
 const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
 
 /**
- * Subdirectory of a consumer fixture whose crate is a `wasm32-unknown-unknown`
+ * note: Subdirectory of a consumer fixture whose crate is a `wasm32-unknown-unknown`
  * guest. A guest is a separate crate from the host consumer, so no host-side
  * dependency can reach the artifact.
  */
 const GUEST_DIR = "guest";
 
 /**
- * Prefix of the disposable scratch dir. It lives inside `CARGO_TARGET_DIR`
+ * note: Prefix of the disposable scratch dir. It lives inside `CARGO_TARGET_DIR`
  * when that is set, so a worktree keeps its scoped target cache, and falls
  * back to the OS temp dir otherwise.
  */
 const SCRATCH_PREFIX = "nexus-contract-package-";
 
 /**
- * Top-level entries never copied into the packing tree: VCS metadata, the
+ * why: Top-level entries never copied into the packing tree: VCS metadata, the
  * harness control dir, other checkouts and build outputs are not product
  * source and must not reach an archive.
  */
@@ -130,7 +130,7 @@ const SKIPPED_STAGE_ENTRIES = new Set([
 ]);
 
 /**
- * Contract entries the manifest names as a dependency (`name = ...` or
+ * note: Contract entries the manifest names as a dependency (`name = ...` or
  * `name.path = ...`). Cargo package names are hyphen/underscore/alphanumeric,
  * so they need no regex escaping.
  *
@@ -145,6 +145,7 @@ function contractDependencies(manifestContents, entries) {
 }
 
 /**
+ * note: contract for `ArchiveEvidence`.
  * @typedef {object} ArchiveEvidence
  * @property {string} file `.crate` file name produced by `cargo package`.
  * @property {string} sha256 SHA-256 of the archive bytes, kept after cleanup.
@@ -152,6 +153,7 @@ function contractDependencies(manifestContents, entries) {
  */
 
 /**
+ * note: contract for `NormalizedDependency`.
  * @typedef {object} NormalizedDependency
  * @property {string} name Package name.
  * @property {string} req Cargo version requirement from the packed manifest.
@@ -166,7 +168,7 @@ function contractDependencies(manifestContents, entries) {
  * @property {{name: string, sha256: string}[]} patched
  * @property {{name: string, version: string, manifest: string, source: string}[]} resolved
  * @property {string} mode `run` for a `src/main.rs` fixture, `test` when it ships a `tests/`
- *   target (the only target kind that sees a dev-dependency).
+ * why:   target (the only target kind that sees a dev-dependency).
  * @property {{artifact: string, bytes: number, sha256: string} | null} guest
  *   `wasm32-unknown-unknown` artifact of the fixture's `guest/` crate, when it
  *   ships one; null for host-only fixtures.
@@ -184,7 +186,7 @@ function contractDependencies(manifestContents, entries) {
  * @property {string | null} cause Short named failure reason.
  * @property {ArchiveEvidence | null} archive
  * @property {{version: string, publish: string[] | null} | null} package
- *   Normalized `[package]` row read from the extracted archive.
+ * note:   Normalized `[package]` row read from the extracted archive.
  * @property {NormalizedDependency[]} dependencies
  * @property {ConsumerEvidence | null} consumer Actual archive-only consumer, when
  *   a fixture exists for this entry.
@@ -200,7 +202,7 @@ function contractDependencies(manifestContents, entries) {
  * @property {PackageResult[]} results One row per contract entry, in carrier order.
  * @property {string | null} firstFailure Package name of the first failing crate.
  * @property {{path: string; fixtures: string[]; noFixture: {name: string, reason: string}[]}}
- *   consumerAccounting The checked-in fixture accounting the run was validated
+ * note:   consumerAccounting The checked-in fixture accounting the run was validated
  *   against: entries with a fixture, and entries explicitly declared without one.
  * @property {{sha: string | null; clean: boolean; mismatch?: string[]}} source
  *   Revision the packed source came from, and whether the staged bytes are that
@@ -212,7 +214,7 @@ function contractDependencies(manifestContents, entries) {
  */
 
 /**
- * Run a command and keep the streams apart: `cargo metadata` writes JSON to
+ * why: Run a command and keep the streams apart: `cargo metadata` writes JSON to
  * stdout while warnings may land on stderr.
  *
  * @param {string} command
@@ -227,7 +229,7 @@ function run(command, args, cwd, input) {
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
     input,
-    // The staging path list is a whole checkout; the default pipe buffer is
+    // note: The staging path list is a whole checkout; the default pipe buffer is
     // smaller than a big `git ls-files` result.
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -250,7 +252,7 @@ function run(command, args, cwd, input) {
 }
 
 /**
- * First Cargo/tool error line of an output, used as the short named cause.
+ * note: First Cargo/tool error line of an output, used as the short named cause.
  *
  * @param {string} output
  * @returns {string | null}
@@ -265,6 +267,7 @@ function firstErrorLine(output) {
 }
 
 /**
+ * note: contract for `failedRow`.
  * @param {string} cause
  * @param {string} output
  * @param {ArchiveEvidence | null} [archive]
@@ -282,7 +285,7 @@ function failedRow(cause, output, archive = null) {
 }
 
 /**
- * Scratch parent: the worktree's own `CARGO_TARGET_DIR` when configured, else
+ * note: Scratch parent: the worktree's own `CARGO_TARGET_DIR` when configured, else
  * the OS temp dir. The scratch dir is a child of it and always disposable.
  *
  * @returns {string}
@@ -295,7 +298,7 @@ function packageScratchParent() {
 }
 
 /**
- * Paths Git would ship for the current working source: tracked files (with any
+ * why: Paths Git would ship for the current working source: tracked files (with any
  * uncommitted modifications) plus untracked files that are not ignored. Git is
  * only asked for the path list; every byte copied comes from the working tree,
  * so an archive never carries stale HEAD or index content.
@@ -323,7 +326,7 @@ function workingSourcePaths(repoRoot) {
 }
 
 /**
- * Copy the source Git would ship into a disposable packing tree. The skip set
+ * why: Copy the source Git would ship into a disposable packing tree. The skip set
  * stays as a guard for VCS/build entries even if a checkout tracks one, and
  * executable bits and symlinks are preserved because packed build scripts and
  * tools depend on them.
@@ -345,13 +348,13 @@ function stageWorkingSource(repoRoot, stageRoot) {
       continue;
     }
     const source = join(repoRoot, path);
-    /** @type {import("node:fs").Stats} */
+    /** note: @type {import("node:fs").Stats} */
     let stats;
     try {
       stats = lstatSync(source);
     } catch (error) {
       if (error?.code === "ENOENT") {
-        // Listed by Git but already removed from the working tree.
+        // why: Listed by Git but already removed from the working tree.
         continue;
       }
       throw error;
@@ -368,7 +371,7 @@ function stageWorkingSource(repoRoot, stageRoot) {
 }
 
 /**
- * Package-name policy from Cargo's normalized metadata for the staged
+ * note: Package-name policy from Cargo's normalized metadata for the staged
  * workspace. `publish: []` is Cargo's "publish = false"; anything else
  * (including an unset key) is not this check's business.
  *
@@ -409,7 +412,7 @@ function workspacePolicy(stageRoot) {
 }
 
 /**
- * Pack one contract entry from the staging tree, keep its archive, extract it
+ * why: Pack one contract entry from the staging tree, keep its archive, extract it
  * outside the repository and read the normalized manifest Cargo actually
  * shipped.
  *
@@ -485,7 +488,7 @@ function packAndInspect({
   }
 
   const archivePath = join(packageDir, produced[0]);
-  /** @type {ArchiveEvidence} */
+  /** note: @type {ArchiveEvidence} */
   const archive = {
     file: produced[0],
     sha256: createHash("sha256")
@@ -584,7 +587,7 @@ function packAndInspect({
 }
 
 /**
- * Whether `candidate` is `root` or a descendant of it.
+ * note: Whether `candidate` is `root` or a descendant of it.
  *
  * @param {string} candidate
  * @param {string} root
@@ -597,7 +600,7 @@ function inside(candidate, root) {
 }
 
 /**
- * Read and validate the checked-in fixture accounting from the same staged tree
+ * note: Read and validate the checked-in fixture accounting from the same staged tree
  * the archives are packed from. Every carrier entry must appear exactly once,
  * with either a fixture directory that exists in the tree or an explicit
  * no-fixture record and reason; anything else fails closed. Without this, a
@@ -636,9 +639,9 @@ function readConsumerAccounting(stageRoot, entries) {
     );
   }
   const names = new Set(entries.map((entry) => entry.name));
-  /** @type {Map<string, string>} */
+  /** note: @type {Map<string, string>} */
   const fixtures = new Map();
-  /** @type {Map<string, string>} */
+  /** note: @type {Map<string, string>} */
   const noFixture = new Map();
   for (const [name, record] of Object.entries(parsed)) {
     if (!names.has(name)) {
@@ -685,7 +688,7 @@ function readConsumerAccounting(stageRoot, entries) {
 }
 
 /**
- * Build a consumer fixture's `wasm32-unknown-unknown` guest, when it ships one
+ * note: Build a consumer fixture's `wasm32-unknown-unknown` guest, when it ships one
  * in `guest/`. The guest crate is a separate workspace member, so the host
  * consumer's dependencies stay out of the artifact, and the target itself
  * refuses host-only crates (nexus-module-test, wasmtime).
@@ -768,7 +771,7 @@ function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
 }
 
 /**
- * Consume one extracted archive set with a fresh consumer workspace. Every
+ * note: Consume one extracted archive set with a fresh consumer workspace. Every
  * failure returns named evidence instead of throwing, so a Cargo failure can
  * never leave an empty passing report. `repoRoot` is only the escape detector's
  * reference (a consumer must not resolve from the original checkout); the
@@ -796,7 +799,7 @@ function runConsumer({
   archives,
   policy,
 }) {
-  // Fixture existence and contents come from the same copied tree the archives
+  // note: Fixture existence and contents come from the same copied tree the archives
   // were packed from, so package and consumer evidence share one set of
   // reviewed inputs; the original checkout is no longer a consumer input. The
   // directory is the one the accounting declares, not one derived from the
@@ -805,7 +808,7 @@ function runConsumer({
   const fixturePath = join(stageRoot, CONSUMER_FIXTURES_PATH, fixture);
   const consumerRoot = join(scratchRoot, "consumers", entryName);
   cpSync(fixturePath, consumerRoot, { recursive: true });
-  /** @type {ConsumerEvidence} */
+  /** note: @type {ConsumerEvidence} */
   const evidence = {
     case: `${CONSUMER_FIXTURES_PATH}/${fixture}`,
     root: consumerRoot,
@@ -884,7 +887,7 @@ function runConsumer({
     };
   }
 
-  // One patch per archive; a workspace fixture may name the same archive from
+  // note: One patch per archive; a workspace fixture may name the same archive from
   // more than one member.
   const selected = [
     ...new Map(
@@ -895,13 +898,13 @@ function runConsumer({
   ];
   evidence.patched = selected.map((dependency) => ({
     name: dependency.name,
-    sha256: /** @type {{sha256: string}} */ (archives.get(dependency.name))
+    sha256: /** note: @type {{sha256: string}} */ (archives.get(dependency.name))
       .sha256,
   }));
   const patchArgs = selected.flatMap((dependency) => [
     "--config",
     `patch.crates-io.${dependency.name}.path = "${
-      /** @type {{root: string}} */ (archives.get(dependency.name)).root
+      /** note: @type {{root: string}} */ (archives.get(dependency.name)).root
     }"`,
   ]);
 
@@ -935,7 +938,7 @@ function runConsumer({
     };
   }
 
-  // A fixture that ships a `tests/` target is exercised with `cargo test`: a dev-dependency is
+  // note: A fixture that ships a `tests/` target is exercised with `cargo test`: a dev-dependency is
   // visible to a test target only, so that is the shape a module crate's ABI harness has.
   const mode = existsSync(join(consumerRoot, "tests")) ? "test" : "run";
   evidence.mode = mode;
@@ -1004,7 +1007,7 @@ function runConsumer({
         cause: `consumer resolved ${row.name} from the packing tree (${row.manifest_path})`,
       };
     }
-    // The scratch tree can sit under CARGO_TARGET_DIR, which may itself be
+    // note: The scratch tree can sit under CARGO_TARGET_DIR, which may itself be
     // inside the checkout; only inputs outside it are original-source escapes.
     if (
       inside(row.manifest_path, repoRoot) &&
@@ -1031,7 +1034,7 @@ function runConsumer({
 }
 
 /**
- * Revision the working source is packed from. The archive bytes come from the
+ * note: Revision the working source is packed from. The archive bytes come from the
  * working tree (see {@link stageWorkingSource}), so the revision alone is not
  * provenance: `clean` says whether that tree still matched it. Both reads fail
  * closed — an unreadable revision or status reports "not clean".
@@ -1049,7 +1052,7 @@ function workingSourceState(repoRoot) {
 }
 
 /**
- * Git blob id of a byte sequence: how Git's object database addresses content.
+ * note: Git blob id of a byte sequence: how Git's object database addresses content.
  *
  * @param {Buffer} bytes
  * @returns {string}
@@ -1059,7 +1062,7 @@ function blobId(bytes) {
 }
 
 /**
- * Every file and symlink under `directory`, relative and POSIX-joined, minus the
+ * safety: Every file and symlink under `directory`, relative and POSIX-joined, minus the
  * entries staging never copies (VCS metadata, build output, other checkouts) and
  * minus the subtrees the revision records as gitlinks.
  *
@@ -1073,9 +1076,9 @@ function blobId(bytes) {
  * @returns {string[]}
  */
 function stagedPaths(directory, gitlinks) {
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const paths = [];
-  /** @param {string} relative */
+  /** note: @param {string} relative */
   const walk = (relative) => {
     const absolute = relative.length === 0 ? directory : join(directory, relative);
     for (const dirent of readdirSync(absolute, { withFileTypes: true })) {
@@ -1121,9 +1124,9 @@ export function verifyStagedSource(repoRoot, sha, directory) {
   if (!listed.ok) {
     return ["<unreadable tree>"];
   }
-  /** @type {Map<string, {mode: string; id: string}>} */
+  /** note: @type {Map<string, {mode: string; id: string}>} */
   const revision = new Map();
-  /** @type {Set<string>} */
+  /** note: @type {Set<string>} */
   const gitlinks = new Set();
   for (const entry of listed.stdout.split("\0")) {
     if (entry.length === 0) {
@@ -1148,11 +1151,11 @@ export function verifyStagedSource(repoRoot, sha, directory) {
     revision.set(path, { mode, id });
   }
 
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const mismatches = [];
   const staged = stagedPaths(directory, gitlinks);
   const stagedSet = new Set(staged);
-  /** Staged regular files whose content id is read in one batch below. */
+  /** note: Staged regular files whose content id is read in one batch below. */
   const toHash = [];
   for (const path of staged) {
     const entry = revision.get(path);
@@ -1161,7 +1164,7 @@ export function verifyStagedSource(repoRoot, sha, directory) {
       continue;
     }
     const stagedFile = join(directory, path);
-    /** @type {import("node:fs").Stats} */
+    /** note: @type {import("node:fs").Stats} */
     let stats;
     try {
       stats = lstatSync(stagedFile);
@@ -1190,12 +1193,13 @@ export function verifyStagedSource(repoRoot, sha, directory) {
     // staged file raw would report every clean checkout as unclean; hashing it
     // through `--work-tree` keeps the packed copy the thing being measured.
     // shortcut: `--stdin-paths` splits on newline, so a tracked path containing
-    // one aborts the batch as unverifiable instead of being compared wrongly.
+    // one aborts the batch as unverifiable instead of being compared wrongly;
+    // upgrade: when a tracked staged path contains a newline.
     const hashed = run(
       "git",
       ["--work-tree", directory, "hash-object", "--stdin-paths"],
       repoRoot,
-      // Absolute paths: `hash-object` opens exactly these, and `--work-tree`
+      // note: Absolute paths: `hash-object` opens exactly these, and `--work-tree`
       // is what maps them back to the staged tree's attributes.
       `${toHash.map((path) => join(directory, path)).join("\n")}\n`,
     );
@@ -1228,7 +1232,7 @@ export function verifyStagedSource(repoRoot, sha, directory) {
  */
 export function checkContractPackageability(repoRoot) {
   const entries = readVersionBrackets(repoRoot);
-  let source = /** @type {{sha: string | null; clean: boolean; mismatch?: string[]}} */ (
+  let source = /** note: @type {{sha: string | null; clean: boolean; mismatch?: string[]}} */ (
     workingSourceState(repoRoot)
   );
   const scratchParent = packageScratchParent();
@@ -1236,15 +1240,15 @@ export function checkContractPackageability(repoRoot) {
   const scratchRoot = mkdtempSync(join(scratchParent, SCRATCH_PREFIX));
   const stageRoot = join(scratchRoot, "stage");
   const targetRoot = join(scratchRoot, "target");
-  /** @type {PackageResult[]} */
+  /** note: @type {PackageResult[]} */
   const results = [];
-  /** @type {Map<string, {root: string, sha256: string, version: string}>} */
+  /** note: @type {Map<string, {root: string, sha256: string, version: string}>} */
   const archives = new Map();
-  /** @type {ReturnType<typeof readConsumerAccounting>} */
+  /** note: @type {ReturnType<typeof readConsumerAccounting>} */
   let consumer = { fixtures: new Map(), noFixture: new Map() };
   try {
     stageWorkingSource(repoRoot, stageRoot);
-    // The copy happens after the status sample, so a file can change in
+    // why: The copy happens after the status sample, so a file can change in
     // between. Only a clean tree is claimed, and only when the bytes actually
     // staged hash to that revision's blobs; anything else downgrades the stamp
     // to "not clean" instead of naming a revision the archive does not match.
@@ -1255,7 +1259,7 @@ export function checkContractPackageability(repoRoot) {
       }
     }
 
-    // The fixture set is a reviewed input, not something discovered by looking
+    // note: The fixture set is a reviewed input, not something discovered by looking
     // for whatever happens to be on disk: the accounting must name every entry.
     consumer = readConsumerAccounting(stageRoot, entries);
 
@@ -1267,7 +1271,7 @@ export function checkContractPackageability(repoRoot) {
         stageRoot,
         targetRoot,
       });
-      /** @type {PackageResult} */
+      /** note: @type {PackageResult} */
       const row = {
         name: entry.name,
         manifest: entry.manifest,
@@ -1285,14 +1289,14 @@ export function checkContractPackageability(repoRoot) {
         archives.set(entry.name, {
           root: inspected.root,
           sha256: inspected.archive.sha256,
-          version: /** @type {{version: string}} */ (inspected.package).version,
+          version: /** note: @type {{version: string}} */ (inspected.package).version,
         });
       }
     }
 
     if (consumer.fixtures.size > 0 && archives.size > 0) {
       const policy = workspacePolicy(stageRoot);
-      // Standalone contract crates (`modules/*`) are not workspace members, so
+      // note: Standalone contract crates (`modules/*`) are not workspace members, so
       // the staged workspace cannot report their `publish`; their archive's own
       // normalized row is the source for them.
       for (const row of results) {
@@ -1321,7 +1325,7 @@ export function checkContractPackageability(repoRoot) {
           row.cause = evidence.cause;
         }
       }
-      // An entry with no fixture of its own is consumed by another entry's
+      // note: An entry with no fixture of its own is consumed by another entry's
       // fixture (knowledge by narrative), so a passing package row is not proof
       // its archive is usable. Coverage is decided by what the consumer actually
       // resolved, not by what the fixture proposed: `patched` only says a patch
@@ -1329,7 +1333,7 @@ export function checkContractPackageability(repoRoot) {
       // after the origin loop has proven each of those rows came from the
       // extracted archive. A patch that resolution ignored (a target-specific
       // declaration, an unused patch) therefore proves nothing.
-      /** @type {Map<string, {sha256: string, cases: Set<string>}>} */
+      /** note: @type {Map<string, {sha256: string, cases: Set<string>}>} */
       const coverage = new Map();
       for (const row of results) {
         if (row.consumer?.ok !== true) {
@@ -1347,7 +1351,7 @@ export function checkContractPackageability(repoRoot) {
           coverage.set(entry.name, covered);
         }
       }
-      /** Package names a passing consumer declared but never resolved. */
+      /** why: Package names a passing consumer declared but never resolved. */
       const declaredOnly = new Set(
         results.flatMap((row) =>
           row.consumer?.ok === true
@@ -1366,7 +1370,7 @@ export function checkContractPackageability(repoRoot) {
           covered !== undefined && covered.sha256 === row.archive.sha256
             ? [...covered.cases].sort()
             : null;
-        // A declared fixture is a claim about *this* entry. When another entry's
+        // note: A declared fixture is a claim about *this* entry. When another entry's
         // fixture also consumes the archive, running the declared one proves
         // nothing unless it is one of the fixtures that resolved it.
         const declared = consumer.fixtures.get(row.name);
@@ -1411,6 +1415,7 @@ export function checkContractPackageability(repoRoot) {
 }
 
 /**
+ * note: contract for `indent`.
  * @param {string} text
  * @returns {string}
  */
@@ -1422,6 +1427,7 @@ function indent(text) {
 }
 
 /**
+ * note: contract for `printRows`.
  * @param {PackageabilityReport} report
  */
 function printRows(report) {
@@ -1461,7 +1467,7 @@ function main(argv) {
     return 0;
   }
 
-  /** @type {PackageabilityReport} */
+  /** note: @type {PackageabilityReport} */
   let report;
   try {
     report = checkContractPackageability(resolveRepoRoot());

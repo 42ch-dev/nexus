@@ -1,6 +1,6 @@
 /**
  * @nexus/design-tokens — Shared Tailwind preset.
- *
+ *note: 
  * Extracted from apps/web/tailwind.config.ts theme.extend for all Nexus
  * product surfaces (apps/web, apps/design-studio). Single source of truth
  * for theme-dependent token mappings; no per-app `theme.extend` duplication.
@@ -16,23 +16,23 @@
  */
 import type { Config } from 'tailwindcss';
 
-/** CSS var helper for color tokens. */
+/** note: CSS var helper for color tokens. */
 const cv = (token: string): string => `var(--color-${token})`;
 
-/** CSS var helper for structural (non-color) tokens — e.g. `--canvas-node-width-*`. */
+/** note: CSS var helper for structural (non-color) tokens — e.g. `--canvas-node-width-*`. */
 const sv = (token: string): string => `var(--${token})`;
 
 const preset: Partial<Config> = {
   theme: {
     extend: {
       colors: {
-        // Background scale — DESIGN.md §Colors/Background.
+        // note: Background scale — DESIGN.md §Colors/Background.
         background: {
           100: cv('background-100'),
           200: cv('background-200'),
           300: cv('background-300'),
         },
-        // Solid gray scale — DESIGN.md §Colors/Gray (solid).
+        // note: Solid gray scale — DESIGN.md §Colors/Gray (solid).
         gray: {
           100: cv('gray-100'),
           200: cv('gray-200'),
@@ -45,7 +45,7 @@ const preset: Partial<Config> = {
           900: cv('gray-900'),
           1000: cv('gray-1000'),
         },
-        // Gray alpha scale — DESIGN.md §Colors/Gray Alpha.
+        // note: Gray alpha scale — DESIGN.md §Colors/Gray Alpha.
         'gray-alpha': {
           100: cv('gray-alpha-100'),
           200: cv('gray-alpha-200'),
@@ -54,9 +54,9 @@ const preset: Partial<Config> = {
           500: cv('gray-alpha-500'),
           600: cv('gray-alpha-600'),
         },
-        // Overlay scrim — DESIGN.md §Elevation (backdrop fill behind overlays).
+        // note: Overlay scrim — DESIGN.md §Elevation (backdrop fill behind overlays).
         scrim: cv('scrim'),
-        // Status surface family — DESIGN.md components.states.{error,success,warning,info}
+        // note: Status surface family — DESIGN.md components.states.{error,success,warning,info}
         // (V1.121: error landed P1 T2; success/warning/info added P2 T4 to
         // tokenize preset-validation status cards + canvas live-session banner;
         // theme-aware via .dark overrides).
@@ -70,7 +70,7 @@ const preset: Partial<Config> = {
         'info-surface-border': cv('info-surface-border'),
         'data-table-row-protected': cv('data-table-row-protected'),
         'main-banner-background': cv('main-banner-background'),
-        // Finding status pill — DESIGN.md components.finding-status-pill
+        // note: Finding status pill — DESIGN.md components.finding-status-pill
         // (V1.121 P1 T3; tinted fill + semantic text + border per status).
         'finding-status': {
           open: {
@@ -104,7 +104,7 @@ const preset: Partial<Config> = {
             border: cv('finding-status-duplicate-border'),
           },
         },
-        // Memory task-kind chips — DESIGN.md components.memory-task-kind-*.
+        // note: Memory task-kind chips — DESIGN.md components.memory-task-kind-*.
         'memory-task-kind': {
           brainstorm: {
             bg: cv('memory-task-kind-brainstorm-bg'),
@@ -132,7 +132,7 @@ const preset: Partial<Config> = {
             border: cv('memory-task-kind-unknown-border'),
           },
         },
-        // Reading maturation count badges — DESIGN.md
+        // note: Reading maturation count badges — DESIGN.md
         // components.reading-maturation-badge.
         'reading-maturation': {
           'kb-density': {
@@ -146,7 +146,7 @@ const preset: Partial<Config> = {
             border: cv('reading-maturation-open-findings-border'),
           },
         },
-        // nexus-ui Badge soft variants — DESIGN.md
+        // note: nexus-ui Badge soft variants — DESIGN.md
         // components.badge-status-pill.soft (v1.183 P0 R-V1121P1QC1-S001
         // projection; tinted fill + semantic -1000 text + 50% border per
         // variant). Neutral stays on gray-alpha tokens directly.
@@ -177,7 +177,7 @@ const preset: Partial<Config> = {
             border: cv('nexus-ui-badge-soft-preset-border'),
           },
         },
-        // Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
+        // note: Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
         brand: {
           'deep-blue': cv('brand-deep-blue'),
           'deep-blue-800': cv('brand-deep-blue-800'),
@@ -188,7 +188,7 @@ const preset: Partial<Config> = {
           'cyan-1000': cv('brand-cyan-1000'),
           white: cv('brand-white'),
         },
-        // V1.94 Footer Profile Switcher + Setup Wizard Step Chrome tokens.
+        // note: V1.94 Footer Profile Switcher + Setup Wizard Step Chrome tokens.
         'footer-profile': {
           'avatar-size': cv('footer-profile-avatar-size'),
           'avatar-rounded': cv('footer-profile-avatar-rounded'),
@@ -218,7 +218,7 @@ const preset: Partial<Config> = {
           'label-active-color': cv('setup-wizard-step-label-active-color'),
           'label-pending-color': cv('setup-wizard-step-label-pending-color'),
         },
-        // V1.96 Setup Wizard Surface
+        // note: V1.96 Setup Wizard Surface
         'setup-wizard-surface': {
           'card-bg': cv('setup-wizard-surface-card-bg'),
           'card-border': cv('setup-wizard-surface-card-border'),
@@ -229,7 +229,7 @@ const preset: Partial<Config> = {
           'input-row-path-color': cv('setup-wizard-surface-input-row-path-color'),
           'input-row-icon-color': cv('setup-wizard-surface-input-row-icon-color'),
         },
-        // Accent scales — DESIGN.md §Colors/Accent Scales.
+        // note: Accent scales — DESIGN.md §Colors/Accent Scales.
         blue: {
           700: cv('blue-700'),
           800: cv('blue-800'),
@@ -273,7 +273,7 @@ const preset: Partial<Config> = {
           900: cv('pink-900'),
           1000: cv('pink-1000'),
         },
-        // Canvas surface — DESIGN.md §Canvas Surface (V1.70).
+        // note: Canvas surface — DESIGN.md §Canvas Surface (V1.70).
         canvas: {
           surface: cv('canvas-surface'),
           grid: cv('canvas-grid'),
@@ -286,10 +286,10 @@ const preset: Partial<Config> = {
           port: cv('canvas-port'),
           minimap: cv('canvas-minimap'),
           'strategy-accent': cv('canvas-strategy-accent'),
-          // V1.121 P3 T2: per-surface accent spines (DESIGN.md §Canvas Surface).
+          // note: V1.121 P3 T2: per-surface accent spines (DESIGN.md §Canvas Surface).
           'outline-accent': cv('canvas-outline-accent'),
           'worldkb-accent': cv('canvas-worldkb-accent'),
-          // V1.123 P4 Task 2: per-layer feel accents (layer-feel-
+          // note: V1.123 P4 Task 2: per-layer feel accents (layer-feel-
           // differentiation.md §6.1). Brief=gold-bronze; Narrative=brand
           // blue; Moment=ink-on-paper. Consumed by Brief-era + Moment
           // scene/beat node components so a screenshot differentiates the
@@ -301,7 +301,7 @@ const preset: Partial<Config> = {
           'write-conflict': cv('canvas-write-conflict'),
           'write-success': cv('canvas-write-success'),
           'write-stale-bg': cv('canvas-write-stale-bg'),
-          // V1.73 World KB canvas-write tokens
+          // note: V1.73 World KB canvas-write tokens
           'worldkb-entity-card-fill-default': cv('canvas-worldkb-entity-card-fill-default'),
           'worldkb-entity-card-fill-hover': cv('canvas-worldkb-entity-card-fill-hover'),
           'worldkb-entity-card-fill-selected': cv('canvas-worldkb-entity-card-fill-selected'),
@@ -328,7 +328,7 @@ const preset: Partial<Config> = {
           'worldkb-relationship-grounded-badge': cv('canvas-worldkb-relationship-grounded-badge'),
           'worldkb-relationship-asserted-badge': cv('canvas-worldkb-relationship-asserted-badge'),
           'worldkb-relationship-inspector-fill': cv('canvas-worldkb-relationship-inspector-fill'),
-          // Outline canvas — DESIGN.md §Canvas Outline Tokens (V1.72; consumed V1.108).
+          // note: Outline canvas — DESIGN.md §Canvas Outline Tokens (V1.72; consumed V1.108).
           'outline-volume-fill': cv('canvas-outline-volume-fill'),
           'outline-chapter-card-status-pending': cv('canvas-outline-chapter-card-status-pending'),
           'outline-chapter-card-status-drafted': cv('canvas-outline-chapter-card-status-drafted'),
@@ -342,9 +342,9 @@ const preset: Partial<Config> = {
       fontFamily: {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
-        // V1.121 v0.4 — content-voice display tier (DESIGN.md typography.font-display).
+        // note: V1.121 v0.4 — content-voice display tier (DESIGN.md typography.font-display).
         display: 'var(--font-display)',
-        // Per-role family projection (supported Tailwind fontFamily keys). Each
+        // note: Per-role family projection (supported Tailwind fontFamily keys). Each
         // role's family follows the generated --text-<role>--font-family var so
         // a DESIGN family edit re-projects through the same single chain. The
         // fontSize tuple only carries supported options (lineHeight /
@@ -368,7 +368,7 @@ const preset: Partial<Config> = {
         'copy-13-mono': sv('text-copy-13-mono--font-family'),
       },
       fontSize: {
-        // All typography roles project from repo-root DESIGN.md frontmatter
+        // note: All typography roles project from repo-root DESIGN.md frontmatter
         // typography:* through tooling/design-tokens (generate-tokens.mjs →
         // project-tokens.mjs → generated tokens.css --text-<role> / metric
         // tuples). fontSize tuples carry only the supported options; each
@@ -525,7 +525,7 @@ const preset: Partial<Config> = {
         card: 'var(--shadow-card)',
         popover: 'var(--shadow-popover)',
         modal: 'var(--shadow-modal)',
-        // V1.121 v0.4 elevation scale (DESIGN.md §Elevation) — additive;
+        // note: V1.121 v0.4 elevation scale (DESIGN.md §Elevation) — additive;
         // legacy card/popover/modal keys above keep resolving via the alias chain.
         // Flat keys: Tailwind v3 does not flatten nested boxShadow maps into
         // dash-separated utilities (compile-verified).
@@ -536,22 +536,22 @@ const preset: Partial<Config> = {
         'elevation-4': 'var(--shadow-elevation-4)',
       },
       transitionDuration: {
-        // DESIGN.md §Motion scale — values projected from --duration-* vars.
+        // note: DESIGN.md §Motion scale — values projected from --duration-* vars.
         instant: sv('duration-instant'),
         state: sv('duration-state'),
         popover: sv('duration-popover'),
         modal: sv('duration-modal'),
-        // V1.121 v0.4 directional pair (DESIGN.md §Motion) — additive.
+        // note: V1.121 v0.4 directional pair (DESIGN.md §Motion) — additive.
         enter: 'var(--duration-enter)',
         exit: 'var(--duration-exit)',
       },
       transitionTimingFunction: {
-        // DESIGN.md §Motion easings — values projected from --ease-* vars.
+        // note: DESIGN.md §Motion easings — values projected from --ease-* vars.
         standard: sv('ease-standard'),
         emphasized: sv('ease-emphasized'),
       },
       borderRadius: {
-        // DESIGN.md rounded: scale — values projected from --radius-* vars.
+        // note: DESIGN.md rounded: scale — values projected from --radius-* vars.
         control: sv('radius-control'),
         card: sv('radius-card'),
         popover: sv('radius-popover'),
@@ -560,7 +560,7 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-input-row-rounded': cv('setup-wizard-surface-input-row-rounded'),
       },
       spacing: {
-        // DESIGN.md spacing: scale (4px base) — the nine DESIGN steps override
+        // note: DESIGN.md spacing: scale (4px base) — the nine DESIGN steps override
         // the matching Tailwind default numeric steps so the utilities resolve
         // through the --space-* projection chain (values identical to the
         // defaults; non-DESIGN fractional steps stay on the Tailwind scale).
@@ -579,7 +579,7 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-input-row-min-height': cv('setup-wizard-surface-input-row-min-height'),
         'setup-wizard-surface-input-row-gap': cv('setup-wizard-surface-input-row-gap'),
         'setup-wizard-surface-cta-container-gap': cv('setup-wizard-surface-cta-container-gap'),
-        // V1.99 P1: sidebar-nav sizing tokens (DESIGN.md §sidebar-nav).
+        // note: V1.99 P1: sidebar-nav sizing tokens (DESIGN.md §sidebar-nav).
         // Structural (non-color) tokens — bare `--sidebar-nav-*` namespace
         // (v1.183 P0 AR-2), referenced via sv() like --dialog-*/--sheet-*;
         // Tailwind keys stable so all consumers stay unchanged.
@@ -589,10 +589,10 @@ const preset: Partial<Config> = {
       maxWidth: {
         'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
-        // Dialog — DESIGN.md components.dialog.maxWidth (560px).
+        // note: Dialog — DESIGN.md components.dialog.maxWidth (560px).
         dialog: cv('dialog-max-width'),
       },
-      // Dialog/Sheet layout metrics — DESIGN.md components.dialog /
+      // note: Dialog/Sheet layout metrics — DESIGN.md components.dialog /
       // components.sheet (V1.121 P1 T2; theme-independent). Structural
       // (non-color) tokens — referenced via the bare `--dialog-*` /
       // `--sheet-*` namespace, not the `--color-*` helper.
@@ -601,7 +601,7 @@ const preset: Partial<Config> = {
         sheet: sv('sheet-width'),
       },
       opacity: {
-        // V1.113 P1 / R-V1182P0-002 (v1.183 P0 AR-1): shared disabled-state
+        // note: V1.113 P1 / R-V1182P0-002 (v1.183 P0 AR-1): shared disabled-state
         // wash — promoted from apps/web app-local so every Nexus surface
         // (incl. design-studio's mirrored gallery) renders the same
         // disabled chrome. Theme-independent scalar; consumes the
@@ -611,7 +611,7 @@ const preset: Partial<Config> = {
       maxHeight: {
         dialog: sv('dialog-max-height'),
       },
-      // V1.121 v0.4 canvas node width family (DESIGN.md components.canvas.node-width;
+      // note: V1.121 v0.4 canvas node width family (DESIGN.md components.canvas.node-width;
       // registered here, applied to node components in P3 as min-w-canvas-node-*).
       // Structural (non-color) tokens — referenced via the bare
       // `--canvas-node-width-*` namespace, not the `--color-*` helper.
@@ -622,7 +622,7 @@ const preset: Partial<Config> = {
         'canvas-node-outline-scene-beat': sv('canvas-node-width-outline-scene-beat'),
         'canvas-node-default': sv('canvas-node-width-default'),
       },
-      // V1.105 P2: portrait wizard height cap (DESIGN.md setup-wizard-step.wizard-max-height)
+      // note: V1.105 P2: portrait wizard height cap (DESIGN.md setup-wizard-step.wizard-max-height)
       height: {
         'setup-wizard-wizard-max-height': cv('setup-wizard-wizard-max-height'),
       },

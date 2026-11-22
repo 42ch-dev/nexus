@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-// Toolchain pins follow the app manifest so a dependency bump cannot leave a stale literal behind.
+// why: Toolchain pins follow the app manifest so a dependency bump cannot leave a stale literal behind.
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 export const PACKAGE_CONTRACT = Object.freeze({

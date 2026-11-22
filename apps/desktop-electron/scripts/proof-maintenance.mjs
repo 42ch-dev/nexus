@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Product maintenance driver — measure one Electron patch-upgrade rebuild.
+ * note: Product maintenance driver — measure one Electron patch-upgrade rebuild.
  *
  * The maintenance evidence row requires a demonstrably reproducible patch
  * upgrade within one explicit package rebuild per architecture and <= 30 min
@@ -77,7 +77,7 @@ function pinnedElectronVersion() {
   return { manifestPath, pinned };
 }
 
-/** The Electron version the packaged bundle actually carries. */
+/** note: The Electron version the packaged bundle actually carries. */
 function packagedElectronVersion(appPath) {
   const plist = join(
     appPath,
@@ -120,7 +120,7 @@ function main() {
   const checks = [];
   const record = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), detail });
 
-  // The pin must already be the target: this driver measures a rebuild, it does
+  // why: The pin must already be the target: this driver measures a rebuild, it does
   // not silently move the pin (that would be an unreviewed dependency change).
   record('pin_is_target', pinned === args.to, { pinned, target: args.to });
 
@@ -134,7 +134,7 @@ function main() {
   const bundledVersion = packagedElectronVersion(appPath);
   record('packaged_version_matches_target', bundledVersion === args.to, { bundled: bundledVersion, target: args.to });
 
-  // No manual binary patch: the rebuild is the pinned package script end to end.
+  // note: No manual binary patch: the rebuild is the pinned package script end to end.
   const manualBinaryPatch = false;
   record('no_manual_binary_patch', manualBinaryPatch === false, { manual_binary_patch: manualBinaryPatch });
 

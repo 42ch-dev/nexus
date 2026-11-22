@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Public Cargo package release planning — allowlist, dependency order,
+ * note: Public Cargo package release planning — allowlist, dependency order,
  * provenance, content-matched resume and selected-only version preparation.
  *
  * The inventory is `tooling/release/version-brackets.json` through
@@ -73,10 +73,10 @@ import {
  */
 export const PACKAGE_RELEASE_LABEL = "crate-release";
 
-/** Registries this helper can label. A label is a tag fact, never a lookup. */
+/** why: Registries this helper can label. A label is a tag fact, never a lookup. */
 const REGISTRY_NAMES = new Set(["crates-io"]);
 
-/** Full Git object name of a reviewed source revision. */
+/** note: Full Git object name of a reviewed source revision. */
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
 /**
@@ -98,10 +98,11 @@ export function releaseTag(name, version) {
 }
 
 /**
- * A refusal the caller must act on; `code` is the stable name tests assert.
+ * why: A refusal the caller must act on; `code` is the stable name tests assert.
  */
 class ReleaseRefusal extends Error {
   /**
+   * note: contract for `constructor`.
    * @param {string} code
    * @param {string} message
    */
@@ -112,6 +113,7 @@ class ReleaseRefusal extends Error {
 }
 
 /**
+ * note: contract for `escapeRegExp`.
  * @param {string} value
  * @returns {string}
  */
@@ -120,7 +122,7 @@ function escapeRegExp(value) {
 }
 
 /**
- * A TOML name in every spelling Cargo treats as the same key or the same
+ * note: A TOML name in every spelling Cargo treats as the same key or the same
  * string: bare, `"basic"` or `'literal'`. Both quote forms are ordinary TOML,
  * so a scan that accepts one and ignores the other skips a declaration instead
  * of refusing it — the one outcome this file must never produce.
@@ -134,7 +136,7 @@ function nameForms(name) {
 }
 
 /**
- * `git` as one more read of the repository: provenance is what makes a source
+ * note: `git` as one more read of the repository: provenance is what makes a source
  * revision reviewable, and it needs no network.
  *
  * @param {string} repoRoot
@@ -187,7 +189,7 @@ export function readSourceProvenance(repoRoot) {
 }
 
 /**
- * Every declaration of `name` in one manifest, in file order: a package may
+ * note: Every declaration of `name` in one manifest, in file order: a package may
  * declare the same edge more than once (`nexus-knowledge` names
  * `nexus-contracts` as both a normal and a dev dependency), so planning and
  * preparation both read the declarations here instead of the first match.
@@ -220,7 +222,7 @@ function dependencyDeclarations(contents, manifestPath, name) {
   const keyLine = new RegExp(`^\\s*${key}\\s*[.=]`);
   const inline = new RegExp(`^\\s*${key}\\s*=\\s*\\{([^}\\n]*)\\}\\s*$`);
   const renamed = new RegExp(`\\bpackage\\s*=\\s*${key}`);
-  /** @type {{ line: number; requirement: string | null }[]} */
+  /** note: @type {{ line: number; requirement: string | null }[]} */
   const declarations = [];
   contents.split("\n").forEach((line, index) => {
     if (renamed.test(line)) {
@@ -248,7 +250,7 @@ function dependencyDeclarations(contents, manifestPath, name) {
 }
 
 /**
- * Inline dependency tables of an inventory manifest that name another
+ * note: Inline dependency tables of an inventory manifest that name another
  * inventory package, with the requirement to satisfy: one edge per declaration.
  * The `[dependencies.x]` table form is refused: this helper rewrites bounds in
  * place and must not claim a package it cannot read the same way Cargo does.
@@ -259,7 +261,7 @@ function dependencyDeclarations(contents, manifestPath, name) {
  * @returns {{ name: string; requirement: string }[]}
  */
 function inventoryDependencies(contents, manifestPath, names) {
-  /** @type {{ name: string; requirement: string }[]} */
+  /** note: @type {{ name: string; requirement: string }[]} */
   const dependencies = [];
   for (const name of names) {
     if (new RegExp(`^\\s*\\[(?:.*\\.)?(?:dev-|build-)?dependencies\\.${nameForms(name)}\\]\\s*$`, "m").test(contents)) {
@@ -275,7 +277,7 @@ function inventoryDependencies(contents, manifestPath, names) {
           `${manifestPath}: ${name} has no version requirement, so the package is not registry-ready`,
         );
       }
-      // Normal and dev declarations usually carry the same bound; one edge per
+      // note: Normal and dev declarations usually carry the same bound; one edge per
       // distinct requirement keeps the plan free of duplicate prerequisite rows
       // while a bound that differs is still checked on its own.
       if (
@@ -294,7 +296,7 @@ function inventoryDependencies(contents, manifestPath, names) {
 }
 
 /**
- * Caret acceptance of `version`, the requirement form every manifest keeps
+ * why: Caret acceptance of `version`, the requirement form every manifest keeps
  * (`"0.1.0"` means `^0.1.0`). Pre-1.0 the left-most non-zero component is
  * pinned: `^0.1.0` accepts `>=0.1.0 <0.2.0`, `^0.0.3` accepts only `0.0.3`.
  *
@@ -321,7 +323,7 @@ function caretAccepts(requirement, version) {
 }
 
 /**
- * The inventory as rows: name, manifest, literal version and dependency edges.
+ * note: The inventory as rows: name, manifest, literal version and dependency edges.
  * A consumer crate that inherits the workspace version is not independently
  * releasable, so an inherited literal is a refusal rather than a fallback.
  *
@@ -358,7 +360,7 @@ function readInventory(repoRoot) {
 }
 
 /**
- * Selected names in dependency-first order: every prerequisite precedes its
+ * note: Selected names in dependency-first order: every prerequisite precedes its
  * consumer, and inventory order breaks ties. A cycle cannot be ordered, so it
  * refuses.
  *
@@ -368,11 +370,12 @@ function readInventory(repoRoot) {
  */
 function dependencyOrder(rows, selected) {
   const byName = new Map(rows.map((row) => [row.name, row]));
-  /** @type {Map<string, "visiting" | "done">} */
+  /** note: @type {Map<string, "visiting" | "done">} */
   const state = new Map();
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const order = [];
   /**
+   * note: contract for `visit`.
    * @param {string} name
    * @param {string[]} trail
    */
@@ -404,7 +407,7 @@ function dependencyOrder(rows, selected) {
 }
 
 /**
- * Published rows of one package from the caller's registry view.
+ * note: Published rows of one package from the caller's registry view.
  *
  * @param {{ name: string; version: string; checksum?: string }[] | null} published
  * @param {string} name
@@ -415,13 +418,13 @@ function publishedRows(published, name) {
 }
 
 /**
- * Archive rows the verifier produced for this source revision, keyed by package.
+ * note: Archive rows the verifier produced for this source revision, keyed by package.
  *
  * @param {{ sourceSha?: string; results?: { name: string; ok: boolean; archive: { sha256: string } | null; package: { version: string } | null }[] } | null} evidence
  * @returns {Map<string, { version: string; archiveSha256: string; ok: boolean }>}
  */
 function evidenceRows(evidence) {
-  /** @type {Map<string, { version: string; archiveSha256: string; ok: boolean }>} */
+  /** note: @type {Map<string, { version: string; archiveSha256: string; ok: boolean }>} */
   const rows = new Map();
   for (const result of evidence?.results ?? []) {
     if (result.archive === null || result.package === null) {
@@ -456,9 +459,9 @@ export function planPackageRelease(repoRoot, options) {
   const registryKnown = registry.published !== null && registry.published !== undefined;
   const packages = Array.isArray(options.packages) ? options.packages : [];
   const evidence = options.evidence ?? null;
-  /** @type {{ code: string; message: string }[]} */
+  /** note: @type {{ code: string; message: string }[]} */
   const refusals = [];
-  /** @param {string} code @param {string} message */
+  /** note: @param {string} code @param {string} message */
   const refuse = (code, message) => {
     refusals.push({ code, message });
   };
@@ -518,7 +521,7 @@ export function planPackageRelease(repoRoot, options) {
     }
   }
 
-  let provenance = { sha: "", dirty: /** @type {string[]} */ ([]) };
+  let provenance = { sha: "", dirty: /** note: @type {string[]} */ ([]) };
   try {
     provenance = readSourceProvenance(repoRoot);
   } catch (error) {
@@ -547,7 +550,7 @@ export function planPackageRelease(repoRoot, options) {
   }
 
   const archives = evidenceRows(evidence);
-  /** @type {{ name: string; manifest: string; version: string; tag: string; archiveSha256: string | null; status: "completed" | "pending"; reason: string; prerequisites: { name: string; requirement: string; resolved: string }[] }[]} */
+  /** note: @type {{ name: string; manifest: string; version: string; tag: string; archiveSha256: string | null; status: "completed" | "pending"; reason: string; prerequisites: { name: string; requirement: string; resolved: string }[] }[]} */
   const planned = [];
   for (const name of order) {
     const row = byName.get(name);
@@ -574,7 +577,7 @@ export function planPackageRelease(repoRoot, options) {
       }
     }
     const sameVersion = rowsPublished.find((published) => published.version === row.version);
-    let status = /** @type {"completed" | "pending"} */ ("pending");
+    let status = /** note: @type {"completed" | "pending"} */ ("pending");
     let reason = registryKnown
       ? "not published at the selected registry"
       : "registry state unknown; content not matched";
@@ -596,7 +599,7 @@ export function planPackageRelease(repoRoot, options) {
         reason = "published with identical content";
       }
     }
-    /** @type {{ name: string; requirement: string; resolved: string; version: string | null }[]} */
+    /** note: @type {{ name: string; requirement: string; resolved: string; version: string | null }[]} */
     const prerequisites = [];
     for (const dependency of row.dependencies) {
       if (!byName.has(dependency.name)) {
@@ -605,15 +608,15 @@ export function planPackageRelease(repoRoot, options) {
       const dependencyRow = byName.get(dependency.name);
       let resolved;
       if (selected.has(dependency.name)) {
-        // A selected prerequisite is what the same run publishes first, so its
+        // note: A selected prerequisite is what the same run publishes first, so its
         // version has to satisfy this consumer's own requirement — otherwise
         // the consumer would be packed against a version it cannot use.
-        const satisfies = caretAccepts(dependency.requirement, /** @type {{version: string}} */ (dependencyRow).version);
+        const satisfies = caretAccepts(dependency.requirement, /** note: @type {{version: string}} */ (dependencyRow).version);
         resolved = satisfies ? "selected" : "incompatible";
         if (!satisfies) {
           refuse(
             "incompatible-prerequisite",
-            `${name}: requires ${dependency.name} ${dependency.requirement}, but the selected ${dependency.name} is ${/** @type {{version: string}} */ (dependencyRow).version}`,
+            `${name}: requires ${dependency.name} ${dependency.requirement}, but the selected ${dependency.name} is ${/** note: @type {{version: string}} */ (dependencyRow).version}`,
           );
         }
       } else if (registryKnown) {
@@ -628,7 +631,7 @@ export function planPackageRelease(repoRoot, options) {
         }
         resolved = satisfied ? "published" : "missing";
       } else {
-        // Nothing is known about the registry, so this plan cannot claim the
+        // why: Nothing is known about the registry, so this plan cannot claim the
         // prerequisite exists; it stays unresolved and blocks publication.
         resolved = "unverified";
       }
@@ -661,7 +664,7 @@ export function planPackageRelease(repoRoot, options) {
   }
 
   /**
-   * Publication readiness: a plan can be correct and still not publishable.
+   * why: Publication readiness: a plan can be correct and still not publishable.
    * Every prerequisite needs a satisfying selected or known-published version,
    * and every pending row needs the verified archive it would upload.
    *
@@ -678,7 +681,7 @@ export function planPackageRelease(repoRoot, options) {
       }
     }
     if (row.status === "pending" && !registryKnown) {
-      // An unknown view cannot rule out that this exact version already exists
+      // why: An unknown view cannot rule out that this exact version already exists
       // with different content, and registry publication is irreversible.
       blockers.push({
         code: "registry-unverified",
@@ -755,7 +758,7 @@ export async function publishSelected(plan, client) {
     };
   }
   const entries = plan.packages.filter((entry) => entry.status === "pending");
-  /** @param {number} index */
+  /** note: @param {number} index */
   const remaining = (index) =>
     entries.slice(index).map((row) => `${row.name}@${row.version}`);
   for (const [index, entry] of entries.entries()) {
@@ -765,7 +768,7 @@ export async function publishSelected(plan, client) {
         name: entry.name,
         version: entry.version,
         tag: entry.tag,
-        archiveSha256: /** @type {string} */ (entry.archiveSha256),
+        archiveSha256: /** note: @type {string} */ (entry.archiveSha256),
       });
     } catch (error) {
       return {
@@ -782,7 +785,7 @@ export async function publishSelected(plan, client) {
         ],
       };
     }
-    /** @type {{ checksum?: string } | null} */
+    /** note: @type {{ checksum?: string } | null} */
     let confirmed;
     try {
       confirmed = await client.read(entry.name, entry.version);
@@ -826,7 +829,7 @@ export async function publishSelected(plan, client) {
 }
 
 /**
- * Replace the literal `[package].version` of one manifest, leaving the rest of
+ * note: Replace the literal `[package].version` of one manifest, leaving the rest of
  * the file untouched.
  *
  * @param {string} contents
@@ -851,7 +854,7 @@ function replacePackageVersion(contents, manifestPath, version) {
 }
 
 /**
- * Rewrite the inline requirement of every declaration of `name` to `version`.
+ * note: Rewrite the inline requirement of every declaration of `name` to `version`.
  * A manifest may declare the same edge twice (`nexus-knowledge` names
  * `nexus-contracts` in `[dependencies]` and `[dev-dependencies]`); rewriting
  * one bound leaves the other requiring a version the same local path no longer
@@ -881,7 +884,7 @@ function replaceDependencyRequirement(contents, manifestPath, name, version) {
 }
 
 /**
- * Open a dated section for `version` and keep an empty `[Unreleased]` above it,
+ * why: Open a dated section for `version` and keep an empty `[Unreleased]` above it,
  * the convention each package changelog documents.
  *
  * @param {string} contents
@@ -920,9 +923,9 @@ export function preparePackageVersions(repoRoot, options) {
     return { ok: false, changed: [], refusals: [{ code: error.code ?? "inventory-unreadable", message: error.message }] };
   }
   const byName = new Map(rows.map((row) => [row.name, row]));
-  /** @type {{ code: string; message: string }[]} */
+  /** note: @type {{ code: string; message: string }[]} */
   const refusals = [];
-  /** @type {Map<string, string>} */
+  /** note: @type {Map<string, string>} */
   const targets = new Map();
   for (const name of options.packages ?? []) {
     const row = byName.get(name);
@@ -952,9 +955,10 @@ export function preparePackageVersions(repoRoot, options) {
     return { ok: false, changed: [], refusals };
   }
 
-  /** @type {{ path: string; contents: string }[]} */
+  /** note: @type {{ path: string; contents: string }[]} */
   const writes = [];
   /**
+   * note: contract for `patch`.
    * @param {string} path
    * @param {(contents: string) => string} transform
    */
@@ -975,10 +979,10 @@ export function preparePackageVersions(repoRoot, options) {
 
   try {
     for (const [name, version] of targets) {
-      const row = /** @type {{ manifest: string }} */ (byName.get(name));
+      const row = /** note: @type {{ manifest: string }} */ (byName.get(name));
       patch(row.manifest, (contents) => replacePackageVersion(contents, row.manifest, version));
     }
-    // A consumer's caret bound must accept the new prerequisite, or the source
+    // why: A consumer's caret bound must accept the new prerequisite, or the source
     // tree cannot resolve the bumped local path dependency.
     for (const row of rows) {
       for (const dependency of row.dependencies) {
@@ -992,7 +996,7 @@ export function preparePackageVersions(repoRoot, options) {
       }
     }
     for (const [name, version] of targets) {
-      const row = /** @type {{ manifest: string }} */ (byName.get(name));
+      const row = /** note: @type {{ manifest: string }} */ (byName.get(name));
       const changelog = join(dirname(row.manifest), "CHANGELOG.md");
       if (!existsSync(join(repoRoot, changelog))) {
         throw new ReleaseRefusal("changelog-missing", `${changelog}: selected package has no changelog`);
@@ -1019,6 +1023,7 @@ export function preparePackageVersions(repoRoot, options) {
 }
 
 /**
+ * note: contract for `printPlan`.
  * @param {ReturnType<typeof planPackageRelease>} plan
  */
 function printPlan(plan) {
@@ -1057,11 +1062,12 @@ function printPlan(plan) {
 }
 
 /**
+ * note: contract for `parseArgs`.
  * @param {string[]} argv
  * @returns {{ flags: Map<string, string>; switches: Set<string> } | string}
  */
 function parseArgs(argv) {
-  /** @type {Map<string, string>} */
+  /** note: @type {Map<string, string>} */
   const flags = new Map();
   const switches = new Set();
   const valued = new Set([
@@ -1099,7 +1105,7 @@ function parseArgs(argv) {
 }
 
 /**
- * One JSON input file, parsed. A missing or malformed file is a named refusal
+ * note: One JSON input file, parsed. A missing or malformed file is a named refusal
  * rather than a `TypeError` from whatever reads the value next.
  *
  * @param {string} path
@@ -1121,6 +1127,7 @@ function readJsonFile(path) {
 }
 
 /**
+ * note: contract for `isRecord`.
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
  */
@@ -1129,7 +1136,7 @@ function isRecord(value) {
 }
 
 /**
- * Registry view shape, checked before planning reads `published` rows: a wrong
+ * note: Registry view shape, checked before planning reads `published` rows: a wrong
  * shape would otherwise surface as a `TypeError` deep in the plan.
  *
  * @param {unknown} value
@@ -1165,13 +1172,13 @@ function readRegistryView(value) {
       '"writable" must be a boolean when present',
     );
   }
-  return /** @type {{ published: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }} */ (
+  return /** note: @type {{ published: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }} */ (
     { published, writable: value.writable }
   );
 }
 
 /**
- * Archive evidence shape, checked before planning reads `source`/`results`.
+ * note: Archive evidence shape, checked before planning reads `source`/`results`.
  * Only the fields the plan consumes are required; extra checker fields pass
  * through untouched.
  *
@@ -1205,10 +1212,11 @@ function readArchiveEvidence(value) {
       );
     }
   }
-  return /** @type {ReturnType<typeof readArchiveEvidence>} */ (value);
+  return /** note: @type {ReturnType<typeof readArchiveEvidence>} */ (value);
 }
 
 /**
+ * note: contract for `main`.
  * @param {string[]} argv
  * @returns {number}
  */
@@ -1256,7 +1264,7 @@ function main(argv) {
   const packages = (flags.get("--packages") ?? "").split(",").filter((name) => name.length > 0);
 
   if (prepare) {
-    /** @type {Record<string, string>} */
+    /** note: @type {Record<string, string>} */
     const versions = {};
     for (const pair of (flags.get("--versions") ?? "").split(",").filter((entry) => entry.length > 0)) {
       const [name, version] = pair.split("=");
@@ -1294,7 +1302,7 @@ function main(argv) {
     console.error("--source is required (the reviewed full commit sha)");
     return 2;
   }
-  /** @type {{ name: string; published?: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }} */
+  /** note: @type {{ name: string; published?: { name: string; version: string; checksum?: string }[] | null; writable?: boolean }} */
   const registry = { name: registryName };
   const statePath = flags.get("--registry-state");
   if (statePath !== undefined) {
@@ -1311,7 +1319,7 @@ function main(argv) {
       return 2;
     }
   }
-  /** @type {{ source: { sha: string; clean: boolean }; results: unknown[] } | null} */
+  /** note: @type {{ source: { sha: string; clean: boolean }; results: unknown[] } | null} */
   let evidence = null;
   const evidencePath = flags.get("--archive-evidence");
   if (evidencePath !== undefined) {
@@ -1326,7 +1334,7 @@ function main(argv) {
   }
   const plan = planPackageRelease(repoRoot, { packages, sourceSha, registry, evidence });
   printPlan(plan);
-  // Two distinct outcomes: `--check-only` succeeds for a valid plan and states
+  // why: Two distinct outcomes: `--check-only` succeeds for a valid plan and states
   // what is still missing, while `--require-publishable` is the gate a publish
   // path must pass. Neither one grants publication by itself.
   return plan.ok && (!switches.has("--require-publishable") || plan.ready) ? 0 : 1;

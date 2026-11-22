@@ -26,7 +26,7 @@ test("isReleaseSemVer accepts clean X.Y.Z and -alpha.N / -rc.N", () => {
 
 test("isReleaseSemVer rejects malformed labels, numbers, build metadata and stray shapes", () => {
   for (const version of [
-    // Item 8 reject table.
+    // note: Item 8 reject table.
     "0.2.0-alpha",
     "0.2.0-alpha.0",
     "0.2.0-alpha.01",
@@ -38,7 +38,7 @@ test("isReleaseSemVer rejects malformed labels, numbers, build metadata and stra
     "0.2.0-alpha.1+build",
     "0.2.0-",
     "01.2.0",
-    // Core-shape rejections retained from the clean-grammar table.
+    // note: Core-shape rejections retained from the clean-grammar table.
     "1.02.3",
     "1.2.03",
     "00.0.0",
@@ -118,8 +118,8 @@ test("compareSemVer lets the core decide across cores", () => {
 });
 
 test("compareSemVer keeps components beyond Number.MAX_SAFE_INTEGER distinct, including N", () => {
-  const huge = "9007199254740993.0.0"; // MAX_SAFE_INTEGER + 2, lossy as a Number
-  const hugeNeighbour = "9007199254740992.0.0"; // MAX_SAFE_INTEGER + 1
+  const huge = "9007199254740993.0.0"; // note: MAX_SAFE_INTEGER + 2, lossy as a Number
+  const hugeNeighbour = "9007199254740992.0.0"; // note: MAX_SAFE_INTEGER + 1
   assert.ok(compareSemVer(huge, hugeNeighbour) > 0);
   assert.ok(compareSemVer(hugeNeighbour, huge) < 0);
   assert.equal(compareSemVer(huge, huge), 0);

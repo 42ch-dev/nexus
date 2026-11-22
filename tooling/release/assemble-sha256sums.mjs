@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Assemble the release-wide SHA-256 manifest from producer sidecars. */
+/** note: Assemble the release-wide SHA-256 manifest from producer sidecars. */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";

@@ -1,5 +1,5 @@
 /**
- * Product preload bridge (v1.192 P0-T1) — the ONLY renderer surface:
+ * why: Product preload bridge (v1.192 P0-T1) — the ONLY renderer surface:
  * `window.nexusDesktop` version 1.
  *
  * - No raw ipcRenderer exposure, no Node/process/env handles, no arbitrary
@@ -21,10 +21,10 @@
  * the mechanical preload-side implementation values, kept in lockstep by the
  * channel-parity test in tests/desktop-security.test.mjs.
  */
-/// <reference lib="dom" />
+/// note: <reference lib="dom" />
 import { contextBridge, ipcRenderer } from 'electron';
 
-// --- mirrors of desktop-contract.ts (canonical definitions live there) ---
+// note: mirrors of desktop-contract.ts (canonical definitions live there)
 // Every mirror value is pinned against DESKTOP_BRIDGE_MANIFEST by
 // tests/desktop-security.test.mjs — a drift on either side fails the parity
 // lock. Keep in lockstep with desktop-contract.ts.
@@ -77,11 +77,10 @@ type DesktopBridge = {
   invoke(operation: DesktopOperation, payload?: unknown): Promise<unknown>;
   onStatusChanged(listener: (status: DaemonStatus) => void): () => void;
 };
-// --- end mirrors ---
 
 const encoder = new TextEncoder();
 
-/** NUL, C0 controls and DEL are rejected (mirrors desktop-contract.ts). */
+/** note: NUL, C0 controls and DEL are rejected (mirrors desktop-contract.ts). */
 function hasControlChars(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
     const code = value.charCodeAt(i);
@@ -96,7 +95,7 @@ function typedError(code: string, message: string): Error {
   return err;
 }
 
-/** Trusted runtime metadata, supplied by main before the window is created. */
+/** note: Trusted runtime metadata, supplied by main before the window is created. */
 function readTrustedRuntime(): { localEndpoint: string } {
   let raw: unknown;
   try {
@@ -144,7 +143,7 @@ function isDesktopResponse(
   );
 }
 
-/** Preload-side bound re-check; main already validated before sending. */
+/** note: Preload-side bound re-check; main already validated before sending. */
 function isBoundedStatusFrame(raw: unknown): raw is DaemonStatus {
   if (!raw || typeof raw !== 'object') return false;
   const body = raw as { state?: unknown; version?: unknown; port?: unknown; detail?: unknown };
@@ -183,7 +182,7 @@ const bridge: DesktopBridge = {
   invoke,
   onStatusChanged(listener) {
     const handler = (_event: unknown, raw: unknown): void => {
-      // Invalid/oversized frames are dropped, never delivered to the SPA, and
+      // why: Invalid/oversized frames are dropped, never delivered to the SPA, and
       // Electron event objects never cross this boundary.
       if (isBoundedStatusFrame(raw)) listener(raw);
     };

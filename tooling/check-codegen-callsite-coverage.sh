@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# check-codegen-callsite-coverage.sh — typify struct-literal callsite gate
+# note: check-codegen-callsite-coverage.sh — typify struct-literal callsite gate
 # (R-V1163P2QC1-002 / V1.163 P1 failure class).
 #
 # `pnpm run codegen` (typify) can add fields to generated Rust structs without
@@ -21,7 +20,6 @@
 #   bash tooling/check-codegen-callsite-coverage.sh
 # After regen:
 #   pnpm run codegen:verify
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,7 +28,7 @@ cd "$ROOT"
 export SQLX_OFFLINE=true
 
 echo "==> Codegen callsite coverage (SQLX_OFFLINE=true cargo check --workspace)"
-# Default lib/bin graph only (no --all-targets): #[cfg(test)] struct literals
+# why: Default lib/bin graph only (no --all-targets): #[cfg(test)] struct literals
 # are caught downstream by verify-sqlx-offline / rust-checks clippy
 # `--all-targets` (CI budget; boundary accepted by the L2 task-4 review).
 cargo check --workspace

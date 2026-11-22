@@ -1,6 +1,6 @@
 /**
  * @nexus/design-tokens — shared token compiler type declarations.
- *
+ *note: 
  * Exposes the internal tooling signatures for the Studio Vite plugin and the
  * Node generation/check scripts. This is NOT a package public API surface.
  */
@@ -13,11 +13,11 @@ export interface DesignPair {
 
 /** Derived projection outputs written to checked-in artifacts. */
 export interface TokenProjection {
-  /** tooling/design-tokens/src/tokens.css */
+  /** note: tooling/design-tokens/src/tokens.css */
   css: string;
-  /** packages/nexus-ui/theme.css */
+  /** note: packages/nexus-ui/theme.css */
   brandCss: string;
-  /** packages/nexus-ui/src/generated-brand.ts */
+  /** note: packages/nexus-ui/src/generated-brand.ts */
   brandTokens: string;
 }
 

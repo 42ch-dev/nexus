@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate the CHANGELOG section (also the Release body source) for a release.
+ * note: Generate the CHANGELOG section (also the Release body source) for a release.
  *
  * Groups conventional commits over `<base>..<head>` into Features / Fixes /
  * Docs & chores. `chore(release):` bump commits are excluded — the release
@@ -78,6 +78,7 @@ export function isReleaseBumpSubject(subject) {
 }
 
 /**
+ * note: contract for `renderEntry`.
  * @param {{ sha: string; subject: string }} commit
  * @returns {string}
  */
@@ -96,9 +97,9 @@ function renderEntry(commit) {
  * @returns {{ groups: { heading: string; entries: string[] }[]; included: number; skipped: string[] }}
  */
 export function groupCommits(commits) {
-  /** @type {Map<string, string[]>} */
+  /** note: @type {Map<string, string[]>} */
   const buckets = new Map(GROUPS.map((group) => [group.heading, []]));
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const skipped = [];
   let included = 0;
 
@@ -117,7 +118,7 @@ export function groupCommits(commits) {
       skipped.push(commit.subject);
       continue;
     }
-    /** @type {string[]} */
+    /** note: @type {string[]} */
     const bucket = buckets.get(group.heading) ?? [];
     bucket.push(renderEntry(commit));
     buckets.set(group.heading, bucket);
@@ -142,7 +143,7 @@ export function groupCommits(commits) {
  */
 export function buildChangelogSection({ version, date, summary = null, commits }) {
   const { groups, included, skipped } = groupCommits(commits);
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const lines = [`## [${version}] - ${date}`];
 
   const trimmedSummary = typeof summary === "string" ? summary.trim() : "";
@@ -150,7 +151,7 @@ export function buildChangelogSection({ version, date, summary = null, commits }
     lines.push("", trimmedSummary);
   }
 
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const headings = [];
   for (const group of groups) {
     if (group.entries.length === 0) {
@@ -192,10 +193,10 @@ export function collectCommits(repoRoot, baseRef, headRef = "HEAD") {
 export function resolveChangelogBase(repoRoot) {
   const tags = runGit(repoRoot, ["tag", "--list", "v*"]);
   if (tags.status === 0) {
-    // Re-derive "newest" with the release comparator: Git's version sort ranks
+    // note: Re-derive "newest" with the release comparator: Git's version sort ranks
     // `v0.2.0-rc.1` above `v0.2.0` unless `versionsort.suffix` is configured,
     // an environment coupling this module refuses to inherit.
-    /** @type {string | null} */
+    /** note: @type {string | null} */
     const newest = tags.stdout
       .split("\n")
       .map((line) => line.trim())
@@ -211,7 +212,7 @@ export function resolveChangelogBase(repoRoot) {
           }
           return best === null || compareSemVer(version, best) > 0 ? version : best;
         },
-        /** @type {string | null} */ (null),
+        /** note: @type {string | null} */ (null),
       );
     if (newest !== null) {
       return { tag: `v${newest}`, source: "tag" };
@@ -261,7 +262,7 @@ section (Features / Fixes / Docs & chores) from conventional commits over
 commit that introduced ${CHANGELOG_PATH}.`;
 
 function main(argv, env = process.env) {
-  /** @type {{ version: string | null; base: string | null; head: string; summary: string | null; summaryFile: string | null; date: string | null; prepend: string | null; repoRoot: string | null; help: boolean }} */
+  /** note: @type {{ version: string | null; base: string | null; head: string; summary: string | null; summaryFile: string | null; date: string | null; prepend: string | null; repoRoot: string | null; help: boolean }} */
   const options = {
     version: null,
     base: null,

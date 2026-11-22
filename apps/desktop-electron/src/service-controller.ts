@@ -1,5 +1,5 @@
 /**
- * Serialized owner of the app-managed TypeScript service (v1.192 P0-T4).
+ * note: Serialized owner of the app-managed TypeScript service (v1.192 P0-T4).
  *
  * Main-process module with no Electron import: the lifecycle logic is testable
  * under plain Node (`tests/service-controller.test.mjs`) and the utility entry
@@ -42,16 +42,14 @@ export const PORT_RELEASE_DEADLINE_MS = 3_000;
  * close and the 15s restart readiness window.
  */
 export const NATIVE_RESET_TIMEOUT_MS = 10_000;
-/** Poll cadence: 100ms for the first second, then 250ms. */
+/** note: Poll cadence: 100ms for the first second, then 250ms. */
 const PROBE_FAST_INTERVAL_MS = 100;
 const PROBE_SLOW_INTERVAL_MS = 250;
 const PROBE_FAST_WINDOW_MS = 1_000;
-/** Published private record path (`rust-core-service-boundary.md` §8.1). */
+/** note: Published private record path (`rust-core-service-boundary.md` §8.1). */
 const RECORD_SEGMENTS = ['.nexus42', 'run', 'service.json'] as const;
 
-// ---------------------------------------------------------------------------
-// Main → utility wire protocol (frozen message contract)
-// ---------------------------------------------------------------------------
+// note: Main → utility wire protocol (frozen message contract)
 
 export type UtilityOperation = 'start' | 'close' | 'reset-local-state';
 
@@ -211,14 +209,12 @@ export function assertDiscoveryShape(raw: unknown): CoreServiceDiscovery {
   if (endpoint.transport === 'unix' && (!('path' in endpoint) || typeof endpoint.path !== 'string')) {
     throw utilityError('invalid_input', 'unix discovery endpoint has no path');
   }
-  // Fully shape-checked above against the closed v1 record; the generated type
+  // note: Fully shape-checked above against the closed v1 record; the generated type
   // is the same shape.
   return raw as CoreServiceDiscovery;
 }
 
-// ---------------------------------------------------------------------------
-// Injected adapters
-// ---------------------------------------------------------------------------
+// note: Injected adapters
 
 /** The subset of Electron's `UtilityProcess` this controller drives. */
 export interface UtilityChildProcess {
@@ -239,7 +235,7 @@ const realClock: ControllerClock = {
   now: () => Date.now(),
   sleep: (ms) =>
     new Promise<void>((resolve) => {
-      // A settled race must not hold the app (or a test process) open.
+      // why: A settled race must not hold the app (or a test process) open.
       setTimeout(resolve, ms).unref?.();
     }),
 };
@@ -255,15 +251,15 @@ export interface DetachedServiceHandoff {
 }
 
 export interface DesktopServiceControllerOptions {
-  /** Trusted raw user home — main-owned, never renderer supplied. */
+  /** why: Trusted raw user home — main-owned, never renderer supplied. */
   home: string;
-  /** Port resolved from the trusted launch config (`resolveDesktopServicePort`). */
+  /** note: Port resolved from the trusted launch config (`resolveDesktopServicePort`). */
   resolvedPort: number;
-  /** API key for the guarded discovery/health/stop probes (main-only secret). */
+  /** safety: API key for the guarded discovery/health/stop probes (main-only secret). */
   apiKey?: string;
-  /** Fork the utility entry for one owner generation. */
+  /** note: Fork the utility entry for one owner generation. */
   spawnUtility: (generation: number) => UtilityChildProcess;
-  /** Main-owned status sender; P0-T7 wires it to the renderer event channel. */
+  /** note: Main-owned status sender; P0-T7 wires it to the renderer event channel. */
   emitStatus?: (channel: string, status: DaemonStatus) => void;
   handoff?: DetachedServiceHandoff;
   clock?: ControllerClock;
@@ -305,7 +301,7 @@ function sameEndpoint(a: CoreServiceDiscovery['endpoint'], b: CoreServiceDiscove
 }
 
 /**
- * Depth-bounded walk of a `fetch` failure chain for a socket-level `code`
+ * note: Depth-bounded walk of a `fetch` failure chain for a socket-level `code`
  * (undici wraps the real error as `cause`). Used to tell a refused connect —
  * no listener at all — from a timeout or a transport failure that proves
  * nothing about the owner.
@@ -322,7 +318,7 @@ function socketErrorCode(error: unknown): string | null {
 }
 
 /**
- * Attach identity (`§8.1`): the authenticated response must name the same
+ * why: Attach identity (`§8.1`): the authenticated response must name the same
  * instance, home, endpoint and engine epoch as the private published record.
  * A replaced instance or a stale epoch never attaches. The record itself is
  * bound to this session's trusted home and endpoint before any probe, so the
@@ -354,7 +350,7 @@ interface LiveEndpoint {
   discovery: CoreServiceDiscovery;
 }
 
-/** Guarded probe outcome; `absent` is the only transport-level proof of no listener. */
+/** why: Guarded probe outcome; `absent` is the only transport-level proof of no listener. */
 interface ProbeResult {
   ok: boolean;
   body: unknown;
@@ -385,7 +381,7 @@ export class DesktopServiceController {
   private child: UtilityChildProcess | null = null;
   private readonly pending = new Map<string, PendingEntry>();
   private readonly readyWaiters = new Set<ReadyWaiter>();
-  /** Live service owned by this app's utility (`owned`) or an independent process (`attached`). */
+  /** note: Live service owned by this app's utility (`owned`) or an independent process (`attached`). */
   private owned = false;
   private attached: LiveEndpoint | null = null;
   private liveEndpoint: CoreServiceDiscovery['endpoint'] | null = null;
@@ -393,7 +389,7 @@ export class DesktopServiceController {
   private closeInFlight = false;
   private intentionalStop = false;
   private recovery: { cancelled: boolean } | null = null;
-  /** Pre-exit crash diagnostic reported by the owner, folded into recovery text. */
+  /** note: Pre-exit crash diagnostic reported by the owner, folded into recovery text. */
   private crashDetail: string | null = null;
   private restartFlight: Promise<void> | null = null;
 
@@ -406,16 +402,16 @@ export class DesktopServiceController {
     this.emitStatus = options.emitStatus;
     this.handoff = options.handoff;
     this.clock = options.clock ?? realClock;
-    // First state: stopped, no child.
+    // note: First state: stopped, no child.
     this.status = { state: 'stopped', port: this.targetPort };
   }
 
-  /** Existing status shape; internal instance/home/epoch never leak here. */
+  /** why: Existing status shape; internal instance/home/epoch never leak here. */
   getStatus(): DaemonStatus {
     return { ...this.status };
   }
 
-  /** Registers the listener first, then delivers the current snapshot. */
+  /** note: Registers the listener first, then delivers the current snapshot. */
   subscribe(listener: (status: DaemonStatus) => void): () => void {
     this.listeners.add(listener);
     this.deliver(listener, this.status);
@@ -429,7 +425,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * Frozen lifecycle shape (`§8.1`): stops the service this app owns. An
+   * note: Frozen lifecycle shape (`§8.1`): stops the service this app owns. An
    * attached independent service is left running (row 8) — only the explicit
    * path below may stop it.
    */
@@ -438,7 +434,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * The authenticated instance/epoch-bound stop that explicit Restart and
+   * note: The authenticated instance/epoch-bound stop that explicit Restart and
    * Stop-and-Quit require (P0-T6), including for an attached independent
    * service. Deliberately *not* part of the frozen public surface — the frozen
    * `stop(): Promise<void>` stays argument-free — and only reachable from the
@@ -448,7 +444,7 @@ export class DesktopServiceController {
     return this.serialize(() => this.stopLocked(true));
   }
 
-  /** Single-flight restart: concurrent callers join the one attempt. */
+  /** note: Single-flight restart: concurrent callers join the one attempt. */
   restart(): Promise<void> {
     if (this.restartFlight) return this.restartFlight;
     const flight = this.serialize(async () => {
@@ -474,17 +470,16 @@ export class DesktopServiceController {
     return tracked;
   }
 
-  /** Serialized against start/stop/restart: confirmed close, native reset, real recovery. */
+  /** note: Serialized against start/stop/restart: confirmed close, native reset, real recovery. */
   resetLocalState(): Promise<void> {
     return this.serialize(() => this.resetLocked());
   }
 
-  /** Keep-on-quit: transfer an owned service to an independent owner, or detach. */
+  /** why: Keep-on-quit: transfer an owned service to an independent owner, or detach. */
   keepForQuit(): Promise<void> {
     return this.serialize(() => this.keepLocked());
   }
 
-  // ── serialization ────────────────────────────────────────────────────────
 
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.queue.then(fn, fn);
@@ -495,7 +490,6 @@ export class DesktopServiceController {
     return next;
   }
 
-  // ── status ───────────────────────────────────────────────────────────────
 
   private effectivePort(): number {
     const attachedPort = this.attached?.port ?? null;
@@ -521,7 +515,7 @@ export class DesktopServiceController {
     try {
       this.emitStatus?.(DESKTOP_STATUS_CHANNEL, { ...merged });
     } catch {
-      // A destroyed window must not break the lifecycle transition.
+      // why: A destroyed window must not break the lifecycle transition.
     }
   }
 
@@ -529,11 +523,10 @@ export class DesktopServiceController {
     try {
       listener({ ...status });
     } catch {
-      // Listeners are an isolation boundary: one must not break the others.
+      // why: Listeners are an isolation boundary: one must not break the others.
     }
   }
 
-  // ── utility child ────────────────────────────────────────────────────────
 
   private ensureUtility(): UtilityChildProcess {
     if (this.child) return this.child;
@@ -547,7 +540,7 @@ export class DesktopServiceController {
   }
 
   private onChildMessage(generation: number, raw: unknown): void {
-    // Stale owner generations are ignored, never applied.
+    // why: Stale owner generations are ignored, never applied.
     if (isStaleGeneration(generation, this.generation)) return;
     if (isServiceReadyMessage(raw)) {
       let discovery: CoreServiceDiscovery;
@@ -562,7 +555,7 @@ export class DesktopServiceController {
       return;
     }
     if (isUtilityCrashedMessage(raw)) {
-      // The owner's own pre-exit diagnostic; the exit carries the recovery.
+      // note: The owner's own pre-exit diagnostic; the exit carries the recovery.
       this.crashDetail = raw.message.slice(0, 512);
       return;
     }
@@ -577,11 +570,11 @@ export class DesktopServiceController {
     this.child = null;
     this.rejectPending(generation, `service owner exited (${code})`);
     if (this.closeInFlight) {
-      // The close attempt owns the outcome: it reports interrupted/unconfirmed.
+      // note: The close attempt owns the outcome: it reports interrupted/unconfirmed.
       return;
     }
     if (this.unconfirmedClose) {
-      // The retained owner is gone: nothing is held any more, so a later start
+      // why: The retained owner is gone: nothing is held any more, so a later start
       // is legal, but the unconfirmed cleanup stays an explicit diagnostic.
       this.clearRetainedOwner();
       this.setStatus({
@@ -597,7 +590,7 @@ export class DesktopServiceController {
       this.setStatus({ state: 'stopped', port: this.targetPort });
       return;
     }
-    // An owner that dies while starting is as unexpected as one that dies
+    // note: An owner that dies while starting is as unexpected as one that dies
     // while running: both retry on the row 10 backoff schedule.
     if (this.owned || this.status.state === 'starting') {
       this.owned = false;
@@ -605,7 +598,7 @@ export class DesktopServiceController {
       this.scheduleRecovery(`service owner exited unexpectedly (${code})`);
       return;
     }
-    // An idle owner process (no service running) dying is not a service crash.
+    // note: An idle owner process (no service running) dying is not a service crash.
     if (this.status.state !== 'stopped') {
       this.setStatus({ state: 'stopped', port: this.effectivePort() });
     }
@@ -668,7 +661,7 @@ export class DesktopServiceController {
     });
   }
 
-  // ── crash recovery (row 10) ──────────────────────────────────────────────
+  // note: crash recovery (row 10)
 
   private scheduleRecovery(reason: string): void {
     if (this.recovery) return;
@@ -692,7 +685,7 @@ export class DesktopServiceController {
           await this.serialize(() => this.startLocked({ manual: false }));
           return;
         } catch {
-          // The next backoff step retries; exhaustion ends in stopped.
+          // note: The next backoff step retries; exhaustion ends in stopped.
         }
         if (token.cancelled || this.intentionalStop) return;
       }
@@ -711,7 +704,6 @@ export class DesktopServiceController {
     if (this.recovery) this.recovery.cancelled = true;
   }
 
-  // ── start ────────────────────────────────────────────────────────────────
 
   private async startLocked(input: { manual: boolean }): Promise<void> {
     if (input.manual) {
@@ -746,7 +738,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * Attach before spawning: a live independent owner for this home must never
+   * why: Attach before spawning: a live independent owner for this home must never
    * be joined by a second engine owner. A listener that cannot prove the
    * published identity is a conflict — never attach-as-TS, never kill by pid
    * (D-7, row 7).
@@ -754,7 +746,7 @@ export class DesktopServiceController {
   private async probeOwner(): Promise<OwnerProbe> {
     const record = this.readRecord();
     if (record) {
-      // Trusted-home and trusted-endpoint binding, before any probe: a record
+      // note: Trusted-home and trusted-endpoint binding, before any probe: a record
       // published by another home (or naming another endpoint) is a planted or
       // foreign-session record. It is never adopted, and the guarded probe —
       // which carries this session's API key — is never sent to it.
@@ -785,7 +777,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * This session's service endpoint — the loopback origin the app starts and
+   * note: This session's service endpoint — the loopback origin the app starts and
    * probes the service on. Every request this controller issues targets it.
    */
   private trustedOrigin(): string {
@@ -793,7 +785,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * The endpoint a published record may be probed on, or `null` when the record
+   * note: The endpoint a published record may be probed on, or `null` when the record
    * is not this session's service. A record is admitted only when it names
    * exactly this session's loopback origin (HTTP only, §8.1); another host,
    * port, scheme or a decorated URL is a planted or foreign-session record.
@@ -834,7 +826,7 @@ export class DesktopServiceController {
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
-    // Readiness means the service's own published record is this instance's,
+    // note: Readiness means the service's own published record is this instance's,
     // answered over authenticated discovery and healthy HTTP. The file is
     // replaceable, so it must agree with the owner's own report: this home's
     // record, this instance, this endpoint.
@@ -855,7 +847,7 @@ export class DesktopServiceController {
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
-    // The probe targets the endpoint the owner itself reported (equal to the
+    // note: The probe targets the endpoint the owner itself reported (equal to the
     // published record's above) — never the record's string off disk.
     const confirmed = await this.confirmIdentity(replyDiscovery.endpoint, record, deadline);
     if (!confirmed) {
@@ -872,7 +864,7 @@ export class DesktopServiceController {
     });
   }
 
-  // ── stop / close ─────────────────────────────────────────────────────────
+  // note: stop / close
 
   private async stopLocked(explicit: boolean): Promise<void> {
     this.cancelRecovery();
@@ -882,19 +874,19 @@ export class DesktopServiceController {
       return;
     }
     if (this.attached) {
-      // Ordinary stop leaves an independent service running (row 8); the
+      // note: Ordinary stop leaves an independent service running (row 8); the
       // authenticated instance/epoch stop is the explicit path.
       if (!explicit && !this.unconfirmedClose) return;
       await this.stopAttachedService();
       return;
     }
-    // Nothing is owned or attached: a stop cancels any pending recovery and
+    // note: Nothing is owned or attached: a stop cancels any pending recovery and
     // clears the retained-close fence.
     this.unconfirmedClose = false;
     this.setStatus({ state: 'stopped', port: this.targetPort, detail: undefined, version: undefined });
   }
 
-  /** Cooperative close inside the 5s budget; unconfirmed cleanup is never success. */
+  /** why: Cooperative close inside the 5s budget; unconfirmed cleanup is never success. */
   private async closeOwnedService(): Promise<void> {
     const child = this.child;
     const generation = this.generation;
@@ -927,7 +919,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * An unconfirmed cleanup is an interrupted diagnostic, never success. While
+   * why: An unconfirmed cleanup is an interrupted diagnostic, never success. While
    * the owner process is still alive it stays retained and fences further
    * ownership; a lost owner retains nothing, so the fence is cleared and only
    * the diagnostic remains.
@@ -950,7 +942,7 @@ export class DesktopServiceController {
     this.unconfirmedClose = false;
   }
 
-  /** Authenticated instance/epoch-bound stop of an attached service, then verified port release. */
+  /** note: Authenticated instance/epoch-bound stop of an attached service, then verified port release. */
   private async stopAttachedService(): Promise<void> {
     const live = this.attached;
     if (!live) {
@@ -971,7 +963,7 @@ export class DesktopServiceController {
         `attached service did not accept the authenticated stop (${response.code}: ${response.message}); it keeps running`,
       );
     }
-    // A 200 {status:'stopping'} is not confirmed closure: wait for the port to be released.
+    // note: A 200 {status:'stopping'} is not confirmed closure: wait for the port to be released.
     const released = await this.waitForPortRelease(origin, live.discovery, PORT_RELEASE_DEADLINE_MS);
     if (!released) {
       this.markUnconfirmed(
@@ -985,7 +977,7 @@ export class DesktopServiceController {
   }
 
   /**
-   * Positive release proof only. An independent owner is released when the
+   * why: Positive release proof only. An independent owner is released when the
    * trusted endpoint has no listener at all (refused connect — verified
    * discovery absence) or when the guarded route answers as a *different*
    * instance, so the stopped one no longer owns the port. A still-listening
@@ -1016,7 +1008,6 @@ export class DesktopServiceController {
     }
   }
 
-  // ── reset ────────────────────────────────────────────────────────────────
 
   private async resetLocked(): Promise<void> {
     this.cancelRecovery();
@@ -1028,7 +1019,7 @@ export class DesktopServiceController {
     }
     const child = this.ensureUtility();
     const generation = this.generation;
-    // The native binding lives in the utility only; main forwards the trusted
+    // why: The native binding lives in the utility only; main forwards the trusted
     // home and never a renderer-supplied path.
     const reply = await this.request(
       child,
@@ -1044,11 +1035,10 @@ export class DesktopServiceController {
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
-    // Same recovery/restart outcome as before: the service comes back up.
+    // note: Same recovery/restart outcome as before: the service comes back up.
     await this.startLocked({ manual: true });
   }
 
-  // ── keep (quit) ──────────────────────────────────────────────────────────
 
   private async keepLocked(): Promise<void> {
     this.cancelRecovery();
@@ -1059,7 +1049,7 @@ export class DesktopServiceController {
       );
     }
     if (!this.owned) {
-      // Attached: the GUI simply detaches. Nothing running: nothing to keep.
+      // why: Attached: the GUI simply detaches. Nothing running: nothing to keep.
       return;
     }
     const handoff = this.handoff;
@@ -1105,10 +1095,9 @@ export class DesktopServiceController {
     });
   }
 
-  // ── probes ───────────────────────────────────────────────────────────────
 
   /**
-   * Read the published discovery record through a single descriptor: the file
+   * note: Read the published discovery record through a single descriptor: the file
    * is opened once and the descriptor is both type-checked (`fstat`) and read,
    * so a leaf swapped after a separate check cannot redirect the read.
    * `O_NOFOLLOW` keeps the retired no-symlink posture — a planted symlink at
@@ -1128,7 +1117,7 @@ export class DesktopServiceController {
     }
   }
 
-  /** Authenticated discovery plus health; identity must match the published record. */
+  /** why: Authenticated discovery plus health; identity must match the published record. */
   private async confirmIdentity(
     endpoint: CoreServiceDiscovery['endpoint'],
     expected: CoreServiceDiscovery,
@@ -1172,7 +1161,7 @@ export class DesktopServiceController {
     }
   }
 
-  /** Any HTTP answer on the target port means a listener exists (identity unproven). */
+  /** note: Any HTTP answer on the target port means a listener exists (identity unproven). */
   private async listenerAnswers(): Promise<boolean> {
     try {
       await fetch(`${this.trustedOrigin()}/v1/daemon/runtime/health`, {
@@ -1186,7 +1175,7 @@ export class DesktopServiceController {
     }
   }
 
-  /** Guarded probe: never follows a redirect with the API key attached. */
+  /** why: Guarded probe: never follows a redirect with the API key attached. */
   private async probeJson(
     url: string,
     request: { method: 'GET' | 'POST'; body?: unknown },
@@ -1218,10 +1207,10 @@ export class DesktopServiceController {
         envelope && typeof envelope === 'object' && 'message' in envelope && typeof envelope.message === 'string'
           ? envelope.message
           : `service probe answered ${response.status}`;
-      // The endpoint answered: whatever it said, a listener is there.
+      // note: The endpoint answered: whatever it said, a listener is there.
       return { ok: false, body, absent: false, code, message };
     } catch (error) {
-      // Only a refused connect proves no listener; a timeout or any other
+      // why: Only a refused connect proves no listener; a timeout or any other
       // transport failure leaves the owner question open.
       return {
         ok: false,

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# check-wire-drift.sh — Wire/local schema drift detection CI gate
+# note: check-wire-drift.sh — Wire/local schema drift detection CI gate
 #
 # Gates:
 #   1. Spoke version conformance — the lockstep spoke pin (spoke-adapter-
@@ -16,13 +15,12 @@
 # Exit codes:
 #   0 — All registered schemas match their Rust types AND spoke pins are honored
 #   1 — Drift detected, test failure, or spoke pin mismatch
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Lockstep spoke pin. The workspace Cargo.toml `spoke-operations` entry is the
+# note: Lockstep spoke pin. The workspace Cargo.toml `spoke-operations` entry is the
 # canonical source: every other declaration (the sibling crates, the root
 # package.json) MUST match it. A dependency bump updates the manifest; this gate
 # then catches a bump that missed a copy. `strategy-samples/**` is deliberately
@@ -48,7 +46,7 @@ echo "=== Spoke Version Conformance ==="
 echo "Expected lockstep pin: ${SPOKE_PIN}"
 echo ""
 
-# ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
+# note: Gate 1a: Rust crate pins (workspace Cargo.toml)
 # The workspace [workspace.dependencies] declares exact pins for all three
 # crates; `spoke-operations` is the canonical source, so the other two are
 # asserted against it:
@@ -69,7 +67,7 @@ for crate in spoke-schemas spoke-connect; do
   echo "OK: Cargo.toml ${crate} = ${cargo_spoke}"
 done
 
-# ── Gate 1b: npm package pins (root package.json) ───────────────────────────
+# note: Gate 1b: npm package pins (root package.json)
 PKG_JSON="${PROJECT_ROOT}/package.json"
 for pkg in @42ch/spoke-schemas @42ch/spoke-operations; do
   npm_spoke=$(node -e \

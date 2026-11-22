@@ -100,7 +100,7 @@ try {
   rmSync(iconsetDir, { recursive: true, force: true });
 }
 
-// The runtime dock icon (src/main.ts) loads a decodable PNG, never the
+// why: The runtime dock icon (src/main.ts) loads a decodable PNG, never the
 // packaging-only `.icns`; regenerate it from the icns so a logo change updates
 // both. `sips` converts the icns to the committed 512x512 RGB PNG shape.
 execFileSync('/usr/bin/sips', ['-s', 'format', 'png', '-z', '512', '512', icnsPath, '--out', appIconPath], { stdio: 'inherit' });

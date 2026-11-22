@@ -1,5 +1,5 @@
 /**
- * Desktop IPC registration (v1.192 P0-T1) — main-process side of the frozen
+ * note: Desktop IPC registration (v1.192 P0-T1) — main-process side of the frozen
  * IPC and trust boundary.
  *
  * `registerDesktopIpc(window, handlers)` admits invoke envelopes on
@@ -51,14 +51,14 @@ export type DesktopHandlers = {
 
 export interface RegisterDesktopIpcOptions extends DesktopOriginOptions {
   /**
-   * Generation this registration was bound to. Events are checked against
+   * note: Generation this registration was bound to. Events are checked against
    * the LIVE current generation (see `getCurrentGeneration`), not just this
    * value, so a stale registration left installed after navigation is
    * rejected with `stale_sender`. Defaults to 0.
    */
   generation?: number;
   /**
-   * Live current-generation source owned by main. MANDATORY: registration
+   * note: Live current-generation source owned by main. MANDATORY: registration
    * fails closed without it. Every sender check compares the registration's
    * bound generation against `getCurrentGeneration()` evaluated at call
    * time, so a registration left installed after a window-generation
@@ -149,7 +149,7 @@ export class DesktopAdmission {
   private readonly queue: QueueEntry[] = [];
   private queuedBytes = 0;
 
-  /** Returns a release function once admitted, or null when the caller must be rejected `busy`. */
+  /** why: Returns a release function once admitted, or null when the caller must be rejected `busy`. */
   async admit(payloadBytes: number): Promise<(() => void) | null> {
     if (this.active < MAX_ACTIVE_CALLS) {
       this.active += 1;
@@ -177,7 +177,7 @@ export class DesktopAdmission {
 }
 
 export interface RegisterDesktopIpcResult {
-  /** Removes the invoke handler (window teardown / generation replacement). */
+  /** note: Removes the invoke handler (window teardown / generation replacement). */
   dispose: () => void;
 }
 
@@ -198,7 +198,7 @@ export async function registerDesktopIpc(
   handlers: DesktopHandlers,
   options: RegisterDesktopIpcOptions,
 ): Promise<RegisterDesktopIpcResult> {
-  // Fail closed BEFORE touching Electron: a registration without a live
+  // why: Fail closed BEFORE touching Electron: a registration without a live
   // generation source is rejected outright (P0-T7 wiring obligation), so the
   // sender check can never degenerate to a captured closure constant.
   if (typeof options.getCurrentGeneration !== 'function') {

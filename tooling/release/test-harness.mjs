@@ -1,5 +1,5 @@
 /**
- * Shared harness for release-script unit tests.
+ * note: Shared harness for release-script unit tests.
  *
  * Fixtures are copied from the real repository so the tests exercise the actual
  * version surfaces (root `Cargo.toml`, root `package.json`, the Electron
@@ -38,7 +38,7 @@ const RELEASE_DIR = dirname(fileURLToPath(import.meta.url));
 /** Repository that provides the fixtures. */
 export const REPO_ROOT = join(RELEASE_DIR, "../..");
 
-/** Files copied verbatim into every temp repo. */
+/** note: Files copied verbatim into every temp repo. */
 const FIXTURE_PATHS = [
   ...LOCKSTEP_PATHS,
   ...NATIVE_SURFACE_PATHS,
@@ -56,7 +56,7 @@ export const FIXTURE_BASELINE_VERSION = "9.8.7";
 /** Bump target for fixture repos; strictly greater than the baseline. */
 export const FIXTURE_TARGET_VERSION = "9.8.8";
 
-/** Content of the generated crate target stubs. */
+/** note: Content of the generated crate target stubs. */
 const TARGET_STUB = "// release-fixture stub\n";
 
 /**
@@ -74,7 +74,7 @@ const TARGET_STUB = "// release-fixture stub\n";
  */
 export function expectedMemberLockVersions(repoRoot, productVersion) {
   const contractLiterals = fixtureContractLiterals(repoRoot);
-  /** @type {Map<string, string | null>} */
+  /** note: @type {Map<string, string | null>} */
   const expected = new Map();
   for (const member of readWorkspaceMemberPackages(repoRoot)) {
     expected.set(
@@ -86,13 +86,13 @@ export function expectedMemberLockVersions(repoRoot, productVersion) {
 }
 
 /**
- * Contract literals a fixture was created with, keyed by temp repo path.
+ * note: Contract literals a fixture was created with, keyed by temp repo path.
  * @type {Map<string, Map<string, string>>}
  */
 const fixtureContractLiteralsByRepo = new Map();
 
 /**
- * Contract literal per contract entry, from the fixture's creation-time
+ * note: Contract literal per contract entry, from the fixture's creation-time
  * snapshot when there is one (see {@link createTempRepo}); a root that is not
  * a fixture (the real repository) has no snapshot, so its own manifests are the
  * source.
@@ -105,7 +105,7 @@ function fixtureContractLiterals(repoRoot) {
   if (frozen !== undefined) {
     return frozen;
   }
-  /** @type {Map<string, string>} */
+  /** note: @type {Map<string, string>} */
   const literals = new Map();
   for (const entry of readVersionBrackets(repoRoot)) {
     const literal = parseCargoPackageVersion(
@@ -119,10 +119,10 @@ function fixtureContractLiterals(repoRoot) {
   return literals;
 }
 
-/** `[lib]` / `[[bin]]` / `[[example]]` / `[[test]]` / `[[bench]]` headers. */
+/** note: `[lib]` / `[[bin]]` / `[[example]]` / `[[test]]` / `[[bench]]` headers. */
 const TARGET_SECTION_PATTERN = /^\s*\[\[?(lib|bin|example|test|bench)\]?\]\s*$/;
 
-/** Dependency tables that may carry a `path = "..."` key. */
+/** note: Dependency tables that may carry a `path = "..."` key. */
 const DEPENDENCY_SECTION_PATTERN =
   /^\s*\[(?:target\.[^\]]+\.)?(?:dev-|build-)?dependencies\]\s*$/;
 
@@ -167,7 +167,7 @@ export function gitOk(repoRoot, args) {
  * @returns {{ name: string; manifest: string; publish: string[] | null; dependencies: { name: string; kind: string | null; req: string; path: string | null }[] }[]}
  */
 export function readCargoPackageRows(repoRoot) {
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const manifestRoots = [join(repoRoot, "Cargo.toml")];
   const modulesDir = join(repoRoot, "modules");
   if (existsSync(modulesDir)) {
@@ -179,7 +179,7 @@ export function readCargoPackageRows(repoRoot) {
     }
   }
 
-  /** @type {ReturnType<typeof readCargoPackageRows>} */
+  /** note: @type {ReturnType<typeof readCargoPackageRows>} */
   const rows = [];
   for (const manifestPath of manifestRoots) {
     const result = spawnSync(
@@ -237,7 +237,7 @@ export function createTempRepo(options = {}) {
   const contractNames = new Set(contractEntries.map((entry) => entry.name));
   const manifests = collectCrateManifests(sourceRoot);
   for (const entry of contractEntries) {
-    // Standalone contract crates (`modules/*`) are neither workspace members
+    // note: Standalone contract crates (`modules/*`) are neither workspace members
     // nor path dependencies, so the carrier is what makes them fixture input.
     if (!manifests.includes(entry.manifest)) {
       manifests.push(entry.manifest);
@@ -264,7 +264,7 @@ export function createTempRepo(options = {}) {
 
   pinFixtureVersion(dir, version, contractNames);
 
-  // A standalone contract crate owns its own workspace lock and the assertion
+  // note: A standalone contract crate owns its own workspace lock and the assertion
   // reads that lock, so the fixture must carry the same shape with the pinned
   // literal in the row.
   for (const entry of contractEntries) {
@@ -289,9 +289,9 @@ export function createTempRepo(options = {}) {
     writeFileSync(dest, contents, "utf8");
   }
 
-  // Freeze the contract literals now, before any test mutates a manifest, so
+  // note: Freeze the contract literals now, before any test mutates a manifest, so
   // `expectedMemberLockVersions` never reads a version the defect wrote.
-  /** @type {Map<string, string>} */
+  /** note: @type {Map<string, string>} */
   const contractLiterals = new Map();
   for (const entry of contractEntries) {
     if (!existsSync(join(dir, entry.manifest))) {
@@ -311,7 +311,7 @@ export function createTempRepo(options = {}) {
 }
 
 /**
- * Pin one copied manifest to the fixture version. Contract-bracket crates keep
+ * why: Pin one copied manifest to the fixture version. Contract-bracket crates keep
  * their independent literal form, so their `[package].version` is pinned rather
  * than inherited; a `version` requirement on a contract path dependency must
  * follow, or Cargo refuses to resolve the literal against the path package.
@@ -325,7 +325,7 @@ export function createTempRepo(options = {}) {
 function pinFixtureManifest(contents, manifestPath, contractNames, version) {
   let pinned = contents;
   if (contractNames.has(parseCargoPackageName(contents, manifestPath))) {
-    // The `[package]` table opens the file, so the first bare `version` line is
+    // why: The `[package]` table opens the file, so the first bare `version` line is
     // the package version (`version.workspace = true` does not match).
     pinned = pinned.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`);
   }
@@ -339,7 +339,7 @@ function pinFixtureManifest(contents, manifestPath, contractNames, version) {
 }
 
 /**
- * Workspace member manifests plus every crate reachable through a `path`
+ * note: Workspace member manifests plus every crate reachable through a `path`
  * dependency, so the fixture workspace loads without the real sources.
  *
  * @param {string} sourceRoot
@@ -347,13 +347,13 @@ function pinFixtureManifest(contents, manifestPath, contractNames, version) {
  */
 function collectCrateManifests(sourceRoot) {
   const workspace = readFileSync(join(sourceRoot, CARGO_WORKSPACE_PATH), "utf8");
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const queue = [...parseCargoWorkspaceMembers(workspace)];
   const seen = new Set();
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const manifests = [];
   while (queue.length > 0) {
-    const cratePath = /** @type {string} */ (queue.shift());
+    const cratePath = /** note: @type {string} */ (queue.shift());
     if (seen.has(cratePath)) {
       continue;
     }
@@ -369,13 +369,13 @@ function collectCrateManifests(sourceRoot) {
 }
 
 /**
- * `path = "..."` values of every dependency table in a manifest.
+ * note: `path = "..."` values of every dependency table in a manifest.
  *
  * @param {string} manifest
  * @returns {string[]}
  */
 function pathDependencies(manifest) {
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const paths = [];
   let inDependencies = false;
   for (const line of manifest.split("\n")) {
@@ -395,7 +395,7 @@ function pathDependencies(manifest) {
 }
 
 /**
- * Files Cargo expects for a crate's targets. Declared paths are mirrored from
+ * note: Files Cargo expects for a crate's targets. Declared paths are mirrored from
  * the manifest; when nothing is declared the real crate's default target is
  * mirrored instead (`src/lib.rs` / `src/main.rs`).
  *
@@ -405,7 +405,7 @@ function pathDependencies(manifest) {
  * @returns {string[]}
  */
 function targetPaths(sourceRoot, crateDir, manifest) {
-  /** @type {string[]} */
+  /** note: @type {string[]} */
   const paths = [];
   let section = null;
   let libSection = false;
@@ -442,7 +442,7 @@ function targetPaths(sourceRoot, crateDir, manifest) {
 }
 
 /**
- * Pin every version surface of a fixture repo to `version`, `Cargo.lock`
+ * note: Pin every version surface of a fixture repo to `version`, `Cargo.lock`
  * member entries included. Contract-bracket crates are pinned into their
  * literal manifest form, so their lock rows are pinned too — including the
  * standalone ones the workspace only path-depends on.
@@ -477,13 +477,14 @@ function pinFixtureVersion(dir, version, contractNames) {
     lock = pinLockMemberVersion(lock, member.name, version);
   }
   for (const name of contractNames) {
-    // Standalone contract crates the workspace never resolves have no lock row.
+    // why: Standalone contract crates the workspace never resolves have no lock row.
     lock = pinLockMemberVersion(lock, name, version, false);
   }
   writeFileSync(lockPath, lock, "utf8");
 }
 
 /**
+ * note: contract for `pinLockMemberVersion`.
  * @param {string} lock
  * @param {string} packageName
  * @param {string} version
@@ -520,7 +521,7 @@ export function initGitRepo(dir) {
   gitOk(dir, ["init", "-q", "-b", "main"]);
   gitOk(dir, ["config", "user.email", "release-test@example.com"]);
   gitOk(dir, ["config", "user.name", "Release Test"]);
-  // Ambient developer config must not leak into fixtures (signed commits, tag
+  // why: Ambient developer config must not leak into fixtures (signed commits, tag
   // signing, hooks would all make the tests depend on the host).
   gitOk(dir, ["config", "commit.gpgsign", "false"]);
   gitOk(dir, ["config", "tag.gpgsign", "false"]);

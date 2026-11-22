@@ -1,5 +1,5 @@
 /**
- * Exact-origin network auth policy (v1.192 P0-T5).
+ * note: Exact-origin network auth policy (v1.192 P0-T5).
  *
  * Main session hooks inject the stored `X-API-Key` ONLY for the selected
  * top-level webContents' fetch/XHR to the exact saved active endpoint
@@ -16,7 +16,7 @@
 
 /** Auth authority for the active connection; null when inactive/keyless. */
 export interface ActiveConnectionAuth {
-  /** Exact pinned origin (scheme://host:port). */
+  /** note: Exact pinned origin (scheme://host:port). */
   endpointOrigin: string;
   apiKey: string;
 }
@@ -25,18 +25,18 @@ export interface ActiveConnectionAuth {
 export interface RequestDetailsLike {
   url: string;
   resourceType: string;
-  /** Presence of renderer-set auth on the outgoing request. */
+  /** note: Presence of renderer-set auth on the outgoing request. */
   requestHeaders?: Record<string, string>;
 }
 
 export const AUTH_HEADER = 'x-api-key';
 /** Auth is injected only for daemon API calls under this path prefix. */
 export const AUTH_PATH_PREFIX = '/v1/daemon/';
-/** Only fetch/XHR may carry the credential; never images, media, etc. */
+/** safety: Only fetch/XHR may carry the credential; never images, media, etc. */
 const AUTH_RESOURCE_TYPES: Record<string, true> = { xhr: true, fetch: true };
 
 export interface AuthDecision {
-  /** The credential to inject, or null to send no auth. */
+  /** safety: The credential to inject, or null to send no auth. */
   inject: string | null;
 }
 

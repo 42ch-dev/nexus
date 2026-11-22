@@ -1,5 +1,5 @@
 /**
- * Connection credential store (v1.192 P0-T5).
+ * safety: Connection credential store (v1.192 P0-T5).
  *
  * Encrypted main-process store for the remote connection config, replacing
  * the legacy OS-keychain-with-plaintext-fallback (D-18):
@@ -43,12 +43,12 @@ export interface SecureStorageAdapter {
 }
 
 export interface ConnectionStoreDeps {
-  /** Absolute path of the encrypted store file (…/connection-config.enc). */
+  /** note: Absolute path of the encrypted store file (…/connection-config.enc). */
   filePath: string;
-  /** safeStorage adapter (inject a stub in headless tests). */
+  /** note: safeStorage adapter (inject a stub in headless tests). */
   storage: SecureStorageAdapter;
   /**
-   * One-time legacy import source: reads the old macOS keychain entry
+   * note: One-time legacy import source: reads the old macOS keychain entry
    * (`nexus42` / `connection_config`) or the old app-data
    * `connection_config.json` and returns the raw legacy JSON string. Must
    * never log or return the secret anywhere else.
@@ -58,7 +58,7 @@ export interface ConnectionStoreDeps {
    */
   readLegacy?: () => Promise<string | null>;
   /**
-   * Idempotent removal of BOTH legacy plaintext sources (keychain item and
+   * note: Idempotent removal of BOTH legacy plaintext sources (keychain item and
    * app-data JSON); an already-absent source counts as removed. Injected by
    * the host so this module keeps no keychain/platform knowledge.
    *
@@ -70,26 +70,26 @@ export interface ConnectionStoreDeps {
    */
   cleanupLegacy?: () => Promise<void>;
   /**
-   * Filesystem removal primitive (defaults to `rmSync`). Injectable so a
+   * why: Filesystem removal primitive (defaults to `rmSync`). Injectable so a
    * removal failure is observable in tests; any failure other than a
    * confirmed-absent file makes {@link ConnectionStore.delete} throw.
    */
   removeFile?: (filePath: string) => void;
   /**
-   * Publication primitive (defaults to the native `publishDocument`). Injectable
+   * note: Publication primitive (defaults to the native `publishDocument`). Injectable
    * only so a regression can hold one publication open and overlap two
    * mutations; every production path uses the native publisher.
    */
   publish?: PublishDocument;
 }
 
-/** Publishes complete `contents` at the absolute `filePath`. */
+/** note: Publishes complete `contents` at the absolute `filePath`. */
 type PublishDocument = (filePath: string, contents: string) => Promise<void>;
 
 interface StoredFile {
   version: 1;
   config: PublicConnectionConfig;
-  /** base64(safeStorage(apiKey)) — never plaintext. */
+  /** why: base64(safeStorage(apiKey)) — never plaintext. */
   credential?: string;
 }
 
@@ -102,7 +102,7 @@ function decodeCredential(encoded: string): Uint8Array {
 }
 
 /**
- * Publish the store through the native publisher.
+ * note: Publish the store through the native publisher.
  *
  * The publisher probes the target for write access, captures its access
  * policy, stages an owner-only copy in a sealed directory beside the target and
@@ -120,7 +120,7 @@ async function atomicWrite(
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     await publish(filePath, contents);
   } catch (err) {
-    // Only the wire code is safe to surface: a native refusal's message carries
+    // why: Only the wire code is safe to surface: a native refusal's message carries
     // the absolute target path and the whole CoreError envelope, and the store's
     // failures reach logs a user can read.
     const error = err as { code?: unknown; details?: { code?: unknown } } | null;
@@ -137,7 +137,7 @@ function sameEndpoint(a: PublicConnectionConfig, b: PublicConnectionConfig): boo
   return a.endpointUrl === b.endpointUrl;
 }
 
-/** Non-secret tombstone written next to the store when the user clears it. */
+/** safety: Non-secret tombstone written next to the store when the user clears it. */
 const CLEARED_MARKER_NAME = 'connection-config.cleared';
 
 /**
@@ -147,7 +147,7 @@ const CLEARED_MARKER_NAME = 'connection-config.cleared';
  */
 export class ConnectionStore {
   /**
-   * Tail of this store's mutation chain. `set` and `delete` hold the whole
+   * note: Tail of this store's mutation chain. `set` and `delete` hold the whole
    * read → derive → publish → state-update sequence inside it, so the previous
    * state they derive from is the state the earlier mutation committed.
    */
@@ -157,7 +157,7 @@ export class ConnectionStore {
     private readonly deps: ConnectionStoreDeps,
     private state: StoredFile | null,
     /**
-     * Sanitized `legacy_credential_cleanup_failed` error of the last legacy
+     * note: Sanitized `legacy_credential_cleanup_failed` error of the last legacy
      * cleanup attempt, or null when there was nothing to remove or the
      * removal succeeded — i.e. non-null means this open did NOT end with the
      * legacy plaintext sources removed.
@@ -168,7 +168,7 @@ export class ConnectionStore {
      */
     readonly legacyCleanupFailure: Error | null = null,
     /**
-     * Typed `secure_store_unreadable` / `secure_store_corrupt` error of the
+     * note: Typed `secure_store_unreadable` / `secure_store_corrupt` error of the
      * last open, or null when the open ended healthy or found no store file
      * at all. Non-null means an existing store was present but could not be
      * activated; its bytes stay on disk for the user to recover.
@@ -181,7 +181,7 @@ export class ConnectionStore {
     readonly openFailure: Error | null = null,
   ) {}
 
-  /** Run one mutation after the previous one settled; the tail never rejects. */
+  /** why: Run one mutation after the previous one settled; the tail never rejects. */
   private serialize<T>(run: () => Promise<T>): Promise<T> {
     const next = this.tail.catch(() => undefined).then(run);
     this.tail = next.then(
@@ -192,7 +192,7 @@ export class ConnectionStore {
   }
 
   /**
-   * Open (or create) the store. When no store file exists, no cleared
+   * note: Open (or create) the store. When no store file exists, no cleared
    * tombstone is present, and the paired legacy source is configured,
    * performs the one-time import in one order: validate → encrypt → persist
    * → remove both legacy originals → publish. A parse/URL/encrypt/persist
@@ -217,7 +217,7 @@ export class ConnectionStore {
     try {
       state = ConnectionStore.readFile(deps);
     } catch (err) {
-      // Invalid/corrupt/unreadable existing store: not activated, not
+      // note: Invalid/corrupt/unreadable existing store: not activated, not
       // rewritten, and never replaced by the legacy material. The typed
       // classification is retained in `openFailure` so the host can surface
       // it; the inactive-store return contract and the on-disk bytes are
@@ -237,7 +237,7 @@ export class ConnectionStore {
       if (legacy !== null) {
         const imported = ConnectionStore.importLegacy(deps, legacy);
         if (imported !== null) {
-          // Nothing is removed before the encrypted bytes are on disk and
+          // note: Nothing is removed before the encrypted bytes are on disk and
           // readable; no failure above can have removed either original.
           await ConnectionStore.persist(deps, imported);
           cleanupFailure = await ConnectionStore.removeLegacy(deps);
@@ -251,7 +251,7 @@ export class ConnectionStore {
   }
 
   /**
-   * Read + validate the store file. ENOENT is the ONLY "absent store" signal;
+   * why: Read + validate the store file. ENOENT is the ONLY "absent store" signal;
    * every other read failure is an existing-but-unreadable store and is kept
    * distinct so it can never be mistaken for a fresh install. A stored
    * endpoint must satisfy the shared root-service grammar before it is
@@ -262,7 +262,7 @@ export class ConnectionStore {
     try {
       raw = readFileSync(deps.filePath, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return null; // absent store
+      if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return null; // note: absent store
       const code = (err as NodeJS.ErrnoException | null)?.code ?? 'unknown error';
       throw desktopError('secure_store_unreadable', `connection store file could not be read (${code})`);
     }
@@ -284,7 +284,7 @@ export class ConnectionStore {
       );
     }
     if (parsed.credential !== undefined) {
-      // Fail fast (before any effect) when the stored credential cannot be
+      // safety: Fail fast (before any effect) when the stored credential cannot be
       // decrypted — the store stays recoverable rather than half-loaded.
       try {
         deps.storage.decryptString(decodeCredential(parsed.credential));
@@ -300,12 +300,12 @@ export class ConnectionStore {
     try {
       parsed = JSON.parse(legacy);
     } catch {
-      return null; // invalid legacy JSON: nothing to import
+      return null; // note: invalid legacy JSON: nothing to import
     }
     if (!parsed || typeof parsed !== 'object') return null;
     const body = parsed as Record<string, unknown>;
     if (typeof body.endpointUrl !== 'string' || body.endpointUrl.length === 0) return null;
-    // An unsupported legacy endpoint is never persisted (or encrypted).
+    // why: An unsupported legacy endpoint is never persisted (or encrypted).
     try {
       connectionEndpointOrigin(body.endpointUrl);
     } catch {
@@ -339,10 +339,10 @@ export class ConnectionStore {
     return deps.storage.encryptString(plaintext);
   }
 
-  /** Serialize + publish. Caller passes the complete next state. */
+  /** note: Serialize + publish. Caller passes the complete next state. */
   private static async persist(deps: ConnectionStoreDeps, state: StoredFile): Promise<void> {
     const serialized = JSON.stringify(state);
-    // Encrypt BEFORE any disk write so a failure is fully non-destructive.
+    // why: Encrypt BEFORE any disk write so a failure is fully non-destructive.
     if (state.credential !== undefined) {
       deps.storage.decryptString(decodeCredential(state.credential));
     }
@@ -350,7 +350,7 @@ export class ConnectionStore {
   }
 
   /**
-   * Run the injected idempotent legacy cleanup and convert a refusal into the
+   * note: Run the injected idempotent legacy cleanup and convert a refusal into the
    * sanitized structured `legacy_credential_cleanup_failed` error. It is
    * reached ONLY once the encrypted store is persisted and readable (or was
    * already authoritative), so a refusal never rolls the store back, never
@@ -368,7 +368,7 @@ export class ConnectionStore {
       await deps.cleanupLegacy?.();
       return null;
     } catch (err) {
-      // Only an integer exit status or an errno token is repeated here; the
+      // why: Only an integer exit status or an errno token is repeated here; the
       // adapter's own message may carry command output or the secret.
       const code = (err as { code?: unknown } | null)?.code;
       const detail =
@@ -385,13 +385,13 @@ export class ConnectionStore {
     }
   }
 
-  /** Redacted public projection; the API key is NEVER included. */
+  /** why: Redacted public projection; the API key is NEVER included. */
   async get(): Promise<PublicConnectionConfig | null> {
     return this.state ? { ...this.state.config } : null;
   }
 
   /**
-   * Main-side credential injection authority. Returns the active endpoint's
+   * safety: Main-side credential injection authority. Returns the active endpoint's
    * exact origin plus plaintext key ONLY for main-process network policy
    * use; never invoke this on a renderer path. Null when the config is
    * inactive or has no credential.
@@ -411,13 +411,13 @@ export class ConnectionStore {
     try {
       origin = connectionEndpointOrigin(state.config.endpointUrl);
     } catch {
-      return null; // fail closed: an unsupported stored endpoint carries no auth
+      return null; // why: fail closed: an unsupported stored endpoint carries no auth
     }
     return { endpointOrigin: origin, apiKey };
   }
 
   /**
-   * Apply a public config update plus the explicit credential update.
+   * safety: Apply a public config update plus the explicit credential update.
    *
    * - an unsupported endpoint is refused BEFORE any effect: nothing is
    *   encrypted, nothing is written and the previous state survives;
@@ -444,14 +444,14 @@ export class ConnectionStore {
             ? encodeCredential(ConnectionStore.encrypt(this.deps, credential.value))
             : undefined;
       } else {
-        // keep
+        // why: a non-replace update keeps the stored credential.
         if (!previous?.credential) {
-          // No stored key and none supplied: valid, simply keyless.
+          // note: No stored key and none supplied: valid, simply keyless.
           nextCredential = undefined;
         } else if (sameEndpoint(previous.config, config)) {
           nextCredential = previous.credential;
         } else {
-          // Endpoint changed: the old endpoint's credential never carries over.
+          // safety: Endpoint changed: the old endpoint's credential never carries over.
           nextCredential = undefined;
         }
       }
@@ -467,7 +467,7 @@ export class ConnectionStore {
   }
 
   /**
-   * Remove all stored material. Writes a durable cleared tombstone next to
+   * note: Remove all stored material. Writes a durable cleared tombstone next to
    * the store so a later {@link ConnectionStore.open} sees the marker and
    * never re-imports the legacy material (D-18): clear is a deliberate user
    * action and must not be undone by the still-present legacy key. The

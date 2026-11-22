@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Schema / ownership consistency checks for nexus-local-db vs the nexus42 app
+# note: Schema / ownership consistency checks for nexus-local-db vs the nexus42 app
 # (ordinary `cli` binary + the Connect-only `nexus-runtime` binary — one
 # manifest, one workspace-DB owner). Mirrors `.github/workflows/ci.yml` job
 # `schema-consistency-check`.

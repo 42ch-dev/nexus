@@ -1,5 +1,5 @@
 /**
- * Product desktop host (v1.192 P0-T7) — the ONE Electron main process.
+ * note: Product desktop host (v1.192 P0-T7) — the ONE Electron main process.
  *
  * Composes the reviewed modules into the shipped app:
  *  - identity from `resources/product.json` (P1-T1): app name, bundle-id
@@ -92,18 +92,16 @@ const execFileAsync = promisify(execFile);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// ---------------------------------------------------------------------------
-// Product identity (resources/product.json, P1-T1 producer / P0-T7 consumer)
-// ---------------------------------------------------------------------------
+// note: Product identity (resources/product.json, P1-T1 producer / P0-T7 consumer)
 
 export interface ProductIdentity {
-  /** Bundle id, e.g. io.nexus42.desktop — also the userData directory name. */
+  /** note: Bundle id, e.g. io.nexus42.desktop — also the userData directory name. */
   id: string;
-  /** Display name, e.g. Nexus. */
+  /** note: Display name, e.g. Nexus. */
   name: string;
-  /** Marketing version carried by the packaging layout. */
+  /** note: Marketing version carried by the packaging layout. */
   version: string;
-  /** Minimum macOS version, e.g. 13.0. */
+  /** note: Minimum macOS version, e.g. 13.0. */
   minimumMacos: string;
 }
 
@@ -170,9 +168,7 @@ export function applyProductIdentity(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Launch-time resolution (pure — covered headlessly by the host test)
-// ---------------------------------------------------------------------------
+// note: Launch-time resolution (pure — covered headlessly by the host test)
 
 /**
  * Explicitly launched dev HMR URL. Only the two frozen Vite origins are
@@ -242,9 +238,7 @@ export function resolveTrustedNodeExecutable(input: {
   return findNodeOnPath(sanitizeInheritedEnv(input.env));
 }
 
-// ---------------------------------------------------------------------------
-// Injected Electron surfaces
-// ---------------------------------------------------------------------------
+// note: Injected Electron surfaces
 
 /** Narrowest structural view of Electron's `utilityProcess` module main needs. */
 export interface UtilityProcessFork {
@@ -256,27 +250,27 @@ export interface DesktopElectronSurfaces {
   BrowserWindow: typeof BrowserWindow;
   dialog: Dialog;
   shell: Shell;
-  /** The main session the selected window loads in (defaultSession). */
+  /** note: The main session the selected window loads in (defaultSession). */
   session: Session;
   ipcMain: IpcMain;
   utilityProcess: UtilityProcessFork;
   Menu: typeof Menu;
   safeStorage: SecureStorageAdapter;
-  /** Dock/tray icon image decoding (PNG/JPEG only). */
+  /** why: Dock/tray icon image decoding (PNG/JPEG only). */
   nativeImage: NativeImageLoader;
 }
 
 export interface DesktopHostPaths {
-  /** Directory holding product.json and icons/ (dev: apps/desktop-electron/resources). */
+  /** note: Directory holding product.json and icons/ (dev: apps/desktop-electron/resources). */
   resourcesDir: string;
   distRoot: string;
   preloadPath: string;
-  /** Compiled utility owner entry (dist/utility-host.js). */
+  /** note: Compiled utility owner entry (dist/utility-host.js). */
   utilityEntry: string;
-  /** Packaged standalone TS service entry (nexus-service dist/main.js). */
+  /** note: Packaged standalone TS service entry (nexus-service dist/main.js). */
   serviceEntry: string;
   userDataDir: string;
-  /** Trusted raw user home (launch environment). */
+  /** note: Trusted raw user home (launch environment). */
   home: string;
   documentsPath: string;
 }
@@ -288,9 +282,9 @@ export interface ComposeDesktopHostOptions {
   env: NodeJS.ProcessEnv;
   isPackaged: boolean;
   devUrl: string | null;
-  /** Trusted standalone Node (see {@link resolveTrustedNodeExecutable}). */
+  /** note: Trusted standalone Node (see {@link resolveTrustedNodeExecutable}). */
   nodeExecutable: string | null;
-  /** Opened store override (test seam); defaults to the encrypted userData store. */
+  /** note: Opened store override (test seam); defaults to the encrypted userData store. */
   connectionStore?: ConnectionStore;
   adapters?: {
     registerProtocol?: (distRoot: string, policy: DesktopCspPolicy) => Promise<void>;
@@ -304,7 +298,7 @@ export interface ComposeDesktopHostOptions {
       getActiveAuth: () => ActiveConnectionAuth | null,
     ) => void;
     /**
-     * Legacy plaintext credential source (test seam); defaults to the paired
+     * safety: Legacy plaintext credential source (test seam); defaults to the paired
      * macOS-keychain/app-data adapter over `app.getPath('appData')`.
      */
     legacyCredentials?: LegacyCredentialAdapter;
@@ -322,13 +316,13 @@ export interface DesktopHost {
   controller: DesktopServiceController;
   quitController: DesktopQuitController;
   connectionStore: ConnectionStore;
-  /** Live generation source: bumps on every window replacement. */
+  /** note: Live generation source: bumps on every window replacement. */
   generation(): number;
-  /** IPC bindings in registration order (one per window generation). */
+  /** note: IPC bindings in registration order (one per window generation). */
   ipcBindings: DesktopHostIpcBinding[];
-  /** Focuses the sole window; a second-instance launch never spawns anything. */
+  /** why: Focuses the sole window; a second-instance launch never spawns anything. */
   focusExistingWindow(): void;
-  /** Settles when the in-flight (re)registration has completed. */
+  /** note: Settles when the in-flight (re)registration has completed. */
   settled(): Promise<void>;
   dispose(): void;
 }
@@ -340,10 +334,10 @@ function quitDetail(status: DaemonStatus): string {
   return status.detail ? `${base} ${status.detail}` : base;
 }
 
-/** Retired legacy-host keychain identity of the legacy connection credential. */
+/** safety: Retired legacy-host keychain identity of the legacy connection credential. */
 const LEGACY_KEYCHAIN_SERVICE = 'nexus42';
 const LEGACY_KEYCHAIN_ACCOUNT = 'connection_config';
-/** `security` exit status for errSecItemNotFound: the item is already gone. */
+/** note: `security` exit status for errSecItemNotFound: the item is already gone. */
 const SECURITY_ITEM_NOT_FOUND = 44;
 
 /**
@@ -358,22 +352,22 @@ const SECURITY_ITEM_NOT_FOUND = 44;
  * an error message.
  */
 export interface LegacyCredentialAdapter {
-  /** Legacy JSON, or null when no legacy source exists. */
+  /** note: Legacy JSON, or null when no legacy source exists. */
   read(): Promise<string | null>;
-  /** Removes both legacy sources; an already-absent source counts as removed. */
+  /** note: Removes both legacy sources; an already-absent source counts as removed. */
   cleanup(): Promise<void>;
 }
 
 export interface LegacyCredentialAdapterDeps {
   /**
-   * `/usr/bin/security` invocation (no shell). Injected by tests so the exact
+   * why: `/usr/bin/security` invocation (no shell). Injected by tests so the exact
    * argv is asserted WITHOUT reading or writing the user's keychain; the
    * default runs the real CLI with a bounded timeout.
    */
   runSecurity?: (args: string[]) => Promise<{ stdout: string }>;
-  /** Filesystem removal primitive (defaults to `rmSync`). */
+  /** note: Filesystem removal primitive (defaults to `rmSync`). */
   removeFile?: (filePath: string) => void;
-  /** Platform gate for the keychain step (defaults to `process.platform`). */
+  /** note: Platform gate for the keychain step (defaults to `process.platform`). */
   platform?: NodeJS.Platform;
 }
 
@@ -406,7 +400,7 @@ export function createLegacyCredentialAdapter(
           const secret = stdout.trim();
           if (secret.length > 0) return secret;
         } catch {
-          // No such item (or no usable keychain): fall through to app-data.
+          // note: No such item (or no usable keychain): fall through to app-data.
         }
       }
       try {
@@ -426,7 +420,7 @@ export function createLegacyCredentialAdapter(
             LEGACY_KEYCHAIN_ACCOUNT,
           ]);
         } catch (err) {
-          // An already-absent item is the idempotent success case; every other
+          // note: An already-absent item is the idempotent success case; every other
           // failure (locked keychain, denied access, …) must surface.
           if (Number((err as { code?: unknown } | null)?.code) !== SECURITY_ITEM_NOT_FOUND) throw err;
         }
@@ -457,30 +451,29 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   const resolvedPort = resolveDesktopServicePort(undefined, input.env);
   const localEndpoint = `http://${DESKTOP_SERVICE_HOST}:${resolvedPort}`;
-  // The app-managed local origin is validated through the same strict grammar
+  // note: The app-managed local origin is validated through the same strict grammar
   // as every remote endpoint, so the CSP fallback below can never be the
   // reason a response is emitted without a policy.
   const localServiceOrigin = connectionEndpointOrigin(localEndpoint);
   const navigationOptions = { dev };
 
-  // ── identity ──────────────────────────────────────────────────────────
   applyProductIdentity(e.app, product, {
     userDataDir: input.paths.userDataDir,
     resourcesDir: input.paths.resourcesDir,
   }, e.nativeImage);
 
-  // ── trusted runtime metadata (preload reads it synchronously) ─────────
+  // note: trusted runtime metadata (preload reads it synchronously)
   const runtimeMetadata = { localEndpoint };
   const onRuntimeChannel = (event: { returnValue: unknown }): void => {
     event.returnValue = runtimeMetadata;
   };
   e.ipcMain.on(DESKTOP_RUNTIME_CHANNEL, onRuntimeChannel);
 
-  // ── config, connection store, network policy ──────────────────────────
+  // note: config, connection store, network policy
   const config = createDesktopConfig(input.paths.home, input.paths.documentsPath);
   const { resolveWorkspaceRoot, ...configHandlers } = config;
 
-  // One paired adapter: the store imports only when the same unit also
+  // why: One paired adapter: the store imports only when the same unit also
   // carries the removal of both plaintext originals.
   const legacyCredentials =
     adapters.legacyCredentials ?? createLegacyCredentialAdapter(e.app.getPath('appData'));
@@ -492,7 +485,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       readLegacy: () => legacyCredentials.read(),
       cleanupLegacy: () => legacyCredentials.cleanup(),
     }));
-  // An existing store that could not be activated is surfaced on both
+  // note: An existing store that could not be activated is surfaced on both
   // channels: the durable main-process diagnostic (the legacyCleanupFailure
   // stderr shape, extended with the typed classification code) and a one-shot
   // window-less notice. The compose seam runs after
@@ -529,7 +522,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   attachNetworkHooks(e.session, () => connectionStore.getAuth());
 
-  // Exact-origin CSP, refreshed per response with the ACTIVE connection
+  // note: Exact-origin CSP, refreshed per response with the ACTIVE connection
   // origin (frozen contract: main validates and inserts exact origins only).
   // The origin is derived ONLY through the shared endpoint grammar; a stored
   // config that fails it (or an unreadable store) falls back to the validated
@@ -539,7 +532,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       try {
         return connectionEndpointOrigin(activeConfig.endpointUrl);
       } catch {
-        // fall through to the app-managed local endpoint
+        // note: fall through to the app-managed local endpoint
       }
     }
     return localServiceOrigin;
@@ -561,7 +554,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     );
   }
 
-  // ── service controller (P0-T4) with renderer status events ────────────
+  // note: service controller (P0-T4) with renderer status events
   const controller = new DesktopServiceController({
     home: input.paths.home,
     resolvedPort,
@@ -584,14 +577,14 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     }),
   });
 
-  // ── window + IPC generation ───────────────────────────────────────────
+  // note: window + IPC generation
   let generation = 0;
   let currentWindow: BrowserWindow | null = null;
   let ipcRegistration: RegisterDesktopIpcResult | null = null;
   let lastSelect: Promise<void> = Promise.resolve();
   const ipcBindings: DesktopHostIpcBinding[] = [];
 
-  // ── quit gate (P0-T6), wired into before-quit below ───────────────────
+  // note: quit gate (P0-T6), wired into before-quit below
   const chooseQuitChoice = async (status: DaemonStatus): Promise<QuitChoice | null> => {
     const options = {
       type: 'question' as const,
@@ -626,7 +619,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       return;
     }
     if (outcome.choice === 'keep') {
-      // D-21: the user is told in-flight work was interrupted.
+      // note: D-21: the user is told in-flight work was interrupted.
       void e.dialog
         .showMessageBox({
           type: 'info',
@@ -641,7 +634,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   };
   const quitController = new DesktopQuitController({ controller, chooseQuitChoice, reportQuitOutcome });
 
-  // ── the full typed handler map ────────────────────────────────────────
+  // note: the full typed handler map
   const handlers: DesktopHandlers = {
     ...configHandlers,
     ...createDesktopActions({
@@ -708,7 +701,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       await controller.restart();
       return null;
     },
-    /** Parity row 22: main-owned maximize toggle. */
+    /** note: Parity row 22: main-owned maximize toggle. */
     async toggle_maximize_window() {
       const win = currentWindow;
       if (!win || win.isDestroyed()) {
@@ -723,13 +716,13 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     },
   };
 
-  // ── window chrome + hardening (parity rows 22/26/25/29) ───────────────
+  // note: window chrome + hardening (parity rows 22/26/25/29)
   const preloadPath = input.paths.preloadPath;
 
   function hardenWindow(win: BrowserWindow): void {
-    // Deny all window.open and webview creation, everywhere.
+    // note: Deny all window.open and webview creation, everywhere.
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    // Deny navigation/redirect outside the active app origin. An outbound
+    // note: Deny navigation/redirect outside the active app origin. An outbound
     // link must call `open_external_url` — an untrusted navigation is never
     // auto-opened as an external URL.
     win.webContents.on('will-navigate', (event, url) => {
@@ -742,7 +735,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       if (currentWindow === win) {
         currentWindow = null;
       }
-      // The renderer alone is replaced; the service owner is never killed by
+      // why: The renderer alone is replaced; the service owner is never killed by
       // a renderer crash and no second owner is created.
       recreateWindow();
     });
@@ -776,7 +769,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     return win;
   }
 
-  // Registration ownership is serialized: each selection awaits the previous
+  // note: Registration ownership is serialized: each selection awaits the previous
   // one's registration and disposes it (it is superseded by definition —
   // whether it won and was stored, or resolved late and was not) before the
   // current one binds. ipcMain allows a single handler per channel, so a
@@ -795,7 +788,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
         getCurrentGeneration: () => generation,
         dev,
       });
-      // A registration resolving after a newer generation won must not
+      // why: A registration resolving after a newer generation won must not
       // clobber the live binding. It is NOT disposed here: the newer
       // selection (which is awaiting us as `previous`) disposes us exactly
       // once, always before it re-binds the sole invoke channel.
@@ -815,7 +808,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     );
   }
 
-  // ── protocol BEFORE any window is created/loaded ──────────────────────
+  // note: protocol BEFORE any window is created/loaded
   // The `nexus` scheme privilege is registered exactly once, pre-ready, by
   // the bootstrap (`registerDesktopSchemes` before `app.whenReady()`); this
   // composition never registers schemes again. The protocol handler must be
@@ -834,7 +827,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       await selectWindow(win);
     })()
       .catch((err) => {
-        // Surface, never swallow: a replacement that failed to register
+        // why: Surface, never swallow: a replacement that failed to register
         // leaves the visible window without its bridge — that must be
         // visible in main-process diagnostics (QC1 F-001).
         process.stderr.write(`[desktop] window replacement registration failed: ${errorMessage(err)}\n`);
@@ -849,7 +842,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   lastSelect = selectWindow(firstWindow);
 
   function focusExistingWindow(): void {
-    // Second-instance contract: focus the sole window, never spawn anything.
+    // why: Second-instance contract: focus the sole window, never spawn anything.
     // With no live window this is an explicit no-op — window (re)creation is
     // owned only by the guarded paths (`activate`, renderer-crash recreate),
     // so a second launch can never race a replacement into existence.
@@ -862,15 +855,14 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     win.focus();
   }
 
-  // ── standard menu roles only (no native product menu) ─────────────────
+  // note: standard menu roles only (no native product menu)
   const menuTemplate: MenuItemConstructorOptions[] =
     process.platform === 'darwin'
       ? [{ role: 'appMenu' }, { role: 'editMenu' }]
       : [{ role: 'fileMenu' }, { role: 'editMenu' }];
   e.Menu.setApplicationMenu(e.Menu.buildFromTemplate(menuTemplate));
 
-  // ── app-level wiring ──────────────────────────────────────────────────
-  // Second launch: focus the sole window — never spawn a duplicate service.
+  // why: Second launch: focus the sole window — never spawn a duplicate service.
   e.app.on('second-instance', () => {
     focusExistingWindow();
   });
@@ -885,7 +877,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     }
   });
 
-  // The one quit gate: Cmd+Q / menu quit / window-all-closed all funnel
+  // note: The one quit gate: Cmd+Q / menu quit / window-all-closed all funnel
   // through here. DesktopQuitController is single-flight, so a re-raised
   // before-quit during the decision joins the same promise.
   let quitAllowed = false;
@@ -902,7 +894,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       .catch(() => undefined);
   });
 
-  // Outbound URLs only ever through the shared predicate + shell.openExternal.
+  // why: Outbound URLs only ever through the shared predicate + shell.openExternal.
   e.app.on('open-url', (event, url) => {
     event.preventDefault();
     if (isAllowedDesktopExternalUrl(url)) {
@@ -937,9 +929,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   };
 }
 
-// ---------------------------------------------------------------------------
-// Bootstrap (the real Electron entry)
-// ---------------------------------------------------------------------------
+// note: Bootstrap (the real Electron entry)
 
 async function bootstrap(): Promise<void> {
   const electron = (await import('electron')) as typeof import('electron');
@@ -950,7 +940,7 @@ async function bootstrap(): Promise<void> {
     : join(__dirname, '..', 'resources');
   const product = loadProductIdentity(resourcesDir);
 
-  // Single instance: a second launch focuses the sole window and exits —
+  // note: Single instance: a second launch focuses the sole window and exits —
   // it never spawns a duplicate service.
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -978,7 +968,7 @@ async function bootstrap(): Promise<void> {
     'main.js',
   );
 
-  // The `nexus` scheme must be privileged before the app is ready.
+  // why: The `nexus` scheme must be privileged before the app is ready.
   await registerDesktopSchemes();
   await app.whenReady();
 
@@ -1022,7 +1012,7 @@ async function bootstrap(): Promise<void> {
     nodeExecutable,
   });
 
-  // A refused legacy cleanup is reported on the existing main-process
+  // note: A refused legacy cleanup is reported on the existing main-process
   // diagnostic channel and the app keeps running: the encrypted store is
   // authoritative and the plaintext source is retried by the next launch.
   if (host.connectionStore.legacyCleanupFailure !== null) {
@@ -1030,7 +1020,7 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-// Auto-run only inside the real Electron main process; plain-node test
+// why: Auto-run only inside the real Electron main process; plain-node test
 // imports get the composition factory without side effects.
 if (process.type === 'browser') {
   bootstrap().catch((err) => {
