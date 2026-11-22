@@ -1,4 +1,5 @@
 //! Guarded preset authoring and Strategy edits, independent of execution.
+// invariant: preset authoring owns the file effect only; execution never runs here.
 
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
@@ -8,7 +9,7 @@ use nexus_contracts::{
     ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_contracts::{UpdatePresetRequest, UpdatePresetResponse};
-// The preset profile family is generated one type per module; the lane de-duplicates
+// note: the preset profile family is generated one type per module; the lane de-duplicates
 // every `$ref` target to its standalone module, so import each type from the module
 // that owns it.
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_conditional_rule::PresetProfileConditionalRule;
@@ -36,7 +37,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Preset domain failures. Adapters retain their existing status/envelope mapping.
+/// note: Preset domain failures. Adapters retain their existing status/envelope mapping.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum PresetError {
     #[error("{code}: {message}")]
@@ -94,7 +95,7 @@ fn preset_io(code: &str, error: impl std::fmt::Display) -> PresetError {
     }
 }
 
-/// Resolve existing ancestors before any file effect, including a new template
+/// note: Resolve existing ancestors before any file effect, including a new template
 /// below a symlinked parent. Lexical traversal is rejected by the caller.
 fn confined_path(root: &Path, path: &Path) -> Result<PathBuf, PresetError> {
     let canonical_root = root
@@ -133,7 +134,7 @@ fn confined_path(root: &Path, path: &Path) -> Result<PathBuf, PresetError> {
     Ok(resolved)
 }
 
-/// Stable per-ID lock outside the bundle: deleting/recreating a bundle cannot
+/// note: Stable per-ID lock outside the bundle — deleting/recreating a bundle cannot
 /// split concurrent writers across different lock-file inodes.
 fn acquire_preset_lock(nexus_home: &Path, id: &str) -> Result<std::fs::File, PresetError> {
     validate_strategy_id(id)?;
@@ -186,7 +187,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     pub async fn patch_strategy_state(
         &self,
@@ -207,7 +208,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     pub async fn patch_strategy_transition(
         &self,
@@ -226,7 +227,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     pub async fn patch_strategy_prompt_template(
         &self,
@@ -247,7 +248,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     pub async fn scaffold_preset(
         &self,
@@ -268,7 +269,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     pub async fn delete_preset(&self, principal: &Principal, preset_id: String) -> CoreResult<()> {
         self.preset_write(principal, preset_id, |home, id| {
@@ -287,10 +288,10 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn get_preset(
         &self,
         principal: &Principal,
@@ -311,7 +312,7 @@ impl CoreService {
         })
     }
 
-    /// Re-resolve a preset from disk (`POST /v1/daemon/presets/{id}:reload`).
+    /// note: Re-resolve a preset from disk (`POST /v1/daemon/presets/{id}:reload`).
     ///
     /// Every preset read in this core is read-through: the manifest is parsed
     /// from its on-disk bundle per request, so there is no compiled cache to
@@ -326,8 +327,8 @@ impl CoreService {
     /// Returns `CoreError` when the principal is rejected, the id is not a
     /// valid preset id, or the preset does not resolve from the current disk
     /// state.
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn reload_preset(
         &self,
         principal: &Principal,
@@ -351,10 +352,10 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    /// or fails validation, or the guarded home read/write fails.
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    /// note: or fails validation, or the guarded home read/write fails.
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn list_presets(&self, principal: &Principal) -> CoreResult<ListPresetsResponse> {
         self.verify_principal(principal)?;
         let caps = BuiltinCapabilityCatalog;
@@ -418,10 +419,11 @@ impl CoreService {
 
     /// # Errors
     ///
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: the error surface is the shared `CoreError` mapping.
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn validate_preset(
         &self,
         principal: &Principal,
@@ -433,7 +435,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     /// Replace user YAML without changing the retained request or revision policy.
     pub async fn update_preset(
@@ -466,11 +468,12 @@ impl CoreService {
 
     /// # Errors
     ///
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: the error surface is the shared `CoreError` mapping.
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     /// Retained orchestration listing: embedded IDs followed by unique system IDs.
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn list_orchestration_presets(
         &self,
         principal: &Principal,
@@ -490,12 +493,13 @@ impl CoreService {
     }
 
     /// # Errors
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    /// note: the error surface is the shared `CoreError` mapping.
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
     ///
-    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// note: Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     /// Read the profile using the retained user/system/embedded resolution order.
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn get_preset_profile(
         &self,
         principal: &Principal,
@@ -529,14 +533,13 @@ impl CoreService {
     }
 }
 
-/// Maximum YAML file size for a user preset (1 MiB).
+/// note: Maximum YAML file size for a user preset (1 MiB).
 const PRESET_MAX_YAML_SIZE: usize = 1024 * 1024;
 
-/// Maximum YAML nesting depth for a user preset.
+/// note: Maximum YAML nesting depth for a user preset.
 const PRESET_MAX_YAML_DEPTH: usize = 10;
-// ─── Request helpers ───────────────────────────────────────────────────────
 
-/// Parsed `set` payload for `patch_state`.
+/// note: Parsed `set` payload for `patch_state`.
 #[derive(Debug, Default)]
 struct StatePatchSet {
     label: Option<String>,
@@ -561,9 +564,9 @@ fn parse_state_set(value: &Value) -> Result<StatePatchSet, PresetError> {
     Ok(StatePatchSet { label, description })
 }
 
-// ─── Preset loading / revision read ────────────────────────────────────────
+// note: preset loading / revision read.
 
-/// Locate a user preset bundle and read its YAML + current revision.
+/// note: Locate a user preset bundle and read its YAML + current revision.
 ///
 /// Returns the parsed YAML value, bundle directory, and current `revision`
 /// (missing `revision:` reads as `0`).
@@ -573,7 +576,7 @@ fn load_user_preset_yaml(
 ) -> Result<(serde_yaml::Value, std::path::PathBuf, u64), PresetError> {
     validate_strategy_id(strategy_id)?;
 
-    // `nexus-home-layout` user-preset helpers take the RAW user home and join
+    // note: `nexus-home-layout` user-preset helpers take the RAW user home and join
     // `.nexus42` internally (conventions/nexus-home-layout-path-helpers.md);
     // passing the `.nexus42` root would double-nest to
     // `<home>/.nexus42/.nexus42/presets` (F-QA-001).
@@ -587,7 +590,7 @@ fn load_user_preset_yaml(
         });
     }
     if !yaml_path.is_file() {
-        // Reject embedded/system presets explicitly so callers get a clear
+        // invariant: reject embedded/system presets explicitly so callers get a clear
         // forbidden message rather than a generic not-found.
         if nexus_preset::list_embedded_presets().contains(&strategy_id.to_string()) {
             return Err(PresetError::Rejected {
@@ -652,7 +655,7 @@ fn load_user_preset_yaml(
     Ok((value, bundle_dir, revision))
 }
 
-/// Validate a strategy/preset identifier (same rules as a user preset name).
+/// note: Validate a strategy/preset identifier (same rules as a user preset name).
 fn validate_strategy_id(id: &str) -> Result<(), PresetError> {
     if id.is_empty()
         || id.contains('/')
@@ -672,7 +675,7 @@ fn validate_strategy_id(id: &str) -> Result<(), PresetError> {
     Ok(())
 }
 
-/// Ensure the request's repeated identifier matches the URL path.
+/// note: Ensure the request's repeated identifier matches the URL path.
 fn ensure_id_matches(path: &str, body: &str, field: &str) -> Result<(), PresetError> {
     if path != body {
         return Err(PresetError::Rejected {
@@ -683,8 +686,6 @@ fn ensure_id_matches(path: &str, body: &str, field: &str) -> Result<(), PresetEr
     Ok(())
 }
 
-// ─── Conflict builder ──────────────────────────────────────────────────────
-
 fn strategy_conflict(
     current_revision: u64,
     node_id: &str,
@@ -694,9 +695,9 @@ fn strategy_conflict(
     PresetError::strategy_conflict(current_revision, node_id, conflicting_path, recovery_hint)
 }
 
-// ─── Patch application ─────────────────────────────────────────────────────
+// note: patch application.
 
-/// Find the index of a state by id inside a YAML sequence.
+/// note: Find the index of a state by id inside a YAML sequence.
 fn find_state_index(states: &[serde_yaml::Value], id: &str) -> Option<usize> {
     states.iter().position(|s| {
         s.get("id")
@@ -705,7 +706,7 @@ fn find_state_index(states: &[serde_yaml::Value], id: &str) -> Option<usize> {
     })
 }
 
-/// Collect the ids of all states in a YAML sequence.
+/// note: Collect the ids of all states in a YAML sequence.
 fn state_ids(states: &[serde_yaml::Value]) -> Vec<String> {
     states
         .iter()
@@ -713,7 +714,7 @@ fn state_ids(states: &[serde_yaml::Value]) -> Vec<String> {
         .collect()
 }
 
-/// Rename a state id and rewrite all references held in YAML values.
+/// note: Rename a state id and rewrite all references held in YAML values.
 fn rename_state_references(
     root: &mut serde_yaml::Value,
     old_id: &str,
@@ -728,7 +729,7 @@ fn rename_state_references(
 
     let mut side_effects = Vec::new();
 
-    // Update preset.initial / preset.terminal
+    // note: update preset.initial / preset.terminal
     if let Some(preset) = root.get_mut("preset") {
         for key in ["initial", "terminal"] {
             if preset
@@ -742,17 +743,17 @@ fn rename_state_references(
         }
     }
 
-    // Update every state's next references.
+    // note: update every state's next references.
     if let Some(states) = root.get_mut("states").and_then(|v| v.as_sequence_mut()) {
         for state in states {
-            // Linear next scalar.
+            // note: linear next scalar.
             if let Some(next) = state.get_mut("next") {
                 if next.is_string() {
                     if next.as_str().is_some_and(|v| v == old_id) {
                         *next = serde_yaml::Value::String(new_id.to_string());
                     }
                 } else if let Some(next_map) = next.as_mapping_mut() {
-                    // Conditional rules / labeled branches
+                    // note: conditional rules / labeled branches
                     if let Some(rules) = next_map.get_mut("rules").and_then(|v| v.as_sequence_mut())
                     {
                         for rule in rules {
@@ -763,13 +764,13 @@ fn rename_state_references(
                             }
                         }
                     }
-                    // Default target
+                    // note: default target
                     if let Some(default) = next_map.get_mut("default") {
                         if default.as_str().is_some_and(|v| v == old_id) {
                             *default = serde_yaml::Value::String(new_id.to_string());
                         }
                     }
-                    // Go/nogo branches
+                    // note: go/nogo branches
                     for key in ["go", "nogo"] {
                         if let Some(branch) = next_map.get_mut(key) {
                             if branch.as_str().is_some_and(|v| v == old_id) {
@@ -782,7 +783,7 @@ fn rename_state_references(
         }
     }
 
-    // Update the renamed state's own id.
+    // note: update the renamed state's own id.
     if let Some(states) = root.get_mut("states").and_then(|v| v.as_sequence_mut()) {
         if let Some(state) = states.iter_mut().find(|s| {
             s.get("id")
@@ -797,9 +798,9 @@ fn rename_state_references(
     Ok(side_effects)
 }
 
-// ─── Domain validation ─────────────────────────────────────────────────────
+// note: domain validation.
 
-/// Run the same preset validation the loader uses and return (errors, warnings).
+/// note: Run the same preset validation the loader uses and return (errors, warnings).
 fn validate_preset_yaml(
     bundle_root: &std::path::Path,
     yaml_value: &serde_yaml::Value,
@@ -838,9 +839,9 @@ fn validate_preset_yaml(
     Ok((errors, warnings))
 }
 
-// ─── Atomic persistence ────────────────────────────────────────────────────
+// note: atomic persistence.
 
-/// Write the updated YAML back to `preset.yaml`, bumping the revision header.
+/// note: Write the updated YAML back to `preset.yaml`, bumping the revision header.
 ///
 /// Uses a request-unique temp file + rename + fsync (file and parent directory)
 /// for atomicity. The parent directory fsync ensures the rename entry is durable
@@ -871,7 +872,7 @@ fn write_preset_yaml(
     Ok(())
 }
 
-/// Atomically write `content` to `target_path` using `tmp_path`, then rename.
+/// note: Atomically write `content` to `target_path` using `tmp_path`, then rename.
 ///
 /// Syncs the temp file, renames, and fsyncs the parent directory. Cleans up
 /// `tmp_path` on rename error. The durable sequence lives in the private
@@ -919,13 +920,13 @@ fn atomic_write_with_dir_fsync(
                         ),
                     ))
                 }
-                // fsync_final is disabled on this path; keep the stage handled
+                // note: fsync_final is disabled on this path; keep the stage handled
                 // so the match stays total if that ever changes.
                 Stage::FinalSync => Err(internal(
                     "FILE_SYNC_ERROR",
                     format!("cannot fsync final file: {}", e.source),
                 )),
-                // Both directory stages run strictly after the rename, so the
+                // note: both directory stages run strictly after the rename, so the
                 // new bytes are already visible; only crash durability is at
                 // risk, which makes them warning-only on this path.
                 Stage::DirOpen | Stage::DirSync => {
@@ -944,7 +945,7 @@ fn atomic_write_with_dir_fsync(
     }
 }
 
-/// Back up the existing file at `path` (if any) and return the backup bytes.
+/// note: Back up the existing file at `path` (if any) and return the backup bytes.
 fn backup_existing_file(path: &std::path::Path) -> Result<Option<Vec<u8>>, PresetError> {
     if !path.exists() {
         return Ok(None);
@@ -956,7 +957,7 @@ fn backup_existing_file(path: &std::path::Path) -> Result<Option<Vec<u8>>, Prese
     Ok(Some(bytes))
 }
 
-/// Restore `path` from `backup` and remove any leftover temp file.
+/// note: Restore `path` from `backup` and remove any leftover temp file.
 ///
 /// The restore itself is atomic: backup bytes are written to a fresh temp file
 /// in the same directory, fsync'd, and renamed over `path`, followed by a
@@ -980,7 +981,7 @@ fn rollback_template_write(
                 ));
                 path.with_file_name(&tmp_name)
             } else {
-                // The caller always passes a file path, but if that invariant
+                // invariant: the caller always passes a file path, but if that invariant
                 // ever breaks, still attempt the rollback via a non-atomic write
                 // rather than leaving the file in an inconsistent state.
                 if let Err(e) = std::fs::write(path, &bytes) {
@@ -1006,7 +1007,7 @@ fn rollback_template_write(
     }
 }
 
-/// Validate that a transition condition string parses against the preset
+/// note: Validate that a transition condition string parses against the preset
 /// condition grammar. Conditional `when:` values in user presets are expression
 /// strings; an unparsable condition must be rejected before persistence.
 fn validate_transition_condition(condition: &str) -> Result<(), PresetError> {
@@ -1034,7 +1035,7 @@ fn validate_transition_op(op: &str) -> Result<(), PresetError> {
     }
 }
 
-/// Validate the `transition_kind` field of a transition patch request.
+/// note: Validate the `transition_kind` field of a transition patch request.
 fn validate_transition_kind(kind: &str) -> Result<(), PresetError> {
     if matches!(kind, "next" | "branch" | "default") {
         Ok(())
@@ -1054,7 +1055,7 @@ fn patch_state_inner(
     state_id: &str,
     req: &StrategyPatchStateRequest,
 ) -> Result<CoreStrategyPatchResponse, PresetError> {
-    // Load the canonical YAML while holding the lock so the revision check is
+    // invariant: load the canonical YAML while holding the lock so the revision check is
     // not subject to TOCTOU.
     let (mut yaml_value, bundle_dir, current_revision) =
         load_user_preset_yaml(nexus_home, strategy_id)?;
@@ -1138,7 +1139,7 @@ fn patch_state_inner(
     })
 }
 
-/// Apply a transition patch to a `next` YAML value.
+/// note: Apply a transition patch to a `next` YAML value.
 ///
 /// Returns `(matched, side_effects)`. If no branch matches, `matched` is false
 /// so the caller can emit a `strategy_transition_not_found` error.
@@ -1175,7 +1176,7 @@ fn apply_transition_patch(
     (matched, side_effects)
 }
 
-/// Match and update a conditional/labeled `rules` branch inside a transition.
+/// note: Match and update a conditional/labeled `rules` branch inside a transition.
 fn apply_conditional_rules(
     next_map: &mut serde_yaml::Mapping,
     old_target: &str,
@@ -1216,7 +1217,7 @@ fn apply_conditional_rules(
     matched
 }
 
-/// Match and update the `default` target of a conditional transition.
+/// note: Match and update the `default` target of a conditional transition.
 fn apply_default_transition(
     next_map: &mut serde_yaml::Mapping,
     old_target: &str,
@@ -1238,7 +1239,7 @@ fn apply_default_transition(
     false
 }
 
-/// Match and update `go` / `nogo` branches of a transition.
+/// note: Match and update `go` / `nogo` branches of a transition.
 fn apply_go_nogo_branches(
     next_map: &mut serde_yaml::Mapping,
     old_target: &str,
@@ -1260,7 +1261,7 @@ fn apply_go_nogo_branches(
     matched
 }
 
-/// Whether a conditional rule matches the same `(to, when)` pair as a create request.
+/// note: Whether a conditional rule matches the same `(to, when)` pair as a create request.
 fn transition_rule_matches(
     rule: &serde_yaml::Value,
     target: &str,
@@ -1368,7 +1369,7 @@ fn append_conditional_rule(
     Ok(())
 }
 
-/// Resolve the create form when `transition_kind` is omitted.
+/// note: Resolve the create form when `transition_kind` is omitted.
 ///
 /// Legacy callers without `transition_kind` keep the shipped behavior: absent
 /// `next` becomes a linear scalar; an existing conditional map appends a rule.
@@ -1390,7 +1391,7 @@ fn resolved_create_transition_kind<'a>(
     }
 }
 
-/// Create a new outgoing transition on a `next` YAML value.
+/// note: Create a new outgoing transition on a `next` YAML value.
 ///
 /// Honors `transition_kind` when supplied:
 /// - `next` — linear scalar when `next` is absent; rejects conditional maps.
@@ -1437,7 +1438,7 @@ fn apply_transition_create(
                 .as_mapping_mut()
                 .expect("ensure_conditional_next_map leaves a mapping");
             append_conditional_rule(next_map, req, new_target)?;
-            // Conditional presets require a `default` target; seed one when the
+            // why: conditional presets require a `default` target; seed one when the
             // author adds the first branch to an otherwise-empty state.
             if !next_map.contains_key(serde_yaml::Value::String("default".to_string())) {
                 next_map.insert(
@@ -1496,7 +1497,7 @@ fn patch_transition_inner(
         ));
     }
 
-    // Reject an unparsable condition before touching YAML so the file is never
+    // invariant: reject an unparsable condition before touching YAML so the file is never
     // left with a bad expression.
     if let Some(condition) = &req.condition {
         validate_transition_condition(condition)?;
@@ -1538,7 +1539,7 @@ fn patch_transition_inner(
                 ),
             })?;
 
-        // For create, `next` may be absent; treat absent as null so a new
+        // note: for create, `next` may be absent; treat absent as null so a new
         // transition is inserted.
         if state_node.get("next").is_none() {
             state_node["next"] = serde_yaml::Value::Null;
@@ -1548,7 +1549,7 @@ fn patch_transition_inner(
             .expect("next was just inserted if absent");
         apply_transition_create(next, req, new_target)?
     } else {
-        // `op` defaults to "update"; any value other than "create" is treated as
+        // note: `op` defaults to "update"; any value other than "create" is treated as
         // an update to preserve backward compatibility with shipped callers.
         let old_target = req
             .old_target
@@ -1619,7 +1620,7 @@ fn patch_prompt_template_inner(
     )
 }
 
-/// Injected YAML writer for tests so filesystem failures after the template
+/// note: Injected YAML writer for tests so filesystem failures after the template
 /// rename can be exercised deterministically.
 type PresetYamlWriter =
     fn(&std::path::Path, &mut serde_yaml::Value, u64) -> Result<(), PresetError>;
@@ -1649,7 +1650,7 @@ fn patch_prompt_template_inner_with_writer(
             message: "strategy revision exhausted".into(),
         })?;
 
-    // Validate the template path is safe before touching the filesystem.
+    // invariant: validate the template path is safe before touching the filesystem.
     nexus_preset::loader::assert_template_file_safe(&req.template_ref).map_err(|reason| {
         PresetError::Rejected {
             code: "strategy_template_path_unsafe".to_string(),
@@ -1659,7 +1660,7 @@ fn patch_prompt_template_inner_with_writer(
 
     let canonical_template = confined_path(&bundle_dir, &bundle_dir.join(&req.template_ref))?;
 
-    // Ensure parent directory exists inside the bundle.
+    // note: ensure parent directory exists inside the bundle.
     if let Some(parent) = canonical_template.parent() {
         std::fs::create_dir_all(parent).map_err(|e| PresetError::Internal {
             code: "DIR_CREATE_ERROR".to_string(),
@@ -1669,7 +1670,7 @@ fn patch_prompt_template_inner_with_writer(
 
     let body = req.set.body.clone();
 
-    // Stage the new template with a request-unique temp file, then rename it
+    // why: stage the new template with a request-unique temp file, then rename it
     // into place before validating the manifest. If validation fails we roll
     // back to the previous file contents and never bump YAML revision.
     let backup = backup_existing_file(&canonical_template)?;
@@ -1684,14 +1685,14 @@ fn patch_prompt_template_inner_with_writer(
     tmp_name.push(format!(".tmp.{}", uuid::Uuid::new_v4()));
     let tmp_path = canonical_template.with_file_name(&tmp_name);
 
-    // Use the same atomic-write helper as the YAML path so the template file
+    // note: use the same atomic-write helper as the YAML path so the template file
     // and the parent directory are fsync'd before and after the rename. Without
     // this, a crash between the write and the OS page-cache flush could leave
     // the template empty/truncated while the YAML revision has already been
     // bumped. R-V171-GREPTILE-P1-2.
     atomic_write_with_dir_fsync(&canonical_template, &tmp_path, body.as_bytes())?;
 
-    // Validation can fail before returning diagnostics (e.g. malformed grammar).
+    // note: validation can fail before returning diagnostics (e.g. malformed grammar).
     let (errors, warnings) = match validate_preset_yaml(&bundle_dir, &yaml_value) {
         Ok(summary) => summary,
         Err(error) => {
@@ -1704,7 +1705,7 @@ fn patch_prompt_template_inner_with_writer(
         return Err(PresetError::strategy_validation_failed(&errors, &warnings));
     }
 
-    // Persist the YAML revision only after the template file has been
+    // note: persist the YAML revision only after the template file has been
     // committed. If YAML persistence fails, roll the template back so the
     // on-disk prompt bytes and the YAML revision can never diverge.
     if let Err(e) = write_yaml(&bundle_dir, &mut yaml_value, new_revision) {
@@ -1724,14 +1725,13 @@ fn patch_prompt_template_inner_with_writer(
         side_effects,
     })
 }
-/// Default maximum YAML file size for validation (1 MiB).
+/// note: Default maximum YAML file size for validation (1 MiB).
 const VALIDATE_MAX_YAML_SIZE: usize = 1024 * 1024;
 
-/// Default maximum YAML nesting depth for validation.
+/// note: Default maximum YAML nesting depth for validation.
 const VALIDATE_MAX_YAML_DEPTH: usize = 10;
-// ─── Template ──────────────────────────────────────────────────────────────
 
-/// The template YAML for a new user preset.
+/// note: The template YAML for a new user preset.
 const PRESET_INIT_TEMPLATE: &str = r#"preset:
   id: {{name}}
   version: 1
@@ -1756,12 +1756,12 @@ states:
     terminal: true
 "#;
 
-/// Template for the default prompt file scaffolding.
+/// note: Template for the default prompt file scaffolding.
 const PROMPT_INIT_CONTENT: &str = r"# Start Prompt
 
 {{input}}
 ";
-/// Infer the bundle root directory from a preset.yaml path.
+/// note: Infer the bundle root directory from a preset.yaml path.
 ///
 /// If `file_path` ends with `preset.yaml`, return its parent directory.
 /// Otherwise return `None` (standalone YAML file, no bundle).
@@ -1773,7 +1773,7 @@ fn infer_bundle_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> 
     }
 }
 
-/// Parse YAML text into a `PresetManifest`, checking depth and structure.
+/// note: Parse YAML text into a `PresetManifest`, checking depth and structure.
 fn parse_and_check_manifest(
     yaml: &str,
 ) -> Result<nexus_contracts::local::orchestration::preset::PresetManifest, PresetError> {
@@ -1800,7 +1800,7 @@ fn parse_and_check_manifest(
         message: format!("Structural validation error: {e}"),
     })
 }
-/// Resolve the on-disk bundle directory for a system preset id.
+/// note: Resolve the on-disk bundle directory for a system preset id.
 ///
 /// System presets are listed with a qualified `_system.<name>` id, while the
 /// on-disk bundle lives at `presets/_system/<name>/` — strip the `_system.`
@@ -1810,7 +1810,7 @@ fn system_preset_dir_for_id(nexus_home: &std::path::Path, preset_id: &str) -> st
     nexus_preset::system_preset_dir::system_preset_bundle_dir(nexus_home, dir_name)
 }
 
-/// Locate a preset by ID and return its source + filesystem path.
+/// note: Locate a preset by ID and return its source + filesystem path.
 pub fn locate_preset(
     nexus_home: &std::path::Path,
     preset_id: &str,
@@ -1847,7 +1847,7 @@ pub fn locate_preset(
     )))
 }
 
-/// Load the raw YAML content for a preset.
+/// note: Load the raw YAML content for a preset.
 fn load_preset_yaml(
     _nexus_home: &std::path::Path,
     preset_id: &str,
@@ -1892,7 +1892,7 @@ fn load_preset_yaml(
     }
 }
 
-/// Resolve a client-supplied validation path to an existing file inside the
+/// note: Resolve a client-supplied validation path to an existing file inside the
 /// daemon home. Escapes are one uniform `invalid_input`, and the refusal never
 /// echoes the path it was given.
 fn confine_preset_validate_path(nexus_home: &Path, raw: &str) -> Result<PathBuf, PresetError> {
@@ -1916,7 +1916,7 @@ fn confine_preset_validate_path(nexus_home: &Path, raw: &str) -> Result<PathBuf,
     Ok(file_path)
 }
 
-/// Validate a preset YAML file named by the request.
+/// note: Validate a preset YAML file named by the request.
 ///
 /// The request names a file on the daemon host, so the path is confined to the
 /// daemon home BEFORE any filesystem observation — an unconstrained path turns
@@ -1929,7 +1929,7 @@ fn validate_preset_file(
 ) -> Result<ValidatePresetResponse, PresetError> {
     let file_path = confine_preset_validate_path(nexus_home, &req.path)?;
 
-    // Check file size via metadata BEFORE reading
+    // note: check file size via metadata BEFORE reading
     let metadata = std::fs::metadata(&file_path).map_err(|error| {
         tracing::warn!(
             path = %file_path.display(),
@@ -1961,7 +1961,7 @@ fn validate_preset_file(
         }
     })?;
 
-    // Defense-in-depth size check
+    // invariant: defense-in-depth size check
     if yaml.len() > VALIDATE_MAX_YAML_SIZE {
         return Ok(invalid_validation(&[format!(
             "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes)",
@@ -1970,10 +1970,10 @@ fn validate_preset_file(
         )]));
     }
 
-    // Parse + depth check
+    // note: parse + depth check
     let manifest = parse_and_check_manifest(&yaml)?;
 
-    // C2: Run loader-equivalent structural validation so the daemon endpoint
+    // note: C2 — run loader-equivalent structural validation so the daemon endpoint
     //     rejects the same defects the runtime loader would reject.
     let caps = BuiltinCapabilityCatalog;
     let structural_problems = nexus_preset::loader_validate_manifest_compat(&manifest, &caps);
@@ -1994,19 +1994,19 @@ fn validate_preset_file(
         });
     }
 
-    // C3: Shared path-safety check (same `assert_template_file_safe` the loader uses).
+    // note: C3 — shared path-safety check (same `assert_template_file_safe` the loader uses).
     let path_result = nexus_preset::validate_path_safety(&manifest);
 
-    // A5: Run shared semantic validation (the same surface used by the loader).
+    // note: A5 — run shared semantic validation (the same surface used by the loader).
     let sem_result = nexus_preset::validate_preset_semantic(&manifest, &caps);
 
-    // A3: If the path points into a bundle directory, also run asset checks.
+    // note: A3 — if the path points into a bundle directory, also run asset checks.
     let asset_result = infer_bundle_root(&file_path)
         .map_or_else(nexus_preset::ValidationResult::default, |bundle_root| {
             nexus_preset::validate_assets_in_bundle(&manifest, &bundle_root)
         });
 
-    // Combine diagnostics from path safety + semantic + asset checks
+    // note: combine diagnostics from path safety + semantic + asset checks
     let mut errors: Vec<String> = Vec::new();
     for d in path_result
         .diagnostics
@@ -2015,11 +2015,11 @@ fn validate_preset_file(
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_preset::DiagnosticSeverity::Error)
     {
-        // Sanitize: use only the relative path, not full host FS path
+        // note: sanitize — use only the relative path, not full host FS path
         errors.push(format!("{}: {}", d.path, d.message));
     }
 
-    // Warnings are reported separately in the response (informational).
+    // note: warnings are reported separately in the response (informational).
     let warnings: Vec<String> = path_result
         .diagnostics
         .iter()
@@ -2065,7 +2065,7 @@ fn scaffold_user_preset(
             bundle.display()
         )));
     }
-    // Encode the identifier as a YAML scalar rather than interpolating YAML syntax.
+    // note: encode the identifier as a YAML scalar rather than interpolating YAML syntax.
     let quoted = serde_json::to_string(id).map_err(|e| preset_io("YAML_SERIALIZE_ERROR", e))?;
     let yaml = PRESET_INIT_TEMPLATE.replace("{{name}}", &quoted);
     parse_and_check_manifest(&yaml)?;
@@ -2081,7 +2081,7 @@ fn scaffold_user_preset(
         path: bundle.display().to_string(),
     })
 }
-/// Trigger-lane classification (AR-21).
+/// note: Trigger-lane classification (AR-21).
 ///
 /// `cron` is derived from the shared works-cron role membership
 /// ([`cron_role_preset_ids`] — the brainstorm / write / review role presets
@@ -2109,7 +2109,7 @@ fn profile_lanes(preset_id: &str, session: bool) -> PresetProfileLanes {
     }
 }
 
-/// Is `preset_id` a user preset (3-tier resolvability class, AR-22)?
+/// note: Is `preset_id` a user preset (3-tier resolvability class, AR-22)?
 ///
 /// `_system.` qualified ids are system presets; otherwise a user bundle at
 /// `<nexus_home>/presets/<id>/preset.yaml` marks the user class. Used for
@@ -2123,7 +2123,7 @@ fn is_user_preset(preset_id: &str, nexus_home: &std::path::Path) -> bool {
             .is_file()
 }
 
-/// Map one manifest state to its profile shape.
+/// note: Map one manifest state to its profile shape.
 fn profile_state(state: &StateDefinition) -> PresetProfileState {
     PresetProfileState {
         id: state.id.clone(),
@@ -2135,7 +2135,7 @@ fn profile_state(state: &StateDefinition) -> PresetProfileState {
     }
 }
 
-/// Map one enter action to its profile shape.
+/// note: Map one enter action to its profile shape.
 fn profile_enter_action(action: &EnterAction) -> PresetProfileEnterAction {
     match action {
         EnterAction::Capability { name, .. } => PresetProfileEnterAction {
@@ -2153,7 +2153,7 @@ fn profile_enter_action(action: &EnterAction) -> PresetProfileEnterAction {
     }
 }
 
-/// Map one exit condition to its profile shape.
+/// note: Map one exit condition to its profile shape.
 fn profile_exit_when(exit_when: &ExitWhen) -> PresetProfileExitWhen {
     match exit_when {
         ExitWhen::LlmJudge {
@@ -2198,7 +2198,7 @@ fn profile_exit_when(exit_when: &ExitWhen) -> PresetProfileExitWhen {
     }
 }
 
-/// Map one next-transition form to its profile shape.
+/// note: Map one next-transition form to its profile shape.
 fn profile_next(next: &NextTarget) -> PresetProfileNext {
     match next {
         NextTarget::Linear(target) => PresetProfileNext {
@@ -2274,7 +2274,7 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
     }
 }
 
-/// Map one role definition to its profile shape.
+/// note: Map one role definition to its profile shape.
 fn profile_role(role: &PresetRoleDefinition) -> PresetProfileRole {
     PresetProfileRole {
         id: role.id.clone(),
@@ -2284,7 +2284,7 @@ fn profile_role(role: &PresetRoleDefinition) -> PresetProfileRole {
     }
 }
 
-/// Map one declared signal binding to its profile shape.
+/// note: Map one declared signal binding to its profile shape.
 fn profile_signal(signal: &SignalBinding) -> PresetProfileSignal {
     let action = match signal.on_receive.action {
         SignalActionKind::Pause => "pause",

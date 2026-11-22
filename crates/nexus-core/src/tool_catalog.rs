@@ -10,46 +10,47 @@
 //! The runtime owner (`crate::owner::capabilities`) binds a real handler to
 //! each [`HostToolId`] and borrows the metadata from here. It restates neither
 //! the id strings nor the schemas.
+// invariant: pure metadata — no executable bindings, and no owner/capability/engine/provider import.
 
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-/// Access classification for a capability row.
+/// note: access classification for a capability row.
 ///
 /// Used by admission gates and audit to determine the
 /// risk profile of a capability at dispatch time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Access {
-    /// Read-only; no side effects.
+    /// note: read-only; no side effects.
     Read,
-    /// Mutation-capable; may write to DB, filesystem, or state.
+    /// note: mutation-capable; may write to DB, filesystem, or state.
     Write,
-    /// Access depends on runtime policy (e.g. `permissions.toml`
+    /// note: access depends on runtime policy (e.g. `permissions.toml`
     /// or DA-005 `ContextPermissionGrant`).
     PolicyGated,
 }
 
-/// Ordered fail-closed admission gate before handler dispatch.
+/// note: ordered fail-closed admission gate before handler dispatch.
 ///
 /// Each gate must pass (or be explicitly skipped for a given
 /// capability) before the handler is invoked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdmissionGate {
-    /// Tool ID must be in the allowlist.
+    /// invariant: Tool ID must be in the allowlist.
     Allowlist,
-    /// Active creator must exist (for `nexus.*` tools).
+    /// invariant: active creator must exist (for `nexus.*` tools).
     ActiveCreator,
-    /// Operation must be within workspace bounds.
+    /// invariant: operation must be within workspace bounds.
     WorkspaceBounds,
-    /// `permissions.toml` / policy must grant the capability.
+    /// invariant: `permissions.toml` / policy must grant the capability.
     PermissionPolicy,
-    /// World must exist and be owned by the active creator.
+    /// invariant: World must exist and be owned by the active creator.
     RequireWorldOwnership,
-    /// Audit log entry must be written (always last gate).
+    /// invariant: audit log entry must be written (always last gate).
     AuditLog,
 }
 
-/// Catalog descriptor for a capability (AR-78, DF-89).
+/// note: catalog descriptor for a capability (AR-78, DF-89).
 ///
 /// Carries the authored tool summary plus real draft-2020-12 JSON-Schema
 /// text for the input (and, where pinned, output) shape. `&'static str`
@@ -61,116 +62,116 @@ pub struct CatalogDescriptor {
     /// Authored tool summary for LLM/script consumers (replaces the
     /// `TestVector.description` reuse that ended with AR-78 #4).
     pub description: &'static str,
-    /// Real draft-2020-12 JSON-Schema text (root `"type":"object"`) for the
+    /// note: real draft-2020-12 JSON-Schema text (root `"type":"object"`) for the
     /// tool's input. REQUIRED: every canonical row authors one, so there is no
     /// placeholder or omission path — a row without a schema does not compile.
     pub input_schema: &'static str,
-    /// Real draft-2020-12 JSON-Schema text for the success shape when the
+    /// note: real draft-2020-12 JSON-Schema text for the success shape when the
     /// handler's output is a stable object worth pinning; `None` otherwise
     /// (omission is honest and rule-based — no ledger entry for outputs).
     pub output_schema: Option<&'static str>,
 }
 
-/// Stable failure mode contract for a capability.
+/// note: stable failure mode contract for a capability.
 ///
 /// Defines the error surface a caller can expect when
 /// the capability is denied or fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FailureMode {
-    /// Capability is not supported in this runtime configuration.
+    /// note: capability is not supported in this runtime configuration.
     NotSupported,
-    /// Policy (permissions or admission gate) blocked execution.
+    /// note: policy (permissions or admission gate) blocked execution.
     PolicyBlocked,
-    /// Authentication/authorization failed.
+    /// note: authentication/authorization failed.
     Forbidden,
-    /// Input validation failed.
+    /// note: input validation failed.
     InvalidInput,
-    /// Internal error (database, filesystem, etc.).
+    /// note: internal error (database, filesystem, etc.).
     Internal,
 }
 
-/// Test vector descriptor for a capability row.
+/// note: test vector descriptor for a capability row.
 ///
 /// Each row must have at least one success and one
 /// failure test proving the handler works correctly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestVector {
-    /// Human-readable description of what the test covers.
+    /// note: human-readable description of what the test covers.
     pub description: &'static str,
-    /// Expected outcome: "success", "`failure:policy_blocked`", etc.
+    /// note: expected outcome — "success", "`failure:policy_blocked`", etc.
     pub expected_outcome: &'static str,
-    /// Name of the test function (for grep-ability).
+    /// note: name of the test function (for grep-ability).
     pub test_fn_name: &'static str,
 }
 
-/// Typed identity of one canonical host tool.
+/// note: typed identity of one canonical host tool.
 ///
 /// The runtime binder matches on this key, so a canonical tool without a real
 /// handler binding is a compile error rather than a silent fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostToolId {
-    /// `nexus.context.whoami`
+    /// note: `nexus.context.whoami`
     ContextWhoami,
-    /// `nexus.workspace.info`
+    /// note: `nexus.workspace.info`
     WorkspaceInfo,
-    /// `nexus.work.get`
+    /// note: `nexus.work.get`
     WorkGet,
-    /// `nexus.work.patch`
+    /// note: `nexus.work.patch`
     WorkPatch,
-    /// `nexus.orchestration.schedule_status`
+    /// note: `nexus.orchestration.schedule_status`
     OrchestrationScheduleStatus,
-    /// `nexus.strategy.generate`
+    /// note: `nexus.strategy.generate`
     StrategyGenerate,
-    /// `nexus.context.assemble`
+    /// note: `nexus.context.assemble`
     ContextAssemble,
-    /// `nexus.world.snapshot.get`
+    /// note: `nexus.world.snapshot.get`
     WorldSnapshotGet,
-    /// `nexus.timeline.recent.get`
+    /// note: `nexus.timeline.recent.get`
     TimelineRecentGet,
-    /// `nexus.kb_snapshot.read`
+    /// note: `nexus.kb_snapshot.read`
     KbSnapshotRead,
-    /// `nexus.manuscript.chapter.get`
+    /// note: `nexus.manuscript.chapter.get`
     ManuscriptChapterGet,
-    /// `nexus.observability.daemon.health`
+    /// note: `nexus.observability.daemon.health`
     ObservabilityDaemonHealth,
-    /// `nexus.kb_snapshot.write`
+    /// note: `nexus.kb_snapshot.write`
     KbSnapshotWrite,
-    /// `nexus.manuscript.chapter.update`
+    /// note: `nexus.manuscript.chapter.update`
     ManuscriptChapterUpdate,
-    /// `nexus.world.configure`
+    /// note: `nexus.world.configure`
     WorldConfigure,
-    /// `nexus.work.schedule.set`
+    /// note: `nexus.work.schedule.set`
     WorkScheduleSet,
-    /// `nexus.finding.resolve`
+    /// note: `nexus.finding.resolve`
     FindingResolve,
-    /// `nexus.pool.entry.manage`
+    /// note: `nexus.pool.entry.manage`
     PoolEntryManage,
-    /// `nexus.registry.refresh`
+    /// note: `nexus.registry.refresh`
     RegistryRefresh,
-    /// `nexus.manuscript.list`
+    /// note: `nexus.manuscript.list`
     ManuscriptList,
-    /// `nexus.manuscript.read_range`
+    /// note: `nexus.manuscript.read_range`
     ManuscriptReadRange,
-    /// `nexus.manuscript.write`
+    /// note: `nexus.manuscript.write`
     ManuscriptWrite,
-    /// `nexus.manuscript.phase.get`
+    /// note: `nexus.manuscript.phase.get`
     ManuscriptPhaseGet,
-    /// `nexus.manuscript.phase.set`
+    /// note: `nexus.manuscript.phase.set`
     ManuscriptPhaseSet,
-    /// `nexus.workspace.paths`
+    /// note: `nexus.workspace.paths`
     WorkspacePaths,
-    /// `nexus.runtime.health`
+    /// note: `nexus.runtime.health`
     RuntimeHealth,
-    /// `nexus.trace.correlation`
+    /// note: `nexus.trace.correlation`
     TraceCorrelation,
-    /// `fs/read_text_file`
+    /// note: `fs/read_text_file`
     FsReadTextFile,
-    /// `fs/write_text_file`
+    /// note: `fs/write_text_file`
     FsWriteTextFile,
 }
 
 impl HostToolId {
-    /// The stable wire id.
+    /// note: the stable wire id.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -207,25 +208,25 @@ impl HostToolId {
     }
 }
 
-/// One canonical host tool: everything a caller may know before a handler is
+/// note: one canonical host tool — everything a caller may know before a handler is
 /// bound.
 #[derive(Debug, Clone)]
 pub struct HostToolMetadata {
-    /// Stable typed id.
+    /// note: stable typed id.
     pub id: HostToolId,
-    /// Access classification.
+    /// note: access classification.
     pub access: Access,
-    /// Ordered fail-closed admission gates.
+    /// note: ordered fail-closed admission gates.
     pub admission: &'static [AdmissionGate],
-    /// Catalog descriptor (authored description + real draft-2020-12 schemas).
+    /// note: catalog descriptor (authored description + real draft-2020-12 schemas).
     pub catalog: CatalogDescriptor,
-    /// Expected failure mode when denied.
+    /// note: expected failure mode when denied.
     pub failure_mode: FailureMode,
-    /// Test vector descriptor.
+    /// note: test vector descriptor.
     pub handler_test_vector: TestVector,
 }
 
-/// Static admission gate arrays (defined once, referenced by every row).
+/// note: static admission gate arrays (defined once, referenced by every row).
 const ADMISSION_READ_CONTEXT: &[AdmissionGate] = &[
     AdmissionGate::Allowlist,
     AdmissionGate::ActiveCreator,
@@ -286,7 +287,7 @@ const ADMISSION_POOL_WRITE: &[AdmissionGate] = &[
     AdmissionGate::AuditLog,
 ];
 
-/// The agent tool's input contract: `GenerateRequest` rendered as JSON Schema, plus the address
+/// note: the agent tool's input contract — `GenerateRequest` rendered as JSON Schema, plus the address
 /// the CLI and HTTP surfaces carry in arguments and the path.
 ///
 /// The schema is the committed wire contract itself, so the tool description IS the contract (D8):
@@ -321,7 +322,7 @@ pub(crate) fn tool_input_schema() -> &'static str {
                                 the path instead.",
             }),
         );
-        // The tool's own address field is PREPENDED to the committed array: the
+        // why: the tool's own address field is PREPENDED to the committed array — the
         // wire schema keeps owning which request fields are required, and the
         // rendered envelope stays what it was before the move.
         let required = root["required"]
@@ -333,7 +334,7 @@ pub(crate) fn tool_input_schema() -> &'static str {
     SCHEMA.as_str()
 }
 
-/// The canonical rows, in declaration order.
+/// note: the canonical rows, in declaration order.
 ///
 /// `tool_input_schema` renders at first use, so the table is lazily built; the
 /// returned slice is process-lifetime.
@@ -440,9 +441,9 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
                               more: the candidate still has to be simulated and approved. On lint \
                               exhaustion the result is the `lint_exhausted` payload with one \
                               actionable correction per violation, and nothing was persisted.",
-                // The rendered `GenerateRequest` contract (D8): the tool description IS the schema.
+                // note: the rendered `GenerateRequest` contract (D8) — the tool description IS the schema.
                 input_schema: tool_input_schema(),
-                // Omitted: the success shape is the WorkflowDocument contract, which is authored as
+                // note: omitted — the success shape is the WorkflowDocument contract, which is authored as
                 // its own `$ref`-addressed schema and cannot be carried here verbatim.
                 output_schema: None,
             },
@@ -871,7 +872,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
     ]
 });
 
-/// The full canonical host-tool catalog.
+/// note: the full canonical host-tool catalog.
 ///
 /// Complete and nonempty in every build: reservation uses this set, never the
 /// subset a particular graph binds.
@@ -880,13 +881,13 @@ pub fn host_tool_catalog() -> &'static [HostToolMetadata] {
     HOST_TOOL_CATALOG.as_slice()
 }
 
-/// The stable ids the host namespace reserves, including rows this build does
+/// note: the stable ids the host namespace reserves, including rows this build does
 /// not bind.
 pub fn reserved_host_tool_ids() -> impl Iterator<Item = &'static str> {
     host_tool_catalog().iter().map(|row| row.id.as_str())
 }
 
-/// Look up one canonical row by its wire id.
+/// note: look up one canonical row by its wire id.
 #[must_use]
 pub fn lookup_host_tool(id: &str) -> Option<&'static HostToolMetadata> {
     host_tool_catalog().iter().find(|row| row.id.as_str() == id)
@@ -896,7 +897,7 @@ pub fn lookup_host_tool(id: &str) -> Option<&'static HostToolMetadata> {
 mod tests {
     use super::*;
 
-    /// The Generate tool's rendered contract adds ONLY its address field: the
+    /// note: the Generate tool's rendered contract adds ONLY its address field — the
     /// committed wire schema keeps owning the rest of the `required` list, in
     /// its own order. Replacing the array (the pre-fix shape) fails here the
     /// moment the wire schema gains or reorders a required entry.
@@ -922,7 +923,7 @@ mod tests {
         assert_eq!(rendered["required"], serde_json::Value::Array(expected));
     }
 
-    /// The canonical-input requirement is a type, not a convention: every row
+    /// note: the canonical-input requirement is a type, not a convention — every row
     /// authors one, so no placeholder path exists.
     #[test]
     fn every_canonical_row_authors_an_input_schema() {

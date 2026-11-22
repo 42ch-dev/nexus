@@ -13,6 +13,7 @@
 //! table is touched through a transient pool on the resolved active
 //! workspace state DB only where the daemon used its attached pool
 //! (list backfill, create insert, patch upsert).
+// invariant: home-level operations hold no workspace pool; the workspace table is touched only through a transient pool.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,11 +35,11 @@ use crate::error::{db_err, CoreError, CoreResult};
 use crate::home::CoreHomeService;
 use sqlx::Row;
 
-/// Maximum creator display name length accepted by this family — parity with
+/// note: Maximum creator display name length accepted by this family — parity with
 /// the daemon handler rule (char count, so CJK / emoji count once).
 pub const MAX_DISPLAY_NAME_CHARS: usize = 256;
 
-/// Wire-internal code carriers this family re-sends verbatim at the adapter.
+/// note: Wire-internal code carriers this family re-sends verbatim at the adapter.
 ///
 /// The daemon handler built `Internal { code, message }` envelopes for cache,
 /// config and profile-home failures, so the core carries
@@ -67,7 +68,7 @@ fn internal(code: &str, message: impl std::fmt::Display) -> CoreError {
 }
 
 impl CoreHomeService {
-    /// List the registered creator Profiles (membership SSOT: directories
+    /// note: List the registered creator Profiles (membership SSOT: directories
     /// under `<nexus_home>/creators/<id>/`), enriched with display metadata
     /// from the active workspace `creators` SQL rows and the identity cache.
     /// Orphan SQL/cache rows stay invisible until a matching Profile home
@@ -88,14 +89,14 @@ impl CoreHomeService {
         &self,
         query: ListCreatorsQuery,
     ) -> CoreResult<ListCreatorsResponse> {
-        // Clamped to 1..=250 above, so the conversion is infallible; state it
+        // why: clamped to 1..=250 above, so the conversion is infallible; state it
         // with try_from rather than a sign-losing `as`.
         let limit = usize::try_from(query.limit.unwrap_or(50).clamp(1, 250)).unwrap_or(250);
 
-        // Membership SSOT: on-disk Profile homes only.
+        // note: membership SSOT — on-disk Profile homes only.
         let ssot_ids = list_profile_ids_ssot(&self.nexus_home);
 
-        // Secondary enrichment map (may contain dirty/orphan rows — ignored
+        // note: secondary enrichment map (may contain dirty/orphan rows — ignored
         // unless the id is in the SSOT set).
         let identity_cache = load_identity_cache(&self.nexus_home);
         let mut sql_by_id: HashMap<String, NexusCreatorInfo> = HashMap::new();
@@ -109,7 +110,7 @@ impl CoreHomeService {
                     for row in rows {
                         sql_by_id.insert(row.creator_id.clone(), row);
                     }
-                    // Complete the active-pool cache from SSOT (never the reverse).
+                    // invariant: complete the active-pool cache from SSOT (never the reverse).
                     for creator_id in &ssot_ids {
                         if sql_by_id.contains_key(creator_id) {
                             continue;
@@ -144,7 +145,7 @@ impl CoreHomeService {
                 .then_with(|| a.creator_id.cmp(&b.creator_id))
         });
 
-        // Apply cursor-based pagination (cursor = creator_id).
+        // note: apply cursor-based pagination (cursor = creator_id).
         if let Some(ref cursor) = query.cursor {
             let pos = items.iter().position(|i| &i.creator_id == cursor);
             if let Some(idx) = pos {
@@ -172,7 +173,7 @@ impl CoreHomeService {
             .expect("core creator list is wire-valid"))
     }
 
-    /// Create a new local creator profile: validate the display name, mint a
+    /// note: Create a new local creator profile: validate the display name, mint a
     /// `ctr_local…` id, materialize the membership-SSOT Profile home and
     /// return the detail-shaped result. The workspace `creators` row is an
     /// enrichment written into the selected workspace store; a home with no
@@ -186,7 +187,7 @@ impl CoreHomeService {
     pub async fn create_creator(&self, display_name: String) -> CoreResult<CreatorDetail> {
         let display_name = validated_display_name(&display_name)?;
 
-        // Generate a creator id matching the `^ctr_[a-zA-Z0-9]+$` pattern used
+        // note: generate a creator id matching the `^ctr_[a-zA-Z0-9]+$` pattern used
         // by `nexus-creator::local_identity::generate_local_id`; the pattern
         // itself is the public contract.
         let random: String = uuid::Uuid::new_v4()
@@ -196,14 +197,14 @@ impl CoreHomeService {
             .take(12)
             .collect();
         let creator_id = format!("ctr_local{random}");
-        // Defensive: the generated id always matches the safe-id check, but
+        // invariant: defensive — the generated id always matches the safe-id check, but
         // run it anyway so future id-shape changes cannot bypass the
         // path-traversal guard.
         validate_creator_id_safe(&creator_id).map_err(|reason| CoreError::Internal {
             category: format!("CREATOR_ID_GENERATION_ERROR: {reason}"),
         })?;
 
-        // Membership SSOT write — Profile is real only when the home dir exists.
+        // note: membership SSOT write — Profile is real only when the home dir exists.
         // A home with no selected workspace has no workspace store to carry the
         // creator's enrichment row: register the identity metadata first (the
         // `register_creator` carrier), so a name collision refuses before any
@@ -215,7 +216,7 @@ impl CoreHomeService {
         }
         ensure_profile_home_ssot(&self.nexus_home, &creator_id)?;
 
-        // No selected workspace ⇒ no workspace store to enrich yet: creation
+        // note: no selected workspace ⇒ no workspace store to enrich yet — creation
         // must not fail on that absence (the first-run shell creates the
         // creator before any workspace is selected). The row is materialized
         // by the first workspace selection.
@@ -224,7 +225,7 @@ impl CoreHomeService {
                 let pool = nexus_local_db::init_pool(&db_path)
                     .await
                     .map_err(crate::error::local_db_err)?;
-                // v1.191 P1 T4: the one transaction-taking local-db
+                // note: v1.191 P1 T4 — the one transaction-taking local-db
                 // materialization — the workspace `creators` row and its
                 // stable holder registry row commit together (§2.1), so no
                 // second Creator create SQL exists here.
@@ -232,7 +233,7 @@ impl CoreHomeService {
                     nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
                         .await
                         .map_err(crate::error::local_db_err);
-                // §2.2: the detail's holder projection reads the registry row
+                // note: §2.2 — the detail's holder projection reads the registry row
                 // that just committed with the subject back through the
                 // read-only primitive (a read never provisions), while the
                 // pool is still open.
@@ -259,7 +260,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Persist a freshly created creator's identity metadata when no workspace
+    /// note: Persist a freshly created creator's identity metadata when no workspace
     /// store exists: the global identity row (the `register_creator` carrier,
     /// which `resolved_display_name` reads when a workspace is later selected)
     /// and the enrichment cache `list_creators` reads display names from.
@@ -313,7 +314,7 @@ impl CoreHomeService {
         save_identity_cache(&cache_path, &cache)
     }
 
-    /// Project the status/detail of one creator: identity-cache metadata,
+    /// note: Project the status/detail of one creator: identity-cache metadata,
     /// credential presence from the auth store, and active-selection state.
     ///
     /// # Errors
@@ -336,7 +337,7 @@ impl CoreHomeService {
         ))
     }
 
-    /// Patch a creator's display name (identity cache + workspace `creators`
+    /// note: Patch a creator's display name (identity cache + workspace `creators`
     /// row), materializing the membership SSOT when missing.
     ///
     /// # Errors
@@ -355,7 +356,7 @@ impl CoreHomeService {
             reason,
         })?;
 
-        // Author-facing PATCH materializes membership SSOT when missing
+        // note: author-facing PATCH materializes membership SSOT when missing
         // (enrichment targets only exist for Profiles that have a home).
         ensure_profile_home_ssot(&self.nexus_home, creator_id)?;
 
@@ -375,7 +376,7 @@ impl CoreHomeService {
         }
 
         let cache_path = self.nexus_home.join("creator_identity_cache.json");
-        // Only initialize a fresh cache when the file does not exist. If the
+        // note: only initialize a fresh cache when the file does not exist. If the
         // file exists but cannot be parsed, report an error instead of
         // silently wiping all cached identities (QC2-F-002).
         let mut cache = if cache_path.exists() {
@@ -410,14 +411,14 @@ impl CoreHomeService {
                 return Err(err);
             }
             pool.close().await;
-            // Write the display name to the cache as well so the rename is
+            // why: write the display name to the cache as well so the rename is
             // reflected by every consumer (QC1-F-001).
             set_cached_display_name(&mut cache, creator_id, display_name);
         }
 
         save_identity_cache(&cache_path, &cache)?;
 
-        // Re-read the updated cache so the returned detail reflects the write.
+        // why: re-read the updated cache so the returned detail reflects the write.
         let cache = load_identity_cache(&self.nexus_home);
         let entry = get_identity_entry(&cache, creator_id);
         let auth_store = load_auth_store(&self.nexus_home);
@@ -430,7 +431,7 @@ impl CoreHomeService {
         ))
     }
 
-    /// Use (activate) a creator: verify it is a known member (auth store or
+    /// note: Use (activate) a creator: verify it is a known member (auth store or
     /// identity cache), write the active-creator selection and reset its
     /// active workspace slug to `default` so the config stays
     /// self-describing.
@@ -450,7 +451,7 @@ impl CoreHomeService {
             }
         })?;
 
-        // Verify the creator has credentials stored.
+        // note: verify the creator has credentials stored.
         let auth_store = load_auth_store(&self.nexus_home);
         let cache = load_identity_cache(&self.nexus_home);
         let in_auth = auth_store
@@ -464,7 +465,7 @@ impl CoreHomeService {
             });
         }
 
-        // ONE locked write for the whole selection change: the active id and
+        // note: ONE locked write for the whole selection change — the active id and
         // the workspace slug reset must not straddle two lock epochs, or a
         // concurrent writer landing between them splits the pair (a slug reset
         // applied to a creator that is no longer the active one).
@@ -484,7 +485,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Project the active creator (id + cached handle/display name).
+    /// note: Project the active creator (id + cached handle/display name).
     ///
     /// # Errors
     /// Returns [`CoreError::NotFound`] when no active creator is selected.
@@ -502,7 +503,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Log a creator out: clear its credentials from the auth store and clear
+    /// note: Log a creator out: clear its credentials from the auth store and clear
     /// the active selection when it pointed at this creator.
     ///
     /// # Errors
@@ -522,7 +523,7 @@ impl CoreHomeService {
 
         let cleared = clear_creator_credentials(&self.nexus_home, creator_id)?;
 
-        // If this was the active creator, clear the active selection. The
+        // note: if this was the active creator, clear the active selection. The
         // decision is re-made on the locked document: a concurrent switch to
         // another creator that lands first must not be clobbered by this
         // logout.
@@ -547,7 +548,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Resolve the active workspace state DB for the SQL-backed creator
+    /// note: Resolve the active workspace state DB for the SQL-backed creator
     /// family paths (`None` before any workspace is selected — the daemon
     /// Tier-0 shape).
     fn active_workspace_db_path(&self) -> Option<std::path::PathBuf> {
@@ -557,7 +558,7 @@ impl CoreHomeService {
     }
 }
 
-/// Validate a display name for create/patch: non-empty after trim and at most
+/// note: Validate a display name for create/patch: non-empty after trim and at most
 /// 256 characters (by char count, so CJK / emoji count once).
 fn validated_display_name(raw: &str) -> CoreResult<String> {
     let display_name = raw.trim().to_string();
@@ -584,7 +585,7 @@ fn creator_detail_from_parts(
 ) -> CreatorDetail {
     CreatorDetail {
         creator_id: creator_id.to_string(),
-        // Home-level detail reads hold no workspace pool, so the
+        // note: home-level detail reads hold no workspace pool, so the
         // service-managed holder is not projected here (the trusted
         // management read path resolves it).
         holder_entry_id: None,
@@ -596,7 +597,7 @@ fn creator_detail_from_parts(
     }
 }
 
-/// Wire holder projection for an already-authorized identity (durable §7).
+/// note: Wire holder projection for an already-authorized identity (durable §7).
 ///
 /// The registry id is `hld_` plus the lowercase BLAKE3 digest of the subject
 /// (§2.1), so it always satisfies the wire pattern; a caller with no registry
@@ -606,7 +607,7 @@ fn holder_projection(holder_entry_id: String) -> CreatorDetailHolderEntryId {
         .expect("registry-derived holder id is wire-valid")
 }
 
-/// Reject path segments that look like Google-AIP custom verbs (`id:verb`):
+/// note: Reject path segments that look like Google-AIP custom verbs (`id:verb`)
 /// those URLs share the `:creator_id` capture with logout; GET/PATCH must not
 /// treat `ctr_x:logout` as a valid creator id (ghost 200).
 pub fn reject_colon_verb_segment(creator_id: &str) -> CoreResult<()> {
@@ -619,7 +620,7 @@ pub fn reject_colon_verb_segment(creator_id: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Profile membership SSOT: directories under `<nexus_home>/creators/<id>/`.
+/// note: Profile membership SSOT — directories under `<nexus_home>/creators/<id>/`.
 /// The active workspace `creators` SQL table and
 /// `creator_identity_cache.json` are **enrichment only** — they never expand
 /// membership.
@@ -649,7 +650,7 @@ fn list_profile_ids_ssot(nexus_home: &Path) -> Vec<String> {
     ids
 }
 
-/// Ensure a Profile home exists on disk (membership SSOT write).
+/// note: Ensure a Profile home exists on disk (membership SSOT write).
 fn ensure_profile_home_ssot(nexus_home: &Path, creator_id: &str) -> CoreResult<()> {
     validate_creator_id_safe(creator_id).map_err(|reason| CoreError::InvalidInput {
         field: "creator_id".to_string(),
@@ -661,7 +662,7 @@ fn ensure_profile_home_ssot(nexus_home: &Path, creator_id: &str) -> CoreResult<(
     Ok(())
 }
 
-/// Enrich a SSOT Profile id with display metadata from secondary sources.
+/// note: Enrich a SSOT Profile id with display metadata from secondary sources.
 /// Priority: active-pool SQL row → identity cache → creator id fallback.
 /// Never invents membership.
 fn enrich_profile(
@@ -690,7 +691,7 @@ pub struct IdentityEntry {
     pub(crate) display_name: Option<String>,
 }
 
-/// Read the CLI config from `nexus_home`.
+/// note: Read the CLI config from `nexus_home`.
 pub fn read_cli_config(nexus_home: &Path) -> CoreResult<toml::Value> {
     let config_path = nexus_home.join("config.toml");
     if !config_path.exists() {
@@ -704,7 +705,7 @@ pub fn read_cli_config(nexus_home: &Path) -> CoreResult<toml::Value> {
     toml::from_str(&content).map_err(|e| internal("CONFIG_PARSE_ERROR", e))
 }
 
-/// Publish the CLI config for `nexus_home`.
+/// note: Publish the CLI config for `nexus_home`.
 ///
 /// Every caller (`use_creator`, `logout_creator`) already holds the shared
 /// writer lock; the publication replaces the whole document atomically so the
@@ -716,7 +717,7 @@ pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<(
         .map_err(|e| internal("CONFIG_WRITE_ERROR", e))
 }
 
-/// Commit the active-creator selection and its `default` workspace slug into
+/// note: Commit the active-creator selection and its `default` workspace slug into
 /// one document, so the pair cannot be split by a second read-modify-write.
 ///
 /// # Errors
@@ -733,7 +734,7 @@ fn apply_active_selection(config: &mut toml::Value, creator_id: &str) -> CoreRes
         .remove("active_workspace_slug_by_creator")
         .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
     let Some(slug_table) = slugs.as_table_mut() else {
-        // Restore the untouched entry so a rejected commit leaves the
+        // why: restore the untouched entry so a rejected commit leaves the
         // document exactly as it was.
         table.insert("active_workspace_slug_by_creator".to_string(), slugs);
         return Err(internal(
@@ -753,7 +754,7 @@ fn apply_active_selection(config: &mut toml::Value, creator_id: &str) -> CoreRes
     Ok(())
 }
 
-/// Set a creator's `display_name` in the enrichment cache
+/// note: Set a creator's `display_name` in the enrichment cache
 /// (`creator_identity_cache.json`), creating the minimal entry when absent.
 /// `list_creators` reads display names from this cache.
 fn set_cached_display_name(cache: &mut serde_json::Value, creator_id: &str, display_name: &str) {
@@ -771,7 +772,7 @@ fn set_cached_display_name(cache: &mut serde_json::Value, creator_id: &str, disp
     }
 }
 
-/// Load the creator identity cache (`Value::Null` for missing/unparseable —
+/// note: Load the creator identity cache (`Value::Null` for missing/unparseable —
 /// treated as a missing cache).
 pub fn load_identity_cache(nexus_home: &Path) -> serde_json::Value {
     let cache_path = nexus_home.join("creator_identity_cache.json");
@@ -784,7 +785,7 @@ pub fn load_identity_cache(nexus_home: &Path) -> serde_json::Value {
     serde_json::from_str(&content).unwrap_or(serde_json::Value::Null)
 }
 
-/// Load the identity cache from disk, reporting parse/read errors instead of
+/// note: Load the identity cache from disk, reporting parse/read errors instead of
 /// treating them as a missing cache.
 pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::Value> {
     let content =
@@ -792,7 +793,7 @@ pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::V
     serde_json::from_str(&content).map_err(|e| internal("CACHE_PARSE_ERROR", e))
 }
 
-/// Crash-safe file write: write to a sibling temp file on the same
+/// note: Crash-safe file write — write to a sibling temp file on the same
 /// filesystem, fsync it, then rename it into place (`rename` is atomic on
 /// POSIX) and fsync the parent directory so the rename is durable.
 ///
@@ -825,7 +826,7 @@ fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     }
 }
 
-/// Write the identity cache to disk with an atomic temp-file + rename.
+/// note: Write the identity cache to disk with an atomic temp-file + rename.
 pub fn save_identity_cache(cache_path: &Path, cache: &serde_json::Value) -> CoreResult<()> {
     if let Some(parent) = cache_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| internal("CACHE_DIR_ERROR", e))?;
@@ -835,7 +836,7 @@ pub fn save_identity_cache(cache_path: &Path, cache: &serde_json::Value) -> Core
     atomic_write(cache_path, &json).map_err(|e| internal("CACHE_WRITE_ERROR", e))
 }
 
-/// Update the SQL `creators` row for `creator_id`, inserting a minimal active
+/// note: Update the SQL `creators` row for `creator_id`, inserting a minimal active
 /// row if one does not exist (v1.191 P1 T4: the daemon/core creators flow
 /// delegates to the one transaction-taking local-db materialization, so the
 /// workspace subject and its stable holder registry row commit together, §2.1).
@@ -854,7 +855,7 @@ async fn upsert_creator_display_name(
         .map_err(crate::error::local_db_err)
 }
 
-/// Active-workspace `creators` rows ordered by recency (retained list order
+/// note: Active-workspace `creators` rows ordered by recency (retained list order
 /// input). Failures surface as the retained `DATABASE_ERROR` carrier.
 async fn sql_creator_rows(pool: &sqlx::SqlitePool) -> CoreResult<Vec<NexusCreatorInfo>> {
     let rows = sqlx::query(
@@ -883,7 +884,7 @@ async fn sql_creator_rows(pool: &sqlx::SqlitePool) -> CoreResult<Vec<NexusCreato
     Ok(items)
 }
 
-/// Get the identity cache entry for a creator.
+/// note: Get the identity cache entry for a creator.
 pub fn get_identity_entry(cache: &serde_json::Value, creator_id: &str) -> Option<IdentityEntry> {
     let creators = cache.get("creators")?.as_object()?;
     let entry = creators.get(creator_id)?;
@@ -899,7 +900,7 @@ pub fn get_identity_entry(cache: &serde_json::Value, creator_id: &str) -> Option
     })
 }
 
-/// Load the auth store to check credentials (`Value::Null` for
+/// note: Load the auth store to check credentials (`Value::Null` for
 /// missing/unparseable).
 pub fn load_auth_store(nexus_home: &Path) -> serde_json::Value {
     let auth_path = nexus_home.join("auth.json");
@@ -912,7 +913,7 @@ pub fn load_auth_store(nexus_home: &Path) -> serde_json::Value {
     serde_json::from_str(&content).unwrap_or(serde_json::Value::Null)
 }
 
-/// Check if a creator has an API key stored.
+/// note: Check if a creator has an API key stored.
 fn has_creator_api_key(auth_store: &serde_json::Value, creator_id: &str) -> bool {
     auth_store
         .get("creators")
@@ -922,7 +923,7 @@ fn has_creator_api_key(auth_store: &serde_json::Value, creator_id: &str) -> bool
         .is_some_and(|s| !s.is_empty())
 }
 
-/// Check if a creator has a cached access token.
+/// note: Check if a creator has a cached access token.
 fn has_cached_token(auth_store: &serde_json::Value, creator_id: &str) -> bool {
     auth_store
         .get("creators")
@@ -932,7 +933,7 @@ fn has_cached_token(auth_store: &serde_json::Value, creator_id: &str) -> bool {
         .is_some_and(|s| !s.is_empty())
 }
 
-/// Remove a creator's credentials from the auth store.
+/// note: Remove a creator's credentials from the auth store.
 fn clear_creator_credentials(nexus_home: &Path, creator_id: &str) -> CoreResult<bool> {
     let auth_path = nexus_home.join("auth.json");
     if !auth_path.exists() {
@@ -964,7 +965,7 @@ mod tests {
     const TARGET: &str = "ctr_localusetarget0";
     const OTHER: &str = "ctr_localuseother0";
 
-    /// Seed profile membership: `use_creator` accepts a creator present in the
+    /// note: Seed profile membership — `use_creator` accepts a creator present in the
     /// identity cache or the auth store.
     fn seed_creator(home: &Path, creator_id: &str) {
         let cache = serde_json::json!({
@@ -986,7 +987,7 @@ mod tests {
             .expect("valid toml")
     }
 
-    /// MF-1 (I-000090): the active-creator commit and the slug reset are ONE
+    /// note: MF-1 (I-000090) — the active-creator commit and the slug reset are ONE
     /// locked write. A writer interleaved between the old two epochs — it
     /// clears the target's slug entry and re-selects another creator — leaves
     /// that slug resurrected as `default` under a different active creator,
@@ -995,7 +996,7 @@ mod tests {
     fn use_creator_commits_the_selection_and_the_slug_reset_together() {
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
-        // The service opens the user home; the config/document store lives in
+        // note: the service opens the user home; the config/document store lives in
         // its `.nexus42` root.
         let nexus_home = home.join(".nexus42");
         std::fs::create_dir_all(&nexus_home).expect("nexus home");
@@ -1008,7 +1009,7 @@ mod tests {
             crate::home::write_active_selection(&nexus_home, OTHER, Some("ws_other"), None)
                 .expect("seed");
 
-            // The concurrent writer reacts to the target becoming active: it
+            // note: the concurrent writer reacts to the target becoming active — it
             // then clears the target's slug and re-selects the other creator.
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let racer = {
@@ -1046,12 +1047,12 @@ mod tests {
                             return;
                         }
                         if stop.load(std::sync::atomic::Ordering::Relaxed) {
-                            // One final poll after the writer returned: it sees
+                            // note: one final poll after the writer returned — it sees
                             // the committed selection, or a stale one.
                             poll();
                             return;
                         }
-                        // Yield to the writer: an aggressive loop starves its
+                        // why: yield to the writer — an aggressive loop starves its
                         // backoff and hides the interleaving we are probing.
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     }
@@ -1083,7 +1084,7 @@ mod tests {
         }
     }
 
-    /// BUG (I-000104): a config document whose root is not a table cannot hold
+    /// note: BUG (I-000104) — a config document whose root is not a table cannot hold
     /// the selection, so the commit must surface the wire-internal
     /// `CONFIG_ERROR` carrier instead of reporting a change it never made.
     ///
@@ -1106,7 +1107,7 @@ mod tests {
         );
     }
 
-    /// BUG (I-000112): a pre-existing `active_workspace_slug_by_creator` that
+    /// note: BUG (I-000112) — a pre-existing `active_workspace_slug_by_creator` that
     /// is not a table would silently skip the slug write while still
     /// committing `active_creator_id` — a partial commit. The writer must
     /// surface the wire-internal `CONFIG_ERROR` carrier instead, matching

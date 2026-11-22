@@ -13,6 +13,7 @@
 //! [`crate::CoreService`], which stays workspace-bound; a successful
 //! identity/workspace change invalidates the old selection on the next
 //! disk re-read (`CoreService::verify_selected_context`).
+// invariant: no workspace pool is held across calls and no execution/Host is started.
 
 use std::path::{Path, PathBuf};
 
@@ -34,12 +35,12 @@ use crate::config_lock::with_config_lock;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_selection::MemoryProviderSelection;
 
-/// Maximum length for a creator display name — parity with the CLI identity
+/// note: Maximum length for a creator display name — parity with the CLI identity
 /// front door (`MAX_CREATOR_NAME_LENGTH` in `nexus42`), so both entry points
 /// reject the same over-long display token.
 pub const MAX_CREATOR_NAME_LENGTH: usize = 64;
 
-/// Serializes workspace creation in-process.
+/// note: Serializes workspace creation in-process.
 ///
 /// The create transaction is check-then-write (slug registered? root claimed?
 /// root empty? probe writable? then materialize). Two concurrent creates of the
@@ -49,7 +50,7 @@ pub const MAX_CREATOR_NAME_LENGTH: usize = 64;
 /// opened per call and holds no state between calls.
 static CREATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Opaque home-control entry point. The layout is private; callers only pass
+/// note: Opaque home-control entry point. The layout is private; callers only pass
 /// the raw user home to [`CoreHomeService::open`] and await the typed
 /// operations. No workspace pool is held between calls.
 pub struct CoreHomeService {
@@ -58,7 +59,7 @@ pub struct CoreHomeService {
 }
 
 impl CoreHomeService {
-    /// Open the home-control entry for `user_home` (raw user home semantics:
+    /// note: Open the home-control entry for `user_home` (raw user home semantics:
     /// home-layout appends `.nexus42` exactly once).
     ///
     /// No selected workspace is assumed and nothing is created on disk —
@@ -79,13 +80,13 @@ impl CoreHomeService {
         })
     }
 
-    /// The raw user home this entry was opened against.
+    /// note: the raw user home this entry was opened against.
     #[must_use]
     pub fn user_home(&self) -> &Path {
         &self.user_home
     }
 
-    /// Persist the memory provider selection in `[memory_provider]`.
+    /// note: persist the memory provider selection in `[memory_provider]`.
     ///
     /// The whole document is read and rewritten under the daemon-home
     /// `config.toml` advisory lock, so keys other writers own survive. A
@@ -102,7 +103,7 @@ impl CoreHomeService {
         write_memory_provider_selection(&self.nexus_home, selection)
     }
 
-    /// Remove `[memory_provider]`, restoring the implicit local default.
+    /// note: remove `[memory_provider]`, restoring the implicit local default.
     ///
     /// # Errors
     /// Returns the mapped carrier when the lock, read or write fails.
@@ -110,7 +111,7 @@ impl CoreHomeService {
         clear_memory_provider_selection(&self.nexus_home)
     }
 
-    /// Register a persistent local creator in the global identity store
+    /// note: register a persistent local creator in the global identity store
     /// (`<nexus_home>/state.db`) and select it as the active creator.
     ///
     /// Extracted from the CLI local-creator bootstrap (`creator register
@@ -133,7 +134,7 @@ impl CoreHomeService {
     /// Returns [`CoreError::InvalidInput`] for invalid display names or
     /// platform ids and for display-name collisions, and the mapped storage
     /// error when the global identity store or the config write fails.
-    #[allow(clippy::too_many_lines)] // one linear domain operation
+    #[allow(clippy::too_many_lines)] // why: one linear domain operation
     pub async fn register_creator(
         &self,
         request: CoreRegisterCreatorRequest,
@@ -153,7 +154,7 @@ impl CoreHomeService {
 
         let global_db = self.nexus_home.join("state.db");
 
-        // Read-only collision/convergence decision tree (no store writes when
+        // note: read-only collision/convergence decision tree (no store writes when
         // the registration is a no-op or a collision).
         if let Some(trimmed) = display_name.as_deref() {
             if global_db.exists() {
@@ -187,7 +188,7 @@ impl CoreHomeService {
             }
         }
 
-        // Mint leg: writable global store (migrations + seed versions via the
+        // note: mint leg — writable global store (migrations + seed versions via the
         // guarded initialization factory), INSERT, optional platform link,
         // then the active-creator config write.
         std::fs::create_dir_all(&self.nexus_home).map_err(|e| CoreError::Internal {
@@ -207,7 +208,7 @@ impl CoreHomeService {
         )
         .await;
         if let Err(err) = inserted {
-            // The unique partial index on persistent display_name rejects a
+            // note: the unique partial index on persistent display_name rejects a
             // name minted concurrently between our 0-match read and this
             // INSERT (TOCTOU): surface the same honest collision. The
             // collision read must run on the still-open pool — reading after
@@ -253,7 +254,7 @@ impl CoreHomeService {
 
         Ok(CreatorDetail {
             creator_id,
-            // Registration activates the global identity; the workspace
+            // note: registration activates the global identity; the workspace
             // `creators` row (and with it the holder registry row) is
             // materialized by the workspace-selection path, so no registry
             // state is at hand to project here.
@@ -266,12 +267,12 @@ impl CoreHomeService {
         })
     }
 
-    /// Converge an existing persistent identity: make it the active creator
+    /// note: Converge an existing persistent identity: make it the active creator
     /// when it is not, and return its detail. Read paths stay read-only —
     /// no identity-row or workspace-row writes (a home registration cannot
     /// assume a workspace).
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     async fn converge_identity(
         &self,
         creator_id: &str,
@@ -283,7 +284,7 @@ impl CoreHomeService {
         }
         Ok(CreatorDetail {
             creator_id: creator_id.to_string(),
-            // Convergence is a config/selection read: it holds no workspace
+            // note: convergence is a config/selection read — it holds no workspace
             // pool, so there is no registry state to project.
             holder_entry_id: None,
             display_name: display_name.map(str::to_string),
@@ -294,7 +295,7 @@ impl CoreHomeService {
         })
     }
 
-    /// List all registered workspaces (creator directories under
+    /// note: List all registered workspaces (creator directories under
     /// `<nexus_home>/creators` containing an operational `meta.json`), sorted
     /// by `(creator_id, workspace_slug)`.
     ///
@@ -304,9 +305,9 @@ impl CoreHomeService {
     ///
     /// # Errors
     /// Returns the mapped storage error only; unreadable directories are
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    /// skipped, mirroring the extracted daemon scan.
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    /// note: skipped, mirroring the extracted daemon scan.
+    #[allow(clippy::unused_async)] // note: async is the await-symmetric public signature; the body is store-only today
     pub async fn list_workspaces(&self) -> CoreResult<ListWorkspacesResponse> {
         let items = scan_workspaces(&self.nexus_home);
         let limit = i64::try_from(items.len()).unwrap_or(i64::MAX);
@@ -320,7 +321,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Create and register a workspace for the active creator (I-000063).
+    /// note: Create and register a workspace for the active creator (I-000063).
     ///
     /// The workspace id IS the `(creator_id, workspace_slug)` pair: the slug is
     /// client-proposed and core-validated, and `creator_id` resolves against
@@ -341,7 +342,7 @@ impl CoreHomeService {
     /// override (including an unwritable or unreadable target), and
     /// [`CoreError::WorkspaceConflict`] when the slug, the resolved root or the
     /// target directory content is already claimed.
-    #[allow(clippy::too_many_lines)] // one linear create transaction
+    #[allow(clippy::too_many_lines)] // why: one linear create transaction
     pub async fn create_workspace(
         &self,
         request: CreateWorkspaceRequest,
@@ -357,7 +358,7 @@ impl CoreHomeService {
         }
         let slug = request.workspace_slug;
 
-        // Serialize the whole check+register transaction; see `CREATE_LOCK`.
+        // why: serialize the whole check+register transaction — see `CREATE_LOCK`.
         let _create_guard = CREATE_LOCK.lock().await;
 
         let op_dir = operational_workspace_dir(&self.user_home, &creator_id, &slug);
@@ -384,7 +385,7 @@ impl CoreHomeService {
             )));
         }
 
-        // `Some` means the target already existed: it is adopted only when
+        // note: `Some` means the target already existed — it is adopted only when
         // empty, and a later failure removes just the artifacts we added.
         let preexisting_root = creative_root.is_dir().then_some(creative_root.as_path());
         if let Some(root) = preexisting_root {
@@ -396,7 +397,7 @@ impl CoreHomeService {
             }
         }
         if let Err(err) = probe_creative_dir(&creative_root) {
-            // The probe is the first writer; undo the root it created.
+            // note: the probe is the first writer; undo the root it created.
             if preexisting_root.is_none() {
                 let _ = std::fs::remove_dir_all(&creative_root);
             }
@@ -441,7 +442,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Write a new workspace's artifacts in failure order: operational dir,
+    /// note: Write a new workspace's artifacts in failure order: operational dir,
     /// creative manifest, guarded state DB, then — last — `meta.json`.
     async fn materialize_new_workspace(
         &self,
@@ -496,7 +497,7 @@ impl CoreHomeService {
         write_json_file(&op_dir.join("meta.json"), &meta, "workspace_meta")
     }
 
-    /// Select the active creator/workspace and initialize only the chosen
+    /// note: Select the active creator/workspace and initialize only the chosen
     /// workspace (guarded state-DB initialization + workspace `creators` row).
     ///
     /// Extracted from the daemon `set_active_workspace` handler: the request
@@ -523,7 +524,7 @@ impl CoreHomeService {
             .await
     }
 
-    /// [`Self::select_workspace`] plus the CLI's active creative root, both
+    /// note: [`Self::select_workspace`] plus the CLI's active creative root, both
     /// committed in the SAME config lock epoch. The CLI workspace init must not
     /// write `config.toml` through two writers: a concurrent writer landing
     /// between them can diverge the selection from `workspace_path`.
@@ -572,7 +573,7 @@ impl CoreHomeService {
         }
         deny_foreign_workspace(&op_dir, &creator_id, workspace_slug)?;
 
-        // Initialize only the chosen workspace BEFORE committing the
+        // why: initialize only the chosen workspace BEFORE committing the
         // selection: guarded initialization factory (Direct-writer admission
         // + migrations + seed versions) and the workspace `creators` row the
         // FK-prechecks rely on. The pool is closed before returning — the
@@ -587,12 +588,12 @@ impl CoreHomeService {
         pool.close().await;
         materialized.map_err(local_db_err)?;
 
-        // A creator bootstrap only pre-creates the directory: register the
+        // note: a creator bootstrap only pre-creates the directory — register the
         // workspace's discovery metadata so it is listable (D25 — the first
         // workspace is selected, never created over HTTP).
         self.ensure_workspace_registration(&creator_id, workspace_slug)?;
 
-        // Failure-atomic selection commit: the config write happens only
+        // note: failure-atomic selection commit — the config write happens only
         // after initialization fully succeeded, so an initialization failure
         // preserves the previous selection instead of committing a broken one.
         write_active_selection(
@@ -608,7 +609,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Register the selected workspace for discovery when only its operational
+    /// note: Register the selected workspace for discovery when only its operational
     /// directory was pre-created. `scan_workspaces` lists exactly the
     /// workspaces carrying an operational `meta.json`, and the display name is
     /// read from `<creative_root>/.nexus42/workspace.json`; both are written
@@ -632,7 +633,7 @@ impl CoreHomeService {
 
         let workspace_json = creative_meta.join("workspace.json");
         if !workspace_json.exists() {
-            // D25 copy: the pre-created first workspace is the product's
+            // note: D25 copy — the pre-created first workspace is the product's
             // `默认工作区`; an additional workspace names itself by slug (the
             // deferred create route supplies its own display name).
             let display_name = if slug == "default" {
@@ -672,7 +673,7 @@ impl CoreHomeService {
         })
     }
 
-    /// The resolved home configuration: active creator/workspace selection
+    /// note: The resolved home configuration: active creator/workspace selection
     /// plus the resolved `nexus_home` and raw `user_home` roots.
     ///
     /// `None` selections describe an uninitialized shell; this is not an
@@ -681,9 +682,9 @@ impl CoreHomeService {
     ///
     /// # Errors
     /// Returns [`CoreError::Internal`] when the config file cannot be read or
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    /// parsed.
-    #[allow(clippy::unused_async)] // selected contract shape: async for transport symmetry
+    #[allow(clippy::unused_async_trait_impl)] // note: async matches the trait contract; the impl has no await today
+    /// note: parsed.
+    #[allow(clippy::unused_async)] // note: selected contract shape — async for transport symmetry
     pub async fn configuration(&self) -> CoreResult<CoreHomeConfiguration> {
         let cfg = load_config_snapshot(&self.nexus_home)?;
         let active_workspace_slug = cfg
@@ -698,7 +699,7 @@ impl CoreHomeService {
         })
     }
 
-    /// Persistent identity rows in the global store whose display name is
+    /// note: Persistent identity rows in the global store whose display name is
     /// byte-exactly `trimmed`, read through a read-only pool.
     async fn read_persistent_matches(
         &self,
@@ -713,7 +714,7 @@ impl CoreHomeService {
         Ok(persistent_rows_with_name(&rows, trimmed))
     }
 
-    /// One identity row from the global store, read through a read-only pool.
+    /// note: One identity row from the global store, read through a read-only pool.
     async fn read_identity_row(
         &self,
         global_db: &Path,
@@ -727,7 +728,7 @@ impl CoreHomeService {
         Ok(row)
     }
 
-    /// Display name for `creator_id` from the global identity store when it
+    /// note: Display name for `creator_id` from the global identity store when it
     /// exists, falling back to the id (mirrors the CLI bootstrap projection).
     async fn resolved_display_name(&self, creator_id: &str) -> String {
         let global_db = self.nexus_home.join("state.db");
@@ -741,7 +742,7 @@ impl CoreHomeService {
     }
 }
 
-/// Load the CLI config snapshot, mapping read/parse failures onto the core
+/// note: Load the CLI config snapshot, mapping read/parse failures onto the core
 /// taxonomy.
 fn load_config_snapshot(nexus_home: &Path) -> CoreResult<CliConfigSnapshot> {
     CliConfigSnapshot::load(nexus_home).map_err(|e| CoreError::Internal {
@@ -749,7 +750,7 @@ fn load_config_snapshot(nexus_home: &Path) -> CoreResult<CliConfigSnapshot> {
     })
 }
 
-/// Validate the optional display name at the identity front door — the same
+/// note: Validate the optional display name at the identity front door — the same
 /// rules as the CLI helper: non-empty after trim, no control characters, and
 /// at most [`MAX_CREATOR_NAME_LENGTH`] bytes. Returns the trimmed name.
 fn validated_display_name(name: Option<&str>) -> CoreResult<Option<String>> {
@@ -780,7 +781,7 @@ fn validated_display_name(name: Option<&str>) -> CoreResult<Option<String>> {
     Ok(Some(trimmed.to_string()))
 }
 
-/// Persistent identity rows whose display name is byte-exactly `trimmed`
+/// note: Persistent identity rows whose display name is byte-exactly `trimmed`
 /// (`str::trim` + `==`: no case-fold, no normalization).
 fn persistent_rows_with_name(
     rows: &[nexus_local_db::LocalIdentityRow],
@@ -802,7 +803,7 @@ fn collision_error(display: &str, matches: &[nexus_local_db::LocalIdentityRow]) 
     }
 }
 
-/// Mint a persistent local creator id — `ctr_local` + 12 hex chars from a
+/// note: Mint a persistent local creator id — `ctr_local` + 12 hex chars from a
 /// UUID v4. The pattern is the public contract (same inline copy the daemon
 /// `create_creator` handler uses; the private helper is not cross-crate).
 fn mint_local_creator_id() -> String {
@@ -815,7 +816,7 @@ fn mint_local_creator_id() -> String {
     format!("ctr_local{random}")
 }
 
-/// Validate a workspace slug through the one shared slug rule
+/// note: Validate a workspace slug through the one shared slug rule
 /// ([`crate::slug::validate_slug_name`]).
 fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
     crate::slug::validate_slug_name(slug).map_err(|reason| CoreError::InvalidInput {
@@ -824,7 +825,7 @@ fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
     })
 }
 
-/// The creative root of a workspace: only the first workspace (`default`)
+/// note: The creative root of a workspace: only the first workspace (`default`)
 /// honours the legacy setup root for the creator; every additional workspace
 /// is `~/Nexus/<slug>`. This is the ONE derivation rule shared by the
 /// onboarding selection path and `create_workspace` (access spec §3.1 Q3).
@@ -855,7 +856,7 @@ fn default_creative_root(
     }
 }
 
-/// Reject a creative-root override that is not absolute, traverses with `..`,
+/// note: Reject a creative-root override that is not absolute, traverses with `..`,
 /// or carries control characters — the `validate_workspace_path_safe` safety
 /// semantics, applied to an absolute create target.
 fn validate_creative_root_override(raw: &str) -> CoreResult<()> {
@@ -878,10 +879,10 @@ fn validate_creative_root_override(raw: &str) -> CoreResult<()> {
     })
 }
 
-/// Files an OS writes into a directory without the author's involvement.
+/// note: Files an OS writes into a directory without the author's involvement.
 const NON_AUTHOR_FILES: [&str; 3] = [".DS_Store", "desktop.ini", "Thumbs.db"];
 
-/// True when `dir` has no entries (a freshly chosen empty directory is adopted).
+/// note: True when `dir` has no entries (a freshly chosen empty directory is adopted).
 /// An unreadable directory is a client-side root problem, so it folds to
 /// `invalid_input` rather than an internal fault.
 fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
@@ -889,7 +890,7 @@ fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
         field: "creative_root".to_string(),
         reason: "not readable".to_string(),
     })?;
-    // OS thumbnail/metadata droppings are not author content: adopting a
+    // note: OS thumbnail/metadata droppings are not author content — adopting an
     // directory that only carries them must not read as "already holds
     // content". `.DS_Store` (Finder), `desktop.ini` (Explorer) and `Thumbs.db`
     // (Explorer thumbs) are the three platforms' equivalents.
@@ -903,7 +904,7 @@ fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
     }))
 }
 
-/// Prove the creative root is writable before any registration artifact is
+/// note: Prove the creative root is writable before any registration artifact is
 /// produced: create it with parents, then write/remove a probe file. The probe
 /// removes its own file on a failed write; the caller removes a root this create
 /// created when the probe fails.
@@ -921,10 +922,10 @@ fn probe_creative_dir(root: &Path) -> CoreResult<()> {
         })
 }
 
-/// Which create-path artifacts already existed before this call. Rollback
+/// note: Which create-path artifacts already existed before this call. Rollback
 /// removes only what the create itself produced.
 #[derive(Clone, Copy)]
-#[allow(clippy::struct_excessive_bools)] // four independent artifact flags, not a state machine
+#[allow(clippy::struct_excessive_bools)] // note: four independent artifact flags, not a state machine
 struct PreexistingArtifacts {
     op_dir: bool,
     db: bool,
@@ -932,7 +933,7 @@ struct PreexistingArtifacts {
     creative_root: bool,
 }
 
-/// How a rollback artifact is removed.
+/// note: How a rollback artifact is removed.
 #[derive(Clone, Copy)]
 enum RollbackRemoval {
     File,
@@ -940,7 +941,7 @@ enum RollbackRemoval {
     RecursiveDirectory,
 }
 
-/// Best-effort removal of one rollback artifact. A missing path is the normal
+/// note: Best-effort removal of one rollback artifact. A missing path is the normal
 /// answer (nothing of ours to undo); anything else is logged, never raised —
 /// the caller is already unwinding a failure.
 fn remove_rollback_artifact(path: &Path, how: RollbackRemoval) {
@@ -960,7 +961,7 @@ fn remove_rollback_artifact(path: &Path, how: RollbackRemoval) {
     }
 }
 
-/// Undo a failed create by removing only the artifacts this call produced.
+/// note: Undo a failed create by removing only the artifacts this call produced.
 ///
 /// The operational directory is removed recursively only when this call created
 /// it; a pre-existing directory keeps everything else. An adopted creative root
@@ -1003,7 +1004,7 @@ fn rollback_new_workspace(
     }
 }
 
-/// Pretty-print `value` into `path`; the category names the failing artifact.
+/// note: Pretty-print `value` into `path`; the category names the failing artifact.
 fn write_json_file(path: &Path, value: &serde_json::Value, category: &str) -> CoreResult<()> {
     let text = serde_json::to_string_pretty(value).map_err(|e| CoreError::Internal {
         category: format!("{category}_serialize: {e}"),
@@ -1013,7 +1014,7 @@ fn write_json_file(path: &Path, value: &serde_json::Value, category: &str) -> Co
     })
 }
 
-/// Deny selecting a workspace whose operational `meta.json` registers a
+/// note: Deny selecting a workspace whose operational `meta.json` registers a
 /// different creator or slug (foreign-workspace denial). A missing or
 /// unparseable `meta.json` keeps the retained existence-only semantics.
 fn deny_foreign_workspace(op_dir: &Path, creator_id: &str, slug: &str) -> CoreResult<()> {
@@ -1037,7 +1038,7 @@ fn deny_foreign_workspace(op_dir: &Path, creator_id: &str, slug: &str) -> CoreRe
     Ok(())
 }
 
-/// Scan all creator directories under `nexus_home` and collect workspace
+/// note: Scan all creator directories under `nexus_home` and collect workspace
 /// registrations (ported from the daemon handler). Sorted by
 /// `(creator_id, workspace_slug)`; only workspaces with a `meta.json` count.
 #[must_use]
@@ -1095,7 +1096,7 @@ pub fn scan_workspaces(nexus_home: &Path) -> Vec<NexusWorkspaceSummary> {
     items
 }
 
-/// Read `creative_root` from operational `meta.json` (ported from the daemon
+/// note: Read `creative_root` from operational `meta.json` (ported from the daemon
 /// handler). Returns `None` if the file doesn't exist or can't be parsed.
 #[must_use]
 pub fn read_meta_creative_root(op_dir: &Path) -> Option<String> {
@@ -1106,7 +1107,7 @@ pub fn read_meta_creative_root(op_dir: &Path) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-/// Read `display_name` from `.nexus42/workspace.json` in the creative root
+/// note: Read `display_name` from `.nexus42/workspace.json` in the creative root
 /// (ported from the daemon handler). Returns `None` if the file doesn't exist
 /// or can't be parsed.
 #[must_use]
@@ -1119,7 +1120,7 @@ pub fn read_workspace_display_name(creative_root: &Path) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-/// Write the active `creator_id` — and, when `workspace_slug` is `Some`, the
+/// note: Write the active `creator_id` — and, when `workspace_slug` is `Some`, the
 /// per-creator active workspace slug — to `config.toml`, preserving every
 /// other key (ported from the daemon `write_active_selection`). When
 /// `workspace_path` is `Some`, the CLI's active creative root is committed in
@@ -1166,7 +1167,7 @@ pub fn write_active_selection(
     })
 }
 
-/// Write `[memory_provider]` — the non-secret provider selection — preserving
+/// note: Write `[memory_provider]` — the non-secret provider selection — preserving
 /// every other key. The whole read-modify-write holds the daemon-home
 /// `config.toml` advisory lock.
 fn write_memory_provider_selection(
@@ -1184,7 +1185,7 @@ fn write_memory_provider_selection(
     })
 }
 
-/// Remove `[memory_provider]`, restoring the implicit local default.
+/// note: Remove `[memory_provider]`, restoring the implicit local default.
 fn clear_memory_provider_selection(nexus_home: &Path) -> CoreResult<()> {
     with_config_lock(nexus_home, || {
         let mut config = read_config_table(nexus_home)?;
@@ -1195,7 +1196,7 @@ fn clear_memory_provider_selection(nexus_home: &Path) -> CoreResult<()> {
     })
 }
 
-/// Read `config.toml` as a whole TOML table (absent/empty → empty table).
+/// note: Read `config.toml` as a whole TOML table (absent/empty → empty table).
 fn read_config_table(nexus_home: &Path) -> CoreResult<toml::Table> {
     let config_path = nexus_home.join("config.toml");
     if !config_path.exists() {
@@ -1212,7 +1213,7 @@ fn read_config_table(nexus_home: &Path) -> CoreResult<toml::Table> {
     })
 }
 
-/// Serialize and publish the whole `config.toml` document.
+/// note: Serialize and publish the whole `config.toml` document.
 ///
 /// The caller holds the writer lock; the rename makes the replacement atomic so
 /// a reader (including a `ReadOnly` open that cannot take the lock) always sees
@@ -1228,7 +1229,7 @@ fn write_config_table(nexus_home: &Path, config: &toml::Table) -> CoreResult<()>
     })
 }
 
-/// Build a generated string newtype from a plain `str`; the generated
+/// note: Build a generated string newtype from a plain `str`; the generated
 /// newtypes validate their own bounds (e.g. non-emptiness), so a violating
 /// stored value is an honest internal failure.
 pub fn newtype_value<T>(value: &str) -> CoreResult<T>

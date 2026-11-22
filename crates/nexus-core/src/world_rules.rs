@@ -8,16 +8,17 @@
 //! in `CoreService::list_world_rules` and is pushed into SQL **before** the
 //! 501-row probe, and the PATCH terminal guard shares one `BEGIN IMMEDIATE`
 //! transaction with the current-row read and the write.
+// invariant: storage keeps the carrier JSON opaque; only the read projection types it.
 
 use crate::world_kb::guards;
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::daemon_api::WorldFindingsListResponse;
 
-/// The PATCH status that turns an existing rule into a terminal, read-only
+/// note: The PATCH status that turns an existing rule into a terminal, read-only
 /// row (§13). Refused at create; never an authoring state.
 const ARCHIVED_STATUS: &str = "archived";
 
-/// Which members a PATCH request actually supplied.
+/// note: Which members a PATCH request actually supplied.
 ///
 /// The generated `WorldRuleUpdateRequest` is a lossy carrier for presence:
 /// the constraint `Map` treats absent and `{}` identically
@@ -35,7 +36,7 @@ const ARCHIVED_STATUS: &str = "archived";
 pub struct RulePatchPresence(u8);
 
 impl RulePatchPresence {
-    /// No member supplied (the raw-`{}` request); also the builder starting
+    /// note: No member supplied (the raw-`{}` request); also the builder starting
     /// point. Deliberately not `Default`: a caller that never thought about
     /// presence must not silently claim "nothing was supplied".
     const NONE: Self = Self(0);
@@ -51,7 +52,7 @@ impl RulePatchPresence {
         self.0 & member != 0
     }
 
-    /// Presence from the supplied member keys — native callers pass the raw
+    /// note: Presence from the supplied member keys — native callers pass the raw
     /// JSON object keys, direct callers the fields they authored.
     ///
     /// Unknown keys are ignored: the request DTO is `deny_unknown_fields`, so
@@ -76,7 +77,7 @@ impl RulePatchPresence {
 }
 
 impl CoreService {
-    /// List the first 500 rules in canonical-name/id order, omitting archived
+    /// note: List the first 500 rules in canonical-name/id order, omitting archived
     /// rows unless `include_archived` selects them (§13: the default read hides
     /// archived rules; draft/deprecated/NULL/unknown statuses stay visible).
     /// # Errors
@@ -92,7 +93,7 @@ impl CoreService {
         list_world_rules(&self.inner.pool, world_id, include_archived).await
     }
 
-    /// Create a structured rule after member-aware carrier validation.
+    /// note: Create a structured rule after member-aware carrier validation.
     /// # Errors
     /// Returns principal, write-access, World ownership, validation or storage errors.
     pub async fn create_world_rule(
@@ -107,7 +108,7 @@ impl CoreService {
         create_world_rule(&self.inner.pool, world_id, request).await
     }
 
-    /// Update only supplied fields; replace the entire constraint carrier.
+    /// note: Update only supplied fields; replace the entire constraint carrier.
     ///
     /// `presence` carries the supplied-member set the generated request DTO
     /// erases (see [`RulePatchPresence`]); the archived terminal guard reads it
@@ -129,7 +130,7 @@ impl CoreService {
         update_world_rule(&self.inner.pool, world_id, rule_id, request, presence).await
     }
 
-    /// Read the newest 500 advisory World findings, with an honest cap flag.
+    /// note: Read the newest 500 advisory World findings, with an honest cap flag.
     /// # Errors
     /// Returns principal, World ownership or storage errors.
     pub async fn list_world_findings(
@@ -165,19 +166,19 @@ use nexus_local_db::spoke_rules::{
 use nexus_spoke_adapter::constraint::{parse_carrier_json_member, Constraint};
 use serde_json::{json, Map, Value};
 
-/// Safety cap on the read surface: the first 500 rules per world in store
+/// note: Safety cap on the read surface — the first 500 rules per world in store
 /// order (`canonical_name ASC, rule_id ASC` — AR-3). Pagination lands with
 /// the Control Room panel — roadmap.
 const WORLD_RULES_CAP: usize = 500;
 
-/// SQL-side probe bound for the store query: one past [`WORLD_RULES_CAP`],
+/// note: SQL-side probe bound for the store query — one past [`WORLD_RULES_CAP`],
 /// so the `LIMIT ?` returns the overflow row and `truncated` stays honest
 /// without loading the full set (Bugbot 4bad2fca). Derived from the cap so
 /// the two cannot drift.
-#[allow(clippy::cast_possible_wrap)] // const-evaluated literal (500): always fits i64
+#[allow(clippy::cast_possible_wrap)] // note: const-evaluated literal (500) — always fits i64
 const WORLD_RULES_PROBE: i64 = WORLD_RULES_CAP as i64 + 1;
 
-/// `GET /v1/daemon/worlds/:world_id/rules?include_archived=` — list a world's
+/// note: `GET /v1/daemon/worlds/:world_id/rules?include_archived=` — list a world's
 /// structured rules, `canonical_name ASC, rule_id ASC`, capped at
 /// [`WORLD_RULES_CAP`].
 ///
@@ -192,7 +193,7 @@ async fn list_world_rules(
     world_id: String,
     include_archived: bool,
 ) -> CoreResult<WorldRulesListResponse> {
-    // Fetch one past the cap (501): the store bounds the read SQL-side via
+    // note: fetch one past the cap (501) — the store bounds the read SQL-side via
     // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
     // just beyond the cap so `truncated` below stays honest without ever
     // loading the full set. The caller-selected status omission travels with
@@ -204,7 +205,7 @@ async fn list_world_rules(
             category: e.to_string(),
         })?;
 
-    // Honest truncation flag: more *selected* rows than the cap → `truncated:
+    // note: honest truncation flag — more *selected* rows than the cap → `truncated:
     // true`, response carries the first 500 (store order is
     // canonical_name ASC, rule_id ASC).
     let truncated = rows.len() > WORLD_RULES_CAP;
@@ -217,7 +218,7 @@ async fn list_world_rules(
     Ok(WorldRulesListResponse { rules, truncated })
 }
 
-/// Project one `spoke_rules` row onto the wire item.
+/// note: Project one `spoke_rules` row onto the wire item.
 ///
 /// JSON columns are parsed leniently (malformed stored JSON degrades to
 /// empty rather than failing the list — mirrors the `world_findings`
@@ -232,11 +233,11 @@ fn row_to_item(r: SpokeRuleRow) -> WorldRulesListResponseRulesItem {
         description: r.description,
         severity_hint: r.severity_hint,
         status: r.status,
-        // Spoke vocabulary verbatim; malformed stored JSON → empty
+        // note: spoke vocabulary verbatim; malformed stored JSON → empty
         // (all-types) targeting, same lenient read as the findings route.
         target_entry_types: serde_json::from_str::<Vec<String>>(&r.target_entry_types_json)
             .unwrap_or_default(),
-        // AR-3 first-class carrier: `extensions["nexus"]["constraint"]`.
+        // note: AR-3 first-class carrier — `extensions["nexus"]["constraint"]`.
         // Absent/malformed → empty map (the wire omits it via the
         // generated `skip_serializing_if`). The extensions bag itself is
         // NOT exposed.
@@ -246,7 +247,7 @@ fn row_to_item(r: SpokeRuleRow) -> WorldRulesListResponseRulesItem {
     }
 }
 
-/// Extract the AR-2 constraint carrier from the stored `extensions` bag:
+/// note: Extract the AR-2 constraint carrier from the stored `extensions` bag:
 /// `extensions["nexus"]["constraint"]` as a JSON object. Absent namespace /
 /// absent key / malformed carrier → empty map (omitted on the wire).
 fn constraint_from_extensions(extensions_json: &str) -> Map<String, Value> {
@@ -262,7 +263,7 @@ fn constraint_from_extensions(extensions_json: &str) -> Map<String, Value> {
     }
 }
 
-/// Project a `spoke_rules` row onto the single-item write response
+/// note: Project a `spoke_rules` row onto the single-item write response
 /// (V1.169 P1, AR-1): the `WorldRuleResponse` schema is the
 /// `WorldRulesListResponseRulesItem` shape verbatim, so the projection
 /// reuses [`row_to_item`] and converts nominally.
@@ -282,13 +283,13 @@ fn item_to_response(item: WorldRulesListResponseRulesItem) -> WorldRuleResponse 
     }
 }
 
-/// Convert Unix-epoch seconds to an RFC 3339 UTC datetime (`None` for
+/// note: Convert Unix-epoch seconds to an RFC 3339 UTC datetime (`None` for
 /// out-of-range epochs or unknown/null stored timestamps).
 const fn epoch_to_rfc3339(epoch: i64) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::from_timestamp(epoch, 0)
 }
 
-/// AR-2 projection: `constraint.{member}`, with the carrier-level member
+/// note: AR-2 projection — `constraint.{member}`, with the carrier-level member
 /// (`"constraint"` — non-object root / closed-shape reject) projecting to
 /// the bare `constraint` field (locks AR-2: "root → `constraint`").
 fn constraint_field(member: &'static str) -> String {
@@ -299,7 +300,7 @@ fn constraint_field(member: &'static str) -> String {
     }
 }
 
-/// `POST /v1/daemon/worlds/:world_id/rules` — create a structured rule
+/// note: `POST /v1/daemon/worlds/:world_id/rules` — create a structured rule
 /// (V1.169 P1, AR-2/AR-3/AR-5).
 ///
 /// Mirrors the CLI `rule add` row assembly: guards (401/404/403) → carrier
@@ -318,7 +319,7 @@ fn constraint_field(member: &'static str) -> String {
 /// `created_at` = `updated_at` = now epoch; `schema_version` = 1.
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::too_many_lines)]
-// ^ the locked fail-early validation order (AR-5) is one cohesive chain;
+// why: ^ the locked fail-early validation order (AR-5) is one cohesive chain;
 // splitting would obscure the contract order it documents (works.rs
 // create_work precedent).
 async fn create_world_rule(
@@ -326,7 +327,7 @@ async fn create_world_rule(
     world_id: String,
     req: WorldRuleCreateRequest,
 ) -> CoreResult<WorldRuleResponse> {
-    // AR-2 seam: the carrier grammar lives in the spoke adapter (sole
+    // note: AR-2 seam — the carrier grammar lives in the spoke adapter (sole
     // consumer) — the daemon never parses carriers itself. The
     // member-aware error projects onto the closed `constraint.*` envelope
     // vocabulary (no message string-sniffing).
@@ -338,7 +339,7 @@ async fn create_world_rule(
             }
         })?;
 
-    // AR-5: observer_cardinality applies to timeline events (no
+    // note: AR-5 — observer_cardinality applies to timeline events (no
     // entry_type) — combining with target_entry_types is rejected on the
     // effective pair (both fresh at create), never silently ignored (CLI
     // parity, rule.rs:197-207).
@@ -354,7 +355,7 @@ async fn create_world_rule(
         });
     }
 
-    // AR-2: target_entry_types members must be non-empty ([] is meaningful
+    // note: AR-2 — target_entry_types members must be non-empty ([] is meaningful
     // — all entry types in check scope — but [""] is not).
     if req.target_entry_types.iter().any(|t| t.trim().is_empty()) {
         return Err(CoreError::InvalidInput {
@@ -363,7 +364,7 @@ async fn create_world_rule(
         });
     }
 
-    // AR-2 meta-field value checks (handler-side; the schemas are
+    // note: AR-2 meta-field value checks (handler-side; the schemas are
     // type-only per AR-1 so these surface through the envelope).
     let canonical_name = req.canonical_name.trim().to_string();
     if canonical_name.is_empty() {
@@ -380,7 +381,7 @@ async fn create_world_rule(
         });
     }
     let status = req.status.as_deref().unwrap_or("active");
-    // §13: create is an authoring path — `archived` is a transition applied to
+    // note: §13 — create is an authoring path; `archived` is a transition applied to
     // an existing rule, never an authoring state, so it is refused here.
     if !matches!(status, "draft" | "active" | "deprecated") {
         return Err(CoreError::InvalidInput {
@@ -405,7 +406,7 @@ async fn create_world_rule(
         }
     }
 
-    // AR-2 id minting (V1.166 AR-2): rul_ ++ uuid v4 simple (32 hex, no
+    // note: AR-2 id minting (V1.166 AR-2) — rul_ ++ uuid v4 simple (32 hex, no
     // hyphens), minted server-side — immutable, path-addressed, never a
     // DTO field.
     let rule_id = format!("rul_{}", uuid::Uuid::new_v4().simple());
@@ -429,7 +430,7 @@ async fn create_world_rule(
         severity_hint: req.severity_hint.clone(),
         status: Some(status.to_string()),
         source_anchor_json: None,
-        // AR-2/AR-3 CLI row-assembly parity: the nexus namespace is written
+        // note: AR-2/AR-3 CLI row-assembly parity — the nexus namespace is written
         // fresh at create with the carrier verbatim (rule.rs:230).
         extensions_json: json!({ "nexus": { "constraint": req.constraint } }).to_string(),
         created_at: Some(now_epoch),
@@ -444,7 +445,7 @@ async fn create_world_rule(
     Ok(item_to_response(row_to_item(row)))
 }
 
-/// Test-only rendezvous at the rule write path's write-lock boundary
+/// note: Test-only rendezvous at the rule write path's write-lock boundary
 /// (`test-hooks`; the production build contains none of this).
 ///
 /// Mirrors `nexus_execution::test_hooks::OwnerGate`: the gate names the rule whose
@@ -462,17 +463,17 @@ async fn create_world_rule(
 #[cfg(any(test, feature = "test-hooks"))]
 #[derive(Debug)]
 pub struct RuleWriteGate {
-    /// The rule whose write request participates in this rendezvous.
+    /// note: The rule whose write request participates in this rendezvous.
     pub rule_id: String,
-    /// Signalled once the request reached the write-lock boundary.
+    /// note: Signalled once the request reached the write-lock boundary.
     pub boundary: std::sync::Arc<tokio::sync::Notify>,
-    /// The request waits for this before taking the write lock.
+    /// note: The request waits for this before taking the write lock.
     pub proceed: std::sync::Arc<tokio::sync::Notify>,
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
 impl RuleWriteGate {
-    /// A gate governing `rule_id`'s write requests.
+    /// note: A gate governing `rule_id`'s write requests.
     #[must_use]
     pub fn for_rule(rule_id: impl Into<String>) -> Self {
         Self {
@@ -487,7 +488,7 @@ impl RuleWriteGate {
 static RULE_WRITE_GATE: std::sync::Mutex<Option<std::sync::Arc<RuleWriteGate>>> =
     std::sync::Mutex::new(None);
 
-/// Install (or clear) the rule-write gate.
+/// note: Install (or clear) the rule-write gate.
 ///
 /// # Panics
 ///
@@ -511,7 +512,7 @@ async fn rule_write_gate_boundary(rule_id: &str) {
     }
 }
 
-/// `PATCH /v1/daemon/worlds/:world_id/rules/:rule_id` — per-field edit
+/// note: `PATCH /v1/daemon/worlds/:world_id/rules/:rule_id` — per-field edit
 /// (V1.169 P1, AR-2/AR-3/AR-5/AR-6; V1.198 §13 terminal archive).
 ///
 /// Validation order is contract (AR-5): guards (401/404/403) → current-row
@@ -536,7 +537,7 @@ async fn rule_write_gate_boundary(rule_id: &str) {
 /// stands, `updated_at` included, so replaying the archive is invisible.
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::too_many_lines)]
-// ^ the locked validation order (AR-5) is one cohesive chain; splitting
+// why: ^ the locked validation order (AR-5) is one cohesive chain; splitting
 // would obscure the contract order it documents (works.rs patch_work
 // precedent).
 async fn update_world_rule(
@@ -546,7 +547,7 @@ async fn update_world_rule(
     req: WorldRuleUpdateRequest,
     presence: RulePatchPresence,
 ) -> CoreResult<WorldRuleResponse> {
-    // §13: one `BEGIN IMMEDIATE` transaction owns the read → guard → write →
+    // note: §13 — one `BEGIN IMMEDIATE` transaction owns the read → guard → write →
     // re-read sequence. The write lock is taken up front, so a competing
     // archive commits before this read or waits behind this write — neither
     // request can act on a stale preimage.
@@ -567,7 +568,7 @@ async fn update_world_rule(
             })?
     };
 
-    // AR-5 order: addressing precedes payload. The pre-fetch is
+    // note: AR-5 order — addressing precedes payload. The pre-fetch is
     // world-scoped (filter below): a rule_id owned by a different world —
     // even another world of the same creator — is 404 naming only the id,
     // with no existence leak (AR-6).
@@ -583,7 +584,7 @@ async fn update_world_rule(
         });
     };
 
-    // §13: archived is terminal, so the tombstone accepts exactly the
+    // note: §13 — archived is terminal, so the tombstone accepts exactly the
     // status-only request that produced it. The guard runs straight after the
     // scoped lookup — before the typed empty-PATCH test — so a supplied member
     // the generated DTO collapses (an empty `{}` / `[]`, an explicit `null`, or
@@ -595,7 +596,7 @@ async fn update_world_rule(
         presence,
     )?;
 
-    // §13 strict idempotence: the archive-only repeat on an already archived
+    // note: §13 strict idempotence — the archive-only repeat on an already archived
     // row is a **no-write** success. The shared update statement refreshes
     // `updated_at` on every matched row, so letting the repeat reach the write
     // path would mutate the stored row — and the caller-visible response —
@@ -610,7 +611,7 @@ async fn update_world_rule(
         return Ok(item_to_response(row_to_item(current)));
     }
 
-    // AR-3: empty PATCH (no mutable field present) → 400 field=`patch` —
+    // invariant: AR-3 — empty PATCH (no mutable field present) → 400 field=`patch` —
     // fail-early beats a no-op write that would still refresh updated_at.
     // `constraint` counts as present only when non-empty (typify's
     // generated `Map` treats absent and `{}` identically via
@@ -634,7 +635,7 @@ async fn update_world_rule(
         });
     }
 
-    // AR-2 seam: validate the provided carrier member-aware before any
+    // note: AR-2 seam — validate the provided carrier member-aware before any
     // assembly (whole-carrier replacement, AR-3).
     let provided_constraint = if req.constraint.is_empty() {
         None
@@ -649,7 +650,7 @@ async fn update_world_rule(
         )
     };
 
-    // AR-5: effective-pair conflict — family = provided carrier's family
+    // note: AR-5 effective-pair conflict — family = provided carrier's family
     // or stored family (via the read-side projection), target set =
     // provided or stored; rejected on `target_entry_types` regardless of
     // which side each half came from (the pair rule, not grammar — the
@@ -660,7 +661,7 @@ async fn update_world_rule(
         let stored = constraint_from_extensions(current.extensions_json.as_str());
         stored.get("family").and_then(Value::as_str) == Some("observer_cardinality")
     };
-    // Lenient stored parse (read-projection parity): malformed stored JSON
+    // note: lenient stored parse (read-projection parity) — malformed stored JSON
     // degrades to the empty set.
     let stored_targets =
         serde_json::from_str::<Vec<String>>(&current.target_entry_types_json).unwrap_or_default();
@@ -676,7 +677,7 @@ async fn update_world_rule(
         });
     }
 
-    // AR-2 meta-field value checks — provided fields only (per-field
+    // note: AR-2 meta-field value checks — provided fields only (per-field
     // replace, AR-3).
     if let Some(targets) = req.target_entry_types.as_ref() {
         if targets.iter().any(|t| t.trim().is_empty()) {
@@ -713,7 +714,7 @@ async fn update_world_rule(
         None => None,
     };
     if let Some(status) = req.status.as_deref() {
-        // §13 write vocabulary: `archived` joins the three authoring states
+        // note: §13 write vocabulary — `archived` joins the three authoring states
         // (create still refuses it). An archived *row* never reaches this
         // branch with a non-archived value — the terminal guard above already
         // refused the status exit.
@@ -743,7 +744,7 @@ async fn update_world_rule(
         }
     }
 
-    // AR-4 assembly: pre-serialized JSON columns; storage stays opaque
+    // note: AR-4 assembly — pre-serialized JSON columns; storage stays opaque
     // spoke-vocabulary-free (sole-consumer rule).
     let mut update = RuleUpdate {
         canonical_name,
@@ -763,7 +764,7 @@ async fn update_world_rule(
         extensions_json: None,
     };
 
-    // AR-3 whole-carrier replacement: only extensions.nexus.constraint is
+    // note: AR-3 whole-carrier replacement — only extensions.nexus.constraint is
     // overwritten — the rest of the nexus namespace and all other
     // namespaces survive. Malformed stored extensions_json → 500
     // fail-closed (storage corruption; rows written by CLI/API are always
@@ -776,7 +777,7 @@ async fn update_world_rule(
         );
     }
 
-    // AR-4: Ok(false) = unknown id OR foreign world (storage does not
+    // note: AR-4 — Ok(false) = unknown id OR foreign world (storage does not
     // distinguish) → 404 naming only the id (AR-6).
     if !update_rule_in_tx(&mut tx, &world_id, &rule_id, &update)
         .await
@@ -789,7 +790,7 @@ async fn update_world_rule(
         });
     }
 
-    // Re-read for the response item inside the same transaction: the row this
+    // note: re-read for the response item inside the same transaction — the row this
     // commit is about to publish, never a concurrent writer's state.
     let Some(row) = get_rule_in_tx(&mut tx, &rule_id)
         .await
@@ -809,7 +810,7 @@ async fn update_world_rule(
     Ok(item_to_response(row_to_item(row)))
 }
 
-/// §13 terminal guard: an archived row accepts exactly the status-only
+/// note: §13 terminal guard — an archived row accepts exactly the status-only
 /// request that produced it.
 ///
 /// Rejections use the existing field-level `invalid_input` envelope and follow
@@ -855,7 +856,7 @@ fn guard_archived_patch(
             "statement",
             presence.contains(RulePatchPresence::STATEMENT) || req.statement.is_some(),
         ),
-        // A status exit is a *supplied* status other than `archived` (an
+        // note: a status exit is a *supplied* status other than `archived` (an
         // explicit null counts: `presence` records the key while the typed
         // value is the absent member). An absent status is not an offender —
         // the supplied content member is the one named.
@@ -886,7 +887,7 @@ fn guard_archived_patch(
     })
 }
 
-/// AR-3 whole-carrier replacement: overwrite `extensions["nexus"]
+/// note: AR-3 whole-carrier replacement — overwrite `extensions["nexus"]
 /// ["constraint"]` with `carrier`, preserving the rest of the extensions
 /// bag — other nexus keys + all other namespaces. A missing nexus
 /// namespace is created (the carrier is being set); a nexus value that is
@@ -921,25 +922,25 @@ mod findings {
     use serde_json::{Map, Value};
     use std::num::NonZeroU64;
 
-    /// Safety cap on the read surface: the newest 500 findings per world
+    /// note: Safety cap on the read surface — the newest 500 findings per world
     /// (AR-3). Pagination lands with the Control Room panel — roadmap.
     const WORLD_FINDINGS_CAP: usize = 500;
 
-    /// SQL-side probe bound for the store query: one past
+    /// note: SQL-side probe bound for the store query — one past
     /// [`WORLD_FINDINGS_CAP`], so the `LIMIT ?` returns the overflow row and
     /// `truncated` stays honest without loading the full set (Bugbot
     /// 4bad2fca). Derived from the cap so the two cannot drift.
-    #[allow(clippy::cast_possible_wrap)] // const-evaluated literal (500): always fits i64
+    #[allow(clippy::cast_possible_wrap)] // note: const-evaluated literal (500) — always fits i64
     const WORLD_FINDINGS_PROBE: i64 = WORLD_FINDINGS_CAP as i64 + 1;
 
-    /// `GET /v1/daemon/worlds/:world_id/findings` — list world-attached
+    /// note: `GET /v1/daemon/worlds/:world_id/findings` — list world-attached
     /// check findings, newest-first, capped at [`WORLD_FINDINGS_CAP`].
     #[allow(clippy::missing_errors_doc)]
     pub(super) async fn list_world_findings(
         pool: &sqlx::SqlitePool,
         world_id: String,
     ) -> CoreResult<WorldFindingsListResponse> {
-        // Fetch one past the cap (501): the store bounds the read SQL-side via
+        // note: fetch one past the cap (501) — the store bounds the read SQL-side via
         // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
         // just beyond the cap so `truncated` below stays honest without ever
         // loading the full set.
@@ -949,7 +950,7 @@ mod findings {
                 category: e.to_string(),
             })?;
 
-        // Honest truncation flag: more stored rows than the cap → `truncated:
+        // note: honest truncation flag — more stored rows than the cap → `truncated:
         // true`, response carries the newest 500 (store order is newest-first).
         let truncated = rows.len() > WORLD_FINDINGS_CAP;
         let findings = rows
@@ -964,7 +965,7 @@ mod findings {
         })
     }
 
-    /// Project one `world_findings` row onto the wire item.
+    /// note: Project one `world_findings` row onto the wire item.
     ///
     /// JSON columns are parsed leniently (malformed stored JSON degrades to
     /// `None` / empty rather than failing the list — mirrors the
@@ -986,10 +987,10 @@ mod findings {
                 .as_deref()
                 .and_then(|s| serde_json::from_str(s).ok()),
             suggested_fix: r.suggested_fix,
-            // The column is NOT NULL DEFAULT '{}' — verbatim spoke Map.
+            // note: the column is NOT NULL DEFAULT '{}' — verbatim spoke Map.
             text_position: parse_json_object(Some(r.text_position_json.as_str()))
                 .unwrap_or_default(),
-            // The column is NOT NULL DEFAULT '{}' — verbatim spoke ExtensionMap
+            // note: the column is NOT NULL DEFAULT '{}' — verbatim spoke ExtensionMap
             // (incl. the stamped `extensions.nexus.world_id` / `creator_id`).
             extensions: parse_json_object(Some(r.extensions_json.as_str())).unwrap_or_default(),
             created_at: epoch_to_rfc3339(r.created_at),
@@ -997,13 +998,13 @@ mod findings {
         }
     }
 
-    /// Parse a stored JSON object column leniently (`None` when absent or
+    /// note: Parse a stored JSON object column leniently (`None` when absent or
     /// malformed) — same idiom as `timeline_events::parse_json_object`.
     fn parse_json_object(raw: Option<&str>) -> Option<Map<String, Value>> {
         raw.and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
     }
 
-    /// Convert Unix-epoch seconds to an RFC 3339 UTC datetime (`None` for
+    /// note: Convert Unix-epoch seconds to an RFC 3339 UTC datetime (`None` for
     /// out-of-range epochs — the column is NOT NULL, so valid rows always map).
     const fn epoch_to_rfc3339(epoch: i64) -> Option<chrono::DateTime<chrono::Utc>> {
         chrono::DateTime::from_timestamp(epoch, 0)

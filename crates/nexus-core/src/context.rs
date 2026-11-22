@@ -12,6 +12,7 @@
 //! writes. The read-only directive store never runs the post-injection
 //! lifecycle, so a poll never burns TTL or writes anchors; the Moment
 //! Directive body is never on the wire (status/metadata only, AC-I3).
+// invariant: inspection is read-only — a poll never burns TTL or writes anchors.
 
 use nexus_contracts::generated::core::core_actor_context::{CoreActorContext, NexusActorRef};
 use nexus_contracts::generated::daemon_api::inspector::moment_directive_request::{
@@ -45,7 +46,7 @@ use crate::memory_pipeline::internal_err;
 use crate::principal::Principal;
 use crate::service::CoreService;
 
-/// Unix epoch milliseconds (QC3-S-2 dedupe: the single directive lifecycle
+/// note: Unix epoch milliseconds (QC3-S-2 dedupe: the single directive lifecycle
 /// clock, shared by both store adapters and the directive family).
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -70,7 +71,7 @@ fn database_error(e: &LocalDbError) -> CoreError {
     }
 }
 
-/// Map a `narrative_write` domain error onto the matching core category: a
+/// note: map a `narrative_write` domain error onto the matching core category: a
 /// genuine storage fault stays the database class, an id-format rejection is
 /// invalid input, a missing FK reference is not-found, and a sequence
 /// conflict is the retained plain 409. (The world-ownership probes never
@@ -101,9 +102,7 @@ fn map_narrative_write_error(e: nexus_local_db::narrative_write::NarrativeWriteE
     }
 }
 
-// ── DirectiveStore adapters (composition root) ──────────────────────────
-
-/// Composition-root [`DirectiveStore`] over `nexus-local-db`, consumed by
+/// note: composition-root [`DirectiveStore`] over `nexus-local-db`, consumed by
 /// `assemble_moment_with_directive` at run/assemble wiring sites. Cannot live
 /// in `nexus-local-db` (dependency cycle with MCA).
 #[derive(Debug, Clone)]
@@ -112,7 +111,7 @@ pub struct LocalDirectiveStore {
 }
 
 impl LocalDirectiveStore {
-    /// Create the adapter over a shared pool.
+    /// note: create the adapter over a shared pool.
     #[must_use]
     pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
@@ -141,7 +140,7 @@ impl DirectiveStore for LocalDirectiveStore {
     }
 }
 
-/// Read-only [`DirectiveStore`] for the inspector route (W-001).
+/// note: read-only [`DirectiveStore`] for the inspector route (W-001).
 ///
 /// Resolves + renders the active directive exactly like
 /// [`LocalDirectiveStore`] but **never** runs the post-injection lifecycle —
@@ -158,7 +157,7 @@ pub struct ReadOnlyDirectiveStore {
 }
 
 impl ReadOnlyDirectiveStore {
-    /// Create the read-only adapter over a shared pool.
+    /// note: create the read-only adapter over a shared pool.
     #[must_use]
     pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
@@ -183,11 +182,11 @@ impl DirectiveStore for ReadOnlyDirectiveStore {
         _event_id: Option<&str>,
         _work_id: Option<&str>,
     ) {
-        // Read-only: the inspector never advances the directive lifecycle.
+        // invariant: the inspector never advances the directive lifecycle.
     }
 }
 
-/// Scope resolution (spec §3.2 — Work wins / World-override fallback).
+/// note: scope resolution (spec §3.2 — Work wins / World-override fallback).
 ///
 /// 1. If the Work has a Work-scoped directive, use it.
 /// 2. Else if the Work's `world_id` has a World-scoped override, use it.
@@ -212,21 +211,21 @@ async fn resolve_active_row(
 ) -> Option<MomentDirectiveRow> {
     if let Some(work_id) = work_id {
         match get_active_for_work(pool, creator_id, work_id).await {
-            // Work-wins.
+            // note: Work-wins.
             Ok(Some(row)) => return Some(row),
-            // Unverifiable Work-directive state: do NOT fall through to the
+            // invariant: unverifiable Work-directive state — do NOT fall through to the
             // World override (QC2-F2).
             Err(e) => {
                 tracing::warn!(creator_id, work_id, error = %e,
                     "moment directive: work-scoped read failed; resolving to no directive");
                 return None;
             }
-            // Confirmed no Work directive — the binding check may fall
+            // note: confirmed no Work directive — the binding check may fall
             // through to the World override.
             Ok(None) => {}
         }
         match get_work(pool, creator_id, work_id).await {
-            // Binding verified: a World-bound Work inherits the override.
+            // note: binding verified — a World-bound Work inherits the override.
             Ok(Some(work)) => match work.world_id {
                 Some(world_id) => match get_active_for_world(pool, creator_id, &world_id).await {
                     Ok(row) => row,
@@ -236,10 +235,10 @@ async fn resolve_active_row(
                         None
                     }
                 },
-                // Confirmed worldless Work — no override can apply.
+                // note: confirmed worldless Work — no override can apply.
                 None => None,
             },
-            // Unknown Work (Ok(None)) or unreadable binding (Err): no override.
+            // note: unknown Work (Ok(None)) or unreadable binding (Err); no override.
             Ok(None) => None,
             Err(e) => {
                 tracing::warn!(creator_id, work_id, error = %e,
@@ -259,12 +258,12 @@ async fn resolve_active_row(
     }
 }
 
-/// Map a stored row to the MCA payload. A corrupt row (empty body / unknown
+/// note: map a stored row to the MCA payload. A corrupt row (empty body / unknown
 /// depth / TTL kind strings) never injects — the adapter skips it with a
 /// warning (failures degrade to "no directive", never fail the assembly).
 fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
     if row.body.trim().is_empty() {
-        // QC2-F5: a corrupt row with an empty body would render nothing yet
+        // why: QC2-F5 — a corrupt row with an empty body would render nothing yet
         // still count as an injection — skip it, and because `load_active`
         // returns `None` the post-injection TTL decrement never runs.
         tracing::warn!(directive_id = %row.directive_id,
@@ -287,7 +286,7 @@ fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
         insert_depth,
         ttl_kind,
         clear_on_scene_change: row.clear_on_scene_change,
-        // V1.151 P0 (DF-76 spec §2 H6): carry the persisted metadata through
+        // note: V1.151 P0 (DF-76 spec §2 H6) — carry the persisted metadata through
         // to MCA for the inspector packet — status/metadata only, never the
         // body (AC-I3). `ttl_remaining` is `i64` on the row; only non-
         // negative values surface (an active row's TTL never goes negative).
@@ -300,7 +299,7 @@ fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
     })
 }
 
-/// Post-injection lifecycle (spec §3.3) — run after a directive was actually
+/// note: post-injection lifecycle (spec §3.3) — run after a directive was actually
 /// injected by `assemble_moment_with_directive`:
 ///
 /// 1. **Scene clear**: when `clear_on_scene_change` is set and the focused
@@ -329,7 +328,6 @@ async fn after_injection_lifecycle(
         return;
     };
 
-    // Scene-change clear.
     if row.clear_on_scene_change {
         if let (Some(last), Some(current)) = (row.last_focused_event_id.as_deref(), event_id) {
             if last != current {
@@ -341,7 +339,7 @@ async fn after_injection_lifecycle(
         }
     }
 
-    // Chapter-advance TTL burn for novel Works with `chapters` TTL. The burn
+    // note: chapter-advance TTL burn for novel Works with `chapters` TTL. The burn
     // is the chapter delta since this work's last injecting assemble — see
     // `decrement_ttl_by` in `nexus-local-db` for the write-failure threat
     // model (R-V1150P2-005 accepted: atomic via RETURNING; a write failure
@@ -352,13 +350,13 @@ async fn after_injection_lifecycle(
                 Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
                     let chapter = i64::from(work.current_chapter);
                     let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
-                        // Delta since this work's last injecting assemble;
+                        // note: delta since this work's last injecting assemble;
                         // never negative — a chapter rewind does not refund TTL.
                         Ok(Some(last)) => i64::max(0, chapter - last),
-                        // First injecting assemble for this work: observe
+                        // note: first injecting assemble for this work — observe
                         // only, no burn (R-V1150P2-004).
                         Ok(None) => 0,
-                        // Unreadable anchor: degrade like the non-novel
+                        // note: unreadable anchor — degrade like the non-novel
                         // fallback (burn 1, keep the directive moving toward
                         // expiry) — never fail the assembly (QC2-F2).
                         Err(e) => {
@@ -369,7 +367,7 @@ async fn after_injection_lifecycle(
                     };
                     (burn, Some((work_id, chapter)))
                 }
-                // Non-novel / unknown Work: `chapters` behaves like
+                // note: non-novel / unknown Work — `chapters` behaves like
                 // `generations` (documented, not silent — spec §3.3).
                 _ => (1, None),
             }
@@ -377,7 +375,7 @@ async fn after_injection_lifecycle(
         _ => (1, None),
     };
 
-    // Anchor first, then burn: if the burn write fails, the next assemble
+    // why: anchor first, then burn — if the burn write fails, the next assemble
     // re-reads the row and re-attempts; if the directive expires at 0, the
     // anchors are already recorded for DF-76 inspection.
     if let Err(e) = update_lifecycle_anchor(pool, directive_id, event_id, now_ms()).await {
@@ -397,10 +395,8 @@ async fn after_injection_lifecycle(
     }
 }
 
-// ── Moment Directive family (set / show / clear) ────────────────────────
-
 impl CoreService {
-    /// Set / show / clear the active Moment Directive for a scope the
+    /// note: set / show / clear the active Moment Directive for a scope the
     /// principal owns (V1.151 P0, DF-76).
     ///
     /// Guard order (plan lock, preserved): principal verification → scope
@@ -440,7 +436,7 @@ impl CoreService {
             return Err(invalid_input("scope.id", "must be non-empty"));
         }
 
-        // Ownership gate (inspector/check pattern): a foreign scope never
+        // invariant: ownership gate (inspector/check pattern) — a foreign scope never
         // leaks directive state — 403, not 404.
         let owned = match req.scope.kind {
             MomentDirectiveRequestScopeKind::Work => {
@@ -459,7 +455,7 @@ impl CoreService {
             });
         }
 
-        // The DB scope_kind string (`scope_kind::WORK` | `scope_kind::WORLD`).
+        // note: the DB scope_kind string (`scope_kind::WORK` | `scope_kind::WORLD`).
         let kind = match req.scope.kind {
             MomentDirectiveRequestScopeKind::Work => scope_kind::WORK,
             MomentDirectiveRequestScopeKind::World => scope_kind::WORLD,
@@ -475,7 +471,7 @@ impl CoreService {
     }
 }
 
-/// `set` — validation mirrors CLI `handle_set`, then
+/// note: `set` — validation mirrors CLI `handle_set`, then
 /// `set_active` / `replace_active` (thin wrapper).
 async fn set(
     pool: &sqlx::SqlitePool,
@@ -484,7 +480,7 @@ async fn set(
     kind: &str,
     scope_id: &str,
 ) -> CoreResult<MomentDirectiveResponse> {
-    // Non-empty body after trim (CLI `handle_set`, spec §3.1).
+    // note: non-empty body after trim (CLI `handle_set`, spec §3.1).
     let Some(body) = req.body.as_deref() else {
         return Err(invalid_input("body", "is required for set"));
     };
@@ -495,7 +491,7 @@ async fn set(
             "must be non-empty (after trimming whitespace)",
         ));
     }
-    // Exactly one TTL kind, count >= 1 (`NonZeroU64` makes ttl_remaining >= 1
+    // note: exactly one TTL kind, count >= 1 (`NonZeroU64` makes ttl_remaining >= 1
     // by construction; the signed cast mirrors the CLI's `i64 --ttl-*` flags).
     // Wire name `ttl_remaining` per the spec §5 H5 lock (W-3 / QC1-F-001).
     let (Some(ttl_kind), Some(ttl_count)) = (req.ttl_kind, req.ttl_remaining) else {
@@ -506,7 +502,7 @@ async fn set(
     };
     let ttl_remaining = i64::try_from(ttl_count.get())
         .map_err(|_| invalid_input("ttl_remaining", "must fit in a signed 64-bit count"))?;
-    // Known insert depth (closed wire enum; required for set).
+    // note: known insert depth (closed wire enum; required for set).
     let Some(insert_depth) = req.insert_depth else {
         return Err(invalid_input("insert_depth", "is required for set"));
     };
@@ -531,7 +527,7 @@ async fn set(
     } else {
         match set_active(pool, &new).await {
             Ok(row) => row,
-            // The unique partial index `moment_directives_one_active_per_scope`
+            // why: the unique partial index `moment_directives_one_active_per_scope`
             // rejects a second active row — surface as 409, mirroring the
             // CLI's "--replace required" message (no silent overwrite).
             Err(LocalDbError::Sqlx(sqlx::Error::Database(db_err)))
@@ -551,7 +547,7 @@ async fn set(
     response_from_row(&row)
 }
 
-/// `show` — resolve the **effective** directive for the scope (incl. body,
+/// note: `show` — resolve the **effective** directive for the scope (incl. body,
 /// the author surface); `{}` when nothing is effective.
 ///
 /// Mirrors the CLI `resolve_effective_for_show`: for a Work scope the Work's
@@ -566,9 +562,9 @@ async fn show(
 ) -> CoreResult<MomentDirectiveResponse> {
     let row = if kind == scope_kind::WORK {
         match get_active_for_work(pool, creator_id, scope_id).await {
-            // Work-wins.
+            // note: Work-wins.
             Ok(Some(row)) => Some(row),
-            // Confirmed no Work directive — inherit the bound World's
+            // note: confirmed no Work directive — inherit the bound World's
             // override (the ownership gate already verified the Work, so
             // `get_work` resolves; a worldless Work has no override).
             Ok(None) => {
@@ -594,7 +590,7 @@ async fn show(
     row.map_or_else(|| Ok(empty_response()), |row| response_from_row(&row))
 }
 
-/// `clear` — soft-delete the active row (retained for DF-76 inspection);
+/// note: `clear` — soft-delete the active row (retained for DF-76 inspection);
 /// always responds `{}`.
 async fn clear_action(
     pool: &sqlx::SqlitePool,
@@ -608,7 +604,7 @@ async fn clear_action(
     Ok(empty_response())
 }
 
-/// Work ownership: `works::get_work` is creator-scoped in the query itself —
+/// note: Work ownership — `works::get_work` is creator-scoped in the query itself;
 /// `Ok(Some(_))` means the Work belongs to the active creator.
 async fn is_work_owned(
     pool: &sqlx::SqlitePool,
@@ -621,7 +617,7 @@ async fn is_work_owned(
         .map_err(|e| database_error(&e))
 }
 
-/// Map a directive row onto the typed response (the `Directive` oneOf branch).
+/// note: map a directive row onto the typed response (the `Directive` oneOf branch).
 ///
 /// JSON round-trip bridge (check.rs precedent): the row's `serde::Serialize`
 /// output IS the wire shape, so `from_value` converts it into the generated
@@ -636,21 +632,19 @@ fn response_from_row(row: &MomentDirectiveRow) -> CoreResult<MomentDirectiveResp
     })
 }
 
-/// The `Empty` oneOf branch — serializes to `{}` (`show` with no effective
+/// note: the `Empty` oneOf branch — serializes to `{}` (`show` with no effective
 /// directive / `clear`).
 fn empty_response() -> MomentDirectiveResponse {
     MomentDirectiveResponse::Empty(serde_json::Map::new())
 }
 
-/// Generate a stable directive id (`dir_<uuid v4>`).
+/// note: generate a stable directive id (`dir_<uuid v4>`).
 fn generate_directive_id() -> String {
     format!("dir_{}", uuid::Uuid::new_v4())
 }
 
-// ── Inspector assembly ──────────────────────────────────────────────────
-
 impl CoreService {
-    /// Assemble one moment over an owned World and return the enriched
+    /// note: assemble one moment over an owned World and return the enriched
     /// inspector packet (V1.151 P0, DF-76).
     ///
     /// Guard order (plan lock, preserved): principal verification → world
@@ -679,7 +673,7 @@ impl CoreService {
         let pool = &self.inner.pool;
         let creator_id = principal.creator_id();
 
-        // Ownership gate (compute_runs / check pattern): a foreign World never
+        // invariant: ownership gate (compute_runs / check pattern) — a foreign World never
         // leaks assembly behavior — 403, not 404, so world existence stays
         // unobservable to other creators.
         let owned = narrative_write::is_world_owned(pool, creator_id, req.world_id.as_str())
@@ -692,7 +686,7 @@ impl CoreService {
             });
         }
 
-        // Work→world binding (QC2-S-001): when both ids are given, the Work's
+        // why: Work→world binding (QC2-S-001) — when both ids are given, the Work's
         // own binding must agree with the request World. Otherwise a Work
         // bound to World B passed alongside owned World A would resolve B's
         // World override into A's assembly — the packet would show a
@@ -719,7 +713,7 @@ impl CoreService {
             }
         }
 
-        // MomentRequest mirroring the CLI `run_assemble_moment` wiring minus
+        // note: MomentRequest mirroring the CLI `run_assemble_moment` wiring minus
         // the CLI-only knobs: the active creator + world are always threaded;
         // work + generation stage only when the request carries them. Stage-0
         // stays the empty default — this is an observation surface and the
@@ -731,7 +725,7 @@ impl CoreService {
             request = request.with_work(work_id);
         }
         if let Some(stage) = req.generation_stage.as_ref() {
-            // The wire enum is schema-closed (8 variants mapping 1:1 onto
+            // note: the wire enum is schema-closed (8 variants mapping 1:1 onto
             // GenerationStage), so parse is total here; the `else` arm is
             // defensive against future schema drift — unknown degrades to
             // unspecified (all slots on), matching the CLI.
@@ -745,7 +739,7 @@ impl CoreService {
             }
         }
 
-        // Greptile P1 (CLI parity): preload the World's confirmed relation
+        // why: Greptile P1 (CLI parity) — preload the World's confirmed relation
         // edges for relation-hop expansion — without them the inspector
         // packet would omit hopped entries that the CLI assembly includes.
         // Best-effort like the CLI: a storage-read failure degrades to
@@ -771,7 +765,7 @@ impl CoreService {
             request = request.with_hop_edges(edges);
         }
 
-        // Three-domain assembly over the same persistent stores the CLI uses
+        // note: three-domain assembly over the same persistent stores the CLI uses
         // + a **read-only** directive store (W-001 / QC2-W-001 + QC3-W-1):
         // the packet's `moment_directive` section reflects the active
         // directive (Work scope → World override fallback) without running
@@ -783,7 +777,7 @@ impl CoreService {
         let directives = ReadOnlyDirectiveStore::new(pool.clone());
         let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
 
-        // Enriched packet → generated wire DTO via JSON round-trip at the
+        // note: enriched packet → generated wire DTO via JSON round-trip at the
         // boundary (validates the builder output against the wire contract —
         // `moment_directive` carries status/metadata only, AC-I3).
         let packet = build_inspector_packet(&ctx);
@@ -798,10 +792,8 @@ impl CoreService {
     }
 }
 
-// ── Admitted Actor context ──────────────────────────────────────────────
-
 impl CoreService {
-    /// Admit a stored Actor against stored ownership and project the
+    /// note: admit a stored Actor against stored ownership and project the
     /// serializable [`CoreActorContext`] (v1.190 P2-T3 contract API).
     ///
     /// This is the single Actor-truth entry for the P3 `nexus.context.assemble`
@@ -823,7 +815,7 @@ impl CoreService {
         viewpoint: &ActorViewpoint,
     ) -> CoreResult<CoreActorContext> {
         self.verify_principal(principal)?;
-        // Full stored admission (owner, active World/Character/binding, the
+        // note: full stored admission (owner, active World/Character/binding, the
         // bounded KnowledgeView) — the single Actor-truth path; the serializable
         // projection below carries no authority.
         let admitted = crate::actors::CoreActorAdmission::new(self.inner.pool.clone())
@@ -846,7 +838,7 @@ impl CoreService {
 
 type ContextActorRef = NexusActorRef;
 
-/// Project the opaque admitted Actor onto the closed wire sum.
+/// note: project the opaque admitted Actor onto the closed wire sum.
 fn actor_ref_wire(actor: &crate::actors::AdmittedActor) -> CoreResult<ContextActorRef> {
     match actor {
         crate::actors::AdmittedActor::Creator { creator_id } => {
