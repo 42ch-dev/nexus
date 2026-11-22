@@ -1,5 +1,5 @@
 /**
- * Finding inline-edit form — extracted from `finding-detail-panel.tsx` so the
+ * note: Finding inline-edit form — extracted from `finding-detail-panel.tsx` so the
  * panel stays under the 250-line module-size discipline (V1.78 qc1 S-002,
  * mirroring the V1.74 A10 split pattern).
  *

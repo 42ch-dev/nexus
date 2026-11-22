@@ -11,9 +11,9 @@ import { formatRelative, humanizeStatus, shortId } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export interface WorkRailProps {
-  /** Called after navigating to another work (e.g. close mobile drawer). */
+  /** note: called after navigating to another work (e.g. close mobile drawer). */
   onWorkSelect?: () => void;
-  /** When false, omits the rail title row (drawer supplies its own). */
+  /** note: when false, omits the rail title row (drawer supplies its own). */
   showHeader?: boolean;
 }
 
@@ -125,7 +125,7 @@ function WorkRailListItem({
   );
 }
 
-/** Metadata-only preview card for the route-scoped work (no manuscript snippet). */
+/** note: metadata-only preview card for the route-scoped work (no manuscript snippet). */
 function WorkRailPreview({ workId }: { workId: string }) {
   const { t } = useTranslation('shell');
   const work = useWork(workId || undefined);

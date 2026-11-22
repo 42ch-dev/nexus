@@ -10,14 +10,14 @@ export interface FooterProfile {
 }
 
 export interface FooterProfilesChromeProps {
-  /** Section label above the toolbar (e.g. "Profiles"). */
+  /** note: section label above the toolbar (e.g. "Profiles"). */
   sectionLabel: string;
-  /** Accessible name for the add-profile button. */
+  /** note: accessible name for the add-profile button. */
   addButtonLabel: string;
   profiles: FooterProfile[];
-  /** Focused item index in the roving-tabindex sequence. */
+  /** note: focused item index in the roving-tabindex sequence. */
   focusIndex: number;
-  /** Optional active-profile display name shown below the toolbar. */
+  /** note: optional active-profile display name shown below the toolbar. */
   activeDisplayName?: string;
   onSelect: (id: string) => void;
   onAdd: () => void;
@@ -104,7 +104,7 @@ interface ProfileAvatarProps {
   tabIndex: number;
   onFocus: () => void;
   onSelect: () => void;
-  /** DOM ref forwarded to the underlying button (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the underlying button (React 19 ref-as-prop). */
   ref?: Ref<HTMLButtonElement>;
 }
 

@@ -1,5 +1,5 @@
 /**
- * `SessionsPage` (plan v221-caps-sessions-rail T2) — the sessions rail as
+ * note: `SessionsPage` (plan v221-caps-sessions-rail T2) — the sessions rail as
  * cards.
  *
  * Each card is one link to the session's run view: short id as the title,
@@ -55,7 +55,7 @@ beforeEach(async () => {
 
 describe('SessionsPage', () => {
   it('keeps the un-paginated response order (F-F1) across the cards', async () => {
-    // Deliberately not alphabetical: the card order must mirror `items`.
+    // note: deliberately not alphabetical — the card order must mirror `items`.
     listSessions([
       { session_id: 'sess-mid', creator_id: 'creator-b', preset_id: 'preset-b', status: 'completed' },
       { session_id: 'sess-last', creator_id: 'creator-c', preset_id: 'preset-c', status: 'running' },
@@ -94,10 +94,10 @@ describe('SessionsPage', () => {
     expect(card.getByText('Creator')).toBeInTheDocument();
     expect(card.getByText('creator-a')).toBeInTheDocument();
 
-    // Dropped from the table: the transient in-flight pointer.
+    // note: dropped from the table — the transient in-flight pointer.
     expect(screen.queryByText(/Current task/i)).not.toBeInTheDocument();
     expect(screen.queryByText('task-1')).not.toBeInTheDocument();
-    // The table chrome (column headers) is gone with the table.
+    // note: the table chrome (column headers) is gone with the table.
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
@@ -128,7 +128,7 @@ describe('SessionsPage', () => {
     );
   });
 
-  // v1.201 P1 T3 (compass D7): the acceptance-bearing observation surface — the
+  // note: v1.201 P1 T3 (compass D7) — the acceptance-bearing observation surface: the
   // whole card carries the run id in the path and its accessible name.
   it('opens the run view from the card through its single link', async () => {
     listSessions(ONE_SESSION);
@@ -139,7 +139,7 @@ describe('SessionsPage', () => {
       name: 'Open run view for session session-1',
     });
     expect(link).toHaveAttribute('href', '/sessions/session-1');
-    // One navigation affordance, no nested interactive content.
+    // note: one navigation affordance, no nested interactive content.
     expect(within(link).queryAllByRole('link')).toHaveLength(0);
     expect(within(link).queryAllByRole('button')).toHaveLength(0);
   });
@@ -156,7 +156,7 @@ describe('SessionsPage', () => {
     expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
-  // AC-P2-1 / AD-P0-2c (V1.120 P2 / F3): daemon-internal `_system.*` boot
+  // note: AC-P2-1 / AD-P0-2c (V1.120 P2 / F3) — daemon-internal `_system.*` boot
   // sessions must never appear — an idle daemon shows the empty state.
   it('renders the empty state when only _system.* sessions come back (defensive filter)', async () => {
     listSessions([
@@ -215,7 +215,7 @@ describe('SessionsPage', () => {
     expect(await screen.findByText('Could not load sessions')).toBeInTheDocument();
     expect(screen.getByText(/Could not load orchestration sessions/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
-    // Error and empty stay distinct branches.
+    // note: error and empty stay distinct branches.
     expect(screen.queryByText('No sessions yet')).not.toBeInTheDocument();
     expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
   });

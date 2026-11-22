@@ -1,5 +1,5 @@
 /**
- * RuleForm state + client validation mirror (V1.169 P2 T1/T2, DF-82).
+ * note: RuleForm state + client validation mirror (V1.169 P2 T1/T2, DF-82).
  *
  * The mirror validates the AR-2 carrier grammar (`constraint.rs`
  * member-aware parse) just enough to intercept obvious mistakes at submit
@@ -61,29 +61,29 @@ export const EDIT_RULE_STATUS_OPTIONS: RuleStatus[] = ['active', 'draft', 'depre
 export type RequiredFieldOperand = 'entry' | 'module-row';
 
 export interface RuleFormState {
-  /** Null until the author picks a family (family picker first). */
+  /** note: null until the author picks a family (family picker first). */
   family: RuleFamily | null;
   canonicalName: string;
   statement: string;
-  /** module_presence / module_absence operand. */
+  /** note: module_presence / module_absence operand. */
   moduleKey: string;
-  /** required_field operand form (radio); null = neither chosen. */
+  /** note: required_field operand form (radio); null = neither chosen. */
   requiredFieldOperand: RequiredFieldOperand | null;
-  /** Entry-level operand: one of {@link ENTRY_FIELDS}. */
+  /** note: entry-level operand: one of {@link ENTRY_FIELDS}. */
   entryField: string;
-  /** Module-row operand: module key. */
+  /** note: module-row operand: module key. */
   requiredModuleKey: string;
-  /** Module-row operand: free-form field. */
+  /** note: module-row operand: free-form field. */
   requiredModuleField: string;
-  /** observer_cardinality bounds as raw input strings. */
+  /** note: observer_cardinality bounds as raw input strings. */
   min: string;
   max: string;
   status: RuleStatus;
-  /** '' = omitted → the daemon stores NULL → evaluation defaults `warning`. */
+  /** note: '' = omitted → the daemon stores NULL → evaluation defaults `warning`. */
   severityHint: '' | SeverityOption;
-  /** Open string, stored verbatim (core vocabulary: rule/prohibition/style). '' = omitted at create. */
+  /** note: open string, stored verbatim (core vocabulary: rule/prohibition/style). '' = omitted at create. */
   kind: string;
-  /** Target axis for the three entry families (mutually exclusive with observer_cardinality). */
+  /** note: target axis for the three entry families (mutually exclusive with observer_cardinality). */
   targetEntryTypes: string[];
 }
 
@@ -144,7 +144,7 @@ export type RuleFormErrorCode =
 
 export type RuleFormErrors = Partial<Record<RuleFormErrorKey, string>>;
 
-/** Parse an observer bound: absent (empty), invalid (non-whole), too large
+/** note: parse an observer bound: absent (empty), invalid (non-whole), too large
  * for the JS number mirror (whole u64 beyond 2^53−1 — the API accepts it,
  * the mirror cannot represent it), or a valid u64. */
 type Bound = { kind: 'absent' } | { kind: 'invalid' } | { kind: 'tooLarge' } | { kind: 'valid'; value: number };
@@ -179,7 +179,7 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
       break;
     case 'required_field': {
       if (state.requiredFieldOperand === null) {
-        // Operand misuse: neither form chosen.
+        // note: operand misuse: neither form chosen.
         errors['constraint.field'] = 'operandRequired';
       } else if (state.requiredFieldOperand === 'entry') {
         if (state.entryField.length === 0) errors['constraint.field'] = 'entryFieldRequired';
@@ -190,7 +190,7 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
         if (state.requiredModuleField.trim().length === 0) {
           errors['constraint.field'] = 'moduleFieldRequired';
         } else if ((ENTRY_FIELDS as readonly string[]).includes(state.requiredModuleField.trim())) {
-          // Operand misuse: entry-level value combined with a module row.
+          // note: operand misuse: entry-level value combined with a module row.
           errors['constraint.field'] = 'moduleFieldReserved';
         }
       }
@@ -214,7 +214,7 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
     }
   }
 
-  // observer_cardinality × target axis: mutually exclusive (locked; the UI
+  // note: observer_cardinality × target axis: mutually exclusive (locked; the UI
   // disables the axis, this guard keeps the mirror honest).
   if (state.family === 'observer_cardinality' && state.targetEntryTypes.length > 0) {
     errors.target_entry_types = 'targetTypesConflict';
@@ -349,7 +349,7 @@ export function ruleFormStateFromRule(rule: WorldRule): RuleFormState {
       state.min = typeof constraint.min === 'number' ? String(constraint.min) : '';
       state.max = typeof constraint.max === 'number' ? String(constraint.max) : '';
     }
-    // Unknown family → family stays null (explicit choice before replacement).
+    // note: unknown family → family stays null (explicit choice before replacement).
   }
   return state;
 }

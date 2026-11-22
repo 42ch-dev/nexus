@@ -27,9 +27,9 @@ export function resolveEntranceBounce(
   pathname: string,
   hash: string,
 ): string | null {
-  if (entrance === 'developer') return null; // Develop never bounces
+  if (entrance === 'developer') return null; // why: Develop never bounces
 
-  // Settings-modal paths (`/settings/*`) resolve the section first via the
+  // note: settings-modal paths (`/settings/*`) resolve the section first via the
   // existing machinery and check section-level visibility (AR-19).
   if (isSettingsDrivenPath(pathname)) {
     const resolved = resolveSettingsLocation(pathname, hash);
@@ -72,7 +72,7 @@ export function EntranceGuard({ children }: { children: ReactNode }) {
     ? `${location.pathname}${location.search}${location.hash}`
     : null;
 
-  // One-shot toast per bounce episode: fired once per location, reset once the
+  // note: one-shot toast per bounce episode — fired once per location, reset once the
   // guard stops bouncing (redirect landed or the user moved on).
   useEffect(() => {
     if (bounceKey === null) {

@@ -1,5 +1,5 @@
 /**
- * `PathContextMenu` — the V1.66 desktop right-click menu for chapter paths.
+ * note: `PathContextMenu` — the V1.66 desktop right-click menu for chapter paths.
  *
  * Spec: web-ui-design-requirements §6.4 + DESIGN.md "Desktop Context Menu".
  *
@@ -74,15 +74,15 @@ function isOutsideWorkspaceError(err: unknown): boolean {
 }
 
 export interface PathContextMenuProps {
-  /** Workspace-relative or absolute path to act on (e.g. body_path / outline_path). */
+  /** note: workspace-relative or absolute path to act on (e.g. body_path / outline_path). */
   path: string;
-  /** Label shown above the path preview (e.g. "Body path"). */
+  /** note: label shown above the path preview (e.g. "Body path"). */
   pathLabel: string;
-  /** Menu anchor position (clientX / clientY). */
+  /** note: menu anchor position (clientX / clientY). */
   position: MenuPosition;
-  /** Called when any item fires or the menu loses focus. */
+  /** note: called when any item fires or the menu loses focus. */
   onClose: () => void;
-  /** aria-label for the menu region (per-surface). */
+  /** note: aria-label for the menu region (per-surface). */
   regionLabel?: string;
 }
 
@@ -121,12 +121,12 @@ export function PathContextMenu({
     successKey: string,
     errorKey: string,
   ): Promise<void> {
-    if (!desktop) return; // defended by conditional render; belt-and-suspenders.
+    if (!desktop) return; // why: defended by conditional render; belt-and-suspenders.
     try {
       await desktop[action](path);
       toast({ variant: 'success', title: commonT(successKey) });
     } catch (err) {
-      // The Rust path guard returns `path_outside_workspace`; surface its
+      // note: the Rust path guard returns `path_outside_workspace`; surface its
       // plain-language copy verbatim (design-req §6.4 / DESIGN.md rule).
       const title = isOutsideWorkspaceError(err)
         ? commonT('toast.pathNotOpened')

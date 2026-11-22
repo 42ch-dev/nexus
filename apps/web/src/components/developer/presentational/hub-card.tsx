@@ -1,5 +1,5 @@
 /**
- * Hub card — the read-only frame for one 操作台 status section (plan v1220 T1).
+ * note: Hub card — the read-only frame for one 操作台 status section (plan v1220 T1).
  *
  * A card carries a title, an optional status pill, its data body, and at most
  * one navigation link. The Hub aggregates state only: no form, no mutation —
@@ -12,16 +12,16 @@ import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export interface HubCardProps {
-  /** Stable test-id stem (`service` → `hub-card-service`). */
+  /** note: stable test-id stem (`service` → `hub-card-service`). */
   id: string;
-  /** Title text, or a node when the owning surface needs inline markup. */
+  /** note: title text, or a node when the owning surface needs inline markup. */
   title: ReactNode;
-  /** Status pill in the header (e.g. 运行中 / 已连接). */
+  /** note: status pill in the header (e.g. 运行中 / 已连接). */
   status?: {
     label: string;
     variant: BadgeProps['variant'];
   };
-  /** Navigation-only link into the owning rail app. */
+  /** note: navigation-only link into the owning rail app. */
   go?: { to: string; label: string };
   children?: ReactNode;
 }

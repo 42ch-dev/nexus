@@ -1,5 +1,5 @@
 /**
- * ThemeProvider coverage (R-V164-QC1-S1-P1 T2).
+ * note: ThemeProvider coverage (R-V164-QC1-S1-P1 T2).
  *
  * DESIGN.md uses identical token names in both themes; only the CSS-variable
  * values swap under the `.dark` class on `<html>` (Tailwind `class` strategy).
@@ -19,7 +19,7 @@ import { ThemeProvider, useTheme, type Theme } from '@/components/theme-provider
 
 const STORAGE_KEY = 'nexus-web-theme';
 
-/** jsdom does not implement matchMedia; the provider consults it for the OS
+/** note: jsdom does not implement matchMedia; the provider consults it for the OS
  *  default, so each test installs a deterministic mock. */
 function mockMatchMedia(prefersDark: boolean) {
   const media = {
@@ -35,14 +35,14 @@ function mockMatchMedia(prefersDark: boolean) {
   vi.spyOn(window, 'matchMedia').mockReturnValue(media as unknown as MediaQueryList);
 }
 
-/** Surface the context value from inside the provider for assertions. */
+/** note: surface the context value from inside the provider for assertions. */
 function ThemeProbe({ onTheme }: { onTheme: (t: Theme) => void }) {
   const { theme } = useTheme();
   onTheme(theme);
   return null;
 }
 
-/** Surface the resolved effective theme from inside the provider. */
+/** note: surface the resolved effective theme from inside the provider. */
 function ThemeResolvedProbe({ onTheme }: { onTheme: (t: 'light' | 'dark') => void }) {
   const { resolvedTheme } = useTheme();
   onTheme(resolvedTheme);
@@ -73,8 +73,8 @@ describe('ThemeProvider mount', () => {
 
 describe('ThemeProvider default-theme detection', () => {
   it('prefers a stored light theme over the OS preference', () => {
-    mockMatchMedia(true); // OS says dark…
-    window.localStorage.setItem(STORAGE_KEY, 'light'); // …but stored says light.
+    mockMatchMedia(true);
+    window.localStorage.setItem(STORAGE_KEY, 'light');
     let current: Theme = 'system';
     renderWith(<ThemeProbe onTheme={(t) => (current = t)} />);
     expect(current).toBe('light');
@@ -136,7 +136,7 @@ describe('ThemeProvider token application (`.dark` swap)', () => {
   });
 
   it('removes the `.dark` class when switching back to light', () => {
-    mockMatchMedia(true); // start system/dark
+    mockMatchMedia(true);
     let setTheme: (t: Theme) => void = () => {};
     renderWith(
       <ThemeProbeOnAction onReady={(api) => (setTheme = api.setTheme)} />,
@@ -179,14 +179,12 @@ describe('useTheme outside provider', () => {
       useTheme();
       return null;
     }
-    // Silence the expected error noise in the test reporter.
+    // why: silence the expected error noise in the test reporter.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => render(<Orphan />)).toThrow(/useTheme must be used within a ThemeProvider/);
     spy.mockRestore();
   });
 });
-
-// ── helpers ─────────────────────────────────────────────────────────────────
 
 function ThemeProbeOnAction({
   onReady,

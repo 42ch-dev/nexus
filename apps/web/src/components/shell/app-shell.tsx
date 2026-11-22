@@ -1,5 +1,5 @@
 /**
- * App shell — topnav + entrance-scoped app rail + scrollable content slot
+ * note: App shell — topnav + entrance-scoped app rail + scrollable content slot
  * (plan v1219 Task 2; IA spec §3). Replaces the old `RootLayout` chrome in
  * `App.tsx`; legacy pages keep their explicit routes and render through the
  * `<Outlet/>` content slot.
@@ -30,7 +30,7 @@ import { useToast } from '@/lib/use-toast';
 import { isWorkShellRoute } from '@/lib/work-shell-routes';
 import { cn } from '@/lib/utils';
 
-// Mobile top nav (below lg) — same entrance-bounce filter as the retired
+// note: mobile top nav (below lg) — same entrance-bounce filter as the retired
 // RootLayout chrome; the dock rail takes over at `lg` and above.
 const MOBILE_NAV_KEYS = [
   { to: '/works', key: 'works' },
@@ -48,9 +48,9 @@ export function AppShell() {
   const { entrance } = useEntrance();
   const workShell = isWorkShellRoute(pathname);
 
-  // ⌘K/Ctrl+K opens the command palette (V1.111 P0 T3 behaviour, unchanged).
+  // note: ⌘K/Ctrl+K opens the command palette (V1.111 P0 T3 behaviour, unchanged).
   useHotkey('mod+k', () => openPalette());
-  // V1.123 P3 Task 5 — global Timeline chord (`g` then `t`).
+  // note: V1.123 P3 Task 5 — global Timeline chord (`g` then `t`).
   useTimelineShortcut(() => navigate('/timeline'));
 
   const mobileNav = MOBILE_NAV_KEYS.filter(
@@ -66,7 +66,7 @@ export function AppShell() {
       <Topnav />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Desktop dock rail; mobile keeps the horizontal top nav below. */}
+        {/* note: desktop dock rail; mobile keeps the horizontal top nav below. */}
         <AppRail />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -92,7 +92,7 @@ export function AppShell() {
             ))}
           </nav>
 
-          {/* Content region — the ONLY scroll region (AD-P2-2). The
+          {/* note: content region — the ONLY scroll region (AD-P2-2). The
               workspace chip row (T3) mounts inside content apps, not here. */}
           <main className="min-h-0 flex-1 overflow-y-auto" data-testid="shell-main">
             <div
@@ -108,7 +108,7 @@ export function AppShell() {
             </div>
           </main>
 
-          {/* Desktop-only daemon footer (browser build renders null). */}
+          {/* note: desktop-only daemon footer (browser build renders null). */}
           <DaemonStatusBar />
         </div>
       </div>
@@ -133,7 +133,7 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
   const app = appsForEntrance(entrance).find((a) => a.id === appId) ?? null;
   const locked = app !== null && isAppLocked(app, isUnlocked);
 
-  // Created only for unlocked apps: a locked app's `load` is never referenced.
+  // note: created only for unlocked apps: a locked app's `load` is never referenced.
   const LazyComponent = useMemo(
     () => (app !== null && !locked ? lazy(app.load) : null),
     [app, locked],
@@ -146,7 +146,7 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
   }, [locked, app, toast]);
 
   if (app === null || LazyComponent === null) {
-    // Locked (or unknown) app: bounce to the first unlocked app of this
+    // note: locked (or unknown) app: bounce to the first unlocked app of this
     // entrance. The entrance landRoute is NOT safe here — for the creator
     // entrance it IS the work app, which locks first (IA §3.2 progressive
     // activation), so landing there would self-redirect.

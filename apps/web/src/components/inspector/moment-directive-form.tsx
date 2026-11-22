@@ -1,5 +1,5 @@
 /**
- * Moment Directive set/clear form — P1 T4 (DF-76). Thin author surface.
+ * note: Moment Directive set/clear form — P1 T4 (DF-76). Thin author surface.
  *
  * Mounts through `AssemblyInspectorPanel#directiveActions` into the
  * `DirectiveStatusBlock` header slot. A native `<details>` disclosure keeps
@@ -28,12 +28,12 @@ import { NexusClientError } from '@/lib/nexus';
 import type { MomentDirectiveRequest, MomentInspectResponse } from '@42ch/nexus-contracts';
 
 export interface MomentDirectiveFormProps {
-  /** Work scope id (`scope.kind === 'work'`). */
+  /** note: work scope id (`scope.kind === 'work'`). */
   workId: string;
-  /** The Work's bound world id (`scope.kind === 'world'` override). The
+  /** note: the Work's bound world id (`scope.kind === 'world'` override). The
    *  page gates on it — the form only mounts when the Work is bound. */
   worldId: string;
-  /** The inspector packet's `moment_directive` section (status/metadata only;
+  /** note: the inspector packet's `moment_directive` section (status/metadata only;
    *  body never on the wire — AC-I3). Clear targets the **active** directive's
    *  scope from this section — never the form's default Work scope — so Clear
    *  always clears what the status block shows (QC W-1). Disabled when
@@ -61,7 +61,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
 
   const scopeId = scopeKind === 'world' ? worldId : workId;
 
-  // The active directive's scope from the inspector packet (null when none).
+  // note: the active directive's scope from the inspector packet (null when none).
   // Clear targets this — never the form's selected scope — so clearing a
   // World-scoped active directive actually clears it (QC W-1).
   const activeDirectiveScope: { kind: 'work' | 'world'; id: string } | null =
@@ -75,21 +75,21 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
   if (body.trim().length === 0) errors.push(t('directive.form.validation.bodyRequired'));
   if (ttlKind === null) errors.push(t('directive.form.validation.ttlKindRequired'));
   const ttlValue = Number(ttlRemaining);
-  // Safe integer caps at 2^53-1 — fits the daemon's i64 while rejecting
+  // note: safe integer caps at 2^53-1 — fits the daemon's i64 while rejecting
   // values that would overflow the JSON number on the wire (QC3 S-2).
   const ttlInvalid = !Number.isSafeInteger(ttlValue) || ttlValue < 1;
   if (ttlInvalid) {
     errors.push(t('directive.form.validation.ttlRemainingInvalid'));
   }
 
-  // 409 = an active directive already exists for the scope without `replace`
+  // note: 409 = an active directive already exists for the scope without `replace`
   // (CLI `--replace` discipline — no silent overwrite).
   const conflict =
     directive.error instanceof NexusClientError && directive.error.status === 409;
   const showErrors = (attempted || directive.isError) && errors.length > 0;
   const pending = directive.isPending;
 
-  // Back to pristine state after a successful set/clear — repeat sets after
+  // note: back to pristine state after a successful set/clear — repeat sets after
   // clear stay clean and the disclosure never shows a "ghost" directive (QC3 S-3).
   const resetForm = () => {
     setScopeKind('work');
@@ -145,7 +145,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
         </summary>
         <div className="mt-3 w-80 rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-elevation-2 sm:w-96">
           <div className="flex flex-col gap-4">
-            {/* Scope — Work default / World override */}
+            {/* note: scope — Work default / World override */}
             <fieldset>
               <legend className="text-label-12 text-gray-900">
                 {t('directive.form.scopeLegend')}
@@ -172,7 +172,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
               </div>
             </fieldset>
 
-            {/* Body — non-empty after trim */}
+            {/* note: body — non-empty after trim */}
             <div className="flex flex-col gap-1">
               <Label htmlFor={`${uid}-body`}>{t('directive.form.bodyLabel')}</Label>
               <Textarea
@@ -191,7 +191,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
               ) : null}
             </div>
 
-            {/* Insert depth — head / mid / tail */}
+            {/* note: insert depth — head / mid / tail */}
             <div className="flex flex-col gap-1">
               <Label htmlFor={`${uid}-depth`}>{t('directive.form.insertDepthLabel')}</Label>
               <Select
@@ -206,7 +206,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
               </Select>
             </div>
 
-            {/* TTL — exactly one kind required */}
+            {/* note: TTL — exactly one kind required */}
             <fieldset>
               <legend className="text-label-12 text-gray-900">
                 {t('directive.form.ttlLegend')}
@@ -238,7 +238,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
               ) : null}
             </fieldset>
 
-            {/* TTL count — integer >= 1 */}
+            {/* note: TTL count — integer >= 1 */}
             <div className="flex flex-col gap-1">
               <Label htmlFor={`${uid}-ttl-remaining`}>
                 {t('directive.form.ttlRemainingLabel')}
@@ -265,7 +265,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
               ) : null}
             </div>
 
-            {/* Flags */}
+            {/* note: flags */}
             <label className="flex items-center gap-2 text-copy-13 text-gray-1000">
               <input
                 type="checkbox"
@@ -288,7 +288,7 @@ export function MomentDirectiveForm({ workId, worldId, momentDirective }: Moment
               </span>
             </label>
 
-            {/* Errors — validation list + mutation failure */}
+            {/* note: errors — validation list + mutation failure */}
             {showErrors ? (
               <ul
                 className="flex flex-col gap-1 rounded-card border border-red-700/30 bg-red-700/10 p-3 text-copy-13 text-red-1000"

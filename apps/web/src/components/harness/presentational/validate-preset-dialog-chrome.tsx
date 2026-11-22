@@ -1,5 +1,5 @@
 /**
- * Presentational body of the Validate Preset dialog (`POST /v1/daemon/presets:validate`).
+ * note: Presentational body of the Validate Preset dialog (`POST /v1/daemon/presets:validate`).
  *
  * The product dialog owns the mutation, the path state and i18n; this module
  * owns the markup so the Design Studio fixture can render the same tree with
@@ -15,7 +15,7 @@ import { useId } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-// Subpath imports: the Design Studio's tsconfig aliases `@/components/ui/*`
+// why: subpath imports — the Design Studio's tsconfig aliases `@/components/ui/*`
 // (not the barrel) to apps/web, so the fixture resolves the same modules.
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -38,7 +38,7 @@ export interface ValidatePresetResultView {
   valid: boolean;
   errors: readonly string[];
   warnings?: readonly string[];
-  /** Localized " · N states" tail for the success line (empty when unknown). */
+  /** note: localized " · N states" tail for the success line (empty when unknown). */
   stateSuffix?: string;
 }
 
@@ -47,7 +47,7 @@ export interface ValidatePresetDialogChromeProps {
   path: string;
   onPathChange: (value: string) => void;
   pending: boolean;
-  /** `null` before the first submission. */
+  /** note: `null` before the first submission. */
   result: ValidatePresetResultView | null;
   onClose: () => void;
   onSubmit: () => void;
@@ -138,7 +138,7 @@ export function ValidatePresetDialogChrome({
   onClose,
   onSubmit,
 }: ValidatePresetDialogChromeProps) {
-  // Per-instance id: the Studio fixture mounts this body four times, so a
+  // note: per-instance id — the Studio fixture mounts this body four times, so a
   // literal id would pair every label with the first input in the document.
   const pathId = useId();
 

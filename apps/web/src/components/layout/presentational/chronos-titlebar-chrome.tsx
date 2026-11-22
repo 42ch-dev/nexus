@@ -7,15 +7,15 @@ export const CHRONOS_TITLEBAR_DESKTOP_INSET_PX = 72;
 
 export interface ChronosTitlebarChromeProps {
   title: string;
-  /** When true, title labels use cyan (dark shell); otherwise white (light shell). */
+  /** note: when true, title labels use cyan (dark shell); otherwise white (light shell). */
   isDark: boolean;
-  /** Reserve native traffic-light safe inset and enable desktop drag spacer. */
+  /** note: reserve native traffic-light safe inset and enable desktop drag spacer. */
   desktopSafeInset?: boolean;
   logo?: ReactNode;
   settingsControl?: ReactNode;
   themeToggle?: ReactNode;
   healthIndicator?: ReactNode;
-  /** Desktop overlay: double-click empty paint (safe inset + drag spacer) to maximize. */
+  /** note: desktop overlay — double-click empty paint (safe inset + drag spacer) to maximize. */
   onEmptyPaintDoubleClick?: () => void;
   'data-testid'?: string;
 }

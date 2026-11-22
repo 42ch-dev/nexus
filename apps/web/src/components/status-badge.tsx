@@ -40,7 +40,7 @@ export function chapterStatusVariant(status: ChapterStatus | undefined | null): 
 
 interface StatusBadgeProps {
   status?: string | null;
-  /** Show the raw value verbatim instead of humanizing. */
+  /** note: show the raw value verbatim instead of humanizing. */
   raw?: boolean;
   variant?: BadgeProps['variant'];
   className?: string;
@@ -73,7 +73,7 @@ export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProp
 }
 
 /**
- * DESIGN.md §Findings — explicit 6-state finding-status badge mapping.
+ * note: DESIGN.md §Findings — explicit 6-state finding-status badge mapping.
  *
  * Each finding status gets an intentional, distinct color (the generic
  * `statusVariant` keyword matcher cannot distinguish `in_review` from `resolved`
@@ -85,22 +85,16 @@ export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProp
 function findingStatusClasses(status: string | undefined | null): string {
   switch (status as FindingStatus) {
     case 'open':
-      // amber — newly raised, needs triage attention.
       return 'bg-finding-status-open-bg text-finding-status-open-text border-finding-status-open-border';
     case 'triaged':
-      // teal — reviewed, ready to route.
       return 'bg-finding-status-triaged-bg text-finding-status-triaged-text border-finding-status-triaged-border';
     case 'in_review':
-      // blue — actively under master review.
       return 'bg-finding-status-in-review-bg text-finding-status-in-review-text border-finding-status-in-review-border';
     case 'resolved':
-      // green — addressed, positive terminal.
       return 'bg-finding-status-resolved-bg text-finding-status-resolved-text border-finding-status-resolved-border';
     case 'wont_fix':
-      // gray — explicitly waived, quiet terminal.
       return 'bg-finding-status-wont-fix-bg text-finding-status-wont-fix-text border-finding-status-wont-fix-border';
     case 'duplicate':
-      // purple — superseded by another finding.
       return 'bg-finding-status-duplicate-bg text-finding-status-duplicate-text border-finding-status-duplicate-border';
     default:
       return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';

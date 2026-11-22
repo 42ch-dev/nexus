@@ -1,5 +1,5 @@
 /**
- * Pack panel — Narrative Knowledge Pack export + import for one World
+ * note: Pack panel — Narrative Knowledge Pack export + import for one World
  * (V1.152 P1 T2–T4, DF-77).
  *
  * Two author actions, both pure UI over the T1 hooks:
@@ -71,7 +71,7 @@ export function PackPanel({ worldId }: PackPanelProps) {
       {
         onSuccess: (summary) => {
           setLastSummary(summary);
-          // Reset the picker so selecting the same file again re-fires
+          // note: reset the picker so selecting the same file again re-fires
           // onChange (native file inputs do not re-fire for the same file).
           setFile(null);
           setAttempted(false);
@@ -98,14 +98,14 @@ export function PackPanel({ worldId }: PackPanelProps) {
     runImport();
   };
 
-  // Client-side validation failures (no file, oversized).
+  // note: client-side validation failures (no file, oversized).
   const clientErrors: string[] = [];
   if (attempted && !file) clientErrors.push(t('import.errors.noFile'));
   if (attempted && file && file.size > MAX_PACK_FILE_BYTES) {
     clientErrors.push(t('import.errors.tooLarge', { size: MAX_PACK_FILE_BYTES / (1024 * 1024) }));
   }
 
-  // Mutation failures: file-not-JSON (SyntaxError from the hook's JSON.parse),
+  // note: mutation failures: file-not-JSON (SyntaxError from the hook's JSON.parse),
   // daemon 400 invalid pack, 403 ownership, 413 too large, else the daemon
   // message with a generic fallback.
   const importErrorText = importPack.isError
@@ -159,7 +159,7 @@ export function PackPanel({ worldId }: PackPanelProps) {
         <p className="text-copy-13 text-gray-700">{t('section.description')}</p>
       </div>
 
-      {/* ── Export ───────────────────────────────────────────────────────── */}
+      {/* note: Export ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-2" data-testid="pack-export-section">
         <h3 className="text-label-14 font-semibold text-gray-900">{t('export.title')}</h3>
         <p className="text-copy-13 text-gray-700">{t('export.description')}</p>
@@ -195,7 +195,7 @@ export function PackPanel({ worldId }: PackPanelProps) {
         ) : null}
       </div>
 
-      {/* ── Import ───────────────────────────────────────────────────────── */}
+      {/* note: Import ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-2" data-testid="pack-import-section">
         <h3 className="text-label-14 font-semibold text-gray-900">{t('import.title')}</h3>
         <p className="text-copy-13 text-gray-700">{t('import.description')}</p>
@@ -211,10 +211,10 @@ export function PackPanel({ worldId }: PackPanelProps) {
               const next = e.target.files?.[0] ?? null;
               setFile(next);
               setAttempted(false);
-              // Results belong to the previously imported file — drop them
+              // note: results belong to the previously imported file — drop them
               // when the author picks a different one.
               setLastSummary(null);
-              // A failed mutation keeps isError until reset — the new file
+              // note: a failed mutation keeps isError until reset — the new file
               // has not been submitted yet, so the stale error banner from
               // the previous attempt must not linger.
               importPack.reset();

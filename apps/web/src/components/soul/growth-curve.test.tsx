@@ -1,5 +1,5 @@
 /**
- * GrowthCurve tests (V1.81 SP-3 — web-ui.md §26.1).
+ * note: GrowthCurve tests (V1.81 SP-3 — web-ui.md §26.1).
  *
  * Covers the three density states (empty / low-data / rich) with the
  * documented thresholds and copy, plus the pure `growthDensityFor` /
@@ -95,7 +95,7 @@ describe('GrowthCurve', () => {
     renderInApp(<GrowthCurve fragments={[]} />);
     expect(screen.getByTestId('soul-growth-empty')).toBeInTheDocument();
     expect(screen.getByText(/your soul begins here/i)).toBeInTheDocument();
-    // No chart in the empty state.
+    // note: no chart in the empty state.
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
@@ -110,7 +110,7 @@ describe('GrowthCurve', () => {
     const fragments = Array.from({ length: 12 }, (_, i) => stamped(`f${i}`, 1 + (i % 6)));
     renderInApp(<GrowthCurve fragments={fragments} />);
     expect(screen.getByTestId('soul-growth-rich')).toBeInTheDocument();
-    // Summary stat: 12 fragments over N days.
+    // note: summary stat: 12 fragments over N days.
     expect(screen.getByText(/12 fragments over/i)).toBeInTheDocument();
   });
 });

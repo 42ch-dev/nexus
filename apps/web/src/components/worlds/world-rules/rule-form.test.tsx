@@ -1,5 +1,5 @@
 /**
- * RuleForm tests — V1.169 P2 T1 (DF-82 create form).
+ * note: RuleForm tests — V1.169 P2 T1 (DF-82 create form).
  *
  * Covers the four-family happy path + submit payload shape, the client
  * validation mirror (immediate interception; the API's field-level errors
@@ -53,7 +53,7 @@ function renderForm(onClose = vi.fn()) {
   });
 }
 
-/** Capture the POST body; `respond` may return a custom HttpResponse. */
+/** note: capture the POST body; `respond` may return a custom HttpResponse. */
 function useCreateCapture(
   capture: { body?: WorldRuleCreateRequest },
   respond?: (body: WorldRuleCreateRequest) => Response,
@@ -80,7 +80,7 @@ function submit() {
   fireEvent.click(screen.getByRole('button', { name: 'Add rule' }));
 }
 
-/** A stored read-item projection for edit-mode tests (T2). */
+/** note: a stored read-item projection for edit-mode tests (T2). */
 function makeStoredRule(over: Partial<WorldRule> = {}): WorldRule {
   return {
     rule_id: 'rul_edit',
@@ -95,7 +95,7 @@ function makeStoredRule(over: Partial<WorldRule> = {}): WorldRule {
   };
 }
 
-/** Capture the PATCH body; `respond` may return a custom HttpResponse. */
+/** note: capture the PATCH body; `respond` may return a custom HttpResponse. */
 function useUpdateCapture(
   capture: { body?: WorldRuleUpdateRequest },
   respond?: (body: WorldRuleUpdateRequest) => Response,
@@ -127,11 +127,11 @@ describe('RuleForm — four-family happy path + submit payload shape', () => {
     renderForm(onClose);
 
     selectFamily('module_presence');
-    // Locked one-line family hint (plan table, verbatim).
+    // note: locked one-line family hint (plan table, verbatim).
     expect(screen.getByTestId('rule-form-family-help')).toHaveTextContent(
       'Matching entries must carry this module key.',
     );
-    // Locked field helpers (plan clarify, verbatim).
+    // note: locked field helpers (plan clarify, verbatim).
     expect(
       screen.getByText('A stable name you will recognize in the list.'),
     ).toBeInTheDocument();
@@ -150,7 +150,7 @@ describe('RuleForm — four-family happy path + submit payload shape', () => {
       constraint: { family: 'module_presence', module_key: 'belief' },
       status: 'active',
     });
-    // Success closes the form.
+    // note: success closes the form.
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
@@ -663,12 +663,12 @@ describe('RuleForm — submit attempts start from a clean error slate (bugbot 67
     fillNameAndSummary('Inverted cap', 'Min exceeds max.');
     fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '2' } });
-    // First submit fails client validation on the Min field (min > max).
+    // note: first submit fails client validation on the Min field (min > max).
     submit();
     await waitFor(() => expect(screen.getByText('Min must not exceed max.')).toBeInTheDocument());
     expect(capture.body).toBeUndefined();
 
-    // Fix the constraint by raising Max (that edit clears only the Max
+    // note: fix the constraint by raising Max (that edit clears only the Max
     // field error, so the Min message is still stale) and resubmit: the
     // server rejects a *different* field, so the stale Min message must not
     // survive next to the new echo.
@@ -700,7 +700,7 @@ describe('RuleForm — submit attempts start from a clean error slate (bugbot 67
     submit();
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    // The form stays mounted (onClose is a no-op mock): no stale error may
+    // note: the form stays mounted (onClose is a no-op mock) — no stale error may
     // linger next to the submitted fields.
     expect(screen.queryByText('Min must not exceed max.')).not.toBeInTheDocument();
   });
@@ -788,7 +788,7 @@ describe('validateRuleForm — client mirror (pure)', () => {
       family: 'observer_cardinality',
       canonicalName: 'Name',
       statement: 'Summary',
-      min: '9007199254740993', // whole u64, but beyond 2^53−1 (qc F-004)
+      min: '9007199254740993', // note: whole u64, but beyond 2^53−1 (qc F-004)
     };
     expect(validateRuleForm(state)).toEqual({ 'constraint.min': 'boundTooLarge' });
   });
@@ -858,7 +858,7 @@ describe('RuleForm — edit mode: prefill round-trip (stored carrier → form �
     const onClose = vi.fn();
     renderEditForm(makeStoredRule(), onClose);
 
-    // Prefill: meta fields + the stored carrier deserialized into the form.
+    // note: prefill: meta fields + the stored carrier deserialized into the form.
     expect((screen.getByLabelText('Constraint family') as HTMLSelectElement).value).toBe(
       'module_presence',
     );
@@ -872,7 +872,7 @@ describe('RuleForm — edit mode: prefill round-trip (stored carrier → form �
     submitEdit();
 
     await waitFor(() => expect(capture.body).toBeDefined());
-    // Untouched meta fields are not sent (AR-3); the carrier is whole replacement.
+    // note: untouched meta fields are not sent (AR-3); the carrier is whole replacement.
     expect(capture.body).toEqual({ constraint: { family: 'module_presence', module_key: 'belief' } });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
@@ -1053,11 +1053,11 @@ describe('RuleForm — edit mode: PATCH semantics (AR-3)', () => {
 
 describe('RuleForm — edit mode: severity honesty (stored hint, no inert Default)', () => {
   it('hides the inert Default option and states the stored hint when one is stored', async () => {
-    renderEditForm(makeStoredRule()); // makeStoredRule stores severity_hint: 'warning'
+    renderEditForm(makeStoredRule()); // note: makeStoredRule stores severity_hint: 'warning'
 
     const severity = screen.getByLabelText('Severity') as HTMLSelectElement;
     expect(severity.value).toBe('warning');
-    // No silent no-op: "Default (warning)" cannot be chosen for a stored hint
+    // note: no silent no-op: "Default (warning)" cannot be chosen for a stored hint
     // (no null-clearing, AR-3) — the option is not rendered.
     expect(screen.queryByRole('option', { name: 'Default (warning)' })).not.toBeInTheDocument();
     expect(
@@ -1127,7 +1127,7 @@ describe('buildUpdateWorldRuleRequest — PATCH semantics (pure, AR-3)', () => {
 
   it('never sends an empty severity_hint (no null-clearing, AR-3)', () => {
     const state = ruleFormStateFromRule(stored);
-    state.severityHint = ''; // author picks "Default (warning)" on a stored hint
+    state.severityHint = ''; // note: author picks "Default (warning)" on a stored hint
     const request = buildUpdateWorldRuleRequest(state, stored);
     expect(request?.severity_hint).toBeUndefined();
   });

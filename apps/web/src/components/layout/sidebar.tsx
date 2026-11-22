@@ -21,7 +21,7 @@ import { useToast } from '@/lib/use-toast';
 import { isWorkProfile, WORK_PROFILES } from '@/lib/work-profiles';
 
 /**
- * Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator).
+ * note: Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator).
  *
  * V1.135 P0: hub create lives in {@link CreatorCreatePanel} as
  * `panelContent` on every creator-tab surface, including `/works` and `/worlds`.
@@ -63,7 +63,7 @@ export function CreatorCreatePanel() {
   const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
   const createWorld = useCreateWorld();
   const createWork = useCreateWork();
-  // F-01 W1: Work creation requires a World (the daemon rejects a missing
+  // note: F-01 W1 — Work creation requires a World (the daemon rejects a missing
   // `world_id` with 400 `world_id_required`). The inline Work form therefore
   // renders a required World selector fed by the narrative-worlds read model.
   const narrativeWorlds = useNarrativeWorlds();
@@ -153,7 +153,7 @@ const CREATOR_HUB_PATH = '/works';
 const ORCHESTRATOR_HUB_PATH = '/strategies';
 
 /**
- * Footer "Switch entrance" affordance (V1.170 P1 — AR-15 / EL §2).
+ * note: Footer "Switch entrance" affordance (V1.170 P1 — AR-15 / EL §2).
  *
  * Persistent shell-chrome control — NOT a third top-level tab (the
  * Creator | Orchestrator tabs stay untouched). Opens the identity page, which
@@ -198,7 +198,7 @@ export function Sidebar() {
     setActiveTab(tab);
   }
 
-  // V1.170 P1 (AR-15) — the nav slot renders the entrance-filtered tree from
+  // note: V1.170 P1 (AR-15) — the nav slot renders the entrance-filtered tree from
   // the registry (labels are `shell` i18n keys, resolved here). Create omits
   // the EL §3 hide-table surfaces; Develop shows the full Control Room + hub.
   // The Creator|Orchestrator tabs stay untouched — entrance is a separate
@@ -238,5 +238,5 @@ export function Sidebar() {
   );
 }
 
-// Re-export the chrome types for convenience.
+// note: re-export the chrome types for convenience.
 export type { ShellNavGroup, ShellSidebarTab };

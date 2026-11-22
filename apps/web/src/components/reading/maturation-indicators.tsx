@@ -1,5 +1,5 @@
 /**
- * MaturationIndicators — V1.79 Author Reflection (Track A / P0).
+ * note: MaturationIndicators — V1.79 Author Reflection (Track A / P0).
  *
  * In-context lightweight maturation indicators rendered from EXISTING
  * read-only data — no new backend route, no write path. Three signals:

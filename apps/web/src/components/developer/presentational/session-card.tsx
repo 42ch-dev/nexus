@@ -1,5 +1,5 @@
 /**
- * Presentational session card for the `/sessions` rail (plan
+ * note: Presentational session card for the `/sessions` rail (plan
  * v221-caps-sessions-rail T2).
  *
  * The product page (`components/developer/sessions-page.tsx`) owns the query,
@@ -19,27 +19,27 @@ import type { BadgeProps } from '@/components/ui/badge';
 
 /** One session reduced to the fields the card renders. */
 export interface SessionCardView {
-  /** Full contract id — carried in the run-view href. */
+  /** note: full contract id — carried in the run-view href. */
   sessionId: string;
-  /** `shortId(session_id)` — the visible title. */
+  /** note: `shortId(session_id)` — the visible title. */
   shortId: string;
-  /** `humanizeStatus(status)` + `statusVariant(status)` — unchanged mapping. */
+  /** note: `humanizeStatus(status)` + `statusVariant(status)` — unchanged mapping. */
   status: { label: string; variant: BadgeProps['variant'] };
-  /** `shortId(preset_id)`. */
+  /** note: `shortId(preset_id)`. */
   preset: string;
-  /** `shortId(creator_id)`. */
+  /** note: `shortId(creator_id)`. */
   creator: string;
 }
 
 export interface SessionCardCopy {
-  /** `Open run view for session {{id}}` with the short id. */
+  /** note: `Open run view for session {{id}}` with the short id. */
   openRunAria: (shortId: string) => string;
   presetLabel: string;
   creatorLabel: string;
 }
 
 export interface SessionCardLinkArgs {
-  /** `/sessions/<encodeURIComponent(session_id)>` — the run view for this card. */
+  /** note: `/sessions/<encodeURIComponent(session_id)>` — the run view for this card. */
   href: string;
   ariaLabel: string;
   children: ReactNode;

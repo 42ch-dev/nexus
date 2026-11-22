@@ -1,5 +1,5 @@
 /**
- * AppModuleRoute (plan v1219 T2 — lazy-chunk assertion):
+ * note: AppModuleRoute (plan v1219 T2 — lazy-chunk assertion):
  *
  * Tests inject a registry whose `load` factories are spies and assert:
  *  - a locked app's factory is NEVER invoked and its chunk stays unrequested —
@@ -41,7 +41,7 @@ const registryApps: readonly AppDef[] = [
   },
 ];
 
-// Inject the spy registry; keep the real lock-resolution logic.
+// note: inject the spy registry; keep the real lock-resolution logic.
 vi.mock('@/lib/app-registry', async (importOriginal) => {
   const actual = await importOriginal<typeof AppRegistryModule>();
   return {
@@ -74,7 +74,7 @@ describe('AppModuleRoute — progressive activation lazy boundary', () => {
 
   it('never invokes the factory for a locked app; redirects with the reason toast', async () => {
     renderRoute('work');
-    // Bounced to the first unlocked app (世界) without requesting the chunk.
+    // note: bounced to the first unlocked app (世界) without requesting the chunk.
     expect(await screen.findByTestId('world-page')).toBeInTheDocument();
     expect(loadSpy).not.toHaveBeenCalled();
     expect(await screen.findByText('完成 Brief 后解锁「作品」')).toBeInTheDocument();

@@ -41,19 +41,19 @@ export function SoulNarrativeCard({
   isLoading: boolean;
   isReflecting: boolean;
   onReflect: () => void;
-  /** V1.82: `world` scopes copy to the selected world's per-World narrative. */
+  /** note: V1.82 — `world` scopes copy to the selected world's per-World narrative. */
   scope?: 'creator' | 'world';
 }) {
   const { t } = useTranslation('memory');
 
-  // `generating` (client-side, mutation in flight) takes precedence over the
+  // note: `generating` (client-side, mutation in flight) takes precedence over the
   // server-reported state so the CTA shows active progress regardless of the
   // pre-reflect cache shape.
   if (isReflecting) {
     return <GeneratingState t={t} />;
   }
 
-  // Initial read in flight and no cached data yet: a neutral loading skeleton.
+  // note: initial read in flight and no cached data yet: a neutral loading skeleton.
   // (When a cache already exists, `narrative` is defined and we render the
   // server state below instead of flashing a skeleton on every poll refetch.)
   if (isLoading && !narrative) {
@@ -77,7 +77,7 @@ export function SoulNarrativeCard({
     return <UngeneratedState onReflect={onReflect} t={t} />;
   }
 
-  // `current` or `stale` both have a cached narrative to show. `stale` overlays
+  // note: `current` or `stale` both have a cached narrative to show. `stale` overlays
   // a growth banner above the cached prose with a primary re-reflect CTA.
   const stale = narrative.state === 'stale' || narrative.stale;
   if (narrative.narrative) {
@@ -91,13 +91,13 @@ export function SoulNarrativeCard({
     );
   }
 
-  // Defensive: a `current`/`stale` state without narrative text should not
+  // note: defensive — a `current`/`stale` state without narrative text should not
   // happen (the server returns text for those states), but degrade to the
   // ungenerated CTA rather than a blank card.
   return <UngeneratedState onReflect={onReflect} t={t} />;
 }
 
-/** Distance from the quality threshold, clamped at 0 (for "X more to go"). */
+/** note: distance from the quality threshold, clamped at 0 (for "X more to go"). */
 function remainingToFragmentsThreshold(narrative: SoulNarrativeResponse): number {
   return Math.max(0, narrative.min_fragment_count - narrative.current_fragment_count);
 }

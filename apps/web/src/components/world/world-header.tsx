@@ -1,5 +1,5 @@
 /**
- * World app header (plan v1219-world-module T1) — world name + surface
+ * note: World app header (plan v1219-world-module T1) — world name + surface
  * subtitle (`世界 · 时间线`, product-owned copy). Sits above the layer tabs.
  */
 import { useTranslation } from 'react-i18next';

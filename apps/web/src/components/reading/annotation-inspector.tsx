@@ -1,5 +1,5 @@
 /**
- * AnnotationInspector — V1.89 Deeper Manuscript Reading.
+ * note: AnnotationInspector — V1.89 Deeper Manuscript Reading.
  *
  * Side panel listing the persisted annotations for the current chapter. Each
  * row shows a color swatch, the captured text snippet, an optional note, and
@@ -15,7 +15,7 @@ import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 
-// V1.138 codegen inlines the color enum; derive it from the canonical type so
+// note: V1.138 codegen inlines the color enum; derive it from the canonical type so
 // it stays in sync with `@42ch/nexus-contracts` rather than being hardcoded.
 type ReadingAnnotationColor = ReadingAnnotation['color'];
 

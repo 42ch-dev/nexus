@@ -1,5 +1,5 @@
 /**
- * Inspiration Pool chrome — presentational extract (v1.222 P1 T2).
+ * note: Inspiration Pool chrome — presentational extract (v1.222 P1 T2).
  *
  * Props-driven Card: header copy, the single-field add form (the add request
  * carries `title` and nothing else) and the pool rows with their status-driven
@@ -49,7 +49,7 @@ export interface InspirationPoolCopy {
   titlePlaceholder: string;
   submitLabel: string;
   submittingLabel: string;
-  /** Translatable pool count with both numbers interpolated; absent hides it. */
+  /** note: translatable pool count with both numbers interpolated; absent hides it. */
   countLabel?: string;
   openWork: string;
   promoteLabel: string;
@@ -61,13 +61,13 @@ export interface InspirationPoolCopy {
 export interface InspirationPoolRow {
   itemId: string;
   title: string;
-  /** Stored status — opaque; only `idea` / `promoted` / `archived` are known. */
+  /** note: stored status — opaque; only `idea` / `promoted` / `archived` are known. */
   status: string;
-  /** Translated status, or the raw status when it is not one of the three. */
+  /** note: translated status, or the raw status when it is not one of the three. */
   statusLabel: string;
-  /** Translated added label with the formatted date interpolated. */
+  /** note: translated added label with the formatted date interpolated. */
   addedLabel: string;
-  /** Present once the item was promoted to a Work. */
+  /** note: present once the item was promoted to a Work. */
   workId?: string;
 }
 
@@ -86,7 +86,7 @@ export interface InspirationPoolChromeProps {
   onAdd: (title: string) => void;
   adding?: boolean;
   /**
-   * The row whose promote is in flight (drives the pending label and
+   * note: the row whose promote is in flight (drives the pending label and
    * `aria-busy`). Non-null locks every promote button in the pool: the server
    * checks status once, so one idea must never have two creates in flight.
    */
@@ -95,7 +95,7 @@ export interface InspirationPoolChromeProps {
   onPromote?: (row: InspirationPoolRow) => void;
   onArchive?: (row: InspirationPoolRow) => void;
   /**
-   * Host-owned Work link — the App injects a router `Link`. Must return a
+   * note: host-owned Work link — the App injects a router `Link`. Must return a
    * single element (or null): the result is rendered inside `<Button
    * asChild>` (Radix Slot), which throws on fragments/multi-element output.
    */
@@ -120,7 +120,7 @@ function InspirationPoolRowItem({
   row: InspirationPoolRow;
   copy: InspirationPoolCopy;
   promoting: boolean;
-  /** Any promote in the pool is in flight — one at a time across rows. */
+  /** note: any promote in the pool is in flight — one at a time across rows. */
   promoteLocked: boolean;
   archiving: boolean;
   onPromote?: (row: InspirationPoolRow) => void;
@@ -281,7 +281,7 @@ export function InspirationPoolChrome({
           <>
             <ul
               className="flex flex-col gap-2"
-              // One announcement: the pooled count string already carries the
+              // why: one announcement — the pooled count string already carries the
               // pool name, so it replaces the list label (see the aria-hidden
               // count paragraph below) instead of repeating it.
               aria-label={copy.countLabel ?? copy.listAriaLabel}

@@ -6,7 +6,7 @@ import { i18n } from '@/lib/i18n/config';
 import { EmptyState, ErrorState, LoadingState, Spinner, UnavailableState } from './states';
 
 /**
- * V1.121 P1 T2 — States v0.4 (DESIGN.md components.states).
+ * note: V1.121 P1 T2 — States v0.4 (DESIGN.md components.states).
  *
  * Pins:
  * - ErrorState tint/border consume the error-surface tokens (no raw
@@ -41,7 +41,6 @@ describe('EmptyState (content voice)', () => {
     expect(headline.className).toMatch(/\bfont-display\b/);
     expect(headline.className).toMatch(/\btext-display-24\b/);
     expect(headline.className).toMatch(/\btext-gray-1000\b/);
-    // Interface-voice heading treatment is gone.
     expect(headline.className).not.toMatch(/\btext-heading-16\b/);
     expect(headline.className).not.toMatch(/\bfont-heading\b/);
   });
@@ -86,7 +85,7 @@ describe('copy i18n defaults (V1.148 wrapper)', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
 
     render(<UnavailableState title="服务不可用" onRetry={() => undefined} />);
-    // ErrorState + UnavailableState both fell back to the same zh-CN retry copy.
+    // note: ErrorState + UnavailableState both fell back to the same zh-CN retry copy.
     expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(2);
   });
 

@@ -1,5 +1,5 @@
 /**
- * First World step — creator onboarding (plan v1219-onboarding T3; prototype
+ * note: First World step — creator onboarding (plan v1219-onboarding T3; prototype
  * `onboarding-v3.html` S3).
  *
  * Presentation only: the shell owns the finish sequence (creator bootstrap →
@@ -26,7 +26,7 @@ interface WorldTemplate {
   emoji: string;
   label: string;
   description: string;
-  /** Name the template preselects; the field stays editable after picking. */
+  /** note: name the template preselects; the field stays editable after picking. */
   name: string;
 }
 
@@ -48,12 +48,12 @@ const TEMPLATES: readonly WorldTemplate[] = [
   },
 ];
 
-/** Prototype default: the fantasy template, with its name prefilled. */
+/** note: prototype default: the fantasy template, with its name prefilled. */
 const DEFAULT_TEMPLATE = TEMPLATES[1]!;
 
 interface StepFirstWorldProps {
   onBack: () => void;
-  /** Runs the finish sequence; a rejection keeps this step mounted with the draft. */
+  /** note: runs the finish sequence; a rejection keeps this step mounted with the draft. */
   onFinish: (name: string) => Promise<void>;
 }
 
@@ -65,7 +65,7 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
   const [showRoot, setShowRoot] = useState(false);
   const activeWorkspace = useActiveWorkspaceQuery();
 
-  // Never a hardcoded path: only the root the service reports for the selected
+  // note: never a hardcoded path: only the root the service reports for the selected
   // workspace (D25 — the base note claims no absolute path).
   const workspaceRoot = activeWorkspace.data?.creative_root ?? null;
   const trimmed = name.trim();

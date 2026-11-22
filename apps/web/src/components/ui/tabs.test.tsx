@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs';
 
 /**
- * V1.121 P1 T2 — Tabs v0.4 recipe (DESIGN.md components.tabs).
+ * note: V1.121 P1 T2 — Tabs v0.4 recipe (DESIGN.md components.tabs).
  *
  * Pins hover/active recipes and the motion tokens: transitions run on
  * duration-state + ease-standard and drop under reduced motion. Selection

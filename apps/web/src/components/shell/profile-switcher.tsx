@@ -1,5 +1,5 @@
 /**
- * Creator profile switcher — topnav identity control (IA spec §3.1).
+ * note: Creator profile switcher — topnav identity control (IA spec §3.1).
  *
  * Dropdown lists creators from the existing surface (`GET /v1/daemon/creators`),
  * shows ✓ on the active row, appends the § Copy trailing item (`＋ 新建 Creator…`),
@@ -24,7 +24,7 @@ import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 import { cn } from '@/lib/utils';
 
-/** SOUL maturity is display-only and not yet on the wire contract (IA O3). */
+/** note: SOUL maturity is display-only and not yet on the wire contract (IA O3). */
 function soulMaturityOf(creator: unknown): number | undefined {
   if (creator === null || typeof creator !== 'object' || !('soul_maturity' in creator)) {
     return undefined;
@@ -75,7 +75,7 @@ export function ProfileSwitcher() {
     try {
       await client.setActiveCreator({ creator_id: creatorId });
       setActiveCreatorId(creatorId);
-      // Nearly every surface is creator-scoped — refetch active queries.
+      // note: nearly every surface is creator-scoped — refetch active queries.
       void queryClient.invalidateQueries();
     } catch (error) {
       toast({

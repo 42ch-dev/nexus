@@ -1,5 +1,5 @@
 /**
- * Slot map block — P1 T2 (DF-76). Read-only.
+ * note: Slot map block — P1 T2 (DF-76). Read-only.
  *
  * Renders `slot_map` (`entry_id` → slot id) grouped in prompt emit order:
  * `world.before` → `default` → `world.after` → `kb.outlet.<name>` →
@@ -14,7 +14,7 @@ import type { MomentInspectResponse } from '@42ch/nexus-contracts';
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
-/** Emit-order rank for named slots (spec §2 H2). `kb.outlet.<name>` is a prefix family. */
+/** note: emit-order rank for named slots (spec §2 H2). `kb.outlet.<name>` is a prefix family. */
 const SLOT_EMIT_RANK: Record<string, number> = {
   'world.before': 0,
   default: 1,

@@ -1,5 +1,5 @@
 /**
- * SoulSection integration tests (V1.82 SP-2).
+ * note: SoulSection integration tests (V1.82 SP-2).
  *
  * Renders SoulSection against msw handlers to assert the selector→narrative
  * scope linkage: "All worlds" sends no `world_id`; selecting a world sends that
@@ -31,7 +31,7 @@ function world(id: string, title: string) {
   };
 }
 
-/** Default narrative response used when a test does not override the handler. */
+/** note: default narrative response used when a test does not override the handler. */
 function defaultNarrativeResponse(body: { world_id?: string }) {
   return HttpResponse.json({
     creator_id: CREATOR,
@@ -47,7 +47,7 @@ function defaultNarrativeResponse(body: { world_id?: string }) {
   });
 }
 
-/** Worlds + fragments handlers; narrative handler is provided per-test. */
+/** note: worlds + fragments handlers; narrative handler is provided per-test. */
 function baselineHandlers(overrides: {
   worlds?: unknown[];
   fragments?: unknown[];

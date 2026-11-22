@@ -1,5 +1,5 @@
 /**
- * Agent discovery + selection for the onboarding wizard (plan v1219-onboarding
+ * note: Agent discovery + selection for the onboarding wizard (plan v1219-onboarding
  * T2, compass D24/D27; shared by the creator AI-partner step and the developer
  * agent/workspace step).
  *
@@ -56,7 +56,7 @@ function matchChoice(choices: AgentChoice[], profile: AgentProfile): AgentChoice
 }
 
 function profileOfChoice(choice: AgentChoice): AgentProfile {
-  // The scan entry name, not the catalog display name: `resolveAgentBadge`
+  // note: the scan entry name, not the catalog display name: `resolveAgentBadge`
   // matches a saved profile against `AgentScanEntry.name`.
   const launchCommand = choice.item.launchCommand?.trim();
   return {
@@ -69,10 +69,10 @@ export type AgentScanStatus = 'loading' | 'ready' | 'empty' | 'error';
 
 export interface AgentSelection {
   status: AgentScanStatus;
-  /** Human-readable scan failure ('' when the error carries no message). */
+  /** note: human-readable scan failure ('' when the error carries no message). */
   errorReason: string;
   choices: AgentChoice[];
-  /** First installed row — preselected when nothing was saved yet. */
+  /** note: first installed row — preselected when nothing was saved yet. */
   recommendedId: string | null;
   selectedId: string | null;
   select: (pickerId: string) => void;
@@ -80,7 +80,7 @@ export interface AgentSelection {
   setManual: (command: string) => void;
   retry: () => void;
   /**
-   * Persist the current profile (a manual command overrides the selected row).
+   * note: persist the current profile (a manual command overrides the selected row).
    * Resolves `true` when the selection was saved; `false` when the profile
    * write failed (one error toast shown) — callers must not advance.
    */
@@ -104,7 +104,7 @@ export function useAgentSelection(): AgentSelection {
   const recommendedId = choices.find((choice) => choice.entry.installed)?.pickerId ?? null;
 
   const saved = savedProfile.data;
-  // The saved profile always wins over the scan-recommended default: apply it
+  // note: the saved profile always wins over the scan-recommended default: apply it
   // whenever it arrives, until the user explicitly picks a row. A read that
   // settled without a profile (error or `null`) must not hold the step.
   const profileSettled = savedProfile.isFetched;
@@ -115,7 +115,7 @@ export function useAgentSelection(): AgentSelection {
   const [manual, setManual] = useState('');
   const userPicked = useRef(false);
 
-  // Restore the saved profile once both the scan and the profile read have
+  // note: restore the saved profile once both the scan and the profile read have
   // settled. A row-backed profile re-selects its row; a saved command that
   // differs from the row's own is a manual override and must come back into
   // the field so a later commit does not overwrite it. With zero scan rows
@@ -135,7 +135,7 @@ export function useAgentSelection(): AgentSelection {
     setManual(saved.launchCommand ?? '');
   }, [choices, saved, profileSettled, scanSettled]);
 
-  // While the profile read is still pending, no selection exists yet: the
+  // note: while the profile read is still pending, no selection exists yet: the
   // scan-recommended default must not be committed as an intermediate choice.
   // A read that settled without a profile (error or `null`) releases the gate —
   // only an actually-arrived saved profile overrides the scan default.
@@ -156,13 +156,13 @@ export function useAgentSelection(): AgentSelection {
       : client.saveAgentProfile(wireFromSnapshot(profile)).then(() => undefined);
     return write
       .then(() => {
-        // The status bar and agent chip read the saved profile + scan.
+        // note: the status bar and agent chip read the saved profile + scan.
         void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
         void qc.invalidateQueries({ queryKey: queryKeys.agentHost.scan({ filter: 'all' }) });
         return true;
       })
       .catch((error) => {
-        // Logged here; the toast is shown by commit() so a failed row click
+        // note: logged here; the toast is shown by commit() so a failed row click
         // does not double-report — advance retries the same write.
         console.error('setAgentProfile failed', error);
         return false;
@@ -217,7 +217,7 @@ interface AgentRowProps {
   description: string;
   selected: boolean;
   onSelect: () => void;
-  /** Optional protocol pill (developer surface only). */
+  /** note: optional protocol pill (developer surface only). */
   protocol?: string;
 }
 

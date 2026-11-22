@@ -1,5 +1,5 @@
 /**
- * Chapter keyboard navigation — V1.79 Author Reflection (Track A / P0).
+ * note: Chapter keyboard navigation — V1.79 Author Reflection (Track A / P0).
  *
  * ←/→ chapter/volume navigation for the reading surface, with guards so the
  * shortcuts never compete with form input, contenteditable, or open overlays
@@ -86,7 +86,7 @@ export function isEditable(el: Element): boolean {
  * this guard catching it implicitly.
  */
 export function hasOpenOverlay(): boolean {
-  // A visible menu or dialog captures keyboard intent; do not navigate.
+  // note: a visible menu or dialog captures keyboard intent; do not navigate.
   return Boolean(
     document.querySelector('[role="menu"]:not([hidden]), [role="dialog"]:not([hidden])'),
   );

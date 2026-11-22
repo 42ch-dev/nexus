@@ -1,5 +1,5 @@
 /**
- * Hub card (plan v1220 T1) — the read-only status-section frame.
+ * note: Hub card (plan v1220 T1) — the read-only status-section frame.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
@@ -33,12 +33,12 @@ describe('HubCard', () => {
       'href',
       '/strategies',
     );
-    // Read-only: no form controls, only the one navigation link.
+    // note: read-only — no form controls, only the one navigation link.
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
   });
 
-  // v221-caps-sessions-rail T2 — the sessions card needs an inline node title
+  // note: v221-caps-sessions-rail T2 — the sessions card needs an inline node title
   // (mono short id) and `error` for a `failed` session; the markup is unchanged.
   it('accepts a node title and an error pill', () => {
     renderInApp(
@@ -52,7 +52,7 @@ describe('HubCard', () => {
     expect(screen.getByTestId('hub-card-session')).toBeInTheDocument();
     expect(screen.getByText('sess-0001')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
-    // Pins `variant` + `tone="soft"` forwarding without an innerHTML dump.
+    // note: pins `variant` + `tone="soft"` forwarding without an innerHTML dump.
     expect(screen.getByText('Failed')).toHaveClass(
       'text-nexus-ui-badge-soft-error-text',
     );

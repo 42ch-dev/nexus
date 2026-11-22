@@ -1,5 +1,5 @@
 /**
- * Harness catalog surface (plan v1220 T2).
+ * note: Harness catalog surface (plan v1220 T2).
  *
  * Live read-only aggregation over existing daemon endpoints: preset rows with
  * list facts, strategy binding (`states.length > 0`), per-preset running-session
@@ -61,7 +61,7 @@ function sessionsHandler(items: unknown[]) {
   );
 }
 
-/** Always-more pages: exercises the bounded walk's truncated (lower-bound) path. */
+/** note: always-more pages — exercises the bounded walk's truncated (lower-bound) path. */
 function truncatedSessionsHandler(items: unknown[]) {
   return http.get('/v1/daemon/orchestration/sessions', () =>
     HttpResponse.json({
@@ -88,7 +88,7 @@ function renderHarness() {
 
 beforeEach(async () => {
   window.localStorage.clear();
-  // LocaleProvider resolves from this preference; without it jsdom's en-US wins.
+  // note: LocaleProvider resolves from this preference; without it jsdom's en-US wins.
   window.localStorage.setItem('nexus-web-locale', 'zh-CN');
   await i18n.changeLanguage('zh-CN');
 });
@@ -113,7 +113,7 @@ describe('HarnessPage', () => {
     renderHarness();
 
     expect(await screen.findByTestId('preset-row-user/one')).toBeInTheDocument();
-    // `_system.*` internals are hidden; user/embedded/system rows stay.
+    // note: `_system.*` internals are hidden; user/embedded/system rows stay.
     expect(screen.queryByTestId('preset-row-_system.hidden')).not.toBeInTheDocument();
     expect(screen.getByTestId('preset-row-embedded/two')).toBeInTheDocument();
     expect(screen.getByTestId('preset-row-sys/three')).toBeInTheDocument();
@@ -126,12 +126,12 @@ describe('HarnessPage', () => {
     expect(screen.getByTestId('preset-running-user/one')).toHaveTextContent('running ×2');
     expect(screen.getByTestId('preset-running-embedded/two')).toHaveTextContent('idle');
 
-    // The profile bar reads the same service profile.
+    // note: the profile bar reads the same service profile.
     expect(await screen.findByTestId('harness-profile-current')).toHaveTextContent(
       '当前：claude-code',
     );
 
-    // Canvas and profile drill-downs stay reachable from a row.
+    // note: canvas and profile drill-downs stay reachable from a row.
     await userEvent.click(screen.getByRole('button', { name: '在 canvas 中打开 user/one' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/strategies/user%2Fone');
   });
@@ -161,7 +161,7 @@ describe('HarnessPage', () => {
     useHandlers(
       http.get('/v1/daemon/presets', () => {
         listCalls += 1;
-        // The reload re-reads the manifest: the refetched catalog carries the
+        // note: the reload re-reads the manifest — the refetched catalog carries the
         // new list facts, which is what the row must show.
         return HttpResponse.json(
           listCalls === 1
@@ -176,7 +176,7 @@ describe('HarnessPage', () => {
       profileHandler('embedded/two', []),
       profileHandler('sys/three', []),
       sessionsHandler([]),
-      // The real route answers the generated `ReloadPresetResponse`.
+      // note: the real route answers the generated `ReloadPresetResponse`.
       http.post(/\/v1\/daemon\/presets\/.*:reload$/, () =>
         HttpResponse.json({ id: 'user/one', reloaded: true }),
       ),
@@ -212,7 +212,7 @@ describe('HarnessPage', () => {
     renderHarness();
     await screen.findByTestId('preset-row-user/one');
 
-    // Delete is offered on user presets only.
+    // note: delete is offered on user presets only.
     expect(screen.getByTestId('preset-delete-user/one')).toBeInTheDocument();
     expect(screen.queryByTestId('preset-delete-embedded/two')).not.toBeInTheDocument();
     expect(screen.queryByTestId('preset-delete-sys/three')).not.toBeInTheDocument();
@@ -224,7 +224,7 @@ describe('HarnessPage', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('preset-row-user/one')).not.toBeInTheDocument(),
     );
-    // The rest of the catalog survives the delete.
+    // note: the rest of the catalog survives the delete.
     expect(screen.getByTestId('preset-row-embedded/two')).toBeInTheDocument();
     expect(screen.getByTestId('preset-row-sys/three')).toBeInTheDocument();
   });
@@ -256,14 +256,14 @@ describe('HarnessPage', () => {
     renderHarness();
     await screen.findByTestId('preset-row-user/one');
 
-    // Validate exists only where a manifest file does: user and system rows.
+    // note: validate exists only where a manifest file does — user and system rows.
     expect(screen.getByTestId('preset-validate-user/one')).toBeInTheDocument();
     expect(screen.getByTestId('preset-validate-sys/three')).toBeInTheDocument();
     expect(screen.queryByTestId('preset-validate-embedded/two')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('preset-validate-user/one'));
 
-    // The row button names THAT preset: the form arrives pre-filled with its
+    // note: the row button names THAT preset — the form arrives pre-filled with its
     // own manifest path (still editable) instead of a blank disk path.
     const dialog = await screen.findByRole('dialog', { name: '验证预设' });
     const pathField = within(dialog).getByRole('textbox');
@@ -317,7 +317,7 @@ describe('HarnessPage', () => {
 
     const error = await screen.findByTestId('harness-catalog-error');
     expect(error).toHaveTextContent('加载失败：preset store offline');
-    // The profile bar is a separate source and keeps rendering.
+    // note: the profile bar is a separate source and keeps rendering.
     expect(await screen.findByTestId('harness-profile-current')).toHaveTextContent(
       '当前：claude-code',
     );
@@ -356,7 +356,7 @@ describe('HarnessPage', () => {
     renderHarness();
 
     expect(await screen.findByTestId('preset-row-user/one')).toBeInTheDocument();
-    // A failed source must not assert a positive state: no `idle`, but an
+    // note: a failed source must not assert a positive state — no `idle`, but an
     // explicit unknown badge.
     const badge = screen.getByTestId('preset-running-user/one');
     expect(badge).toHaveTextContent('运行状态未知');
@@ -369,7 +369,7 @@ describe('HarnessPage', () => {
       profileHandler('user/one', []),
       profileHandler('embedded/two', []),
       profileHandler('sys/three', []),
-      // 2 running rows per page × the 10-page cap → 20+ trusted as a lower bound.
+      // note: 2 running rows per page × the 10-page cap → 20+ trusted as a lower bound.
       truncatedSessionsHandler([session('user/one', 'running'), session('user/one', 'running')]),
     );
 

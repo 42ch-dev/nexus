@@ -1,5 +1,5 @@
 /**
- * ReadingProse — V1.79 Author Reflection (Track A / P0) + V1.91 Profile-specific
+ * note: ReadingProse — V1.79 Author Reflection (Track A / P0) + V1.91 Profile-specific
  * Reading Chrome (P0 headline).
  *
  * The prose reading surface: applies reading typography (measure, line-height,
@@ -35,7 +35,7 @@ export interface ReadingProseProps {
   isError: boolean;
   onRetry: () => void;
   workProfile?: string;
-  /** DOM ref forwarded to the prose surface (React 19 ref-as-prop). */
+  /** note: DOM ref forwarded to the prose surface (React 19 ref-as-prop). */
   ref?: Ref<HTMLDivElement>;
 }
 

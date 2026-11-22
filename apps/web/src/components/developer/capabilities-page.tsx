@@ -29,7 +29,7 @@ export function CapabilitiesPage() {
   const { t } = useTranslation('capabilities');
   const caps = useCapabilities();
   const [searchParams] = useSearchParams();
-  // V1.171 P1 (PL-13) — the preset profile deep-links required capabilities
+  // note: V1.171 P1 (PL-13) — the preset profile deep-links required capabilities
   // with `?filter=<name>`; seed the local filter so the linked schema is
   // visible on arrival. The param is a read-only seed: typing does not write
   // it back and a later param change does not re-seed. No param → full list.
@@ -51,7 +51,7 @@ export function CapabilitiesPage() {
   );
 }
 
-/* ── Caller-owned copy (i18n lives in the app, not in the chrome) ─────────── */
+/* note: Caller-owned copy (i18n lives in the app, not in the chrome) ─────────── */
 
 function pageCopy(t: TFunction): CapabilitiesPageCopy {
   return {

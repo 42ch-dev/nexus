@@ -7,7 +7,7 @@ import { Dialog, DialogContent } from './dialog';
 import { Sheet, SheetContent } from './sheet';
 
 /**
- * V1.121 P1 T2 — keep-web elevation pass.
+ * note: V1.121 P1 T2 — keep-web elevation pass.
  *
  * Pins the v0.4 contract for the Radix-dialog surfaces:
  * - overlay consumes the `scrim` token (never a raw black/N literal);
@@ -27,7 +27,7 @@ describe('Dialog (v0.4 elevation)', () => {
     );
 
     const overlay = container.ownerDocument.querySelector('[data-state="open"]');
-    // Radix renders Overlay + Content into a portal on document.body.
+    // note: Radix renders Overlay + Content into a portal on document.body.
     const portalRoot = container.ownerDocument.body;
     const overlayEl = portalRoot.querySelector('.fixed.inset-0');
     expect(overlayEl).not.toBeNull();
@@ -40,7 +40,6 @@ describe('Dialog (v0.4 elevation)', () => {
     expect(content.className).toMatch(/\bw-dialog\b/);
     expect(content.className).toMatch(/\bmax-w-dialog\b/);
     expect(content.className).toMatch(/\bmax-h-dialog\b/);
-    // No arbitrary sizing/overlay values remain.
     expect(content.className).not.toMatch(/\[calc\(|\[min\(|max-h-\[85vh\]|max-w-\[560px\]/);
   });
 });

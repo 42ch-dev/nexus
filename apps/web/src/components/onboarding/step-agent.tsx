@@ -1,5 +1,5 @@
 /**
- * AI partner step — creator onboarding (plan v1219-onboarding T2; prototype
+ * note: AI partner step — creator onboarding (plan v1219-onboarding T2; prototype
  * `onboarding-v3.html` S2).
  *
  * Copy is product-owned and final (plan § Copy), so it ships verbatim and not
@@ -29,7 +29,7 @@ const LINK_CLASS =
   'self-start text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:opacity-100';
 
 /**
- * Outbound install link. Desktop routes every activation through the
+ * note: Outbound install link. Desktop routes every activation through the
  * system-browser opener so the agent page never loads inside the app webview;
  * the browser build uses a normal new-tab link.
  */
@@ -72,7 +72,7 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
   const canContinue = !scanning && selection.canContinue;
 
   async function advance() {
-    // Do not advance when the desktop profile write failed — the step stays
+    // note: do not advance when the desktop profile write failed — the step stays
     // so the user can retry (commit() surfaces the error toast).
     if (await selection.commit()) onNext();
   }

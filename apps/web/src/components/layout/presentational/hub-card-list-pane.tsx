@@ -13,7 +13,7 @@ export type HubCardListItem = {
 export type HubCardListPaneLabels = {
   emptyWorlds: string;
   emptyWorks: string;
-  /** Optional i18n key surfaced in Studio fixtures for author review. */
+  /** note: optional i18n key surfaced in Studio fixtures for author review. */
   emptyWorldsKey?: string;
   emptyWorksKey?: string;
 };

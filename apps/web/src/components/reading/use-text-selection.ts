@@ -1,5 +1,5 @@
 /**
- * useTextSelection — V1.89 Deeper Manuscript Reading.
+ * note: useTextSelection — V1.89 Deeper Manuscript Reading.
  *
  * Captures text selections that fall inside a given container and converts them
  * to character offsets within the container's rendered text content. The
@@ -9,24 +9,24 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 
 export interface TextSelection {
-  /** The selected text. */
+  /** note: the selected text. */
   text: string;
-  /** Inclusive character offset where the selection starts. */
+  /** note: inclusive character offset where the selection starts. */
   startOffset: number;
-  /** Exclusive character offset where the selection ends. */
+  /** note: exclusive character offset where the selection ends. */
   endOffset: number;
 }
 
 export interface TextSelectionState {
   selection: TextSelection | null;
-  /** Viewport-relative position suitable for positioning a floating toolbar. */
+  /** note: viewport-relative position suitable for positioning a floating toolbar. */
   position: { x: number; y: number } | null;
-  /** Clear the captured selection (e.g. after creating a highlight). */
+  /** note: clear the captured selection (e.g. after creating a highlight). */
   clear: () => void;
 }
 
 /**
- * Compute the plain-text offset of a DOM point inside a container by walking
+ * note: Compute the plain-text offset of a DOM point inside a container by walking
  * all text nodes in document order.
  */
 function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): number {
@@ -44,7 +44,7 @@ function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): 
 }
 
 /**
- * Extract the selected text and start/end offsets relative to the container's
+ * note: Extract the selected text and start/end offsets relative to the container's
  * full text content.
  */
 function getSelectionOffsets(container: HTMLElement, range: Range): TextSelection {

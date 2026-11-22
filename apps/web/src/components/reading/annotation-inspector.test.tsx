@@ -1,5 +1,5 @@
 /**
- * AnnotationInspector tests — V1.89 Deeper Manuscript Reading.
+ * note: AnnotationInspector tests — V1.89 Deeper Manuscript Reading.
  *
  * Covers listing annotations, editing note/color, and deleting an annotation.
  */

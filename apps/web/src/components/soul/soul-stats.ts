@@ -1,5 +1,5 @@
 /**
- * SOUL personality visualization — pure aggregation helpers.
+ * note: SOUL personality visualization — pure aggregation helpers.
  *
  * V1.79 P1: these functions turn the read-only `MemoryFragmentInfo` list
  * (carrying `keywords` + `created_at` as of the additive DTO extension) into the
@@ -70,15 +70,15 @@ export function aggregateKeywordFrequency(
 }
 
 export interface TimeBucket {
-  /** 0-based index of this bucket within the timeline. */
+  /** note: 0-based index of this bucket within the timeline. */
   index: number;
-  /** Short human label for the bucket's start boundary (e.g. "Jun 1"). */
+  /** note: short human label for the bucket's start boundary (e.g. "Jun 1"). */
   label: string;
-  /** Number of NEW fragments captured in this bucket. */
+  /** note: number of NEW fragments captured in this bucket. */
   newCount: number;
-  /** Cumulative fragment count through the END of this bucket (growth fold-in). */
+  /** note: cumulative fragment count through the END of this bucket (growth fold-in). */
   cumulative: number;
-  /** Keyword composition of the NEW fragments in this bucket, sorted desc. */
+  /** note: keyword composition of the NEW fragments in this bucket, sorted desc. */
   keywords: KeywordCount[];
 }
 
@@ -110,7 +110,7 @@ export function bucketByTime(
   const maxMs = stamped[stamped.length - 1]!.ms;
   if (maxMs < minMs) return [];
 
-  // Collapse to a single bucket when all fragments share one moment or the span
+  // note: collapse to a single bucket when all fragments share one moment or the span
   // is too small to divide meaningfully — avoids div-by-zero and empty buckets.
   const span = maxMs - minMs;
   const bucketCount = span === 0 ? 1 : Math.max(1, Math.min(targetBuckets, distinctDays(stamped)));
@@ -146,14 +146,14 @@ export function bucketByTime(
   return buckets;
 }
 
-/** Parse an ISO timestamp to epoch-ms, or `null` if unparseable. */
+/** note: parse an ISO timestamp to epoch-ms, or `null` if unparseable. */
 function safeParseMs(iso: string | undefined | null): number | null {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : ms;
 }
 
-/** Count distinct calendar days in the stamped set (caps over-bucketing). */
+/** note: count distinct calendar days in the stamped set (caps over-bucketing). */
 function distinctDays(stamped: { ms: number }[]): number {
   const days = new Set<string>();
   for (const { ms } of stamped) {
@@ -163,12 +163,12 @@ function distinctDays(stamped: { ms: number }[]): number {
   return days.size;
 }
 
-/** Short locale label for a bucket boundary (e.g. "Jun 14"). */
+/** note: short locale label for a bucket boundary (e.g. "Jun 14"). */
 function bucketLabel(ms: number): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(ms);
 }
 
-// ── Growth-curve helpers (V1.81 SP-3) ────────────────────────────────────────
+// note: Growth-curve helpers (V1.81 SP-3) ────────────────────────────────────────
 
 /**
  * Growth-curve density thresholds (plan §2.3). These are deliberately tighter
@@ -185,9 +185,9 @@ export const GROWTH_LOW_DATA_MAX_FRAGMENT = 9;
 export type GrowthDensity = 'empty' | 'low-data' | 'rich';
 
 export interface GrowthDensityInput {
-  /** Total fragment count (stamped + unstamped). */
+  /** note: total fragment count (stamped + unstamped). */
   fragmentCount: number;
-  /** Distinct calendar days among fragments that carry a parseable timestamp. */
+  /** note: distinct calendar days among fragments that carry a parseable timestamp. */
   distinctDays: number;
 }
 
@@ -209,16 +209,16 @@ export function growthDensityFor(input: GrowthDensityInput): GrowthDensity {
 }
 
 export interface GrowthPoint {
-  /** Short human label for the day (e.g. "Jun 1"). */
+  /** note: short human label for the day (e.g. "Jun 1"). */
   label: string;
-  /** Cumulative fragment count through the end of this day (growth). */
+  /** note: cumulative fragment count through the end of this day (growth). */
   cumulative: number;
 }
 
 export interface GrowthSeries {
-  /** One cumulative point per distinct day, in chronological order. */
+  /** note: one cumulative point per distinct day, in chronological order. */
   points: GrowthPoint[];
-  /** Distinct calendar days among parseable timestamps. */
+  /** note: distinct calendar days among parseable timestamps. */
   distinctDays: number;
 }
 

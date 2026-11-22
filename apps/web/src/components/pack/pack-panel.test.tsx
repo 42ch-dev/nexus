@@ -1,5 +1,5 @@
 /**
- * PackPanel — P1 T5 (DF-77) coverage.
+ * note: PackPanel — P1 T5 (DF-77) coverage.
  *
  * Export: the real `useExportPack` hook runs against an msw handler for
  * `POST /v1/daemon/worlds/:world_id/kb/pack/export` (V1.151 precedent —
@@ -33,21 +33,21 @@ import type { PackExportResponse, PackImportResponse } from '@42ch/nexus-contrac
 
 type ImportVars = { worldId: string; file: File; conflict: PackConflictPolicy };
 
-/** Per-test import behavior — read by the mocked `useImportPack` mutationFn. */
+/** note: per-test import behavior — read by the mocked `useImportPack` mutationFn. */
 const packMock = vi.hoisted(() => ({
   importCalls: [] as ImportVars[],
   importMutationFn: null as null | ((vars: ImportVars) => Promise<PackImportResponse>),
 }));
 
 vi.mock('@/api/queries', async (importOriginal) => {
-  // The dynamic `await import` is required here: vi.mock factories are
+  // note: the dynamic `await import` is required here — vi.mock factories are
   // hoisted above the test's static imports, so a statically imported
   // `useMutation` binding would be uninitialized inside the factory.
   const mod = await importOriginal<typeof QueriesModule>();
   const { useMutation } = await import('@tanstack/react-query');
   return {
     ...mod,
-    // Brief T5: control the mutation outcome per test. `useExportPack` stays
+    // note: brief T5 — control the mutation outcome per test. `useExportPack` stays
     // real so the Blob-download path is exercised end to end (V1.151 pattern).
     useImportPack: () =>
       useMutation({
@@ -102,7 +102,7 @@ function renderPanel() {
   return renderInApp(<PackPanel worldId={WORLD_ID} />, { client: new BrowserClient() });
 }
 
-/** Pick the pack file, optionally switch the conflict policy, then submit. */
+/** note: pick the pack file, optionally switch the conflict policy, then submit. */
 async function uploadAndSubmit(user: UserEvent, policy?: PackConflictPolicy) {
   await user.upload(screen.getByTestId('pack-file-input'), PACK_FILE);
   if (policy && policy !== 'skip') {
@@ -127,7 +127,7 @@ describe('PackPanel — export (T5)', () => {
       }),
     );
 
-    // jsdom has no Blob-download APIs — stub them so the hook's download
+    // note: jsdom has no Blob-download APIs; stub them so the hook's download
     // mechanics (object-URL round-trip + anchor click) are observable.
     const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:pack');
     const revokeObjectURL = vi.fn();
@@ -141,7 +141,7 @@ describe('PackPanel — export (T5)', () => {
       if (tagName === 'a') {
         capturedAnchor = el as HTMLAnchorElement;
         el.addEventListener('click', (event) => {
-          // jsdom would otherwise schedule a (not-implemented) navigation for
+          // note: jsdom would otherwise schedule a (not-implemented) navigation for
           // the blob: href — prevent it; the click itself is what we assert.
           event.preventDefault();
           anchorClick();
@@ -156,7 +156,7 @@ describe('PackPanel — export (T5)', () => {
 
       await user.click(screen.getByTestId('pack-export-button'));
 
-      // Mutation called against the daemon export route with an empty body
+      // note: mutation called against the daemon export route with an empty body
       // ("export with defaults"), then the envelope is downloaded.
       await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
       expect(exportBody).toEqual({});
@@ -166,7 +166,7 @@ describe('PackPanel — export (T5)', () => {
       expect(capturedAnchor!.download).toBe('My World.json');
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:pack');
 
-      // Success state surfaces the inline status message.
+      // note: success state surfaces the inline status message.
       expect(await screen.findByTestId('pack-export-success')).toHaveTextContent(
         'Pack exported — check your downloads.',
       );
@@ -193,7 +193,7 @@ describe('PackPanel — import results (T5)', () => {
     expect(packMock.importCalls[0]).toMatchObject({ worldId: WORLD_ID, conflict: 'skip' });
     expect(packMock.importCalls[0].file).toBe(PACK_FILE);
 
-    // Duplicate testids across the entries/relations blocks — scope by block.
+    // note: duplicate testids across the entries/relations blocks — scope by block.
     const [entriesBlock, relationsBlock] = screen.getAllByTestId('pack-atom-counts');
     expect(within(entriesBlock).getByTestId('pack-count-created')).toHaveTextContent('3');
     expect(within(entriesBlock).getByTestId('pack-count-skipped')).toHaveTextContent('2');
@@ -201,7 +201,7 @@ describe('PackPanel — import results (T5)', () => {
     expect(within(relationsBlock).getByTestId('pack-count-created')).toHaveTextContent('1');
     expect(within(relationsBlock).getByTestId('pack-count-skipped')).toHaveTextContent('0');
 
-    // The sr-only live region summarizes the non-zero outcomes (T4 a11y).
+    // note: the sr-only live region summarizes the non-zero outcomes (T4 a11y).
     expect(screen.getByTestId('pack-results-live')).toHaveTextContent(
       'Import finished. Entries: 3 created, 2 skipped. Relations: 1 created.',
     );
@@ -242,7 +242,7 @@ describe('PackPanel — import results (T5)', () => {
 
     await uploadAndSubmit(user, 'overwrite');
 
-    // Confirm dialog appears FIRST — the mutation has not run yet.
+    // note: confirm dialog appears FIRST — the mutation has not run yet.
     expect(await screen.findByTestId('overwrite-confirm-dialog')).toBeInTheDocument();
     expect(packMock.importCalls).toHaveLength(0);
 
@@ -258,7 +258,7 @@ describe('PackPanel — import results (T5)', () => {
     expect(within(entriesBlock).getByTestId('pack-count-created')).toHaveTextContent('2');
     expect(within(relationsBlock).getByTestId('pack-count-overwritten')).toHaveTextContent('1');
 
-    // Per-atom details render inside the disclosure (row kind + outcome).
+    // note: per-atom details render inside the disclosure (row kind + outcome).
     expect(screen.getByTestId('pack-detail-row')).toHaveTextContent('e-shadow');
     expect(screen.getByTestId('pack-detail-row')).toHaveTextContent('Overwritten');
   });
@@ -266,7 +266,7 @@ describe('PackPanel — import results (T5)', () => {
 
 describe('PackPanel — overwrite confirm gate (T5)', () => {
   it('cancel closes the dialog without calling the import mutation', async () => {
-    packMock.importMutationFn = async () => makeSummary(); // must never run
+    packMock.importMutationFn = async () => makeSummary(); // note: must never run
     const user = userEvent.setup();
     renderPanel();
 
@@ -322,13 +322,13 @@ describe('PackPanel — import guards & state lifecycle (QC fix wave)', () => {
     const user = userEvent.setup();
     renderPanel();
 
-    // File A fails with 403 → error banner renders.
+    // note: file A fails with 403 → error banner renders.
     await uploadAndSubmit(user);
     expect(await screen.findByTestId('pack-import-errors')).toHaveTextContent(
       'You do not have permission to import into this World.',
     );
 
-    // Picking file B must drop the previous attempt's error — the banner
+    // note: picking file B must drop the previous attempt's error — the banner
     // belongs to the old file, not the new (unsubmitted) one.
     await user.upload(screen.getByTestId('pack-file-input'), PACK_FILE_B);
 
@@ -361,7 +361,7 @@ describe('PackPanel — import guards & state lifecycle (QC fix wave)', () => {
     await uploadAndSubmit(user);
 
     expect(await screen.findByTestId('pack-import-results')).toBeInTheDocument();
-    // The picker is reset so selecting the same file again re-fires onChange.
+    // note: the picker is reset so selecting the same file again re-fires onChange.
     expect((screen.getByTestId('pack-file-input') as HTMLInputElement).value).toBe('');
   });
 

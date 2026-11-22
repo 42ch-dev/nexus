@@ -110,7 +110,7 @@ describe('AuthRecoveryGate', () => {
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
 
-    // The probe is cookie-only, and the stale key is gone, so the client that
+    // why: the probe is cookie-only and the stale key is gone, so the client
     // ClientProvider rebuilds (which reads this store) sends no X-API-Key and
     // the valid session cookie wins service-side.
     expect(sentKeys).toEqual([null]);

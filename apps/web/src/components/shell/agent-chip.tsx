@@ -1,5 +1,5 @@
 /**
- * Agent chip — topnav badge for the current AI agent (IA spec §3.1).
+ * note: Agent chip — topnav badge for the current AI agent (IA spec §3.1).
  *
  * Read-only: the saved agent profile resolved by `useSavedAgentProfile`
  * (desktop IPC profile, else the service-backed daemon-global profile), matched

@@ -1,5 +1,5 @@
 /**
- * One Harness catalog row (plan v1220 T2): preset name, list facts, strategy
+ * note: One Harness catalog row (plan v1220 T2) — preset name, list facts, strategy
  * binding state, and running-session state.
  *
  * Author actions live on the row: the canvas drill-down (row name), the
@@ -40,13 +40,13 @@ export interface PresetCardProps {
   running: PresetRunningState;
   onOpenCanvas: () => void;
   onOpenProfile: () => void;
-  /** Open the dry-run validate dialog for this row; absent on embedded presets. */
+  /** note: open the dry-run validate dialog for this row; absent on embedded presets. */
   onValidate?: () => void;
-  /** Re-read this preset's manifest from disk. */
+  /** note: re-read this preset's manifest from disk. */
   onReload: () => void;
-  /** True while this row's reload is in flight. */
+  /** note: true while this row's reload is in flight. */
   reloading: boolean;
-  /** User presets only — absent on embedded/system rows. */
+  /** note: user presets only — absent on embedded/system rows. */
   onDelete?: () => void;
 }
 
@@ -63,7 +63,7 @@ export function PresetCard({
 }: PresetCardProps) {
   const { t } = useTranslation('strategies');
   const bound = Boolean(profile.data && profile.data.states.length > 0);
-  // "Not bound" is only claimable from a successful empty profile; a failed
+  // note: "Not bound" is only claimable from a successful empty profile; a failed
   // read is unknown, exactly like the running column.
   const bindingBadge = profile.isError
     ? { variant: 'warning' as const, label: t('harness.bindingUnknown') }
@@ -83,7 +83,7 @@ export function PresetCard({
         ? { variant: 'neutral' as const, label: t('harness.runningLoading') }
         : running.truncated
           ? {
-              // A truncated walk is a lower bound even at zero: never `idle`.
+              // note: a truncated walk is a lower bound even at zero — never `idle`.
               variant: running.count > 0 ? ('queued' as const) : ('neutral' as const),
               label: t('harness.runningTruncated', { count: running.count }),
             }

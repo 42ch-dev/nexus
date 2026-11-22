@@ -1,5 +1,5 @@
 /**
- * Agent + workspace step — developer onboarding (plan v1219-onboarding T2;
+ * note: Agent + workspace step — developer onboarding (plan v1219-onboarding T2;
  * prototype `onboarding-v3.html` S2D).
  *
  * One merged step: agent rows (ACP pill allowed on this surface), an optional
@@ -42,7 +42,7 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
   const [pickedRoot, setPickedRoot] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Never a hardcoded path: the daemon reports the active workspace root.
+  // note: never a hardcoded path: the daemon reports the active workspace root.
   const workspaceRoot = pickedRoot ?? activeWorkspace.data?.creative_root ?? null;
   const canContinue = selection.status !== 'loading' && selection.canContinue;
 
@@ -63,7 +63,7 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
   }
 
   async function finish() {
-    // Do not finish when the desktop profile write failed — the step stays
+    // note: do not finish when the desktop profile write failed — the step stays
     // so the user can retry (commit() surfaces the error toast).
     if (await selection.commit()) onFinish();
   }

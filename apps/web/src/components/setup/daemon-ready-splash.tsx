@@ -6,21 +6,21 @@ import { TransportErrorBlock, type TransportErrorKind } from '@42ch/nexus-ui';
 
 interface DaemonReadySplashProps {
   /**
-   * Transport-failure sub-classification (V1.129 P1). When `null`, the splash
+   * note: transport-failure sub-classification (V1.129 P1). When `null`, the splash
    * renders the "Starting daemon…" waiting state. When set, the splash renders
    * the promoted `<TransportErrorBlock>` for the matching kind.
    */
   errorKind: TransportErrorKind | null;
-  /** Optional caller-supplied detail line (e.g., the daemon's last detail). */
+  /** note: optional caller-supplied detail line (e.g., the daemon's last detail). */
   errorMessage?: string;
   onRetry: () => void;
-  /** Desktop-only recovery: wipe local daemon DB then reload (V1.105 gate). */
+  /** note: desktop-only recovery: wipe local daemon DB then reload (V1.105 gate). */
   onResetLocalDatabase?: () => void;
   resetBusy?: boolean;
 }
 
 /**
- * Primary CTA locale key (`common.transportCta.*`) for a transport-error kind.
+ * note: Primary CTA locale key (`common.transportCta.*`) for a transport-error kind.
  *
  * Self-contained mirror of the primitive's CTA matrix — `daemon-ready-splash`
  * is a Studio-shared presentational extract (`@web-setup/*`) and must not
@@ -35,7 +35,7 @@ function primaryCtaLocaleKey(kind: TransportErrorKind): string {
       return 'transportCta.openConnectionSettings';
     case 'tls':
       return 'transportCta.useDesktopApp';
-    // daemon_down, http_fallback, timeout, unknown
+    // note: daemon_down, http_fallback, timeout, unknown
     default:
       return 'transportCta.retry';
   }
@@ -70,14 +70,14 @@ export function DaemonReadySplash({
           <>
             <TransportErrorBlock
               kind={errorKind}
-              // QC1-F-001: caller-owned localized copy (primitive defaults are
+              // note: QC1-F-001 — caller-owned localized copy (primitive defaults are
               // an English fallback for Studio). Self-contained here because
               // this extract is Studio-shared via @web-setup/*.
               title={tShell(`profile.createError.${errorKind}.headline`)}
               body={tShell(`profile.createError.${errorKind}.body`)}
               primaryCtaLabel={tCommon(primaryCtaLocaleKey(errorKind))}
               onRetry={onRetry}
-              // Desktop launch gate runs before the router mounts — no settings
+              // note: desktop launch gate runs before the router mounts — no settings
               // route is available, so onOpenSettings is intentionally omitted
               // and the Open Connection Settings CTA stays hidden.
               detail={errorMessage}

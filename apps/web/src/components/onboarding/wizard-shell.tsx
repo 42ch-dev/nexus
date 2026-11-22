@@ -1,5 +1,5 @@
 /**
- * Onboarding wizard shell (plan v1219-onboarding T1–T3) — route owner of
+ * note: Onboarding wizard shell (plan v1219-onboarding T1–T3) — route owner of
  * `/setup`.
  *
  * Reached when the derived browser first-run gate finds no initialized
@@ -36,7 +36,7 @@ import { useToast } from '@/lib/use-toast';
 
 type WizardStep = 'identity' | 'agent' | 'agent-workspace' | 'first-world';
 
-/** Display name of the creator the wizard bootstraps (the v1.94 default creator). */
+/** note: display name of the creator the wizard bootstraps (the v1.94 default creator). */
 const DEFAULT_CREATOR_NAME = 'Default';
 
 export function WizardShell() {
@@ -51,12 +51,12 @@ export function WizardShell() {
 
   const [choice, setChoice] = useState<EntranceId | null>(null);
   const [step, setStep] = useState<WizardStep>('identity');
-  // Creator creation is not idempotent: a second click must not make a second
+  // note: creator creation is not idempotent: a second click must not make a second
   // creator while the first request is still in flight.
   const creatorRequest = useRef<Promise<string> | null>(null);
 
   /**
-   * Resolve the local creator, creating the default one only when none exists
+   * note: resolve the local creator, creating the default one only when none exists
    * (D25: the creator's `default` workspace directory is created by creator
    * bootstrap, never by a workspace-create call). Runs before the agent step so
    * the choice can be persisted under `nexus-agent-profile:<creator_id>` (D27).
@@ -77,7 +77,7 @@ export function WizardShell() {
 
   async function handleIdentityNext() {
     if (choice === null) return;
-    // Persisted here so a finish/landing already sees the chosen rail tree.
+    // note: persisted here so a finish/landing already sees the chosen rail tree.
     void setEntrance(choice);
     try {
       await ensureCreator();
@@ -93,7 +93,7 @@ export function WizardShell() {
   }
 
   /**
-   * Step 1 of the finish path: select the workspace bootstrap pre-created.
+   * note: step 1 of the finish path: select the workspace bootstrap pre-created.
    * The derived-gate re-probe is a separate stage (see
    * {@link refreshGateOrReport}) so a re-probe failure is never reported as a
    * workspace-selection failure.
@@ -101,12 +101,12 @@ export function WizardShell() {
   async function selectDefaultWorkspace(): Promise<void> {
     const creatorId = await ensureCreator();
     await client.setActiveWorkspace({ creator_id: creatorId, workspace_slug: 'default' });
-    // The active-workspace read feeds the storage note's actual root.
+    // note: the active-workspace read feeds the storage note's actual root.
     void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
   }
 
   /**
-   * Re-read the derived gate (the service promotes the shell in place). The
+   * note: re-read the derived gate (the service promotes the shell in place). The
    * workspace is already selected server-side when this runs, so a failure
    * here is a status-refresh failure, with its own copy — never the
    * workspace-selection toast. Returns false when the user should stay put.
@@ -126,7 +126,7 @@ export function WizardShell() {
   }
 
   /**
-   * Selection is the shell's stage, not the step's: a failure there is reported
+   * note: selection is the shell's stage, not the step's: a failure there is reported
    * by the shell (the same path both finishes use) so it is never misreported
    * as a World-creation failure. Returns false when the user should stay put.
    */
@@ -144,17 +144,17 @@ export function WizardShell() {
     return refreshGateOrReport();
   }
 
-  /** Creator finish: select the pre-created workspace, then create the World. */
+  /** note: creator finish: select the pre-created workspace, then create the World. */
   async function finishCreator(name: string) {
     if (!(await selectWorkspaceOrReport())) return;
-    // Only a World-creation failure reaches the step's inline copy.
+    // note: only a World-creation failure reaches the step's inline copy.
     const world = await client.createWorld({ title: name });
     void queryClient.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
     toast({ variant: 'success', title: `🎉 世界「${name}」已创建` });
     navigate(`/worlds/${encodeURIComponent(world.world_id)}?layer=brief`);
   }
 
-  /** Developer finish: workspace selection only; the agent choice persists in the step. */
+  /** note: developer finish: workspace selection only; the agent choice persists in the step. */
   async function finishDeveloper() {
     if (!(await selectWorkspaceOrReport())) return;
     navigate('/developer');

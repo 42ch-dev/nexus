@@ -1,5 +1,5 @@
 /**
- * Reading-chrome ReactMarkdown renderers — V1.91 profile-specific read-only
+ * note: Reading-chrome ReactMarkdown renderers — V1.91 profile-specific read-only
  * chrome.
  *
  * Each shipped work profile (`novel`, `essay`, `game-bible`, `script`) maps
@@ -75,7 +75,7 @@ export function createProfileRenderers(profile: ReadingChromeProfile): Component
   }
 }
 
-/* ── Profile: novel ── */
+/* note: Profile: novel */
 
 function NovelChapterTitle({ node: _node, level: _level, ...props }: HeadingProps) {
   return (
@@ -111,7 +111,7 @@ function NovelEpigraph({ node: _node, ...props }: NodeProps<HTMLQuoteElement>) {
   );
 }
 
-/* ── Profile: essay ── */
+/* note: Profile: essay */
 
 function EssaySectionHeading({ node: _node, level: _level, ...props }: HeadingProps) {
   return (
@@ -146,7 +146,7 @@ function EssayAnchor({ node: _node, ...props }: NodeProps<HTMLAnchorElement>) {
   return <a {...props} />;
 }
 
-/* ── Profile: game-bible ── */
+/* note: Profile: game-bible */
 
 function GameBibleTermLink({ node: _node, ...props }: NodeProps<HTMLAnchorElement>) {
   return (
@@ -171,7 +171,7 @@ function GameBibleDefinitionCallout({ node: _node, ...props }: NodeProps<HTMLQuo
   );
 }
 
-/* ── Profile: script ── */
+/* note: Profile: script */
 
 function ScriptSceneHeading({ node: _node, level: _level, ...props }: HeadingProps) {
   return (

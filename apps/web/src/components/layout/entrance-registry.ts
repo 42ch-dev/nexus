@@ -1,5 +1,5 @@
 /**
- * User-layer entrance registry (V1.170 P1 — AR-15).
+ * note: User-layer entrance registry (V1.170 P1 — AR-15).
  *
  * Single typed **descriptor** + **route classification** SSOT for the
  * Create | Develop layout split. Mirrors the `SETTINGS_SECTION_DESCRIPTORS`
@@ -36,32 +36,32 @@ import {
   type SettingsSectionId,
 } from '@/components/layout/settings-section-registry';
 
-export type EntranceId = 'content-creator' | 'developer'; // chrome labels: Create | Develop
+export type EntranceId = 'content-creator' | 'developer'; // note: chrome labels: Create | Develop
 
 export interface EntranceRouteRule {
-  /** Route path (App.tsx SSOT); longest-prefix match. */
+  /** note: route path (App.tsx SSOT); longest-prefix match. */
   path: string;
-  /** Nothing is create-only (Develop = full config). */
+  /** note: nothing is create-only (Develop = full config). */
   visibility: 'both' | 'develop-only';
-  /** Pass-through on the hidden tree (product lock: strategy canvas OK). */
+  /** note: pass-through on the hidden tree (product lock: strategy canvas OK). */
   allowDeepLink?: boolean;
-  /** For /settings/* section resolution. */
+  /** note: for /settings/* section resolution. */
   settingsSection?: SettingsSectionId;
 }
 
 export interface EntranceDescriptor {
   id: EntranceId;
-  /** "Create" | "Develop" (chrome labels). */
+  /** note: "Create" | "Develop" (chrome labels). */
   layoutLabel: string;
-  /** "Content creator" | "Developer" (identity page). */
+  /** note: "Content creator" | "Developer" (identity page). */
   personaLabel: string;
-  /** '/works' | '/developer' — single source for guard bounces AND the index redirect (AR-18). */
+  /** note: '/works' | '/developer' — single source for guard bounces AND the index redirect (AR-18). */
   landRoute: string;
-  /** Entrance-filtered sidebar tree. */
+  /** note: entrance-filtered sidebar tree. */
   navGroups: readonly ShellNavGroup[];
-  /** Sections hidden from the tree (Create: agent | advanced). */
+  /** note: sections hidden from the tree (Create: agent | advanced). */
   hiddenSettingsSections: readonly SettingsSectionId[];
-  /** i18n shell key for the guard bounce toast (AR-19). */
+  /** note: i18n shell key for the guard bounce toast (AR-19). */
   bounceToastKey: string;
 }
 
@@ -72,19 +72,19 @@ export interface EntranceDescriptor {
  * `resolveSettingsLocation` first (AR-19) — their rules carry `settingsSection`.
  */
 export const ENTRANCE_ROUTE_RULES: readonly EntranceRouteRule[] = [
-  // develop-only surfaces (guard-bounced on Create)
+  // note: develop-only surfaces (guard-bounced on Create)
   { path: '/strategies', visibility: 'develop-only' },
-  // Strategy canvas — support deep-link per product EL §3 (no bounce, no toast).
+  // note: strategy canvas — support deep-link per product EL §3 (no bounce, no toast).
   { path: '/strategies/:presetId', visibility: 'develop-only', allowDeepLink: true },
   { path: '/sessions', visibility: 'develop-only' },
   { path: '/schedule', visibility: 'develop-only' },
-  // Compute modules page (developer rail).
+  // note: compute modules page (developer rail).
   { path: '/modules', visibility: 'develop-only' },
   { path: '/capabilities', visibility: 'develop-only' },
   { path: '/connect', visibility: 'develop-only' },
   { path: '/developer', visibility: 'develop-only' },
   { path: '/works/:workId/inspector', visibility: 'develop-only' },
-  // Settings sections — section-level visibility via resolveSettingsLocation.
+  // note: settings sections — section-level visibility via resolveSettingsLocation.
   { path: '/settings/agent', visibility: 'develop-only', settingsSection: 'agent' },
   { path: '/settings/advanced', visibility: 'develop-only', settingsSection: 'advanced' },
   { path: '/settings/workspace', visibility: 'both', settingsSection: 'workspace' },
@@ -100,7 +100,7 @@ export function isEntranceId(value: string | null | undefined): value is Entranc
 }
 
 /**
- * Both-visibility nav groups (EL §3 keep-visible table) — ONE source shared by
+ * note: Both-visibility nav groups (EL §3 keep-visible table) — ONE source shared by
  * both entrance descriptors (plan QC S-1): adding a surface visible on both
  * trees edits this constant only, not the two descriptor lists.
  */
@@ -138,7 +138,7 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
     layoutLabel: 'Create',
     personaLabel: 'Content creator',
     landRoute: '/works',
-    // EL §3 — reduced tree: primary JTBD (works/worlds), Memory, findings.
+    // note: EL §3 — reduced tree: primary JTBD (works/worlds), Memory, findings.
     navGroups: COMMON_NAV_GROUPS,
     hiddenSettingsSections: ['agent', 'advanced'],
     bounceToastKey: 'entrance.bounceToast',
@@ -148,7 +148,7 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
     layoutLabel: 'Develop',
     personaLabel: 'Developer',
     landRoute: '/developer',
-    // EL §4 — full config surface + Develop hub as the land route.
+    // note: EL §4 — full config surface + Develop hub as the land route.
     navGroups: [
       {
         id: 'hub',

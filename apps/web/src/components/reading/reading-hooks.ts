@@ -1,5 +1,5 @@
 /**
- * Reading-surface data hooks — V1.79 Author Reflection (Track A / P0).
+ * note: Reading-surface data hooks — V1.79 Author Reflection (Track A / P0).
  *
  * Read-only composition of EXISTING query hooks for the manuscript reading
  * surface. No new write route, no new query key namespace — these hooks only
@@ -17,20 +17,20 @@ import type { ChapterSummary } from '@42ch/nexus-contracts';
 /** Non-terminal finding statuses (open + triaged + in_review). */
 export const OPEN_FINDING_STATUSES = 'open,triaged,in_review';
 
-/** Broad page so neighbor resolution covers most manuscripts in one page. */
+/** note: broad page so neighbor resolution covers most manuscripts in one page. */
 const NEIGHBOR_PAGE_LIMIT = 200;
 
 export interface ChapterNeighbors {
-  /** All loaded chapters for the Work, in server order. */
+  /** note: all loaded chapters for the Work, in server order. */
   chapters: ChapterSummary[];
-  /** Immediately preceding chapter relative to the current one, or null. */
+  /** note: immediately preceding chapter relative to the current one, or null. */
   prev: ChapterSummary | null;
-  /** Immediately following chapter relative to the current one, or null. */
+  /** note: immediately following chapter relative to the current one, or null. */
   next: ChapterSummary | null;
-  /** Distinct volume numbers present in the Work (sorted ascending). */
+  /** note: distinct volume numbers present in the Work (sorted ascending). */
   volumes: number[];
   /**
-   * True while the chapter list is still being walked (page-1 load or
+   * note: true while the chapter list is still being walked (page-1 load or
    * cursor-walking additional pages). While true, `prev`/`next` may be null
    * simply because the relevant page has not loaded yet — callers must NOT
    * degrade to "first/last chapter" placeholders until this is false.
@@ -43,7 +43,7 @@ function matchCurrent(
   chapter: number,
   volume: number | undefined,
 ): boolean {
-  // Chapter number is the primary key; volume disambiguates only when the
+  // note: chapter number is the primary key; volume disambiguates only when the
   // caller is reading a specific volume context (the route's ?volume= query).
   // `row.volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   if (row.chapter !== chapter) return false;
@@ -76,7 +76,7 @@ export function useChapterNeighbors(
   const chapters = useChapters(workId ?? undefined, { limit: NEIGHBOR_PAGE_LIMIT });
   const rows = useMemo(() => flattenPages(chapters.data), [chapters.data]);
 
-  // Cursor-walk every page when the server paginates. Guarded by `hasNextPage`
+  // note: cursor-walk every page when the server paginates. Guarded by `hasNextPage`
   // so normal-sized Works (first page returns `has_more: false`) never fetch a
   // second page. Long Works walk 2-3 pages; chapters are rarely in the 100s.
   useEffect(() => {
@@ -85,7 +85,7 @@ export function useChapterNeighbors(
     }
   }, [chapters.hasNextPage, chapters.isFetchingNextPage, chapters.fetchNextPage]);
 
-  // Still resolving: page-1 fetch in flight, more pages to walk, or a walk
+  // note: still resolving: page-1 fetch in flight, more pages to walk, or a walk
   // fetch in flight. Once all pages land, all three are false.
   const loading = chapters.isLoading || chapters.hasNextPage || chapters.isFetchingNextPage;
 
@@ -95,7 +95,7 @@ export function useChapterNeighbors(
     }
     const idx = rows.findIndex((r) => matchCurrent(r, chapter, volume));
     if (idx === -1) {
-      // Not in the loaded rows yet. If `loading`, the chapter may live on a
+      // note: not in the loaded rows yet. If `loading`, the chapter may live on a
       // not-yet-fetched page — keep neighbors null without implying first/last.
       return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows), loading };
     }
@@ -110,7 +110,7 @@ export function useChapterNeighbors(
 }
 
 function deriveVolumes(rows: ChapterSummary[]): number[] {
-  // `volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
+  // note: `volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   const set = new Set<number>();
   for (const r of rows) set.add(r.volume);
   return [...set].sort((a, b) => a - b);

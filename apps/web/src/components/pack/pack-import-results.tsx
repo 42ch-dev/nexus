@@ -1,5 +1,5 @@
 /**
- * Pack import results — summary counts + collapsible per-atom details
+ * note: Pack import results — summary counts + collapsible per-atom details
  * (V1.152 P1 T2, DF-77). Pure presentation.
  *
  * Renders the `PackImportResponse` returned by `useImportPack`: the two
@@ -53,7 +53,7 @@ export function PackImportResults({ summary }: PackImportResultsProps) {
   const { t } = useTranslation('pack');
   const titleId = useId();
 
-  // Compact "3 created, 1 overwritten" sentence per atom group for the live
+  // note: compact "3 created, 1 overwritten" sentence per atom group for the live
   // region; only non-zero outcomes are listed so the announcement stays short.
   const summarize = (counts: AtomCounts): string => {
     const parts = OUTCOME_KEYS.filter((key) => counts[key] > 0).map((key) =>

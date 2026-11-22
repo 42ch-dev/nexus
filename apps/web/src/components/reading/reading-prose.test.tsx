@@ -1,5 +1,5 @@
 /**
- * ReadingProse profile-chrome tests — V1.91 P0 headline.
+ * note: ReadingProse profile-chrome tests — V1.91 P0 headline.
  *
  * Asserts that each shipped work profile (`novel`, `essay`, `game-bible`,
  * `script`) renders with at least two distinct, token-driven visual markers

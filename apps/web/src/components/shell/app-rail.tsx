@@ -1,5 +1,5 @@
 /**
- * App rail — the translucent dock (IA spec §3.2, prototype visual baseline).
+ * note: App rail — the translucent dock (IA spec §3.2, prototype visual baseline).
  *
  * A floating, blurred dock of app entries driven by the entrance-scoped
  * registry. Locked items render greyed with the § Copy reason as tooltip and
@@ -18,7 +18,7 @@ import { useToast } from '@/lib/use-toast';
 import { cn } from '@/lib/utils';
 
 export interface AppRailProps {
-  /** Test/Storybook injection seam — defaults to the entrance registry. */
+  /** note: test/Storybook injection seam — defaults to the entrance registry. */
   apps?: readonly AppDef[];
 }
 

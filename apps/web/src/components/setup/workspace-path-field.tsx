@@ -1,5 +1,5 @@
 /**
- * WorkspacePathField — presentational workspace folder path + change action.
+ * note: WorkspacePathField — presentational workspace folder path + change action.
  *
  * Shared between Settings (settings-row) and the setup wizard (wizard-stack).
  * No daemon client, no desktop hooks; the host owns the picker orchestration.
@@ -14,33 +14,33 @@ import { cn } from '@/lib/utils';
 import { Button, Input, Label } from '@42ch/nexus-ui';
 
 export interface WorkspacePathFieldProps {
-  /** Required — `label htmlFor` ↔ readonly `Input` a11y association. */
+  /** note: required — `label htmlFor` ↔ readonly `Input` a11y association. */
   id: string;
-  /** Display value. */
+  /** note: display value. */
   path: string;
-  /** Optional — shows resolving placeholder while true. */
+  /** note: optional — shows resolving placeholder while true. */
   loading?: boolean;
-  /** Optional — disables the change action CTA. */
+  /** note: optional — disables the change action CTA. */
   changeDisabled?: boolean;
-  /** Optional — omit in Studio fixtures. */
+  /** note: optional — omit in Studio fixtures. */
   onChangeClick?: () => void;
-  /** Layout variant. Default `settings-row`. */
+  /** note: layout variant. Default `settings-row`. */
   layout?: 'settings-row' | 'wizard-stack';
-  /** When false, show the browser-only helper. */
+  /** note: when false, show the browser-only helper. */
   desktopAvailable?: boolean;
-  /** Optional label text; defaults to setup catalog. */
+  /** note: optional label text; defaults to setup catalog. */
   label?: string;
-  /** Optional change action text; defaults to setup catalog. */
+  /** note: optional change action text; defaults to setup catalog. */
   changeAction?: string;
-  /** Optional override for the browser-only helper text; defaults to setup catalog. */
+  /** note: optional override for the browser-only helper text; defaults to setup catalog. */
   browserOnlyHelper?: string;
-  /** Optional tooltip for the disabled change action (e.g. desktop-only explanation). */
+  /** note: optional tooltip for the disabled change action (e.g. desktop-only explanation). */
   title?: string;
-  /** Optional root test id. */
+  /** note: optional root test id. */
   'data-testid'?: string;
-  /** Optional test id for the readonly Input. */
+  /** note: optional test id for the readonly Input. */
   inputDataTestId?: string;
-  /** Optional test id for the Change Folder button. */
+  /** note: optional test id for the Change Folder button. */
   buttonDataTestId?: string;
 }
 

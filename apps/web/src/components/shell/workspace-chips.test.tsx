@@ -1,5 +1,5 @@
 /**
- * Workspace chip row + create flow (plan v1219 T3; create added by v1220 P3-T3)
+ * note: Workspace chip row + create flow (plan v1219 T3; create added by v1220 P3-T3)
  * — product-behaviour tests:
  *
  *  - One workspace chip per `display_name`; a fresh creator sees exactly one,
@@ -45,7 +45,7 @@ const NOVEL_WS = {
   creative_root: '/home/creator/Nexus/novel',
   display_name: '我的小说',
 };
-/** Same slug as creator-a's default — the multi-creator collision case. */
+/** note: same slug as creator-a's default — the multi-creator collision case. */
 const CREATOR_B_DEFAULT_WS = {
   creator_id: 'creator-b',
   workspace_slug: 'default',
@@ -53,7 +53,7 @@ const CREATOR_B_DEFAULT_WS = {
   display_name: 'B 的工作区',
 };
 
-/** Mutable service state so set-active flips what the active route serves. */
+/** note: mutable service state so set-active flips what the active route serves. */
 let activeCreator = 'creator-a';
 let activeSlug = 'default';
 let activeStatus = 200;
@@ -69,9 +69,9 @@ let releaseCreate: (() => void) | null = null;
 
 interface WorkspaceHandlerOptions {
   items?: unknown[];
-  /** 200 serves the active workspace; 409 simulates a fresh home. */
+  /** note: 200 serves the active workspace; 409 simulates a fresh home. */
   active?: number;
-  /** Creator id the active-workspace route reports. */
+  /** note: creator id the active-workspace route reports. */
   activeCreatorId?: string;
 }
 
@@ -169,7 +169,7 @@ async function openCreatePanel() {
 describe('WorkspaceChips', () => {
   beforeEach(async () => {
     window.localStorage.clear();
-    // LocaleProvider resolves `system` (en in jsdom) and calls
+    // note: LocaleProvider resolves `system` (en in jsdom) and calls
     // changeLanguage on mount; pin the stored preference so the shell copy is
     // the zh-CN one these assertions read.
     window.localStorage.setItem('nexus-web-locale', 'zh-CN');
@@ -220,7 +220,7 @@ describe('WorkspaceChips', () => {
   });
 
   it('matches creator_id + slug: with creator-b active, only creator-b’s default chip is active', async () => {
-    // Both creators own a `default` workspace; the service receives the
+    // note: both creators own a `default` workspace; the service receives the
     // creator filter and the client-side match must not light creator-a's chip.
     useWorkspaceHandlers({
       items: [DEFAULT_WS, CREATOR_B_DEFAULT_WS],
@@ -259,7 +259,7 @@ describe('WorkspaceChips', () => {
     await waitFor(() =>
       expect(setActiveRequests).toEqual([{ workspace_slug: 'novel', creator_id: 'creator-a' }]),
     );
-    // Invalidation refires the workspace list (workspace-scoped refetch).
+    // note: invalidation refires the workspace list (workspace-scoped refetch).
     await waitFor(() => expect(listRequests).toBeGreaterThan(listsBefore));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '我的小说' })).toHaveAttribute(
@@ -281,7 +281,7 @@ describe('WorkspaceChips', () => {
     expect(await screen.findByTestId('workspace-create-panel')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-create-name')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-root-preview')).toBeInTheDocument();
-    // The advanced override is collapsed by default.
+    // note: the advanced override is collapsed by default.
     const advanced = screen.getByText('高级：更改位置…').closest('details');
     expect(advanced?.open).toBe(false);
     expect(createRequests).toHaveLength(0);
@@ -296,17 +296,17 @@ describe('WorkspaceChips', () => {
     expect(submit).toBeDisabled();
     expect(preview).toHaveTextContent('~/Nexus/');
 
-    // Pure-CJK name → deterministic ASCII fallback slug.
+    // note: pure-CJK name → deterministic ASCII fallback slug.
     await user.type(screen.getByTestId('workspace-create-name'), '我的小说');
     expect(preview).toHaveTextContent('~/Nexus/ws-20029f24');
     expect(submit).toBeEnabled();
 
-    // ASCII name → slugified path.
+    // note: ASCII name → slugified path.
     await user.clear(screen.getByTestId('workspace-create-name'));
     await user.type(screen.getByTestId('workspace-create-name'), 'My Novel');
     expect(preview).toHaveTextContent('~/Nexus/my-novel');
 
-    // The advanced override takes over the preview when set.
+    // note: the advanced override takes over the preview when set.
     await user.type(screen.getByLabelText('内容根目录'), '/data/roots/novel');
     expect(preview).toHaveTextContent('/data/roots/novel');
 
@@ -333,7 +333,7 @@ describe('WorkspaceChips', () => {
       ]),
     );
 
-    // Panel closes on success; the chip row now carries the workspace and
+    // note: panel closes on success; the chip row now carries the workspace and
     // reflects it as active.
     await waitFor(() =>
       expect(screen.queryByTestId('workspace-create-panel')).not.toBeInTheDocument(),
@@ -350,12 +350,12 @@ describe('WorkspaceChips', () => {
     await user.type(screen.getByTestId('workspace-create-name'), '星际拓荒志');
     await user.click(screen.getByTestId('workspace-create-submit'));
 
-    // Activation failed after the create committed: distinct state + copy.
+    // note: activation failed after the create committed: distinct state + copy.
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('切换失败：未切换成功，请重试激活。');
     expect(screen.getByTestId('workspace-create-created')).toBeInTheDocument();
 
-    // The chip row now carries the created workspace, but it is not active.
+    // note: the chip row now carries the created workspace, but it is not active.
     const chip = await screen.findByRole('button', { name: '星际拓荒志' });
     expect(chip).toHaveAttribute('aria-pressed', 'false');
 
@@ -366,7 +366,7 @@ describe('WorkspaceChips', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('workspace-create-panel')).not.toBeInTheDocument(),
     );
-    // Only activation re-ran: no second create request (a re-create would 409).
+    // note: only activation re-ran: no second create request (a re-create would 409).
     expect(createRequests).toHaveLength(1);
     expect(setActiveRequests).toHaveLength(2);
     expect(await screen.findByRole('button', { name: '星际拓荒志' })).toHaveAttribute(
@@ -387,14 +387,14 @@ describe('WorkspaceChips', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Switch failed: Switching did not complete');
-    // The created-but-not-activated state must never show create-failure copy.
+    // note: the created-but-not-activated state must never show create-failure copy.
     expect(alert).not.toHaveTextContent(/not created/i);
     expect(screen.getByTestId('workspace-create-created')).toBeInTheDocument();
   });
 
   it('shows 创建中… and disables the button while creating', async () => {
     useWorkspaceHandlers();
-    // `Promise.withResolvers` is outside this app's `es2022` lib target.
+    // note: `Promise.withResolvers` is outside this app's `es2022` lib target.
     createGate = new Promise<void>((resolve) => {
       releaseCreate = resolve;
     });
@@ -425,7 +425,7 @@ describe('WorkspaceChips', () => {
     expect(alert).toHaveTextContent('创建失败：该工作区或目标目录已存在');
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(screen.getByTestId('workspace-create-name')).toHaveValue('Taken');
-    // No activation switch and no chip-row change.
+    // note: no activation switch and no chip-row change.
     expect(setActiveRequests).toHaveLength(0);
     expect(screen.getAllByTestId('workspace-chip')).toHaveLength(2);
     expect(screen.getByRole('button', { name: '默认工作区' })).toHaveAttribute(
@@ -443,7 +443,7 @@ describe('WorkspaceChips', () => {
     });
     await screen.findByTestId('workspace-chips');
     expect(await screen.findByRole('button', { name: '默认工作区' })).toBeInTheDocument();
-    // QC W: the sidebar is gone, so the hub itself must carry the create entry.
+    // note: QC W: the sidebar is gone, so the hub itself must carry the create entry.
     expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
   });
 

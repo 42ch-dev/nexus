@@ -1,5 +1,5 @@
 /**
- * Assembly Inspector panel — P1 T1–T3 (DF-76). Read-only.
+ * note: Assembly Inspector panel — P1 T1–T3 (DF-76). Read-only.
  *
  * Consumes the enriched inspector packet from `POST /v1/daemon/inspector/moment`
  * (`MomentInspectResponse`) and renders four sections: activation trace (T1),
@@ -23,7 +23,7 @@ import { SlotMapBlock } from './slot-map-block';
 
 export interface AssemblyInspectorPanelProps {
   packet: MomentInspectResponse;
-  /** Batch B (T4) extension point — the directive set/clear form. */
+  /** note: batch B (T4) extension point — the directive set/clear form. */
   directiveActions?: React.ReactNode;
 }
 
@@ -31,7 +31,7 @@ export function AssemblyInspectorPanel({ packet, directiveActions }: AssemblyIns
   const { t } = useTranslation('inspector');
   const traceTitleId = useId();
 
-  // entry_id → slot, joined once per packet so the trace rows and slot map
+  // note: entry_id → slot, joined once per packet so the trace rows and slot map
   // share one lookup.
   const slotByEntry = useMemo(
     () => new Map(packet.slot_map.map((entry) => [entry.entry_id, entry.slot])),

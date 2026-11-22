@@ -1,5 +1,5 @@
 /**
- * ReadingProgress — V1.79 Author Reflection (Track A / P0).
+ * note: ReadingProgress — V1.79 Author Reflection (Track A / P0).
  *
  * Session-only scroll/position indicator. Tracks main scroll progress
  * through the reading surface and renders a thin progress bar. Per the P-1
@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 /**
- * Debounce design (R-V179P0-QC1-002).
+ * note: Debounce design (R-V179P0-QC1-002).
  *
  * Scroll fires many times per second; re-rendering + recomputing the ratio on
  * every tick thrashes the bar and the aria-valuenow. The effect uses a two-tier
@@ -32,7 +32,7 @@ import { useTranslation } from 'react-i18next';
  * timer that would outlive the scroll. The effect is reset on unmount, which
  * cancels any pending rAF so no stale update lands after navigation.
  */
-/** Time-gate floor (~1 frame @ 60Hz) so the bar doesn't thrash per scroll tick. */
+/** note: time-gate floor (~1 frame @ 60Hz) so the bar doesn't thrash per scroll tick. */
 const RAF_GUARD_MS = 16;
 
 export function ReadingProgress() {
@@ -60,7 +60,7 @@ export function ReadingProgress() {
     const flush = () => {
       frame = 0;
       const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
-      // A page shorter than the viewport has nothing to track; keep the bar at
+      // note: a page shorter than the viewport has nothing to track; keep the bar at
       // zero rather than dividing by zero.
       const ratio = scrollable > 0 ? scrollContainer.scrollTop / scrollable : 0;
       setPct(Math.max(0, Math.min(100, Math.round(ratio * 100))));

@@ -30,7 +30,7 @@
  * simplify: the listbox is flat — the registry's `group` field is not rendered
  * as ARIA group headings this iteration (flat ranked order from
  * `filterCommands` is what T3 specifies; grouped listbox markup is a follow-up
- * if authors ask for it). Upgrade path: wrap options in nested
+ * if authors ask for it). upgrade: wrap options in nested
  * `role="group"[aria-label]` per `group`, preserving rank within each group.
  */
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -39,8 +39,6 @@ import { useTranslation } from 'react-i18next';
 
 import { filterCommands, useCommands, type Command } from '@/lib/canvas/command-registry';
 import { cn } from '@/lib/utils';
-
-// --- open-state store (module-level, mirrors command-registry pattern) ----
 
 let paletteOpen = false;
 const paletteListeners = new Set<() => void>();
@@ -83,8 +81,6 @@ export function _resetPaletteForTests(): void {
   paletteListeners.clear();
 }
 
-// --- component ------------------------------------------------------------
-
 const NO_RESULTS_ID = 'command-palette-no-results';
 
 /**
@@ -97,7 +93,7 @@ export function CommandPalette(): React.ReactElement | null {
   return open ? <CommandPaletteDialog /> : null;
 }
 
-/** Command with display strings resolved from translation keys. */
+/** note: command with display strings resolved from translation keys. */
 type ResolvedCommand = Command & {
   readonly label: string;
   readonly group: string;
@@ -117,7 +113,7 @@ function CommandPaletteDialog(): React.ReactElement {
   const listboxId = useId();
   const optionBaseId = useId();
 
-  // Resolve translation keys at render time so labels update instantly on
+  // why: resolve translation keys at render time so labels update instantly on
   // locale switches without re-registering commands. The registry stays stable
   // (keyed by id); useTranslation subscribes this component to i18n changes.
   const resolvedCommands = useMemo<ResolvedCommand[]>(
@@ -133,7 +129,7 @@ function CommandPaletteDialog(): React.ReactElement {
     [commands, t],
   );
 
-  // Available() is a render-time gate (T1 contract) — evaluated on EVERY render
+  // why: available() is a render-time gate (T1 contract) — evaluated on EVERY render
   // (NOT memoized) so a predicate that flips between renders is honoured. The
   // registry is small (canvas-action-scoped this iteration), so an un-memoized
   // scan is cheap; ranking is also linear in the visible set.
@@ -142,13 +138,13 @@ function CommandPaletteDialog(): React.ReactElement {
   );
   const visible = filterCommands(availableCommands, query);
 
-  // Clamp active index into range whenever the filtered set shrinks/grows so
+  // note: clamp active index into range whenever the filtered set shrinks/grows so
   // `aria-activedescendant` never points at a stale or out-of-range option.
   const safeActiveIndex = visible.length === 0 ? 0 : Math.min(activeIndex, visible.length - 1);
   const activeOptionId =
     visible.length > 0 ? `${optionBaseId}-${safeActiveIndex}` : undefined;
 
-  // Open lifecycle: capture prior focus, focus the input, bind Escape + Tab.
+  // note: open lifecycle — capture prior focus, focus the input, bind Escape + Tab.
   // Cleanup (runs on unmount when the palette closes) restores focus.
   useEffect(() => {
     previousFocus.current = document.activeElement as HTMLElement | null;
@@ -161,7 +157,7 @@ function CommandPaletteDialog(): React.ReactElement {
         closePalette();
         return;
       }
-      // Focus trap: the input is the only real tab stop (options are driven
+      // why: focus trap — the input is the only real tab stop (options are driven
       // via aria-activedescendant, not DOM focus). Keep Tab inside the dialog.
       if (event.key === 'Tab') {
         event.preventDefault();
@@ -177,7 +173,7 @@ function CommandPaletteDialog(): React.ReactElement {
   }, []);
 
   function onQueryChange(event: React.ChangeEvent<HTMLInputElement>): void {
-    // Reset selection to the top on every keystroke so the first match is the
+    // why: reset selection to the top on every keystroke so the first match is the
     // implicit "Enter" target (matches the combobox APG default). Colocating
     // the reset with its cause avoids a mount-time effect that fires a
     // redundant setState outside React's initial act scope in tests.
@@ -235,7 +231,7 @@ function CommandPaletteDialog(): React.ReactElement {
         <h2 id={titleId} className="sr-only">
           {t('palette.title')}
         </h2>
-        {/* Combobox: APG "editable combobox with listbox popup". The input owns
+        {/* note: combobox — APG "editable combobox with listbox popup". The input owns
             focus and carries the combobox role; the active option is virtualized
             via aria-activedescendant (options never receive DOM focus). */}
         <input

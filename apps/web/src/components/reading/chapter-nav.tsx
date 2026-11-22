@@ -1,5 +1,5 @@
 /**
- * ChapterNav — V1.79 Author Reflection (Track A / P0).
+ * note: ChapterNav — V1.79 Author Reflection (Track A / P0).
  *
  * Prev/next chapter navigation within a Work, with volume-grouping awareness
  * for multi-volume Works. The prev/next targets are derived from the Work's

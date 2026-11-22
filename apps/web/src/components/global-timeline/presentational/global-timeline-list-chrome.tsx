@@ -1,5 +1,5 @@
 /**
- * Global Timeline list chrome — presentational extract (V1.124 P2).
+ * note: Global Timeline list chrome — presentational extract (V1.124 P2).
  *
  * Props-driven Card + World activity rows. No daemon hooks, no contracts,
  * no router, no `useTranslation`. App `GlobalTimelineView` maps query data →
@@ -27,7 +27,7 @@ export interface GlobalTimelineListRow {
   activityText: string;
   lastEditedText?: string;
   layer?: GlobalTimelineLayer;
-  /** Optional plain href when the host does not supply `renderRow`. */
+  /** note: optional plain href when the host does not supply `renderRow`. */
   href?: string;
 }
 
@@ -51,10 +51,10 @@ export interface GlobalTimelineListChromeProps {
   errorDescription?: string;
   retryLabel?: string;
   onRetry?: () => void;
-  /** Host-owned row wrapper (e.g. react-router `Link`). */
+  /** note: host-owned row wrapper (e.g. react-router `Link`). */
   renderRow?: RenderGlobalTimelineRow;
   onRowActivate?: (row: GlobalTimelineListRow) => void;
-  /** Optional node rendered after the row list (e.g. Load More control). */
+  /** note: optional node rendered after the row list (e.g. Load More control). */
   footer?: ReactNode;
   'data-testid'?: string;
 }

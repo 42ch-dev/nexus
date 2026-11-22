@@ -1,13 +1,13 @@
 import { Button } from '@42ch/nexus-ui';
 
 export interface SettingsSetupSectionChromeProps {
-  /** Called when the Re-run Setup CTA is clicked. */
+  /** note: called when the Re-run Setup CTA is clicked. */
   onReRunSetup?: () => void;
-  /** Section title. Defaults to English "Setup". */
+  /** note: section title. Defaults to English "Setup". */
   title?: string;
-  /** Section body helper. */
+  /** note: section body helper. */
   helper?: string;
-  /** Re-run Setup CTA label. */
+  /** note: Re-run Setup CTA label. */
   rerunLabel?: string;
   'data-testid'?: string;
 }

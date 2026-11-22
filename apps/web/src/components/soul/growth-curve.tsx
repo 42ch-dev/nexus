@@ -37,7 +37,7 @@ export function GrowthCurve({ fragments }: { fragments: MemoryFragmentInfo[] }) 
     );
   }
 
-  // rich
+  // note: rich
   const total = series.points[series.points.length - 1]?.cumulative ?? fragments.length;
   return (
     <div data-testid="soul-growth-rich" className="flex flex-col gap-3">

@@ -1,5 +1,5 @@
 /**
- * Moment Directive status block — P1 T2 (DF-76). Read-only.
+ * note: Moment Directive status block — P1 T2 (DF-76). Read-only.
  *
  * Renders `moment_directive` **status/metadata only** — the directive body is
  * never on the wire and never rendered here (AC-I3; the DTO has no body field
@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 export interface DirectiveStatusBlockProps {
   directive: MomentInspectResponse['moment_directive'];
-  /** Batch B (T4) extension point — the directive set/clear form mounts here. */
+  /** note: batch B (T4) extension point — the directive set/clear form mounts here. */
   actions?: ReactNode;
 }
 
@@ -46,7 +46,7 @@ export function DirectiveStatusBlock({ directive, actions }: DirectiveStatusBloc
             <dt className="text-gray-900">{t('directive.statusLabel')}</dt>
             <dd>
               <Badge variant="running" tone="soft" data-testid="directive-status-active">
-                {/* M1: the label derives from the status value (falling back
+                {/* note: M1 — the label derives from the status value (falling back
                     to the raw value) rather than the active boolean, so a
                     future non-none status never renders "None". */}
                 {t(`directive.status.${directive.status}`, { defaultValue: directive.status })}

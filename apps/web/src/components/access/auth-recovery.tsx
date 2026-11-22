@@ -6,7 +6,7 @@ import { clearStoredApiKey, storeApiKey } from '@/lib/client-context';
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
 import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT } from '@/lib/nexus/errors';
 
-/** §6.1 copy — product-owned and shipped verbatim (access spec §6). */
+/** note: §6.1 copy — product-owned and shipped verbatim (access spec §6). */
 const COPY = {
   title: '需要访问授权',
   body: '此浏览器还没有获得本 Nexus 服务的访问授权。Nexus 每次启动都会在服务终端打印一条带一次性令牌的访问链接——回到终端复制并打开它即可；也可以直接输入你的 API Key。',
@@ -37,7 +37,7 @@ export function AuthRecoveryGate({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * A guarded route is the only honest access probe: the runtime family is
+   * why: a guarded route is the only honest access probe: the runtime family is
    * unguarded, so it would answer 200 with or without a key. With no candidate
    * key the probe re-reads the session cookie (bootstrap finished in another tab).
    */
@@ -45,7 +45,7 @@ export function AuthRecoveryGate({ children }: { children: ReactNode }) {
     setProbe('checking');
     try {
       await new BrowserClient(candidate ? { apiKey: candidate } : {}).listCreators();
-      // A cookie-only success means the session is authoritative: drop any
+      // why: a cookie-only success means the session is authoritative; drop any
       // stale stored key, because a non-empty X-API-Key wins service-side and
       // would keep rejecting requests (access spec §6.1).
       if (candidate) storeApiKey(candidate);

@@ -1,5 +1,5 @@
 /**
- * Chapter keyboard-nav interaction tests (R-V179P0-QC1-001).
+ * note: Chapter keyboard-nav interaction tests (R-V179P0-QC1-001).
  *
  * Interaction-level coverage for the ←/→ chapter/volume navigation hook +
  * the overlay/editable short-circuit guards. The hook owns a window `keydown`
@@ -82,7 +82,7 @@ describe('useChapterKeyboardNav — ←/→ navigation', () => {
 
   it('ignores already-prevented events', () => {
     const navigate = vi.fn();
-    // jsdom resets `defaultPrevented` when an event is constructed+prevented
+    // note: jsdom resets `defaultPrevented` when an event is constructed+prevented
     // before dispatch, so simulate a real earlier listener that cancels the
     // event: registered before the hook's listener (both bubble-phase on
     // window), it runs first and the hook observes `defaultPrevented === true`.
@@ -201,7 +201,7 @@ describe('useChapterKeyboardNav — guard short-circuits', () => {
     renderHook(() => useChapterKeyboardNav('work-1', NEIGHBORS, navigate));
 
     const ce = document.createElement('div');
-    // `contenteditable` makes the div focusable (so document.activeElement
+    // note: `contenteditable` makes the div focusable (so document.activeElement
     // becomes it); jsdom never computes isContentEditable, so stub the property
     // the production predicate reads to exercise the guard.
     ce.setAttribute('contenteditable', 'true');
@@ -257,7 +257,7 @@ describe('isEditable — focus predicate', () => {
 
   it('flags contenteditable elements', () => {
     const el = document.createElement('div');
-    // jsdom does not compute isContentEditable from the attribute; stub the
+    // note: jsdom does not compute isContentEditable from the attribute; stub the
     // property the production predicate reads.
     Object.defineProperty(el, 'isContentEditable', { configurable: true, value: true });
     expect(isEditable(el)).toBe(true);

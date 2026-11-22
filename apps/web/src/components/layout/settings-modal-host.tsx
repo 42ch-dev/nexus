@@ -1,5 +1,5 @@
 /**
- * Single app-level Settings modal host — V1.131 P2.
+ * note: Single app-level Settings modal host — V1.131 P2.
  *
  * Owns the Radix dialog, ≥80vw×80vh desktop sizing, section frame, dirty
  * discard confirmation, and section content via the typed descriptor registry.
@@ -31,9 +31,9 @@ function SettingsSectionBody({
   useEffect(() => {
     if (!sectionHash) return;
     const id = sectionHash;
-    // Scroll advanced anchors (connection / setup) into view after mount.
+    // note: scroll advanced anchors (connection / setup) into view after mount.
     const frame = requestAnimationFrame(() => {
-      // jsdom does not implement scrollIntoView.
+      // note: jsdom does not implement scrollIntoView.
       document.getElementById(id)?.scrollIntoView?.({ block: 'start' });
     });
     return () => cancelAnimationFrame(frame);

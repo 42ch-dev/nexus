@@ -13,11 +13,11 @@ interface DaemonLaunchGateProps {
 }
 
 const WAIT_TIMEOUT_MS = 25_000;
-/** Secondary health poll cadence while waiting for `running` (V1.125). */
+/** note: secondary health poll cadence while waiting for `running` (V1.125). */
 const HEALTH_POLL_MS = 1_500;
 
 /**
- * Map a desktop daemon status failure to a transport-error kind (V1.129 P1).
+ * note: Map a desktop daemon status failure to a transport-error kind (V1.129 P1).
  *
  * The desktop launch gate does NOT consume the browser-client classifier —
  * its failures come from the desktop bridge `getDaemonStatus` / wait timeout. The kind
@@ -64,7 +64,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<TransportErrorKind | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
-  // Bumped after a CONFIRMED reset to re-enter the wait against the live
+  // note: bumped after a CONFIRMED reset to re-enter the wait against the live
   // controller (re-subscribe + status poll). Never bumped on cancel/failure.
   const [resetNonce, setResetNonce] = useState(0);
 
@@ -78,7 +78,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     let unsub: (() => void) | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let pollId: ReturnType<typeof setInterval> | undefined;
-    let ready = false; // Guard: timeout callback must not race after markReady.
+    let ready = false; // note: guard — timeout callback must not race after markReady.
     const cap = desktop;
 
     function clearWaitTimeout() {
@@ -102,7 +102,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       if (status.state === 'running') {
         markReady();
       } else if (status.state === 'starting' || status.state === 'stopped') {
-        // Main's DesktopServiceController owns start — keep waiting; do not
+        // note: main's DesktopServiceController owns start — keep waiting; do not
         // call startDaemon from the renderer.
         setDaemonReady(false);
         setErrorMessage(null);
@@ -115,7 +115,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     }
 
     /**
-     * Health success is not sufficient to unlock (V1.125) — re-fetch status so
+     * note: health success is not sufficient to unlock (V1.125) — re-fetch status so
      * attach races can observe `running`. When status IPC is unavailable, keep
      * waiting; timeout surfaces the error UX.
      */
@@ -127,10 +127,10 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
           const status = await cap.getDaemonStatus();
           if (!cancelled) applyStatus(status);
         } catch {
-          // Status IPC unavailable — health alone must not unlock.
+          // note: status IPC unavailable — health alone must not unlock.
         }
       } catch {
-        // Ignore — status events / timeout own failure UX during wait.
+        // note: ignore — status events / timeout own failure UX during wait.
       }
     }
 
@@ -167,7 +167,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
             clearHealthPoll();
             return;
           }
-          // Opportunistic health check after non-ready events (attach races).
+          // note: opportunistic health check after non-ready events (attach races).
           void probeForReady();
         });
         if (cancelled) {
@@ -179,7 +179,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         void probeForReady();
       } catch {
         if (cancelled) return;
-        // Subscription unavailable — poll health and re-check status for `running`.
+        // note: subscription unavailable — poll health and re-check status for `running`.
         startHealthPoll();
         void probeForReady();
       }
@@ -187,7 +187,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
     timeoutId = setTimeout(() => {
       if (cancelled || ready) return;
-      // Timer already fired — clear the handle without clearTimeout (no-op).
+      // note: timer already fired — clear the handle without clearTimeout (no-op).
       timeoutId = undefined;
       void cap
         .getDaemonStatus()
@@ -225,7 +225,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   }, [client, desktop, t, resetNonce]);
 
   function retry() {
-    // Renderer reload only remounts the SPA — main's controller survives and
+    // note: renderer reload only remounts the SPA — main's controller survives and
     // keeps owning the service. The re-mounted gate consumes the controller's
     // real readiness (status subscribe/poll); no startDaemon, no main rerun.
     window.location.reload();
@@ -233,7 +233,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
   async function resetLocalDatabase() {
     if (!desktop) return;
-    // Capture the recovery state so a declined dialog can restore it — the
+    // note: capture the recovery state so a declined dialog can restore it — the
     // attempt clears the splash error while the native dialog is up.
     const prevErrorMessage = errorMessage;
     const prevErrorKind = errorKind;
@@ -243,7 +243,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     try {
       const outcome = await desktop.resetLocalDatabase();
       if (outcome.status !== 'confirmed') {
-        // Cancelled: nothing was closed, deleted or restarted. Stay in
+        // note: cancelled — nothing was closed, deleted or restarted. Stay in
         // recovery with the pre-attempt error restored — no success reload,
         // no wait rerun.
         setResetBusy(false);
@@ -251,7 +251,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         setErrorKind(prevErrorKind);
         return;
       }
-      // Confirmed reset: the main-owned controller drives daemon recovery and
+      // note: confirmed reset — the main-owned controller drives daemon recovery and
       // emits real status transitions. Re-enter the wait against the live
       // subscription — a renderer reload would not rerun main, so recovery
       // truth comes from the controller, not from navigation.
@@ -259,7 +259,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       setResetNonce((n) => n + 1);
     } catch (err) {
       setResetBusy(false);
-      // Failed reset stays in recovery: surface the error, keep the
+      // note: failed reset stays in recovery — surface the error, keep the
       // existing subscription, and never show a success reload.
       setErrorMessage(toErrorMessage(err) || t('error.resetDatabaseFailed'));
       setErrorKind(kindForErrorState('unknown'));

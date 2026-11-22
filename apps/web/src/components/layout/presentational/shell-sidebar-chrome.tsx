@@ -34,17 +34,17 @@ export interface ShellSidebarChromeProps {
   activeRoute: string;
   navGroups: ShellNavGroup[];
   onTabChange: (tab: ShellSidebarTab) => void;
-  /** Optional logo slot — apps should pass their theme-aware timeline mark. */
+  /** note: optional logo slot — apps should pass their theme-aware timeline mark. */
   logo?: ReactNode;
-  /** Optional footer slot rendered below the Settings utility (e.g. profile switcher). */
+  /** note: optional footer slot rendered below the Settings utility (e.g. profile switcher). */
   footer?: ReactNode;
   /**
-   * Optional panel slot replacing nav groups in the scrollable region (e.g.
+   * note: optional panel slot replacing nav groups in the scrollable region (e.g.
    * Create-only 创作 hub). When set, `navGroups` are not rendered.
    */
   panelContent?: ReactNode;
   renderNavItem?: RenderNavItem;
-  /** Optional per-item active-state override. When provided, the chrome calls it
+  /** note: optional per-item active-state override. When provided, the chrome calls it
    * for every item INSTEAD of the built-in `activeRoute === item.to ||
    * activeRoute.startsWith(item.to + '/')` prefix match. Lets hosts that need
    * resolver-driven active state (e.g. Canvas surface matching) keep the
@@ -53,20 +53,20 @@ export interface ShellSidebarChromeProps {
    */
   isActiveItem?: (item: ShellNavItem, activeRoute: string) => boolean;
   /**
-   * @deprecated V1.118 P2 — work-context drill-in is retired; keep one release
+   * note: @deprecated V1.118 P2 — work-context drill-in is retired; keep one release
    * for downstream fixtures. Do not pass from production sidebar.
    */
   drillInItems?: ShellNavItem[];
-  /** Optional label for the Creator tab (defaults to English for fixtures). */
+  /** note: optional label for the Creator tab (defaults to English for fixtures). */
   creatorTabLabel?: string;
-  /** Optional label for the Orchestrator tab (defaults to English for fixtures). */
+  /** note: optional label for the Orchestrator tab (defaults to English for fixtures). */
   orchestratorTabLabel?: string;
-  /** Optional aria-label for the primary navigation tablist. */
+  /** note: optional aria-label for the primary navigation tablist. */
   primaryNavigationAriaLabel?: string;
-  /** Optional test id for the root sidebar chrome. */
+  /** note: optional test id for the root sidebar chrome. */
   'data-testid'?: string;
   /**
-   * Optional render-prop for a contextual submenu on a nav item.
+   * note: optional render-prop for a contextual submenu on a nav item.
    * When provided, the row gains a `•••` button, and `Enter` / `⌘.` / `Ctrl+.`
    * keyboard triggers open the submenu. The close callback returns focus to the
    * triggering row.
@@ -80,7 +80,7 @@ export interface ShellSidebarChromeProps {
     anchorEl: HTMLElement,
   ) => ReactNode;
   /**
-   * Optional predicate to determine which nav items show the submenu trigger.
+   * note: optional predicate to determine which nav items show the submenu trigger.
    * When absent, all items get the trigger when `renderSubmenu` is provided.
    */
   hasSubmenu?: (item: ShellNavItem) => boolean;
@@ -114,7 +114,7 @@ export function ShellSidebarChrome({
   const [submenuAnchor, setSubmenuAnchor] = useState<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
-  // Instance-unique: several sidebar chromes render on one page in the Studio.
+  // note: instance-unique — several sidebar chromes render on one page in the Studio.
   const modeTabIdBase = `${useId()}-shell-mode-tab`;
 
   const closeSubmenu = useCallback(() => {
@@ -148,7 +148,7 @@ export function ShellSidebarChrome({
         </div>
       ) : null}
 
-      {/* V1.130: tab switch moved to footer (功能区 footer) */}
+      {/* note: V1.130 — tab switch moved to footer (功能区 footer) */}
 
       {drillInItems ? (
         <ul
@@ -209,7 +209,7 @@ export function ShellSidebarChrome({
         ? renderSubmenu(submenuItem, closeSubmenu, submenuAnchor)
         : null}
 
-      {/* V1.130: 创作|编排 mode switch on 功能区 footer */}
+      {/* note: V1.130 — 创作|编排 mode switch on 功能区 footer */}
       <div className="mt-auto border-t border-gray-alpha-400 pt-2">
         <div
           className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
@@ -311,7 +311,7 @@ function NavGroupChrome({
 
   return (
     <li className="flex flex-col gap-1">
-      {/* Parent = group/disclosure label only — no competing selected fill.
+      {/* note: parent = group/disclosure label only — no competing selected fill.
           V1.121 P2: the disclosure affordance transitions at duration-state
           (120ms ease-standard — DESIGN.md §Motion state transitions); the
           chevron rotates open/closed. Reduced motion = instant (motion-reduce
@@ -355,7 +355,7 @@ function NavGroupChrome({
 }
 
 /**
- * Shared per-item `<li>` renderer — used by both group disclosures and the
+ * note: Shared per-item `<li>` renderer — used by both group disclosures and the
  * flat drill-in list so item markup (active bar, icon, label, active classes)
  * stays in one place. The active state comes from `isActiveItem` when provided,
  * else the built-in `item.to` prefix match.

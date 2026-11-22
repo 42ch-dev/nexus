@@ -1,5 +1,5 @@
 /**
- * ChapterNav component tests (R-V179P0-QC1-002).
+ * note: ChapterNav component tests (R-V179P0-QC1-002).
  *
  * Pure-presentation coverage for the prev/next chapter navigation surface:
  * link hrefs + labels, the first/last-chapter and loading placeholders, the
@@ -49,7 +49,7 @@ describe('ChapterNav — prev/next links', () => {
       <ChapterNav
         workId="work-1"
         prev={row({ chapter: 2, volume: 1, title: '   ' })}
-        next={row({ chapter: 3, volume: 1 /* no title */ })}
+        next={row({ chapter: 3, volume: 1 /* note: no title */ })}
         volumes={[1]}
       />,
     );
@@ -99,7 +99,7 @@ describe('ChapterNav — boundary + loading placeholders', () => {
       <ChapterNav workId="work-1" prev={null} next={null} volumes={[]} loading />,
     );
 
-    // Two loading placeholders (prev + next side); neither boundary label shows.
+    // note: two loading placeholders (prev + next side); neither boundary label shows.
     expect(screen.getAllByLabelText('Loading chapters')).toHaveLength(2);
     expect(screen.queryByText('First chapter')).not.toBeInTheDocument();
     expect(screen.queryByText('Last chapter')).not.toBeInTheDocument();
@@ -121,9 +121,9 @@ describe('ChapterNav — volume chip', () => {
     expect(screen.getByLabelText('Volume 2')).toBeInTheDocument();
     expect(screen.getByText('Volume 2')).toBeInTheDocument();
 
-    // Single-volume work: the chip must not render.
+    // note: single-volume work: the chip must not render.
     rerender(
-      // renderInApp returns the RTL render result; rerender stays inside the
+      // note: renderInApp returns the RTL render result; rerender stays inside the
       // same provider stack (MemoryRouter etc.) because `rerender` is bound to
       // the same container.
       <ChapterNav
@@ -144,7 +144,7 @@ describe('ChapterNav — volume chip', () => {
         prev={row({ chapter: 1, volume: 1 })}
         next={row({ chapter: 2, volume: 2 })}
         volumes={[1, 2]}
-        // currentVolume omitted on purpose — exercises the optional-prop default.
+        // note: currentVolume omitted on purpose — exercises the optional-prop default.
       />,
     );
 

@@ -1,5 +1,5 @@
 /**
- * Presentational body of the Run Studio (plan v221-modules-rail T2).
+ * note: Presentational body of the Run Studio (plan v221-modules-rail T2).
  *
  * The product studio (`components/compute/run-studio.tsx`) owns every hook,
  * query, mutation, toast and i18n lookup; this module owns the markup so the
@@ -52,7 +52,7 @@ export interface RunStudioFormView {
   entityEntries?: Record<string, EntityPickerEntry[]>;
   copy: RunFormCopy;
   /**
-   * World-scoped KB graph feed (the entity pickers' source). `null` while no
+   * note: World-scoped KB graph feed (the entity pickers' source). `null` while no
    * World is selected — the form then renders without gating on that feed.
    */
   graph: { isLoading: boolean; isError: boolean; onRetry: () => void } | null;
@@ -63,7 +63,7 @@ export interface RunStudioAdvancedView {
   onOpenChange: (open: boolean) => void;
   json: string;
   onJsonChange: (value: string) => void;
-  /** Parse error shown under the textarea (caller-owned copy). */
+  /** note: parse error shown under the textarea (caller-owned copy). */
   error: string | null;
 }
 
@@ -71,16 +71,16 @@ export interface RunStudioRunView {
   pending: boolean;
   canRun: boolean;
   onRun: () => void;
-  /** Deep-linked run-detail read: own loading / error states above the inspector. */
+  /** note: deep-linked run-detail read: own loading / error states above the inspector. */
   detailLoading: boolean;
   detailError: boolean;
   onDetailRetry: () => void;
 }
 
 export interface RunStudioProposalView {
-  /** Inspected run (fresh POST response or detail read); `null` → no inspector. */
+  /** note: inspected run (fresh POST response or detail read); `null` → no inspector. */
   run: {
-    /** Short correlation id, caller-shortened for display. */
+    /** note: short correlation id, caller-shortened for display. */
     runIdShort: string;
     status: RunStatus;
     proposals?: ComputeProposals;
@@ -103,7 +103,7 @@ export interface RunStudioRunsView {
   onStatusFilterChange: (status: '' | RunStatus) => void;
   worldFilter: string;
   onWorldFilterChange: (worldId: string) => void;
-  /** Clear history is World-scoped; `null` disables the affordance. */
+  /** note: clear history is World-scoped; `null` disables the affordance. */
   clearScopeWorldId: string | null;
   clearPending: boolean;
   onClear: () => void;
@@ -143,9 +143,9 @@ export interface RunStudioCopy {
   runsErrorDescription: string;
   loadMore: string;
   loadingMore: string;
-  /** Product status options for the Runs filter (labels caller-owned). */
+  /** note: product status options for the Runs filter (labels caller-owned). */
   statusOptions: readonly { value: RunStatus; label: string }[];
-  /** Product status label per wire status (Needs review = `succeeded`). */
+  /** note: product status label per wire status (Needs review = `succeeded`). */
   statusLabel: (status: RunStatus) => string;
   accept: string;
   discard: string;
@@ -183,7 +183,7 @@ export function RunStudioChrome({
   proposal,
   runs,
 }: RunStudioChromeProps) {
-  // `useId` — the gallery mounts this chrome three times; static ids would
+  // note: `useId` — the gallery mounts this chrome three times; static ids would
   // collide and every label after the first would point at frame 1's control.
   const worldSelectId = useId();
   const statusFilterId = useId();
@@ -194,7 +194,7 @@ export function RunStudioChrome({
     <div className="flex flex-col gap-4 border-t border-gray-alpha-300 pt-4" data-testid="run-studio">
       <p className="text-label-12 uppercase tracking-wide text-gray-700">{copy.title}</p>
 
-      {/* Product chrome: World selector (always present, spec §3). A data-feed
+      {/* note: product chrome — World selector (always present, spec §3). A data-feed
           failure here must not collapse into a silent empty select (qc3 W-3
           fix) — surface the ErrorState with a retry instead. */}
       {world.isError ? (
@@ -248,7 +248,7 @@ export function RunStudioChrome({
         />
       )}
 
-      {/* Advanced JSON escape hatch — collapsed by default; form syncs best-effort. */}
+      {/* note: Advanced JSON escape hatch — collapsed by default; form syncs best-effort. */}
       <details
         open={advanced.open}
         onToggle={(event) => advanced.onOpenChange(event.currentTarget.open)}
@@ -294,7 +294,7 @@ export function RunStudioChrome({
       {run.detailLoading ? (
         <LoadingState label={copy.runLoadingDetail} />
       ) : run.detailError ? (
-        // A deep-linked Run whose detail read fails (cleared by Clear history,
+        // note: a deep-linked Run whose detail read fails (cleared by Clear history,
         // deleted, or transport down) must SAY so — rendering nothing hides the
         // failure behind an empty space where the inspector should be.
         <ErrorState
@@ -319,7 +319,7 @@ export function RunStudioChrome({
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <p className="text-label-12 uppercase tracking-wide text-gray-700">{copy.runsTitle}</p>
-          {/* Filter chrome (spec §4 + plan Global Constraints). Status + World
+          {/* note: filter chrome (spec §4 + plan Global Constraints). Status + World
               narrow the module-scoped history; Clear history is World-scoped
               because the daemon DELETE requires a World. */}
           <div className="flex flex-wrap items-end gap-2">
@@ -364,7 +364,7 @@ export function RunStudioChrome({
                 ))}
               </Select>
             </div>
-            {/* Clear history (V1.147 P3 T2) — server-backed DELETE. The daemon
+            {/* note: clear history (V1.147 P3 T2) — server-backed DELETE. The daemon
                 REQUIRES `world_id`, so the button is gated on the World filter
                 (never a world-wide purge); running / needs-review rows are
                 always kept. */}
@@ -385,7 +385,7 @@ export function RunStudioChrome({
           </div>
         </div>
 
-        {/* Data-feed errors must not collapse into "No runs yet" (qc3 W-3
+        {/* note: data-feed errors must not collapse into "No runs yet" (qc3 W-3
             fix): a failed runs query renders ErrorState, and a loading list
             renders a placeholder instead of flashing the empty state. */}
         {runs.isLoading ? (
@@ -400,7 +400,7 @@ export function RunStudioChrome({
           <RunsTable rows={runs.rows} copy={runs.copy} onOpenRun={runs.onOpenRun} />
         )}
 
-        {/* Cursor pagination (qc1 W-002 / qc3 W-2 fix): runs beyond the first
+        {/* note: cursor pagination (qc1 W-002 / qc3 W-2 fix) — runs beyond the first
             page — including older Needs-review rows — must stay reachable. */}
         {runs.hasNextPage && (
           <Button
@@ -419,7 +419,7 @@ export function RunStudioChrome({
   );
 }
 
-/** Result inspector for one Run — succeeded (proposals + Accept/Discard), failed, or terminal. */
+/** note: result inspector for one Run — succeeded (proposals + Accept/Discard), failed, or terminal. */
 function RunInspector({
   run,
   truncated,

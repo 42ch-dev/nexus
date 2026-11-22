@@ -1,5 +1,5 @@
 /**
- * Entrance registry classification SSOT (V1.170 P1 — AR-15).
+ * note: Entrance registry classification SSOT (V1.170 P1 — AR-15).
  *
  * Pins the AR-15 route table: develop-only list, allow-deep-link exception,
  * settings-section rules, and the index helpers mirroring
@@ -45,9 +45,9 @@ describe('entrance registry (AR-15)', () => {
   });
 
   it('resolves the first entrance-visible settings section (W-2)', () => {
-    // Create: `agent` (the historic default) is develop-only → workspace.
+    // note: Create — `agent` (the historic default) is develop-only → workspace.
     expect(firstSettingsSectionFor('content-creator')).toBe('workspace');
-    // Develop: full Control Room — the historic `agent` default is kept.
+    // note: Develop — full Control Room; the historic `agent` default is kept.
     expect(firstSettingsSectionFor('developer')).toBe('agent');
   });
 
@@ -89,7 +89,7 @@ describe('entrance registry (AR-15)', () => {
     ).toEqual(
       [...SETTINGS_SECTION_IDS].sort(),
     );
-    // develop-only sections == Create's hiddenSettingsSections (guard parity).
+    // note: develop-only sections == Create's hiddenSettingsSections (guard parity).
     const developOnlySections = sectionRules
       .filter((rule) => rule.visibility === 'develop-only')
       .map((rule) => rule.settingsSection)
@@ -104,7 +104,7 @@ describe('entrance registry (AR-15)', () => {
     expect(matchEntranceRouteRule('/strategies/preset-1')?.path).toBe(
       '/strategies/:presetId',
     );
-    // V1.171 P1 (PL-13/AR-28) — profile drill-down deep-link: the trailing
+    // note: V1.171 P1 (PL-13/AR-28) — profile drill-down deep-link: the trailing
     // `/profile` segment inherits the canvas rule's `allowDeepLink` via
     // longest-prefix match. No separate registry row (App.tsx: "no registry
     // change"); a dedicated rule would be a second deep-link mechanism.
@@ -128,10 +128,10 @@ describe('entrance registry (AR-15)', () => {
     expect(matchEntranceRouteRule('/findings')).toBeNull();
     expect(matchEntranceRouteRule('/memory')).toBeNull();
     expect(matchEntranceRouteRule('/strategiesx')).toBeNull();
-    // Settings-driven paths resolve via resolveSettingsLocation, not prefix
+    // note: settings-driven paths resolve via resolveSettingsLocation, not prefix
     // matching — the `/settings/*` rules are section rules, not path rules.
     expect(matchEntranceRouteRule('/settings/agent')).toBeNull();
-    // `/modules` is itself in the develop-only table (its own page route).
+    // note: `/modules` is itself in the develop-only table (its own page route).
     expect(matchEntranceRouteRule('/modules')?.visibility).toBe('develop-only');
   });
 

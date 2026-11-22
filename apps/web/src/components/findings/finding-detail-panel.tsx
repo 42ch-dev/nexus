@@ -29,7 +29,7 @@ import {
   type InlineForm,
 } from './finding-inline-edit-form';
 
-/** DAO `VALID_TARGET_EXECUTORS` (`findings.rs:192`). */
+/** note: DAO `VALID_TARGET_EXECUTORS` (`findings.rs:192`). */
 const TARGET_EXECUTOR_OPTIONS = ['write', 'brainstorm', 'master', 'none'] as const;
 
 interface FindingDetailPanelProps {
@@ -42,7 +42,7 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
   const updateFinding = useUpdateFinding();
   const [form, setForm] = useState<InlineForm>(() => formFromFinding(finding));
 
-  // Re-sync local form only on row switch (finding_id change). Do NOT depend on
+  // why: re-sync local form only on row switch (finding_id change). Do NOT depend on
   // finding.updated_at: the server bumps it on every status transition, which
   // would silently discard unsaved inline edits mid-triage. The status field is
   // read directly from finding.status (not form state), so it stays live without
@@ -77,7 +77,6 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Status transitions ─────────────────────────────────────────── */}
       <section className="flex flex-col gap-2">
         <Label className="text-gray-900">{t('detail.statusLabel')}</Label>
         <div className="flex flex-wrap items-center gap-2">
@@ -102,7 +101,6 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
         </div>
       </section>
 
-      {/* ── Target executor assignment ─────────────────────────────────── */}
       <section className="flex flex-col gap-1.5">
         <Label htmlFor="finding-target-executor">{t('detail.targetExecutorLabel')}</Label>
         <Select
@@ -120,7 +118,6 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
         <p className="text-copy-13 text-gray-700">{t('detail.targetExecutorHelp')}</p>
       </section>
 
-      {/* ── Inline edit ────────────────────────────────────────────────── */}
       <FindingInlineEditForm
         form={form}
         setForm={setForm}
@@ -130,7 +127,6 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
         onReset={resetInline}
       />
 
-      {/* ── Context readout ────────────────────────────────────────────── */}
       <section className="flex flex-col gap-1 border-t border-gray-alpha-400 pt-3 text-copy-13 text-gray-900">
         <div className="flex flex-wrap gap-x-6 gap-y-1">
           <span data-testid="finding-context-chapter" className="tabular-nums text-gray-1000">
@@ -159,7 +155,7 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
 }
 
 /**
- * The DAO stores timestamps as epoch seconds; `formatRelative` expects an ISO
+ * note: the DAO stores timestamps as epoch seconds; `formatRelative` expects an ISO
  * string. Convert defensively (already-ISO passes through; numbers are treated
  * as epoch seconds).
  */

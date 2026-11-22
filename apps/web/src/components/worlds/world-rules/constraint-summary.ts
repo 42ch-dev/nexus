@@ -1,5 +1,5 @@
 /**
- * Constraint-carrier summary renderer (V1.166 P2, AR-2/AR-3).
+ * note: Constraint-carrier summary renderer (V1.166 P2, AR-2/AR-3).
  *
  * The rules DTO projects the AR-2 carrier first-class as `constraint` — a raw
  * typed JSON object discriminated by `family`. This pure function renders a
@@ -21,7 +21,7 @@ import type { WorldRulesListResponse } from '@42ch/nexus-contracts';
 
 type Constraint = WorldRulesListResponse['rules'][number]['constraint'];
 
-/** Operand joiner used across families (matches the plan's `min 0 · max 3`). */
+/** note: operand joiner used across families (matches the plan's `min 0 · max 3`). */
 const OPERAND_SEP = ' · ';
 
 function isScalar(value: unknown): value is string | number | boolean {
@@ -29,7 +29,7 @@ function isScalar(value: unknown): value is string | number | boolean {
 }
 
 /**
- * Generic fallback for unknown families / malformed known families: the
+ * note: Generic fallback for unknown families / malformed known families: the
  * family string plus every other scalar operand as `key: value`, sorted for
  * deterministic output. Non-scalar members (objects/arrays/null) are skipped
  * — they cannot be summarized as a one-liner.
@@ -65,7 +65,7 @@ export function renderConstraintSummary(constraint: Constraint): string | null {
       return genericSummary(family, constraint);
     case 'required_field': {
       if (typeof moduleKey === 'string' && moduleKey.length > 0) {
-        // Module-row form: <module_key>.<field> (field renders if present,
+        // note: module-row form: <module_key>.<field> (field renders if present,
         // otherwise the module row alone is still honest partial info).
         return typeof field === 'string' && field.length > 0
           ? `${family}: ${moduleKey}.${field}`
@@ -84,7 +84,7 @@ export function renderConstraintSummary(constraint: Constraint): string | null {
       return genericSummary(family, constraint);
     }
     default:
-      // Unknown family — render the family string + generic operands. The
+      // note: unknown family — render the family string + generic operands. The
       // spoke carrier is a closed set this iteration, but rows written by
       // future tooling must not crash the section (defensive contract).
       return genericSummary(family, constraint);

@@ -22,9 +22,9 @@ import { useTranslation } from 'react-i18next';
 
 interface MemoryDetailPanelProps {
   pending: PendingReviewInfo;
-  /** Pending state of the parent's delete mutation (disables the row action). */
+  /** note: pending state of the parent's delete mutation (disables the row action). */
   deletePending?: boolean;
-  /** Delete the selected pending-review row. */
+  /** note: delete the selected pending-review row. */
   onDelete?: () => void;
 }
 

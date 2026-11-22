@@ -1,5 +1,5 @@
 /**
- * RuleForm — inline create/edit form for the world-rules section (V1.169 P2
+ * note: RuleForm — inline create/edit form for the world-rules section (V1.169 P2
  * T1/T2, DF-82).
  *
  * Four-family constraint authoring without JSON: family picker first (locked
@@ -52,7 +52,7 @@ import {
   type WorldRule,
 } from './rule-form-state';
 
-/** Target-entry-types axis: the full spoke BlockType set with labels. */
+/** note: target-entry-types axis: the full spoke BlockType set with labels. */
 const ENTRY_TYPE_OPTIONS: { value: BlockType; label: string }[] = (
   Object.keys(BLOCK_TYPE_LABELS) as BlockType[]
 ).map((value) => ({ value, label: BLOCK_TYPE_LABELS[value] }));
@@ -60,11 +60,11 @@ const ENTRY_TYPE_OPTIONS: { value: BlockType; label: string }[] = (
 interface RuleFormProps {
   worldId: string;
   /**
-   * The stored read-item projection being edited. Absent = create mode.
+   * note: the stored read-item projection being edited. Absent = create mode.
    * The section keys the form by `rule_id` so switching rules remounts.
    */
   rule?: WorldRule;
-  /** Called after a successful create/edit (the section closes the form). */
+  /** note: called after a successful create/edit (the section closes the form). */
   onClose: () => void;
 }
 
@@ -105,7 +105,7 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
     if (isRuleInvalidInputError(error)) {
       const details = error.details as { field?: string; reason?: string } | undefined;
       if (details && typeof details.field === 'string' && typeof details.reason === 'string') {
-        // AR-2 vocabulary maps 1:1 onto form fields — echo verbatim. The
+        // note: AR-2 vocabulary maps 1:1 onto form fields — echo verbatim. The
         // form-level keys (`constraint`, `patch`) have no field surface:
         // surface them at the submit level so the echo is never invisible.
         if (details.field === 'constraint' || details.field === 'patch') {
@@ -117,12 +117,12 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
         setSubmitError(error.message);
       }
     } else if (isRuleNotFoundError(error)) {
-      // P1 404 envelope (AR-6): a create-mode 404 is the missing-world guard
+      // note: P1 404 envelope (AR-6): a create-mode 404 is the missing-world guard
       // (world gone mid-form); an edit-mode 404 is an unknown/foreign rule —
       // honest copy per mode, no id/world leak.
       setSubmitError(isEdit ? t('form.notFoundError') : t('form.worldNotFoundError'));
     } else {
-      // The hook toasts non-envelope failures; mirror a generic inline
+      // note: the hook toasts non-envelope failures; mirror a generic inline
       // message so the form never closes silently on failure.
       setSubmitError(isEdit ? t('form.genericUpdateError') : t('form.genericError'));
     }
@@ -145,7 +145,7 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
       return;
     }
 
-    // Clean slate before the API round-trip: from here on the error state
+    // note: clean slate before the API round-trip: from here on the error state
     // holds only what the server echoes, so a stale field message from an
     // earlier submit can never survive next to a field the new response did
     // not reject (bugbot 677244f5).
@@ -153,7 +153,7 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
 
     if (isEdit) {
       const request = buildUpdateWorldRuleRequest(state, rule);
-      if (request === null) return; // unreachable: validation requires a family
+      if (request === null) return; // note: unreachable — validation requires a family
       updateRule.mutate(
         { ruleId: rule.rule_id, request },
         {
@@ -165,7 +165,7 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
     }
 
     const request = buildCreateWorldRuleRequest(state);
-    if (request === null) return; // unreachable: validation requires a family
+    if (request === null) return; // note: unreachable — validation requires a family
 
     createRule.mutate(request, {
       onSuccess: () => onClose(),
@@ -175,7 +175,7 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
 
   const familyHelp = state.family ? t(`form.families.${state.family}.help`) : null;
   const targetAxisDisabled = state.family === 'observer_cardinality';
-  // Edit-mode severity honesty: when a hint is stored, the "Default
+  // note: edit-mode severity honesty: when a hint is stored, the "Default
   // (warning)" option is a silent no-op (no null-clearing, AR-3) and its
   // label misstates the rule's evaluation — hide it and state the stored
   // value instead (qc F-001).
@@ -444,7 +444,7 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
 }
 
 /**
- * `required_field` operand fields: the radio choice (entry-level closed
+ * note: `required_field` operand fields: the radio choice (entry-level closed
  * field vs module-row `module_key` + free field) plus the operand-specific
  * inputs. Errors key to the AR-2 `constraint.field` / `constraint.module_key`
  * vocabulary; the operand-level error renders only when no form is chosen.
@@ -545,7 +545,7 @@ function RequiredFieldOperands({
 }
 
 /**
- * Field wrapper: label + control + one-line helper / field-adjacent error.
+ * note: Field wrapper: label + control + one-line helper / field-adjacent error.
  * The control receives `aria-describedby` (helper or error id) and the
  * visual `invalid` flag so errors are readable (a11y baseline).
  */

@@ -1,5 +1,5 @@
 /**
- * WorkRail — list + metadata preview smoke tests (V1.118 P2 T1).
+ * note: WorkRail — list + metadata preview smoke tests (V1.118 P2 T1).
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';

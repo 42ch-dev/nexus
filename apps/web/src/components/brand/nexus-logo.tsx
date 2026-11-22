@@ -4,7 +4,7 @@ import { NexusLogo as NexusLogoComponent, logoShellHeightPx } from '@42ch/nexus-
 import { cn } from '@/lib/utils';
 
 export interface NexusLogoProps {
-  /** Accessible label for the mark. Defaults to the product name. */
+  /** note: accessible label for the mark. Defaults to the product name. */
   label?: string;
   className?: string;
 }

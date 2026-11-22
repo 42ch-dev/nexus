@@ -1,5 +1,5 @@
 /**
- * Presentational body of the `/modules` surface (plan v221-modules-rail T2).
+ * note: Presentational body of the `/modules` surface (plan v221-modules-rail T2).
  *
  * The product page (`components/developer/modules-page.tsx`) owns every hook,
  * query, router read and i18n lookup; this module owns the markup so the
@@ -73,7 +73,7 @@ export interface ModulesPageCopy {
 
 export interface ModuleDetailCopy {
   title: string;
-  /** `Manifest v1.0.0` — caller-owned so plural/format stays in i18n. */
+  /** note: `Manifest v1.0.0` — caller-owned so plural/format stays in i18n. */
   version: (version: string) => string;
   loading: string;
   errorTitle: string;
@@ -102,7 +102,7 @@ export interface ModulesListView {
   items?: readonly ModuleSummaryView[];
   isLoading: boolean;
   isError: boolean;
-  /** Idle/unstarted orchestration engine renders the neutral state instead. */
+  /** note: idle/unstarted orchestration engine renders the neutral state instead. */
   isEngineUnavailable?: boolean;
   isRefreshing: boolean;
   onRefresh: () => void;
@@ -114,7 +114,7 @@ export interface ModulesPageChromeProps {
   selectedId: string | null;
   onSelect: (moduleId: string) => void;
   /**
-   * Detail panel slot. Rendered only when a module is selected; `null` keeps
+   * note: detail panel slot. Rendered only when a module is selected; `null` keeps
    * the "select a module" prompt. The wiring decides which studio fills the
    * panel's own `runStudio` slot.
    */
@@ -238,7 +238,7 @@ export interface ModuleDetailView {
   data?: ModuleManifestView | null;
   isLoading: boolean;
   isError: boolean;
-  /** Idle/unstarted orchestration engine renders the neutral state instead. */
+  /** note: idle/unstarted orchestration engine renders the neutral state instead. */
   isEngineUnavailable?: boolean;
   onRetry: () => void;
 }
@@ -246,7 +246,7 @@ export interface ModuleDetailView {
 export interface ModuleDetailChromeProps {
   copy: ModuleDetailCopy;
   detail: ModuleDetailView;
-  /** The Run Studio mount point; the wiring owns its queries and state. */
+  /** note: the Run Studio mount point; the wiring owns its queries and state. */
   runStudio?: ReactNode;
 }
 
@@ -362,7 +362,7 @@ export function DetailField({
 }: {
   label: string;
   value: string | number | undefined;
-  /** Stable hook for row-scoped assertions (survives markup changes). */
+  /** note: stable hook for row-scoped assertions (survives markup changes). */
   testId?: string;
 }) {
   if (value === undefined || value === null || value === '') {

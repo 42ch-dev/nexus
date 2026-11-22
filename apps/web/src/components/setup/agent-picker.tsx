@@ -1,5 +1,5 @@
 /**
- * AgentPicker — presentational card grid for agent selection.
+ * note: AgentPicker — presentational card grid for agent selection.
  *
  * Placement (V1.101 locked): app-shared under `components/setup/`.
  * No wizard routing, no daemon client, no `@42ch/nexus-contracts` wire DTOs.
@@ -33,22 +33,22 @@ export interface AgentPickerDesktop {
 
 /** Local view-model for one agent card — owned by this module (not wire DTOs). */
 export interface AgentPickerItem {
-  /** Stable id used for selection (typically registry agent id or name). */
+  /** note: stable id used for selection (typically registry agent id or name). */
   id: string;
   name: string;
   displayName?: string | null;
   version?: string | null;
   description?: string | null;
-  /** Remote icon URL (registry or override). */
+  /** note: remote icon URL (registry or override). */
   iconUrl?: string | null;
-  /** When false, card is discoverability-only (not selectable as profile). */
+  /** note: when false, card is discoverability-only (not selectable as profile). */
   installed: boolean;
-  /** Outbound install URL; omit/null → hide Install link. */
+  /** note: outbound install URL; omit/null → hide Install link. */
   installUrl?: string | null;
-  /** Outbound docs URL; omit/null → hide Docs link. */
+  /** note: outbound docs URL; omit/null → hide Docs link. */
   docsUrl?: string | null;
   /**
-   * Optional last-updated timestamp (forward-compat). Unsourced in V1.110 —
+   * note: optional last-updated timestamp (forward-compat). Unsourced in V1.110 —
    * stays `undefined`; residual R-V110P2-001 covers the sort deferral.
    */
   lastUpdated?: string;
@@ -73,41 +73,41 @@ export type AgentVerifyStatus = 'idle' | 'loading' | 'success' | 'no-match' | 'e
 
 export interface AgentPickerProps {
   status: AgentPickerStatus;
-  /** Cards shown in the primary grid (default grid — native-first, priority-sorted). */
+  /** note: cards shown in the primary grid (default grid — native-first, priority-sorted). */
   defaultGrid?: AgentPickerItem[];
-  /** Cards behind the "More agents" toggle (installed-first). */
+  /** note: cards behind the "More agents" toggle (installed-first). */
   moreAgents?: AgentPickerItem[];
-  /** Currently selected installed agent id (profile path). */
+  /** note: currently selected installed agent id (profile path). */
   selectedId?: string | null;
   onSelect?: (id: string) => void;
-  /** Custom launch command value (escape hatch). */
+  /** note: custom launch command value (escape hatch). */
   customLaunchValue?: string;
   onCustomLaunchChange?: (command: string) => void;
-  /** When true, always show custom-launch row (default: empty/error, or when list non-empty). */
+  /** note: when true, always show custom-launch row (default: empty/error, or when list non-empty). */
   showCustomLaunch?: boolean;
-  /** Verify a custom launch command probe. When omitted, the Verify button is hidden. */
+  /** note: verify a custom launch command probe. When omitted, the Verify button is hidden. */
   onVerify?: () => void;
-  /** Status of the custom-launch verify probe (defaults to `idle`). */
+  /** note: status of the custom-launch verify probe (defaults to `idle`). */
   verifyStatus?: AgentVerifyStatus;
   errorTitle?: string;
   errorDescription?: string;
   onRetry?: () => void;
-  /** Optional slot above the grid (product copy lives in the host). */
+  /** note: optional slot above the grid (product copy lives in the host). */
   header?: ReactNode;
   className?: string;
   loadingLabel?: string;
   emptyTitle?: string;
   emptyDescription?: string;
-  /** Layout density. Omit or `'default'` for Settings; wizard may pass `'compact'`. */
+  /** note: layout density. Omit or `'default'` for Settings; wizard may pass `'compact'`. */
   density?: AgentPickerDensity;
   /**
-   * Desktop capabilities for opening URLs in the system browser.
+   * note: desktop capabilities for opening URLs in the system browser.
    * When provided, Install/Docs links use `openExternalUrl` instead of
    * `<a target="_blank">` (desktop builds). Browser builds omit this prop.
    */
   desktop?: AgentPickerDesktop;
   /**
-   * Called when `desktop.openExternalUrl` rejects (AD-P1-2: the host must
+   * note: called when `desktop.openExternalUrl` rejects (AD-P1-2: the host must
    * surface a toast — do not silently no-op). Omitted on browser builds
    * (where `desktop` is absent).
    */
@@ -163,7 +163,7 @@ export function AgentPicker({
   const effectiveEmptyTitle = emptyTitle ?? t('agentPicker.empty.title');
   const effectiveEmptyDescription = emptyDescription ?? t('agentPicker.empty.description');
 
-  // Stabilise onSelect so that memoised AgentCards do not re-render when the
+  // note: stabilise onSelect so that memoised AgentCards do not re-render when the
   // host re-renders for an unrelated reason (e.g. verifyStatus change). The ref
   // always points at the latest prop without changing callback identity.
   // R-V1108P1QC3-W001
@@ -319,7 +319,7 @@ const AgentCard = memo(function AgentCard({
   const { t } = useTranslation('setup');
   const selectable = agent.installed;
 
-  // Outbound links must NOT be descendants of the select <button> (QC B2 /
+  // note: outbound links must NOT be descendants of the select <button> (QC B2 /
   // nested interactive content). Card chrome is a div; selection is a sibling
   // button that covers the identity region only.
   return (
@@ -357,7 +357,7 @@ const AgentCard = memo(function AgentCard({
       )}
 
       {/*
-        P2 (F3): Install/Docs render only when `!agent.installed`. Installed
+        note: P2 (F3) — Install/Docs render only when `!agent.installed`. Installed
         cards show identity + Installed badge + version/description only — no
         outbound link chrome.
       */}
@@ -455,7 +455,7 @@ function AgentCardIdentity({
 }
 
 /**
- * Selection affordance: hollow gray outline when installed-unselected; filled
+ * note: Selection affordance — hollow gray outline when installed-unselected; filled
  * green when selected; muted solid gray when not installed (non-selectable).
  *
  * V1.108 FB-UI-006: unselected installed agents show hollow **gray** (not
@@ -515,13 +515,13 @@ function OutboundLink({
   const routeThroughOpener = useCallback(
     (e: React.MouseEvent) => {
       if (!desktop?.openExternalUrl) return;
-      // onClick covers left + modifier (meta/ctrl/shift) clicks. onAuxClick is
+      // note: onClick covers left + modifier (meta/ctrl/shift) clicks. onAuxClick is
       // attached for middle-click (button === 1); right-click (button === 2)
       // is left to the host context menu and must not navigate.
       if (e.type === 'auxclick' && e.button !== 1) return;
       e.preventDefault();
       desktop.openExternalUrl(href).catch(() => {
-        // AD-P1-2: surface the failure to the user via the host's toast.
+        // note: AD-P1-2 — surface the failure to the user via the host's toast.
         // Do not silently no-op.
         console.error('Failed to open external URL:', href);
         onExternalUrlError?.();
@@ -561,7 +561,7 @@ function CustomLaunchField({
 }) {
   const { t } = useTranslation('setup');
   const canVerify = value.trim().length > 0 && verifyStatus !== 'loading';
-  // Instance-unique: the Studio mounts several pickers on one page.
+  // note: instance-unique — the Studio mounts several pickers on one page.
   const inputId = `${useId()}-agent-picker-custom-launch`;
 
   return (

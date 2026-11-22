@@ -1,5 +1,5 @@
 /**
- * SoulNarrativeCard tests (V1.81 SP-1 — web-ui.md §26.1).
+ * note: SoulNarrativeCard tests (V1.81 SP-1 — web-ui.md §26.1).
  *
  * The card is stateless beyond its props, so each of the five UX states is
  * exercised by rendering with a representative prop combination and asserting
@@ -57,7 +57,7 @@ describe('SoulNarrativeCard — five UX states', () => {
     expect(screen.getByTestId('soul-narrative-generating')).toBeInTheDocument();
     const button = screen.getByTestId('soul-narrative-reflect');
     expect(button).toBeDisabled();
-    // "Reflecting…" appears in both the status line and the disabled button label.
+    // note: "Reflecting…" appears in both the status line and the disabled button label.
     expect(screen.getAllByText(/reflecting…/i).length).toBeGreaterThanOrEqual(1);
   });
 
@@ -79,7 +79,7 @@ describe('SoulNarrativeCard — five UX states', () => {
     expect(screen.getByTestId('soul-narrative-prose')).toHaveTextContent(
       'You are drawn to moral ambiguity and ensemble casts.',
     );
-    // No stale banner in the current state.
+    // note: no stale banner in the current state.
     expect(screen.queryByTestId('soul-narrative-stale-banner')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /re-reflect/i })).toBeInTheDocument();
     expect(screen.getByText(/reflected on/i)).toBeInTheDocument();
@@ -102,11 +102,11 @@ describe('SoulNarrativeCard — five UX states', () => {
     const banner = screen.getByTestId('soul-narrative-stale-banner');
     expect(banner).toBeInTheDocument();
     expect(banner).toHaveTextContent(/you've grown since this reflection/i);
-    // The cached narrative stays visible under the banner.
+    // note: the cached narrative stays visible under the banner.
     expect(screen.getByTestId('soul-narrative-prose')).toHaveTextContent(
       'An earlier reflection on your themes.',
     );
-    // The banner carries its own Re-reflect CTA.
+    // note: the banner carries its own Re-reflect CTA.
     expect(
       screen.getAllByRole('button', { name: /re-reflect/i }).length,
     ).toBeGreaterThanOrEqual(1);
@@ -129,7 +129,7 @@ describe('SoulNarrativeCard — five UX states', () => {
     expect(screen.getByText(/your soul is still forming/i)).toBeInTheDocument();
     expect(screen.getByText(/3 fragments captured so far/i)).toBeInTheDocument();
     expect(screen.getByText(/7 more to go/i)).toBeInTheDocument();
-    // No CTA in the insufficient-data state.
+    // note: no CTA in the insufficient-data state.
     expect(screen.queryByTestId('soul-narrative-reflect')).not.toBeInTheDocument();
   });
 

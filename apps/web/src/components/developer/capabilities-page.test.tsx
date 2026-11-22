@@ -1,5 +1,5 @@
 /**
- * CapabilitiesPage render tests.
+ * note: CapabilitiesPage render tests.
  *
  * Verifies the admission-gate UX affordance: because CapabilityInfo does not
  * carry gate data, the page must explicitly tell authors that gates are
@@ -58,7 +58,7 @@ describe('CapabilitiesPage', () => {
     expect(await screen.findByText('nexus.example.greet')).toBeInTheDocument();
     expect(screen.getByText('Input schema')).toBeInTheDocument();
     expect(screen.getByText('Output schema')).toBeInTheDocument();
-    // Wire-shape guard (P2 fix wave F2): the daemon serves the local camelCase
+    // note: wire-shape guard (P2 fix wave F2) — the daemon serves the local camelCase
     // DTO (inputSchema/outputSchema — AR-40), so the schema payload must render
     // through the page's field access. If the page read a snake_case key the
     // wire never sends, SchemaBlock falls back to '—' and this assertion fails.
@@ -121,7 +121,7 @@ describe('CapabilitiesPage', () => {
       initialRouterEntries: ['/capabilities?filter=nexus.world.describe'],
     });
 
-    // The linked schema is visible on arrival; others are filtered out.
+    // note: the linked schema is visible on arrival; others are filtered out.
     expect(await screen.findByText('nexus.world.describe')).toBeInTheDocument();
     expect(screen.queryByText('nexus.other.cap')).not.toBeInTheDocument();
     expect(screen.getByDisplayValue('nexus.world.describe')).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe('CapabilitiesPage', () => {
       initialRouterEntries: ['/capabilities?filter=no.such.cap'],
     });
 
-    // The miss is a state, not an error: its own title quotes the query.
+    // note: the miss is a state, not an error — its own title quotes the query.
     expect(
       await screen.findByText('No capability matches "no.such.cap"'),
     ).toBeInTheDocument();
@@ -181,7 +181,7 @@ describe('CapabilitiesPage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Clear filter' }));
 
-    // The full registry shows in place and the input is emptied.
+    // note: the full registry shows in place and the input is emptied.
     expect(await screen.findByText('nexus.world.describe')).toBeInTheDocument();
     expect(screen.getByDisplayValue('')).toBeInTheDocument();
     expect(screen.queryByText('No capability matches "no.such.cap"')).not.toBeInTheDocument();
@@ -199,7 +199,7 @@ describe('CapabilitiesPage', () => {
       initialRouterEntries: ['/capabilities?filter=nexus'],
     });
 
-    // Registry-empty wins: the filter cannot be blamed for an empty registry.
+    // note: registry-empty wins — the filter cannot be blamed for an empty registry.
     expect(
       await screen.findByText('Capabilities will appear here once the runtime registers them.'),
     ).toBeInTheDocument();

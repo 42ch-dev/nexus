@@ -89,7 +89,7 @@ export function SessionsPage() {
                 card={{
                   sessionId: s.session_id,
                   shortId: shortId(s.session_id),
-                  // Locked v1.220 pill mapping — unchanged `statusVariant`,
+                  // note: locked v1.220 pill mapping — unchanged `statusVariant`,
                   // `completed` reads green and is told apart by its label.
                   status: {
                     label: humanizeStatus(s.status),
@@ -109,7 +109,7 @@ export function SessionsPage() {
   );
 }
 
-/** The card is one link to the session's run view (compass D7). */
+/** note: the card is one link to the session's run view (compass D7). */
 function renderRunLink({ href, ariaLabel, children }: SessionCardLinkArgs) {
   return (
     <Link

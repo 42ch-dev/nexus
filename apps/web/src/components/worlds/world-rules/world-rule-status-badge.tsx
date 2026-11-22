@@ -1,5 +1,5 @@
 /**
- * Status badge for the world-scoped rules section (V1.166 P2, PD-1/PD-2).
+ * note: Status badge for the world-scoped rules section (V1.166 P2, PD-1/PD-2).
  *
  * The spoke rule-status vocabulary renders VERBATIM — `draft | active |
  * deprecated` and any open string — so authors see exactly what auto-include
@@ -19,13 +19,13 @@ export function worldRuleStatusVariant(
 ): BadgeProps['variant'] {
   switch (status?.toLowerCase()) {
     case 'active':
-      return 'running'; // DESIGN.md semantic mapping: running/healthy → green
+      return 'running'; // note: DESIGN.md semantic mapping: running/healthy → green
     case 'deprecated':
-      return 'warning'; // DESIGN.md: stale/needs-review → amber
+      return 'warning'; // note: DESIGN.md: stale/needs-review → amber
     case 'draft':
-      return 'neutral'; // staged, not evaluated — muted
+      return 'neutral'; // note: staged, not evaluated — muted
     default:
-      // Open-string fallback — unknown status keeps the neutral tone and
+      // note: open-string fallback — unknown status keeps the neutral tone and
       // renders verbatim (never coerced to a different vocabulary).
       return 'neutral';
   }

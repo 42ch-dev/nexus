@@ -1,5 +1,5 @@
 /**
- * LocaleProvider coverage.
+ * note: LocaleProvider coverage.
  *
  * Mirrors theme-provider.test.tsx to pin the architectural surface P1 inherits:
  * provider mount, default-locale detection (stored → system → fallback),
@@ -15,7 +15,7 @@ import { LocaleProvider, useLocale, type LocalePreference } from '@/components/l
 
 const STORAGE_KEY = 'nexus-web-locale';
 
-/** jsdom does not provide a configurable real navigator.language, so each test
+/** note: jsdom does not provide a configurable real navigator.language, so each test
  *  installs a deterministic getter on the navigator instance. */
 function setNavigatorLanguage(language: string) {
   Object.defineProperty(navigator, 'language', {
@@ -24,14 +24,14 @@ function setNavigatorLanguage(language: string) {
   });
 }
 
-/** Surface the preference value from inside the provider for assertions. */
+/** note: surface the preference value from inside the provider for assertions. */
 function LocaleProbe({ onPreference }: { onPreference: (p: LocalePreference) => void }) {
   const { preference } = useLocale();
   onPreference(preference);
   return null;
 }
 
-/** Surface the resolved locale from inside the provider for assertions. */
+/** note: surface the resolved locale from inside the provider for assertions. */
 function LocaleResolvedProbe({ onResolved }: { onResolved: (r: 'en' | 'zh-CN') => void }) {
   const { resolvedLocale } = useLocale();
   onResolved(resolvedLocale);
@@ -45,6 +45,7 @@ function renderWith(ui: ReactNode) {
 beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.removeAttribute('lang');
+  // note: jsdom needs the test-defined navigator override removed first.
   // @ts-expect-error - delete the test-defined own property to start fresh
   delete navigator.language;
   setNavigatorLanguage('en');
@@ -52,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // note: drop the test-defined navigator override after each case.
   // @ts-expect-error - clean up the test-defined navigator override
   delete navigator.language;
 });
@@ -66,8 +68,8 @@ describe('LocaleProvider mount', () => {
 
 describe('LocaleProvider default-locale detection', () => {
   it('prefers a stored locale over the system preference', () => {
-    setNavigatorLanguage('zh-CN'); // OS says Chinese…
-    window.localStorage.setItem(STORAGE_KEY, 'en'); // …but stored says English.
+    setNavigatorLanguage('zh-CN');
+    window.localStorage.setItem(STORAGE_KEY, 'en');
     let current: LocalePreference = 'system';
     renderWith(<LocaleProbe onPreference={(p) => (current = p)} />);
     expect(current).toBe('en');
@@ -180,14 +182,12 @@ describe('useLocale outside provider', () => {
       useLocale();
       return null;
     }
-    // Silence the expected error noise in the test reporter.
+    // why: silence the expected error noise in the test reporter.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => render(<Orphan />)).toThrow(/useLocale must be used within a LocaleProvider/);
     spy.mockRestore();
   });
 });
-
-// ── helpers ─────────────────────────────────────────────────────────────────
 
 function LocaleProbeApi({
   onReady,

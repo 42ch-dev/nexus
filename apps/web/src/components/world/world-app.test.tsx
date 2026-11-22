@@ -1,5 +1,5 @@
 /**
- * World app surface tests (plan v1219-world-module T1).
+ * note: World app surface tests (plan v1219-world-module T1).
  *
  * Locks the acceptance contract:
  *   - Header renders the world name + the product-owned subtitle
@@ -93,7 +93,7 @@ function renderWorld(initialPath = `/worlds/${WORLD_ID}`, client?: NexusClient) 
 
 beforeEach(() => {
   cleanup();
-  // LocaleProvider resolves from localStorage on mount — pin zh-CN so the
+  // note: LocaleProvider resolves from localStorage on mount — pin zh-CN so the
   // product-owned Chinese copy assertions below hold.
   window.localStorage.setItem('nexus-web-locale', 'zh-CN');
   return i18n.changeLanguage('zh-CN');
@@ -118,7 +118,7 @@ describe('WorldApp — Brief layer (era KnowledgeEntry projection)', () => {
   it('renders era entries with their world_summary when eras exist', async () => {
     renderWorld(undefined, makeClient({ graph: () => Promise.resolve(graph([KB_EVENT, ERA_FIRST, ERA_SECOND])) }));
     const layer = await screen.findByTestId('world-layer-brief');
-    // Only era projections render — narrative events stay out of the Brief read.
+    // note: only era projections render — narrative events stay out of the Brief read.
     expect(layer).toHaveTextContent('第一纪元');
     expect(layer).toHaveTextContent('神话与传说的时代。');
     expect(layer).toHaveTextContent('第二纪元');
@@ -131,7 +131,7 @@ describe('WorldApp — Brief layer (era KnowledgeEntry projection)', () => {
     expect(empty).toHaveTextContent('写下你的第一个 Brief');
     expect(empty).toHaveTextContent('Brief 是这个世界的最高层描述——一句话讲清它是什么。');
     expect(empty).toHaveTextContent('例如：“一个魔法正在消亡的低魔奇幻世界”');
-    // T2: the guided entry action is present (behaviour locks in brief-flow.test.tsx).
+    // note: T2: the guided entry action is present (behaviour locks in brief-flow.test.tsx).
     expect(screen.getByTestId('world-brief-create')).toHaveTextContent('+ 写 Brief');
   });
 });
@@ -142,7 +142,7 @@ describe('WorldApp — Narrative / Moment pre-rebuild placeholders', () => {
     const layer = await screen.findByTestId('world-layer-narrative');
     expect(layer).toHaveTextContent('Narrative 层——章节级叙事时间线');
     expect(layer).toHaveTextContent('此层内容在后续迭代启用');
-    // The URL convention is honoured — no route break.
+    // note: the URL convention is honoured — no route break.
     expect(screen.getByTestId('layer-tab-narrative')).toHaveAttribute('aria-selected', 'true');
   });
 

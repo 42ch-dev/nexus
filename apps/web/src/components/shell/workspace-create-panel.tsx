@@ -1,5 +1,5 @@
 /**
- * Workspace create panel (plan v1220 P3-T3; prototype screen 3; partial-success
+ * note: Workspace create panel (plan v1220 P3-T3; prototype screen 3; partial-success
  * handling added by plan v1220 QC fix wave 2).
  *
  * Opened from the chip row's trailing 「＋新建工作区」 chip on creator-entrance
@@ -28,7 +28,7 @@ import { queryKeys } from '@/lib/nexus/query-keys';
 import { deriveWorkspaceSlug } from '@/lib/workspace-slug';
 import { cn } from '@/lib/utils';
 
-/** Display-only mirror of the core's `default_creative_root` (one rule, core-owned). */
+/** note: display-only mirror of the core's `default_creative_root` (one rule, core-owned). */
 function previewRoot(slug: string): string {
   return slug === 'default' ? '~/Nexus' : `~/Nexus/${slug}`;
 }
@@ -50,7 +50,7 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
   const [pending, setPending] = useState(false);
 
   /**
-   * Failure copy per phase. `创建失败：{reason}` only describes a create that did
+   * note: failure copy per phase. `创建失败：{reason}` only describes a create that did
    * not commit; once the workspace exists, activation failures must never reuse
    * the create fallback (that would contradict the created state), so they use
    * the created-state copy.
@@ -69,7 +69,7 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
     return t('workspaceCreate.generic');
   }
 
-  /** Activate the created workspace and refresh workspace-scoped content. */
+  /** note: activate the created workspace and refresh workspace-scoped content. */
   async function activate(workspace: CreatedWorkspace) {
     setPending(true);
     setFailure(null);
@@ -118,7 +118,7 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
       return;
     }
 
-    // Creation committed: the chip row must surface it even if activation fails.
+    // note: creation committed: the chip row must surface it even if activation fails.
     setCreated({ slug: response.workspace_slug, creatorId: response.creator_id });
     void qc.invalidateQueries({
       queryKey: queryKeys.workspaces.list({ creator_id: creatorId }),

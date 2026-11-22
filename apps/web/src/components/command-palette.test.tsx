@@ -1,5 +1,5 @@
 /**
- * `CommandPalette` — global shell command palette overlay (⌘K / Ctrl+K).
+ * note: `CommandPalette` — global shell command palette overlay (⌘K / Ctrl+K).
  *
  * FB-CP-000/002/004, V1.111 P0 T3. Coverage per task brief: a11y role
  * assertions (dialog / combobox / listbox / option), keyboard interactions
@@ -29,7 +29,7 @@ import {
 } from './command-palette';
 
 /**
- * Render the palette then open it inside `act`. Opening after render (rather
+ * note: render the palette then open it inside `act`. Opening after render (rather
  * than before) keeps the dialog's mount + effects inside a single act scope,
  * avoiding spurious "state update not wrapped in act" warnings from the
  * activeIndex-reset effect that fires on mount.
@@ -44,7 +44,7 @@ function renderPalette() {
   return result;
 }
 
-/** Factory for a minimal command; overrides only what each test cares about. */
+/** note: factory for a minimal command; overrides only what each test cares about. */
 function makeCommand(
   overrides: Partial<Command> & Pick<Command, 'id'>,
 ): Command {
@@ -82,7 +82,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Unmount before clearing the registry: clearCommands() emits to listeners,
+  // why: unmount before clearing the registry — clearCommands() emits to listeners,
   // which would re-render a still-mounted palette outside an act scope.
   cleanup();
   clearCommands();
@@ -154,11 +154,9 @@ describe('CommandPalette — open / close + focus', () => {
     const dialog = screen.getByRole('dialog');
     const panel = dialog.firstElementChild as HTMLElement;
 
-    // Clicking inside the panel must NOT close (event target !== dialog).
     fireEvent.click(panel);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
-    // Clicking the backdrop (the dialog element itself) closes.
     fireEvent.click(dialog);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
@@ -168,7 +166,7 @@ describe('CommandPalette — open / close + focus', () => {
     renderPalette();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     act(() => closePalette());
-    // Re-render to flush the now-closed store state.
+    // note: re-render to flush the now-closed store state.
     render(
       <LocaleProvider>
         <CommandPalette />
@@ -184,7 +182,6 @@ describe('CommandPalette — keyboard navigation', () => {
     const input = screen.getByRole('combobox');
     const options = screen.getAllByRole('option');
 
-    // First option is active by default.
     expect(input.getAttribute('aria-activedescendant')).toBe(options[0].id);
     expect(options[0]).toHaveAttribute('aria-selected', 'true');
 
@@ -195,11 +192,9 @@ describe('CommandPalette — keyboard navigation', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     expect(input.getAttribute('aria-activedescendant')).toBe(options[2].id);
 
-    // Wrap from last → first.
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     expect(input.getAttribute('aria-activedescendant')).toBe(options[0].id);
 
-    // ArrowUp from first wraps to last.
     fireEvent.keyDown(input, { key: 'ArrowUp' });
     expect(input.getAttribute('aria-activedescendant')).toBe(options[2].id);
   });
@@ -223,7 +218,7 @@ describe('CommandPalette — keyboard navigation', () => {
     renderPalette();
     const input = screen.getByRole('combobox');
 
-    fireEvent.keyDown(input, { key: 'ArrowDown' }); // → second option
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(handler).toHaveBeenCalledTimes(1);
   });
@@ -246,7 +241,7 @@ describe('CommandPalette — keyboard navigation', () => {
     const input = screen.getByRole('combobox');
 
     fireEvent.change(input, { target: { value: 'zzz-no-match' } });
-    // Combobox reports the popup collapsed when there are no options.
+    // note: combobox reports the popup collapsed when there are no options.
     expect(input).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -280,7 +275,7 @@ describe('CommandPalette — filter wiring', () => {
   it('matches keywords too', () => {
     renderPalette();
     const input = screen.getByRole('combobox');
-    // ALPHA has keyword 'new chapter'.
+    // note: ALPHA has keyword 'new chapter'.
     fireEvent.change(input, { target: { value: 'new chapter' } });
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
       'Add Chapter',
@@ -331,7 +326,6 @@ describe('CommandPalette — available() predicate', () => {
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2);
 
-    // Move active to the second option, then make it unavailable.
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     off = true;
     rerender(
@@ -348,7 +342,7 @@ describe('CommandPalette — available() predicate', () => {
 
 describe('CommandPalette — locale switching', () => {
   it('updates command labels without remounting when the locale changes', () => {
-    // Use real keys from the commands catalog so switching to zh-CN changes
+    // why: use real keys from the commands catalog so switching to zh-CN changes
     // the rendered text. The palette stays open and is not remounted.
     clearCommands();
     registerCommand({
@@ -365,11 +359,10 @@ describe('CommandPalette — locale switching', () => {
       i18n.changeLanguage('zh-CN');
     });
 
-    // Palette is still open, option text is now Chinese, component was not remounted.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('option')).toHaveTextContent('前往 Harness');
 
-    // Restore English for subsequent tests.
+    // note: restore English for subsequent tests.
     act(() => {
       i18n.changeLanguage('en');
     });
@@ -381,9 +374,8 @@ describe('CommandPalette — v0.4 elevation + state recipe (V1.121 P2 T1)', () =
     renderPalette();
 
     const dialog = screen.getByRole('dialog');
-    // Overlay dims via the scrim token (no text on scrim — §Elevation scrim rule).
+    // note: overlay dims via the scrim token (no text on scrim — §Elevation scrim rule).
     expect(dialog).toHaveClass('bg-scrim');
-    // The opaque panel above the scrim carries the modal-class elevation.
     const panel = dialog.firstElementChild as HTMLElement;
     expect(panel).toHaveClass('shadow-elevation-4');
     expect(panel).toHaveClass('bg-background-100');
@@ -396,7 +388,7 @@ describe('CommandPalette — v0.4 elevation + state recipe (V1.121 P2 T1)', () =
     expect(option.className).toMatch(/\bduration-state\b/);
     expect(option.className).toMatch(/\bease-standard\b/);
     expect(option.className).toMatch(/\bmotion-reduce:transition-none\b/);
-    // Selected state = gray-alpha-100 wash (aria-selected preserved, V1.111 untouched).
+    // note: selected state = gray-alpha-100 wash (aria-selected preserved, V1.111 untouched).
     expect(option).toHaveAttribute('aria-selected', 'true');
     expect(option).toHaveClass('bg-gray-alpha-100');
   });

@@ -1,5 +1,5 @@
 /**
- * Task-kind badge — V1.78 Creator Memory review-loop (web-ui.md §24 + DESIGN.md
+ * note: Task-kind badge — V1.78 Creator Memory review-loop (web-ui.md §24 + DESIGN.md
  * `memory-task-kind-*`).
  *
  * `task_kind` is a free-form string on the wire (the contract does not constrain
@@ -27,26 +27,21 @@ export const KNOWN_TASK_KINDS: readonly KnownTaskKind[] = [
 ];
 
 /**
- * Tailwind classes for each task-kind chip. Mirrors DESIGN.md frontmatter
+ * note: Tailwind classes for each task-kind chip. Mirrors DESIGN.md frontmatter
  * `memory-task-kind-*` via the projected token classes.
  */
 function taskKindClasses(taskKind: string | undefined | null): string {
   switch (taskKind as KnownTaskKind) {
     case 'brainstorm':
-      // amber — ideation / creative.
       return 'bg-memory-task-kind-brainstorm-bg text-memory-task-kind-brainstorm-text border-memory-task-kind-brainstorm-border';
     case 'outline':
-      // blue — planning / structure.
       return 'bg-memory-task-kind-outline-bg text-memory-task-kind-outline-text border-memory-task-kind-outline-border';
     case 'chapter':
-      // teal — writing / content.
       return 'bg-memory-task-kind-chapter-bg text-memory-task-kind-chapter-text border-memory-task-kind-chapter-border';
     case 'research':
-      // purple — inquiry / knowledge.
       return 'bg-memory-task-kind-research-bg text-memory-task-kind-research-text border-memory-task-kind-research-border';
     case 'unknown':
     default:
-      // neutral gray — unrecognized values render verbatim (humanized).
       return 'bg-memory-task-kind-unknown-bg text-memory-task-kind-unknown-text border-memory-task-kind-unknown-border';
   }
 }

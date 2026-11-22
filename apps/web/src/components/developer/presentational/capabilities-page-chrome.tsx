@@ -1,5 +1,5 @@
 /**
- * Presentational body of the `/capabilities` surface (plan
+ * note: Presentational body of the `/capabilities` surface (plan
  * v221-caps-sessions-rail T1).
  *
  * The product page (`components/developer/capabilities-page.tsx`) owns the
@@ -37,10 +37,10 @@ export interface CapabilitiesPageCopy {
   refreshAria: string;
   errorDescription: string;
   loading: string;
-  /** Registry-empty branch (no capability items at all). */
+  /** note: registry-empty branch (no capability items at all). */
   emptyTitle: string;
   emptyDescription: string;
-  /** Filtered-miss branch (registry non-empty, filter matched nothing). */
+  /** note: filtered-miss branch (registry non-empty, filter matched nothing). */
   filteredMissTitle: (filter: string) => string;
   filteredMissDescription: string;
   clearFilter: string;
@@ -63,7 +63,7 @@ export interface CapabilitiesListView {
 export interface CapabilitiesPageChromeProps {
   copy: CapabilitiesPageCopy;
   list: CapabilitiesListView;
-  /** Controlled filter text (the caller owns where the seed comes from). */
+  /** note: controlled filter text (the caller owns where the seed comes from). */
   filter: string;
   onFilterChange: (filter: string) => void;
 }

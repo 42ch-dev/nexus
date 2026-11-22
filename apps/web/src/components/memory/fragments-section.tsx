@@ -1,5 +1,5 @@
 /**
- * FragmentsSection — extracted from MemoryPage (R-V179P1-QC1-001).
+ * note: FragmentsSection — extracted from MemoryPage (R-V179P1-QC1-001).
  *
  * Read-only long-term-memory fragment browser with an optional keyword filter.
  * Controlled: the page shell lifts the keyword so the SOUL viz click-to-filter

@@ -1,5 +1,5 @@
 /**
- * World Findings panel — V1.166 P2 (DR-64 surfacing half, Task 1).
+ * note: World Findings panel — V1.166 P2 (DR-64 surfacing half, Task 1).
  *
  * Read-only list of world-scoped check findings (mental pair + rule-derived)
  * consumed from `GET /v1/daemon/worlds/:world_id/findings` via
@@ -91,7 +91,7 @@ export function WorldFindingsPanel({ worldId }: { worldId: string }) {
 }
 
 /**
- * One finding row. Collapsed: severity badge (spoke verbatim) + kind (open
+ * note: One finding row. Collapsed: severity badge (spoke verbatim) + kind (open
  * string verbatim) + title + shortened target entry id. Expanded (read-only
  * toggle): full description, full target entry id, created timestamp. No
  * interactive affordance writes — `aria-expanded` toggles display only.

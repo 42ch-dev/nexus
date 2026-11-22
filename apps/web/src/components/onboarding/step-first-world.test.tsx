@@ -6,7 +6,7 @@ import { StepFirstWorld } from './step-first-world';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 
-// Promise.withResolvers is unavailable at the current tsconfig lib — local
+// note: Promise.withResolvers is unavailable at the current tsconfig lib — local
 // equivalent until the lib target reaches es2024.
 function withResolvers<T>(): {
   promise: Promise<T>;
@@ -79,7 +79,7 @@ describe('StepFirstWorld (creator first World)', () => {
     expect(field).toHaveValue('灰烬王座');
     expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
 
-    // The advanced area reads the reported root only after it is opened.
+    // note: the advanced area reads the reported root only after it is opened.
     expect(screen.queryByTestId('first-world-root')).not.toBeInTheDocument();
   });
 
@@ -129,7 +129,7 @@ describe('StepFirstWorld (creator first World)', () => {
     expect(
       await screen.findByText('创建世界失败：daemon refused。请重试或更换名称。'),
     ).toBeInTheDocument();
-    // Still in the step with the draft (template + name).
+    // note: still in the step with the draft (template + name).
     expect(screen.getByRole('heading', { name: '创建你的第一个世界' })).toBeInTheDocument();
     expect(screen.getByTestId('world-template-scifi')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('世界名称')).toHaveValue('远星号');

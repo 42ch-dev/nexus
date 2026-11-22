@@ -1,5 +1,5 @@
 /**
- * Run Studio — shared app component for the Compute Run author journey
+ * note: Run Studio — shared app component for the Compute Run author journey
  * (V1.147 P1, behavior spec §1 / §2 / §3 / §4 / §6).
  *
  * Flow: World → guided form (pickers filtered by `required_key_block_types`)
@@ -61,29 +61,29 @@ import { formatDateTime, shortId } from '@/lib/format';
 import { useToast } from '@/lib/use-toast';
 
 export interface RunStudioProps {
-  /** Module detail — the studio is module-scoped (spec §1 P1). */
+  /** note: module detail — the studio is module-scoped (spec §1 P1). */
   module: ModuleDetail;
   /**
-   * V1.147 P2 T3 — pre-filled World (Timeline Run Module entry). Omitted /
+   * note: V1.147 P2 T3 — pre-filled World (Timeline Run Module entry). Omitted /
    * empty → the explicit World picker (spec §3: "otherwise explicit
    * picker").
    */
   initialWorldId?: string;
   /**
-   * Bugbot 1 — pre-filled fork branch (Timeline Run Module entry from a
+   * note: Bugbot 1 — pre-filled fork branch (Timeline Run Module entry from a
    * forked-branch view, `?branch=`). Threaded into the Run request as
    * `branch_id`; omitted/undefined → the daemon defaults to the World's
    * current branch (root).
    */
   initialBranchId?: string;
   /**
-   * V1.147 P2 T3 — deep-linked run id (compute node "Open Run"). The run
+   * note: V1.147 P2 T3 — deep-linked run id (compute node "Open Run"). The run
    * inspector opens immediately; status flips (Needs review → Applied /
    * Discarded) render from the shared run-detail query.
    */
   initialRunId?: string;
   /**
-   * V1.147 P2 T3 — fired when the author opens a run from the Runs table
+   * note: V1.147 P2 T3 — fired when the author opens a run from the Runs table
    * (or the deep-linked inspector lands). The host writes the selection
    * back to the URL (`?module=<id>&run=<runId>`) so refresh keeps the
    * detail. Optional — the studio works without URL write-back.
@@ -91,7 +91,7 @@ export interface RunStudioProps {
   onRunOpen?: (runId: string) => void;
 }
 
-/** Status filter options for the Runs history (spec §4 + plan Global
+/** note: status filter options for the Runs history (spec §4 + plan Global
  * Constraints "module/world/status filter"). Values are the wire statuses the
  * daemon matches against the persisted row; labels are the product status
  * names (Needs review = `succeeded`). */
@@ -113,8 +113,7 @@ export function RunStudio({
   const { t } = useTranslation('modules');
   const { toast } = useToast();
 
-  // ── World scope ────────────────────────────────────────────────────────────
-  // No active-World shell state exists for the modules surface, so the World
+  // note: no active-World shell state exists for the modules surface, so the World
   // selector defaults to the explicit picker (behavior spec §3: "otherwise
   // explicit picker") — or the Timeline pre-fill when the entry came from the
   // World Timeline (V1.147 P2 T3). KnowledgeEntry pickers re-derive when it
@@ -123,7 +122,7 @@ export function RunStudio({
   const [worldId, setWorldId] = useState(initialWorldId ?? '');
   const worldGraph = useWorldKbGraph(worldId || undefined);
 
-  // Bugbot 1 — `?branch=` pre-fill re-sync, mirroring the `?world=` pattern
+  // note: Bugbot 1 — `?branch=` pre-fill re-sync, mirroring the `?world=` pattern
   // below: the Modules page stays mounted across Timeline "Run Module"
   // entries (search-params-only navigation), so the state seed alone would
   // keep the previous fork's branch on the next run request — a Run would
@@ -167,8 +166,7 @@ export function RunStudio({
     }
   }, [initialWorldId]);
 
-  // ── Guided form + Advanced JSON (best-effort sync) ────────────────────────
-  // Narrow the generated open index signature at the app boundary through the
+  // note: narrow the generated open index signature at the app boundary through the
   // structural guard (qc1 W-003 fix) — the primitive consumes the structural
   // InvocationSchema fragment; shape drift is rejected instead of cast.
   const invocationSchema = toInvocationSchema(module.schemas?.invocation);
@@ -179,7 +177,7 @@ export function RunStudio({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  // Keep the raw-JSON disclosure in sync with guided-form edits until the
+  // note: keep the raw-JSON disclosure in sync with guided-form edits until the
   // author touches it ("form fields sync best-effort" — JSON edits never
   // propagate back into the guided controls).
   useEffect(() => {
@@ -188,7 +186,7 @@ export function RunStudio({
     }
   }, [values, jsonDirty]);
 
-  // Parsed Advanced-JSON payload while `jsonDirty`; `null` when the text is
+  // note: parsed Advanced-JSON payload while `jsonDirty`; `null` when the text is
   // not a complete JSON object. This is the enablement source of truth for the
   // JSON path (qc2 W-002 fix): a valid complete JSON object can satisfy Run
   // even when the guided `required` fields are empty — the server/manifest
@@ -228,7 +226,6 @@ export function RunStudio({
     resetInvocation();
   }
 
-  // ── Entity picker entries (KnowledgeEntry list from the World KB graph) ────
   const entityEntries = useMemo(() => {
     const entries: Record<string, EntityPickerEntry[]> = {};
     if (!worldGraph.data) return entries;
@@ -247,8 +244,7 @@ export function RunStudio({
     return entries;
   }, [worldGraph.data, invocationSchema, module.required_key_block_types]);
 
-  // ── Runs history (scoped to this module — context filter per spec §4) ─────
-  // Filter chrome on module detail (qc1 W-005 / qc3 W-4 fix): status + World
+  // note: filter chrome on module detail (qc1 W-005 / qc3 W-4 fix) — status + World
   // narrow the module-scoped history; each filter view caches independently
   // (the filter is part of the query key). No daemon DELETE API exists for
   // Clear history in P1, so filtering is the honest affordance — a
@@ -265,16 +261,14 @@ export function RunStudio({
   const discardRun = useDiscardRun();
   const clearRuns = useClearRuns();
 
-  // ── Clear history (V1.147 P3 T2) ─────────────────────────────────────────
-  // Server-backed `DELETE /runs?world_id=` (plan Clear-history lock): the
+  // note: server-backed `DELETE /runs?world_id=` (plan Clear-history lock) — the
   // daemon REQUIRES a World scope, so the affordance is gated on the World
   // filter — no world-wide purge is possible. Terminal runs only
   // (applied|discarded|failed); running / needs-review rows are kept.
   const [clearTargetWorldId, setClearTargetWorldId] = useState<string | null>(null);
   const clearScopeWorldId = runWorldFilter !== '' ? runWorldFilter : null;
 
-  // ── Inspector state ────────────────────────────────────────────────────────
-  // Fresh runs render from the POST response (carries the truncated flag);
+  // note: fresh runs render from the POST response (carries the truncated flag);
   // runs reopened from history render from the detail query. Accept/Discard
   // move the inspector onto the detail query so the status flip (Needs review
   // → Applied/Discarded) renders from refetched data.
@@ -329,7 +323,7 @@ export function RunStudio({
   const runDetail = useComputeRun(inspectorRunId ?? undefined);
   const inspectorRun = inspectorRunId ? runDetail.data : latestRun;
 
-  // Client mirrors the manifest's obvious `required` list (spec §3); the
+  // note: client mirrors the manifest's obvious `required` list (spec §3); the
   // server/manifest validation stays the source of truth on submit.
   const requiredFilled = useMemo(() => {
     const required = invocationSchema?.required ?? [];
@@ -339,7 +333,7 @@ export function RunStudio({
     });
   }, [invocationSchema, values]);
 
-  // Run enablement (qc2 W-002 fix): while the Advanced JSON path is the
+  // note: run enablement (qc2 W-002 fix) — while the Advanced JSON path is the
   // active input (`jsonDirty`), a complete valid JSON object satisfies
   // enablement even when guided `required` fields are empty — the author's
   // JSON is what gets submitted and the server validates it on submit.
@@ -363,7 +357,7 @@ export function RunStudio({
         world_id: worldId,
         module_id: module.module_id,
         invocation_params: params,
-        // Bugbot 1 — fork branch scope (from the Timeline `?branch=`
+        // note: Bugbot 1 — fork branch scope (from the Timeline `?branch=`
         // pre-fill); undefined = world root, daemon default.
         branch_id: branchId ?? undefined,
       },
@@ -379,7 +373,7 @@ export function RunStudio({
   function handleAccept() {
     const runId = inspectorRunId ?? latestRun?.run_id;
     if (!runId) return;
-    // Whole-accept: Accept commits all proposals atomically (spec §2 locked
+    // note: whole-accept — Accept commits all proposals atomically (spec §2 locked
     // granularity); per-item event unchecking is the optional-if-cheap path
     // and is intentionally not surfaced here.
     acceptRun.mutate(
@@ -416,7 +410,7 @@ export function RunStudio({
       {
         onSuccess: (res) => {
           toast({ variant: 'success', title: t('run.clearToast', { count: res.deleted }) });
-          // A cleared (terminal) run open in the inspector no longer exists —
+          // note: a cleared (terminal) run open in the inspector no longer exists —
           // close the inspector honestly; needs-review/running rows survive
           // Clear and stay open.
           if (
@@ -439,7 +433,6 @@ export function RunStudio({
     onRunOpen?.(runId);
   }
 
-  // ── Row mapping for the Runs table ────────────────────────────────────────
   const worldTitleById = useMemo(() => {
     const map = new Map<string, string>();
     for (const w of worlds.data ?? []) map.set(w.world_id, w.title);
@@ -480,7 +473,7 @@ export function RunStudio({
           onChange: setField,
           entityEntries,
           copy: runFormCopy(t),
-          // No World selected → the KB graph is not queried, so the form
+          // note: no World selected → the KB graph is not queried, so the form
           // renders without gating on it.
           graph:
             worldId !== ''
@@ -568,7 +561,7 @@ export function RunStudio({
   );
 }
 
-/** Destructive Discard confirmation (spec §2 — Discard is always author-confirmed). */
+/** note: destructive Discard confirmation (spec §2 — Discard is always author-confirmed). */
 function DiscardRunDialog({
   open,
   onCancel,
@@ -602,7 +595,7 @@ function DiscardRunDialog({
 }
 
 /**
- * Destructive Clear-history confirmation (V1.147 P3 T2, behavior spec §4
+ * note: destructive Clear-history confirmation (V1.147 P3 T2, behavior spec §4
  * Retain / clear). The daemon deletes terminal runs (applied|discarded|
  * failed) for the selected World; running / needs-review rows are kept. The
  * confirm names the World and the permanent nature of the delete — Applied
@@ -652,9 +645,8 @@ function ClearHistoryDialog({
   );
 }
 
-/* ── Caller-owned copy builders (i18n lives in the app, not the package) ───── */
 
-/** Flat copy for the studio chrome — assembled from the `modules` namespace. */
+/** note: flat copy for the studio chrome — assembled from the `modules` namespace. */
 function runStudioCopy(t: TFunction): RunStudioCopy {
   return {
     title: t('run.title'),
@@ -748,7 +740,7 @@ function runsTableCopy(t: TFunction): RunsTableCopy {
   };
 }
 
-/** Product status labels per behavior spec §4 (caller-owned, never in the package). */
+/** note: product status labels per behavior spec §4 (caller-owned, never in the package). */
 function runStatusLabel(t: TFunction, status: RunStatus): string {
   switch (status) {
     case 'running':

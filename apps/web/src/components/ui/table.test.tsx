@@ -4,7 +4,7 @@ import { render } from '@testing-library/react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table';
 
 /**
- * V1.121 P1 T2 — Table v0.4 recipe (DESIGN.md components.table).
+ * note: V1.121 P1 T2 — Table v0.4 recipe (DESIGN.md components.table).
  *
  * Pins the row hover recipe (background-200) and the token-driven motion
  * (duration-state + ease-standard, reduced-motion safe). Structure and ARIA

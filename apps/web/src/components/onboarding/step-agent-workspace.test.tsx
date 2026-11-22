@@ -25,7 +25,7 @@ const AGENTS: AgentScanEntry[] = [
   },
 ];
 
-// Promise.withResolvers is unavailable at the current tsconfig lib — local
+// note: Promise.withResolvers is unavailable at the current tsconfig lib — local
 // equivalent until the lib target reaches es2024.
 function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -176,7 +176,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
       desktop: makeDesktop({ getAgentProfile: () => promise }),
     });
 
-    // Scan lands first; the IPC profile is still in flight.
+    // note: scan lands first; the IPC profile is still in flight.
     await screen.findByTestId('agent-row-claude');
     const field = screen.getByLabelText(
       '自定义启动命令（可选，覆盖选中 agent 的默认启动方式）',

@@ -1,5 +1,5 @@
 /**
- * WorldSelector tests (V1.82 SP-2 — web-ui.md §26.1).
+ * note: WorldSelector tests (V1.82 SP-2 — web-ui.md §26.1).
  *
  * Covers the pure `countFragmentsByWorld` helper and the rendered control:
  * "All worlds" default, world options rendered with titles + fragment counts,
@@ -102,7 +102,7 @@ describe('WorldSelector', () => {
         onSelect={() => {}}
       />,
     );
-    const options = screen.getAllByRole('option').slice(1); // skip "All worlds"
+    const options = screen.getAllByRole('option').slice(1); // note: skip "All worlds"
     expect(options.map((o) => o.textContent)).toEqual(['Alpha (2 fragments mention \'Alpha\')', 'Zeta (1 fragment mentions \'Zeta\')']);
   });
 

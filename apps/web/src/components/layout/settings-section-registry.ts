@@ -1,5 +1,5 @@
 /**
- * Typed Settings section registry + URL resolver (V1.131 P2).
+ * note: Typed Settings section registry + URL resolver (V1.131 P2).
  *
  * Single ordered **descriptor** SSOT for the Settings modal host and demoted
  * test shell: each entry carries `id`, i18n label key, icon, and content
@@ -30,7 +30,7 @@ export type SettingsSectionId =
 /** Ordered section descriptor — chrome + content share this SSOT. */
 export interface SettingsSectionDescriptor {
   id: SettingsSectionId;
-  /** i18n key under the `settings` namespace (e.g. `nav.agent`). */
+  /** note: i18n key under the `settings` namespace (e.g. `nav.agent`). */
   labelKey: string;
   icon: LucideIcon;
   Content: ComponentType;
@@ -86,9 +86,9 @@ export type SettingsCloseReason =
 
 export interface ResolvedSettingsLocation {
   section: SettingsSectionId;
-  /** Hash fragment without leading `#` (e.g. `connection` for advanced). */
+  /** note: hash fragment without leading `#` (e.g. `connection` for advanced). */
   hash: string;
-  /** Canonical pathname under `/settings/:section`. */
+  /** note: canonical pathname under `/settings/:section`. */
   pathname: string;
 }
 

@@ -1,5 +1,5 @@
 /**
- * Brief save mutation (plan v1219-world-module T2, QC fix wave) — the
+ * note: Brief save mutation (plan v1219-world-module T2, QC fix wave) — the
  * create-on-absent `patch-entity` write for the era KnowledgeEntry that backs
  * the Brief layer (`POST .../kb/patch-entity`, architect-confirmed contract):
  *
@@ -37,13 +37,13 @@ import type { WorldKbPatchEntityResponse } from '@42ch/nexus-contracts';
 
 export interface SaveBriefInput {
   text: string;
-  /** Observed entity for an edit; omit to create. */
+  /** note: observed entity for an edit; omit to create. */
   entity?: { entityId: string; version: number; body?: Record<string, unknown> };
 }
 
 export interface UseSaveBriefOptions {
   /**
-   * Fired when this save performs the first-transition Work unlock — the
+   * note: fired when this save performs the first-transition Work unlock — the
    * layer renders the announce UI (`世界已就绪` card + toast) here.
    */
   onFirstUnlock?: () => void;
@@ -85,7 +85,7 @@ function patchEdit(
   return client.worldKbPatchEntity(worldId, {
     entity_id: entity.entityId,
     expected_version: entity.version,
-    // Body is a REPLACEMENT on the wire — merge, never overwrite: keep every
+    // note: body is a REPLACEMENT on the wire — merge, never overwrite: keep every
     // existing top-level key and attribute, upsert only `world_summary`.
     // The canonical title stays untouched on edit.
     patch: {
@@ -104,7 +104,7 @@ export function useSaveBrief(worldId: string, opts: UseSaveBriefOptions = {}) {
         try {
           return await patchEdit(client, worldId, entity, text);
         } catch (error) {
-          // 409 on edit = concurrent write — refresh the graph so the mounted
+          // note: 409 on edit = concurrent write — refresh the graph so the mounted
           // editor picks up the fresh revision, then rethrow for the inline
           // retry copy.
           if (isWorldKbConflictError(error)) {
@@ -116,13 +116,13 @@ export function useSaveBrief(worldId: string, opts: UseSaveBriefOptions = {}) {
       try {
         return await patchCreate(client, worldId, mintBriefEntityId(), text);
       } catch (error) {
-        // 409 on create = the minted id already exists — remint, retry once.
+        // note: 409 on create = the minted id already exists — remint, retry once.
         if (!isWorldKbConflictError(error)) throw error;
         return patchCreate(client, worldId, mintBriefEntityId(), text);
       }
     },
     onSuccess: async () => {
-      // Unlock at patch settle — BEFORE the awaited invalidation — so the
+      // note: unlock at patch settle — BEFORE the awaited invalidation — so the
       // activation survives a tab close in the refetch window. The
       // first-transition gate keeps edit re-saves silent (D8/D17); any save
       // can be the first transition (an era may predate the Brief).
@@ -130,7 +130,7 @@ export function useSaveBrief(worldId: string, opts: UseSaveBriefOptions = {}) {
         unlock(creatorId, 'work');
         opts.onFirstUnlock?.();
       }
-      // Awaited by mutateAsync: the caller can leave edit mode immediately
+      // note: awaited by mutateAsync: the caller can leave edit mode immediately
       // after save without an empty-state flash.
       await qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });
     },

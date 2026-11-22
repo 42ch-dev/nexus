@@ -1,5 +1,5 @@
 /**
- * World layer tabs (plan v1219-world-module T1) — Brief / Narrative / Moment.
+ * note: World layer tabs (plan v1219-world-module T1) — Brief / Narrative / Moment.
  *
  * The tabs ride the existing `?layer=brief|narrative|moment` URL convention
  * (V1.123 P4): the active layer is derived from the search param (unknown or

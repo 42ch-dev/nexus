@@ -1,5 +1,5 @@
 /**
- * Harness rail app (plan v1220 T2) — replaces the legacy `/strategies` list
+ * note: Harness rail app (plan v1220 T2) — replaces the legacy `/strategies` list
  * page inside the new shell.
  *
  * Reads only existing daemon endpoints (no new aggregation contract):
@@ -55,7 +55,7 @@ export function HarnessPage() {
   const reload = useReloadPreset();
   const removePreset = useDeletePreset();
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
-  /** The row whose manifest is being validated; `null` keeps the dialog closed. */
+  /** note: the row whose manifest is being validated; `null` keeps the dialog closed. */
   const [validateTarget, setValidateTarget] = useState<{ id: string; path: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
@@ -64,7 +64,7 @@ export function HarnessPage() {
     [presets.data],
   );
 
-  // One profile query per row sharing the exact `['presets','profile',<id>]`
+  // note: one profile query per row sharing the exact `['presets','profile',<id>]`
   // cache keys of the canvas/profile pages, so both drill-downs are cache hits.
   const profiles = useQueries({
     queries: catalogPresets.map((preset) => presetProfileQueryOptions(preset.id, client)),
@@ -84,7 +84,7 @@ export function HarnessPage() {
     return counts;
   }, [sessions.data]);
 
-  // One row-level state: a failed session read is unknown (never `idle`), and
+  // note: one row-level state — a failed session read is unknown (never `idle`), and
   // a truncated walk marks the count as a lower bound.
   const runningStateFor = (presetId: string): PresetRunningState => {
     if (sessions.isError) return { status: 'error' };
@@ -97,7 +97,7 @@ export function HarnessPage() {
   };
 
   /**
-   * Validate validates a FILE, so the row's own manifest path is resolved first
+   * note: validate validates a FILE, so the row's own manifest path is resolved first
    * (`GET /v1/daemon/presets/{id}`). The dialog opens pre-filled with THAT
    * path — the row button means this preset, not a blank form — and stays
    * editable.
@@ -172,7 +172,7 @@ export function HarnessPage() {
                 onOpenProfile={() =>
                   navigate(`/strategies/${encodeURIComponent(preset.id)}/profile`)
                 }
-                // Embedded presets are compiled into the runtime: no manifest
+                // note: embedded presets are compiled into the runtime — no manifest
                 // file exists to validate, so the row renders no button (the
                 // same source gate Delete already uses).
                 onValidate={
@@ -193,7 +193,7 @@ export function HarnessPage() {
         onCreated={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
       />
       <ValidatePresetDialog
-        // Keyed by row: a different target is a different form instance.
+        // note: keyed by row — a different target is a different form instance.
         key={validateTarget?.id ?? 'closed'}
         open={validateTarget !== null}
         onOpenChange={(open) => {

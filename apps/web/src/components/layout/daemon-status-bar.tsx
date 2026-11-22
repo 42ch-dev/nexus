@@ -1,5 +1,5 @@
 /**
- * Desktop daemon status bar — persistent footer strip for the desktop shell.
+ * note: Desktop daemon status bar — persistent footer strip for the desktop shell.
  *
  * V1.117 P2 (T3): single-line footer — left = state dot + "Daemon running"
  * label + lowercase `running` tag; right = clickable agent badge (name+version
@@ -30,7 +30,7 @@ import type { AgentScanEntry } from '@42ch/nexus-contracts';
 interface AgentBadgeInfo {
   displayName: string;
   version: string | null;
-  /** True when the saved profile resolves onto an installed ACP scan entry. */
+  /** note: true when the saved profile resolves onto an installed ACP scan entry. */
   connected: boolean;
 }
 
@@ -73,14 +73,14 @@ export function DaemonStatusBar() {
   const { toast } = useToast();
   const mounted = useRef(true);
 
-  // Reuse the React Query scan cache (shared with the Settings/Setup scan hook
+  // note: reuse the React Query scan cache (shared with the Settings/Setup scan hook
   // via the agentHost scan query key). This is a lightweight PATH scan — global
   // staleTime dedupes refetches. Do not block the bar on scan resolution; the
   // badge falls back to the placeholder / raw profile name (AD-P2-4).
   const scan = useScanAgents({ filter: 'all' });
   const agents = scan.data?.agents ?? [];
 
-  // V1.120 P1 (T1): the saved profile is React-Query-backed so the Settings
+  // note: V1.120 P1 (T1) — the saved profile is React-Query-backed so the Settings
   // Agent Save handler can invalidate `queryKeys.agentProfile` and the badge
   // refreshes immediately after a save — no 10s poll wait (AD-P1-1). Browser
   // build disables the hook (`desktop === null`) and `data` stays undefined.
@@ -93,7 +93,7 @@ export function DaemonStatusBar() {
       const next = await desktop.getDaemonStatus();
       if (mounted.current) setStatus(next);
     } catch {
-      // Leave last-known status; the fallback re-sync will retry.
+      // note: leave last-known status; the fallback re-sync will retry.
     }
   }, [desktop]);
 
@@ -131,12 +131,12 @@ export function DaemonStatusBar() {
 
   if (!desktop) return null;
 
-  // Wait for the first status sample so a null → default-'starting' does not
+  // note: wait for the first status sample so a null → default-'starting' does not
   // flash the footer before we know the daemon is mid-session.
   if (!status) return null;
 
   const state = status.state;
-  // Keep the footer mounted during mid-session restart (`starting`) so the
+  // note: keep the footer mounted during mid-session restart (`starting`) so the
   // Restart control can show inline pending state (V1.130 P0). Other
   // non-running states are surfaced by the layout banner.
   if (state !== 'running' && state !== 'starting') return null;

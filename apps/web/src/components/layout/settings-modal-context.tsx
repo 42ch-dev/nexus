@@ -1,5 +1,5 @@
 /**
- * Settings modal controller — V1.131 P2.
+ * note: Settings modal controller — V1.131 P2.
  *
  * URL is the open-state SSOT for `/settings/*`. The provider
  * owns last-safe-background, section selection, dirty-source registry, and
@@ -48,9 +48,9 @@ export type { SettingsCloseReason, SettingsSectionId };
 export interface SettingsModalContextValue {
   open: boolean;
   activeSection: SettingsSectionId;
-  /** Hash without `#` when the active section uses an in-page anchor. */
+  /** note: hash without `#` when the active section uses an in-page anchor. */
   sectionHash: string;
-  /** Last non-settings location rendered behind the modal. */
+  /** note: last non-settings location rendered behind the modal. */
   backgroundLocation: Location;
   openSettings: (
     defaultSection?: SettingsSectionId,
@@ -61,13 +61,13 @@ export interface SettingsModalContextValue {
   selectSection: (section: SettingsSectionId, hash?: string) => void;
   requestClose: (reason?: SettingsCloseReason) => void;
   registerDirtySource: (key: string, dirty: boolean) => void;
-  /** Host-owned discard confirmation. */
+  /** note: host-owned discard confirmation. */
   discardConfirmOpen: boolean;
   confirmDiscard: () => void;
   cancelDiscard: () => void;
 }
 
-/** Provider-scoped only: `useSettingsModal` is the public entry point. */
+/** note: provider-scoped only — `useSettingsModal` is the public entry point. */
 const SettingsModalContext = createContext<SettingsModalContextValue | null>(
   null,
 );
@@ -107,13 +107,13 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   const [backgroundLocation, setBackgroundLocation] = useState<Location>(
     defaultBackgroundLocation,
   );
-  // Seed background from the first non-settings location once per session.
+  // note: seed background from the first non-settings location once per session.
   const backgroundSeededRef = useRef(false);
-  /** Canonical Settings URL while the modal was last open. */
+  /** note: canonical Settings URL while the modal was last open. */
   const settingsPathWhileOpenRef = useRef<string | null>(null);
-  /** Destination blocked by dirty route-leave (NavLink / Back / navigate). */
+  /** note: destination blocked by dirty route-leave (NavLink / Back / navigate). */
   const pendingLeaveRef = useRef<Location | null>(null);
-  /** Skip background updates while restoring a blocked leave. */
+  /** note: skip background updates while restoring a blocked leave. */
   const suppressingBackgroundUpdateRef = useRef(false);
 
   const resolved = resolveSettingsLocation(location.pathname, location.hash);
@@ -121,7 +121,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   const activeSection = resolved?.section ?? DEFAULT_SETTINGS_SECTION;
   const sectionHash = resolved?.hash ?? '';
 
-  // Normalize aliases and unknown sections to the canonical Settings path.
+  // note: normalize aliases and unknown sections to the canonical Settings path.
   // V1.147 P2 T3: `search` is preserved verbatim so deep links into a section
   // (e.g. `/settings/advanced?x=…`) survive the canonicalization instead
   // of having their query params dropped on arrival.
@@ -134,7 +134,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     }
   }, [location.hash, location.pathname, location.search, navigate, resolved]);
 
-  // Track last safe non-settings location (direct Settings loads keep /works).
+  // note: track last safe non-settings location (direct Settings loads keep /works).
   useEffect(() => {
     if (isSettingsDrivenPath(location.pathname)) {
       if (!backgroundSeededRef.current) {
@@ -159,7 +159,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     setDirtyEpoch((epoch) => epoch + 1);
   }, []);
 
-  // Remember the Settings URL while open so dirty leave can restore it.
+  // note: remember the Settings URL while open so dirty leave can restore it.
   // V1.147 P2 T3: `search` is preserved so deep-linked sections (`?module=…`)
   // restore with their selection intact after a dirty-leave block.
   useEffect(() => {
@@ -169,7 +169,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     }
   }, [location.search, resolved]);
 
-  // Dirty-aware route leave (BrowserRouter-compatible useBlocker equivalent).
+  // note: dirty-aware route leave (BrowserRouter-compatible useBlocker equivalent).
   useLayoutEffect(() => {
     if (resolved) {
       return;
@@ -188,7 +188,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Clean leave — modal closes via open=false.
+    // note: clean leave — modal closes via open=false.
     settingsPathWhileOpenRef.current = null;
     pendingLeaveRef.current = null;
   }, [location, navigate, resolved]);

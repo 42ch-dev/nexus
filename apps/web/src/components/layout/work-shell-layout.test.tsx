@@ -1,5 +1,5 @@
 /**
- * WorkShellLayout — structural smoke tests (V1.118 P2 T1).
+ * note: WorkShellLayout — structural smoke tests (V1.118 P2 T1).
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
@@ -93,7 +93,7 @@ describe('WorkShellLayout', () => {
     });
 
     const rail = screen.getByTestId('work-shell-rail-desktop');
-    // DESIGN.md components.sheet.width (min(100vw, 280px)) — the work-shell
+    // note: DESIGN.md components.sheet.width (min(100vw, 280px)) — the work-shell
     // right rail shares the sheet width token (V1.121 P2 T1).
     expect(rail).toHaveClass('w-sheet');
     expect(rail).toHaveClass('lg:flex');
