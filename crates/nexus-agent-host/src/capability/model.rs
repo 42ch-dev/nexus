@@ -1,4 +1,4 @@
-//! Capability model: host operations, events, descriptors, and DTOs.
+//! Capability model: host operations, events, descriptors, and DTOs. See docs/specs/agents/agent-host.md.
 //!
 //! Defines the normalized host operation and event types used across all provider
 //! adapters, the capability descriptor for negotiation, and supporting DTOs.
@@ -10,21 +10,21 @@ use serde::{Deserialize, Serialize};
 use crate::error::HostResult;
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 
-/// A stream of host events from an operation.
+/// note: A stream of host events from an operation.
 pub type HostEventStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = HostResult<HostEvent>> + Send + 'static>>;
 
-/// Protocol kind for a provider.
+/// note: protocol kind for a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolKind {
-    /// ACP protocol provider (via `nexus-acp-host`).
+    /// note: ACP protocol provider (via `nexus-acp-host`).
     Acp,
-    /// Native CLI provider (subprocess, limited capabilities).
+    /// note: native CLI provider (subprocess, limited capabilities).
     NativeCli,
 }
 
-/// Narrowing permission scope for a Host prompt operation (A1).
+/// note: narrowing permission scope for a Host prompt operation (A1).
 ///
 /// Intersected with Host configuration per operation; a provider unable to
 /// honor a requested scope refuses `not_supported` rather than silently
@@ -32,338 +32,338 @@ pub enum ProtocolKind {
 /// policy and never means unrestricted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptPermissionScope {
-    /// Read-only tools allowed.
+    /// note: read-only tools allowed.
     pub allow_read: bool,
-    /// Write tools allowed.
+    /// note: write tools allowed.
     pub allow_write: bool,
-    /// Destructive tools allowed.
+    /// note: destructive tools allowed.
     pub allow_destructive: bool,
 }
 
-/// Host operation — only execution-scoped variants.
+/// note: host operation — only execution-scoped variants.
 ///
 /// Cancel flows through `HostFacade::cancel()` / `ProviderAdapter::cancel()`.
 /// Health is a separate `HostFacade::health()` query.
 /// See PM Review Note R-002.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostOperation {
-    /// Send a prompt with content blocks.
+    /// note: send a prompt with content blocks.
     Prompt {
-        /// Unique operation ID for tracking.
+        /// note: unique operation ID for tracking.
         op_id: HostOperationId,
-        /// Content blocks comprising the prompt.
+        /// note: content blocks comprising the prompt.
         content: Vec<HostContentBlock>,
-        /// Narrowing permission scope (A1). `None` preserves the standalone
+        /// note: narrowing permission scope (A1). `None` preserves the standalone
         /// Host/Character policy; a provider unable to honor a requested
         /// scope refuses `not_supported`.
         permission_scope: Option<PromptPermissionScope>,
     },
-    /// Switch the model for the current session.
+    /// note: switch the model for the current session.
     SetModel {
-        /// Model identifier.
+        /// note: model identifier.
         model: String,
     },
-    /// Switch the mode for the current session.
+    /// note: switch the mode for the current session.
     SetMode {
-        /// Mode identifier.
+        /// note: mode identifier.
         mode: String,
     },
 }
 
-/// Content block for host prompts.
+/// note: content block for host prompts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostContentBlock {
-    /// Plain text content.
+    /// note: plain text content.
     Text {
-        /// The text content.
+        /// note: the text content.
         text: String,
     },
-    /// Resource link content.
+    /// note: resource link content.
     ResourceLink {
-        /// Resource name.
+        /// note: resource name.
         name: Option<String>,
-        /// Resource URI.
+        /// note: resource URI.
         uri: String,
     },
 }
 
-/// Host event — terminal and intermediate events from provider execution.
+/// note: host event — terminal and intermediate events from provider execution.
 ///
 /// Every operation emits exactly one terminal event (`OpFinished` or `OpFailed`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostEvent {
-    /// Session successfully created.
+    /// note: session successfully created.
     SessionCreated(SessionCreatedEvent),
-    /// Operation started executing.
+    /// note: operation started executing.
     OpStarted(OperationStartedEvent),
-    /// Thinking/reasoning delta.
+    /// note: thinking/reasoning delta.
     ThoughtDelta(TextDeltaEvent),
-    /// Message text delta.
+    /// note: message text delta.
     MessageDelta(TextDeltaEvent),
-    /// Tool call initiated.
+    /// note: tool call initiated.
     ToolCall(ToolCallEvent),
-    /// Tool call status update.
+    /// note: tool call status update.
     ToolCallUpdate(ToolCallUpdateEvent),
     /// Plan/status update.
     PlanUpdate(PlanUpdateEvent),
-    /// Status message (warning, info).
+    /// note: status message (warning, info).
     Status(StatusEvent),
-    /// Operation completed successfully.
+    /// note: operation completed successfully.
     OpFinished(OperationFinishedEvent),
-    /// Operation failed.
+    /// note: operation failed.
     OpFailed(OperationFailedEvent),
-    /// Session stopped (graceful or error).
+    /// note: session stopped (graceful or error).
     SessionStopped(SessionStoppedEvent),
 }
 
-/// Session created event payload.
+/// note: session created event payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreatedEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The provider ID.
+    /// note: the provider ID.
     pub provider_id: ProviderId,
 }
 
-/// Operation started event payload.
+/// note: operation started event payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationStartedEvent {
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
 }
 
-/// Text delta event (used for both thought and message deltas).
+/// note: text delta event (used for both thought and message deltas).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextDeltaEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// Delta text content.
+    /// note: delta text content.
     pub text: String,
 }
 
-/// Tool call event payload.
+/// note: tool call event payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// Tool call ID (provider-assigned).
+    /// note: tool call ID (provider-assigned).
     pub tool_call_id: String,
-    /// Tool name.
+    /// note: tool name.
     pub tool_name: String,
 }
 
-/// Tool call update event payload.
+/// note: tool call update event payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallUpdateEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// Tool call ID.
+    /// note: tool call ID.
     pub tool_call_id: String,
-    /// Update content (partial result or status).
+    /// note: update content (partial result or status).
     pub content: String,
 }
 
-/// Plan update event payload.
+/// note: plan update event payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanUpdateEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// Plan content (structured or free text).
+    /// note: plan content (structured or free text).
     pub content: String,
 }
 
-/// Status event payload (warnings, info, non-error messages).
+/// note: status event payload (warnings, info, non-error messages).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusEvent {
-    /// The session ID (if applicable).
+    /// note: the session ID (if applicable).
     pub session_id: Option<HostSessionId>,
-    /// Status level.
+    /// note: status level.
     pub level: StatusLevel,
-    /// Status message.
+    /// note: status message.
     pub message: String,
 }
 
-/// Status level for status events.
+/// note: status level for status events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusLevel {
-    /// Informational status.
+    /// note: informational status.
     Info,
-    /// Warning status.
+    /// note: warning status.
     Warning,
-    /// Error status (non-terminal).
+    /// note: error status (non-terminal).
     Error,
 }
 
-/// Operation finished event payload (terminal).
+/// note: operation finished event payload (terminal).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationFinishedEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// Finish reason.
+    /// note: finish reason.
     pub reason: FinishReason,
 }
 
-/// Reason for operation completion.
+/// note: reason for operation completion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
-    /// Normal end-of-turn completion.
+    /// note: normal end-of-turn completion.
     EndTurn,
-    /// Hit token limit.
+    /// note: hit token limit.
     MaxTokens,
-    /// Hit turn request limit.
+    /// note: hit turn request limit.
     MaxTurnRequests,
-    /// Agent refused the request.
+    /// note: agent refused the request.
     Refusal,
-    /// The turn was cancelled by the client (I-004). Typed non-success:
+    /// note: the turn was cancelled by the client (I-004). Typed non-success:
     /// never mapped to `EndTurn`/succeeded for workflow or Character
     /// consumers.
     Cancelled,
 }
 
-/// Operation failed event payload (terminal).
+/// note: operation failed event payload (terminal).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationFailedEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// The operation ID.
+    /// note: the operation ID.
     pub op_id: HostOperationId,
-    /// Error category.
+    /// note: error category.
     pub error_category: String,
-    /// Error message.
+    /// note: error message.
     pub error_message: String,
 }
 
-/// Session stopped event payload.
+/// note: session stopped event payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStoppedEvent {
-    /// The session ID.
+    /// note: the session ID.
     pub session_id: HostSessionId,
-    /// Stop reason.
+    /// note: stop reason.
     pub reason: SessionStopReason,
 }
 
-/// Reason for session stop.
+/// note: reason for session stop.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStopReason {
-    /// Graceful shutdown requested.
+    /// note: graceful shutdown requested.
     GracefulShutdown,
-    /// Provider process exited.
+    /// note: provider process exited.
     ProviderExit,
-    /// Error caused session termination.
+    /// note: error caused session termination.
     Error,
-    /// Session was cancelled.
+    /// note: session was cancelled.
     Cancelled,
 }
 
-/// Configuration for starting the host.
+/// note: configuration for starting the host.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostStartConfig {
-    /// Path to the config file.
+    /// note: path to the config file.
     pub config_path: PathBuf,
-    /// Workspace root for the host.
+    /// note: workspace root for the host.
     pub workspace_root: PathBuf,
-    /// Maximum concurrent sessions.
+    /// note: maximum concurrent sessions.
     pub max_sessions: usize,
-    /// Maximum concurrent operations per session.
+    /// note: maximum concurrent operations per session.
     pub max_ops_per_session: usize,
-    /// Timeout configuration.
+    /// note: timeout configuration.
     pub timeouts: crate::config::TimeoutConfig,
-    /// Pre-validated config retained from boot (avoids a second disk read).
+    /// note: pre-validated config retained from boot (avoids a second disk read).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_config: Option<crate::config::AgentHostConfig>,
-    /// Pre-admitted provider catalog from open-time PATH/recipe discovery.
+    /// note: pre-admitted provider catalog from open-time PATH/recipe discovery.
     ///
     /// When set, [`crate::HostManager::start`] materializes adapters from this
     /// snapshot and does not re-run PATH discovery.
     #[serde(skip)]
     pub admitted_catalog: Option<Vec<crate::ProviderCatalogEntry>>,
-    /// Verified owner for bounded readiness probes at start.
+    /// note: verified owner for bounded readiness probes at start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_owner: Option<SessionOwner>,
 }
 
-/// Verified owner metadata bound to a Host session.
+/// note: verified owner metadata bound to a Host session.
 ///
 /// Constructed by Host/Character admission from existing verified scope
 /// (never from request-body assertions). The canonical workspace cwd is
 /// validated against this owner before any subprocess spawn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionOwner {
-    /// The verified Creator ID that owns this session.
+    /// note: the verified Creator ID that owns this session.
     pub creator_id: String,
-    /// Canonical workspace root of the Creator (absolute path).
+    /// note: canonical workspace root of the Creator (absolute path).
     pub workspace_root: PathBuf,
-    /// Optional orchestration run ID (set by the trusted orchestration
+    /// note: optional orchestration run ID (set by the trusted orchestration
     /// adapter; `None` for standalone Character/public Host sessions).
     pub orchestration_run_id: Option<String>,
 }
 
-/// Request to create a new managed session.
+/// note: request to create a new managed session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
-    /// Provider to use for this session.
+    /// note: provider to use for this session.
     pub provider_id: ProviderId,
-    /// Working directory for the session.
+    /// note: working directory for the session.
     pub cwd: PathBuf,
-    /// Optional model override.
+    /// note: optional model override.
     pub model: Option<String>,
-    /// Optional mode override.
+    /// note: optional mode override.
     pub mode: Option<String>,
-    /// MCP server configurations for the session.
+    /// note: MCP server configurations for the session.
     pub mcp_servers: Vec<McpServerConfig>,
-    /// Additional metadata (opaque to host).
+    /// note: additional metadata (opaque to host).
     pub metadata: serde_json::Value,
-    /// Verified owner metadata (Creator + canonical workspace).
+    /// note: verified owner metadata (Creator + canonical workspace).
     pub owner: SessionOwner,
 }
 
-/// MCP server configuration.
+/// note: MCP server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpServerConfig {
-    /// HTTP-based MCP server.
+    /// note: HTTP-based MCP server.
     Http {
-        /// Server name.
+        /// note: server name.
         name: String,
-        /// Server URL.
+        /// note: server URL.
         url: String,
     },
-    /// SSE-based MCP server.
+    /// note: SSE-based MCP server.
     Sse {
-        /// Server name.
+        /// note: server name.
         name: String,
-        /// Server URL.
+        /// note: server URL.
         url: String,
     },
-    /// Stdio-based MCP server.
+    /// note: stdio-based MCP server.
     Stdio {
-        /// Server name.
+        /// note: server name.
         name: String,
-        /// Command to execute.
+        /// note: command to execute.
         command: PathBuf,
-        /// Command arguments.
+        /// note: command arguments.
         args: Vec<String>,
-        /// Environment variables.
+        /// note: environment variables.
         env: std::collections::HashMap<String, String>,
     },
 }
 
-/// Descriptor for a provider's static capabilities.
+/// note: descriptor for a provider's static capabilities.
 ///
 /// This struct intentionally uses individual bool fields rather than bitflags
 /// to match the capability negotiation protocol (compass §Capability negotiation)
@@ -371,38 +371,38 @@ pub enum McpServerConfig {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilityDescriptor {
-    /// Supports text prompt input.
+    /// note: supports text prompt input.
     pub text_prompt: bool,
-    /// Supports streaming events.
+    /// note: supports streaming events.
     pub streaming: bool,
-    /// Supports operation cancellation.
+    /// note: supports operation cancellation.
     pub cancellation: bool,
-    /// Supports session restore (load).
+    /// note: supports session restore (load).
     pub session_restore: bool,
-    /// Supports structured tool call events.
+    /// note: supports structured tool call events.
     pub structured_tool_calls: bool,
-    /// Supports HTTP MCP transport.
+    /// note: supports HTTP MCP transport.
     pub mcp_http: bool,
-    /// Supports SSE MCP transport.
+    /// note: supports SSE MCP transport.
     pub mcp_sse: bool,
-    /// Supports stdio MCP transport.
+    /// note: supports stdio MCP transport.
     pub mcp_stdio: bool,
-    /// Supports image input.
+    /// note: supports image input.
     pub images: bool,
-    /// Supports audio input.
+    /// note: supports audio input.
     pub audio: bool,
-    /// Supports embedded context injection.
+    /// note: supports embedded context injection.
     pub embedded_context: bool,
-    /// Supports model switching.
+    /// note: supports model switching.
     pub set_model: bool,
-    /// Supports mode switching.
+    /// note: supports mode switching.
     pub set_mode: bool,
-    /// Supports diagnostic/reporting events.
+    /// note: supports diagnostic/reporting events.
     pub diagnostics: bool,
 }
 
 impl CapabilityDescriptor {
-    /// ACP full capability descriptor.
+    /// note: ACP full capability descriptor.
     ///
     /// Claims `set_mode = true` because the ACP protocol provides a stable
     /// `session/set_mode` RPC. Sets `set_model = false` because model
@@ -430,7 +430,7 @@ impl CapabilityDescriptor {
         }
     }
 
-    /// Native CLI capability descriptor with multi-turn session restore.
+    /// note: native CLI capability descriptor with multi-turn session restore.
     ///
     /// Supports `session_restore = true` because the Claude CLI provides
     /// `--session-id` / `--resume` flags for conversation continuity across
@@ -455,7 +455,7 @@ impl CapabilityDescriptor {
         }
     }
 
-    /// Native CLI descriptor for the `DeepSeek Harness` runtime
+    /// note: native CLI descriptor for the `DeepSeek Harness` runtime
     /// (`dsh-native`) — the documented narrower descriptor (locks § AR-6).
     ///
     /// `streaming` is `true` after v1.188 P1: root `assistant/message`
@@ -489,7 +489,7 @@ impl CapabilityDescriptor {
         }
     }
 
-    /// Disabled descriptor — all capabilities off.
+    /// note: disabled descriptor — all capabilities off.
     #[must_use]
     pub const fn disabled() -> Self {
         Self {
@@ -511,137 +511,137 @@ impl CapabilityDescriptor {
     }
 }
 
-/// Static descriptor for a discovered provider.
+/// note: static descriptor for a discovered provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderDescriptor {
-    /// Provider ID.
+    /// note: provider ID.
     pub provider_id: ProviderId,
-    /// Human-readable display name.
+    /// note: human-readable display name.
     pub display_name: String,
-    /// Protocol kind.
+    /// note: protocol kind.
     pub protocol_kind: ProtocolKind,
-    /// Static capabilities.
+    /// note: static capabilities.
     pub capabilities: CapabilityDescriptor,
 }
 
-/// Provider health status.
+/// note: provider health status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderHealth {
-    /// Provider ID.
+    /// note: provider ID.
     pub provider_id: ProviderId,
-    /// Whether the provider is available.
+    /// note: whether the provider is available.
     pub available: bool,
-    /// Optional latency hint (milliseconds).
+    /// note: optional latency hint (milliseconds).
     pub latency_ms: Option<u64>,
-    /// Optional status message.
+    /// note: optional status message.
     pub message: Option<String>,
 }
 
-/// Probe request for checking provider availability.
+/// note: probe request for checking provider availability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeRequest {
-    /// Timeout in milliseconds.
+    /// note: timeout in milliseconds.
     pub timeout_ms: u64,
-    /// Canonical cwd for the bounded handshake probe.
+    /// note: canonical cwd for the bounded handshake probe.
     pub cwd: PathBuf,
-    /// Verified session owner (Creator + workspace) for the probe child.
+    /// note: verified session owner (Creator + workspace) for the probe child.
     pub owner: SessionOwner,
 }
 
-/// Launch specification for starting a provider session.
+/// note: launch specification for starting a provider session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchSpec {
-    /// Working directory for the session.
+    /// note: working directory for the session.
     pub cwd: PathBuf,
-    /// Optional model override.
+    /// note: optional model override.
     pub model: Option<String>,
-    /// Optional mode override.
+    /// note: optional mode override.
     pub mode: Option<String>,
-    /// MCP server configurations.
+    /// note: MCP server configurations.
     pub mcp_servers: Vec<McpServerConfig>,
-    /// Verified owner metadata (Creator + canonical workspace).
+    /// note: verified owner metadata (Creator + canonical workspace).
     pub owner: SessionOwner,
 }
 
-/// Handle to a managed provider session.
+/// note: handle to a managed provider session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedSessionHandle {
-    /// Provider ID.
+    /// note: provider ID.
     pub provider_id: ProviderId,
-    /// Host session ID.
+    /// note: host session ID.
     pub session_id: HostSessionId,
-    /// Negotiated capabilities for this session.
+    /// note: negotiated capabilities for this session.
     pub capabilities: CapabilityDescriptor,
-    /// Opaque owned-process identity (PID + platform birth + owned group)
+    /// note: opaque owned-process identity (PID + platform birth + owned group)
     /// captured at launch (A5). `None` when the platform cannot establish a
     /// birth token; cleanup must then be reported unconfirmed. Never a
     /// transport handle — the daemon persists this fingerprint only.
     pub process_identity: Option<OwnedProcessIdentity>,
 }
 
-/// Opaque owned-process identity (A5) — PID plus process-birth and group.
+/// note: opaque owned-process identity (A5) — PID plus process-birth and group.
 ///
 /// Never identified by PID alone. Mirrors the durable
 /// `nexus_session_storage::run_state::OwnedProcessIdentity` shape so the daemon
 /// can persist the fingerprint without importing provider crates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnedProcessIdentity {
-    /// Process id.
+    /// note: process id.
     pub pid: u32,
-    /// Platform process-birth identity (e.g. start time) for reuse detection.
+    /// note: platform process-birth identity (e.g. start time) for reuse detection.
     pub process_birth: Option<String>,
-    /// Owned process-group identity for tree cleanup.
+    /// note: owned process-group identity for tree cleanup.
     pub group_id: Option<String>,
 }
 
-/// Host-level health report.
+/// note: host-level health report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostHealth {
-    /// Whether the host is running.
+    /// note: whether the host is running.
     pub running: bool,
-    /// Number of active sessions.
+    /// note: number of active sessions.
     pub active_sessions: usize,
-    /// Number of active operations.
+    /// note: number of active operations.
     pub active_operations: usize,
 }
 
-/// Host session view (returned from `create_session`).
+/// note: host session view (returned from `create_session`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostSession {
-    /// Session ID.
+    /// note: session ID.
     pub session_id: HostSessionId,
-    /// Provider ID.
+    /// note: provider ID.
     pub provider_id: ProviderId,
-    /// Negotiated capabilities.
+    /// note: negotiated capabilities.
     pub capabilities: CapabilityDescriptor,
-    /// Session state.
+    /// note: session state.
     pub state: SessionState,
-    /// Opaque owned-process identity (PID + birth + group) captured at
+    /// note: opaque owned-process identity (PID + birth + group) captured at
     /// launch (A5). `None` when the platform cannot establish a birth token.
     pub process_identity: Option<OwnedProcessIdentity>,
 }
 
-/// Session state in the host state machine.
+/// note: session state in the host state machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
-    /// Session created, not yet started.
+    /// note: session created, not yet started.
     Created,
-    /// Session starting (provider launch in progress).
+    /// note: session starting (provider launch in progress).
     Starting,
-    /// Session ready for operations.
+    /// note: session ready for operations.
     Ready,
-    /// Session busy with an operation.
+    /// note: session busy with an operation.
     Busy,
-    /// Session cancelling an operation.
+    /// note: session cancelling an operation.
     Cancelling,
-    /// Session stopping (shutdown in progress).
+    /// note: session stopping (shutdown in progress).
     Stopping,
-    /// Session stopped (terminal).
+    /// note: session stopped (terminal).
     Stopped,
-    /// Recoverable error state.
+    /// note: recoverable error state.
     ErrorRecoverable,
-    /// Terminal error state.
+    /// note: terminal error state.
     ErrorTerminal,
 }
 
@@ -649,14 +649,14 @@ pub enum SessionState {
 mod descriptor_audit_tests {
     use super::*;
 
-    // ── DF-20: Capability truthfulness audit (AH2.1 / AH2.2) ──────────
+    // note: ── DF-20: Capability truthfulness audit (AH2.1 / AH2.2) ──────────
     //
     // These tests verify that `CapabilityDescriptor::acp_full()` claims
     // match the `AcpProvider` implementation. The spec (agent-host.md §4.1.4
     // D-003) requires the descriptor to never claim capabilities the adapter
     // cannot deliver.
 
-    /// `set_model` must be `false` in the static descriptor because model
+    /// note: `set_model` must be `false` in the static descriptor because model
     /// switching depends on dynamic discovery of agent-specific config
     /// options. The `AcpProvider::handle_set_model()` method returns
     /// `CapabilityUnsupported` when no model config option is found.
@@ -670,7 +670,7 @@ mod descriptor_audit_tests {
         );
     }
 
-    /// `set_mode` must be `true` in the static descriptor because the ACP
+    /// note: `set_mode` must be `true` in the static descriptor because the ACP
     /// protocol provides a stable `session/set_mode` RPC that the
     /// `AcpProvider::handle_set_mode()` method calls directly.
     #[test]
@@ -683,7 +683,7 @@ mod descriptor_audit_tests {
         );
     }
 
-    /// `native_cli_limited` must not claim `set_model` or `set_mode` — native
+    /// note: `native_cli_limited` must not claim `set_model` or `set_mode` — native
     /// CLI providers use subprocess invocation, not protocol-level control.
     #[test]
     fn native_cli_limited_no_model_or_mode() {
@@ -695,7 +695,7 @@ mod descriptor_audit_tests {
         assert!(!desc.set_mode, "native_cli_limited must not claim set_mode");
     }
 
-    /// `native_cli_limited` must not claim `structured_tool_calls` because
+    /// note: `native_cli_limited` must not claim `structured_tool_calls` because
     /// native CLI output is unstructured (agent-host.md §4.2.2).
     #[test]
     fn native_cli_limited_no_structured_tool_calls() {
@@ -706,7 +706,7 @@ mod descriptor_audit_tests {
         );
     }
 
-    /// `dsh_limited` is the documented narrower descriptor (locks § AR-6):
+    /// note: `dsh_limited` is the documented narrower descriptor (locks § AR-6):
     /// `cancellation` must be honest `false` (no cancel RPC on the
     /// `Session::run` surface); `streaming` is `true` since v1.188 P1 —
     /// committed root `assistant/message` notifications are forwarded as
@@ -744,7 +744,7 @@ mod descriptor_audit_tests {
         assert_eq!(desc.diagnostics, native.diagnostics);
     }
 
-    /// `disabled` descriptor must have all capabilities off.
+    /// note: `disabled` descriptor must have all capabilities off.
     #[test]
     fn disabled_all_off() {
         let desc = CapabilityDescriptor::disabled();
@@ -764,7 +764,7 @@ mod descriptor_audit_tests {
         assert!(!desc.diagnostics);
     }
 
-    /// `acp_full` must claim core capabilities that every ACP session
+    /// note: `acp_full` must claim core capabilities that every ACP session
     /// is expected to support (text prompt, streaming, cancellation).
     #[test]
     fn acp_full_core_capabilities_present() {

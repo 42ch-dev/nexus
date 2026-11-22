@@ -1,4 +1,4 @@
-//! Capability negotiation helpers.
+//! Capability negotiation helpers. See docs/specs/agents/agent-host.md.
 //!
 //! Merges provider static descriptor with ACP initialize response,
 //! applies policy deny/allow toggles, and validates against session request.
@@ -7,19 +7,19 @@ use crate::capability::model::{CapabilityDescriptor, CreateSessionRequest};
 use crate::error::{HostError, HostResult};
 use crate::ids::ProviderId;
 
-/// Negotiated capabilities after merging static descriptor, runtime response,
+/// note: negotiated capabilities after merging static descriptor, runtime response,
 /// and policy.
 #[derive(Debug, Clone)]
 pub struct NegotiatedCapabilities {
-    /// Final negotiated descriptor.
+    /// note: final negotiated descriptor.
     pub descriptor: CapabilityDescriptor,
-    /// List of capabilities that were denied by policy.
+    /// note: list of capabilities that were denied by policy.
     pub denied: Vec<String>,
-    /// List of capabilities that were downgraded (requested but unavailable).
+    /// note: list of capabilities that were downgraded (requested but unavailable).
     pub downgraded: Vec<String>,
 }
 
-/// Merge a static provider descriptor with ACP initialize response data.
+/// note: merge a static provider descriptor with ACP initialize response data.
 ///
 /// The static descriptor represents what the host knows about the provider
 /// at discovery time. The ACP initialize response provides runtime capability
@@ -49,7 +49,7 @@ pub const fn merge_provider_capabilities(
     }
 }
 
-/// Apply policy deny toggles to a capability descriptor.
+/// note: apply policy deny toggles to a capability descriptor.
 ///
 /// Capabilities in the deny set are forced to `false` regardless of
 /// what the provider reports.
@@ -101,7 +101,7 @@ pub fn apply_policy_deny(
     (result, actually_denied)
 }
 
-/// Validate a session request against negotiated capabilities.
+/// note: validate a session request against negotiated capabilities.
 ///
 /// Returns an error if the request requires capabilities that are not
 /// available in the negotiated descriptor.
@@ -134,7 +134,7 @@ pub fn validate_session_request(
         }
     }
 
-    // Check MCP server requirements
+    // why: Check MCP server requirements
     for server in &request.mcp_servers {
         match server {
             crate::capability::model::McpServerConfig::Http { .. } => {
@@ -208,7 +208,7 @@ mod tests {
     fn merge_native_with_runtime() {
         let static_caps = CapabilityDescriptor::native_cli_limited();
         let mut runtime_caps = CapabilityDescriptor::acp_full();
-        runtime_caps.streaming = false; // runtime says no streaming
+        runtime_caps.streaming = false; // why: runtime says no streaming
         let merged = merge_provider_capabilities(&static_caps, &runtime_caps);
         assert!(!merged.streaming);
         assert!(!merged.set_model);
@@ -245,8 +245,8 @@ mod tests {
         let request = CreateSessionRequest {
             provider_id: pid.clone(),
             cwd: std::path::PathBuf::from("/tmp"),
-            model: None, // Model switching is via SetModel operation, not creation hint
-            mode: Some("ask".to_string()), // set_mode = true in acp_full()
+            model: None, // why: Model switching is via SetModel operation, not creation hint
+            mode: Some("ask".to_string()), // why: set_mode = true in acp_full()
             mcp_servers: vec![],
             metadata: serde_json::Value::Null,
             owner: crate::capability::model::SessionOwner {

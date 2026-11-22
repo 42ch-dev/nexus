@@ -5,6 +5,8 @@
 //! keeping the wire parser owned by the crate and Nexus owning only the
 //! event normalization. Consumed by the Codex provider execute loop
 //! (v1.168 P1 T2).
+//!
+//! See docs/specs/agents/agent-host.md
 
 use codex_codes::messages::Notification;
 use codex_codes::protocol::{Turn, TurnStatus};
@@ -17,7 +19,7 @@ use crate::capability::model::{
 };
 use crate::ids::{HostOperationId, HostSessionId};
 
-/// Map a batch of codex app-server frames into host events.
+/// note: map a batch of codex app-server frames into host events.
 ///
 /// One turn = one batch, ending at `TurnCompleted`. Emits at most one
 /// terminal event; the frame→event map table is the v1.168 native-host
@@ -39,7 +41,7 @@ pub fn map_codex(
     for message in messages {
         match message {
             ServerMessage::Request { .. } => {
-                // AR-4: approvals are answered by the execute loop, never
+                // why: AR-4: approvals are answered by the execute loop, never
                 // surfaced to the author.
                 tracing::debug!(
                     target: "nexus_agent_host::providers::native_cli::map_codex",
@@ -53,7 +55,7 @@ pub fn map_codex(
                         op_id: op_id.clone(),
                     }));
                 }
-                // AR-1: incremental deltas.
+                // why: AR-1: incremental deltas.
                 Notification::AgentMessageDelta(delta) => {
                     events.push(HostEvent::MessageDelta(TextDeltaEvent {
                         session_id: session_id.clone(),
@@ -83,7 +85,7 @@ pub fn map_codex(
                         break;
                     }
                 }
-                // AR-1: non-terminal; the terminal comes from `TurnCompleted`
+                // why: AR-1: non-terminal; the terminal comes from `TurnCompleted`
                 // or the stream-abort backstop.
                 Notification::Error(err) => events.push(HostEvent::Status(StatusEvent {
                     session_id: Some(session_id.clone()),
@@ -116,7 +118,7 @@ pub fn map_codex(
                         message: notice.summary.clone(),
                     }));
                 }
-                // AR-1: ItemStarted/ItemCompleted/CmdOutputDelta/
+                // why: AR-1: ItemStarted/ItemCompleted/CmdOutputDelta/
                 // FileChangeOutputDelta/PlanDelta/TurnPlanUpdated/token-usage/
                 // thread-lifecycle/realtime/every other modeled method — no
                 // host event this iteration (structured_tool_calls stays
@@ -133,7 +135,7 @@ pub fn map_codex(
     events
 }
 
-/// Terminal event for a `TurnCompleted` frame, if it carries one (AR-1).
+/// note: terminal event for a `TurnCompleted` frame, if it carries one (AR-1).
 ///
 /// `Completed` / `Interrupted` → clean `OpFinished(EndTurn)` (an
 /// interrupt-initiated stop is a clean end, not a failure); `Failed` (with
@@ -175,7 +177,7 @@ fn turn_completed_terminal(
     }
 }
 
-/// Classify a `codex_codes` stream error into the one terminal `OpFailed`
+/// note: classify a `codex_codes` stream error into the one terminal `OpFailed`
 /// event of the failed turn (PD-3, AR-7 category tokens).
 ///
 /// Observed crate API (codex-codes 0.146.4, locked by the T1 fixture
@@ -194,9 +196,9 @@ pub fn classify_stream_error(
     let category = match error {
         CodexError::Deserialization(_) => "decode_error",
         CodexError::ConnectionClosed | CodexError::ServerClosed => "stream_closed",
-        // AR-7: io_error covers spawn/stdio failures.
+        // why: AR-7: io_error covers spawn/stdio failures.
         CodexError::Io(_) | CodexError::BinaryNotFound { .. } => "io_error",
-        // Json originates on the outgoing serialization path (incoming
+        // why: Json originates on the outgoing serialization path (incoming
         // decode failures surface as Deserialization); everything else is a
         // provider-side failure (server exit, JSON-RPC error response, …).
         _ => "provider_error",
@@ -205,7 +207,7 @@ pub fn classify_stream_error(
         session_id: session_id.clone(),
         op_id: op_id.clone(),
         error_category: category.to_string(),
-        // AR-7: the crate error's Display — capped so the raw wire line the
+        // why: AR-7: the crate error's Display — capped so the raw wire line the
         // Deserialization Display embeds is not echoed unboundedly (N-2).
         error_message: crate::providers::native_cli::truncate_error_message(&error.to_string()),
     })
@@ -284,7 +286,7 @@ mod tests {
             .count()
     }
 
-    /// (a) known deltas + `TurnCompleted(Completed)` → `OpStarted`,
+    /// note: (a) known deltas + `TurnCompleted(Completed)` → `OpStarted`,
     /// `MessageDelta`s (incremental), `ThoughtDelta`s, exactly one terminal
     /// `OpFinished(EndTurn)`.
     #[test]
@@ -321,7 +323,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `TurnCompleted(Interrupted)` → clean `OpFinished(EndTurn)` (an
+    /// note: `TurnCompleted(Interrupted)` → clean `OpFinished(EndTurn)` (an
     /// interrupt-initiated stop is a clean end, AR-1).
     #[test]
     fn interrupted_turn_ends_cleanly() {
@@ -338,7 +340,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `TurnCompleted(Failed)` or `turn.error` present → one
+    /// note: `TurnCompleted(Failed)` or `turn.error` present → one
     /// `OpFailed(provider_error)` with the server's message (AR-1, AR-7).
     #[test]
     fn failed_turn_emits_provider_error() {
@@ -355,7 +357,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// (b) unknown method → `Notification::Unknown` (crate passthrough,
+    /// note: (b) unknown method → `Notification::Unknown` (crate passthrough,
     /// PD-3 row 1) → skip, still exactly one terminal.
     #[test]
     fn skips_unknown_method_notification_but_keeps_terminal() {
@@ -379,7 +381,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// Known but unmapped methods (e.g. command output deltas) → skip
+    /// note: known but unmapped methods (e.g. command output deltas) → skip
     /// (`structured_tool_calls` stays false; AR-1 event vocabulary).
     #[test]
     fn skips_known_unmapped_methods() {
@@ -398,7 +400,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `Warning` → non-terminal `Status(warning)` (AR-1).
+    /// note: `Warning` → non-terminal `Status(warning)` (AR-1).
     #[test]
     fn warning_notification_is_status_warning() {
         let (session_id, op_id) = ids();
@@ -415,7 +417,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `Error(ErrorNotification)` → non-terminal `Status(error)`; the
+    /// note: `Error(ErrorNotification)` → non-terminal `Status(error)`; the
     /// terminal comes from `TurnCompleted` / stream abort (AR-1).
     #[test]
     fn error_notification_is_non_terminal_status_error() {
@@ -433,7 +435,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// (c) typed-decode failure on a known method → the crate's own parse
+    /// note: (c) typed-decode failure on a known method → the crate's own parse
     /// path (`ServerMessage::from_json_str`, the same one `next_message`
     /// runs) returns `Err(Error::Deserialization(ParseError))`, which
     /// classifies to one `OpFailed(decode_error)` — never a per-item skip.
@@ -451,7 +453,7 @@ mod tests {
         assert_eq!(terminal_count(&[HostEvent::OpFailed(failed)]), 1);
     }
 
-    /// AR-7 category tokens for the stream-error classifier, including
+    /// note: AR-7 category tokens for the stream-error classifier, including
     /// `stream_closed` on EOF (`Ok(None)` → `Error::ServerClosed` /
     /// `ConnectionClosed`).
     #[test]
@@ -473,7 +475,7 @@ mod tests {
                 CodexError::JsonRpc {
                     code: -32000,
                     message: "server error".to_string(),
-                    // codex-codes 0.167.4 added the structured `data` payload.
+                    // why: codex-codes 0.167.4 added the structured `data` payload.
                     data: None,
                 },
                 "provider_error",
@@ -489,7 +491,7 @@ mod tests {
             let failed = classify_stream_error(&error, &session_id, &op_id)
                 .unwrap_or_else(|| panic!("{expected} must classify: {error}"));
             assert_eq!(failed.error_category, expected, "for error {error}");
-            // N-2: error_message is the crate Display, capped at 512 bytes.
+            // why: N-2: error_message is the crate Display, capped at 512 bytes.
             let full = error.to_string();
             let prefix = failed
                 .error_message
@@ -502,7 +504,7 @@ mod tests {
         }
     }
 
-    /// N-2: a multi-MB raw wire line embedded in the Deserialization Display
+    /// note: N-2: a multi-MB raw wire line embedded in the Deserialization Display
     /// must be capped in `error_message`, not echoed unboundedly.
     #[test]
     fn decode_error_message_truncates_raw_wire() {

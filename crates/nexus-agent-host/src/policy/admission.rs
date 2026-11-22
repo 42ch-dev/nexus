@@ -1,4 +1,4 @@
-//! Admission policy — provider/capability/session gates before launch and exec.
+//! Admission policy — provider/capability/session gates before launch and exec. See docs/specs/agents/agent-host.md.
 //!
 //! Runs before provider launch and before operation dispatch.
 //! ACP provider permissions delegate to `nexus_acp_host::PermissionPolicy` (R-003).
@@ -10,23 +10,23 @@ use crate::config::AgentHostConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostSessionId, ProviderId};
 
-/// Admission policy for provider, capability, and concurrency checks.
+/// note: admission policy for provider, capability, and concurrency checks.
 #[derive(Debug, Clone)]
 pub struct AdmissionPolicy {
-    /// Maximum concurrent sessions.
+    /// note: maximum concurrent sessions.
     pub max_sessions: usize,
-    /// Maximum operations per session.
+    /// note: maximum operations per session.
     pub max_ops_per_session: usize,
-    /// Whether to deny unknown providers.
+    /// note: whether to deny unknown providers.
     pub deny_unknown_providers: bool,
-    /// Known provider IDs (from config + catalog).
+    /// note: known provider IDs (from config + catalog).
     known_providers: HashSet<ProviderId>,
-    /// Denied capability names (from policy config).
+    /// note: denied capability names (from policy config).
     denied_capabilities: HashSet<String>,
 }
 
 impl AdmissionPolicy {
-    /// Build admission policy from config and known provider catalog.
+    /// note: build admission policy from config and known provider catalog.
     #[must_use]
     pub fn from_config(config: &AgentHostConfig, known_providers: HashSet<ProviderId>) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl AdmissionPolicy {
         }
     }
 
-    /// Check if a provider is allowed.
+    /// note: check if a provider is allowed.
     ///
     /// # Errors
     ///
@@ -52,7 +52,7 @@ impl AdmissionPolicy {
         Ok(())
     }
 
-    /// Check if a capability is allowed.
+    /// note: check if a capability is allowed.
     ///
     /// # Errors
     ///
@@ -66,7 +66,7 @@ impl AdmissionPolicy {
         Ok(())
     }
 
-    /// Check session concurrency limit.
+    /// note: check session concurrency limit.
     ///
     /// # Errors
     ///
@@ -81,7 +81,7 @@ impl AdmissionPolicy {
         Ok(())
     }
 
-    /// Check per-session operation concurrency.
+    /// note: check per-session operation concurrency.
     ///
     /// # Errors
     ///
@@ -100,7 +100,7 @@ impl AdmissionPolicy {
         Ok(())
     }
 
-    /// Check workspace root validity.
+    /// note: check workspace root validity.
     ///
     /// The workspace root must be an absolute path that does not escape
     /// above its own trust boundary via directory traversal (e.g. `../../`).
@@ -114,7 +114,7 @@ impl AdmissionPolicy {
         Ok(())
     }
 
-    /// Full pre-launch admission check.
+    /// note: full pre-launch admission check.
     ///
     /// Validates provider, session limit, and workspace root.
     ///
@@ -133,7 +133,7 @@ impl AdmissionPolicy {
         Ok(())
     }
 
-    /// Full pre-exec admission check.
+    /// note: full pre-exec admission check.
     ///
     /// Validates session operation limit.
     ///
@@ -148,7 +148,7 @@ impl AdmissionPolicy {
         self.check_ops_per_session(session_id, active_ops)
     }
 
-    /// Add a denied capability.
+    /// note: add a denied capability.
     pub fn deny_capability(&mut self, capability: impl Into<String>) {
         self.denied_capabilities.insert(capability.into());
     }
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn unknown_provider_denied_when_policy_strict() {
-        let config = default_config(); // deny_unknown_providers = true
+        let config = default_config(); // why: deny_unknown_providers = true
         let policy = AdmissionPolicy::from_config(&config, known_providers());
         assert!(policy.check_provider(&ProviderId::new("unknown")).is_err());
     }

@@ -1,4 +1,4 @@
-//! Tool risk classification.
+//! Tool risk classification. See docs/specs/agents/agent-host.md.
 //!
 //! Wave 1: static declaration only with extension point for future
 //! auto-classification (R-006).
@@ -9,49 +9,49 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-/// Risk level for a tool operation.
+/// note: risk level for a tool operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolRisk {
-    /// Read-only operation (safe to auto-approve).
+    /// note: read-only operation (safe to auto-approve).
     Read,
-    /// Write operation (may modify state).
+    /// note: write operation (may modify state).
     Write,
-    /// Destructive operation (irreversible changes).
+    /// note: destructive operation (irreversible changes).
     Destructive,
 }
 
-/// Classifier for tool risk levels.
+/// note: classifier for tool risk levels.
 ///
 /// Wave 1 supports static declaration only. Future waves will add
 /// name/pattern-based auto-classification (R-006).
 pub trait ToolRiskClassifier: Send + Sync {
-    /// Classify the risk level of a tool by name.
+    /// note: classify the risk level of a tool by name.
     ///
     /// Returns `None` if the tool is unknown (treated as `Write` by default).
     fn classify(&self, tool_name: &str) -> Option<ToolRisk>;
 
-    /// Classify with fallback: unknown tools default to `Write`.
+    /// note: classify with fallback: unknown tools default to `Write`.
     fn classify_or_default(&self, tool_name: &str) -> ToolRisk {
         self.classify(tool_name).unwrap_or(ToolRisk::Write)
     }
 }
 
-/// Static tool risk classifier based on a predefined map.
+/// note: static tool risk classifier based on a predefined map.
 #[derive(Debug, Clone, Default)]
 pub struct StaticToolRiskClassifier {
-    /// Known tool risk mappings.
+    /// note: known tool risk mappings.
     tools: std::collections::HashMap<String, ToolRisk>,
 }
 
 impl StaticToolRiskClassifier {
-    /// Create a new empty classifier.
+    /// note: create a new empty classifier.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Register a tool with a specific risk level.
+    /// note: register a tool with a specific risk level.
     pub fn register(&mut self, tool_name: impl Into<String>, risk: ToolRisk) {
         self.tools.insert(tool_name.into(), risk);
     }
@@ -63,11 +63,11 @@ impl ToolRiskClassifier for StaticToolRiskClassifier {
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: ---------------------------------------------------------------------------
 // Compiled regex patterns for auto-classification
 // ---------------------------------------------------------------------------
 
-/// Destructive patterns — irreversible / highly dangerous operations.
+/// note: destructive patterns — irreversible / highly dangerous operations.
 static DESTRUCTIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)(?:^|[_\-\s])(?:drop|truncate|purge|erase|wipe|rm|force|kill|destroy)(?:$|[_\-\s])",
@@ -75,19 +75,19 @@ static DESTRUCTIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("destructive regex is valid")
 });
 
-/// Write patterns — state-mutating operations.
+/// note: write patterns — state-mutating operations.
 static WRITE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:^|[_\-\s])(?:create|update|delete|send|manage|write|insert|modify|edit|remove)(?:$|[_\-\s])")
         .expect("write regex is valid")
 });
 
-/// Read patterns — read-only / safe operations.
+/// note: read patterns — read-only / safe operations.
 static READ_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:^|[_\-\s])(?:get|list|search|fetch|view|read|show|find|query|check|describe)(?:$|[_\-\s])")
         .expect("read regex is valid")
 });
 
-/// Auto tool risk classifier using compiled regex patterns.
+/// note: auto tool risk classifier using compiled regex patterns.
 ///
 /// Classification priority (first match wins):
 /// 1. Destructive patterns
@@ -98,18 +98,18 @@ static READ_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// A `StaticToolRiskClassifier` can be layered on top for explicit overrides.
 #[derive(Debug, Clone, Default)]
 pub struct AutoToolRiskClassifier {
-    /// Static overrides take precedence over pattern matching.
+    /// note: static overrides take precedence over pattern matching.
     overrides: StaticToolRiskClassifier,
 }
 
 impl AutoToolRiskClassifier {
-    /// Create a new auto classifier with no static overrides.
+    /// note: create a new auto classifier with no static overrides.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Create an auto classifier with static overrides.
+    /// note: create an auto classifier with static overrides.
     ///
     /// Override entries take precedence over regex classification.
     #[must_use]
@@ -117,7 +117,7 @@ impl AutoToolRiskClassifier {
         Self { overrides }
     }
 
-    /// Register a static override for a specific tool name.
+    /// note: register a static override for a specific tool name.
     pub fn register_override(&mut self, tool_name: impl Into<String>, risk: ToolRisk) {
         self.overrides.register(tool_name, risk);
     }
@@ -125,12 +125,12 @@ impl AutoToolRiskClassifier {
 
 impl ToolRiskClassifier for AutoToolRiskClassifier {
     fn classify(&self, tool_name: &str) -> Option<ToolRisk> {
-        // 1. Check static overrides first
+        // note: 1. Check static overrides first
         if let Some(risk) = self.overrides.classify(tool_name) {
             return Some(risk);
         }
 
-        // 2. Match against compiled patterns (destructive first, then write, then read)
+        // note: 2. Match against compiled patterns (destructive first, then write, then read)
         if DESTRUCTIVE_RE.is_match(tool_name) {
             return Some(ToolRisk::Destructive);
         }
@@ -141,7 +141,7 @@ impl ToolRiskClassifier for AutoToolRiskClassifier {
             return Some(ToolRisk::Read);
         }
 
-        // 3. Default: Write (not Read)
+        // note: 3. Default: Write (not Read)
         Some(ToolRisk::Write)
     }
 }
@@ -179,12 +179,12 @@ mod tests {
         assert_eq!(json, "\"destructive\"");
     }
 
-    // --- AutoToolRiskClassifier tests ---
+    // note: --- AutoToolRiskClassifier tests ---
 
     #[test]
     fn auto_classifier_destructive_patterns() {
         let classifier = AutoToolRiskClassifier::new();
-        // Exact keywords
+        // why: Exact keywords
         assert_eq!(
             classifier.classify("drop_table"),
             Some(ToolRisk::Destructive)
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn auto_classifier_default_is_write() {
         let classifier = AutoToolRiskClassifier::new();
-        // Names that don't match any pattern should default to Write
+        // why: Names that don't match any pattern should default to Write
         assert_eq!(classifier.classify("calc"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("transform"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("process"), Some(ToolRisk::Write));
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn auto_classifier_destructive_takes_precedence_over_write() {
         let classifier = AutoToolRiskClassifier::new();
-        // "delete" matches both destructive and write keywords — destructive wins
+        // why: "delete" matches both destructive and write keywords — destructive wins
         // because destructive is checked first
         // "force" is destructive; "update" is write
         assert_eq!(
@@ -282,32 +282,32 @@ mod tests {
     #[test]
     fn auto_classifier_static_overrides_take_precedence() {
         let mut overrides = StaticToolRiskClassifier::new();
-        overrides.register("drop_table", ToolRisk::Read); // Override destructive to read
+        overrides.register("drop_table", ToolRisk::Read); // why: Override destructive to read
         overrides.register("custom_tool", ToolRisk::Destructive);
 
         let classifier = AutoToolRiskClassifier::with_overrides(overrides);
 
-        // Override beats pattern
+        // why: Override beats pattern
         assert_eq!(classifier.classify("drop_table"), Some(ToolRisk::Read));
-        // Custom tool not matching any pattern but registered
+        // why: Custom tool not matching any pattern but registered
         assert_eq!(
             classifier.classify("custom_tool"),
             Some(ToolRisk::Destructive)
         );
-        // Non-override still falls through to pattern matching
+        // why: Non-override still falls through to pattern matching
         assert_eq!(classifier.classify("get_user"), Some(ToolRisk::Read));
     }
 
     #[test]
     fn auto_classifier_register_override_method() {
         let mut classifier = AutoToolRiskClassifier::new();
-        // Before override: "purge" matches destructive
+        // why: Before override: "purge" matches destructive
         assert_eq!(
             classifier.classify("purge_all"),
             Some(ToolRisk::Destructive)
         );
 
-        // Override to Read
+        // why: Override to Read
         classifier.register_override("purge_all", ToolRisk::Read);
         assert_eq!(classifier.classify("purge_all"), Some(ToolRisk::Read));
     }
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn auto_classifier_always_returns_some() {
         let classifier = AutoToolRiskClassifier::new();
-        // Auto classifier never returns None — always falls back to Write
+        // why: Auto classifier never returns None — always falls back to Write
         assert_eq!(classifier.classify(""), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("xyz_no_match"), Some(ToolRisk::Write));
     }

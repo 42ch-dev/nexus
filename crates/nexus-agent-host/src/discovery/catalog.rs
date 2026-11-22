@@ -1,4 +1,4 @@
-//! Provider catalog — deterministic merge of config, PATH, and ACP registry entries.
+//! Provider catalog — deterministic merge of config, PATH, and ACP registry entries. See docs/specs/agents/agent-host.md.
 //!
 //! Priority: explicit config > PATH scan > ACP registry (compass §Discovery mechanism).
 //! Deduplication applies per `provider_id`; disabled config entries suppress matching
@@ -13,21 +13,21 @@ use crate::ids::ProviderId;
 use crate::providers::{candidate_unavailable_health, validate_provider_config};
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
-/// Builder that merges config, PATH, and ACP registry entries deterministically.
+/// note: builder that merges config, PATH, and ACP registry entries deterministically.
 #[derive(Debug, Clone, Default)]
 pub struct ProviderCatalog {
-    /// All discovered provider entries (deterministic order).
+    /// note: all discovered provider entries (deterministic order).
     pub entries: Vec<ProviderCatalogEntry>,
 }
 
 impl ProviderCatalog {
-    /// Create an empty catalog.
+    /// note: create an empty catalog.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Build a catalog from explicit config, PATH scan, and ACP registry entries.
+    /// note: build a catalog from explicit config, PATH scan, and ACP registry entries.
     ///
     /// Merging rules:
     /// 1. Config entries are added first (in config order).
@@ -48,11 +48,11 @@ impl ProviderCatalog {
         let mut seen_ids = HashSet::new();
         let mut suppressed_ids = HashSet::new();
 
-        // Phase 1: config entries (enabled first, track disabled for suppression)
+        // why: Phase 1: config entries (enabled first, track disabled for suppression)
         for provider_config in &config.providers {
             let pid = ProviderId::new(&provider_config.id);
             if provider_config.enabled {
-                // ONE validation authority: the catalog path runs the same
+                // why: ONE validation authority: the catalog path runs the same
                 // `validate_provider_config` gate as `entries_from_config`, so
                 // an unsupported native id, a missing/blank command, or
                 // non-empty native args can never become a catalog candidate.
@@ -83,7 +83,7 @@ impl ProviderCatalog {
                     source: DiscoverySource::Config,
                     trust: TrustLevel::Explicit,
                     capabilities: caps,
-                    // Truthful catalog: the recipe is registered but no
+                    // why: Truthful catalog: the recipe is registered but no
                     // process has been spawned at catalog load. `available`
                     // means "configured and enabled", never "a launch
                     // succeeded" (agent-host.md §4 V1.186 lock).
@@ -94,12 +94,12 @@ impl ProviderCatalog {
                 });
                 seen_ids.insert(pid);
             } else {
-                // Disabled: suppress auto-discovered entries for this provider_id
+                // why: Disabled: suppress auto-discovered entries for this provider_id
                 suppressed_ids.insert(pid);
             }
         }
 
-        // Phase 2: PATH scan entries (sorted by provider_id)
+        // why: Phase 2: PATH scan entries (sorted by provider_id)
         let mut sorted_path = path_entries;
         sorted_path.sort_by(|a, b| a.provider_id.0.cmp(&b.provider_id.0));
 
@@ -112,7 +112,7 @@ impl ProviderCatalog {
             entries.push(entry);
         }
 
-        // Phase 3: ACP registry entries (sorted by provider_id)
+        // why: Phase 3: ACP registry entries (sorted by provider_id)
         let mut sorted_registry = registry_entries;
         sorted_registry.sort_by(|a, b| a.provider_id.0.cmp(&b.provider_id.0));
 
@@ -128,13 +128,13 @@ impl ProviderCatalog {
         Ok(Self { entries })
     }
 
-    /// Find an entry by provider ID.
+    /// note: find an entry by provider ID.
     #[must_use]
     pub fn find(&self, provider_id: &ProviderId) -> Option<&ProviderCatalogEntry> {
         self.entries.iter().find(|e| e.provider_id == *provider_id)
     }
 
-    /// Return entries filtered by protocol kind.
+    /// note: return entries filtered by protocol kind.
     #[must_use]
     pub fn by_protocol(&self, kind: ProtocolKind) -> Vec<&ProviderCatalogEntry> {
         self.entries
@@ -147,7 +147,7 @@ impl ProviderCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Test-only: `ProviderHealth` is referenced by the fixture builders below
+    // why: Test-only: `ProviderHealth` is referenced by the fixture builders below
     // but not by the non-test catalog path, so it is imported here.
     use crate::capability::model::ProviderHealth;
     use std::collections::HashMap;
@@ -248,10 +248,10 @@ mod tests {
         .expect("should succeed");
 
         assert_eq!(catalog.entries.len(), 4);
-        // PATH entries first, sorted
+        // why: PATH entries first, sorted
         assert_eq!(catalog.entries[0].provider_id.0, "a-path");
         assert_eq!(catalog.entries[1].provider_id.0, "z-path");
-        // Registry entries second, sorted
+        // why: Registry entries second, sorted
         assert_eq!(catalog.entries[2].provider_id.0, "a-reg");
         assert_eq!(catalog.entries[3].provider_id.0, "z-reg");
     }
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn distinct_ids_coexist() {
-        // R-004, R-008: ACP registry 'claude' and PATH 'claude-native' coexist
+        // why: R-004, R-008: ACP registry 'claude' and PATH 'claude-native' coexist
         let config = default_config();
         let catalog = ProviderCatalog::build_from_sources(
             &config,

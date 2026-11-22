@@ -5,6 +5,8 @@
 //! `assistant/message` units during `Session::run`, and reconciles the
 //! high-level `RunResult` with a boolean `emitted_root_text` (no cumulative
 //! transcript). Consumed by the dsh provider execute loop and producer.
+//!
+//! See docs/specs/agents/agent-host.md
 
 use deepseek_harness_sdk::api::extract_finish_reason;
 use deepseek_harness_sdk::{Error, Notification, RunResult};
@@ -15,19 +17,19 @@ use crate::capability::model::{
 };
 use crate::ids::{HostOperationId, HostSessionId};
 
-/// Outcome of classifying one SDK tree notification for the dsh adapter.
+/// note: outcome of classifying one SDK tree notification for the dsh adapter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DshNotificationClass {
-    /// Known non-content, nested, or forward-compatible noise.
+    /// note: known non-content, nested, or forward-compatible noise.
     Ignore,
-    /// One complete root assistant message with non-empty prose.
+    /// note: one complete root assistant message with non-empty prose.
     RootText(String),
 }
 
-/// Per-root-message text bound enforced before allocation (architecture §4.3).
+/// note: per-root-message text bound enforced before allocation (architecture §4.3).
 pub(crate) const DSCH_MAX_ROOT_MESSAGE_TEXT_BYTES: usize = 256 * 1024;
 
-/// Classifier failure for a recognized wire envelope.
+/// note: classifier failure for a recognized wire envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DshProtocolFailure;
 
@@ -40,7 +42,7 @@ pub enum ClassifyNotificationError {
     EventTooLarge(DshEventTooLarge),
 }
 
-/// Tracks whether any root message delta was emitted during the run.
+/// note: tracks whether any root message delta was emitted during the run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RunReconciliation {
     pub emitted_root_text: bool,
@@ -59,7 +61,7 @@ impl RunReconciliation {
     }
 }
 
-/// Classify one notification delivered to the `Session::run` observer.
+/// note: classify one notification delivered to the `Session::run` observer.
 ///
 /// Root equality uses the SDK session id passed to `start_session`, not the
 /// host UUID. Malformed recognized envelopes fail; unknown well-formed event
@@ -129,7 +131,7 @@ fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, Ro
                 return Ok(DshNotificationClass::Ignore);
             }
         }
-        // Absent or non-string `type` is a malformed recognized envelope.
+        // why: Absent or non-string `type` is a malformed recognized envelope.
         None | Some(_) => return Err(RootEventFailure::Protocol),
     }
     let len = measure_assistant_message_text(event).map_err(|_| RootEventFailure::Protocol)?;
@@ -161,7 +163,7 @@ fn measure_assistant_message_text(event: &Value) -> Result<usize, DshProtocolFai
         }
         match block.get("text") {
             Some(Value::String(text)) => len += text.len(),
-            // Absent, null, or non-string text is a malformed block.
+            // why: Absent, null, or non-string text is a malformed block.
             None | Some(_) => return Err(DshProtocolFailure),
         }
     }
@@ -177,14 +179,14 @@ fn build_assistant_message_text(event: &Value) -> Result<String, DshProtocolFail
         }
         match block.get("text") {
             Some(Value::String(text)) => out.push_str(text),
-            // Absent, null, or non-string text is a malformed block.
+            // why: Absent, null, or non-string text is a malformed block.
             None | Some(_) => return Err(DshProtocolFailure),
         }
     }
     Ok(out)
 }
 
-/// Build terminal (and optional fallback delta) events after a successful
+/// note: build terminal (and optional fallback delta) events after a successful
 /// `Session::run`. Streaming deltas emitted during the run are not repeated.
 ///
 /// # Errors
@@ -272,7 +274,7 @@ fn failed_turn(
     }
 }
 
-/// Classify a `deepseek_harness_sdk` start/run error into the one terminal
+/// note: classify a `deepseek_harness_sdk` start/run error into the one terminal
 /// `OpFailed` event of the failed turn (PD-3, AR-7 category tokens).
 #[must_use]
 pub fn classify_run_error(
@@ -289,7 +291,7 @@ pub fn classify_run_error(
     }
 }
 
-/// The `(category, safe message)` pair for one SDK error, shared by the
+/// note: the `(category, safe message)` pair for one SDK error, shared by the
 /// turn classifier and the provider's launch/probe error mapping (v1.188
 /// P0 T2).
 #[must_use]
@@ -327,7 +329,7 @@ pub(crate) fn classify_error_parts(error: &Error) -> (&'static str, String) {
     }
 }
 
-/// Static failure for classifier/protocol/overflow detected during streaming.
+/// note: static failure for classifier/protocol/overflow detected during streaming.
 #[must_use]
 pub fn operation_protocol_failure(
     session_id: &HostSessionId,
@@ -341,7 +343,7 @@ pub fn operation_protocol_failure(
     )
 }
 
-/// Static failure when Nexus-owned delivery bounds are exceeded.
+/// note: static failure when Nexus-owned delivery bounds are exceeded.
 #[must_use]
 pub fn operation_delivery_overflow_failure(
     session_id: &HostSessionId,
@@ -664,7 +666,7 @@ mod tests {
         assert!(matches!(events[0], HostEvent::OpFinished(_)));
     }
 
-    /// Closed-transport regression (deepseek-harness-sdk 0.2.1 wakes a run
+    /// note: closed-transport regression (deepseek-harness-sdk 0.2.1 wakes a run
     /// parked on the notification channel when the runtime's stdio closes):
     /// the SDK surfaces `Error::TransportClosed`, and Nexus turns it into the
     /// turn's single terminal failure `OpFailed(stream_closed)` — never a

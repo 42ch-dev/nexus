@@ -1,4 +1,4 @@
-//! Rust-side admission of [`ValidatedProviderRecipe`] for JS provider callbacks.
+//! Rust-side admission of [`ValidatedProviderRecipe`] for JS provider callbacks. See docs/specs/agents/agent-host.md.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -51,7 +51,7 @@ fn sanitize_env<S: std::hash::BuildHasher>(
 ) -> HashMap<String, String> {
     env.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
-/// Build the wire recipe from catalog-owned launch fields and workspace boundary.
+/// note: build the wire recipe from catalog-owned launch fields and workspace boundary.
 ///
 /// # Errors
 ///
@@ -82,7 +82,7 @@ pub fn build_validated_recipe<S: std::hash::BuildHasher>(
     })
 }
 
-/// Reject caller-supplied recipe keys before admission injection.
+/// note: reject caller-supplied recipe keys before admission injection.
 ///
 /// # Errors
 ///

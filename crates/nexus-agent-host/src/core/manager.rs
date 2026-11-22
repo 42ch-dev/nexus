@@ -1,4 +1,4 @@
-//! Host Manager — the facade implementing [`HostFacade`].
+//! Host Manager — the facade implementing [`HostFacade`]. See docs/specs/agents/agent-host.md.
 //!
 //! The manager owns the session registry, provider map, and policy gates.
 //! It routes operations to the correct provider adapter based on session ownership.
@@ -27,46 +27,45 @@ use crate::policy::permission::HostPermissionResolver;
 use crate::ProviderAdapter;
 use nexus_acp_host::LocalSetBridge;
 
-/// Broadcast channel capacity for host events.
+/// note: broadcast channel capacity for host events.
 ///
 /// Increased to 1024 to reduce silent event loss risk under multi-session load
 /// (QC3 W-001). The shared buffer is consumed by all SSE subscribers; higher
 /// capacity gives each subscriber more headroom before `RecvError::Lagged`.
 const EVENT_BROADCAST_CAPACITY: usize = 1024;
 
-/// The host manager facade.
+/// note: the host manager facade.
 ///
 /// Implements [`HostFacade`] — the narrow interface consumed by the daemon runtime.
 /// Owns the session registry, routes operations to provider adapters, and
 /// enforces policy gates.
 pub struct HostManager {
-    /// Session state machine registry.
+    /// note: session state machine registry.
     sessions: Arc<RwLock<SessionRegistry>>,
-    /// Provider adapters indexed by provider ID.
+    /// note: provider adapters indexed by provider ID.
     providers: RwLock<HashMap<ProviderId, ProviderEntry>>,
-    /// Active session → provider mapping.
+    /// note: active session → provider mapping.
     session_providers: RwLock<HashMap<HostSessionId, ProviderId>>,
-    /// Admission policy gate.
+    /// note: admission policy gate.
     admission: RwLock<AdmissionPolicy>,
-    /// Whether admission was explicitly set via `with_admission()`.
+    /// note: whether admission was explicitly set via `with_admission()`.
     admission_custom: bool,
-    /// Host configuration (set on start).
+    /// note: host configuration (set on start).
     config: RwLock<Option<AgentHostConfig>>,
-    /// Whether the host has been started.
+    /// note: whether the host has been started.
     running: RwLock<bool>,
-    /// Canonical workspace root boundary — all session cwds must be under this.
+    /// note: canonical workspace root boundary — all session cwds must be under this.
     workspace_root: RwLock<Option<std::path::PathBuf>>,
-    /// Broadcast sender for host events — SSE subscribers consume via `subscribe()`.
+    /// note: broadcast sender for host events — SSE subscribers consume via `subscribe()`.
     event_tx: tokio::sync::broadcast::Sender<HostEvent>,
-    /// One environment-scoped `LocalSet` bridge shared by all ACP adapters.
+    /// note: one environment-scoped `LocalSet` bridge shared by all ACP adapters.
     localset_bridge: Arc<LocalSetBridge>,
 }
 
-// HashMap import for providers/session_providers
 use std::collections::HashMap;
 
 impl HostManager {
-    /// Create a new host manager with no providers registered.
+    /// note: create a new host manager with no providers registered.
     #[must_use]
     pub fn new() -> Self {
         let (event_tx, _) = tokio::sync::broadcast::channel(EVENT_BROADCAST_CAPACITY);
@@ -87,7 +86,7 @@ impl HostManager {
         }
     }
 
-    /// Snapshot active session/operation IDs for native close reports.
+    /// note: snapshot active session/operation IDs for native close reports.
     pub async fn pending_lifecycle_snapshot(&self) -> Vec<String> {
         let sessions = self.sessions.read().await;
         let mut pending = Vec::new();
@@ -104,13 +103,13 @@ impl HostManager {
         pending
     }
 
-    /// Shared `LocalSet` bridge for all ACP SDK adapters in this environment.
+    /// note: shared `LocalSet` bridge for all ACP SDK adapters in this environment.
     #[must_use]
     pub fn localset_bridge(&self) -> LocalSetBridge {
         self.localset_bridge.as_ref().clone()
     }
 
-    /// Create a host manager with a specific admission policy.
+    /// note: create a host manager with a specific admission policy.
     #[must_use]
     pub fn with_admission(admission: AdmissionPolicy) -> Self {
         let (event_tx, _) = tokio::sync::broadcast::channel(EVENT_BROADCAST_CAPACITY);
@@ -122,7 +121,7 @@ impl HostManager {
         }
     }
 
-    /// Subscribe to host events for a specific session.
+    /// note: subscribe to host events for a specific session.
     ///
     /// Returns a filtered receiver that only yields events belonging to the
     /// requested session. Late subscribers may miss events that were broadcast
@@ -134,12 +133,12 @@ impl HostManager {
         self.event_tx.subscribe()
     }
 
-    /// Snapshot of the loaded agent-host configuration (defaults when absent).
+    /// note: snapshot of the loaded agent-host configuration (defaults when absent).
     pub async fn agent_config(&self) -> AgentHostConfig {
         self.config.read().await.clone().unwrap_or_default()
     }
 
-    /// Re-run the start over a freshly admitted configuration, replacing the
+    /// note: re-run the start over a freshly admitted configuration, replacing the
     /// registered provider set so the next readiness probe reads the providers
     /// the saved config selects.
     ///
@@ -157,7 +156,7 @@ impl HostManager {
         <Self as crate::HostFacade>::start(self, config).await
     }
 
-    /// Admit the catalog-owned launch recipe for JS provider callbacks.
+    /// note: admit the catalog-owned launch recipe for JS provider callbacks.
     ///
     /// # Errors
     ///
@@ -210,7 +209,7 @@ impl HostManager {
         )
     }
 
-    /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
+    /// note: build a [`ProviderPortAdapter`] wired to this host and registered providers.
     pub async fn build_provider_port(
         self: &Arc<Self>,
     ) -> crate::providers::port::ProviderPortAdapter {
@@ -225,7 +224,7 @@ impl HostManager {
         port
     }
 
-    /// Register a provider adapter.
+    /// note: register a provider adapter.
     ///
     /// Must be called before `start()`. The adapter is stored behind `Arc<dyn ProviderAdapter>`.
     /// `launch` is the configured launch recipe reported truthfully by the
@@ -244,7 +243,7 @@ impl HostManager {
         );
     }
 
-    /// Get the provider adapter for a given session.
+    /// note: get the provider adapter for a given session.
     async fn get_provider_for_session(
         &self,
         session_id: &HostSessionId,
@@ -282,7 +281,7 @@ impl HostManager {
     async fn mark_probe_context_unavailable(&self) {
         let mut providers = self.providers.write().await;
         for entry in providers.values_mut() {
-            // EVERY entry becomes unavailable without a verified probe owner.
+            // why: EVERY entry becomes unavailable without a verified probe owner.
             // A prior owner-bound start may have published `available = true`;
             // that success must not survive a re-start that has no owner, or
             // the catalog/admission would expose a provider this process can no
@@ -293,7 +292,7 @@ impl HostManager {
         }
     }
 
-    /// Publish a bounded probe result into the manager catalog (used by provider port).
+    /// note: publish a bounded probe result into the manager catalog (used by provider port).
     pub async fn record_provider_probe(
         &self,
         provider_id: &ProviderId,
@@ -372,7 +371,7 @@ impl HostManager {
                     message: Some(safe_provider_message(&error)),
                 },
             };
-            // Saturating rather than wrapping: a probe latency beyond u64 ms
+            // why: Saturating rather than wrapping: a probe latency beyond u64 ms
             // is not representable, and clamping is truthful for telemetry.
             let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.publish_probe_result(&identity, health, latency_ms)
@@ -389,11 +388,11 @@ impl Default for HostManager {
 }
 
 #[allow(clippy::too_many_lines)]
-// HostFacade start() runs sequential config-validation + spawn; splitting obscures the single code path
+// why: HostFacade start() runs sequential config-validation + spawn; splitting obscures the single code path
 #[async_trait]
 impl crate::HostFacade for HostManager {
     async fn start(&self, config: HostStartConfig) -> HostResult<()> {
-        // Validate config_path does not escape its parent directory.
+        // why: Validate config_path does not escape its parent directory.
         //
         // We canonicalize the parent dir first, then validate the config path
         // is under it — no TOCTOU from checking .exists() separately (QC2 F-003).
@@ -444,13 +443,13 @@ impl crate::HostFacade for HostManager {
                             expected_dir.display()
                         )));
                     }
-                    // Retain the canonical resolved path for the load, so a
+                    // why: Retain the canonical resolved path for the load, so a
                     // raw-path swap between validation and read cannot change
                     // what is loaded.
                     resolved_config_path = canonical_config;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Optional config absent — load_config_from_path returns defaults.
+                    // why: Optional config absent — load_config_from_path returns defaults.
                 }
                 Err(e) => {
                     return Err(HostError::policy_denied(format!(
@@ -462,7 +461,7 @@ impl crate::HostFacade for HostManager {
             }
         }
 
-        // Validate and store the canonical workspace_root (QC2 F-002).
+        // why: Validate and store the canonical workspace_root (QC2 F-002).
         let canonical_workspace_root =
             crate::config::validate_workspace_path(&config.workspace_root)?;
 
@@ -471,7 +470,7 @@ impl crate::HostFacade for HostManager {
             admission.check_workspace_root(&config.workspace_root)?;
         }
 
-        // Retain the validated config from boot when provided; otherwise load once.
+        // why: Retain the validated config from boot when provided; otherwise load once.
         let host_config = if let Some(cfg) = config.host_config.clone() {
             crate::providers::validate_agent_host_config_providers(&cfg)?;
             cfg
@@ -480,12 +479,12 @@ impl crate::HostFacade for HostManager {
         };
         *self.config.write().await = Some(host_config.clone());
 
-        // Store canonical workspace boundary for session cwd validation.
+        // why: Store canonical workspace boundary for session cwd validation.
         *self.workspace_root.write().await = Some(canonical_workspace_root.clone());
 
         let permission_resolver = HostPermissionResolver::new_native_only(&host_config.policy);
 
-        // Discovery replaces ambient boot registration unless tests pre-registered.
+        // why: Discovery replaces ambient boot registration unless tests pre-registered.
         let pre_registered = !self.providers.read().await.is_empty();
         if !pre_registered {
             let discovered = if let Some(catalog) = config.admitted_catalog.as_ref() {
@@ -524,7 +523,7 @@ impl crate::HostFacade for HostManager {
         };
         let provider_count = registered_ids.len();
 
-        // Rebuild admission policy from loaded config + registered providers,
+        // why: Rebuild admission policy from loaded config + registered providers,
         // but only if no custom policy was set via `with_admission()`.
         if !self.admission_custom {
             *self.admission.write().await =
@@ -549,7 +548,7 @@ impl crate::HostFacade for HostManager {
         }
         drop(running);
 
-        // Admission checks: provider allow/deny + session limit.
+        // note: Admission checks: provider allow/deny + session limit.
         {
             let admission = self.admission.read().await;
             admission.check_provider(&request.provider_id)?;
@@ -557,7 +556,6 @@ impl crate::HostFacade for HostManager {
             admission.check_session_limit(session_count)?;
         }
 
-        // Find the provider
         let providers = self.providers.read().await;
         let entry = providers.get(&request.provider_id).ok_or_else(|| {
             HostError::provider_unavailable(request.provider_id.clone(), "provider not registered")
@@ -577,7 +575,7 @@ impl crate::HostFacade for HostManager {
         })?;
         drop(providers);
 
-        // Build launch spec with cwd validated against workspace boundary (QC2 F-002)
+        // why: Build launch spec with cwd validated against workspace boundary (QC2 F-002)
         // and against the verified Creator workspace root (A5 owner/cwd isolation).
         let boundary = {
             let ws = self.workspace_root.read().await;
@@ -585,7 +583,7 @@ impl crate::HostFacade for HostManager {
                 .ok_or_else(|| HostError::internal("workspace root not set — host not started"))?
         };
         let validated_cwd = crate::config::validate_workspace_path_under(&request.cwd, &boundary)?;
-        // The session cwd must belong to the verified Creator workspace; a
+        // why: The session cwd must belong to the verified Creator workspace; a
         // profile switch or foreign workspace must never retarget an existing
         // run (A5: owner_workspace_mismatch).
         let owner_workspace =
@@ -606,7 +604,7 @@ impl crate::HostFacade for HostManager {
             owner: request.owner.clone(),
         };
 
-        // Launch the session on the provider with session_ms timeout (D-004).
+        // why: Launch the session on the provider with session_ms timeout (D-004).
         // This bounds the total time for provider session creation including
         // any provider-side initialization that may occur during launch.
         let session_timeout = self.config.read().await.as_ref().map_or_else(
@@ -639,7 +637,6 @@ impl crate::HostFacade for HostManager {
             }
         };
 
-        // Register in our session registry
         let mut sessions = self.sessions.write().await;
         let session_id = sessions.register(
             handle.session_id,
@@ -649,11 +646,9 @@ impl crate::HostFacade for HostManager {
             handle.process_identity.clone(),
         );
 
-        // Transition to starting → ready
         sessions.transition_to_starting(&session_id)?;
         sessions.transition_to_ready(&session_id)?;
 
-        // Map session to provider
         {
             let mut session_providers = self.session_providers.write().await;
             session_providers.insert(session_id.clone(), request.provider_id.clone());
@@ -671,7 +666,7 @@ impl crate::HostFacade for HostManager {
     ) -> HostResult<HostEventStream> {
         let (adapter, provider_id) = self.get_provider_for_session(&session_id).await?;
 
-        // Admission check: ops-per-session limit.
+        // note: Admission check: ops-per-session limit.
         {
             let admission = self.admission.read().await;
             let active_ops: usize = {
@@ -683,7 +678,6 @@ impl crate::HostFacade for HostManager {
             admission.check_before_exec(&session_id, active_ops)?;
         }
 
-        // Build the managed session handle
         let sessions = self.sessions.read().await;
         let session = sessions
             .get(&session_id)
@@ -697,7 +691,6 @@ impl crate::HostFacade for HostManager {
         };
         drop(sessions);
 
-        // Transition to Busy
         let op_id = match &op {
             crate::capability::model::HostOperation::Prompt { op_id, .. } => op_id.clone(),
             _ => HostOperationId::new(),
@@ -708,7 +701,7 @@ impl crate::HostFacade for HostManager {
             sessions.transition_to_busy(&session_id, op_id.clone())?;
         }
 
-        // Execute on the provider. If execute() returns an error (not a stream),
+        // why: Execute on the provider. If execute() returns an error (not a stream),
         // the session is stuck in Busy — transition back to Ready before
         // propagating the error (QC3 F-001 defense-in-depth).
         let stream = match adapter.execute(&handle, op).await {
@@ -719,7 +712,7 @@ impl crate::HostFacade for HostManager {
                     .write()
                     .await
                     .transition_busy_to_ready(&session_id, &op_id);
-                // An early execution failure (sealed/ordinary initialization or
+                // why: An early execution failure (sealed/ordinary initialization or
                 // a confirmed-close failure on the first denied prompt, or a
                 // lazy child setup failure) is the same launch-class failure
                 // `create_session` already handles: the candidate is no longer
@@ -734,7 +727,7 @@ impl crate::HostFacade for HostManager {
             }
         };
 
-        // Wrap the stream to:
+        // why: Wrap the stream to:
         // 1. Broadcast each event to SSE subscribers
         // 2. Transition back to Ready on terminal event
         let sessions_arc = self.sessions.clone();
@@ -749,11 +742,11 @@ impl crate::HostFacade for HostManager {
                 let tx = event_tx.clone();
                 async move {
                     if let Ok(event) = &result {
-                        // Broadcast to SSE subscribers (ignore lagged/disconnected)
+                        // why: Broadcast to SSE subscribers (ignore lagged/disconnected)
                         let _ = tx.send(event.clone());
                     }
                     if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = &result {
-                        // The operation is terminal: leave Busy or Cancelling
+                        // why: The operation is terminal: leave Busy or Cancelling
                         // (both keyed by this op) back to Ready. During a
                         // cancellation the session stays Cancelling until the
                         // stream itself emits its terminal event — a
@@ -781,7 +774,7 @@ impl crate::HostFacade for HostManager {
     }
 
     async fn cancel(&self, op_id: HostOperationId) -> HostResult<()> {
-        // Find the session that owns this op
+        // why: Find the session that owns this op
         let session;
         {
             let sessions = self.sessions.read().await;
@@ -801,7 +794,6 @@ impl crate::HostFacade for HostManager {
             sessions.transition_to_cancelling(&session.id, &op_id)?;
         }
 
-        // Get the provider and cancel
         let (adapter, _) = self.get_provider_for_session(&session.id).await?;
         let handle = ManagedSessionHandle {
             provider_id: session.provider_id.clone(),
@@ -812,7 +804,7 @@ impl crate::HostFacade for HostManager {
 
         adapter.cancel(&handle, op_id).await?;
 
-        // No transition here: the cancelled ACP stream's terminal event will
+        // why: No transition here: the cancelled ACP stream's terminal event will
         // return the session to Ready. A cancel failure leaves the session
         // Cancelling; the stream's own timeout/EOF guarantee a terminal.
         Ok(())
@@ -833,13 +825,13 @@ impl crate::HostFacade for HostManager {
     async fn shutdown(&self) -> HostResult<()> {
         *self.running.write().await = false;
 
-        // Read the configured shutdown timeout (default 5s if config was never set).
+        // note: Read the configured shutdown timeout (default 5s if config was never set).
         let shutdown_timeout = self.config.read().await.as_ref().map_or_else(
             || crate::config::TimeoutConfig::default().shutdown_duration(),
             |c| c.timeouts.shutdown_duration(),
         );
 
-        // Collect active sessions and their provider mappings before clearing state.
+        // why: Collect active sessions and their provider mappings before clearing state.
         let session_ids: Vec<HostSessionId>;
         let provider_map: HashMap<HostSessionId, ProviderId>;
         {
@@ -858,7 +850,7 @@ impl crate::HostFacade for HostManager {
             session_ids = session_ids_raw;
         }
 
-        // Collect (adapter, handle) pairs while holding the provider read lock briefly,
+        // why: Collect (adapter, handle) pairs while holding the provider read lock briefly,
         // then call shutdown outside the lock to avoid holding it across .await points.
         // Use the actual negotiated capabilities from the session registry (QC2 F-004).
         // If a session has no registry entry, skip it rather than fabricating
@@ -923,7 +915,7 @@ impl crate::HostFacade for HostManager {
             }
         }
 
-        // Now transition sessions through Stopping → Stopped and clean up the
+        // why: Now transition sessions through Stopping → Stopped and clean up the
         // registry — EXCEPT sessions whose cleanup is unconfirmed.
         {
             let mut sessions = self.sessions.write().await;
@@ -959,7 +951,7 @@ impl crate::HostFacade for HostManager {
             }
         }
 
-        // Clear provider mappings only for sessions with confirmed cleanup;
+        // why: Clear provider mappings only for sessions with confirmed cleanup;
         // unconfirmed sessions keep their ownership mapping for reconciliation.
         {
             let mut session_providers = self.session_providers.write().await;
@@ -987,7 +979,6 @@ impl crate::HostFacade for HostManager {
     }
 
     async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
-        // Verify session exists
         let session = {
             let sessions = self.sessions.read().await;
             sessions
@@ -996,10 +987,8 @@ impl crate::HostFacade for HostManager {
                 .ok_or_else(|| HostError::internal(format!("session {session_id} not found")))?
         };
 
-        // Get provider for this session
         let (adapter, _) = self.get_provider_for_session(&session_id).await?;
 
-        // Build handle from registry data
         let handle = ManagedSessionHandle {
             provider_id: session.provider_id.clone(),
             session_id: session_id.clone(),
@@ -1007,13 +996,12 @@ impl crate::HostFacade for HostManager {
             process_identity: session.process_identity.clone(),
         };
 
-        // Read configured shutdown timeout
         let shutdown_timeout = self.config.read().await.as_ref().map_or_else(
             || crate::config::TimeoutConfig::default().shutdown_duration(),
             |c| c.timeouts.shutdown_duration(),
         );
 
-        // Call provider adapter shutdown with timeout. A typed cleanup
+        // why: Call provider adapter shutdown with timeout. A typed cleanup
         // failure/timeout means the exact owned process was not confirmed
         // reaped: the session must remain visibly interrupted (A5), never be
         // marked/removed as cleanly stopped.
@@ -1046,7 +1034,7 @@ impl crate::HostFacade for HostManager {
             };
 
         if cleanup_unconfirmed {
-            // Keep the session in the registry as ErrorRecoverable: it must
+            // why: Keep the session in the registry as ErrorRecoverable: it must
             // not be reported as cleanly stopped while cleanup is unconfirmed.
             let mut sessions = self.sessions.write().await;
             let already_recoverable = matches!(
@@ -1062,7 +1050,7 @@ impl crate::HostFacade for HostManager {
                 }
                 sessions.transition_to_error_recoverable(&session_id)?;
             }
-            drop(sessions); // release the write guard before returning
+            drop(sessions); // why: release the write guard before returning
             return Err(HostError::cleanup_unconfirmed(format!(
                 "session {session_id} cleanup unconfirmed"
             ))
@@ -1070,7 +1058,6 @@ impl crate::HostFacade for HostManager {
             .with_session(session_id.clone()));
         }
 
-        // Transition session through Stopping → Stopped
         {
             let mut sessions = self.sessions.write().await;
             let _ = sessions.transition_to_stopping(&session_id);
@@ -1081,7 +1068,6 @@ impl crate::HostFacade for HostManager {
             let _ = sessions.remove_stopped(&session_id);
         }
 
-        // Remove session → provider mapping
         {
             let mut session_providers = self.session_providers.write().await;
             session_providers.remove(&session_id);
@@ -1110,7 +1096,7 @@ impl crate::HostFacade for HostManager {
                 health: entry.health.clone(),
             })
             .collect();
-        // Snapshot built: release the read guard before returning it rather
+        // why: Snapshot built: release the read guard before returning it rather
         // than holding it to the end of scope.
         drop(providers);
         Ok(crate::discovery::ProviderCatalog { entries })
@@ -1131,7 +1117,7 @@ mod tests {
     use crate::core::session::SessionState;
     use crate::HostFacade;
 
-    /// A minimal mock provider for testing the `HostManager`.
+    /// note: A minimal mock provider for testing the `HostManager`.
     struct MockProvider {
         provider_id: ProviderId,
     }
@@ -1209,7 +1195,7 @@ mod tests {
         }
     }
 
-    /// A mock provider that tracks whether `shutdown()` was called per session.
+    /// note: A mock provider that tracks whether `shutdown()` was called per session.
     struct TrackingMockProvider {
         provider_id: ProviderId,
         shutdown_calls: Arc<std::sync::Mutex<Vec<HostSessionId>>>,
@@ -1314,7 +1300,7 @@ mod tests {
         }
     }
 
-    /// A mock provider whose `shutdown()` hangs forever (to test timeout behavior).
+    /// note: A mock provider whose `shutdown()` hangs forever (to test timeout behavior).
     struct HangingMockProvider {
         provider_id: ProviderId,
         shutdown_called: Arc<std::sync::Mutex<bool>>,
@@ -1383,7 +1369,7 @@ mod tests {
 
         async fn shutdown(&self, _session: ManagedSessionHandle) -> HostResult<()> {
             *self.shutdown_called.lock().unwrap() = true;
-            // Simulate a provider that never completes shutdown.
+            // why: Simulate a provider that never completes shutdown.
             std::future::pending::<()>().await;
             Ok(())
         }
@@ -1429,7 +1415,7 @@ mod tests {
         }
     }
 
-    /// RAII guard replacing `PATH` with a single directory and restoring on drop.
+    /// note: RAII guard replacing `PATH` with a single directory and restoring on drop.
     struct PathGuard {
         previous: Option<String>,
     }
@@ -1487,14 +1473,14 @@ mod tests {
 
     #[tokio::test]
     async fn absent_optional_config_path_returns_defaults() {
-        // An absent optional config whose parent exists is tolerated and
+        // why: An absent optional config whose parent exists is tolerated and
         // `load_config_from_path` supplies defaults.
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let config_path = temp_dir.path().join("absent-config.toml");
         let cfg = HostStartConfig {
             config_path,
             workspace_root: temp_dir.path().to_path_buf(),
-            // The probe owner must sit at (or under) the host workspace
+            // why: The probe owner must sit at (or under) the host workspace
             // boundary: `start_config()` defaults to `/tmp`, which is outside
             // this temp boundary (and on macOS canonicalizes to
             // `/private/tmp`). Align the fixture's owner with the boundary.
@@ -1518,7 +1504,7 @@ mod tests {
 
     #[tokio::test]
     async fn relative_and_escaping_config_paths_rejected_before_read() {
-        // Relative config path → rejected outright (PolicyDenied), never read.
+        // why: Relative config path → rejected outright (PolicyDenied), never read.
         let rel = HostStartConfig {
             config_path: std::path::PathBuf::from("../escape.toml"),
             ..start_config()
@@ -1538,7 +1524,7 @@ mod tests {
             .expect_err("relative path rejected");
         assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
 
-        // Empty config path → rejected before any parent()/read path.
+        // why: Empty config path → rejected before any parent()/read path.
         let empty = HostStartConfig {
             config_path: std::path::PathBuf::from(""),
             ..start_config()
@@ -1557,7 +1543,7 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("temp dir");
 
-        // Absolute in-root path with lexical `..` → rejected BEFORE
+        // why: Absolute in-root path with lexical `..` → rejected BEFORE
         // canonicalization (validate_workspace_path contract).
         let parentdir = HostStartConfig {
             config_path: temp_dir.path().join("cfg").join("..").join("escape.toml"),
@@ -1578,7 +1564,7 @@ mod tests {
             .expect_err("ParentDir component rejected");
         assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
 
-        // Symlink escape: a config path that resolves outside its own parent
+        // why: Symlink escape: a config path that resolves outside its own parent
         // dir must be rejected. Staging the escape needs `symlink(2)`, which a
         // Windows test cannot create portably, so this case is a unix proof.
         #[cfg(unix)]
@@ -1686,7 +1672,7 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        // Admission policy catches unknown providers before the registry lookup.
+        // why: Admission policy catches unknown providers before the registry lookup.
         assert!(
             err.to_string().contains("not in the known providers list"),
             "expected admission denial, got: {err}"
@@ -1746,7 +1732,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("not started"));
     }
 
-    /// Verify that shutdown calls `ProviderAdapter::shutdown()` for every active session.
+    /// note: verify that shutdown calls `ProviderAdapter::shutdown()` for every active session.
     #[tokio::test]
     async fn shutdown_calls_provider_adapter_for_each_session() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
@@ -1800,7 +1786,7 @@ mod tests {
         );
     }
 
-    /// Verify bounded global shutdown retains cleanup-unconfirmed ownership.
+    /// note: verify bounded global shutdown retains cleanup-unconfirmed ownership.
     #[tokio::test]
     async fn shutdown_timeout_retains_unconfirmed_session() {
         let provider = Arc::new(HangingMockProvider::new(ProviderId::new("mock")));
@@ -1809,7 +1795,7 @@ mod tests {
             .register_provider(provider.clone(), mock_launch())
             .await;
 
-        // Create a temp config file with a very short shutdown timeout.
+        // why: Create a temp config file with a very short shutdown timeout.
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let config_path = crate::config::agent_host_config_path(temp_dir.path());
         if let Some(parent) = config_path.parent() {
@@ -1839,7 +1825,7 @@ mod tests {
             .await
             .expect("create");
 
-        // The per-session timeout bounds the call, but unconfirmed cleanup is
+        // why: The per-session timeout bounds the call, but unconfirmed cleanup is
         // an error and the owned session must remain visible for recovery.
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), manager.shutdown())
             .await
@@ -1861,7 +1847,7 @@ mod tests {
             crate::core::session::SessionState::ErrorRecoverable
         );
 
-        // A failed retry is idempotent: it remains typed cleanup-unconfirmed
+        // why: A failed retry is idempotent: it remains typed cleanup-unconfirmed
         // and preserves the same recoverable ownership state.
         let retry_error = manager
             .shutdown()
@@ -1876,7 +1862,7 @@ mod tests {
         );
     }
 
-    /// Verify shutdown works correctly when there are no active sessions.
+    /// note: verify shutdown works correctly when there are no active sessions.
     #[tokio::test]
     async fn shutdown_with_no_sessions_succeeds() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
@@ -1899,14 +1885,14 @@ mod tests {
         assert_eq!(health.active_sessions, 0);
     }
 
-    /// Verify shutdown uses actual negotiated capabilities, not `acp_full()` fallback (QC2 F-004).
+    /// note: verify shutdown uses actual negotiated capabilities, not `acp_full()` fallback (QC2 F-004).
     #[tokio::test]
     async fn shutdown_uses_negotiated_capabilities_not_acp_full() {
-        // Use custom capabilities that differ from acp_full()
+        // why: Use custom capabilities that differ from acp_full()
         let custom_caps = CapabilityDescriptor {
             text_prompt: true,
             streaming: true,
-            cancellation: false, // differs from acp_full
+            cancellation: false, // why: differs from acp_full
             session_restore: false,
             structured_tool_calls: true,
             mcp_http: false,
@@ -1928,7 +1914,6 @@ mod tests {
             .await;
         manager.start(start_config()).await.expect("start");
 
-        // Create a session
         let session = manager
             .create_session(CreateSessionRequest {
                 provider_id: ProviderId::new("mock"),
@@ -1942,7 +1927,7 @@ mod tests {
             .await
             .expect("create session");
 
-        // Override the negotiated capabilities to something non-standard
+        // why: Override the negotiated capabilities to something non-standard
         {
             let mut sessions = manager.sessions.write().await;
             if let Some(s) = sessions.get_mut(&session.id) {
@@ -1965,16 +1950,16 @@ mod tests {
         );
     }
 
-    // ── Admission policy enforcement tests ──────────────────────────────
+    // note: ── Admission policy enforcement tests ──────────────────────────────
 
-    /// Verify that a provider denied by admission policy returns `PolicyDenied`.
+    /// note: verify that a provider denied by admission policy returns `PolicyDenied`.
     #[tokio::test]
     async fn create_session_denied_provider_returns_policy_denied() {
-        // Build a strict admission policy with no known providers.
-        let config = AgentHostConfig::default(); // deny_unknown_providers = true
+        // why: Build a strict admission policy with no known providers.
+        let config = AgentHostConfig::default(); // why: deny_unknown_providers = true
         let admission = AdmissionPolicy::from_config(&config, HashSet::new());
         let manager = HostManager::with_admission(admission);
-        // Register a provider, but admission policy has empty known_providers.
+        // why: Register a provider, but admission policy has empty known_providers.
         manager
             .register_provider(
                 Arc::new(MockProvider {
@@ -2006,10 +1991,10 @@ mod tests {
         );
     }
 
-    /// Verify that session limit is enforced by admission policy.
+    /// note: verify that session limit is enforced by admission policy.
     #[tokio::test]
     async fn create_session_enforces_session_limit() {
-        // Build admission with max_sessions = 1.
+        // why: Build admission with max_sessions = 1.
         let config = AgentHostConfig {
             max_sessions: 1,
             ..AgentHostConfig::default()
@@ -2028,7 +2013,7 @@ mod tests {
             .await;
         manager.start(start_config()).await.expect("start");
 
-        // First session should succeed.
+        // why: First session should succeed.
         let _session1 = manager
             .create_session(CreateSessionRequest {
                 provider_id: ProviderId::new("mock"),
@@ -2042,7 +2027,7 @@ mod tests {
             .await
             .expect("first session should succeed");
 
-        // Second session should be denied by session limit.
+        // why: Second session should be denied by session limit.
         let result = manager
             .create_session(CreateSessionRequest {
                 provider_id: ProviderId::new("mock"),
@@ -2064,10 +2049,10 @@ mod tests {
         );
     }
 
-    /// Verify that ops-per-session limit is enforced by admission policy in `exec()`.
+    /// note: verify that ops-per-session limit is enforced by admission policy in `exec()`.
     #[tokio::test]
     async fn exec_enforces_ops_per_session_limit() {
-        // Build admission with max_ops_per_session = 0 (zero → any exec denied).
+        // why: Build admission with max_ops_per_session = 0 (zero → any exec denied).
         let config = AgentHostConfig {
             max_sessions: 4,
             max_ops_per_session: 0,
@@ -2124,7 +2109,7 @@ mod tests {
         );
     }
 
-    /// Verify that an allowed provider within limits can create sessions and exec ops.
+    /// note: verify that an allowed provider within limits can create sessions and exec ops.
     #[tokio::test]
     async fn create_session_and_exec_allowed_when_within_limits() {
         let config = AgentHostConfig {
@@ -2177,7 +2162,7 @@ mod tests {
         assert!(result.is_ok(), "exec should succeed within ops limit");
     }
 
-    /// Verify that `create_session` rejects a cwd outside the workspace boundary (QC2 F-002).
+    /// note: verify that `create_session` rejects a cwd outside the workspace boundary (QC2 F-002).
     #[tokio::test]
     async fn create_session_rejects_cwd_outside_workspace_boundary() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -2194,7 +2179,7 @@ mod tests {
             )
             .await;
 
-        // Start with workspace_root = temp_dir
+        // why: Start with workspace_root = temp_dir
         manager
             .start({
                 let mut cfg = start_config();
@@ -2206,7 +2191,7 @@ mod tests {
             .await
             .expect("start");
 
-        // Try to create a session with cwd = /tmp (outside temp_dir)
+        // why: Try to create a session with cwd = /tmp (outside temp_dir)
         let result = manager
             .create_session(CreateSessionRequest {
                 provider_id: ProviderId::new("mock"),
@@ -2228,9 +2213,9 @@ mod tests {
         );
     }
 
-    // ── DF-21: Timeout enforcement tests ──────────────────────────────────
+    // note: ── DF-21: Timeout enforcement tests ──────────────────────────────────
 
-    /// A mock provider whose `launch()` takes longer than the configured timeout.
+    /// note: A mock provider whose `launch()` takes longer than the configured timeout.
     struct SlowLaunchProvider {
         provider_id: ProviderId,
     }
@@ -2259,7 +2244,7 @@ mod tests {
         }
 
         async fn launch(&self, _spec: LaunchSpec) -> HostResult<ManagedSessionHandle> {
-            // Simulate a slow provider that takes 10 seconds to launch
+            // why: Simulate a slow provider that takes 10 seconds to launch
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             Ok(ManagedSessionHandle {
                 provider_id: self.provider_id.clone(),
@@ -2294,13 +2279,13 @@ mod tests {
         }
     }
 
-    /// Verify that `create_session()` enforces the `session_ms` timeout (DF-21).
+    /// note: verify that `create_session()` enforces the `session_ms` timeout (DF-21).
     /// A provider with a slow launch should trigger an `OperationTimeout` error.
     #[tokio::test]
     async fn create_session_enforces_session_timeout() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let config_path = temp_dir.path().join("config.toml");
-        // Configure a very short session_ms (50ms) so the slow provider times out
+        // why: Configure a very short session_ms (50ms) so the slow provider times out
         std::fs::write(&config_path, "[timeouts]\nsession_ms = 50\n").expect("write config");
 
         let manager = HostManager::new();
@@ -2393,7 +2378,7 @@ mod tests {
         );
     }
 
-    /// A provider whose probe succeeds and whose first `execute` fails with a
+    /// note: A provider whose probe succeeds and whose first `execute` fails with a
     /// chosen error — the post-ready launch-failure shape.
     struct ExecFailingMockProvider {
         provider_id: ProviderId,
@@ -2508,7 +2493,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_launch_class_failure_invalidates_provider() {
-        // A launch-class failure from `exec` (the dsh sealed/ordinary init or a
+        // why: A launch-class failure from `exec` (the dsh sealed/ordinary init or a
         // lazy child-setup failure) must invalidate the SAME candidate health
         // `create_session` does, so a later admission cannot keep using a
         // provider that is no longer ready.
@@ -2533,7 +2518,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_content_timeout_keeps_provider_ready() {
-        // The counterpart: an ordinary PROMPT timeout is not a launch-class
+        // why: The counterpart: an ordinary PROMPT timeout is not a launch-class
         // failure. A provider that initialized successfully must stay ready —
         // blanket-classifying every `operation_timeout` would tear down a
         // working recipe.
@@ -2558,7 +2543,7 @@ mod tests {
 
     #[tokio::test]
     async fn launch_stage_timeout_is_launch_class() {
-        // The stage-specific half of the same rule: a timeout AT a launch
+        // why: The stage-specific half of the same rule: a timeout AT a launch
         // boundary is launch-class.
         let launch_stage = HostError::timeout("launch", "initialize handshake timed out");
         assert!(is_launch_class_failure(&launch_stage));
@@ -2566,13 +2551,13 @@ mod tests {
         assert!(is_launch_class_failure(&init_stage));
         let prompt_stage = HostError::timeout("prompt", "content timed out");
         assert!(!is_launch_class_failure(&prompt_stage));
-        // The safe diagnostic must use the REAL category.
+        // why: The safe diagnostic must use the REAL category.
         assert_eq!(safe_provider_message(&prompt_stage), "operation timed out");
     }
 
     #[tokio::test]
     async fn restart_without_probe_owner_invalidates_previously_healthy_entries() {
-        // F6: a manager that completed an owner-bound start publishes
+        // why: F6: a manager that completed an owner-bound start publishes
         // `available = true`. Re-starting it with NO verified owner must clear
         // EVERY row (not only rows already unavailable), including latency.
         let manager = HostManager::new();
@@ -2761,14 +2746,14 @@ mod tests {
             probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
         };
 
-        // Initial start with an empty selection.
+        // why: Initial start with an empty selection.
         manager
             .reload(start_config(AgentHostConfig::default()))
             .await
             .expect("initial start");
         assert!(manager.agent_config().await.providers.is_empty());
 
-        // A saved config with one selected provider takes effect on reload.
+        // why: A saved config with one selected provider takes effect on reload.
         let selected = AgentHostConfig {
             providers: vec![crate::config::ProviderConfig {
                 id: "dsh-native".to_string(),
@@ -2792,7 +2777,7 @@ mod tests {
             .find(&provider_id)
             .is_some());
 
-        // Reloading the same config again replaces, never duplicates.
+        // why: Reloading the same config again replaces, never duplicates.
         manager
             .reload(start_config(selected))
             .await

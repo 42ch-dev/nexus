@@ -1,4 +1,4 @@
-//! Hermetic actual-upstream-`dsh` integration proof (v1.188 P0 Task 3).
+//! Hermetic actual-upstream-`dsh` integration proof (v1.188 P0 Task 3). See docs/specs/agents/agent-host.md.
 //!
 //! Unlike the SDK-wire fixture (`tests/fixtures/native_protocol/
 //! mock_dsh_agent.py`, exercised by the in-module `dsh::tests`), these tests
@@ -58,20 +58,20 @@ use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
-/// The persona token planted in the poisoned home patch layer. Its
+/// note: the persona token planted in the poisoned home patch layer. Its
 /// presence in a model request's system message proves the poisoned layer
 /// entered that runtime's composition; its absence from the sealed
 /// runtime's requests proves exclusion.
 const POISON_TOKEN: &str = "POISON-PERSONA-7f3a9c-via-home";
 
-/// The scripted final assistant text (the bounded completion).
+/// note: the scripted final assistant text (the bounded completion).
 const FINAL_TEXT: &str = "deterministic proxy final answer";
 
-/// Non-secret placeholder API key: the loopback proxy ignores it; no real
+/// note: non-secret placeholder API key: the loopback proxy ignores it; no real
 /// credential is ever read or passed.
 const DUMMY_API_KEY: &str = "dsh-test-nonsecret-loopback-key";
 
-/// Serialize every test in this binary that inspects the process table:
+/// note: serialize every test in this binary that inspects the process table:
 /// all tests share ONE test process, so provider-owned dsh children of
 /// concurrently running tests are indistinguishable by parent pid. The
 /// lock makes reaping/hostile-token evidence unambiguous. Poison-tolerant:
@@ -84,7 +84,7 @@ fn serial_real_runtime() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Resolve the installed/resolved real `dsh` through the production chain
+/// note: resolve the installed/resolved real `dsh` through the production chain
 /// (parent `DSH_RUNTIME_BIN` → PATH `dsh`; no explicit override here so the
 /// ambient chain is what a deployment would use). `None` = skip gate.
 fn real_dsh() -> Option<PathBuf> {
@@ -97,7 +97,7 @@ fn real_dsh() -> Option<PathBuf> {
     }
 }
 
-/// The all-false `deny_all` scope (architecture §3.4 selection).
+/// note: the all-false `deny_all` scope (architecture §3.4 selection).
 const fn deny_all_scope() -> PromptPermissionScope {
     PromptPermissionScope {
         allow_read: false,
@@ -129,7 +129,7 @@ fn real_timeouts() -> TimeoutConfig {
     }
 }
 
-/// The isolated child environment handed to the provider (the SDK merges
+/// note: the isolated child environment handed to the provider (the SDK merges
 /// it into the spawn environment): isolated parent HOME and `DSH_HOME`, the
 /// loopback model endpoint, the non-secret placeholder key, the poison
 /// marker log, and disabled telemetry so the proof never egresses.
@@ -171,7 +171,7 @@ fn real_provider(root: &TempDir, proxy_port: u16, dsh_bin: &Path) -> DshNativePr
     .expect("empty native args are accepted")
 }
 
-/// Plant the poison in the ordinary isolated home: a marker plugin
+/// note: plant the poison in the ordinary isolated home: a marker plugin
 /// package inserted through the profile patch layer (its module-load and
 /// apply side effects append their runtime's `DSH_HOME` to `POISON_LOG`), and
 /// a persona override through the home patch layer (reaches the composed
@@ -199,13 +199,13 @@ export function apply(ctx) {
 "#,
     )
     .expect("poison plugin module");
-    // The profile's own patch layer: insert the marker plugin service.
+    // why: The profile's own patch layer: insert the marker plugin service.
     std::fs::write(
         profile.join("cordis.patch.yml"),
         "- insert:\n    - id: poison-marker\n      name: dsh-poison-marker\n",
     )
     .expect("poison profile patch");
-    // The home patch layer: persona override reaching the system prompt.
+    // why: The home patch layer: persona override reaching the system prompt.
     std::fs::write(
         dsh_home.join("cordis.patch.yml"),
         format!("- id: system-prompt\n  config:\n    personaPrefix: \"{POISON_TOKEN}\"\n"),
@@ -213,7 +213,7 @@ export function apply(ctx) {
     .expect("poison home patch");
 }
 
-/// Marker paths the unsolicited tool calls are scripted to create, plus a
+/// note: marker paths the unsolicited tool calls are scripted to create, plus a
 /// per-process unique token embedded in the scripted background process's
 /// OWN command line (the tracked process itself is token-bearing — no
 /// nested untracked sleeper). The marker PARENT directory is created up
@@ -266,7 +266,7 @@ impl HostileMarkers {
     }
 }
 
-/// Explicit capability check for the POSIX process-inspection proof
+/// note: explicit capability check for the POSIX process-inspection proof
 /// tooling. Absence is a loud NON-PROOF skip, never silent success; the
 /// local Unix proof (recorded identity below) is unaffected.
 #[cfg(unix)]
@@ -285,7 +285,7 @@ fn proof_tool_capability() -> bool {
     true
 }
 
-/// Whether a process with `pid` currently exists (`ps`-based).
+/// note: whether a process with `pid` currently exists (`ps`-based).
 #[cfg(unix)]
 fn pid_alive(pid: i32) -> bool {
     Command::new("ps")
@@ -296,7 +296,7 @@ fn pid_alive(pid: i32) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Whether any live process command line carries the unique hostile token.
+/// note: whether any live process command line carries the unique hostile token.
 #[cfg(unix)]
 fn hostile_token_alive(token: &str) -> bool {
     let out = Command::new("ps")
@@ -308,7 +308,7 @@ fn hostile_token_alive(token: &str) -> bool {
         .any(|line| line.contains(token))
 }
 
-/// Live (non-zombie) `dsh` runtime processes parented to THIS test
+/// note: live (non-zombie) `dsh` runtime processes parented to THIS test
 /// process — the provider-owned children whose reaping the cleanup arms
 /// must observe.
 #[cfg(unix)]
@@ -331,7 +331,7 @@ fn live_dsh_children() -> Vec<i32> {
         .collect()
 }
 
-/// Direct-child identity recorded BEFORE provider launch (the ambient
+/// note: direct-child identity recorded BEFORE provider launch (the ambient
 /// baseline). Strays are provider-owned direct children spawned since the
 /// capture. The baseline owns NO close path itself: it never calls
 /// `provider.shutdown` (the retained cleanup owner performs that exactly
@@ -355,7 +355,7 @@ impl ChildBaseline {
             .collect()
     }
 
-    /// Boundedly observe stray exit (5s), then TERM (5s), then KILL (5s).
+    /// note: boundedly observe stray exit (5s), then TERM (5s), then KILL (5s).
     /// Returns `(needed_force, diagnostics)` — `needed_force` means the
     /// provider's own cleanup left a live child, i.e. cleanup was
     /// UNCONFIRMED. Zombies are excluded (dead, reaped by the OS at test
@@ -399,7 +399,7 @@ impl ChildBaseline {
     }
 }
 
-/// Assert the provider left no live direct child; force-reap any straggler
+/// note: assert the provider left no live direct child; force-reap any straggler
 /// so no detached process survives, then fail loudly — unconfirmed cleanup
 /// is never reported as success.
 #[cfg(unix)]
@@ -411,7 +411,7 @@ fn assert_no_stray_dsh_children(baseline: &ChildBaseline, what: &str) {
     );
 }
 
-/// Non-secret request structure recorded by the proxy (never bodies,
+/// note: non-secret request structure recorded by the proxy (never bodies,
 /// headers, or credentials): endpoint shape, model id, tool advertisement
 /// shape, message-role structure, and derived booleans against the KNOWN
 /// test tokens (poison persona, `unknown tool "<name>"` rejections the
@@ -430,7 +430,7 @@ struct RequestRecord {
     rejected_unknown_tools: Vec<String>,
 }
 
-/// One scripted proxy: each of the first `hostile_rounds` requests gets a
+/// note: one scripted proxy: each of the first `hostile_rounds` requests gets a
 /// single unsolicited tool call (shell → editor → `run_code`) whose
 /// arguments would create marker files / spawn a background process; every
 /// later request gets the bounded final `stop` completion.
@@ -473,7 +473,7 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-/// Read one HTTP request (head + content-length body) from a connection.
+/// note: read one HTTP request (head + content-length body) from a connection.
 async fn read_request(socket: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
     let mut buf = Vec::with_capacity(8192);
     let mut chunk = [0u8; 8192];
@@ -506,7 +506,7 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
     (head, body)
 }
 
-/// One SSE chunk (`data: <json>\n\n`).
+/// note: one SSE chunk (`data: <json>\n\n`).
 fn sse_chunk(delta: &serde_json::Value, finish_reason: Option<&str>) -> String {
     let payload = serde_json::json!({
         "id": "chatcmpl-dsh-t3-proxy",
@@ -530,7 +530,7 @@ fn sse_usage_chunk() -> String {
     format!("data: {payload}\n\n")
 }
 
-/// The scripted unsolicited tool call for one hostile round: a tool that
+/// note: the scripted unsolicited tool call for one hostile round: a tool that
 /// the sealed composition does NOT register, with arguments whose
 /// execution would leave observable evidence. The shell body creates a
 /// marker file AND starts a bounded background process whose OWN command
@@ -651,7 +651,7 @@ async fn serve_connection(
     let _ = socket.shutdown().await;
 }
 
-/// Collect a turn's events, expecting a clean stream (no Err items).
+/// note: collect a turn's events, expecting a clean stream (no Err items).
 #[cfg(unix)]
 async fn collect_turn(
     stream: nexus_agent_host::capability::model::HostEventStream,
@@ -686,7 +686,7 @@ async fn run_prompt(
     collect_turn(stream).await
 }
 
-/// Read the poison marker log as parsed JSON lines (empty when absent).
+/// note: read the poison marker log as parsed JSON lines (empty when absent).
 #[cfg(unix)]
 fn poison_log_entries(root: &TempDir) -> Vec<serde_json::Value> {
     let path = root.path().join("poison.jsonl");
@@ -700,7 +700,7 @@ fn poison_log_entries(root: &TempDir) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Run `body` (the assertion phase borrowing the provider and a CLONE of
+/// note: run `body` (the assertion phase borrowing the provider and a CLONE of
 /// the handle) with failure-safe teardown. `baseline` was captured before
 /// launch and owns no close path (never a second provider shutdown, never
 /// a lease deletion), so it cannot race the retained cleanup owner.
@@ -745,10 +745,10 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
                 "teardown after failure: provider shutdown = {cleanup:?}; child reap diagnostics = {diag:?}"
             );
             if leaked.is_empty() {
-                // No leak: preserve the ORIGINAL failure exactly.
+                // why: No leak: preserve the ORIGINAL failure exactly.
                 std::panic::resume_unwind(panic);
             }
-            // A leak the forced reap could not clear: fail (never mask,
+            // why: A leak the forced reap could not clear: fail (never mask,
             // never continue quietly) with the original panic message
             // attached to the cleanup diagnostics.
             let original = panic
@@ -763,7 +763,7 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
     }
 }
 
-/// RAII guard for the identity test's directly spawned child: kill + wait
+/// note: RAII guard for the identity test's directly spawned child: kill + wait
 /// on every early exit; disarmed only after the child is confirmed exited.
 struct ChildGuard(Option<std::process::Child>);
 
@@ -790,7 +790,7 @@ impl Drop for ChildGuard {
     }
 }
 
-/// Positive control for the side-effect arms: every scripted hostile
+/// note: positive control for the side-effect arms: every scripted hostile
 /// body, executed directly, DOES produce its observable evidence (marker
 /// file, and a recorded live pid that IS the token-bearing bounded
 /// process — no wrapper, no nested untracked sleeper). This makes the
@@ -808,7 +808,7 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
     let root = tempfile::tempdir().expect("temp root");
     let markers = HostileMarkers::under(&root);
 
-    // shell body: marker file + uniquely identifiable bounded process.
+    // why: shell body: marker file + uniquely identifiable bounded process.
     let (name, arguments) = hostile_call(0, &markers);
     assert_eq!(name, "shell");
     let arguments: serde_json::Value = serde_json::from_str(&arguments).expect("args json");
@@ -827,7 +827,7 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
         .expect("numeric pid");
     assert!(pid_alive(pid), "the bounded background process is alive");
     assert!(hostile_token_alive(&markers.process_token));
-    // Clean the control process safely: bounded TERM, KILL fallback, then
+    // why: Clean the control process safely: bounded TERM, KILL fallback, then
     // observed death.
     let _ = Command::new("kill").arg(pid.to_string()).status();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -844,7 +844,7 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
     assert!(!pid_alive(pid), "the control process was reaped");
     assert!(!hostile_token_alive(&markers.process_token));
 
-    // str_replace_editor body: creating the file IS the tool effect.
+    // why: str_replace_editor body: creating the file IS the tool effect.
     let (name, arguments) = hostile_call(1, &markers);
     assert_eq!(name, "str_replace_editor");
     let arguments: serde_json::Value = serde_json::from_str(&arguments).expect("args json");
@@ -860,7 +860,7 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
         "the editor body created its marker"
     );
 
-    // run_code body: execute the exact python payload.
+    // why: run_code body: execute the exact python payload.
     let (name, arguments) = hostile_call(2, &markers);
     assert_eq!(name, "run_code");
     let arguments: serde_json::Value = serde_json::from_str(&arguments).expect("args json");
@@ -875,7 +875,7 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
         "the run_code body created its marker"
     );
 
-    // Safe cleanup: every marker removed; total absence re-verified.
+    // why: Safe cleanup: every marker removed; total absence re-verified.
     for path in [
         &markers.shell,
         &markers.shell_pid,
@@ -887,14 +887,14 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
     markers.assert_all_absent();
 }
 
-/// The actual upstream dsh sealed `deny_all` composition enforces no-tools
+/// note: the actual upstream dsh sealed `deny_all` composition enforces no-tools
 /// at dispatch (architecture §3.4 / AC6): the model request advertises NO
 /// tools, unsolicited shell/editor/`run_code` calls are rejected as unknown
 /// tools, and no marker file/process/tool-body side effect occurs before
 /// the scripted bounded completion.
 #[cfg(unix)]
 #[tokio::test]
-#[allow(clippy::too_many_lines, clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
+#[allow(clippy::too_many_lines, clippy::await_holding_lock)] // why: Serial process-table proof across test runtimes.
 async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -926,7 +926,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
             )
             .await;
 
-            // The turn completes bounded through the scripted proxy: exactly
+            // why: The turn completes bounded through the scripted proxy: exactly
             // one OpStarted, the final text delta, one OpFinished(EndTurn).
             assert!(
                 matches!(events.first(), Some(HostEvent::OpStarted(_))),
@@ -945,7 +945,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
                 "the bounded final completion ends the turn: {events:?}"
             );
 
-            // Exactly the scripted model calls happened: three hostile
+            // why: Exactly the scripted model calls happened: three hostile
             // tool-call responses, then the bounded final completion.
             let records = proxy.records();
             assert_eq!(
@@ -991,7 +991,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     };
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
 
-    // After the bounded model completion AND the confirmed provider
+    // why: After the bounded model completion AND the confirmed provider
     // shutdown, separately prove the dispatch-level rejections and the
     // absence of every side effect (file, pid file, live process).
     let records = proxy.records();
@@ -1013,7 +1013,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     markers.assert_all_absent();
     assert_no_stray_dsh_children(&baseline, "sealed deny_all shutdown");
 
-    // The poisoned marker plugin booted ONLY in the ordinary launch (the
+    // why: The poisoned marker plugin booted ONLY in the ordinary launch (the
     // provider initializes the ordinary recipe at launch); the sealed
     // switch booted a runtime that never touched the poisoned layers.
     let dsh_home = std::fs::canonicalize(root.path().join("dsh-home")).expect("canonical home");
@@ -1036,7 +1036,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         );
     }
 
-    // Confirmed shutdown deleted the sealed child home lease (the `nexus`
+    // why: Confirmed shutdown deleted the sealed child home lease (the `nexus`
     // subtree holds no remaining lease).
     let nexus_dir = dsh_home.join("nexus");
     let lease_remains = nexus_dir.exists()
@@ -1050,14 +1050,14 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     );
 }
 
-/// Non-vacuity arm for the sealed proof: the SAME poisoned layers
+/// note: non-vacuity arm for the sealed proof: the SAME poisoned layers
 /// observably enter the ORDINARY runtime — the model request carries the
 /// poison persona token and DOES advertise tools, and the marker plugin
 /// boots against the ordinary home. Without this arm, "absent from the
 /// sealed runtime" would prove nothing.
 #[cfg(unix)]
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
+#[allow(clippy::await_holding_lock)] // why: Serial process-table proof across test runtimes.
 async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1113,13 +1113,13 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
     assert_no_stray_dsh_children(&baseline, "ordinary poison shutdown");
 }
 
-/// A missing required plugin package is a STOP, never an ordinary
+/// note: A missing required plugin package is a STOP, never an ordinary
 /// fallback: the poisoned profile patch names a package that does not
 /// exist, the real runtime fails the initialize handshake, and the
 /// provider launch fails closed with a typed error and zero model calls.
 #[cfg(unix)]
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
+#[allow(clippy::await_holding_lock)] // why: Serial process-table proof across test runtimes.
 async fn real_dsh_missing_plugin_package_fails_closed() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1149,7 +1149,7 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
         proxy.records().is_empty(),
         "no model call ever happened on the failed launch"
     );
-    // Launch failure is not proven cleanup until the failed-init child is
+    // why: Launch failure is not proven cleanup until the failed-init child is
     // observed reaped and no Nexus sealed lease survives; this arm fails
     // closed if cleanup is unconfirmed (strays are killed, then the test
     // fails loudly).
@@ -1167,7 +1167,7 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
     markers.assert_all_absent();
 }
 
-/// Wall-clock capture for the P1 actual-dsh streaming timing proof.
+/// note: wall-clock capture for the P1 actual-dsh streaming timing proof.
 #[cfg(unix)]
 struct TurnTiming {
     first_message_delta: Option<Instant>,
@@ -1202,12 +1202,12 @@ async fn collect_turn_timed(
     }
 }
 
-/// Actual installed `dsh` on a loopback LLM proxy: at least one committed
+/// note: actual installed `dsh` on a loopback LLM proxy: at least one committed
 /// `MessageDelta` is observed before the terminal, with monotonic Instant
 /// evidence logged for parent verification (P1 T3 / AC2).
 #[cfg(unix)]
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
+#[allow(clippy::await_holding_lock)] // why: Serial process-table proof across test runtimes.
 async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
     let Some(dsh_bin) = real_dsh() else {
         return;
@@ -1305,17 +1305,17 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
 }
 
-/// Record the actual runtime identity without reading credentials: CLI
+/// note: record the actual runtime identity without reading credentials: CLI
 /// version output, the installed npm package identity (name/version), and
 /// the wire protocol server identity from a direct `initialize` handshake
 /// under an isolated `HOME/DSH_HOME`.
 #[test]
-#[allow(clippy::too_many_lines)] // One owned-child identity and cleanup scenario.
+#[allow(clippy::too_many_lines)] // why: One owned-child identity and cleanup scenario.
 fn real_dsh_runtime_identity_is_recorded() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
 
-    // CLI version (non-secret).
+    // why: CLI version (non-secret).
     let version_out = Command::new(&dsh_bin)
         .arg("--version")
         .env("DSH_TELEMETRY_DISABLED", "1")
@@ -1327,7 +1327,7 @@ fn real_dsh_runtime_identity_is_recorded() {
         .to_string();
     assert!(!cli_version.is_empty(), "a version string is recorded");
 
-    // Installed package identity: the resolved executable is the package's
+    // why: Installed package identity: the resolved executable is the package's
     // `lib/bin.js`; its `package.json` is two directories up.
     let canonical = std::fs::canonicalize(&dsh_bin).expect("canonical dsh");
     let package_json_path = canonical
@@ -1343,7 +1343,7 @@ fn real_dsh_runtime_identity_is_recorded() {
     let package_version = package_json["version"].as_str().expect("package version");
     assert_eq!(package_name, "@deepseek-ai/dsh");
 
-    // Wire protocol identity: direct initialize handshake under isolation.
+    // why: Wire protocol identity: direct initialize handshake under isolation.
     let root = tempfile::tempdir().expect("temp root");
     let home = root.path().join("home");
     let dsh_home = root.path().join("dsh-home");
@@ -1421,7 +1421,7 @@ fn real_dsh_runtime_identity_is_recorded() {
     assert_eq!(server_name, "deepseek-harness-sdk-runtime");
     assert_ne!(protocol_version, "");
 
-    // Cooperative shutdown + EOF; the child exits on its own.
+    // why: Cooperative shutdown + EOF; the child exits on its own.
     writeln!(
         stdin,
         r#"{{"jsonrpc":"2.0","id":"t3-bye","method":"shutdown"}}"#
@@ -1440,7 +1440,7 @@ fn real_dsh_runtime_identity_is_recorded() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
-    // The child is confirmed exited; disarm so the guard does not kill a
+    // why: The child is confirmed exited; disarm so the guard does not kill a
     // reaped pid.
     guard.disarm();
 

@@ -1,4 +1,4 @@
-//! Structured telemetry event helpers for all `HostEvent` variants.
+//! Structured telemetry event helpers for all `HostEvent` variants. See docs/specs/agents/agent-host.md.
 //!
 //! Each event carries: `run_id` (Option), `session_id`, `provider_id`,
 //! `protocol_kind`, `timestamp`. Provides serialization helpers for JSON output
@@ -14,21 +14,21 @@ use crate::capability::model::{
 };
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 
-/// Common context for telemetry event construction.
+/// note: common context for telemetry event construction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryContext {
-    /// Optional run ID for correlation across operations.
+    /// note: optional run ID for correlation across operations.
     pub run_id: Option<String>,
-    /// Provider ID for the event source.
+    /// note: provider ID for the event source.
     pub provider_id: ProviderId,
-    /// Protocol kind of the provider.
+    /// note: protocol kind of the provider.
     pub protocol_kind: crate::capability::model::ProtocolKind,
-    /// Timestamp for the event.
+    /// note: timestamp for the event.
     pub timestamp: DateTime<Utc>,
 }
 
 impl TelemetryContext {
-    /// Create a new telemetry context.
+    /// note: create a new telemetry context.
     #[must_use]
     pub fn new(
         provider_id: ProviderId,
@@ -42,7 +42,7 @@ impl TelemetryContext {
         }
     }
 
-    /// Set the run ID.
+    /// note: set the run ID.
     #[must_use]
     pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
         self.run_id = Some(run_id.into());
@@ -50,9 +50,9 @@ impl TelemetryContext {
     }
 }
 
-// ── Event creation helpers ──────────────────────────────────────────
+// note: ── Event creation helpers ──────────────────────────────────────────
 
-/// Create a `SessionCreated` event.
+/// note: create a `SessionCreated` event.
 #[must_use]
 pub const fn session_created(session_id: HostSessionId, provider_id: ProviderId) -> HostEvent {
     HostEvent::SessionCreated(SessionCreatedEvent {
@@ -61,13 +61,13 @@ pub const fn session_created(session_id: HostSessionId, provider_id: ProviderId)
     })
 }
 
-/// Create an `OpStarted` event.
+/// note: create an `OpStarted` event.
 #[must_use]
 pub const fn op_started(op_id: HostOperationId, session_id: HostSessionId) -> HostEvent {
     HostEvent::OpStarted(OperationStartedEvent { op_id, session_id })
 }
 
-/// Create a `ThoughtDelta` event.
+/// note: create a `ThoughtDelta` event.
 #[must_use]
 pub const fn thought_delta(
     session_id: HostSessionId,
@@ -81,7 +81,7 @@ pub const fn thought_delta(
     })
 }
 
-/// Create a `MessageDelta` event.
+/// note: create a `MessageDelta` event.
 #[must_use]
 pub const fn message_delta(
     session_id: HostSessionId,
@@ -95,7 +95,7 @@ pub const fn message_delta(
     })
 }
 
-/// Create a `ToolCall` event.
+/// note: create a `ToolCall` event.
 #[must_use]
 pub const fn tool_call(
     session_id: HostSessionId,
@@ -111,7 +111,7 @@ pub const fn tool_call(
     })
 }
 
-/// Create a `PlanUpdate` event.
+/// note: create a `PlanUpdate` event.
 #[must_use]
 pub const fn plan_update(
     session_id: HostSessionId,
@@ -125,7 +125,7 @@ pub const fn plan_update(
     })
 }
 
-/// Create a `Status` event.
+/// note: create a `Status` event.
 #[must_use]
 pub const fn status_event(
     session_id: Option<HostSessionId>,
@@ -139,7 +139,7 @@ pub const fn status_event(
     })
 }
 
-/// Create an `OpFinished` terminal event.
+/// note: create an `OpFinished` terminal event.
 #[must_use]
 pub const fn op_finished(
     session_id: HostSessionId,
@@ -153,7 +153,7 @@ pub const fn op_finished(
     })
 }
 
-/// Create an `OpFailed` terminal event.
+/// note: create an `OpFailed` terminal event.
 #[must_use]
 pub const fn op_failed(
     session_id: HostSessionId,
@@ -169,32 +169,32 @@ pub const fn op_failed(
     })
 }
 
-/// Create a `SessionStopped` event.
+/// note: create a `SessionStopped` event.
 #[must_use]
 pub const fn session_stopped(session_id: HostSessionId, reason: SessionStopReason) -> HostEvent {
     HostEvent::SessionStopped(SessionStoppedEvent { session_id, reason })
 }
 
-// ── Serialization helpers ───────────────────────────────────────────
+// note: ── Serialization helpers ───────────────────────────────────────────
 
-/// A telemetry event enriched with context for JSONL output.
+/// note: A telemetry event enriched with context for JSONL output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrichedEvent {
-    /// Telemetry context.
+    /// note: telemetry context.
     #[serde(flatten)]
     pub context: TelemetryContext,
-    /// The host event.
+    /// note: the host event.
     pub event: HostEvent,
 }
 
 impl EnrichedEvent {
-    /// Create an enriched event from context and host event.
+    /// note: create an enriched event from context and host event.
     #[must_use]
     pub const fn new(context: TelemetryContext, event: HostEvent) -> Self {
         Self { context, event }
     }
 
-    /// Serialize to JSON string.
+    /// note: serialize to JSON string.
     ///
     /// # Errors
     ///
@@ -203,7 +203,7 @@ impl EnrichedEvent {
         serde_json::to_string(self)
     }
 
-    /// Serialize to pretty JSON string.
+    /// note: serialize to pretty JSON string.
     ///
     /// # Errors
     ///

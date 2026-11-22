@@ -1,4 +1,4 @@
-//! Session registry and state machine.
+//! Session registry and state machine. See docs/specs/agents/agent-host.md.
 //!
 //! Manages host-level session lifecycle with explicit op substates per the compass
 //! §Session state machine. Enforces one active op per session in Wave 1.
@@ -14,7 +14,7 @@ use crate::capability::model::{
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 
-/// Session state in the host state machine.
+/// note: session state in the host state machine.
 ///
 /// Per compass §Session state machine:
 /// ```text
@@ -27,46 +27,46 @@ use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
-    /// Session created, not yet started.
+    /// note: session created, not yet started.
     Created,
-    /// Session starting (provider launch in progress).
+    /// note: session starting (provider launch in progress).
     Starting,
-    /// Session ready for operations.
+    /// note: session ready for operations.
     Ready,
-    /// Session busy with an operation.
+    /// note: session busy with an operation.
     Busy(HostOperationId),
-    /// Session cancelling an operation.
+    /// note: session cancelling an operation.
     Cancelling(HostOperationId),
-    /// Session stopping (shutdown in progress).
+    /// note: session stopping (shutdown in progress).
     Stopping,
-    /// Recoverable error state.
+    /// note: recoverable error state.
     ErrorRecoverable,
-    /// Terminal error state — new session required.
+    /// note: terminal error state — new session required.
     ErrorTerminal,
-    /// Session stopped (terminal).
+    /// note: session stopped (terminal).
     Stopped,
 }
 
 impl SessionState {
-    /// Whether the session is in a terminal state (no further transitions).
+    /// note: whether the session is in a terminal state (no further transitions).
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Stopped)
     }
 
-    /// Whether the session can accept a new operation.
+    /// note: whether the session can accept a new operation.
     #[must_use]
     pub const fn can_exec(&self) -> bool {
         matches!(self, Self::Ready)
     }
 
-    /// Whether the session has an active operation.
+    /// note: whether the session has an active operation.
     #[must_use]
     pub const fn is_busy(&self) -> bool {
         matches!(self, Self::Busy(_) | Self::Cancelling(_))
     }
 
-    /// Get the active operation ID, if any.
+    /// note: get the active operation ID, if any.
     #[must_use]
     pub const fn active_op_id(&self) -> Option<&HostOperationId> {
         match self {
@@ -76,52 +76,52 @@ impl SessionState {
     }
 }
 
-/// A host-managed session.
+/// note: A host-managed session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostSession {
-    /// Session ID.
+    /// note: session ID.
     pub id: HostSessionId,
-    /// Provider ID for this session.
+    /// note: provider ID for this session.
     pub provider_id: ProviderId,
-    /// Current session state.
+    /// note: current session state.
     pub state: SessionState,
-    /// When the session was created.
+    /// note: when the session was created.
     pub created_at: DateTime<Utc>,
-    /// Active operation ID (if in Busy/Cancelling state).
+    /// note: active operation ID (if in Busy/Cancelling state).
     pub active_op_id: Option<HostOperationId>,
-    /// Negotiated capabilities for this session.
+    /// note: negotiated capabilities for this session.
     pub negotiated_capabilities: CapabilityDescriptor,
-    /// Verified owner metadata (Creator + canonical workspace).
+    /// note: verified owner metadata (Creator + canonical workspace).
     pub owner: crate::capability::model::SessionOwner,
-    /// Opaque owned-process identity (PID + birth + group) captured at
+    /// note: opaque owned-process identity (PID + birth + group) captured at
     /// launch (A5). `None` when the platform cannot establish a birth token.
     pub process_identity: Option<crate::capability::model::OwnedProcessIdentity>,
 }
 
-/// Registry of all active host sessions.
+/// note: registry of all active host sessions.
 #[derive(Debug, Clone, Default)]
 pub struct SessionRegistry {
-    /// Sessions indexed by ID.
+    /// note: sessions indexed by ID.
     sessions: HashMap<HostSessionId, HostSession>,
 }
 
-/// Result of a state transition that may produce a terminal event.
+/// note: result of a state transition that may produce a terminal event.
 #[derive(Debug, Clone)]
 pub enum TransitionResult {
-    /// Transition succeeded with no terminal event.
+    /// note: transition succeeded with no terminal event.
     Ok,
-    /// Transition succeeded and produced a terminal event (emitted when leaving Busy).
+    /// note: transition succeeded and produced a terminal event (emitted when leaving Busy).
     TerminalEvent(HostEvent),
 }
 
 impl SessionRegistry {
-    /// Create an empty session registry.
+    /// note: create an empty session registry.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Register a provider-launched session in Created state.
+    /// note: register a provider-launched session in Created state.
     pub fn register(
         &mut self,
         id: HostSessionId,
@@ -144,7 +144,7 @@ impl SessionRegistry {
         id
     }
 
-    /// Transition a session to Starting.
+    /// note: transition a session to Starting.
     ///
     /// Valid from: Created, `ErrorRecoverable`.
     ///
@@ -165,7 +165,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition a session to Ready.
+    /// note: transition a session to Ready.
     ///
     /// Valid from: Starting.
     ///
@@ -186,7 +186,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition a session to `Busy` with an operation.
+    /// note: transition a session to `Busy` with an operation.
     ///
     /// Valid from: Ready. Enforces one active op per session.
     /// Returns the transition result; every path out of `Busy` must emit one terminal event.
@@ -213,7 +213,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition from `Busy` to Ready (operation completed).
+    /// note: transition from `Busy` to Ready (operation completed).
     ///
     /// Produces a terminal event acknowledgement. The caller is responsible
     /// for emitting the actual `OpFinished` or `OpFailed` event.
@@ -231,7 +231,7 @@ impl SessionRegistry {
             SessionState::Busy(ref current_op_id) if current_op_id == op_id => {
                 session.state = SessionState::Ready;
                 session.active_op_id = None;
-                // Caller emits the actual terminal event
+                // why: Caller emits the actual terminal event
                 Ok(TransitionResult::Ok)
             }
             _ => Err(HostError::internal(format!(
@@ -241,7 +241,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition from `Busy` to `Cancelling`.
+    /// note: transition from `Busy` to `Cancelling`.
     ///
     /// Valid from: `Busy(op_id)` where `op_id` matches.
     ///
@@ -266,7 +266,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition from `Cancelling` to Ready (cancel acknowledged).
+    /// note: transition from `Cancelling` to Ready (cancel acknowledged).
     ///
     /// Produces a terminal event: `OperationCancelled`.
     ///
@@ -283,7 +283,7 @@ impl SessionRegistry {
             SessionState::Cancelling(ref current_op_id) if current_op_id == op_id => {
                 session.state = SessionState::Ready;
                 session.active_op_id = None;
-                // The caller emits OpFinished or OpFailed terminal event
+                // why: The caller emits OpFinished or OpFailed terminal event
                 Ok(TransitionResult::Ok)
             }
             _ => Err(HostError::internal(format!(
@@ -293,7 +293,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition to Stopping.
+    /// note: transition to Stopping.
     ///
     /// Valid from: Ready, Starting, `Cancelling`, `ErrorRecoverable`.
     ///
@@ -322,7 +322,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition to Stopped.
+    /// note: transition to Stopped.
     ///
     /// Valid from: Stopping, `ErrorTerminal`.
     ///
@@ -351,7 +351,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition to `ErrorRecoverable`.
+    /// note: transition to `ErrorRecoverable`.
     ///
     /// Valid from: Starting, `Busy`, `Cancelling`, Stopping.
     ///
@@ -371,7 +371,7 @@ impl SessionRegistry {
             | SessionState::Stopping => {
                 session.state = SessionState::ErrorRecoverable;
                 session.active_op_id = None;
-                Ok(op_id) // Return op_id so caller can emit terminal event for the op
+                Ok(op_id) // why: Return op_id so caller can emit terminal event for the op
             }
             _ => Err(HostError::internal(format!(
                 "cannot transition to ErrorRecoverable from {:?} (session {})",
@@ -380,7 +380,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Transition to `ErrorTerminal`.
+    /// note: transition to `ErrorTerminal`.
     ///
     /// Valid from: Starting, `Busy`, `Cancelling`, Stopping.
     ///
@@ -400,7 +400,7 @@ impl SessionRegistry {
             | SessionState::Stopping => {
                 session.state = SessionState::ErrorTerminal;
                 session.active_op_id = None;
-                Ok(op_id) // Return op_id so caller can emit terminal event for the op
+                Ok(op_id) // why: Return op_id so caller can emit terminal event for the op
             }
             _ => Err(HostError::internal(format!(
                 "cannot transition to ErrorTerminal from {:?} (session {})",
@@ -409,35 +409,35 @@ impl SessionRegistry {
         }
     }
 
-    /// Get a session by ID.
+    /// note: get a session by ID.
     #[must_use]
     pub fn get(&self, session_id: &HostSessionId) -> Option<&HostSession> {
         self.sessions.get(session_id)
     }
 
-    /// Get a mutable reference to a session by ID.
+    /// note: get a mutable reference to a session by ID.
     pub fn get_mut(&mut self, session_id: &HostSessionId) -> Option<&mut HostSession> {
         self.sessions.get_mut(session_id)
     }
 
-    /// Get current session count.
+    /// note: get current session count.
     #[must_use]
     pub fn len(&self) -> usize {
         self.sessions.len()
     }
 
-    /// Whether the registry is empty.
+    /// note: whether the registry is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
 
-    /// Iterate over all sessions.
+    /// note: iterate over all sessions.
     pub fn iter(&self) -> impl Iterator<Item = &HostSession> {
         self.sessions.values()
     }
 
-    /// Remove a stopped session.
+    /// note: remove a stopped session.
     ///
     /// # Errors
     ///
@@ -592,7 +592,7 @@ mod tests {
         let op1 = HostOperationId::new();
         registry.transition_to_busy(&id, op1).unwrap();
 
-        // Trying to start another op while busy should fail
+        // why: Trying to start another op while busy should fail
         let op2 = HostOperationId::new();
         assert!(registry.transition_to_busy(&id, op2).is_err());
     }
@@ -603,7 +603,7 @@ mod tests {
         let id = register_session(&mut registry);
         registry.transition_to_starting(&id).unwrap();
         let result = registry.transition_to_error_recoverable(&id).unwrap();
-        assert!(result.is_none()); // No active op
+        assert!(result.is_none()); // why: No active op
         assert_eq!(
             registry.get(&id).unwrap().state,
             SessionState::ErrorRecoverable
@@ -648,7 +648,7 @@ mod tests {
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_error_recoverable(&id).unwrap();
 
-        // Restart from error recoverable
+        // why: Restart from error recoverable
         registry.transition_to_starting(&id).unwrap();
         assert_eq!(registry.get(&id).unwrap().state, SessionState::Starting);
     }
@@ -663,7 +663,7 @@ mod tests {
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_ready(&id).unwrap();
 
-        // First cleanup attempt entered Stopping, then retained ownership as
+        // why: First cleanup attempt entered Stopping, then retained ownership as
         // ErrorRecoverable when process cleanup could not be confirmed.
         registry.transition_to_stopping(&id).unwrap();
         registry.transition_to_error_recoverable(&id).unwrap();
@@ -672,7 +672,7 @@ mod tests {
             SessionState::ErrorRecoverable
         );
 
-        // Later ownership-safe retry completes: ErrorRecoverable → Stopping.
+        // why: Later ownership-safe retry completes: ErrorRecoverable → Stopping.
         registry
             .transition_to_stopping(&id)
             .expect("retry to Stopping");
@@ -682,7 +682,7 @@ mod tests {
         assert!(matches!(event, HostEvent::SessionStopped(_)));
         assert!(registry.get(&id).unwrap().state.is_terminal());
 
-        // Registry and mapping removal happens after the successful retry.
+        // why: Registry and mapping removal happens after the successful retry.
         registry.remove_stopped(&id).expect("remove after retry");
         assert!(registry.get(&id).is_none());
     }
@@ -692,16 +692,16 @@ mod tests {
         let mut registry = SessionRegistry::new();
         let id = register_session(&mut registry);
 
-        // Created → Starting → Ready
+        // why: Created → Starting → Ready
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_ready(&id).unwrap();
 
-        // Ready → Busy → Ready
+        // why: Ready → Busy → Ready
         let op_id = HostOperationId::new();
         registry.transition_to_busy(&id, op_id.clone()).unwrap();
         registry.transition_busy_to_ready(&id, &op_id).unwrap();
 
-        // Ready → Stopping → Stopped
+        // why: Ready → Stopping → Stopped
         registry.transition_to_stopping(&id).unwrap();
         let event = registry
             .transition_to_stopped(&id, SessionStopReason::GracefulShutdown)

@@ -1,4 +1,4 @@
-//! Host-visible identifier types.
+//! Host-visible identifier types. See docs/specs/agents/agent-host.md.
 //!
 //! All IDs are owned, `Hash`/`Eq`-compatible, and serializable for
 //! event emission and telemetry.
@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Unique identifier for a discovered provider.
+/// note: unique identifier for a discovered provider.
 ///
 /// Assigned by discovery or explicit config. ACP registry entries use the
 /// agent ID from the registry; native CLI entries use distinct IDs like
@@ -15,7 +15,7 @@ use uuid::Uuid;
 pub struct ProviderId(pub String);
 
 impl ProviderId {
-    /// Create a new provider ID from a string.
+    /// note: create a new provider ID from a string.
     #[must_use]
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
@@ -40,12 +40,12 @@ impl std::fmt::Display for ProviderId {
     }
 }
 
-/// Unique identifier for a host-managed session.
+/// note: unique identifier for a host-managed session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HostSessionId(pub Uuid);
 
 impl HostSessionId {
-    /// Create a new random session ID.
+    /// note: create a new random session ID.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -64,12 +64,12 @@ impl Default for HostSessionId {
     }
 }
 
-/// Unique identifier for a host operation within a session.
+/// note: unique identifier for a host operation within a session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HostOperationId(pub Uuid);
 
 impl HostOperationId {
-    /// Create a new random operation ID.
+    /// note: create a new random operation ID.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -127,15 +127,12 @@ mod tests {
         let sid = HostSessionId::new();
         let oid = HostOperationId::new();
 
-        // Verify ProviderId serializes as newtype
         let pid_json = serde_json::to_string(&pid).unwrap();
         assert!(pid_json.contains("test-provider"));
 
-        // Verify roundtrip
         let pid_back: ProviderId = serde_json::from_str(&pid_json).unwrap();
         assert_eq!(pid, pid_back);
 
-        // Verify session/op IDs roundtrip
         let sid_json = serde_json::to_string(&sid).unwrap();
         let sid_back: HostSessionId = serde_json::from_str(&sid_json).unwrap();
         assert_eq!(sid, sid_back);

@@ -1,4 +1,4 @@
-//! nexus-agent-host — Hybrid managed-only host core for local agent execution.
+//! nexus-agent-host — Hybrid managed-only host core for local agent execution. See docs/specs/agents/agent-host.md.
 //!
 //! This crate provides the orchestration/facade layer above `nexus-acp-host` and
 //! native CLI process adapters. It normalizes ACP providers and native CLI providers
@@ -28,7 +28,7 @@
 //! - **Narrow facade**: daemon runtime depends only on `HostFacade` trait.
 
 #![deny(clippy::unwrap_used)]
-// Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
+// why: Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
 #![cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
@@ -46,11 +46,11 @@ pub mod telemetry;
 
 use async_trait::async_trait;
 
-// Re-export primary types at crate root for convenience.
+// why: Re-export primary types at crate root for convenience.
 pub use error::{HostError, HostResult};
 pub use ids::{HostOperationId, HostSessionId, ProviderId};
 
-// Re-export key public types from submodules.
+// why: Re-export key public types from submodules.
 pub use core::{HostManager, HostSession, SessionRegistry, SessionState, TransitionResult};
 pub use discovery::ProviderCatalog;
 pub use policy::{AdmissionPolicy, HostPermissionResolver, PermissionOutcome};
@@ -62,28 +62,28 @@ use capability::model::{
     ProviderDescriptor, ProviderHealth,
 };
 
-/// Provider adapter trait — the narrow interface each provider implements.
+/// note: provider adapter trait — the narrow interface each provider implements.
 ///
 /// ACP providers use `nexus-acp-host` under the hood; native CLI providers
 /// manage a subprocess directly. Both produce normalized `HostEvent` streams.
 #[async_trait]
 pub trait ProviderAdapter: Send + Sync {
-    /// Return the static descriptor for this provider.
+    /// note: return the static descriptor for this provider.
     fn descriptor(&self) -> ProviderDescriptor;
 
-    /// Probe provider availability (health check).
+    /// note: probe provider availability (health check).
     ///
     /// Should be lightweight — checks if the provider process can be started
     /// and responds to a basic handshake.
     async fn probe(&self, request: ProbeRequest) -> HostResult<ProviderHealth>;
 
-    /// Launch a new managed session on this provider.
+    /// note: launch a new managed session on this provider.
     ///
     /// Creates a provider process (or ACP connection), performs handshake,
     /// and returns a handle for subsequent operations.
     async fn launch(&self, spec: LaunchSpec) -> HostResult<ManagedSessionHandle>;
 
-    /// Execute an operation on an active session.
+    /// note: execute an operation on an active session.
     ///
     /// Returns a stream of `HostEvent` items. The stream MUST emit exactly
     /// one terminal event (`OpFinished` or `OpFailed`) before ending.
@@ -93,7 +93,7 @@ pub trait ProviderAdapter: Send + Sync {
         op: HostOperation,
     ) -> HostResult<HostEventStream>;
 
-    /// Cancel an in-progress operation.
+    /// note: cancel an in-progress operation.
     ///
     /// For ACP providers, sends `session/cancel`. For native providers,
     /// terminates the operation (process kill/termination sequence).
@@ -103,33 +103,33 @@ pub trait ProviderAdapter: Send + Sync {
         op_id: HostOperationId,
     ) -> HostResult<()>;
 
-    /// Shut down a managed session.
+    /// note: shut down a managed session.
     ///
     /// Cancels any active operation, waits for graceful timeout, then
     /// force-terminates the provider process if needed.
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()>;
 
-    /// Return the current (possibly runtime-negotiated) capabilities.
+    /// note: return the current (possibly runtime-negotiated) capabilities.
     fn capabilities(&self) -> CapabilityDescriptor;
 }
 
-/// Host facade — the narrow interface consumed by the daemon runtime.
+/// note: host facade — the narrow interface consumed by the daemon runtime.
 ///
 /// The daemon runtime stores `Arc<dyn HostFacade>` and calls methods
 /// through this trait only. Provider modules are never imported directly.
 #[async_trait]
 pub trait HostFacade: Send + Sync {
-    /// Start the host with the given configuration.
+    /// note: start the host with the given configuration.
     ///
     /// Loads config, discovers providers, and prepares for session creation.
     async fn start(&self, config: HostStartConfig) -> HostResult<()>;
 
-    /// Create a new managed session.
+    /// note: create a new managed session.
     ///
     /// Selects the provider, negotiates capabilities, and launches the session.
     async fn create_session(&self, request: CreateSessionRequest) -> HostResult<HostSession>;
 
-    /// Execute an operation on a session.
+    /// note: execute an operation on a session.
     ///
     /// Returns a stream of `HostEvent` items with exactly one terminal event.
     async fn exec(
@@ -138,36 +138,36 @@ pub trait HostFacade: Send + Sync {
         op: HostOperation,
     ) -> HostResult<HostEventStream>;
 
-    /// Cancel an active operation.
+    /// note: cancel an active operation.
     ///
     /// Routes to the correct provider adapter based on session ownership.
     async fn cancel(&self, op_id: HostOperationId) -> HostResult<()>;
 
-    /// Get host health status.
+    /// note: get host health status.
     async fn health(&self) -> HostResult<HostHealth>;
 
-    /// Shut down the host and all managed sessions.
+    /// note: shut down the host and all managed sessions.
     ///
     /// Drains active operations with configured grace timeout.
     async fn shutdown(&self) -> HostResult<()>;
 
-    /// Shut down a single managed session by ID.
+    /// note: shut down a single managed session by ID.
     ///
     /// The host remains running; only the specified session is stopped.
     /// Returns `HostError` if the session is not found.
     async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()>;
 
-    /// List all active managed sessions.
+    /// note: list all active managed sessions.
     ///
     /// Returns snapshot of sessions currently tracked by the host.
     async fn list_sessions(&self) -> HostResult<Vec<HostSession>>;
 
-    /// Get the provider catalog.
+    /// note: get the provider catalog.
     ///
     /// Returns provider entries discovered from config, PATH scan, and ACP registry.
     async fn provider_catalog(&self) -> HostResult<ProviderCatalog>;
 
-    /// Subscribe to host events for a specific session.
+    /// note: subscribe to host events for a specific session.
     ///
     /// Returns a broadcast receiver yielding [`HostEvent`] items.
     /// The SSE endpoint consumes this to relay real-time events to clients.
@@ -177,68 +177,68 @@ pub trait HostFacade: Send + Sync {
     ) -> tokio::sync::broadcast::Receiver<capability::model::HostEvent>;
 }
 
-/// A single entry in the provider catalog.
+/// note: A single entry in the provider catalog.
 #[derive(Debug, Clone)]
 pub struct ProviderCatalogEntry {
-    /// Provider ID.
+    /// note: provider ID.
     pub provider_id: ProviderId,
-    /// Human-readable display name.
+    /// note: human-readable display name.
     pub display_name: String,
-    /// Protocol kind.
+    /// note: protocol kind.
     pub protocol_kind: ProtocolKind,
-    /// Launch strategy for this provider.
+    /// note: launch strategy for this provider.
     pub launch: LaunchStrategy,
-    /// How this provider was discovered.
+    /// note: how this provider was discovered.
     pub source: DiscoverySource,
-    /// Trust level of this provider.
+    /// note: trust level of this provider.
     pub trust: TrustLevel,
-    /// Static capabilities.
+    /// note: static capabilities.
     pub capabilities: CapabilityDescriptor,
-    /// Health status (initially probed or unknown).
+    /// note: health status (initially probed or unknown).
     pub health: ProviderHealth,
 }
 
-/// How a provider was discovered.
+/// note: how a provider was discovered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoverySource {
-    /// Explicitly configured in `config.toml`.
+    /// note: explicitly configured in `config.toml`.
     Config,
-    /// Found via PATH scan.
+    /// note: found via PATH scan.
     PathScan,
-    /// Found via ACP registry catalog.
+    /// note: found via ACP registry catalog.
     AcpRegistry,
 }
 
-/// Trust level for a discovered provider.
+/// note: trust level for a discovered provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrustLevel {
-    /// Explicitly configured by user.
+    /// note: explicitly configured by user.
     Explicit,
-    /// From ACP registry (curated).
+    /// note: from ACP registry (curated).
     Registry,
-    /// Found on local PATH (lowest trust).
+    /// note: found on local PATH (lowest trust).
     LocalPath,
 }
 
-/// Launch strategy for a provider.
+/// note: launch strategy for a provider.
 #[derive(Debug, Clone)]
 pub enum LaunchStrategy {
-    /// ACP provider: spawn + SDK connection.
+    /// note: ACP provider: spawn + SDK connection.
     Acp {
-        /// Command to execute.
+        /// note: command to execute.
         command: String,
-        /// Command arguments.
+        /// note: command arguments.
         args: Vec<String>,
-        /// Environment variables.
+        /// note: environment variables.
         env: std::collections::HashMap<String, String>,
     },
-    /// Native CLI provider: managed subprocess.
+    /// note: native CLI provider: managed subprocess.
     NativeCli {
-        /// Command to execute.
+        /// note: command to execute.
         command: String,
-        /// Command arguments.
+        /// note: command arguments.
         args: Vec<String>,
-        /// Environment variables.
+        /// note: environment variables.
         env: std::collections::HashMap<String, String>,
     },
 }
@@ -247,8 +247,10 @@ pub enum LaunchStrategy {
 pub(crate) mod test_support {
     //! Shared serialization for tests that touch the process-global
     //! environment (see [`PROCESS_ENV_LOCK`]).
+    //!
+    //! See docs/specs/agents/agent-host.md
 
-    /// Serializes tests that mutate the process-global environment with
+    /// note: serializes tests that mutate the process-global environment with
     /// tests that spawn fixture children.
     ///
     /// On Unix, fixture shebangs resolve `python3` through process PATH at
@@ -275,7 +277,7 @@ pub(crate) mod test_support {
     ///
     /// shortcut: the directory survives the process until the next run's sweep,
     /// and two test processes sharing one temp dir would sweep each other's
-    /// shims — upgrade if that ever runs on one machine.
+    /// shims — upgrade: if that ever runs on one machine.
     #[cfg(windows)]
     static SHIM_DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
         let dir = std::env::temp_dir().join("nexus-agent-host-fixture-shims");
@@ -285,7 +287,7 @@ pub(crate) mod test_support {
         dir
     });
 
-    /// Remove a shim directory, returning one diagnostic line when the
+    /// note: remove a shim directory, returning one diagnostic line when the
     /// removal failed for any reason other than the directory being absent.
     ///
     /// Never panics and never locks. The failure is returned rather than
@@ -310,7 +312,7 @@ pub(crate) mod test_support {
         }
     }
 
-    /// Write the `.cmd` wrapper for `fixture` into `shim_dir`, creating the
+    /// note: write the `.cmd` wrapper for `fixture` into `shim_dir`, creating the
     /// directory when it is missing (a previous sweep may have removed it).
     #[cfg(windows)]
     fn write_shim(shim_dir: &std::path::Path, fixture: &std::path::Path) -> std::path::PathBuf {
@@ -330,7 +332,7 @@ pub(crate) mod test_support {
         shim
     }
 
-    /// Resolve a Python fixture to a program the current platform can spawn.
+    /// note: resolve a Python fixture to a program the current platform can spawn.
     /// Callers must hold `PROCESS_ENV_LOCK` throughout construction: on
     /// Windows, PATH-dependent `python_path()` discovery happens before this
     /// function returns, not only when the fixture is spawned.
@@ -373,7 +375,7 @@ pub(crate) mod test_support {
         PYTHON.clone()
     }
 
-    /// Pins the shim lifecycle: `fixture_launch` writes into `SHIM_DIR`, a
+    /// note: pins the shim lifecycle: `fixture_launch` writes into `SHIM_DIR`, a
     /// sweep removes a shim directory, and the next write recreates it.
     ///
     /// The sweep is exercised on a private directory, never on `SHIM_DIR`:
@@ -410,7 +412,7 @@ pub(crate) mod test_support {
         assert!(shim.is_file(), "write did not recreate: {}", shim.display());
     }
 
-    /// Pins that a failed sweep is reported instead of swallowed: an
+    /// note: pins that a failed sweep is reported instead of swallowed: an
     /// undeletable entry (simulated as a permission error, e.g. a wrapper
     /// another process still holds open) yields one diagnostic line naming
     /// the directory, while an absent directory stays silent.

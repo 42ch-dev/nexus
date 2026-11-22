@@ -1,4 +1,4 @@
-//! `HostEvent` mapping for `claude_codes` stream-json frames (AR-1 table).
+//! `HostEvent` mapping for `claude_codes` stream-json frames (AR-1 table). See docs/specs/agents/agent-host.md.
 //!
 //! Converts a turn's `claude_codes::ClaudeOutput` frames into `HostEvent`s,
 //! keeping the wire parser owned by the crate and Nexus owning only the
@@ -15,7 +15,7 @@ use crate::capability::model::{
 };
 use crate::ids::{HostOperationId, HostSessionId};
 
-/// Map a batch of Claude stream-json frames into host events.
+/// note: map a batch of Claude stream-json frames into host events.
 ///
 /// One turn = one batch, ending at the CLI's `Result` frame. Emits at most
 /// one terminal event; the frame→event map table is the v1.168 native-host
@@ -39,7 +39,7 @@ pub fn map_claude(
             ClaudeOutput::Assistant(assistant) => {
                 for block in &assistant.message.content {
                     match block {
-                        // AR-1: whole block, no token deltas this iteration.
+                        // why: AR-1: whole block, no token deltas this iteration.
                         ContentBlock::Text(text) => {
                             events.push(HostEvent::MessageDelta(TextDeltaEvent {
                                 session_id: session_id.clone(),
@@ -54,7 +54,7 @@ pub fn map_claude(
                                 text: thinking.thinking.clone(),
                             }));
                         }
-                        // AR-1: ToolUse and any other/unknown block carry no
+                        // why: AR-1: ToolUse and any other/unknown block carry no
                         // host event this iteration (structured_tool_calls
                         // stays false; unknown blocks are forward-compat
                         // noise) — skip + debug.
@@ -77,7 +77,7 @@ pub fn map_claude(
                     break;
                 }
                 if matches!(result.subtype, ResultSubtype::Unknown(_)) {
-                    // AR-1 correction: a crate-downgraded unknown subtype is
+                    // why: AR-1 correction: a crate-downgraded unknown subtype is
                     // nested unknown noise — skip, do not fail the turn here.
                     // A later `Result` frame (or the stream-abort backstop)
                     // still supplies the one terminal.
@@ -88,7 +88,7 @@ pub fn map_claude(
                     );
                     continue;
                 }
-                // Known error subtype (error_max_turns, error_during_execution,
+                // why: Known error subtype (error_max_turns, error_during_execution,
                 // …) or success-subtype-with-error-flag → one terminal failure.
                 events.push(HostEvent::OpFailed(OperationFailedEvent {
                     session_id: session_id.clone(),
@@ -98,7 +98,7 @@ pub fn map_claude(
                 }));
                 break;
             }
-            // AR-1: non-terminal warning; the terminal decision stays with
+            // why: AR-1: non-terminal warning; the terminal decision stays with
             // the `Result` frame / stream abort.
             ClaudeOutput::Error(err) => events.push(HostEvent::Status(StatusEvent {
                 session_id: Some(session_id.clone()),
@@ -113,7 +113,7 @@ pub fn map_claude(
                 level: StatusLevel::Warning,
                 message: format!("claude rate limit: {}", evt.rate_limit_info.status),
             })),
-            // AR-1: System / User / TranscriptResult / ControlRequest /
+            // why: AR-1: System / User / TranscriptResult / ControlRequest /
             // ControlResponse / StreamEvent (cannot arrive without
             // --include-partial-messages) / ToolProgress / CommandLifecycle /
             // AuthStatus / ToolUseSummary / PromptSuggestion /
@@ -130,7 +130,7 @@ pub fn map_claude(
     events
 }
 
-/// Error text for a failed claude `Result` frame: the CLI's `errors` list,
+/// note: error text for a failed claude `Result` frame: the CLI's `errors` list,
 /// else the `result` string, else the subtype token.
 fn result_error_message(result: &ResultMessage) -> String {
     if !result.errors.is_empty() {
@@ -142,7 +142,7 @@ fn result_error_message(result: &ResultMessage) -> String {
     }
 }
 
-/// Classify a `claude_codes` stream error into the one terminal `OpFailed`
+/// note: classify a `claude_codes` stream error into the one terminal `OpFailed`
 /// event of the failed turn (PD-3, AR-7 category tokens).
 ///
 /// Observed crate API (claude-codes 2.1.232, locked by the T1 fixture
@@ -162,9 +162,9 @@ pub fn classify_stream_error(
         ClaudeError::Deserialization(_) => "decode_error",
         ClaudeError::ConnectionClosed => "stream_closed",
         ClaudeError::Timeout => "timeout",
-        // AR-7: io_error covers spawn/stdio failures.
+        // why: AR-7: io_error covers spawn/stdio failures.
         ClaudeError::Io(_) | ClaudeError::BinaryNotFound { .. } => "io_error",
-        // Json originates on the outgoing serialization path (incoming
+        // why: Json originates on the outgoing serialization path (incoming
         // decode failures surface as Deserialization); everything else is a
         // provider-side failure.
         _ => "provider_error",
@@ -173,7 +173,7 @@ pub fn classify_stream_error(
         session_id: session_id.clone(),
         op_id: op_id.clone(),
         error_category: category.to_string(),
-        // AR-7: the crate error's Display — capped so the raw wire line the
+        // why: AR-7: the crate error's Display — capped so the raw wire line the
         // Deserialization Display embeds is not echoed unboundedly (N-2).
         error_message: crate::providers::native_cli::truncate_error_message(&error.to_string()),
     })
@@ -237,7 +237,7 @@ mod tests {
             .count()
     }
 
-    /// (a) known assistant text (plus thinking) → deltas + exactly one
+    /// note: (a) known assistant text (plus thinking) → deltas + exactly one
     /// terminal `OpFinished(EndTurn)`.
     #[test]
     fn maps_assistant_text_and_thinking_with_success_terminal() {
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// (b) unknown nested content block (`ContentBlock::Unknown`) → skip,
+    /// note: (b) unknown nested content block (`ContentBlock::Unknown`) → skip,
     /// still exactly one terminal.
     #[test]
     fn skips_unknown_content_block_but_keeps_terminal() {
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// (b) `ResultSubtype::Unknown` (crate-downgraded nested unknown, AR-1
+    /// note: (b) `ResultSubtype::Unknown` (crate-downgraded nested unknown, AR-1
     /// correction) → skip without a terminal of its own; a later `Result`
     /// frame still supplies the one terminal.
     #[test]
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `Error(AnthropicError)` → non-terminal `Status(warning)`; the
+    /// note: `Error(AnthropicError)` → non-terminal `Status(warning)`; the
     /// terminal decision stays with the `Result` frame (AR-1).
     #[test]
     fn error_frame_is_non_terminal_warning() {
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `RateLimitEvent` → non-terminal `Status(warning)` (AR-1).
+    /// note: `RateLimitEvent` → non-terminal `Status(warning)` (AR-1).
     #[test]
     fn rate_limit_event_is_warning() {
         let (session_id, op_id) = ids();
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// Known error `Result` subtype → one terminal `OpFailed(provider_error)`
+    /// note: known error `Result` subtype → one terminal `OpFailed(provider_error)`
     /// with the CLI's error text (AR-1, AR-7).
     #[test]
     fn error_result_fails_turn_with_provider_error() {
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// (c) unknown top-level `type` tag → typed-decode failure: the crate's
+    /// note: (c) unknown top-level `type` tag → typed-decode failure: the crate's
     /// own parse path (`ClaudeOutput::parse_json_tolerant`, the same one
     /// `AsyncClient::receive` uses) errors with `Error::Deserialization`,
     /// which classifies to one `OpFailed(decode_error)` — never a per-item
@@ -361,13 +361,13 @@ mod tests {
 
         let parse_err = ClaudeOutput::parse_json_tolerant(UNKNOWN_TOP_LEVEL_TYPE)
             .expect_err("unknown top-level type tag must fail typed decode");
-        // Same construction `AsyncClient::receive` uses: `parse_error.into()`.
+        // why: Same construction `AsyncClient::receive` uses: `parse_error.into()`.
         let err = ClaudeError::Deserialization(parse_err);
 
         let failed = classify_stream_error(&err, &session_id, &op_id)
             .expect("decode failure must classify to a terminal event");
         assert_eq!(failed.error_category, "decode_error");
-        // N-2: error_message is the crate Display, capped at 512 bytes.
+        // why: N-2: error_message is the crate Display, capped at 512 bytes.
         let full = err.to_string();
         let prefix = failed
             .error_message
@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(terminal_count(&[HostEvent::OpFailed(failed)]), 1);
     }
 
-    /// AR-7 category tokens for the stream-error classifier, including
+    /// note: AR-7 category tokens for the stream-error classifier, including
     /// `stream_closed` on EOF (`Error::ConnectionClosed`).
     #[test]
     fn classifies_stream_errors_to_ar7_tokens() {
@@ -407,7 +407,7 @@ mod tests {
             let failed = classify_stream_error(&error, &session_id, &op_id)
                 .unwrap_or_else(|| panic!("{expected} must classify: {error}"));
             assert_eq!(failed.error_category, expected, "for error {error}");
-            // N-2: error_message is the crate Display, capped at 512 bytes.
+            // why: N-2: error_message is the crate Display, capped at 512 bytes.
             let full = error.to_string();
             let prefix = failed
                 .error_message
@@ -420,7 +420,7 @@ mod tests {
         }
     }
 
-    /// The fixture's unknown subtype string stays a crate-downgraded
+    /// note: the fixture's unknown subtype string stays a crate-downgraded
     /// `ResultSubtype::Unknown` after parse.
     #[test]
     fn unknown_subtype_fixture_is_crate_downgraded() {
@@ -431,7 +431,7 @@ mod tests {
         assert!(matches!(result.subtype, ResultSubtype::Unknown(_)));
     }
 
-    /// N-2: a multi-MB raw wire line embedded in the Deserialization Display
+    /// note: N-2: a multi-MB raw wire line embedded in the Deserialization Display
     /// must be capped in `error_message`, not echoed unboundedly.
     #[test]
     fn decode_error_message_truncates_raw_wire() {

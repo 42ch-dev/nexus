@@ -1,4 +1,4 @@
-//! Config-based discovery — parse explicit provider config entries into catalog entries.
+//! Config-based discovery — parse explicit provider config entries into catalog entries. See docs/specs/agents/agent-host.md.
 
 use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
@@ -7,7 +7,7 @@ use crate::ids::ProviderId;
 use crate::providers::{candidate_unavailable_health, validate_provider_config};
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
-/// Parse explicit provider config entries into catalog entries.
+/// note: parse explicit provider config entries into catalog entries.
 ///
 /// Only enabled providers are returned. Callers should also track disabled
 /// entries to suppress matching auto-discovered entries.
@@ -58,7 +58,7 @@ pub fn entries_from_config(config: &AgentHostConfig) -> HostResult<Vec<ProviderC
     Ok(entries)
 }
 
-/// Return provider IDs that should be suppressed from auto-discovery.
+/// note: return provider IDs that should be suppressed from auto-discovery.
 ///
 /// A disabled config entry for `provider_id` "foo" means that PATH scan and
 /// ACP registry entries for "foo" should not appear in the final catalog.
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn enabled_provider_produces_entry() {
-        // A native_cli provider takes its argv from the provider itself, so a
+        // why: A native_cli provider takes its argv from the provider itself, so a
         // configured `args` list is rejected before it can become a candidate.
         let config = make_config(vec![crate::config::ProviderConfig {
             id: "claude-native".to_string(),
@@ -106,7 +106,7 @@ mod tests {
         let err = entries_from_config(&config).expect_err("native args must be rejected");
         assert_eq!(err.category(), "internal_host_error");
 
-        // Without unsupported argv the same provider yields the explicit
+        // why: Without unsupported argv the same provider yields the explicit
         // config candidate, still unavailable until a bounded probe.
         let config = make_config(vec![crate::config::ProviderConfig {
             id: "claude-native".to_string(),

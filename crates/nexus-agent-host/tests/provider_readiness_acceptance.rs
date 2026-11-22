@@ -1,4 +1,4 @@
-//! v1.188 P2 — provider readiness acceptance proof (runtime, real components).
+//! v1.188 P2 — provider readiness acceptance proof (runtime, real components). See docs/specs/agents/agent-host.md.
 //!
 //! Exercises the REAL `HostManager`/factory plane against spawnable protocol
 //! fixtures (`mock_dsh_agent.py`, `mock_claude_cli.py`,
@@ -40,7 +40,7 @@ use nexus_agent_host::{
 };
 use tokio::sync::Mutex;
 
-// ── Fixtures (reused; no new protocol mocks) ───────────────────────
+// note: ── Fixtures (reused; no new protocol mocks) ───────────────────────
 
 const MOCK_DSH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -55,7 +55,7 @@ const MOCK_ACP: &str = concat!(
     "/tests/fixtures/mock_acp_workflow.py"
 );
 
-/// Serializes the process-heavy tests within this test binary.
+/// note: serializes the process-heavy tests within this test binary.
 ///
 /// Every test here drives real python subprocesses, and two of them also mutate
 /// process-global `PATH`/`DSH_RUNTIME_BIN`. Running them concurrently makes the
@@ -65,7 +65,7 @@ const MOCK_ACP: &str = concat!(
 /// convention the ACP lifecycle and dsh/claude fixtures already use.
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-/// Replace `PATH` for the test scope; restore on drop.
+/// note: replace `PATH` for the test scope; restore on drop.
 struct PathGuard {
     previous: Option<std::ffi::OsString>,
 }
@@ -87,7 +87,7 @@ impl Drop for PathGuard {
     }
 }
 
-/// Set/remove `DSH_RUNTIME_BIN`; restore on drop.
+/// note: set/remove `DSH_RUNTIME_BIN`; restore on drop.
 struct DshBinGuard {
     previous: Option<String>,
 }
@@ -120,7 +120,7 @@ fn set_executable(path: &Path) {
 #[cfg(not(unix))]
 fn set_executable(_path: &Path) {}
 
-/// Resolve an absolute interpreter before tests isolate the process PATH.
+/// note: resolve an absolute interpreter before tests isolate the process PATH.
 fn python3_path() -> String {
     static PYTHON3: LazyLock<String> = LazyLock::new(|| {
         #[cfg(unix)]
@@ -158,7 +158,7 @@ fn python3_path() -> String {
     PYTHON3.clone()
 }
 
-/// Make a platform-appropriate shim using an absolute interpreter.
+/// note: make a platform-appropriate shim using an absolute interpreter.
 fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
     let path = dir.join(if cfg!(windows) {
         format!("{name}.cmd")
@@ -174,7 +174,7 @@ fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
     path
 }
 
-/// Crate-default budgets (see `TimeoutConfig`), not tightened values.
+/// note: crate-default budgets (see `TimeoutConfig`), not tightened values.
 ///
 /// These tests drive REAL python subprocesses; under parallel test load a cold
 /// interpreter start plus the SDK handshake can exceed a few seconds, so a
@@ -214,7 +214,7 @@ fn spawn_records(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter().filter(|e| e["method"] == "_spawn").collect()
 }
 
-/// Every fixture PROCESS SPAWN receipt in a log, regardless of cwd.
+/// note: every fixture PROCESS SPAWN receipt in a log, regardless of cwd.
 ///
 /// The ACP fixture writes one `{"event": "start", "pid": ...}` record per
 /// process it creates, so this counts real spawns (probe AND session). A
@@ -226,7 +226,7 @@ fn spawn_events(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
         .collect()
 }
 
-/// Every fixture pid recorded in a log.
+/// note: every fixture pid recorded in a log.
 fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
     log.iter()
         .filter_map(|e| e["pid"].as_u64())
@@ -234,14 +234,14 @@ fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
         .collect()
 }
 
-// Liveness probe for the fixture children this binary spawns. The definition is
+// why: Liveness probe for the fixture children this binary spawns. The definition is
 // split by platform; the call sites stay shared. The Windows form is a REAL
 // probe, never a constant stub: a `false` stub would let every `!process_alive`
 // leak assertion below pass vacuously, and a `true` stub would false-fail the
 // un-gated post-ready test.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    // `kill -0 <pid>` returns Ok while the process exists (or is a zombie
+    // why: `kill -0 <pid>` returns Ok while the process exists (or is a zombie
     // awaiting reap); non-zero (ESRCH) means it is gone.
     std::process::Command::new("kill")
         .arg("-0")
@@ -252,7 +252,7 @@ fn process_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
-    // `tasklist /FI "PID eq <pid>" /FO CSV /NH` prints one quoted CSV row per
+    // why: `tasklist /FI "PID eq <pid>" /FO CSV /NH` prints one quoted CSV row per
     // match; a no-match run prints a localized INFO line instead, which is
     // never CSV-shaped, so comparing the CSV PID column is
     // localization-independent. `tasklist` exits 0 either way, so the OUTPUT
@@ -272,9 +272,9 @@ fn process_alive(pid: u32) -> bool {
     tasklist_reports_live_pid(&String::from_utf8_lossy(&output.stdout), pid)
 }
 
-// ── Windows tasklist CSV parsing (pure; unit-tested cross-platform) ─
+// note: ── Windows tasklist CSV parsing (pure; unit-tested cross-platform) ─
 
-/// Extract the PID column (the SECOND CSV field) from one `tasklist /FO CSV`
+/// note: extract the PID column (the SECOND CSV field) from one `tasklist /FO CSV`
 /// row, honoring the CSV quoting rules `tasklist` actually emits.
 ///
 /// Every field is double-quoted and an embedded quote is escaped by doubling
@@ -284,7 +284,7 @@ fn process_alive(pid: u32) -> bool {
 /// no-match run, or empty output — yields `None`. Kept pure so the known-live
 /// semantics are unit-testable without Windows.
 fn tasklist_csv_pid(line: &str) -> Option<String> {
-    // tasklist CSV rows always open with the quoted image-name field; the
+    // why: tasklist CSV rows always open with the quoted image-name field; the
     // localized INFO line does not, so reject anything else before splitting.
     let line = line.trim_start();
     if !line.starts_with('"') {
@@ -298,7 +298,7 @@ fn tasklist_csv_pid(line: &str) -> Option<String> {
         match ch {
             '"' if in_quotes => {
                 if chars.peek() == Some(&'"') {
-                    // `""` is one literal `"`; consume both.
+                    // why: `""` is one literal `"`; consume both.
                     field.push('"');
                     chars.next();
                 } else {
@@ -314,7 +314,7 @@ fn tasklist_csv_pid(line: &str) -> Option<String> {
     fields.get(1).map(|pid| pid.trim().to_string())
 }
 
-/// Whether a `tasklist /FI "PID eq <pid>" /FO CSV /NH` run's stdout reports
+/// note: whether a `tasklist /FI "PID eq <pid>" /FO CSV /NH` run's stdout reports
 /// `expected_pid` alive.
 ///
 /// The PID is the second CSV field of a real row, so a live child is
@@ -332,13 +332,13 @@ fn tasklist_reports_live_pid(stdout: &str, expected_pid: u32) -> bool {
 fn tasklist_probe_recognizes_a_live_pid_in_an_ordinary_row() {
     let stdout = "\"python.exe\",\"4242\",\"Console\",\"1\",\"12,000 K\"\r\n";
     assert!(tasklist_reports_live_pid(stdout, 4242));
-    // A PID the row does not carry is NOT reported alive (guards a true stub).
+    // why: A PID the row does not carry is NOT reported alive (guards a true stub).
     assert!(!tasklist_reports_live_pid(stdout, 4243));
 }
 
 #[test]
 fn tasklist_probe_handles_a_comma_inside_a_quoted_image_name() {
-    // The comma lives INSIDE the quoted image name; the PID stays field two.
+    // why: The comma lives INSIDE the quoted image name; the PID stays field two.
     let row = r#""py,thon.exe","4242","Console","1","12,000 K""#;
     assert_eq!(tasklist_csv_pid(row).as_deref(), Some("4242"));
     assert!(tasklist_reports_live_pid(row, 4242));
@@ -346,7 +346,7 @@ fn tasklist_probe_handles_a_comma_inside_a_quoted_image_name() {
 
 #[test]
 fn tasklist_probe_handles_an_escaped_quote_in_a_field() {
-    // `""` is one literal quote and must not end the quoted field early.
+    // why: `""` is one literal quote and must not end the quoted field early.
     let row = r#""we""ird,na""me.exe","4242","Console","1","12,000 K""#;
     assert_eq!(tasklist_csv_pid(row).as_deref(), Some("4242"));
     assert!(tasklist_reports_live_pid(row, 4242));
@@ -365,21 +365,21 @@ fn tasklist_probe_reports_no_pid_for_empty_output() {
     assert!(!tasklist_reports_live_pid("", 4242));
 }
 
-// ── dsh: routes, cwd binding, timeout close ────────────────────────
+// note: ── dsh: routes, cwd binding, timeout close ────────────────────────
 
-/// Platform-specific expectation for one resolved dsh route's probe result.
+/// note: platform-specific expectation for one resolved dsh route's probe result.
 #[derive(Clone, Copy, Debug)]
 enum RouteExpectation {
-    /// Unix: ordinary AND sealed recipes initialize and close, so the probe
+    /// note: unix: ordinary AND sealed recipes initialize and close, so the probe
     /// reports available.
     Available,
-    /// Windows: sealed provisioning is unsupported, so the probe reports
+    /// note: windows: sealed provisioning is unsupported, so the probe reports
     /// unavailable ONLY after the ordinary recipe's confirmed start + close
     /// (register R-V1202-P1T3-001).
     UnsupportedSealed,
 }
 
-/// The Windows sealed-provisioning fail-closed reason fragment. The provider
+/// note: the Windows sealed-provisioning fail-closed reason fragment. The provider
 /// emits it only AFTER the ordinary recipe's confirmed start and cooperative
 /// close (`dsh.rs` probe ordering: an ordinary failure returns an
 /// "ordinary dsh recipe …" message instead), so matching it proves the
@@ -387,7 +387,7 @@ enum RouteExpectation {
 const SEALED_UNSUPPORTED: &str =
     "sealed deny_all home provisioning is unsupported on this platform";
 
-/// Pure predicate for one resolved dsh route's probe outcome; `Err` carries
+/// note: pure predicate for one resolved dsh route's probe outcome; `Err` carries
 /// the violation reason.
 ///
 /// The fixture logs `_spawn` BEFORE reading its first request, so a nonempty
@@ -438,7 +438,7 @@ fn check_route_handshake(
     Ok(())
 }
 
-/// Assert one resolved dsh route reached a REAL ordinary handshake.
+/// note: assert one resolved dsh route reached a REAL ordinary handshake.
 fn assert_route_reached_a_handshake(health: &ProviderHealth, req_log: &Path, route: &str) {
     let methods: Vec<String> = read_log(req_log)
         .iter()
@@ -459,7 +459,7 @@ fn assert_route_reached_a_handshake(health: &ProviderHealth, req_log: &Path, rou
     }
 }
 
-/// QC3-F001 proof: with `initialize` + `shutdown` receipts present, an ordinary
+/// note: QC3-F001 proof: with `initialize` + `shutdown` receipts present, an ordinary
 /// recipe failure (initialization or close) must be rejected under BOTH
 /// platform expectations, while the Windows unsupported-sealed outcome — only
 /// reachable after a confirmed ordinary close — is accepted. A startup-only
@@ -475,7 +475,7 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
         RouteExpectation::Available,
         RouteExpectation::UnsupportedSealed,
     ];
-    // The provider's two ordinary-recipe failure messages (dsh.rs probe).
+    // why: The provider's two ordinary-recipe failure messages (dsh.rs probe).
     for message in [
         "ordinary dsh recipe failed to initialize: dsh runtime could not be launched",
         "ordinary dsh recipe close was not confirmed: cooperative shutdown failed",
@@ -489,7 +489,7 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
             );
         }
     }
-    // A startup-only log (no handshake receipt) is rejected even with the
+    // why: A startup-only log (no handshake receipt) is rejected even with the
     // accepted Windows reason.
     assert!(
         check_route_handshake(
@@ -502,7 +502,7 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
         .is_err(),
         "a startup-only receipt must be rejected"
     );
-    // The Windows unsupported-sealed outcome (ordinary confirmed close, then
+    // why: The Windows unsupported-sealed outcome (ordinary confirmed close, then
     // sealed provisioning fails closed) is accepted.
     assert!(
         check_route_handshake(
@@ -519,7 +519,7 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
         .is_ok(),
         "the unsupported-sealed outcome after a confirmed ordinary close must be accepted"
     );
-    // An available result satisfies the unix expectation.
+    // why: An available result satisfies the unix expectation.
     assert!(
         check_route_handshake(
             &receipts,
@@ -533,7 +533,7 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
     );
 }
 
-/// The three documented resolution routes each produce a bounded, real
+/// note: the three documented resolution routes each produce a bounded, real
 /// handshake; a missing runtime stays unavailable.
 // Keep the three resolution-route handshakes in one acceptance scenario.
 #[allow(clippy::too_many_lines)]
@@ -595,7 +595,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         assert_route_reached_a_handshake(&health, &req_log, "PATH");
     }
 
-    // (3) DSH_RUNTIME_BIN route (no PATH entry).
+    // why: (3) DSH_RUNTIME_BIN route (no PATH entry).
     std::fs::remove_file(&req_log).ok();
     let env_bin = write_fixture_shim(&path_dir, "dsh-env", MOCK_DSH);
     {
@@ -617,10 +617,10 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         assert_route_reached_a_handshake(&health, &req_log, "DSH_RUNTIME_BIN");
     }
 
-    // (4) Nothing resolvable ⇒ unavailable, never a false ready.
+    // why: (4) Nothing resolvable ⇒ unavailable, never a false ready.
     {
         let _empty_path = PathGuard::isolate(&tmp.path().join("no-such-dir"));
-        // `DSH_RUNTIME_BIN` is unset here (guard dropped above).
+        // why: `DSH_RUNTIME_BIN` is unset here (guard dropped above).
         let missing = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Missing".to_string(),
@@ -641,7 +641,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
     }
 }
 
-/// Build the verified-cwd dsh probe fixture: a real interpreter shim plus an
+/// note: build the verified-cwd dsh probe fixture: a real interpreter shim plus an
 /// isolated `REQ_LOG`/`DSH_HOME`. The `cwd` dir is created.
 fn dsh_cwd_probe_provider(
     tmp: &Path,
@@ -671,7 +671,7 @@ fn dsh_cwd_probe_provider(
     .expect("constructor ok")
 }
 
-/// The `_spawn` cwd as the probe child recorded it (`os.getcwd()`),
+/// note: the `_spawn` cwd as the probe child recorded it (`os.getcwd()`),
 /// canonicalized so Windows 8.3/long-name and verbatim-prefix forms compare
 /// equal to the verified request cwd.
 fn recorded_spawn_cwd(spawn: &serde_json::Value, log: &[serde_json::Value]) -> PathBuf {
@@ -681,12 +681,12 @@ fn recorded_spawn_cwd(spawn: &serde_json::Value, log: &[serde_json::Value]) -> P
     })
 }
 
-/// F4 (ordinary half): the bounded probe runs in the VERIFIED request cwd,
+/// note: F4 (ordinary half): the bounded probe runs in the VERIFIED request cwd,
 /// never the daemon's ambient working directory.
 ///
 /// The sealed recipe is asserted by its own `#[cfg(unix)]` test below.
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // one process-heavy fixture at a time
+#[allow(clippy::await_holding_lock)] // why: one process-heavy fixture at a time
 async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
     let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -694,7 +694,7 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
     let req_log = tmp.path().join("dsh.jsonl");
     let dsh_home = tmp.path().join("dsh-home");
 
-    // Read (never mutate) the process cwd: the request cwd is a fresh temp dir,
+    // why: Read (never mutate) the process cwd: the request cwd is a fresh temp dir,
     // so a probe that fell back to the ambient directory would be detectable
     // without changing process-global state (mutating cwd corrupts sibling
     // tests running in the same binary).
@@ -725,7 +725,7 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
     );
 }
 
-/// F4 (sealed half): the bounded probe initializes and closes BOTH recipes and
+/// note: F4 (sealed half): the bounded probe initializes and closes BOTH recipes and
 /// EVERY recipe binds the VERIFIED request cwd, never the ambient directory.
 ///
 /// Sealed `deny_all` home provisioning needs descriptor-relative no-follow
@@ -735,7 +735,7 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
 /// cohort), so only this unix half asserts both recipes.
 #[cfg(unix)]
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // one process-heavy fixture at a time
+#[allow(clippy::await_holding_lock)] // why: one process-heavy fixture at a time
 async fn dsh_probe_binds_verified_cwd_for_sealed_recipe() {
     let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -777,7 +777,7 @@ async fn dsh_probe_binds_verified_cwd_for_sealed_recipe() {
     }
 }
 
-/// A dsh initialize timeout reports unavailable and leaves no live child.
+/// note: A dsh initialize timeout reports unavailable and leaves no live child.
 #[cfg(unix)]
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -803,7 +803,7 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
                 "DSH_HOME".to_string(),
                 dsh_home.to_string_lossy().into_owned(),
             ),
-            // Initialize stalls past the probe budget.
+            // why: Initialize stalls past the probe budget.
             ("INIT_DELAY_MS".to_string(), "3000".to_string()),
         ]),
         TimeoutConfig {
@@ -813,7 +813,7 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     )
     .expect("constructor ok");
 
-    // A probe deadline that fires is surfaced as the typed probe timeout (the
+    // why: A probe deadline that fires is surfaced as the typed probe timeout (the
     // manager maps that to unavailable); a completed probe reports unavailable
     // health. Either way the provider must NOT be reported ready.
     match provider.probe(probe_request(&cwd, 1_200)).await {
@@ -828,7 +828,7 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
         ),
     }
 
-    // The retained close owners finish asynchronously; poll for the spawned
+    // why: The retained close owners finish asynchronously; poll for the spawned
     // pids to appear and then for every one of them to be reaped, under a
     // generous bound. Asserting eventual reaping (not a fixed sleep) keeps this
     // decidable under parallel test load.
@@ -862,9 +862,9 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     );
 }
 
-// ── Claude: configured env + timeout close ─────────────────────────
+// note: ── Claude: configured env + timeout close ─────────────────────────
 
-/// The version probe runs the CONFIGURED environment (evidence: the fixture
+/// note: the version probe runs the CONFIGURED environment (evidence: the fixture
 /// only writes `REQ_LOG` when that configured variable reached the child).
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -907,7 +907,7 @@ async fn claude_version_probe_applies_configured_environment() {
         Some("--version"),
         "the probe must run the version handshake: {log:?}"
     );
-    // Canonicalize the child's recorded cwd too: Windows may report the 8.3
+    // why: Canonicalize the child's recorded cwd too: Windows may report the 8.3
     // short form (RUNNER~1) or a `\\?\` verbatim form, which both canonicalize
     // to the long absolute path (register row R-V1202-P1T3-001).
     let recorded_cwd = std::fs::canonicalize(log[0]["cwd"].as_str().expect("cwd recorded"))
@@ -919,7 +919,7 @@ async fn claude_version_probe_applies_configured_environment() {
     );
 }
 
-/// A hanging version probe is unavailable and leaves no live child.
+/// note: A hanging version probe is unavailable and leaves no live child.
 #[cfg(unix)]
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -929,7 +929,7 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
 
-    // A command that never answers `--version`, and records its pid. The child
+    // why: A command that never answers `--version`, and records its pid. The child
     // is an ABSOLUTE python interpreter so the pid record cannot be lost to a
     // shell redirection race or an isolated PATH.
     let pid_file = tmp.path().join("hang.pid");
@@ -953,7 +953,7 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         timeouts(),
     );
 
-    // The budget must outlast a cold interpreter start so the child can record
+    // why: The budget must outlast a cold interpreter start so the child can record
     // its pid before the deadline kills it; the handshake itself stays hung.
     let health = provider
         .probe(probe_request(&cwd, 2_000))
@@ -969,7 +969,7 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         "the failure must state the timeout (or unconfirmed close), got: {message}"
     );
 
-    // The child records its pid immediately; poll briefly so the read cannot
+    // why: The child records its pid immediately; poll briefly so the read cannot
     // race the child's own startup.
     let mut recorded = None;
     for _ in 0..40 {
@@ -982,7 +982,7 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     let pid = recorded.expect("the probe child must record its pid");
-    // The owned close is bounded; give it that window then assert reaped.
+    // why: The owned close is bounded; give it that window then assert reaped.
     tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
     assert!(
         !process_alive(pid),
@@ -990,9 +990,9 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
     );
 }
 
-// ── ACP: verified owner workspace ──────────────────────────────────
+// note: ── ACP: verified owner workspace ──────────────────────────────────
 
-/// The generic ACP probe connects inside the VERIFIED owner workspace.
+/// note: the generic ACP probe connects inside the VERIFIED owner workspace.
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn acp_probe_runs_in_the_verified_owner_workspace() {
@@ -1022,7 +1022,7 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     )
     .expect("valid ACP recipe");
 
-    // `available` is the observable that fails if the probe spends its whole
+    // why: `available` is the observable that fails if the probe spends its whole
     // budget on the owned close (the old defect reported a timeout here).
     let health = provider
         .probe(probe_request(&creator_ws, 10_000))
@@ -1037,7 +1037,7 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     let starts: Vec<&serde_json::Value> = log.iter().filter(|e| e["event"] == "start").collect();
     assert_eq!(starts.len(), 1, "one probe child: {log:?}");
     let expected = std::fs::canonicalize(&creator_ws).expect("canonical");
-    // Canonicalize the recorded cwd too: Windows may report a `\\?\` verbatim
+    // why: Canonicalize the recorded cwd too: Windows may report a `\\?\` verbatim
     // form that only matches after canonicalization (register row
     // R-V1202-P1T3-001).
     let recorded = std::fs::canonicalize(starts[0]["cwd"].as_str().expect("cwd recorded"))
@@ -1048,7 +1048,7 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     );
 }
 
-// ── HostManager: discovery ⇄ admission agreement ───────────────────
+// note: ── HostManager: discovery ⇄ admission agreement ───────────────────
 
 fn host_start_config(workspace_root: &Path, probe_owner: Option<SessionOwner>) -> HostStartConfig {
     HostStartConfig {
@@ -1074,7 +1074,7 @@ fn provider_row(id: &str, protocol: &str, command: Option<&str>, enabled: bool) 
     }
 }
 
-/// A disabled provider is suppressed and never admissible; a non-executable
+/// note: A disabled provider is suppressed and never admissible; a non-executable
 /// PATH candidate is omitted, and catalog health matches the admission result.
 #[tokio::test]
 async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers() {
@@ -1083,7 +1083,7 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
     let workspace_root = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace_root).expect("workspace root");
 
-    // A non-executable `claude` on PATH must NOT become a candidate.
+    // why: A non-executable `claude` on PATH must NOT become a candidate.
     let path_dir = tmp.path().join("path-bin");
     std::fs::create_dir_all(&path_dir).expect("path bin");
     std::fs::write(path_dir.join("claude"), "not executable\n").expect("write non-exec");
@@ -1092,7 +1092,7 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
     let mut config = host_start_config(&workspace_root, Some(owner(&workspace_root)));
     config.host_config = Some(AgentHostConfig {
         providers: vec![
-            // Explicitly disabled ⇒ suppresses any auto-discovery for this id.
+            // why: Explicitly disabled ⇒ suppresses any auto-discovery for this id.
             provider_row("claude-native", "native_cli", Some("claude"), false),
         ],
         ..AgentHostConfig::default()
@@ -1109,7 +1109,7 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
         "a disabled provider must not appear: {:?}",
         catalog.entries
     );
-    // Full-roster discovery keeps a row for a PATH-absent dsh (unavailable),
+    // why: Full-roster discovery keeps a row for a PATH-absent dsh (unavailable),
     // so the safety guarantee is availability, not absence.
     assert!(
         catalog
@@ -1121,7 +1121,7 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
         catalog.entries
     );
 
-    // Admission agrees with the catalog: no row ⇒ refused.
+    // why: Admission agrees with the catalog: no row ⇒ refused.
     let denied = manager
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("claude-native"),
@@ -1139,10 +1139,10 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
     );
 }
 
-/// A ready-path provider whose LATER launch fails is invalidated; an ordinary
+/// note: A ready-path provider whose LATER launch fails is invalidated; an ordinary
 /// prompt/content timeout leaves the same provider ready.
 #[tokio::test]
-#[allow(clippy::too_many_lines)] // Keep the two lifecycle transitions and their observations together.
+#[allow(clippy::too_many_lines)] // why: Keep the two lifecycle transitions and their observations together.
 async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready() {
     let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -1151,7 +1151,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     std::fs::create_dir_all(&creator_ws).expect("creator ws");
     let acp_fixture = write_fixture_shim(tmp.path(), "acp-lifecycle", MOCK_ACP);
 
-    // ── Case A: the probe PASSES (run 1), the SESSION LAUNCH EOFs (run 2).
+    // note: ── Case A: the probe PASSES (run 1), the SESSION LAUNCH EOFs (run 2).
     let launch_log = tmp.path().join("acp-launch.jsonl");
     let manager = HostManager::new();
     let mut config = host_start_config(&workspace_root, Some(owner(&workspace_root)));
@@ -1197,7 +1197,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         })
         .await;
     let launch_err = launch.expect_err("a post-ready launch failure must surface");
-    // The exact launch-class category varies with whether the owned close could
+    // why: The exact launch-class category varies with whether the owned close could
     // be confirmed once the child dies during session creation
     // (`launch_failed` vs `cleanup_unconfirmed`). The invariant that matters —
     // and that the manager acts on — is the launch-class classification, so
@@ -1208,7 +1208,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         launch_err.category()
     );
 
-    // The candidate must now be reported unavailable by the catalog...
+    // why: The candidate must now be reported unavailable by the catalog...
     let after_launch = manager.provider_catalog().await.expect("catalog");
     assert!(
         !after_launch
@@ -1219,7 +1219,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         "a launch-class exec/launch failure must invalidate the candidate"
     );
 
-    // ...and the next admission must be DENIED, without spawning another child.
+    // why: ...and the next admission must be DENIED, without spawning another child.
     let spawns_before = spawn_events(&read_log(&launch_log)).len();
     let denied = manager
         .create_session(CreateSessionRequest {
@@ -1244,11 +1244,11 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         "the denied admission must not spawn another fixture process"
     );
 
-    // ── Case B: an ordinary prompt timeout must NOT invalidate.
+    // note: ── Case B: an ordinary prompt timeout must NOT invalidate.
     let prompt_log = tmp.path().join("acp-prompt.jsonl");
     let manager2 = HostManager::new();
     let mut config2 = host_start_config(&workspace_root, Some(owner(&workspace_root)));
-    // The 500ms prompt deadline must be configured on the authoritative
+    // why: The 500ms prompt deadline must be configured on the authoritative
     // `AgentHostConfig.timeouts`: `HostManager::start` materializes the
     // discovered provider adapters from the EMBEDDED host config's timeouts,
     // while the `HostStartConfig.timeouts` copy only feeds the start probe
@@ -1277,7 +1277,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         timeouts: prompt_deadline.clone(),
         ..AgentHostConfig::default()
     });
-    // Keep the derived start-config copy in lockstep with the host config,
+    // why: Keep the derived start-config copy in lockstep with the host config,
     // mirroring the daemon/core-node constructors so the two timeout sources
     // never silently diverge.
     config2.timeouts = prompt_deadline;
@@ -1296,7 +1296,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         .await
         .expect("session created on the probed provider");
 
-    // Drive one prompt whose content never completes. The fixture blocks
+    // why: Drive one prompt whose content never completes. The fixture blocks
     // forever, so the provider's OWN prompt deadline must elapse and the
     // stream must terminate with a real timeout OpFailed.
     let mut stream = manager2
@@ -1326,7 +1326,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
                 }
             }
         };
-        // Discriminating bound: 3s is far above the configured 500ms prompt
+        // why: Discriminating bound: 3s is far above the configured 500ms prompt
         // deadline and far below the 180s crate default, so reaching the
         // terminal event here is itself the evidence that the CONFIGURED
         // deadline was the one enforced — an ignored `prompt_ms` would still be
@@ -1344,7 +1344,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
 proving the configured prompt deadline elapsed"
     );
 
-    // A prompt/content timeout is not a launch-class failure: the provider
+    // why: A prompt/content timeout is not a launch-class failure: the provider
     // stays ready and remains admissible.
     let after = manager2.provider_catalog().await.expect("catalog");
     let still_ready = after
@@ -1358,7 +1358,7 @@ proving the configured prompt deadline elapsed"
          healthy (blanket timeout invalidation would break this)"
     );
 
-    // Orderly teardown of BOTH managers, then confirm no fixture child
+    // why: Orderly teardown of BOTH managers, then confirm no fixture child
     // outlived them.
     manager.shutdown().await.expect("manager shutdown");
     manager2.shutdown().await.expect("manager2 shutdown");
@@ -1369,7 +1369,7 @@ proving the configured prompt deadline elapsed"
         !leaked.is_empty(),
         "the run must have spawned fixture children to check for leaks"
     );
-    // Give the owned teardown its bounded window before judging leaks.
+    // why: Give the owned teardown its bounded window before judging leaks.
     tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
     for pid in leaked {
         assert!(

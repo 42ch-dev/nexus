@@ -1,4 +1,4 @@
-//! Native CLI provider adapters.
+//! Native CLI provider adapters. See docs/specs/agents/agent-host.md.
 //!
 //! Wave 1 implements the Claude Code CLI native provider. Wave 2 adds
 //! the Codex CLI native provider. Future waves may add Gemini CLI, etc.
@@ -12,7 +12,7 @@ pub mod map_dsh;
 #[cfg(unix)]
 pub(crate) mod sealed_fs;
 
-/// Cap a crate error's `Display` string for `OpFailed::error_message` (N-2).
+/// note: cap a crate error's `Display` string for `OpFailed::error_message` (N-2).
 ///
 /// Both crates' `Deserialization` `Display` embeds the full raw wire line,
 /// which can be multi-MB and echo prompt/tool payload text. The diagnostic

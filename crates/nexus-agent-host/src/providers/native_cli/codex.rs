@@ -1,4 +1,4 @@
-//! Codex native provider adapter (`codex-codes` app-server client).
+//! Codex native provider adapter (`codex-codes` app-server client). See docs/specs/agents/agent-host.md.
 //!
 //! Implements a native provider for `OpenAI`'s `codex` CLI through the
 //! `codex-codes` async client (PD-2): a long-lived `codex app-server`
@@ -48,31 +48,31 @@ use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::providers::native_cli::map_codex::{classify_stream_error, map_codex};
 use crate::ProviderAdapter;
 
-/// Crate-client-scoped state for a managed codex session, guarded by the
+/// note: crate-client-scoped state for a managed codex session, guarded by the
 /// per-session mutex (B-2): only this session's operations contend on it —
 /// cancel/shutdown of other sessions never wait on this session's frame
 /// reads or setup RPCs. The provider-global registry `RwLock` is only for
 /// short lookups.
 struct ClientState {
-    /// The codex app-server async client, started lazily on the first
+    /// note: the codex app-server async client, started lazily on the first
     /// execute. Dropping it kills the app-server process — no raw `Child`
     /// handles are tracked by the provider.
     client: Option<AsyncClient>,
-    /// The codex thread (conversation) id. Created on the first execute and
+    /// note: the codex thread (conversation) id. Created on the first execute and
     /// reused while the app-server lives; restored via `thread/resume` if
     /// the app-server restarts (AR-5).
     thread_id: Option<String>,
-    /// The turn currently streaming on this session, used by `cancel()` /
+    /// note: the turn currently streaming on this session, used by `cancel()` /
     /// stream-timeout `turn/interrupt` and to filter stale notifications
     /// (B-1). Cleared when the stream ends.
     active_turn_id: Option<String>,
 }
 
-/// Internal state for a managed codex native session.
+/// note: internal state for a managed codex native session.
 struct NativeSession {
-    /// Per-session lock around the crate client and turn state (B-2).
+    /// note: per-session lock around the crate client and turn state (B-2).
     state: Arc<Mutex<ClientState>>,
-    /// Working directory for the app-server process, retained from
+    /// note: working directory for the app-server process, retained from
     /// `LaunchSpec::cwd`.
     cwd: std::path::PathBuf,
 }
@@ -96,7 +96,7 @@ impl std::fmt::Debug for NativeSession {
     }
 }
 
-/// Codex native provider.
+/// note: codex native provider.
 ///
 /// Spawns `codex app-server` (via the `codex-codes` crate) and normalizes
 /// its JSON-RPC notifications into `HostEvent` items. Multi-turn continuity
@@ -104,22 +104,22 @@ impl std::fmt::Debug for NativeSession {
 /// reused while the app-server lives, `thread/resume` after a restart
 /// (AR-5).
 pub struct CodexNativeProvider {
-    /// Provider ID (typically `codex-native` to avoid collision with ACP registry).
+    /// note: provider ID (typically `codex-native` to avoid collision with ACP registry).
     provider_id: ProviderId,
-    /// Display name.
+    /// note: display name.
     display_name: String,
-    /// Command to execute (e.g., `codex`).
+    /// note: command to execute (e.g., `codex`).
     command: String,
-    /// Environment variables to inject into the app-server process.
+    /// note: environment variables to inject into the app-server process.
     env: HashMap<String, String>,
-    /// Active sessions: host session ID → native session state.
+    /// note: active sessions: host session ID → native session state.
     sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
-    /// Timeout configuration for stage-level enforcement.
+    /// note: timeout configuration for stage-level enforcement.
     timeouts: TimeoutConfig,
 }
 
 impl CodexNativeProvider {
-    /// Create a new Codex provider with the given configuration.
+    /// note: create a new Codex provider with the given configuration.
     #[must_use]
     pub fn new(
         provider_id: ProviderId,
@@ -138,7 +138,7 @@ impl CodexNativeProvider {
         }
     }
 
-    /// Create with default configuration for the `codex` command.
+    /// note: create with default configuration for the `codex` command.
     #[must_use]
     pub fn default_config() -> Self {
         Self::new(
@@ -150,7 +150,7 @@ impl CodexNativeProvider {
         )
     }
 
-    /// Ensure the app-server client and thread exist, then start a turn.
+    /// note: ensure the app-server client and thread exist, then start a turn.
     ///
     /// Mirrors the old spawn+stdin-write setup phase: it runs under the
     /// caller's prompt timeout and returns an error (no stream) on failure.
@@ -171,7 +171,7 @@ impl CodexNativeProvider {
         session_id: &HostSessionId,
         prompt_text: &str,
     ) -> HostResult<String> {
-        // Clone the per-session state under a short registry read (B-2);
+        // why: Clone the per-session state under a short registry read (B-2);
         // every setup RPC then runs under the per-session lock only.
         let (state, cwd) = {
             let sessions = self.sessions.read().await;
@@ -210,7 +210,7 @@ impl CodexNativeProvider {
 
             let thread_id = if let Some(thread_id) = guard.thread_id.clone() {
                 if attempts > 1 {
-                    // The app-server restarted: replay thread history so
+                    // why: The app-server restarted: replay thread history so
                     // turns continue where they left off (AR-5).
                     guard
                         .client
@@ -256,7 +256,7 @@ impl CodexNativeProvider {
                 thread_id
             };
 
-            // AR-4: every turn/start runs inside the read-only sandbox with
+            // why: AR-4: every turn/start runs inside the read-only sandbox with
             // no approval prompts — never more writable than today's
             // headless `-s read-only`.
             match guard
@@ -281,7 +281,7 @@ impl CodexNativeProvider {
                     guard.active_turn_id = Some(response.turn.id.clone());
                     return Ok(response.turn.id);
                 }
-                // The app-server died between turns — reconnect once and
+                // why: The app-server died between turns — reconnect once and
                 // resume the thread (AR-5). Only when a thread already
                 // exists; a fresh session re-attempts from thread/start.
                 Err(CodexError::ServerClosed | CodexError::ConnectionClosed)
@@ -304,7 +304,7 @@ impl CodexNativeProvider {
         }
     }
 
-    /// Build the event stream for an active turn.
+    /// note: build the event stream for an active turn.
     ///
     /// Pumps `AsyncClient::next_message` under the per-session lock (B-2;
     /// only this session's operations contend on it) with a per-frame
@@ -340,7 +340,7 @@ impl CodexNativeProvider {
         futures_util::stream::unfold(
             (sessions, op_id, session_id, read_timeout, VecDeque::new(), false),
             |(sessions, op_id, session_id, read_timeout, mut pending, finished)| async move {
-                // Drain events mapped from a previous frame first: one
+                // why: Drain events mapped from a previous frame first: one
                 // frame can carry multiple host events.
                 if let Some(event) = pending.pop_front() {
                     return Some((
@@ -352,7 +352,7 @@ impl CodexNativeProvider {
                     return None;
                 }
 
-                // Read frames until one maps to host events or the turn
+                // why: Read frames until one maps to host events or the turn
                 // ends (terminal event / stream error / timeout). The read
                 // runs under the session's own lock (B-2): other sessions'
                 // cancel/shutdown never wait on this frame read.
@@ -363,7 +363,7 @@ impl CodexNativeProvider {
                             guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
                         };
                         let Some(state) = state else {
-                            // Session removed by shutdown(): the client was
+                            // why: Session removed by shutdown(): the client was
                             // dropped (app-server killed) — backstop below.
                             return (Ok(None), None);
                         };
@@ -381,7 +381,7 @@ impl CodexNativeProvider {
 
                     match outcome {
                         Ok((Ok(Some(ServerMessage::Notification(notification))), active_turn_id)) => {
-                            // B-1: a turn-scoped notification from a
+                            // why: B-1: a turn-scoped notification from a
                             // previous turn (stale terminal/deltas left in
                             // the pipe by an abandoned stream) must not
                             // drive this stream — keep reading.
@@ -405,11 +405,11 @@ impl CodexNativeProvider {
                                 &op_id,
                             );
                             if events.is_empty() {
-                                // Skipped frame (unknown method, unmapped
+                                // why: Skipped frame (unknown method, unmapped
                                 // notification) — keep reading.
                                 continue;
                             }
-                            // map_codex puts the terminal (if any) last.
+                            // why: map_codex puts the terminal (if any) last.
                             let terminal = matches!(
                                 events.last(),
                                 Some(HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
@@ -433,7 +433,7 @@ impl CodexNativeProvider {
                             ));
                         }
                         Ok((Ok(Some(ServerMessage::Request { id, request })), _)) => {
-                            // AR-4: never surfaced to the author.
+                            // why: AR-4: never surfaced to the author.
                             let state = {
                                 let guard = sessions.read().await;
                                 guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
@@ -446,7 +446,7 @@ impl CodexNativeProvider {
                             }
                         }
                         Ok((Ok(None), _)) => {
-                            // Stream abort (EOF or session torn down) before
+                            // why: Stream abort (EOF or session torn down) before
                             // a terminal frame: exactly one OpFailed (PD-3).
                             clear_active_turn(&sessions, &session_id).await;
                             return Some((
@@ -469,7 +469,7 @@ impl CodexNativeProvider {
                             ));
                         }
                         Ok((Err(error), _)) => {
-                            // Typed-decode failure / connection error: the
+                            // why: Typed-decode failure / connection error: the
                             // frame is lost, so the turn fails once (PD-3,
                             // AR-7). The server-side turn is interrupted and
                             // its leftover terminal drained so the next
@@ -485,7 +485,7 @@ impl CodexNativeProvider {
                             ));
                         }
                         Err(_elapsed) => {
-                            // Per-frame read timeout: stop the turn
+                            // why: Per-frame read timeout: stop the turn
                             // server-side (best effort), drain its leftover
                             // terminal (B-1), then fail once with the AR-7
                             // `timeout` token (parity with the old stream
@@ -513,7 +513,7 @@ impl CodexNativeProvider {
     }
 }
 
-/// Auto-answer a residual codex approval server-request (AR-4).
+/// note: auto-answer a residual codex approval server-request (AR-4).
 ///
 /// Uses the native permission classification: read-only command actions
 /// classify `Allow` → accept; everything else (`Ask` / `Deny`) is denied —
@@ -600,7 +600,7 @@ async fn auto_answer_approval(client: &mut AsyncClient, id: RequestId, request: 
                 tracing::warn!(error = %error, "Failed to answer codex approval request");
             }
         }
-        // Permission/user-input/tool/auth requests are not approvals we can
+        // why: Permission/user-input/tool/auth requests are not approvals we can
         // classify — deny with a JSON-RPC error (headless fail-safe).
         _ => {
             tracing::info!(
@@ -618,7 +618,7 @@ async fn auto_answer_approval(client: &mut AsyncClient, id: RequestId, request: 
     }
 }
 
-/// Interrupt the session's active turn via the crate client, if any.
+/// note: interrupt the session's active turn via the crate client, if any.
 ///
 /// Best-effort: a turn that already completed server-side makes
 /// `turn/interrupt` fail with a JSON-RPC error, which is logged only. Runs
@@ -652,7 +652,7 @@ async fn interrupt_turn(
     }
 }
 
-/// Clear the session's active-turn marker (stream ended).
+/// note: clear the session's active-turn marker (stream ended).
 async fn clear_active_turn(
     sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
     session_id: &HostSessionId,
@@ -666,14 +666,14 @@ async fn clear_active_turn(
     guard.active_turn_id = None;
 }
 
-/// Budget for draining an interrupted turn's leftover terminal (B-1).
+/// note: budget for draining an interrupted turn's leftover terminal (B-1).
 ///
 /// The app-server answers `turn/interrupt` with `turn/completed`; that frame
 /// must not linger in the stream for the next execute to consume. Distinct
 /// from the prompt-setup budget: it bounds only the interrupt response wait.
 const TURN_DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Best-effort drain: after interrupting the active turn, keep reading
+/// note: best-effort drain: after interrupting the active turn, keep reading
 /// frames until that turn's terminal arrives (or the budget / EOF / stream
 /// error ends the drain), so the next execute cannot consume a leftover
 /// terminal from this turn (B-1). Runs under the per-session lock; a
@@ -706,7 +706,7 @@ async fn drain_turn_terminal(
         .await;
         match outcome {
             Ok(Ok(Some(ServerMessage::Notification(notification)))) => {
-                // The interrupted turn's terminal ends the drain.
+                // why: The interrupted turn's terminal ends the drain.
                 if matches!(
                     &notification,
                     Notification::TurnCompleted(completed)
@@ -714,13 +714,13 @@ async fn drain_turn_terminal(
                 ) {
                     return;
                 }
-                // Any other leftover frame from the interrupted turn is
+                // why: Any other leftover frame from the interrupted turn is
                 // noise — keep draining.
             }
-            // Leftover approval request: the turn is being torn down, the
+            // why: Leftover approval request: the turn is being torn down, the
             // interrupt response follows; nothing to answer.
             Ok(Ok(Some(ServerMessage::Request { .. }))) => {}
-            // EOF / stream error / budget elapsed: nothing more to drain.
+            // why: EOF / stream error / budget elapsed: nothing more to drain.
             Ok(Ok(None) | Err(_)) | Err(_) => {
                 drop(guard);
                 return;
@@ -771,7 +771,7 @@ impl ProviderAdapter for CodexNativeProvider {
                 provider_id,
                 available: false,
                 latency_ms: None,
-                // Static, category-only diagnostic: the SDK/`app-server`
+                // why: Static, category-only diagnostic: the SDK/`app-server`
                 // failure Display can embed arbitrary subprocess output
                 // (including secrets) and this string is published in the
                 // live provider catalog / API. Never echo the raw Display.
@@ -797,7 +797,7 @@ impl ProviderAdapter for CodexNativeProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // Native provider launch only registers session state — the
+        // why: Native provider launch only registers session state — the
         // app-server process starts lazily on the first execute().
         let host_session_id = HostSessionId::new();
 
@@ -856,7 +856,6 @@ impl ProviderAdapter for CodexNativeProvider {
             ));
         }
 
-        // Build prompt text from content blocks.
         let prompt_text: String = content
             .iter()
             .map(|block| match block {
@@ -873,7 +872,7 @@ impl ProviderAdapter for CodexNativeProvider {
             ));
         }
 
-        // Setup phase (client + thread + turn/start) runs under the prompt
+        // why: Setup phase (client + thread + turn/start) runs under the prompt
         // timeout, mirroring the old spawn + stdin-write enforcement. A
         // failure returns an error, not a stream.
         let turn_id = tokio::time::timeout(
@@ -915,7 +914,7 @@ impl ProviderAdapter for CodexNativeProvider {
         session: &ManagedSessionHandle,
         op_id: HostOperationId,
     ) -> HostResult<()> {
-        // The app-server owns the turn; interrupt it through the crate
+        // why: The app-server owns the turn; interrupt it through the crate
         // client under the per-session lock (B-2: only this session's frame
         // read can delay it). The app-server reports `Interrupted`, which
         // maps to a clean `OpFinished(EndTurn)` on the stream (AR-1).
@@ -930,7 +929,7 @@ impl ProviderAdapter for CodexNativeProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Removing the session drops the crate client once no in-flight
+        // why: Removing the session drops the crate client once no in-flight
         // frame read holds it, which kills the app-server process (AsyncClient
         // teardown owns the child — no raw Child map, no ChildReaper). An
         // in-flight read releases the per-session lock when it returns
@@ -955,7 +954,7 @@ impl ProviderAdapter for CodexNativeProvider {
 
 #[cfg(test)]
 mod tests {
-    // Lock guards (session registry / client) are intentionally held to the
+    // why: Lock guards (session registry / client) are intentionally held to the
     // end of the visible test scope for readability; the nursery
     // significant_drop_tightening suggestion to drop them earlier is noise
     // here. `PROCESS_ENV_LOCK` (lib.rs test_support) is deliberately held
@@ -973,7 +972,7 @@ mod tests {
     );
 
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
-        // A portable, existing working directory. `/tmp` is not a valid
+        // why: A portable, existing working directory. `/tmp` is not a valid
         // `current_dir` on Windows: spawn fails with ERROR_DIRECTORY (os
         // error 267) before the fixture is ever reached. See register row
         // R-V1202-P1T3-001.
@@ -991,7 +990,7 @@ mod tests {
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
-            // Portable, existing working directory (see `test_probe_request`).
+            // why: Portable, existing working directory (see `test_probe_request`).
             cwd: std::env::temp_dir(),
             model: None,
             mode: None,
@@ -1019,7 +1018,7 @@ mod tests {
             .count()
     }
 
-    /// Provider wired to the fixture mock app-server (a small Python
+    /// note: provider wired to the fixture mock app-server (a small Python
     /// JSON-RPC speaker; see `MOCK_APP_SERVER`). Caller must hold
     /// `PROCESS_ENV_LOCK` while constructing it because fixture resolution
     /// may inspect PATH on Windows.
@@ -1039,7 +1038,7 @@ mod tests {
         provider: &CodexNativeProvider,
         text: &str,
     ) -> (ManagedSessionHandle, HostEventStream) {
-        // Serialize with the env-mutating discovery tests: the fixture is
+        // why: Serialize with the env-mutating discovery tests: the fixture is
         // spawned via `#!/usr/bin/env python3`, which resolves python3
         // through PATH at execve time (see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
@@ -1086,14 +1085,14 @@ mod tests {
 
     #[tokio::test]
     async fn probe_failure_diagnostic_never_echoes_sdk_output() {
-        // A hostile sentinel standing in for anything secret-bearing the SDK
+        // why: A hostile sentinel standing in for anything secret-bearing the SDK
         // error Display might carry (subprocess stderr, tokens, paths). The
         // fixture fails `initialize` with it, so it genuinely travels the real
         // probe failure path.
         const SENTINEL: &str = "sentinel-secret-do-not-publish-4f2a";
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
 
-        // The fixture's own request log is the evidence that this probe really
+        // why: The fixture's own request log is the evidence that this probe really
         // reached it. Without a receipt a probe that never spawned (bad
         // interpreter, missing fixture) would also report "unavailable" and the
         // sentinel assertion below would pass vacuously.
@@ -1116,7 +1115,7 @@ mod tests {
             !health.available,
             "a failing handshake must be unavailable, got {health:?}"
         );
-        // ACTUAL receipt from the fixture: `initialize` was issued and logged
+        // why: ACTUAL receipt from the fixture: `initialize` was issued and logged
         // before the sentinel error was returned.
         let log = std::fs::read_to_string(&req_log)
             .expect("the probe must have spawned the fixture and logged a request");
@@ -1129,7 +1128,7 @@ mod tests {
             "the probe must have issued initialize to the fixture; log: {log}"
         );
 
-        // The observable contract: the hostile string never reaches the public
+        // why: The observable contract: the hostile string never reaches the public
         // diagnostic. The exact wording of the static category is deliberately
         // NOT asserted — that would pin source text rather than behavior.
         let message = health.message.unwrap_or_default();
@@ -1236,7 +1235,7 @@ mod tests {
         );
     }
 
-    /// A turn against the mock app-server maps through `map_codex`:
+    /// note: A turn against the mock app-server maps through `map_codex`:
     /// `OpStarted` (turn/started), `MessageDelta`, one `OpFinished(EndTurn)`
     /// (turn/completed), and the client/thread survive for later turns.
     #[tokio::test]
@@ -1282,12 +1281,12 @@ mod tests {
         );
     }
 
-    /// Session restore (AR-5): the second execute reuses the app-server
+    /// note: session restore (AR-5): the second execute reuses the app-server
     /// thread — no second `thread/start`, and both turns run on
     /// `mock-thread-1`.
     #[tokio::test]
     async fn second_execute_reuses_thread() {
-        // Serialize with env-mutating discovery tests (fixture spawns
+        // why: Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1351,7 +1350,7 @@ mod tests {
         );
     }
 
-    /// `cancel()` interrupts the running turn through the crate client; the
+    /// note: `cancel()` interrupts the running turn through the crate client; the
     /// app-server reports `Interrupted`, which maps to a clean
     /// `OpFinished(EndTurn)` (AR-1).
     #[tokio::test]
@@ -1384,7 +1383,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
-    /// `shutdown()` tears down the crate client (killing the app-server) and
+    /// note: `shutdown()` tears down the crate client (killing the app-server) and
     /// removes the session; the in-flight stream still emits exactly one
     /// terminal — `OpFailed(stream_closed)` (PD-3 backstop).
     #[tokio::test]
@@ -1397,7 +1396,7 @@ mod tests {
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
 
-        // Pump the first event so the turn is visibly streaming.
+        // why: Pump the first event so the turn is visibly streaming.
         let first = stream.next().await.expect("first event").expect("ok");
         assert!(matches!(first, HostEvent::OpStarted(_)));
 
@@ -1434,14 +1433,14 @@ mod tests {
             .expect("cancel with no active turn must succeed");
     }
 
-    /// B-1 regression: a `turn/completed` left in the pipe from a PREVIOUS
+    /// note: B-1 regression: a `turn/completed` left in the pipe from a PREVIOUS
     /// turn must not terminate the new turn's stream (empty-success). The
     /// mock emits the stale terminal for `mock-turn-1` before the second
     /// turn's own frames; the stream must skip it and read only its own
     /// turn's events.
     #[tokio::test]
     async fn stale_turn_terminal_from_previous_turn_does_not_end_new_stream() {
-        // Serialize with env-mutating discovery tests (fixture spawns
+        // why: Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([(
@@ -1498,12 +1497,12 @@ mod tests {
         assert_eq!(terminal_count(&events2), 1);
     }
 
-    /// B-1: a typed-decode failure interrupts the server-side turn and
+    /// note: B-1: a typed-decode failure interrupts the server-side turn and
     /// drains its leftover terminal, so the next execute starts a clean
     /// turn instead of consuming the interrupted turn's `turn/completed`.
     #[tokio::test]
     async fn decode_error_interrupts_and_drains_turn() {
-        // Serialize with env-mutating discovery tests (fixture spawns
+        // why: Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BAD_FRAME".to_string(), "1".to_string())]));
@@ -1563,12 +1562,12 @@ mod tests {
         assert_eq!(terminal_count(&events2), 1);
     }
 
-    /// B-2: with session A's frame read in flight (`BLOCK_TURN`), cancel and
+    /// note: B-2: with session A's frame read in flight (`BLOCK_TURN`), cancel and
     /// shutdown of session B must complete promptly — the per-session lock
     /// replaces the provider-global write lock.
     #[tokio::test]
     async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
-        // Serialize with env-mutating discovery tests (fixture spawns
+        // why: Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
@@ -1588,11 +1587,11 @@ mod tests {
             .await
             .expect("execute a");
 
-        // Keep session A's stream polling so its frame read is in flight.
+        // why: Keep session A's stream polling so its frame read is in flight.
         let pump = tokio::spawn(async move {
             let _ = stream_a.collect::<Vec<_>>().await;
         });
-        // Let the read settle into the blocked frame read.
+        // why: Let the read settle into the blocked frame read.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         let handle_b = provider.launch(launch_spec()).await.expect("launch b");
@@ -1617,7 +1616,7 @@ mod tests {
             "shutdown of session B must not wait on session A's frame read"
         );
 
-        // Clean up session A: abort the pump (releasing the blocked read),
+        // why: Clean up session A: abort the pump (releasing the blocked read),
         // then tear the session down so no child process leaks.
         pump.abort();
         let _ = pump.await;

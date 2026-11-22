@@ -1,4 +1,4 @@
-//! Process PATH enrichment for agent CLI discovery.
+//! Process PATH enrichment for agent CLI discovery. See docs/specs/agents/agent-host.md.
 //!
 //! v1.193 P2-T2 moved this helper out of the daemon composition into the
 //! existing neutral provider-discovery owner (technical contracts §4): the
@@ -19,10 +19,10 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-/// Version-manager name used for the enrichment diagnostics field.
+/// note: version-manager name used for the enrichment diagnostics field.
 type ManagerName = &'static str;
 
-/// Resolve the active Node.js bin directory for nvm without shelling out.
+/// note: resolve the active Node.js bin directory for nvm without shelling out.
 ///
 /// 1. Uses `$NVM_DIR` if set, otherwise falls back to `~/.nvm`.
 /// 2. Reads `<nvm_root>/alias/default` and follows up to two alias hops.
@@ -64,7 +64,7 @@ fn resolve_nvm_alias_target(nvm_root: &Path, target: &str, depth: u8) -> Option<
     if bin.is_dir() {
         return Some(bin);
     }
-    // Target may itself be an alias (e.g. `default -> lts/iron -> v20.11.0`).
+    // why: Target may itself be an alias (e.g. `default -> lts/iron -> v20.11.0`).
     let alias = nvm_root.join("alias").join(target);
     let next = std::fs::read_to_string(&alias)
         .ok()
@@ -102,7 +102,7 @@ fn parse_semver_prefix(name: &str) -> Option<(u64, u64, u64)> {
     let major = parts.next()?.parse::<u64>().ok()?;
     let minor = parts.next()?.parse::<u64>().ok()?;
     let patch_part = parts.next()?;
-    // Stop at the first non-digit so `20.11.0-rc.1` parses as (20, 11, 0).
+    // why: Stop at the first non-digit so `20.11.0-rc.1` parses as (20, 11, 0).
     let patch_digits: String = patch_part
         .chars()
         .take_while(char::is_ascii_digit)
@@ -156,7 +156,7 @@ fn resolve_pnpm_bin(home: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Common user / package-manager bin directories that login shells typically
+/// note: common user / package-manager bin directories that login shells typically
 /// include but GUI-launched processes often omit.
 ///
 /// Only directories that currently exist are returned so PATH stays free of
@@ -179,9 +179,9 @@ fn login_equivalent_bin_dirs_with_sources() -> Vec<(PathBuf, Option<ManagerName>
             ".cargo/bin",
             ".npm-global/bin",
             ".bun/bin",
-            // Vendor agent CLIs that install outside Homebrew / npm-global.
+            // why: Vendor agent CLIs that install outside Homebrew / npm-global.
             ".kimi-code/bin",
-            // Version-manager shims (existence-gated; QC B5).
+            // why: Version-manager shims (existence-gated; QC B5).
             ".asdf/shims",
             ".local/share/mise/shims",
         ] {
@@ -241,7 +241,7 @@ fn login_equivalent_bin_dirs_with_sources() -> Vec<(PathBuf, Option<ManagerName>
 
     #[cfg(windows)]
     {
-        // Windows GUI PATH is usually already complete; keep a light touch.
+        // why: Windows GUI PATH is usually already complete; keep a light touch.
         if let Some(local) = env::var_os("LOCALAPPDATA") {
             let npm = PathBuf::from(local).join("npm");
             if npm.is_dir() {
@@ -253,7 +253,7 @@ fn login_equivalent_bin_dirs_with_sources() -> Vec<(PathBuf, Option<ManagerName>
     dirs
 }
 
-/// Merge `extra_dirs` (prepended, de-duplicated) with an existing PATH value.
+/// note: merge `extra_dirs` (prepended, de-duplicated) with an existing PATH value.
 ///
 /// Existing entries keep their relative order after any newly prepended dirs.
 /// Duplicates (by string equality of the path component) are skipped.
@@ -289,7 +289,7 @@ pub fn merge_path(
     env::join_paths(&ordered)
 }
 
-/// Build the directory list used for agent CLI PATH probes at scan time.
+/// note: build the directory list used for agent CLI PATH probes at scan time.
 ///
 /// Order: current process `PATH` entries first (so test isolation and
 /// user overrides win), then [`login_equivalent_bin_dirs`] that are not
@@ -320,7 +320,7 @@ pub fn probe_path_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Enrich the current process `PATH` with [`login_equivalent_bin_dirs`].
+/// note: enrich the current process `PATH` with [`login_equivalent_bin_dirs`].
 ///
 /// Idempotent: directories already present are not duplicated.
 ///
@@ -359,7 +359,7 @@ pub fn apply_process_path_enrichment() {
     };
     let after_count = env::split_paths(&enriched).count();
 
-    // Process-global PATH update before Tokio (and before any agent scan).
+    // why: Process-global PATH update before Tokio (and before any agent scan).
     // Concurrent tests that mutate process env serialize on the crate-wide
     // `crate::test_support::PROCESS_ENV_LOCK` (see this module's tests).
     // Workspace forbids `unsafe`, so we use the safe `set_var` call — but only
@@ -387,7 +387,7 @@ pub fn apply_process_path_enrichment() {
 mod tests {
     use super::*;
 
-    // Tests that isolate the user home by setting `HOME` are `#[cfg(unix)]`:
+    // why: Tests that isolate the user home by setting `HOME` are `#[cfg(unix)]`:
     // `dirs::home_dir()` resolves the Windows profile known folder
     // (`FOLDERID_Profile`) and cannot be redirected from a test, so their
     // home-relative assertions have no Windows meaning.
@@ -401,7 +401,7 @@ mod tests {
     // resolves the interpreter through the process `PATH`. A module-local
     // lock here would let this module's `PATH` writes interleave with those.
 
-    /// Remove version-manager env vars that would override the temp HOME path,
+    /// note: remove version-manager env vars that would override the temp HOME path,
     /// returning their previous values so callers can restore them.
     #[cfg(unix)]
     fn stash_manager_env_vars() -> [Option<OsString>; 3] {
@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn merge_path_prepends_extras_and_dedupes() {
-        // Build the value with the platform PATH separator: the assertion is
+        // why: Build the value with the platform PATH separator: the assertion is
         // about merge/split round-tripping, not about a `:`-joined literal.
         let existing = env::join_paths(["/usr/bin", "/bin", "/opt/homebrew/bin"]).unwrap();
         let extras = vec![
@@ -480,7 +480,7 @@ mod tests {
         fs::set_permissions(&binary, perms).unwrap();
 
         let previous = env::var_os("PATH");
-        // Simulate a stripped macOS GUI PATH that cannot see the temp bin.
+        // why: Simulate a stripped macOS GUI PATH that cannot see the temp bin.
         env::set_var("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
         assert!(
             which::which("nexus-path-probe-agent").is_err(),
@@ -496,7 +496,6 @@ mod tests {
         );
         assert_eq!(found.unwrap(), binary);
 
-        // Restore.
         match previous {
             Some(p) => env::set_var("PATH", p),
             None => env::remove_var("PATH"),
@@ -689,7 +688,7 @@ mod tests {
         let valid_bin = nvm_root.join("versions/node/v20.11.0/bin");
         let current_bin = nvm_root.join("versions/node/current/bin");
         std::fs::create_dir_all(&valid_bin).unwrap();
-        // `current` symlink target does not matter; the name itself is non-semver.
+        // why: `current` symlink target does not matter; the name itself is non-semver.
         std::fs::create_dir_all(&current_bin).unwrap();
         std::fs::write(nvm_root.join("versions/node/.DS_Store"), b"junk").unwrap();
 

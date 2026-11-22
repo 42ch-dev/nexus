@@ -1,4 +1,4 @@
-//! Provider adapters: ACP and native CLI.
+//! Provider adapters: ACP and native CLI. See docs/specs/agents/agent-host.md.
 //!
 //! The ACP provider adapter wraps [`nexus_acp_host::AcpSdkAdapter`] behind the
 //! [`ProviderAdapter`] trait. Native CLI adapters manage subprocess lifecycles.
@@ -24,10 +24,10 @@ use crate::providers::native_cli::{
 };
 use crate::{LaunchStrategy, ProviderAdapter, ProviderCatalogEntry};
 
-/// Native provider IDs accepted by the factory (architecture §5.1).
+/// note: native provider IDs accepted by the factory (architecture §5.1).
 pub const NATIVE_PROVIDER_IDS: &[&str] = &["dsh-native", "codex-native", "claude-native"];
 
-/// Health for a configured/discovered candidate that has not yet passed probe.
+/// note: health for a configured/discovered candidate that has not yet passed probe.
 #[must_use]
 pub fn candidate_unavailable_health(provider_id: &ProviderId, message: &str) -> ProviderHealth {
     ProviderHealth {
@@ -38,7 +38,7 @@ pub fn candidate_unavailable_health(provider_id: &ProviderId, message: &str) -> 
     }
 }
 
-/// Validate one enabled provider config entry.
+/// note: validate one enabled provider config entry.
 ///
 /// Rejects empty IDs/commands, unknown native IDs, and unsupported argv.
 ///
@@ -59,7 +59,7 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.protocol, pc.id
         )));
     }
-    // A command is an executable name, not a shell line: whitespace-only input
+    // why: A command is an executable name, not a shell line: whitespace-only input
     // is empty input.
     if pc
         .command
@@ -71,7 +71,7 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.id
         )));
     }
-    // The built-in trio plus every plain native-CLI row the detection
+    // why: The built-in trio plus every plain native-CLI row the detection
     // roster can emit (`opencode`, `kimi`, …): a configured provider that
     // came from a scan row must pass the same validation at boot.
     if protocol == "native_cli"
@@ -94,7 +94,7 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
     Ok(())
 }
 
-/// Validate every provider row in a loaded config.
+/// note: validate every provider row in a loaded config.
 ///
 /// # Errors
 ///
@@ -108,7 +108,7 @@ pub fn validate_agent_host_config_providers(
     Ok(())
 }
 
-/// The protocol a launch strategy implies — the ONE derivation used to build
+/// note: the protocol a launch strategy implies — the ONE derivation used to build
 /// a [`ProviderConfig`] from a catalog entry.
 const fn protocol_of(launch: &LaunchStrategy) -> &'static str {
     match launch {
@@ -117,7 +117,7 @@ const fn protocol_of(launch: &LaunchStrategy) -> &'static str {
     }
 }
 
-/// Build a [`ProviderConfig`] from a selected catalog entry for factory dispatch.
+/// note: build a [`ProviderConfig`] from a selected catalog entry for factory dispatch.
 fn provider_config_from_entry(entry: &ProviderCatalogEntry) -> HostResult<ProviderConfig> {
     let (command, args, env) = match &entry.launch {
         LaunchStrategy::Acp { command, args, env }
@@ -141,7 +141,7 @@ fn provider_config_from_entry(entry: &ProviderCatalogEntry) -> HostResult<Provid
     })
 }
 
-/// Construct a provider adapter from one selected catalog entry.
+/// note: construct a provider adapter from one selected catalog entry.
 ///
 /// Native IDs are exactly `dsh-native`, `codex-native`, and `claude-native`.
 /// Generic configured ACP recipes use [`acp::AcpProvider::from_config`].
@@ -159,7 +159,7 @@ pub fn adapter_from_catalog_entry(
     let provider_config = provider_config_from_entry(entry)?;
     validate_provider_config(&provider_config)?;
 
-    // The entry's DECLARED protocol must match the protocol its launch
+    // why: The entry's DECLARED protocol must match the protocol its launch
     // strategy implies. Dispatch below selects the adapter from
     // `entry.protocol_kind`, while `provider_config_from_entry` derives
     // validation from the launch strategy — so an inconsistent pair (for
@@ -239,7 +239,7 @@ mod detection_only_tests {
     use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
     use crate::{DiscoverySource, LaunchStrategy, ProviderId, TrustLevel};
 
-    /// A detection-roster native id (no launch adapter in this build) must be
+    /// note: A detection-roster native id (no launch adapter in this build) must be
     /// rejected with an actionable, ACP-suggesting error — saveable config,
     /// honest launch failure (review r2 F-2).
     #[test]

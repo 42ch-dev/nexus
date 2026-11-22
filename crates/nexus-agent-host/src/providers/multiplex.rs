@@ -1,5 +1,7 @@
 //! Catalog-selected provider ports. Selection happens before effects; subsequent
 //! calls use retained session/operation ownership, never caller routing hints.
+//!
+//! See docs/specs/agents/agent-host.md
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +18,7 @@ use crate::capability::model::ProviderHealth;
 use crate::capability::model::{HostOperation, LaunchSpec, ProbeRequest, ProtocolKind};
 use crate::{HostFacade, HostManager, LaunchStrategy, ProviderId};
 
-// Match the callback's retained payload window; completed routes are evicted
+// why: Match the callback's retained payload window; completed routes are evicted
 // before admitting further operations, not while an effect/pull is active.
 const MAX_OPERATIONS_PER_SESSION: usize = 64;
 
@@ -70,7 +72,7 @@ struct MultiplexProviderPort {
     routes: Mutex<Routes>,
 }
 
-/// Compose maintained native adapters with an optional ACP callback port.
+/// note: compose maintained native adapters with an optional ACP callback port.
 ///
 /// The callback receives only Rust-admitted recipes. Any tracking/journal
 /// wrapper around it must consume that recipe, not re-admit caller payload.
@@ -150,7 +152,7 @@ impl MultiplexProviderPort {
             .admit_validated_provider_recipe(&provider_id)
             .await
             .map_err(|e| host_error_to_core_error(&e))?;
-        // Both the host boundary and the verified Creator owner constrain cwd.
+        // why: Both the host boundary and the verified Creator owner constrain cwd.
         let payload = serde_json::Value::Object(request.payload.clone());
         let (cwd, owner) = if request.method == ProviderCallMethod::Launch {
             let spec: LaunchSpec = serde_json::from_value(payload).map_err(|e| {
@@ -257,7 +259,7 @@ impl MultiplexProviderPort {
     }
 
     async fn launch(&self, mut request: ProviderCall) -> ProviderResult<ProviderReply> {
-        // Session identity is provider-owned, never a caller-selected existing ID.
+        // why: Session identity is provider-owned, never a caller-selected existing ID.
         if request.session_id.is_some() || request.operation_id.is_some() {
             return Err(error(
                 CoreErrorCode::InvalidInput,
@@ -292,7 +294,7 @@ impl MultiplexProviderPort {
         })?;
         let mut routes = self.routes()?;
         if routes.sessions.contains_key(session_id) {
-            // Do not replace the incumbent route or try a second adapter. The
+            // why: Do not replace the incumbent route or try a second adapter. The
             // selected adapter/tracking wrapper retains cleanup ownership.
             return Err(error(
                 CoreErrorCode::Internal,
@@ -308,13 +310,13 @@ impl MultiplexProviderPort {
                 closed: AtomicBool::new(false),
             }),
         );
-        // Release the routes guard with its last use: the reply is returned
+        // why: Release the routes guard with its last use: the reply is returned
         // without holding the multiplexer lock.
         drop(routes);
         Ok(reply)
     }
 
-    #[allow(clippy::too_many_lines)] // one linear admission -> register -> reply walk
+    #[allow(clippy::too_many_lines)] // why: one linear admission -> register -> reply walk
     async fn execute(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
         let (session_id, session) = self.session(request.session_id.as_deref())?;
         let _gate = session
@@ -418,7 +420,7 @@ impl MultiplexProviderPort {
                 terminal: AtomicBool::new(false),
             }),
         );
-        // Same tightening as `launch`: the reply never holds the guard.
+        // why: Same tightening as `launch`: the reply never holds the guard.
         drop(routes);
         Ok(reply)
     }

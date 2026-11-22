@@ -1,4 +1,4 @@
-//! Configuration loading for the agent host.
+//! Configuration loading for the agent host. See docs/specs/agents/agent-host.md.
 //!
 //! Loads from `{NEXUS_HOME}/agent-host/config.toml` using `nexus-home-layout`
 //! path helpers. Missing config yields safe defaults; invalid config returns
@@ -11,98 +11,98 @@ use serde::{Deserialize, Serialize};
 use crate::error::{HostError, HostResult};
 use crate::ids::ProviderId;
 
-/// Agent host configuration.
+/// note: agent host configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentHostConfig {
-    /// Maximum concurrent sessions (default: 4).
+    /// note: maximum concurrent sessions (default: 4).
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
 
-    /// Maximum concurrent operations per session (default: 1).
+    /// note: maximum concurrent operations per session (default: 1).
     #[serde(default = "default_max_ops_per_session")]
     pub max_ops_per_session: usize,
 
-    /// Timeout configuration.
+    /// note: timeout configuration.
     #[serde(default)]
     pub timeouts: TimeoutConfig,
 
-    /// Policy configuration.
+    /// note: policy configuration.
     #[serde(default)]
     pub policy: PolicyConfig,
 
-    /// Explicit provider configurations.
+    /// note: explicit provider configurations.
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
 }
 
-/// Timeout configuration (all values in milliseconds).
+/// note: timeout configuration (all values in milliseconds).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutConfig {
-    /// Provider launch timeout (default: 15s).
+    /// note: provider launch timeout (default: 15s).
     #[serde(default = "default_launch_ms")]
     pub launch_ms: u64,
 
-    /// ACP initialize handshake timeout (default: 15s).
+    /// note: ACP initialize handshake timeout (default: 15s).
     #[serde(default = "default_initialize_ms")]
     pub initialize_ms: u64,
 
-    /// Session creation timeout (default: 30s).
+    /// note: session creation timeout (default: 30s).
     #[serde(default = "default_session_ms")]
     pub session_ms: u64,
 
-    /// Prompt/operation execution timeout (default: 180s).
+    /// note: prompt/operation execution timeout (default: 180s).
     #[serde(default = "default_prompt_ms")]
     pub prompt_ms: u64,
 
-    /// Graceful shutdown timeout (default: 5s).
+    /// note: graceful shutdown timeout (default: 5s).
     #[serde(default = "default_shutdown_ms")]
     pub shutdown_ms: u64,
 }
 
-/// Policy configuration.
+/// note: policy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyConfig {
-    /// How to handle unknown (not explicitly configured) providers.
+    /// note: how to handle unknown (not explicitly configured) providers.
     /// "deny" or "allow" (default: "deny").
     #[serde(default = "default_unknown_provider")]
     pub unknown_provider: String,
 
-    /// How to handle tools with unknown risk classification.
+    /// note: how to handle tools with unknown risk classification.
     /// "deny", "ask", or "allow" (default: "deny").
     #[serde(default = "default_unknown_tool_risk")]
     pub unknown_tool_risk: String,
 
-    /// Whether to allow model fallback when `set_model` fails (default: true).
+    /// note: whether to allow model fallback when `set_model` fails (default: true).
     #[serde(default = "default_allow_model_fallback")]
     pub allow_model_fallback: bool,
 }
 
-/// Per-provider configuration.
+/// note: per-provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
-    /// Provider ID.
+    /// note: provider ID.
     pub id: String,
 
-    /// Protocol kind: "acp" or `native_cli`.
+    /// note: protocol kind: "acp" or `native_cli`.
     pub protocol: String,
 
-    /// Command to execute (for native CLI providers).
+    /// note: command to execute (for native CLI providers).
     pub command: Option<String>,
 
-    /// Command arguments.
+    /// note: command arguments.
     #[serde(default)]
     pub args: Vec<String>,
 
-    /// Environment variables.
+    /// note: environment variables.
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
 
-    /// Whether this provider is enabled (default: true).
+    /// note: whether this provider is enabled (default: true).
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
 
-// ── Default value functions ──────────────────────────────────────────
+// note: ── Default value functions ──────────────────────────────────────────
 
 const fn default_max_sessions() -> usize {
     4
@@ -148,7 +148,7 @@ const fn default_enabled() -> bool {
     true
 }
 
-// ── Default impls ────────────────────────────────────────────────────
+// note: ── Default impls ────────────────────────────────────────────────────
 
 impl Default for AgentHostConfig {
     fn default() -> Self {
@@ -185,31 +185,31 @@ impl Default for PolicyConfig {
 }
 
 impl TimeoutConfig {
-    /// Launch timeout as `std::time::Duration`.
+    /// note: launch timeout as `std::time::Duration`.
     #[must_use]
     pub const fn launch_duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.launch_ms)
     }
 
-    /// Initialize timeout as `std::time::Duration`.
+    /// note: initialize timeout as `std::time::Duration`.
     #[must_use]
     pub const fn initialize_duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.initialize_ms)
     }
 
-    /// Session timeout as `std::time::Duration`.
+    /// note: session timeout as `std::time::Duration`.
     #[must_use]
     pub const fn session_duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.session_ms)
     }
 
-    /// Prompt timeout as `std::time::Duration`.
+    /// note: prompt timeout as `std::time::Duration`.
     #[must_use]
     pub const fn prompt_duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.prompt_ms)
     }
 
-    /// Shutdown timeout as `std::time::Duration`.
+    /// note: shutdown timeout as `std::time::Duration`.
     #[must_use]
     pub const fn shutdown_duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.shutdown_ms)
@@ -217,13 +217,13 @@ impl TimeoutConfig {
 }
 
 impl PolicyConfig {
-    /// Whether unknown providers are denied.
+    /// note: whether unknown providers are denied.
     #[must_use]
     pub fn deny_unknown_providers(&self) -> bool {
         self.unknown_provider == "deny"
     }
 
-    /// Whether model fallback is allowed.
+    /// note: whether model fallback is allowed.
     #[must_use]
     pub const fn allow_model_fallback(&self) -> bool {
         self.allow_model_fallback
@@ -231,13 +231,13 @@ impl PolicyConfig {
 }
 
 impl ProviderConfig {
-    /// Get the provider ID as a typed `ProviderId`.
+    /// note: get the provider ID as a typed `ProviderId`.
     #[must_use]
     pub fn provider_id(&self) -> ProviderId {
         ProviderId::new(&self.id)
     }
 
-    /// Parse the protocol string into a `ProtocolKind`.
+    /// note: parse the protocol string into a `ProtocolKind`.
     ///
     /// # Errors
     ///
@@ -254,9 +254,9 @@ impl ProviderConfig {
     }
 }
 
-// ── Path validation helpers ──────────────────────────────────────────
+// note: ── Path validation helpers ──────────────────────────────────────────
 
-/// Validate that a user-supplied workspace path is absolute and does not
+/// note: validate that a user-supplied workspace path is absolute and does not
 /// contain directory traversal components (`..`).
 ///
 /// Rejects paths with `..` components outright — a well-formed workspace
@@ -275,7 +275,7 @@ pub fn validate_workspace_path(workspace_root: &Path) -> HostResult<PathBuf> {
         )));
     }
 
-    // Reject any `..` components — workspace roots should not need traversal.
+    // why: Reject any `..` components — workspace roots should not need traversal.
     if workspace_root
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -286,7 +286,7 @@ pub fn validate_workspace_path(workspace_root: &Path) -> HostResult<PathBuf> {
         )));
     }
 
-    // canonicalize resolves symlinks and validates the path exists
+    // why: canonicalize resolves symlinks and validates the path exists
     let canonical = std::path::Path::canonicalize(workspace_root).map_err(|e| {
         HostError::policy_denied(format!(
             "workspace root cannot be resolved: {} ({})",
@@ -298,7 +298,7 @@ pub fn validate_workspace_path(workspace_root: &Path) -> HostResult<PathBuf> {
     Ok(canonical)
 }
 
-/// Validate that a config path is under the expected config directory.
+/// note: validate that a config path is under the expected config directory.
 ///
 /// # Errors
 ///
@@ -332,7 +332,7 @@ pub fn validate_config_path(config_path: &Path, expected_config_dir: &Path) -> H
     Ok(canonical_config)
 }
 
-/// Validate that a candidate workspace path (e.g. a session cwd) is under a
+/// note: validate that a candidate workspace path (e.g. a session cwd) is under a
 /// trusted boundary directory.
 ///
 /// Both paths are canonicalized (resolving symlinks) and the function checks
@@ -389,7 +389,7 @@ pub fn validate_workspace_path_under(candidate: &Path, boundary: &Path) -> HostR
     Ok(canonical_candidate)
 }
 
-/// Load agent host config from a specific file path.
+/// note: load agent host config from a specific file path.
 ///
 /// This is the TOCTOU-safe replacement for calling `load_config()` with a
 /// home directory. Instead of checking `exists()` and then reading, it
@@ -438,7 +438,7 @@ pub fn load_config_from_path(config_path: &Path) -> HostResult<AgentHostConfig> 
     Ok(config)
 }
 
-/// Normalize a path by collapsing `.` and `..` without touching the
+/// note: normalize a path by collapsing `.` and `..` without touching the
 /// filesystem. Used only for comparison in tests.
 #[cfg(test)]
 fn normalize_path(path: &Path) -> PathBuf {
@@ -455,9 +455,9 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-// ── Path helpers ─────────────────────────────────────────────────────
+// note: ── Path helpers ─────────────────────────────────────────────────────
 
-/// Get the agent-host config directory under the Nexus home.
+/// note: get the agent-host config directory under the Nexus home.
 ///
 /// `$HOME/.nexus42/agent-host/`
 #[must_use]
@@ -465,7 +465,7 @@ pub fn agent_host_config_dir(home: &Path) -> PathBuf {
     nexus_home_layout::nexus_root_from_home(home).join("agent-host")
 }
 
-/// Get the agent-host config file path.
+/// note: get the agent-host config file path.
 ///
 /// `$HOME/.nexus42/agent-host/config.toml`
 #[must_use]
@@ -473,7 +473,7 @@ pub fn agent_host_config_path(home: &Path) -> PathBuf {
     agent_host_config_dir(home).join("config.toml")
 }
 
-/// Load agent host config from the Nexus home layout.
+/// note: load agent host config from the Nexus home layout.
 ///
 /// If the config file does not exist, returns safe defaults.
 /// If the config file is invalid TOML, returns a structured error.
@@ -517,7 +517,7 @@ pub fn load_config(home: &Path) -> HostResult<AgentHostConfig> {
     Ok(config)
 }
 
-/// Persist agent host config to the Nexus home layout.
+/// note: persist agent host config to the Nexus home layout.
 ///
 /// Serializes to `{NEXUS_HOME}/agent-host/config.toml` through a temp file in
 /// the same directory and renames it over the target, so a concurrent reader
@@ -554,7 +554,7 @@ pub fn save_config(home: &Path, config: &AgentHostConfig) -> HostResult<()> {
     })?;
 
     std::fs::rename(&tmp_path, &config_path).map_err(|e| {
-        // A failed rename must not leave the temp document behind.
+        // why: A failed rename must not leave the temp document behind.
         let _ = std::fs::remove_file(&tmp_path);
         HostError::internal(format!(
             "failed to replace config at {}: {e}",
@@ -709,13 +709,13 @@ enabled = true
             std::fs::create_dir_all(parent).expect("Failed to create config dir");
         }
 
-        // Only override max_sessions; everything else should be defaults
+        // why: Only override max_sessions; everything else should be defaults
         let toml_content = "max_sessions = 2\n";
         std::fs::write(&config_path, toml_content).expect("Failed to write config");
 
         let config = load_config(home).expect("Should load partial config");
         assert_eq!(config.max_sessions, 2);
-        // Other fields should use defaults
+        // why: Other fields should use defaults
         assert_eq!(config.max_ops_per_session, 1);
         assert_eq!(config.timeouts.launch_ms, 15_000);
         assert_eq!(config.policy.unknown_provider, "deny");
@@ -773,7 +773,7 @@ enabled = true
         );
     }
 
-    // ── Path validation tests (D-011) ──────────────────────────────────
+    // note: ── Path validation tests (D-011) ──────────────────────────────────
 
     #[test]
     fn validate_workspace_path_accepts_absolute() {
@@ -834,7 +834,7 @@ enabled = true
         let config_dir = temp_dir.path().join("config");
         std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
-        // Write a file outside the config dir to try to reference
+        // why: Write a file outside the config dir to try to reference
         let outside_file = temp_dir.path().join("secret.txt");
         std::fs::write(&outside_file, "secret").expect("Failed to write file");
 
@@ -857,7 +857,7 @@ enabled = true
         assert_eq!(normalize_path(Path::new("/a/./b")), PathBuf::from("/a/b"));
     }
 
-    // ── validate_workspace_path_under tests (QC2 F-002) ────────────────
+    // note: ── validate_workspace_path_under tests (QC2 F-002) ────────────────
 
     #[test]
     fn validate_workspace_path_under_accepts_child() {
@@ -894,7 +894,7 @@ enabled = true
         let child = temp_dir.path().join("workspace");
         std::fs::create_dir_all(&child).expect("create child dir");
 
-        // Try to use /tmp as cwd when boundary is the temp dir
+        // why: Try to use /tmp as cwd when boundary is the temp dir
         let result = validate_workspace_path_under(Path::new("/tmp"), temp_dir.path());
         assert!(result.is_err(), "/tmp should be outside temp dir boundary");
         assert_eq!(result.unwrap_err().category(), "policy_denied");
@@ -935,7 +935,7 @@ enabled = true
         let child = temp_dir.path().join("workspace");
         std::fs::create_dir_all(&child).expect("create child dir");
 
-        // Create a symlink inside the workspace pointing outside
+        // why: Create a symlink inside the workspace pointing outside
         let link = child.join("escape_link");
         #[cfg(unix)]
         {
@@ -943,11 +943,11 @@ enabled = true
         }
         #[cfg(not(unix))]
         {
-            // Symlink test not applicable on non-unix; skip by passing
+            // why: Symlink test not applicable on non-unix; skip by passing
             return;
         }
 
-        // The symlink resolves to /tmp which is outside the boundary
+        // why: The symlink resolves to /tmp which is outside the boundary
         let result = validate_workspace_path_under(&link, &child);
         assert!(
             result.is_err(),
@@ -956,7 +956,7 @@ enabled = true
         assert_eq!(result.unwrap_err().category(), "policy_denied");
     }
 
-    // ── load_config_from_path tests (QC2 F-003) ───────────────────────
+    // note: ── load_config_from_path tests (QC2 F-003) ───────────────────────
 
     #[test]
     fn load_config_from_path_missing_returns_defaults() {
@@ -989,7 +989,7 @@ enabled = true
         assert_eq!(result.unwrap_err().category(), "internal_host_error");
     }
 
-    // ── save_config tests ──────────────────────────────────────────────
+    // note: ── save_config tests ──────────────────────────────────────────────
 
     #[test]
     fn save_config_round_trips_through_load() {

@@ -1,4 +1,4 @@
-//! ACP registry discovery — maps registry entries to catalog entries.
+//! ACP registry discovery — maps registry entries to catalog entries. See docs/specs/agents/agent-host.md.
 //!
 //! Uses `nexus_acp_host::RegistryClient` to fetch the cached registry and maps
 //! each agent entry to a `ProviderCatalogEntry` with `protocol_kind = Acp`,
@@ -13,7 +13,7 @@ use crate::ids::ProviderId;
 use crate::providers::candidate_unavailable_health;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
-/// Map ACP registry entries to catalog entries.
+/// note: map ACP registry entries to catalog entries.
 ///
 /// Each registry agent becomes a catalog entry with ACP protocol kind.
 /// Entries are filtered by current platform where the registry provides
@@ -37,7 +37,6 @@ pub fn entries_from_registry(
     for agent in registry_agents {
         let pid = ProviderId::new(&agent.id);
 
-        // Determine launch command from distribution
         let launch = build_launch_strategy(agent);
 
         entries.push(ProviderCatalogEntry {
@@ -58,11 +57,11 @@ pub fn entries_from_registry(
     Ok(entries)
 }
 
-/// Build a launch strategy from a registry agent's distribution info.
+/// note: build a launch strategy from a registry agent's distribution info.
 fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> LaunchStrategy {
     let dist = &agent.distribution;
 
-    // Prefer NPX distribution
+    // why: Prefer NPX distribution
     if let Some(ref npx) = dist.npx {
         let mut args = vec!["npx".to_string()];
         args.push(npx.package.clone());
@@ -79,7 +78,7 @@ fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> Launch
         };
     }
 
-    // Binary distribution — pick the platform-matching binary
+    // why: Binary distribution — pick the platform-matching binary
     if let Some(ref binary) = dist.binary {
         let (cmd, _archive) = pick_platform_binary(binary);
         return LaunchStrategy::Acp {
@@ -89,7 +88,7 @@ fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> Launch
         };
     }
 
-    // Fallback: use agent ID as command hint
+    // why: Fallback: use agent ID as command hint
     LaunchStrategy::Acp {
         command: agent.id.clone(),
         args: vec![],
@@ -97,7 +96,7 @@ fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> Launch
     }
 }
 
-/// Pick the platform-matching binary distribution.
+/// note: pick the platform-matching binary distribution.
 ///
 /// Returns `(cmd, archive)` for the current platform, or falls back to the
 /// first available binary if no exact match.
@@ -118,7 +117,7 @@ fn pick_platform_binary(binary: &nexus_acp_host::registry::BinaryDistribution) -
         return (&pb.cmd, &pb.archive);
     }
 
-    // Fallback: first non-None platform binary
+    // why: Fallback: first non-None platform binary
     if let Some(pb) = [
         binary.darwin_aarch64.as_ref(),
         binary.darwin_x86_64.as_ref(),
@@ -135,7 +134,7 @@ fn pick_platform_binary(binary: &nexus_acp_host::registry::BinaryDistribution) -
     ("unknown", "")
 }
 
-/// Determine the current platform key matching registry binary keys.
+/// note: determine the current platform key matching registry binary keys.
 const fn platform_key() -> &'static str {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
@@ -255,7 +254,7 @@ mod tests {
 
     #[test]
     fn platform_key_matches_current_platform() {
-        // Basic sanity: should not be "unknown" on CI/developer machines
+        // why: Basic sanity: should not be "unknown" on CI/developer machines
         let key = platform_key();
         assert_ne!(key, "");
     }

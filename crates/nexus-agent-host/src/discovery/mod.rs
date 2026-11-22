@@ -1,4 +1,4 @@
-//! Provider discovery: config-based, PATH-scan, ACP-registry.
+//! Provider discovery: config-based, PATH-scan, ACP-registry. See docs/specs/agents/agent-host.md.
 //!
 //! Discovery is deterministic and ordered:
 //! 1. Static config from `config.toml` (highest priority).

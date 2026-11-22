@@ -1,4 +1,4 @@
-//! Permission resolution for ACP and native providers.
+//! Permission resolution for ACP and native providers. See docs/specs/agents/agent-host.md.
 //!
 //! For ACP providers, delegates to `nexus_acp_host::PermissionPolicy::evaluate_for_agent()`.
 //! For native CLI providers, uses host-level risk classification only.
@@ -9,14 +9,14 @@ use crate::capability::model::ProtocolKind;
 use crate::capability::risk::ToolRisk;
 use crate::config::PolicyConfig;
 
-/// Permission outcome from host-level evaluation.
+/// note: permission outcome from host-level evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionOutcome {
-    /// Allow the operation.
+    /// note: allow the operation.
     Allow,
-    /// Deny the operation.
+    /// note: deny the operation.
     Deny,
-    /// Ask the user interactively.
+    /// note: ask the user interactively.
     Ask,
 }
 
@@ -30,20 +30,20 @@ impl From<nexus_acp_host::policy::PermissionDecision> for PermissionOutcome {
     }
 }
 
-/// Host-level permission resolver.
+/// note: host-level permission resolver.
 ///
 /// Wraps `nexus_acp_host::PermissionPolicy` for ACP providers and uses local
 /// risk classification for native CLI providers.
 #[derive(Debug, Clone)]
 pub struct HostPermissionResolver {
-    /// ACP permission policy (loaded from `.nexus42/permissions.toml`).
+    /// note: ACP permission policy (loaded from `.nexus42/permissions.toml`).
     acp_policy: Option<nexus_acp_host::policy::PermissionPolicy>,
-    /// Unknown tool risk policy from config.
+    /// note: unknown tool risk policy from config.
     unknown_tool_risk: String,
 }
 
 impl HostPermissionResolver {
-    /// Create a resolver without an ACP policy (native-only mode).
+    /// note: create a resolver without an ACP policy (native-only mode).
     #[must_use]
     pub fn new_native_only(config: &PolicyConfig) -> Self {
         Self {
@@ -52,7 +52,7 @@ impl HostPermissionResolver {
         }
     }
 
-    /// Create a resolver with an ACP policy loaded from workspace.
+    /// note: create a resolver with an ACP policy loaded from workspace.
     #[must_use]
     pub fn with_acp_policy(
         config: &PolicyConfig,
@@ -64,7 +64,7 @@ impl HostPermissionResolver {
         }
     }
 
-    /// Resolve permission for a tool/capability operation.
+    /// note: resolve permission for a tool/capability operation.
     ///
     /// - For ACP providers: delegates to `PermissionPolicy::evaluate_for_agent()`.
     /// - For native CLI providers: uses local risk classification.
@@ -82,7 +82,7 @@ impl HostPermissionResolver {
         }
     }
 
-    /// Resolve for ACP provider — delegates to `PermissionPolicy`.
+    /// note: resolve for ACP provider — delegates to `PermissionPolicy`.
     fn resolve_acp(&self, agent_id: &str, capability: &str) -> PermissionOutcome {
         self.acp_policy
             .as_ref()
@@ -91,7 +91,7 @@ impl HostPermissionResolver {
             })
     }
 
-    /// Resolve for native CLI provider — uses local risk classification.
+    /// note: resolve for native CLI provider — uses local risk classification.
     ///
     /// - Read tools: Allow
     /// - Write tools: Ask
@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn acp_unknown_capability_defaults_to_ask() {
         let config = default_policy_config();
-        let acp_policy = nexus_acp_host::policy::PermissionPolicy::new(); // default = ask
+        let acp_policy = nexus_acp_host::policy::PermissionPolicy::new(); // why: default = ask
         let resolver = HostPermissionResolver::with_acp_policy(&config, acp_policy);
         assert_eq!(
             resolver.resolve(

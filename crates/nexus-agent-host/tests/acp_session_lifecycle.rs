@@ -1,4 +1,4 @@
-//! Hermetic ACP session lifecycle tests (v1.186 P1 T1).
+//! Hermetic ACP session lifecycle tests (v1.186 P1 T1). See docs/specs/agents/agent-host.md.
 //!
 //! Windows is excluded: these lifecycle assertions require Unix process-tree
 //! shutdown/reap semantics and verify signal-driven cancellation.
@@ -37,7 +37,7 @@ const FIXTURE: &str = concat!(
     "/tests/fixtures/mock_acp_workflow.py"
 );
 
-/// Serialize environment-mutating tests within this integration-test binary.
+/// note: serialize environment-mutating tests within this integration-test binary.
 static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -98,7 +98,7 @@ fn acp_provider_config(
     }
 }
 
-/// A probe owner bound to `workspace_root` (must be the host boundary or a
+/// note: A probe owner bound to `workspace_root` (must be the host boundary or a
 /// descendant of it) — the same shape `WorkspaceState::verified_probe_owner`
 /// produces in production.
 fn owner(creator_id: &str, workspace_root: PathBuf) -> SessionOwner {
@@ -110,7 +110,7 @@ fn owner(creator_id: &str, workspace_root: PathBuf) -> SessionOwner {
 }
 
 fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
-    // The probe owner's workspace root must be the host boundary; the
+    // why: The probe owner's workspace root must be the host boundary; the
     // per-session Creator workspaces live underneath it.
 
     HostStartConfig {
@@ -127,7 +127,7 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
         },
         host_config: None,
         admitted_catalog: None,
-        // Verified probe owner bound to this fixture's workspace root. The
+        // why: Verified probe owner bound to this fixture's workspace root. The
         // ready-path tests below create real sessions; without an owner every
         // registered entry stays unavailable and admission would refuse.
         probe_owner: Some(owner("ctr_probe", ws.workspace_root.clone())),
@@ -146,7 +146,7 @@ async fn build_host(
     .await
 }
 
-/// Build the host with an explicit probe owner (`None` = no verified context).
+/// note: build the host with an explicit probe owner (`None` = no verified context).
 async fn build_host_with_owner(
     ws: &TestWorkspace,
     provider_cfg: ProviderConfig,
@@ -194,7 +194,7 @@ fn start_events(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter().filter(|e| e["event"] == "start").collect()
 }
 
-/// Start events for SESSION launches only (probe spawns excluded).
+/// note: start events for SESSION launches only (probe spawns excluded).
 ///
 /// A probe owner is wired so the ready-path fixtures admit sessions, which
 /// means `HostManager::start` runs one bounded ACP probe in the boundary root
@@ -232,23 +232,23 @@ async fn wait_for_event(path: &Path, event: &str) -> Vec<serde_json::Value> {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide across the whole async body
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide across the whole async body
 async fn no_boot_spawn_and_truthful_catalog_recipe() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
-    // No verified probe owner: this is the no-context case. The catalog must
+    // why: No verified probe owner: this is the no-context case. The catalog must
     // still report the true recipe AND stay unavailable — readiness is never
     // claimed without a bounded probe.
     let (manager, _host) = build_host_with_owner(&ws, provider_cfg.clone(), None).await;
 
-    // No process may have been spawned at boot/catalog load.
+    // why: No process may have been spawned at boot/catalog load.
     assert!(
         !ws.fixture_log.exists(),
         "fixture must not be spawned at boot/catalog load"
     );
 
-    // Truthful catalog: real command/args/env, available = configured recipe.
+    // why: Truthful catalog: real command/args/env, available = configured recipe.
     let catalog = manager.provider_catalog().await.expect("catalog");
     let entry = catalog
         .find(&ProviderId::new("mock-acp"))
@@ -275,12 +275,12 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
         !entry.health.available,
         "without a verified probe owner the entry stays unavailable"
     );
-    // (The pre-existing assertion here pinned incidental diagnostic PROSE from
+    // why: (The pre-existing assertion here pinned incidental diagnostic PROSE from
     // an earlier wording — removed rather than re-pinned. The observable
     // contract is covered by the unavailability assertion above and the
     // no-spawn assertion below.)
 
-    // Still no spawn after catalog read.
+    // why: Still no spawn after catalog read.
     assert!(
         !ws.fixture_log.exists(),
         "catalog read must not spawn the child"
@@ -288,14 +288,14 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide
 async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
-    // Session A for creator-a, cwd under creator-a workspace.
+    // why: Session A for creator-a, cwd under creator-a workspace.
     let session_a = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("mock-acp"),
@@ -309,7 +309,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
         .await
         .expect("session A created");
 
-    // The fixture must have been spawned with the Creator workspace cwd,
+    // why: The fixture must have been spawned with the Creator workspace cwd,
     // never the daemon cwd (the test process cwd).
     let log = read_fixture_log(&ws.fixture_log);
     let starts = session_start_events(&log, &ws);
@@ -327,7 +327,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     );
     let pid_a = starts[0]["pid"].as_u64().expect("pid recorded");
 
-    // Session B for creator-b, cwd under creator-b workspace → distinct PID.
+    // why: Session B for creator-b, cwd under creator-b workspace → distinct PID.
     let session_b = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("mock-acp"),
@@ -357,7 +357,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
         .expect("canonical");
     assert_eq!(Path::new(cwd_b), expected_cwd_b);
 
-    // Cleanup: shutdown both sessions (reaps the exact owned children).
+    // why: Cleanup: shutdown both sessions (reaps the exact owned children).
     host.shutdown_session(session_a.id.clone())
         .await
         .expect("shutdown A");
@@ -367,7 +367,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide
 async fn prompt_returns_non_echo_agent_output() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -422,18 +422,18 @@ async fn prompt_returns_non_echo_agent_output() {
     host.shutdown_session(session.id).await.expect("shutdown");
 }
 
-/// The one terminal an ACP stop-reason wire case must observe.
+/// note: the one terminal an ACP stop-reason wire case must observe.
 #[derive(Debug)]
 enum ExpectedTerminal {
-    /// A named terminal reason.
+    /// note: A named terminal reason.
     Finished(FinishReason),
-    /// The categoryless failure row. The listed categories are the real ones
+    /// note: the categoryless failure row. The listed categories are the real ones
     /// this wire path can produce; a named terminal reason instead of a failure
     /// fails the case.
     Failed(&'static [&'static str]),
 }
 
-/// One `acp_stop_reason_wire_matrix` row: `(case name, extra fixture env,
+/// note: one `acp_stop_reason_wire_matrix` row: `(case name, extra fixture env,
 /// expected terminal, turn leaves the session usable)`.
 type StopReasonCase = (
     &'static str,
@@ -442,7 +442,7 @@ type StopReasonCase = (
     bool,
 );
 
-/// Drive one ACP stop-reason case over the real fixture and assert its terminal.
+/// note: drive one ACP stop-reason case over the real fixture and assert its terminal.
 ///
 /// `survives` is true when the turn ended through a normal `session/prompt`
 /// reply, so a second turn must still work on the same session; a case that
@@ -470,12 +470,12 @@ async fn assert_stop_reason_case(
         .await
         .unwrap_or_else(|e| panic!("{name}: session creation failed: {e}"));
 
-    #[allow(clippy::cast_possible_truncation)] // OS pid fits u32
+    #[allow(clippy::cast_possible_truncation)] // why: OS pid fits u32
     let pid = session_start_events(&read_fixture_log(&ws.fixture_log), &ws)[0]["pid"]
         .as_u64()
         .expect("pid") as u32;
 
-    // Two serial prompts on the same session: the second one is the proof that
+    // why: Two serial prompts on the same session: the second one is the proof that
     // the first terminal returned the session to a usable state.
     for attempt in 1..=if survives { 2 } else { 1 } {
         let stream = host
@@ -525,7 +525,7 @@ async fn assert_stop_reason_case(
     );
 }
 
-/// A3 / R-V1196-ACP-INCOMPLETE-MAPPING — the real adapter's classification of
+/// note: A3 / R-V1196-ACP-INCOMPLETE-MAPPING — the real adapter's classification of
 /// every ACP stop reason, observed over the wire.
 ///
 /// Each case drives the real `AcpProvider` through the real `HostManager` and
@@ -539,11 +539,11 @@ async fn assert_stop_reason_case(
 /// `cancelled` is never an `EndTurn`. Every case must also emit exactly one
 /// terminal, leave the session usable, and get its owned child reaped.
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide
 async fn acp_stop_reason_wire_matrix() {
     let _lock = env_lock();
 
-    // `(case, fixture env, expected terminal, turn leaves the session usable)`.
+    // why: `(case, fixture env, expected terminal, turn leaves the session usable)`.
     // Only the five real stop reasons arrive as a normal `session/prompt`
     // reply, so only they are expected to leave the session usable; a wire-level
     // prompt error breaks the transport instead.
@@ -581,7 +581,7 @@ async fn acp_stop_reason_wire_matrix() {
         (
             "protocol_error",
             &[("ACP_FIXTURE_PROMPT_ERROR", "1")],
-            // A wire-level prompt error is a failure either way: the SDK
+            // why: A wire-level prompt error is a failure either way: the SDK
             // `Failed` update, or the transport EOF that error causes first.
             ExpectedTerminal::Failed(&["protocol_error", "provider_eof", "protocol_eof"]),
             false,
@@ -592,7 +592,7 @@ async fn acp_stop_reason_wire_matrix() {
         assert_stop_reason_case(name, extra_env, &expect, survives).await;
     }
 
-    // The stop-reason knob is closed: an unknown value must fail fixture setup
+    // why: The stop-reason knob is closed: an unknown value must fail fixture setup
     // instead of silently answering as `end_turn`, so a test typo can never read
     // as a successful turn. The real fixture is spawned directly here — the
     // fastest way to observe its own setup contract without a host.
@@ -621,14 +621,14 @@ async fn acp_stop_reason_wire_matrix() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide
 async fn missing_and_disabled_providers_refuse() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
     let (manager, host) = build_host(&ws, provider_cfg).await;
 
-    // Missing provider → refusal, no echo fallback.
+    // why: Missing provider → refusal, no echo fallback.
     let err = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("does-not-exist"),
@@ -643,7 +643,7 @@ async fn missing_and_disabled_providers_refuse() {
         .expect_err("unknown provider must refuse");
     assert_eq!(err.category(), "policy_denied");
 
-    // Disabled provider → construction refuses (never registered).
+    // why: Disabled provider → construction refuses (never registered).
     let disabled = acp_provider_config("mock-disabled", &ws.fixture_log, &[], false);
     let err = AcpProvider::from_config(
         disabled,
@@ -657,7 +657,7 @@ async fn missing_and_disabled_providers_refuse() {
     .expect("disabled provider must refuse");
     assert_eq!(err.category(), "provider_unavailable");
 
-    // The disabled provider was never registered → catalog omits it.
+    // why: The disabled provider was never registered → catalog omits it.
     let catalog = manager.provider_catalog().await.expect("catalog");
     assert!(
         catalog.find(&ProviderId::new("mock-disabled")).is_none(),
@@ -666,7 +666,7 @@ async fn missing_and_disabled_providers_refuse() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // env_lock() held process-wide; OS pid fits u32
+#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // why: env_lock() held process-wide; OS pid fits u32
 async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -694,7 +694,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
             .expect("pid") as u32
     };
 
-    // Start a blocked prompt in the background (the fixture never responds).
+    // why: Start a blocked prompt in the background (the fixture never responds).
     let op_id = HostOperationId::new();
     let stream = host
         .exec(
@@ -714,7 +714,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     });
     wait_for_event(&ws.fixture_log, "prompt_blocked").await;
 
-    // Cancel targets the owned operation: the ACP session/cancel must reach
+    // why: Cancel targets the owned operation: the ACP session/cancel must reach
     // the fixture.
     tokio::time::timeout(std::time::Duration::from_secs(5), host.cancel(op_id))
         .await
@@ -726,7 +726,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
         "session/cancel must reach the owned fixture: {log:?}"
     );
 
-    // Shutdown drains and reaps the exact owned process tree.
+    // why: Shutdown drains and reaps the exact owned process tree.
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         host.shutdown_session(session.id.clone()),
@@ -739,7 +739,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
         .expect("stream drain must complete within bound")
         .expect("drain task");
 
-    // The exact owned PID must be gone (reaped), and we must never have
+    // why: The exact owned PID must be gone (reaped), and we must never have
     // signalled a reused/unowned PID — the fixture's own child (if any)
     // is the only other process, and the owned child is the one we reaped.
     assert!(
@@ -749,7 +749,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // env_lock() held process-wide; OS pid fits u32
+#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // why: env_lock() held process-wide; OS pid fits u32
 async fn shutdown_reaps_owned_process_tree_descendants() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -770,7 +770,7 @@ async fn shutdown_reaps_owned_process_tree_descendants() {
         .await
         .expect("session created");
 
-    // The fixture spawned an outliving descendant; the owned process-tree
+    // why: The fixture spawned an outliving descendant; the owned process-tree
     // teardown must kill the whole group (leader + descendant).
     let log = read_fixture_log(&ws.fixture_log);
     let child_pid = session_start_events(&log, &ws)[0]["pid"]
@@ -798,21 +798,21 @@ async fn shutdown_reaps_owned_process_tree_descendants() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide
 async fn eof_after_initialize_is_typed_failure() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config(
         "mock-acp",
         &ws.fixture_log,
-        // Run 1 is the bounded readiness probe (passes); run 2 is the
+        // why: Run 1 is the bounded readiness probe (passes); run 2 is the
         // session launch that must fail — post-ready launch failure.
         &[("EOF_AFTER_INIT_FROM_RUN", "2")],
         true,
     );
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
-    // The fixture exits right after initialize; session creation must fail
+    // why: The fixture exits right after initialize; session creation must fail
     // with a typed launch error — never a fake success.
     let err = host
         .create_session(CreateSessionRequest {
@@ -834,14 +834,14 @@ async fn eof_after_initialize_is_typed_failure() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() serializes env-mutating tests process-wide
 async fn eof_failure_with_surviving_descendant_classifies_teardown() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config(
         "mock-acp",
         &ws.fixture_log,
-        // Run 1 is the bounded readiness probe (passes); run 2 is the launch
+        // why: Run 1 is the bounded readiness probe (passes); run 2 is the launch
         // that fails after initialize while a same-group descendant lives on.
         &[("DESCENDANT", "1"), ("EOF_AFTER_INIT_FROM_RUN", "2")],
         true,
@@ -860,7 +860,7 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
         })
         .await;
 
-    // Fixture-owned cleanup BEFORE any assertion that can fail: the failed
+    // why: Fixture-owned cleanup BEFORE any assertion that can fail: the failed
     // launch leaves the fixture's descendant alive (that is the state under
     // test), so kill it and await bounded disappearance first.
     let log = read_fixture_log(&ws.fixture_log);
@@ -886,7 +886,7 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    // The classification follows the teardown OUTCOME: with the fixture
+    // why: The classification follows the teardown OUTCOME: with the fixture
     // owning its descendant's lifetime, the descendant is reaped before the
     // leader exits and stdio reaches EOF, so terminate() finds the group
     // quiescent (ESRCH) on every platform and the typed `launch_failed`
@@ -903,7 +903,7 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
     );
 }
 
-/// I-000358 (Linux): a handshake that loses its leader while a live
+/// note: I-000358 (Linux): a handshake that loses its leader while a live
 /// same-group descendant survives must be classified by the teardown OUTCOME,
 /// at BOTH handshake exit callsites.
 ///
@@ -921,10 +921,10 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
 /// limit), hence Linux-only.
 #[cfg(target_os = "linux")]
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // env_lock() held process-wide
+#[allow(clippy::await_holding_lock)] // why: env_lock() held process-wide
 async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
     let _lock = env_lock();
-    // (stage knob, the log event proving the leader exited at that stage; each
+    // why: (stage knob, the log event proving the leader exited at that stage; each
     // row also proves the request for that stage reached the leader)
     let scenarios = [
         (
@@ -936,7 +936,7 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
 
     for (stage_knob, exit_event) in scenarios {
         let ws = setup_workspace();
-        // Run 1 is the bounded readiness probe (passes); run 2 is the session
+        // why: Run 1 is the bounded readiness probe (passes); run 2 is the session
         // launch whose leader exits at the selected stage.
         let extra_env = [
             ("DESCENDANT", "1"),
@@ -958,7 +958,7 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
             })
             .await;
 
-        // Evidence and fixture-owned cleanup before any assertion that can
+        // why: Evidence and fixture-owned cleanup before any assertion that can
         // fail.
         let log = read_fixture_log(&ws.fixture_log);
         let descendant_pid = u32::try_from(
@@ -979,7 +979,7 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
         )
         .expect("leader pid fits u32");
         let _guard = KillGroupOnDrop(leader_pid);
-        // The fixture logs the exit from inside the branch of the request it
+        // why: The fixture logs the exit from inside the branch of the request it
         // received, so this event proves the selected stage request reached
         // the leader (the probe run never logs it).
         let exit_logged = log.iter().any(|e| e["event"] == exit_event);
@@ -1002,7 +1002,7 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
     }
 }
 
-/// Bounded disappearance: a killed orphan is reaped by init, which is a
+/// note: bounded disappearance: a killed orphan is reaped by init, which is a
 /// transition, not an instantaneous state.
 #[cfg(target_os = "linux")]
 async fn await_process_gone(pid: u32) {
@@ -1018,7 +1018,7 @@ async fn await_process_gone(pid: u32) {
     );
 }
 
-/// Kills the owned process group on every exit path (test failure included):
+/// note: kills the owned process group on every exit path (test failure included):
 /// `kill -9 -<pgid>` reaches the fixture leader and its same-group descendant.
 /// A no-op once the group is gone.
 #[cfg(target_os = "linux")]
@@ -1034,7 +1034,7 @@ impl Drop for KillGroupOnDrop {
     }
 }
 
-/// I-000358 (Linux): the handshake's exit watch observes the leader's exit
+/// note: I-000358 (Linux): the handshake's exit watch observes the leader's exit
 /// WITHOUT reaping it. A leader that exits while a same-group descendant stays
 /// alive keeps its provable birth identity, so the guarded teardown still
 /// reaches the survivor: the descendant is killed and cleanup is confirmed. A
@@ -1070,7 +1070,7 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
     let leader = child.id().expect("leader pid");
     let _guard = KillGroupOnDrop(leader);
 
-    // EOF ends the fixture's read loop: the leader exits while the descendant
+    // why: EOF ends the fixture's read loop: the leader exits while the descendant
     // it spawned keeps the owned process group alive.
     drop(stdin);
     let descendant = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1101,7 +1101,7 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
         .expect("the exit watch must report the leader's exit within bound")
         .expect("the leader's exit must be observable");
 
-    // The observation left the leader unreaped: a reaped leader has no start
+    // why: The observation left the leader unreaped: a reaped leader has no start
     // tick, so this is exactly the identity the guarded teardown needs.
     let identity_kept = proc
         .birth()
@@ -1116,7 +1116,7 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
         teardown.is_ok(),
         "the guarded teardown must reach the surviving descendant: {teardown:?}"
     );
-    // Bounded disappearance: the killed orphan is reaped by init, so an
+    // why: Bounded disappearance: the killed orphan is reaped by init, so an
     // instantaneous `kill -0` sample would still see its zombie.
     await_process_gone(descendant).await;
     assert!(!process_alive(leader), "the leader must be reaped");
@@ -1124,7 +1124,7 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
 
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    // `kill -0 <pid>` returns Ok while the process exists (or is a zombie
+    // why: `kill -0 <pid>` returns Ok while the process exists (or is a zombie
     // awaiting reap); non-zero (ESRCH) means it is gone.
     std::process::Command::new("kill")
         .arg("-0")

@@ -1,4 +1,4 @@
-//! Host error taxonomy and result type.
+//! Host error taxonomy and result type. See docs/specs/agents/agent-host.md.
 //!
 //! Maps all host-visible error categories from the delivery compass §Error handling.
 //! Each variant carries relevant context (`provider_id`, `session_id`, `op_id`) for
@@ -8,50 +8,50 @@ use std::fmt;
 
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 
-/// Result type for all host operations.
+/// note: result type for all host operations.
 pub type HostResult<T> = Result<T, HostError>;
 
-/// Host error taxonomy.
+/// note: host error taxonomy.
 ///
 /// Maps concrete error categories for both ACP and native providers.
 /// Each variant carries relevant context fields for diagnostics.
 #[derive(Debug)]
 pub enum HostError {
-    /// Provider unavailable: registry entry missing, command not on PATH,
+    /// note: provider unavailable: registry entry missing, command not on PATH,
     /// or health probe failed.
     ProviderUnavailable {
         provider_id: ProviderId,
         message: String,
     },
 
-    /// Provider launch failed: spawn/stdio/connection setup error.
+    /// note: provider launch failed: spawn/stdio/connection setup error.
     LaunchFailed {
         provider_id: ProviderId,
         message: String,
         source: Option<String>,
     },
 
-    /// Requested capability not supported by the provider.
+    /// note: requested capability not supported by the provider.
     CapabilityUnsupported {
         provider_id: ProviderId,
         capability: String,
         message: String,
     },
 
-    /// Operation denied by host policy.
+    /// note: operation denied by host policy.
     PolicyDenied {
         provider_id: Option<ProviderId>,
         session_id: Option<HostSessionId>,
         message: String,
     },
 
-    /// Session cwd does not belong to the verified Creator workspace.
+    /// note: session cwd does not belong to the verified Creator workspace.
     OwnerWorkspaceMismatch {
         provider_id: Option<ProviderId>,
         message: String,
     },
 
-    /// Owned process cleanup could not be confirmed reaped/quiescent.
+    /// note: owned process cleanup could not be confirmed reaped/quiescent.
     ///
     /// The exact owned process tree was not confirmed terminated within the
     /// bounded window. The session must remain visibly interrupted (never
@@ -62,7 +62,7 @@ pub enum HostError {
         message: String,
     },
 
-    /// Stage-level timeout exceeded.
+    /// note: stage-level timeout exceeded.
     OperationTimeout {
         provider_id: Option<ProviderId>,
         session_id: Option<HostSessionId>,
@@ -71,7 +71,7 @@ pub enum HostError {
         message: String,
     },
 
-    /// Operation cancelled by host or user.
+    /// note: operation cancelled by host or user.
     OperationCancelled {
         provider_id: Option<ProviderId>,
         session_id: Option<HostSessionId>,
@@ -79,7 +79,7 @@ pub enum HostError {
         message: String,
     },
 
-    /// Protocol-level error from the provider.
+    /// note: protocol-level error from the provider.
     ProviderProtocolError {
         provider_id: Option<ProviderId>,
         session_id: Option<HostSessionId>,
@@ -88,7 +88,7 @@ pub enum HostError {
         source: Option<String>,
     },
 
-    /// Internal host invariant violation or unexpected state.
+    /// note: internal host invariant violation or unexpected state.
     InternalHostError {
         message: String,
         source: Option<String>,
@@ -96,7 +96,7 @@ pub enum HostError {
 }
 
 impl HostError {
-    /// Create a provider-unavailable error.
+    /// note: create a provider-unavailable error.
     #[must_use]
     pub fn provider_unavailable(
         provider_id: impl Into<ProviderId>,
@@ -108,7 +108,7 @@ impl HostError {
         }
     }
 
-    /// Create a launch-failed error.
+    /// note: create a launch-failed error.
     #[must_use]
     pub fn launch_failed(
         provider_id: impl Into<ProviderId>,
@@ -122,7 +122,7 @@ impl HostError {
         }
     }
 
-    /// Create a capability-unsupported error.
+    /// note: create a capability-unsupported error.
     #[must_use]
     pub fn capability_unsupported(
         provider_id: impl Into<ProviderId>,
@@ -136,7 +136,7 @@ impl HostError {
         }
     }
 
-    /// Create a policy-denied error.
+    /// note: create a policy-denied error.
     #[must_use]
     pub fn policy_denied(message: impl fmt::Display) -> Self {
         Self::PolicyDenied {
@@ -146,7 +146,7 @@ impl HostError {
         }
     }
 
-    /// Create an owner-workspace-mismatch error.
+    /// note: create an owner-workspace-mismatch error.
     #[must_use]
     pub fn owner_workspace_mismatch(message: impl fmt::Display) -> Self {
         Self::OwnerWorkspaceMismatch {
@@ -155,7 +155,7 @@ impl HostError {
         }
     }
 
-    /// Create a cleanup-unconfirmed error.
+    /// note: create a cleanup-unconfirmed error.
     #[must_use]
     pub fn cleanup_unconfirmed(message: impl fmt::Display) -> Self {
         Self::CleanupUnconfirmed {
@@ -165,7 +165,7 @@ impl HostError {
         }
     }
 
-    /// Create an operation-timeout error.
+    /// note: create an operation-timeout error.
     #[must_use]
     pub fn timeout(stage: impl fmt::Display, message: impl fmt::Display) -> Self {
         Self::OperationTimeout {
@@ -177,7 +177,7 @@ impl HostError {
         }
     }
 
-    /// Create an operation-cancelled error.
+    /// note: create an operation-cancelled error.
     #[must_use]
     pub fn cancelled(message: impl fmt::Display) -> Self {
         Self::OperationCancelled {
@@ -188,7 +188,7 @@ impl HostError {
         }
     }
 
-    /// Create a provider-protocol error.
+    /// note: create a provider-protocol error.
     #[must_use]
     pub fn protocol_error(message: impl fmt::Display, source: Option<String>) -> Self {
         Self::ProviderProtocolError {
@@ -200,7 +200,7 @@ impl HostError {
         }
     }
 
-    /// Create an internal host error.
+    /// note: create an internal host error.
     #[must_use]
     pub fn internal(message: impl fmt::Display) -> Self {
         Self::InternalHostError {
@@ -209,7 +209,7 @@ impl HostError {
         }
     }
 
-    /// Attach provider context to an error.
+    /// note: attach provider context to an error.
     #[must_use]
     pub fn with_provider(mut self, provider_id: ProviderId) -> Self {
         match &mut self {
@@ -246,7 +246,7 @@ impl HostError {
         self
     }
 
-    /// Attach session context to an error.
+    /// note: attach session context to an error.
     #[must_use]
     pub const fn with_session(mut self, session_id: HostSessionId) -> Self {
         match &mut self {
@@ -272,7 +272,7 @@ impl HostError {
         self
     }
 
-    /// Attach operation context to an error.
+    /// note: attach operation context to an error.
     #[must_use]
     pub const fn with_op(mut self, op_id: HostOperationId) -> Self {
         match &mut self {
@@ -286,7 +286,7 @@ impl HostError {
         self
     }
 
-    /// Return the error category name for telemetry.
+    /// note: return the error category name for telemetry.
     #[must_use]
     pub const fn category(&self) -> &'static str {
         match self {

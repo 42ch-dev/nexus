@@ -1,4 +1,4 @@
-//! `ProviderPort` adapter over existing `ProviderAdapter` / `HostFacade`.
+//! `ProviderPort` adapter over existing `ProviderAdapter` / `HostFacade`. See docs/specs/agents/agent-host.md.
 //!
 //! Owns the host→wire mappings (`HostEvent` promotion, provider/operation wire
 //! vocabulary) and the one-outstanding-pull admission at the port boundary.
@@ -40,14 +40,14 @@ const MAX_BYTES_PER_BATCH: u32 = 256 * 1024;
 /// buffer without limit or, worse, have the over-budget item silently disappear.
 /// Maximum events the port may hold undelivered for one operation.
 pub const MAX_PENDING_MESSAGES_PER_OP: usize = 64;
-/// Maximum wire bytes the port may hold undelivered for one operation.
+/// note: maximum wire bytes the port may hold undelivered for one operation.
 pub const MAX_PENDING_BYTES_PER_OP: usize = 1024 * 1024;
-/// Maximum wire bytes of a single event.
+/// note: maximum wire bytes of a single event.
 pub const MAX_EVENT_BYTES: usize = 256 * 1024;
-/// Maximum wire bytes emitted for one operation before it is cut off.
+/// note: maximum wire bytes emitted for one operation before it is cut off.
 pub const MAX_EMITTED_BYTES_PER_OP: usize = 4 * 1024 * 1024;
 
-/// Map a host error onto the wire error taxonomy.
+/// note: map a host error onto the wire error taxonomy.
 ///
 /// Shared by the effect path ([`ProviderPortAdapter`]) and the admission
 /// boundary (`AdmittingProviderPort` in `nexus-core-node`) so a native caller
@@ -77,7 +77,7 @@ pub fn host_error_to_core_error(err: &HostError) -> CoreError {
     }
 }
 
-/// Wire spelling of [`ProtocolKind`] — the contract's `snake_case` value.
+/// note: wire spelling of [`ProtocolKind`] — the contract's `snake_case` value.
 #[must_use]
 pub fn protocol_kind_wire(kind: ProtocolKind) -> String {
     serde_json::to_value(kind)
@@ -86,7 +86,7 @@ pub fn protocol_kind_wire(kind: ProtocolKind) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Wire status of `op_id`, derived from its owning session's state.
+/// note: wire status of `op_id`, derived from its owning session's state.
 #[must_use]
 pub fn operation_status_wire(state: &SessionState, op_id: &HostOperationId) -> &'static str {
     match state {
@@ -99,16 +99,16 @@ pub fn operation_status_wire(state: &SessionState, op_id: &HostOperationId) -> &
     }
 }
 
-/// A pulled-but-undelivered wire event.
+/// note: A pulled-but-undelivered wire event.
 struct PendingItem {
     wire: NexusProviderHostEvent,
     bytes: usize,
-    /// This item is the operation terminal — a *control* item, delivered even
+    /// note: this item is the operation terminal — a *control* item, delivered even
     /// when the data window is full, and never erased by an EOF behind it.
     terminal: bool,
 }
 
-/// Per-operation pending window and rolling budget accumulators.
+/// note: per-operation pending window and rolling budget accumulators.
 ///
 /// A pull that cannot fit an item no longer drops it: the item is deferred here
 /// and delivered by the next pull. Only a genuine cap violation discards it, and
@@ -118,14 +118,14 @@ struct PendingItem {
 struct PullState {
     pending: VecDeque<PendingItem>,
     pending_bytes: usize,
-    /// Rolling totals actually delivered to the caller for this operation.
+    /// note: rolling totals actually delivered to the caller for this operation.
     emitted_bytes: usize,
     emitted_messages: usize,
-    /// The stream produced a terminal that has not been delivered yet.
+    /// note: the stream produced a terminal that has not been delivered yet.
     terminal_pending: bool,
-    /// The terminal has been delivered; completion may be reported.
+    /// note: the terminal has been delivered; completion may be reported.
     terminal_delivered: bool,
-    /// The per-operation stop of this pull window: a cap violation reports
+    /// note: the per-operation stop of this pull window: a cap violation reports
     /// `oversized`, a lost OBSERVATION source (a broadcast lag or the end of
     /// that source) reports `lagging`. Every later pull keeps reporting the
     /// same typed gap — never a silent drop, never a claimed completion.
@@ -133,7 +133,7 @@ struct PullState {
 }
 
 impl PullState {
-    /// Buffer a pulled item. `false` means a per-operation cap would be
+    /// note: buffer a pulled item. `false` means a per-operation cap would be
     /// exceeded, so the caller must report the typed gap instead of dropping the
     /// item silently.
     fn defer(&mut self, wire: NexusProviderHostEvent, bytes: usize, terminal: bool) -> bool {
@@ -164,7 +164,7 @@ impl PullState {
     }
 }
 
-/// Releases the pull admission flag on every exit path, including `?` and drop.
+/// note: releases the pull admission flag on every exit path, including `?` and drop.
 struct PullGuard<'a> {
     flag: &'a AtomicBool,
 }
@@ -175,7 +175,7 @@ impl Drop for PullGuard<'_> {
     }
 }
 
-/// Owns the stream for one pull and returns it to the slot on every exit path,
+/// note: owns the stream for one pull and returns it to the slot on every exit path,
 /// including cancellation of the awaiting future.
 struct StreamRestore {
     slot: Arc<Mutex<Option<HostEventStream>>>,
@@ -187,7 +187,7 @@ impl StreamRestore {
         Self { slot, stream: None }
     }
 
-    /// Take the stream out of the slot; the slot lock is never held across a pull.
+    /// note: take the stream out of the slot; the slot lock is never held across a pull.
     async fn acquire(&mut self) {
         let mut guard = self.slot.lock().await;
         self.stream = guard.take();
@@ -206,17 +206,17 @@ impl Drop for StreamRestore {
     }
 }
 
-/// Outcome of one bounded-pull stage: a finished batch to return to the
+/// note: outcome of one bounded-pull stage: a finished batch to return to the
 /// caller, or a signal that the pull may continue with the events
 /// accumulated so far.
 enum PullStage {
-    /// A finished batch — hand it back as-is.
+    /// note: A finished batch — hand it back as-is.
     Batch(ProviderEventBatch),
-    /// The stage is exhausted; the pull may continue.
+    /// note: the stage is exhausted; the pull may continue.
     Continue,
 }
 
-/// Bounded stream-only pull reader: one Host event source plus the
+/// note: bounded stream-only pull reader: one Host event source plus the
 /// per-operation pending window and rolling budget accounting.
 ///
 /// The reader owns no Host, provider factory or effect dispatch — only the
@@ -233,25 +233,25 @@ enum PullStage {
 ///   consuming the original exec stream, so observation never consumes it and
 ///   a missing subscriber never blocks settlement.
 pub struct ProviderEventReader {
-    /// Atomic and outside the stream slot, so a concurrent pull is rejected
+    /// note: atomic and outside the stream slot, so a concurrent pull is rejected
     /// without waiting on the owner.
     pull_in_flight: AtomicBool,
     terminal_seen: AtomicBool,
     stream_slot: Arc<Mutex<Option<HostEventStream>>>,
-    /// Guarded by the pull-admission flag, so it needs no async lock.
+    /// note: guarded by the pull-admission flag, so it needs no async lock.
     pull_state: Mutex<PullState>,
-    /// `true` for an observation source (see the type documentation).
+    /// note: `true` for an observation source (see the type documentation).
     observation: bool,
 }
 
 impl ProviderEventReader {
-    /// Reader over an operation's own exec stream.
+    /// note: reader over an operation's own exec stream.
     #[must_use]
     pub fn new(stream: HostEventStream) -> Self {
         Self::with_source(stream, false)
     }
 
-    /// Reader over an OBSERVATION source of the same Host — a session event
+    /// note: reader over an OBSERVATION source of the same Host — a session event
     /// broadcast the caller has already selected down to one operation.
     ///
     /// An observation is not the operation's own stream, so neither a
@@ -273,7 +273,7 @@ impl ProviderEventReader {
         }
     }
 
-    /// Drain one bounded batch. The caller guarantees single-owner access
+    /// note: drain one bounded batch. The caller guarantees single-owner access
     /// through the per-operation admission flag.
     ///
     /// # Errors
@@ -299,7 +299,7 @@ impl ProviderEventReader {
             });
         }
 
-        // Atomic, non-blocking admission: a concurrent pull is Busy immediately.
+        // why: Atomic, non-blocking admission: a concurrent pull is Busy immediately.
         if self
             .pull_in_flight
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -329,7 +329,7 @@ impl ProviderEventReader {
         }
     }
 
-    /// Drain one bounded batch from an owned stream. The caller guarantees
+    /// note: drain one bounded batch from an owned stream. The caller guarantees
     /// single-owner access through the per-operation admission flag.
     ///
     /// Nothing pulled from the non-rewindable stream is ever silently discarded:
@@ -348,7 +348,7 @@ impl ProviderEventReader {
         let mut events: Vec<NexusProviderHostEvent> = Vec::new();
         let mut used_bytes = 0usize;
 
-        // (1) Deliver what a previous pull had to defer, oldest first.
+        // why: (1) Deliver what a previous pull had to defer, oldest first.
         if let PullStage::Batch(batch) = self
             .drain_pending(
                 operation_id,
@@ -362,7 +362,7 @@ impl ProviderEventReader {
             return Ok(batch);
         }
 
-        // (2) Read further items, deferring rather than dropping what does not fit.
+        // why: (2) Read further items, deferring rather than dropping what does not fit.
         if let PullStage::Batch(batch) = self
             .pull_stream_events(
                 operation_id,
@@ -386,7 +386,7 @@ impl ProviderEventReader {
         })
     }
 
-    /// Deliver deferred items from the per-operation pending window, oldest
+    /// note: deliver deferred items from the per-operation pending window, oldest
     /// first. An already-overflowed window keeps reporting the typed gap, a
     /// delivered terminal completes the operation, and a queued terminal stops
     /// the pull before the stream is read.
@@ -400,7 +400,7 @@ impl ProviderEventReader {
     ) -> PullStage {
         let mut state = self.pull_state.lock().await;
         if let Some(reason) = state.gap {
-            // A stopped window keeps reporting its typed gap. Only an overflow
+            // why: A stopped window keeps reporting its typed gap. Only an overflow
             // may still have the terminal queued behind it; a lost OBSERVATION
             // source reports no more data at all, and never completion.
             let has_more =
@@ -441,7 +441,7 @@ impl ProviderEventReader {
             });
         }
         if state.terminal_pending {
-            // The terminal the stream already produced is still queued: do
+            // why: The terminal the stream already produced is still queued: do
             // not read past it, and do not report completion yet.
             return PullStage::Batch(ProviderEventBatch {
                 operation_id: operation_id.to_string(),
@@ -454,7 +454,7 @@ impl ProviderEventReader {
         PullStage::Continue
     }
 
-    /// Read further items straight off the owned stream, deferring rather than
+    /// note: read further items straight off the owned stream, deferring rather than
     /// dropping anything that does not fit the remaining batch budget. Stream
     /// end reports completion only once every deferred item — above all the
     /// terminal — has been delivered.
@@ -474,7 +474,7 @@ impl ProviderEventReader {
                     let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
                     let terminal = is_terminal(&event);
 
-                    // An item that exceeds the per-event cap — or that could not
+                    // why: An item that exceeds the per-event cap — or that could not
                     // fit an *empty* batch under the caller's byte cap — can
                     // never be delivered, so deferring it would spin forever.
                     // That is a typed gap, never a partial or silent drop.
@@ -506,7 +506,7 @@ impl ProviderEventReader {
                         continue;
                     }
 
-                    // Does not fit this batch: defer it for the next pull.
+                    // why: Does not fit this batch: defer it for the next pull.
                     let deferred = self.pull_state.lock().await.defer(wire, size, terminal);
                     if !deferred {
                         self.pull_state.lock().await.gap =
@@ -522,7 +522,7 @@ impl ProviderEventReader {
                 }
                 Some(Err(err)) => {
                     if self.observation {
-                        // A broadcast lag reaches the source as an error and the
+                        // why: A broadcast lag reaches the source as an error and the
                         // source is no longer trustworthy for this operation.
                         return Ok(PullStage::Batch(
                             self.lost_source(operation_id, events).await,
@@ -532,7 +532,7 @@ impl ProviderEventReader {
                 }
                 None => {
                     if self.observation {
-                        // The observation source ended (its sender was
+                        // why: The observation source ended (its sender was
                         // dropped) without this operation's terminal: a resync
                         // gap, never an EOF a consumer could read as a
                         // successful completion.
@@ -540,7 +540,7 @@ impl ProviderEventReader {
                             self.lost_source(operation_id, events).await,
                         ));
                     }
-                    // Stream ended. Completion may only be reported once every
+                    // why: Stream ended. Completion may only be reported once every
                     // deferred item — a terminal above all — has been delivered.
                     let mut state = self.pull_state.lock().await;
                     if !state.pending.is_empty() {
@@ -566,7 +566,7 @@ impl ProviderEventReader {
         Ok(PullStage::Continue)
     }
 
-    /// Report a lost observation source as the typed resync gap. The state is
+    /// note: report a lost observation source as the typed resync gap. The state is
     /// latched, so every later pull keeps reporting it instead of turning the
     /// loss into completion.
     async fn lost_source(
@@ -584,7 +584,7 @@ impl ProviderEventReader {
     }
 }
 
-/// The typed per-operation data-window gap.
+/// note: the typed per-operation data-window gap.
 fn oversized_gap(operation_id: &str) -> ProviderEventBatchGap {
     gap(operation_id, ProviderEventBatchGapReason::Oversized)
 }
@@ -616,7 +616,7 @@ fn internal_error(message: impl Into<String>) -> CoreError {
     }
 }
 
-/// Pull-based provider port backed by the existing host facade and adapters.
+/// note: pull-based provider port backed by the existing host facade and adapters.
 pub struct ProviderPortAdapter {
     host: Arc<dyn HostFacade>,
     manager: Option<Arc<HostManager>>,
@@ -676,7 +676,7 @@ impl ProviderPortAdapter {
         }
     }
 
-    /// `ProviderPort::call` probe arm: run the bounded probe and publish the
+    /// note: `ProviderPort::call` probe arm: run the bounded probe and publish the
     /// result into the manager catalog.
     async fn call_probe(
         &self,
@@ -718,7 +718,7 @@ impl ProviderPortAdapter {
         })
     }
 
-    /// `ProviderPort::call` launch arm: admit the session through the host
+    /// note: `ProviderPort::call` launch arm: admit the session through the host
     /// facade so manager-side policy, boundary checks, and discovery apply.
     async fn call_launch(
         &self,
@@ -762,7 +762,7 @@ impl ProviderPortAdapter {
         })
     }
 
-    /// `ProviderPort::call` execute arm: run one operation and register its
+    /// note: `ProviderPort::call` execute arm: run one operation and register its
     /// stream for bounded pulling.
     async fn call_execute(
         &self,
@@ -786,7 +786,7 @@ impl ProviderPortAdapter {
             .exec(session_id.clone(), op)
             .await
             .map_err(|err| host_error_to_core_error(&err))?;
-        // The returned stream has not been polled, so HostManager still owns
+        // why: The returned stream has not been polled, so HostManager still owns
         // the active control operation. Publish that same identity for both
         // cancellation and terminal delivery rather than inventing a wire ID.
         let op_id = match op_id {
@@ -801,7 +801,7 @@ impl ProviderPortAdapter {
                 .and_then(|session| session.active_op_id)
                 .ok_or_else(|| internal_error("control operation has no active host identity"))?,
         };
-        // ACP controls generate their own terminal ID after the synchronous
+        // why: ACP controls generate their own terminal ID after the synchronous
         // RPC. Correlate it after HostManager applies its lifecycle transition.
         let stream = if control {
             let wire_id = op_id.clone();
@@ -830,7 +830,7 @@ impl ProviderPortAdapter {
         })
     }
 
-    /// `ProviderPort::call` cancel arm: forward the cancellation to the host.
+    /// note: `ProviderPort::call` cancel arm: forward the cancellation to the host.
     async fn call_cancel(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
         let op_raw = request
             .operation_id
@@ -838,7 +838,7 @@ impl ProviderPortAdapter {
             .ok_or_else(|| invalid_input("cancel requires operation_id"))?;
         let op_id = Self::parse_operation_id(op_raw)?;
         let op_id_str = op_id.to_string();
-        // Check negotiated capability before HostManager can transition the
+        // why: Check negotiated capability before HostManager can transition the
         // session to Cancelling. DSH's adapter-level no-op is not cancellation.
         let sessions = self
             .host
@@ -872,7 +872,7 @@ impl ProviderPortAdapter {
         })
     }
 
-    /// `ProviderPort::call` shutdown arm: tear the session down through the host.
+    /// note: `ProviderPort::call` shutdown arm: tear the session down through the host.
     async fn call_shutdown(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
         let session_raw = request
             .session_id
@@ -909,7 +909,7 @@ fn wire_to_batch_event(event: &ProviderHostEvent) -> ProviderResult<NexusProvide
     })
 }
 
-/// Convert a host event into the wire vocabulary via a serde round-trip.
+/// note: convert a host event into the wire vocabulary via a serde round-trip.
 ///
 /// # Errors
 ///
@@ -957,7 +957,7 @@ impl ProviderPort for ProviderPortAdapter {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        // Clone the reader handle and release the map guard before any await:
+        // why: Clone the reader handle and release the map guard before any await:
         // the bounded-pull accounting itself lives in the shared
         // [`ProviderEventReader`], so this port and the core Host observation
         // cannot drift on limits, deferral or terminal delivery.
@@ -1075,7 +1075,7 @@ mod tests {
         let err = second.expect_err("second concurrent pull must be rejected");
         assert_eq!(err.code, CoreErrorCode::Busy);
 
-        // Dropping a parked pull must release admission (guard reset path).
+        // why: Dropping a parked pull must release admission (guard reset path).
         drop(first);
         port.insert_operation(
             "op-2".to_string(),
@@ -1088,7 +1088,7 @@ mod tests {
         assert_eq!(batch.events.len(), 1);
         assert!(!batch.has_more, "terminal batch must report no more events");
 
-        // Terminal truth stays inspectable rather than vanishing into NotFound.
+        // why: Terminal truth stays inspectable rather than vanishing into NotFound.
         let after_terminal = port
             .next("op-2".to_string(), 16, 4096)
             .await
@@ -1131,7 +1131,7 @@ mod tests {
         })
     }
 
-    /// Serialized wire size of one host event, as the port counts batch bytes.
+    /// note: serialized wire size of one host event, as the port counts batch bytes.
     fn wire_size(event: &HostEvent) -> u32 {
         u32::try_from(
             serde_json::to_vec(&wire_to_batch_event(&host_event_to_wire(event).unwrap()).unwrap())
@@ -1141,7 +1141,7 @@ mod tests {
         .expect("serialized wire event fits u32")
     }
 
-    /// Q1-C1: an event that does not fit the *remaining* batch budget must be
+    /// note: Q1-C1: an event that does not fit the *remaining* batch budget must be
     /// deferred and delivered by the next pull — never consumed off the
     /// non-rewindable stream and lost.
     #[tokio::test]
@@ -1154,7 +1154,7 @@ mod tests {
             Box::pin(futures_util::stream::iter(vec![Ok(first), Ok(second)])),
         );
 
-        // A cap that fits exactly one event of this size.
+        // why: A cap that fits exactly one event of this size.
         let cap = wire_size(&status_event("second-event-that-does-not-fit"));
 
         let batch = port
@@ -1175,7 +1175,7 @@ mod tests {
         );
     }
 
-    /// Q1-C1: a terminal that does not fit the batch is a *control* item — it is
+    /// note: Q1-C1: a terminal that does not fit the batch is a *control* item — it is
     /// retained, and the EOF behind it must not erase terminal truth.
     #[tokio::test]
     async fn over_budget_terminal_survives_trailing_eof() {
@@ -1189,7 +1189,7 @@ mod tests {
             ])),
         );
 
-        // A cap that fits each item on its own but not both together: the
+        // why: A cap that fits each item on its own but not both together: the
         // filler is delivered and the terminal must be deferred, not dropped.
         let cap = wire_size(&status_event("filler")) + wire_size(&terminal_event()) - 1;
 
@@ -1209,7 +1209,7 @@ mod tests {
         assert_eq!(second.events.len(), 1, "the terminal must be delivered");
         assert!(!second.has_more, "the delivered terminal completes the op");
 
-        // The terminal is delivered once, not replayed.
+        // why: The terminal is delivered once, not replayed.
         let third = port
             .next("op-term".to_string(), 16, cap)
             .await
@@ -1221,7 +1221,7 @@ mod tests {
         assert!(!third.has_more);
     }
 
-    /// Q3-W4/S7: a single event beyond the per-event cap trips a typed gap even
+    /// note: Q3-W4/S7: a single event beyond the per-event cap trips a typed gap even
     /// when it is not the first event of the batch.
     #[tokio::test]
     async fn oversized_non_first_event_reports_gap() {
@@ -1242,7 +1242,7 @@ mod tests {
             .expect("oversized non-first event must report a gap");
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Oversized);
         assert!(gap.resync_required);
-        // The over-budget event is never delivered partially.
+        // why: The over-budget event is never delivered partially.
         for event in &batch.events {
             assert!(
                 serde_json::to_vec(event).unwrap().len() <= MAX_EVENT_BYTES,
@@ -1251,7 +1251,7 @@ mod tests {
         }
     }
 
-    /// Q3-W4: the per-operation pending window is bounded and tripping it is an
+    /// note: Q3-W4: the per-operation pending window is bounded and tripping it is an
     /// explicit typed gap, not an unbounded buffer.
     #[tokio::test]
     async fn pending_window_is_bounded_and_trips_a_typed_gap() {
@@ -1279,7 +1279,7 @@ mod tests {
         );
     }
 
-    /// Q3-W4: the rolling per-operation emitted budget trips once exceeded, and
+    /// note: Q3-W4: the rolling per-operation emitted budget trips once exceeded, and
     /// every later pull keeps reporting the typed gap rather than silently
     /// growing.
     #[tokio::test]
@@ -1287,7 +1287,7 @@ mod tests {
         let mut state = PullState::default();
         let wire = wire_to_batch_event(&host_event_to_wire(&status_event("e")).unwrap()).unwrap();
         let mut deferred = 0usize;
-        // Fill the emitted + pending budget; the first refusal is the trip point.
+        // why: Fill the emitted + pending budget; the first refusal is the trip point.
         while state.defer(wire.clone(), 64 * 1024, false) {
             deferred += 1;
             assert!(
@@ -1305,7 +1305,7 @@ mod tests {
         );
     }
 
-    /// Q2-S2: the admission boundary and the effect path must agree on the
+    /// note: Q2-S2: the admission boundary and the effect path must agree on the
     /// category for each host condition, so a policy denial is not reported as
     /// malformed input.
     #[test]
@@ -1350,7 +1350,7 @@ mod tests {
                 CoreErrorCode::Busy,
                 503,
             ),
-            // The 500 class: launch/protocol failures and internal host
+            // why: The 500 class: launch/protocol failures and internal host
             // invariant violations are typed `internal`/500, never reported as
             // a client error and never collapsed into a generic refusal.
             (
@@ -1402,7 +1402,7 @@ mod tests {
             );
         }
 
-        // The admission boundary maps through the same function, so the two can
+        // why: The admission boundary maps through the same function, so the two can
         // not drift: policy denial stays 403 rather than collapsing to 400.
         let denied = HostError::PolicyDenied {
             provider_id: None,
@@ -1475,7 +1475,7 @@ mod tests {
 
     #[tokio::test]
     async fn observation_source_loss_is_a_typed_resync_gap() {
-        // The SAME bounded reader is used for both consumers; the observation
+        // why: The SAME bounded reader is used for both consumers; the observation
         // source is not the operation's own stream, so its loss can never be
         // read as a clean completion.
         let items = || {
@@ -1499,7 +1499,7 @@ mod tests {
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Lagging);
         assert!(gap.resync_required);
 
-        // The loss is latched: a later pull keeps reporting the resync gap
+        // why: The loss is latched: a later pull keeps reporting the resync gap
         // instead of turning it into completion.
         let second = observed.next("op-obs".to_string(), 16, 4096).await.unwrap();
         assert!(second.events.is_empty());

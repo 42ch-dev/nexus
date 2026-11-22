@@ -1,4 +1,4 @@
-//! Provider readiness helpers — candidate identity and catalog merge.
+//! Provider readiness helpers — candidate identity and catalog merge. See docs/specs/agents/agent-host.md.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -12,7 +12,7 @@ use crate::policy::permission::HostPermissionResolver;
 use crate::providers::{adapter_from_catalog_entry, candidate_unavailable_health};
 use crate::{DiscoverySource, LaunchStrategy, ProviderAdapter, ProviderCatalogEntry};
 
-/// Stable identity for a catalog candidate used to reject stale probe results.
+/// note: stable identity for a catalog candidate used to reject stale probe results.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CandidateIdentity {
     pub provider_id: ProviderId,
@@ -40,7 +40,7 @@ impl CandidateIdentity {
     }
 }
 
-/// One manager-owned provider row: metadata, optional adapter, live health.
+/// note: one manager-owned provider row: metadata, optional adapter, live health.
 pub struct ProviderEntry {
     pub metadata: ProviderCatalogEntry,
     pub adapter: Option<Arc<dyn ProviderAdapter>>,
@@ -132,7 +132,7 @@ pub fn fingerprint_launch(launch: &LaunchStrategy) -> u64 {
     hasher.finish()
 }
 
-/// Discover and admit the provider catalog (PATH scan + recipe validation).
+/// note: discover and admit the provider catalog (PATH scan + recipe validation).
 ///
 /// Does not construct adapters. Callers that need live rows should pass the
 /// returned entries to [`build_provider_entries_from_catalog`] with their own
@@ -156,7 +156,7 @@ pub fn discover_provider_catalog(
     Ok(catalog.entries)
 }
 
-/// Materialize manager-owned provider rows from a pre-admitted catalog snapshot.
+/// note: materialize manager-owned provider rows from a pre-admitted catalog snapshot.
 ///
 /// Adapter construction failures are NOT errors: that provider is admitted as an
 /// unavailable candidate so the catalog can still explain why it is not ready.
@@ -203,7 +203,7 @@ pub fn build_provider_entries_from_catalog(
     Ok(providers)
 }
 
-/// Discover catalog candidates and construct adapters (no probe).
+/// note: discover catalog candidates and construct adapters (no probe).
 ///
 /// # Errors
 ///
@@ -222,7 +222,7 @@ pub fn discover_provider_entries(
     build_provider_entries_from_catalog(&catalog, timeouts, permission_resolver, localset_bridge)
 }
 
-/// Build a probe request from verified owner context and timeout budget.
+/// note: build a probe request from verified owner context and timeout budget.
 #[must_use]
 pub fn probe_request_for_owner(
     owner: &SessionOwner,
@@ -236,7 +236,7 @@ pub fn probe_request_for_owner(
     }
 }
 
-/// Map probe/launch failures to safe diagnostic text (no subprocess/env dumps).
+/// note: map probe/launch failures to safe diagnostic text (no subprocess/env dumps).
 #[must_use]
 pub fn safe_provider_message(error: &HostError) -> String {
     match error.category() {
@@ -248,14 +248,14 @@ pub fn safe_provider_message(error: &HostError) -> String {
     }
 }
 
-/// Whether a session launch failure should invalidate provider readiness.
+/// note: whether a session launch failure should invalidate provider readiness.
 #[must_use]
 pub fn is_launch_class_failure(error: &HostError) -> bool {
     match error {
         HostError::LaunchFailed { .. }
         | HostError::CleanupUnconfirmed { .. }
         | HostError::ProviderUnavailable { .. } => true,
-        // A timeout only invalidates readiness when it happened at a real
+        // why: A timeout only invalidates readiness when it happened at a real
         // launch/initialize boundary. The typed `stage` distinguishes those
         // from an ordinary prompt/content/run timeout, which leaves an
         // already-initialized recipe healthy — blanket-classifying every
