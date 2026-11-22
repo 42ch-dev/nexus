@@ -661,7 +661,6 @@ async fn persist_failure(
     FailurePersistenceDisposition::Committed
 }
 
-
 /// note: the resume re-drive's decision for one recovered session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResumeDecision {
@@ -973,7 +972,6 @@ pub async fn resume_driven_sessions(
     }
     decisions
 }
-
 
 /// note: error type for coordinator admission/control operations (A3).
 #[derive(Debug, thiserror::Error)]
@@ -3624,7 +3622,6 @@ async fn schedule_eligible(
     }
 }
 
-
 /// note: the coordinator-backed `ScheduleRunStarter` the hosted supervisor admits
 /// through (A3 seam).
 ///
@@ -4746,7 +4743,6 @@ mod tests {
         );
     }
 
-
     /// note: seed a persisted session with the given context keys.
     async fn seed_session(
         storage: &Arc<dyn SessionStorage>,
@@ -5102,7 +5098,6 @@ mod tests {
         );
     }
 
-
     /// note: seed a v1 durable row through the SQLite workflow store. `skip_state`
     /// leaves the state blob NULL (corrupt/unsupported metadata).
     async fn seed_v1_row(
@@ -5377,7 +5372,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn resume_a7_stale_running_summary_terminal_load_skips_immediately() {
         // why: review round-2 Critical 1: the daemon-visible summary can be stale
@@ -5601,7 +5595,6 @@ mod tests {
             "exactly one run_step may be consumed for the v1 converge re-drive"
         );
     }
-
 
     /// note: delegating [`WorkflowStateStore`] that injects a competing transition
     /// on the first `commit_transition` call (the deterministic race gate):

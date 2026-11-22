@@ -1004,7 +1004,6 @@ impl PromptExecutor for HostPromptExecutor {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
