@@ -21,6 +21,7 @@
 //! published protocol ones. Receipt bodies and idempotent replay are absent by
 //! design: the receipt slice owns them, and these methods return only the
 //! content-free result each op reports (MEM-R022).
+// note: test-only fixture slice; the crate-level doc in `lib.rs` names the conformance scope.
 
 use std::num::NonZeroU64;
 
@@ -49,14 +50,14 @@ use crate::spaces::{
     whole_scope_requirement, ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
 
-/// Wire schema version carried by every fixture-served object (§6.1).
+/// note: Wire schema version carried by every fixture-served object (§6.1).
 const SCHEMA_VERSION: u64 = 1;
 
-/// Provider content bound (`memory.describe.limits.max_content_bytes`, §7.1);
+/// note: Provider content bound (`memory.describe.limits.max_content_bytes`, §7.1);
 /// the assembly task advertises this same value.
 pub const MAX_CONTENT_BYTES: usize = 65_536;
 
-/// Content-free result of `memory.records.create` / `memory.records.update`
+/// note: Content-free result of `memory.records.create` / `memory.records.update`
 /// (§7.16/§7.18).
 #[derive(Debug)]
 pub struct RecordRevision {
@@ -64,14 +65,14 @@ pub struct RecordRevision {
     pub(crate) revision: u64,
 }
 
-/// Content-free result of `memory.records.delete` (§7.19).
+/// note: Content-free result of `memory.records.delete` (§7.19).
 #[derive(Debug)]
 pub struct RecordDeleted {
     pub(crate) record_id: String,
     pub(crate) tombstoned: bool,
 }
 
-/// Content-free result of `memory.records.promote` (§7.21).
+/// note: Content-free result of `memory.records.promote` (§7.21).
 #[derive(Debug)]
 pub struct RecordPromoted {
     pub(crate) record_id: String,
@@ -79,7 +80,7 @@ pub struct RecordPromoted {
     pub(crate) scope: PlacementScope,
 }
 
-/// `memory.records.list` payload (§7.20).
+/// note: `memory.records.list` payload (§7.20).
 #[derive(Debug)]
 pub struct RecordPage {
     pub(crate) records: Vec<RetainedRecord>,
@@ -87,9 +88,7 @@ pub struct RecordPage {
     pub(crate) next_cursor: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Protocol errors
-// ---------------------------------------------------------------------------
+// note: Protocol errors
 
 fn not_found(message: impl Into<String>) -> SpokeReject {
     SpokeReject {
@@ -107,7 +106,7 @@ fn not_authorized(message: impl Into<String>) -> SpokeReject {
     }
 }
 
-/// The single public refusal for a record the caller cannot see: an absent id,
+/// note: The single public refusal for a record the caller cannot see: an absent id,
 /// a placement outside the caller's grants, a deleted record and a tombstone
 /// hidden from non-admin all answer this same `NOT_FOUND`, so by-id probes
 /// cannot distinguish existence (matrix C-102, MEM-R026). The caller-supplied
@@ -158,7 +157,7 @@ fn cursor_invalid(message: impl Into<String>) -> SpokeReject {
     }
 }
 
-/// Flatten the published validator envelope into the crate's result shape.
+/// note: Flatten the published validator envelope into the crate's result shape.
 fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
     match result {
         SpokeResult::Ok(()) => Ok(()),
@@ -166,9 +165,7 @@ fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stored row and conversions
-// ---------------------------------------------------------------------------
+// note: Stored row and conversions
 
 struct StoredRecord {
     record_id: String,
@@ -240,7 +237,7 @@ fn wire_placement(
     }
 }
 
-/// One stored row as the published `RetainedRecord` variant it describes.
+/// note: One stored row as the published `RetainedRecord` variant it describes.
 fn record_to_wire(record: &StoredRecord) -> Result<RetainedRecord, SpokeReject> {
     let mut value = json!({
         "schema_version": SCHEMA_VERSION,
@@ -260,7 +257,7 @@ fn record_to_wire(record: &StoredRecord) -> Result<RetainedRecord, SpokeReject> 
         value["occurred_at"] = json!(timestamp_text(occurred_at));
     }
     match &record.tombstone_json {
-        // A tombstoned record keeps its identity and scope but carries the
+        // note: A tombstoned record keeps its identity and scope but carries the
         // tombstone instead of import attribution (MEM-R014); the published
         // tombstoned variant has no import_ref field.
         Some(raw) => value["tombstone"] = json_field(raw, "record tombstone")?,
@@ -323,11 +320,9 @@ async fn fetch_record(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Admission state: freeze and fence
-// ---------------------------------------------------------------------------
+// note: Admission state: freeze and fence
 
-/// Every record mutation is outside the §8.2 maintenance allowlist, so a
+/// note: Every record mutation is outside the §8.2 maintenance allowlist, so a
 /// frozen space admits none of them and the space row is the whole decision.
 async fn require_active_space(
     conn: &mut SqliteConnection,
@@ -346,7 +341,7 @@ async fn require_active_space(
     Ok(())
 }
 
-/// Subject-level write admission for erasure: a fenced or archived subject
+/// note: Subject-level write admission for erasure: a fenced or archived subject
 /// rejects every write for that subject (§7.7/MEM-R017). Context fences are
 /// deliberately not consulted here — they gate placement into a context.
 async fn require_subject_live(
@@ -370,7 +365,7 @@ async fn require_subject_live(
     Ok(())
 }
 
-/// Provider-enforced subject/context fence at admission (§8.3/MEM-R024). A
+/// note: Provider-enforced subject/context fence at admission (§8.3/MEM-R024). A
 /// subject with no lifecycle row carries no fence state, so it admits the
 /// write; a fenced subject or a fenced named placement context refuses it.
 async fn require_subject_writable(
@@ -408,9 +403,7 @@ async fn require_subject_writable(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Authorization requirements (§6.5)
-// ---------------------------------------------------------------------------
+// note: Authorization requirements (§6.5)
 
 fn placement_requirement<'a>(
     capability: &'a str,
@@ -427,7 +420,7 @@ fn placement_requirement<'a>(
     }
 }
 
-/// `records_read` or `recall` must cover the whole declared access: one grant
+/// note: `records_read` or `recall` must cover the whole declared access: one grant
 /// per capability, never a union of coverage facets across grants.
 fn authorized_for(
     grants: &[spoke_operations::spoke_schemas::MemoryGrant],
@@ -451,7 +444,7 @@ fn authorized_for(
     })
 }
 
-/// The read requirement one list selection must be covered by.
+/// note: The read requirement one list selection must be covered by.
 fn selection_requirement(request: &MemoryRecordsListRequest) -> GrantRequirement<'_> {
     let subject_id = request.subject_id.as_str();
     match &request.selection {
@@ -476,7 +469,7 @@ fn selection_requirement(request: &MemoryRecordsListRequest) -> GrantRequirement
     }
 }
 
-/// The records this caller may see in the current snapshot, ordered and decoded
+/// note: The records this caller may see in the current snapshot, ordered and decoded
 /// before any placement, kind, provenance or tombstone filtering.
 async fn list_records_snapshot(
     conn: &mut SqliteConnection,
@@ -553,7 +546,7 @@ async fn list_records_snapshot(
     Ok(records)
 }
 
-/// The resume index a continuation cursor names on exactly this record set.
+/// note: The resume index a continuation cursor names on exactly this record set.
 fn list_cursor_start(
     binding_digest: &str,
     records: &[StoredRecord],
@@ -577,7 +570,7 @@ fn list_cursor_start(
     Ok(position + 1)
 }
 
-/// Refuse unless the caller's one grant covers `records_write` over the
+/// note: Refuse unless the caller's one grant covers `records_write` over the
 /// record's current placement; the refusal is the uniform absent answer.
 async fn require_record_write(
     conn: &mut SqliteConnection,
@@ -606,7 +599,7 @@ async fn require_record_write(
     Err(record_absent())
 }
 
-/// The record's next `(content_json, kind)` when this update changes something
+/// note: The record's next `(content_json, kind)` when this update changes something
 /// observable, or `None` when it names only the already-stored identity
 /// (§7.0.4: an update is never a no-op, but this one would change nothing).
 fn next_record_state(
@@ -640,11 +633,9 @@ impl FixtureMemoryProvider {
         )))
     }
 
-    // -----------------------------------------------------------------------
-    // memory.records.create (§7.16)
-    // -----------------------------------------------------------------------
+    // note: memory.records.create (§7.16)
 
-    /// Direct authored write under `records_write` covering the declared
+    /// note: Direct authored write under `records_write` covering the declared
     /// placement.
     pub(crate) async fn records_create(
         &self,
@@ -665,7 +656,7 @@ impl FixtureMemoryProvider {
         Ok(created)
     }
 
-    /// [`Self::records_create`] on a caller-owned connection; never commits.
+    /// note: [`Self::records_create`] on a caller-owned connection; never commits.
     pub(crate) async fn records_create_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -700,7 +691,7 @@ impl FixtureMemoryProvider {
 
         let record_id = format!("rec_{}", Uuid::new_v4().simple());
         let content = content_json(&request.content.text, request.content.structured.as_ref())?;
-        // spoke-schemas 0.16.0 presence fix: these request members are
+        // why: spoke-schemas 0.16.0 presence fix: these request members are
         // Option<...>; the stored provenance keeps the published array shape
         // (may be empty), never null.
         let provenance = json!({
@@ -741,11 +732,9 @@ impl FixtureMemoryProvider {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // memory.records.get (§7.17)
-    // -----------------------------------------------------------------------
+    // note: memory.records.get (§7.17)
 
-    /// Read one record under current authorization (MEM-R026), pairing the
+    /// note: Read one record under current authorization (MEM-R026), pairing the
     /// grant evaluation and the row inside one read snapshot.
     pub(crate) async fn records_get(
         &self,
@@ -766,7 +755,7 @@ impl FixtureMemoryProvider {
         Ok(record)
     }
 
-    /// [`Self::records_get`] on a caller-owned connection; never begins or
+    /// note: [`Self::records_get`] on a caller-owned connection; never begins or
     /// commits a transaction.
     pub(crate) async fn records_get_in_tx(
         &self,
@@ -786,7 +775,7 @@ impl FixtureMemoryProvider {
             record.scope_context_id.as_deref(),
         );
         if record.tombstone_json.is_some() {
-            // Audit visibility of a tombstone belongs to admin only; every
+            // why: Audit visibility of a tombstone belongs to admin only; every
             // other caller sees the same NOT_FOUND as an absent id.
             let admin = is_authorized(
                 &grants,
@@ -809,18 +798,16 @@ impl FixtureMemoryProvider {
             &placement,
             &["records_read", "recall"],
         ) {
-            // A record outside the caller's coverage answers exactly like an
+            // note: A record outside the caller's coverage answers exactly like an
             // absent id: the grant check is not an existence oracle.
             return Err(record_absent());
         }
         record_to_wire(&record)
     }
 
-    // -----------------------------------------------------------------------
-    // memory.records.update (§7.18)
-    // -----------------------------------------------------------------------
+    // note: memory.records.update (§7.18)
 
-    /// Update content and/or kind under `records_write` covering the current
+    /// note: Update content and/or kind under `records_write` covering the current
     /// placement. Placement is not updatable here (§7.21 owns that).
     pub(crate) async fn records_update(
         &self,
@@ -841,7 +828,7 @@ impl FixtureMemoryProvider {
         Ok(updated)
     }
 
-    /// [`Self::records_update`] on a caller-owned connection; never commits.
+    /// note: [`Self::records_update`] on a caller-owned connection; never commits.
     pub(crate) async fn records_update_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -888,7 +875,7 @@ impl FixtureMemoryProvider {
         require_active_space(conn, space_id).await?;
         let record = fetch_record(conn, space_id, record_id).await?;
         if record.tombstone_json.is_some() {
-            // A tombstone is audit-only: deleted content can never be
+            // why: A tombstone is audit-only: deleted content can never be
             // rewritten or regrown (MEM-R014/§6.6).
             return Err(record_absent());
         }
@@ -935,11 +922,9 @@ impl FixtureMemoryProvider {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // memory.records.delete (§7.19)
-    // -----------------------------------------------------------------------
+    // note: memory.records.delete (§7.19)
 
-    /// Erase the content and keep the tombstone under `records_write` covering
+    /// note: Erase the content and keep the tombstone under `records_write` covering
     /// the current placement (MEM-R014).
     pub(crate) async fn records_delete(
         &self,
@@ -960,7 +945,7 @@ impl FixtureMemoryProvider {
         Ok(deleted)
     }
 
-    /// [`Self::records_delete`] on a caller-owned connection; never commits.
+    /// note: [`Self::records_delete`] on a caller-owned connection; never commits.
     pub(crate) async fn records_delete_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -988,7 +973,7 @@ impl FixtureMemoryProvider {
         ) {
             return Err(record_absent());
         }
-        // §7.7/MEM-R017: a fenced or archived subject rejects every write for
+        // why: §7.7/MEM-R017: a fenced or archived subject rejects every write for
         // that subject, so erasure admission obeys the subject lifecycle before
         // any new effect. A context fence is placement-scoped (§7.7/MEM-R024):
         // it bans writes *into* that context, not removing a record already
@@ -1001,7 +986,7 @@ impl FixtureMemoryProvider {
             ));
         }
         if record.tombstone_json.is_some() {
-            // A repeat delete at the current revision observes exactly the
+            // note: A repeat delete at the current revision observes exactly the
             // stored tombstone: a genuine no-op success (§7.0.4).
             return Ok(RecordDeleted {
                 record_id: record.record_id,
@@ -1042,11 +1027,9 @@ impl FixtureMemoryProvider {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // memory.records.promote (§7.21)
-    // -----------------------------------------------------------------------
+    // note: memory.records.promote (§7.21)
 
-    /// Explicit placement change. One grant must carry both `promote` and
+    /// note: Explicit placement change. One grant must carry both `promote` and
     /// `records_write` and cover the whole source-plus-target placement; two
     /// disjoint grants never compose into promotion authority (§6.5/§7.21).
     pub(crate) async fn records_promote(
@@ -1068,7 +1051,7 @@ impl FixtureMemoryProvider {
         Ok(promoted)
     }
 
-    /// [`Self::records_promote`] on a caller-owned connection; never commits.
+    /// note: [`Self::records_promote`] on a caller-owned connection; never commits.
     pub(crate) async fn records_promote_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -1081,7 +1064,7 @@ impl FixtureMemoryProvider {
         require_active_space(conn, space_id).await?;
         let record = fetch_record(conn, space_id, request.record_id.as_str()).await?;
         if record.tombstone_json.is_some() {
-            // A deleted record keeps its audit placement and can never be
+            // why: A deleted record keeps its audit placement and can never be
             // promoted into a new state (MEM-R014).
             return Err(record_absent());
         }
@@ -1130,7 +1113,7 @@ impl FixtureMemoryProvider {
         let unchanged = record.scope_visibility == target_visibility
             && record.scope_context_id.as_deref() == target_context;
         if unchanged {
-            // Promoting to the placement the record already has changes
+            // note: Promoting to the placement the record already has changes
             // nothing observable: a no-op success (§7.0.4).
             return Ok(RecordPromoted {
                 record_id: record.record_id,
@@ -1167,11 +1150,9 @@ impl FixtureMemoryProvider {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // memory.records.list (§7.20)
-    // -----------------------------------------------------------------------
+    // note: memory.records.list (§7.20)
 
-    /// Authorized, bounded, snapshot-stable page of a subject's records.
+    /// note: Authorized, bounded, snapshot-stable page of a subject's records.
     pub(crate) async fn records_list(
         &self,
         principal_id: &str,
@@ -1191,7 +1172,7 @@ impl FixtureMemoryProvider {
         Ok(page)
     }
 
-    /// [`Self::records_list`] on a caller-owned connection: authorization, the
+    /// note: [`Self::records_list`] on a caller-owned connection: authorization, the
     /// rows and the cursor marker come from the caller's one read snapshot.
     pub(crate) async fn records_list_in_tx(
         &self,
@@ -1238,7 +1219,7 @@ impl FixtureMemoryProvider {
         let records = list_records_snapshot(conn, request, sees_tombstones).await?;
         let total_authorized = u64::try_from(records.len()).map_err(internal_failure)?;
 
-        // §7.0.7/MEM-R026: the cursor is bound to the provider snapshot marker,
+        // note: §7.0.7/MEM-R026: the cursor is bound to the provider snapshot marker,
         // the policy identity and the query itself, and the marker is read in
         // the same snapshot as the authorization and rows above.
         let snapshot = snapshot_marker(conn, space_id).await?;
@@ -1284,7 +1265,7 @@ impl FixtureMemoryProvider {
     }
 }
 
-/// Does the stored placement fall inside the read selection (§6.12)?
+/// note: Does the stored placement fall inside the read selection (§6.12)?
 fn placement_matches(selection: &ReadSelection, record: &StoredRecord) -> bool {
     match selection {
         ReadSelection::SubjectAll => true,
@@ -1554,7 +1535,7 @@ mod tests {
         .expect("valid grants.revoke request")
     }
 
-    /// The whole public refusal, for comparing two refusals field by field
+    /// note: The whole public refusal, for comparing two refusals field by field
     /// without pinning literal wording as the oracle.
     fn refusal<T: std::fmt::Debug>(result: Result<T, SpokeReject>) -> SpokeReject {
         match result {
@@ -1574,7 +1555,7 @@ mod tests {
         assert_eq!(foreign.details, absent.details);
     }
 
-    /// The raw stored bytes and CAS/tombstone columns for one record.
+    /// note: The raw stored bytes and CAS/tombstone columns for one record.
     async fn stored_row(scenario: &Scenario, record_id: &str) -> (String, u64, Option<String>) {
         let mut conn = scenario
             .provider
@@ -1759,7 +1740,7 @@ mod tests {
             scope_of(&live_record.scope),
             ("context".to_owned(), Some("ctx-a".to_owned()))
         );
-        // Provenance is provider-populated from the authenticated context.
+        // note: Provenance is provider-populated from the authenticated context.
         assert_eq!(live_record.provenance.captured_by.as_str(), OPERATOR);
         assert_eq!(*live_record.provenance.captured_at, now());
         assert_eq!(live_record.record_id.as_str(), created.record_id);
@@ -1790,7 +1771,7 @@ mod tests {
         assert_eq!(live_record.content.text, "second");
         assert_eq!(live_record.revision.get(), 2);
 
-        // A stale writer is rejected and the stored row does not move.
+        // note: A stale writer is rejected and the stored row does not move.
         let conflict = scenario
             .provider
             .records_update(
@@ -1843,7 +1824,7 @@ mod tests {
             ("context".to_owned(), Some("ctx-a".to_owned()))
         );
 
-        // A non-admin reader gets the absent-id refusal for a tombstone, so
+        // why: A non-admin reader gets the absent-id refusal for a tombstone, so
         // deletion is not observable as a distinct existence.
         scenario
             .provider
@@ -1929,7 +1910,7 @@ mod tests {
         assert_eq!(same_scope.revision, 1);
         assert_eq!(marker(&scenario).await, after_create);
 
-        // Restating the stored kind changes nothing observable either.
+        // note: Restating the stored kind changes nothing observable either.
         let same_kind = scenario
             .provider
             .records_update(
@@ -1942,7 +1923,7 @@ mod tests {
         assert_eq!(same_kind.revision, 1);
         assert_eq!(marker(&scenario).await, after_create);
 
-        // §7.0.4: content updates are never no-ops, even when the text repeats.
+        // why: §7.0.4: content updates are never no-ops, even when the text repeats.
         let identical = scenario
             .provider
             .records_update(
@@ -1955,7 +1936,7 @@ mod tests {
         assert_eq!(identical.revision, 2);
         assert_eq!(marker(&scenario).await, after_create + 1);
 
-        // A real kind change is an observable update.
+        // note: A real kind change is an observable update.
         let restyled = scenario
             .provider
             .records_update(
@@ -1981,7 +1962,7 @@ mod tests {
         let after_delete = marker(&scenario).await;
         assert_eq!(after_delete, after_create + 3);
 
-        // A repeat delete at the current revision observes the stored
+        // note: A repeat delete at the current revision observes the stored
         // tombstone and advances neither revision nor the private snapshot.
         let repeated = scenario
             .provider
@@ -2143,7 +2124,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
-        // The same query started again yields the same order and totals.
+        // note: The same query started again yields the same order and totals.
         let replay = scenario
             .provider
             .records_list(
@@ -2182,7 +2163,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
-        // Selection modes outside the grant's coverage are refused, and the
+        // note: Selection modes outside the grant's coverage are refused, and the
         // page bound is the published one.
         assert_eq!(
             reject_code(
@@ -2253,7 +2234,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
-        // Any committed record change advances the snapshot and invalidates an
+        // note: Any committed record change advances the snapshot and invalidates an
         // outstanding cursor instead of silently re-filtering the next page.
         scenario
             .provider
@@ -2290,7 +2271,7 @@ mod tests {
     async fn shared_access_widens_the_selection(scenario: &Scenario) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
-        // A shared-access grant widens the selection to shared records only
+        // why: A shared-access grant widens the selection to shared records only
         // because the selection asks for them.
         scenario
             .provider
@@ -2467,7 +2448,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
-        // Two disjoint grants (one per capability) never compose into
+        // why: Two disjoint grants (one per capability) never compose into
         // promotion authority.
         scenario
             .provider
@@ -2567,7 +2548,7 @@ mod tests {
         created: &RecordRevision,
     ) {
         let space = scenario.space_id.clone();
-        // Promoting into shared visibility needs shared access in the same
+        // why: Promoting into shared visibility needs shared access in the same
         // grant; the ctx-only dual grant is refused.
         assert_eq!(
             reject_code(
@@ -2722,7 +2703,7 @@ mod tests {
     ) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
-        // Read-only ops stay admitted while frozen (MEM-R011).
+        // why: Read-only ops stay admitted while frozen (MEM-R011).
         let record = scenario
             .provider
             .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
@@ -2852,7 +2833,7 @@ mod tests {
             ),
             SpokeRejectCode::SubjectFenced
         );
-        // Reads are not fenced.
+        // note: Reads are not fenced.
         scenario
             .provider
             .records_get(OPERATOR, &get_request(&space, &ctx_b.record_id), now())
@@ -2904,7 +2885,7 @@ mod tests {
             ),
             SpokeRejectCode::SubjectFenced
         );
-        // A sibling context stays writable.
+        // note: A sibling context stays writable.
         let sibling = scenario
             .provider
             .records_update(
@@ -2915,7 +2896,7 @@ mod tests {
             .await
             .expect("sibling context stays writable");
         assert_eq!(sibling.revision, 2);
-        // Promoting out of a fenced context is refused as well.
+        // note: Promoting out of a fenced context is refused as well.
         assert_eq!(
             reject_code(
                 scenario
@@ -2986,7 +2967,7 @@ mod tests {
         assert_eq!(after_live.created_at, before_live.created_at);
         assert_eq!(after_live.provenance.captured_by.as_str(), OPERATOR);
 
-        // The durable revision remains a usable CAS token across sessions.
+        // note: The durable revision remains a usable CAS token across sessions.
         let updated = scenario
             .provider
             .records_update(
@@ -3037,7 +3018,7 @@ mod tests {
     async fn foreign_and_missing_record_ids_have_no_existence_oracle() {
         let scenario = Scenario::open().await;
         let created = seed_foreign_and_owned_records(&scenario).await;
-        // Sample the private marker after seeding and before any probe, so a
+        // why: Sample the private marker after seeding and before any probe, so a
         // refused probe that advanced it cannot hide behind its own baseline.
         let marker_before = marker(&scenario).await;
         by_id_refusals_are_indistinguishable(&scenario, &created).await;
@@ -3091,7 +3072,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let missing = "rec_00000000000000000000000000000000";
         let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
-        // Every by-id operation answers a foreign placement exactly like an
+        // note: Every by-id operation answers a foreign placement exactly like an
         // absent id: same code, message and details.
         assert_same_refusal(
             scenario
@@ -3172,7 +3153,7 @@ mod tests {
     ) {
         let space = scenario.space_id.clone();
         let missing = "rec_00000000000000000000000000000000";
-        // A principal with no grants observes the same single refusal.
+        // note: A principal with no grants observes the same single refusal.
         assert_same_refusal(
             scenario
                 .provider
@@ -3188,13 +3169,13 @@ mod tests {
                 .await,
         );
 
-        // Refusals leave the record and the private snapshot untouched.
+        // note: Refusals leave the record and the private snapshot untouched.
         assert_eq!(marker(scenario).await, marker_before);
         let (_, revision, tombstone) = stored_row(scenario, &created.record_id).await;
         assert_eq!(revision, 1);
         assert!(tombstone.is_none());
 
-        // Legitimate reads and CAS still answer precisely to the admin.
+        // note: Legitimate reads and CAS still answer precisely to the admin.
         let record = scenario
             .provider
             .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
@@ -3268,7 +3249,7 @@ mod tests {
 
     async fn no_write_can_resurrect_the_record(scenario: &Scenario, created: &RecordRevision) {
         let space = scenario.space_id.clone();
-        // No update can write content back onto a deleted record, and no
+        // note: No update can write content back onto a deleted record, and no
         // promotion can move it, whatever revision the caller claims.
         assert_eq!(
             reject_code(
@@ -3335,14 +3316,14 @@ mod tests {
         after_delete: u64,
     ) {
         let space = scenario.space_id.clone();
-        // Durable scrub, revision and snapshot are preserved.
+        // note: Durable scrub, revision and snapshot are preserved.
         assert_eq!(marker(scenario).await, after_delete);
         let (scrubbed, revision, tombstone) = stored_row(scenario, &created.record_id).await;
         assert_eq!(scrubbed, "{\"text\":\"\"}");
         assert_eq!(revision, 2);
         assert!(tombstone.is_some());
 
-        // The authorized audit view still decodes the tombstone.
+        // note: The authorized audit view still decodes the tombstone.
         let record = scenario
             .provider
             .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
@@ -3353,7 +3334,7 @@ mod tests {
         assert_eq!(record.revision.get(), 2);
         assert_eq!(record.tombstone.deleted_by.as_str(), OPERATOR);
 
-        // Repeat delete at the current revision remains the accepted no-op.
+        // note: Repeat delete at the current revision remains the accepted no-op.
         let repeated = scenario
             .provider
             .records_delete(
@@ -3402,7 +3383,7 @@ mod tests {
             ),
             SpokeRejectCode::SubjectFenced
         );
-        // No tombstone, revision or snapshot change from the refused erase.
+        // note: No tombstone, revision or snapshot change from the refused erase.
         assert_eq!(marker(scenario).await, fenced_marker);
         let (_, revision, tombstone) = stored_row(scenario, &ctx_a.record_id).await;
         assert_eq!((revision, tombstone.is_none()), (1, true));
@@ -3439,7 +3420,7 @@ mod tests {
         ctx_b: &RecordRevision,
     ) {
         let space = scenario.space_id.clone();
-        // A context fence is placement-scoped: it does not invent an erasure
+        // note: A context fence is placement-scoped: it does not invent an erasure
         // ban for records already placed in that context.
         let erased = scenario
             .provider
@@ -3466,7 +3447,7 @@ mod tests {
     async fn an_archived_subject_rejects_erasure(scenario: &Scenario) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
-        // An archived subject rejects erasure like a fence does.
+        // note: An archived subject rejects erasure like a fence does.
         let later = scenario
             .provider
             .records_create(
@@ -3527,7 +3508,7 @@ mod tests {
             .expect("subject exists");
         let text_prefix = "{\"text\":\"\"}".len();
 
-        // Exactly max_content_bytes of JCS-serialized ASCII content is admitted.
+        // note: Exactly max_content_bytes of JCS-serialized ASCII content is admitted.
         let boundary_text = "a".repeat(MAX_CONTENT_BYTES - text_prefix);
         let created_ascii = scenario
             .provider
@@ -3560,7 +3541,7 @@ mod tests {
             MAX_CONTENT_BYTES - text_prefix
         );
 
-        // One byte over is refused with the published limit details.
+        // note: One byte over is refused with the published limit details.
         let overflow = refusal(
             scenario
                 .provider
@@ -3610,7 +3591,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         let text_prefix = "{\"text\":\"\"}".len();
-        // The bound counts UTF-8 bytes, not characters: 32,763 two-byte
+        // note: The bound counts UTF-8 bytes, not characters: 32,763 two-byte
         // characters are 65,526 bytes and overflow even though the scalar
         // count alone is far below the limit.
         let utf8_boundary = format!("{}{}", "é".repeat(32_762), "a");
@@ -3669,7 +3650,7 @@ mod tests {
     async fn structured_content_counts_canonical_bytes(scenario: &Scenario) -> RecordRevision {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
-        // Structured payloads count through canonical (key-sorted) JCS bytes.
+        // note: Structured payloads count through canonical (key-sorted) JCS bytes.
         let structured_base = "{\"structured\":{\"pad\":\"\"},\"text\":\"\"}";
         let pad = "x".repeat(MAX_CONTENT_BYTES - structured_base.len());
         let structured = json!({ "text": "", "structured": { "pad": pad } });
@@ -3736,7 +3717,7 @@ mod tests {
     ) {
         let space = scenario.space_id.clone();
         let text_prefix = "{\"text\":\"\"}".len();
-        // The update path applies the same serialized-byte bound. Each exact
+        // why: The update path applies the same serialized-byte bound. Each exact
         // update uses the record's true current revision and is read back; each
         // overflow uses that record's *new* current revision, so INVALID_INPUT
         // cannot be a mislabelled CAS refusal.
@@ -3961,7 +3942,7 @@ mod tests {
             )
             .await
             .expect("structured record after refused update");
-        // The complete content is unchanged, not only the structured member.
+        // why: The complete content is unchanged, not only the structured member.
         assert_eq!(live(&record).content.text, "");
         assert_eq!(
             live(&record).content.structured.as_ref(),
@@ -4057,7 +4038,7 @@ mod tests {
         let (_, revision, _) = stored_row(scenario, &created.record_id).await;
         assert_eq!(revision, 1);
 
-        // Expiry is evaluated at the supplied admission instant.
+        // note: Expiry is evaluated at the supplied admission instant.
         let expiry = now() + Duration::hours(1);
         scenario
             .provider
@@ -4140,7 +4121,7 @@ mod tests {
             .expect("subject exists");
         let before = marker(scenario).await;
 
-        // Rolled back caller transaction: neither record nor snapshot survives.
+        // note: Rolled back caller transaction: neither record nor snapshot survives.
         let mut transaction = scenario
             .provider
             .store()
@@ -4170,7 +4151,7 @@ mod tests {
             .await
             .expect("staged update composes in the same transaction");
         assert_eq!(updated.revision, 2);
-        // Uncommitted effects are invisible to another connection.
+        // note: Uncommitted effects are invisible to another connection.
         assert_eq!(
             reject_code(
                 scenario
@@ -4201,7 +4182,7 @@ mod tests {
     async fn a_caller_commit_keeps_both_effects_and_markers(scenario: &Scenario, before: u64) {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
-        // Committed caller transaction: both owned effects and both snapshot
+        // note: Committed caller transaction: both owned effects and both snapshot
         // bumps land in C7's single commit.
         let mut transaction = scenario
             .provider
@@ -4310,7 +4291,7 @@ mod tests {
             .expect("first snapshot page");
         assert_eq!(page_ids(&before_change), vec![first.record_id.clone()]);
 
-        // A committed write from another connection is invisible to the open
+        // note: A committed write from another connection is invisible to the open
         // snapshot, including the marker the page is bound to.
         scenario
             .provider
@@ -4352,7 +4333,7 @@ mod tests {
         let space = scenario.space_id.clone();
         let subject = "subject-one";
         let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
-        // The same snapshot also pins the authorization decision: a committed
+        // note: The same snapshot also pins the authorization decision: a committed
         // revoke does not re-filter an already-open page.
         let mut transaction = scenario
             .provider

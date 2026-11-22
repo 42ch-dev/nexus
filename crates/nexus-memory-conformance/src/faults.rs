@@ -14,6 +14,7 @@
 //!
 //! The clock is the `now` parameter every provider operation already takes;
 //! there is no wall-clock sampling and no wrapper clock object.
+// note: test-only fixture slice; the crate-level doc in `lib.rs` names the conformance scope.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -21,40 +22,40 @@ use std::time::Duration;
 
 use tokio::sync::oneshot;
 
-/// One bounded observation point in the fixture's mutation path.
+/// note: One bounded observation point in the fixture's mutation path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultPoint {
-    /// The effect, receipt, dedup row and target are staged inside the caller's
+    /// note: The effect, receipt, dedup row and target are staged inside the caller's
     /// transaction and not committed: the abort must leave nothing visible.
     BeforeCommit,
-    /// The transaction committed and the response has not been returned: the
+    /// note: The transaction committed and the response has not been returned: the
     /// effect is durable and only replay/`receipts.get` can resolve it.
     AfterCommitBeforeResponse,
-    /// Before the writer transaction, so a competing identical admission can
+    /// note: Before the writer transaction, so a competing identical admission can
     /// commit while this one is paused; the paused admission then replays it.
     AdmissionPause,
-    /// Bounded hold after a generate's pending receipt commit, before the
+    /// note: Bounded hold after a generate's pending receipt commit, before the
     /// fixture's deterministic generation: the pending receipt is observable
     /// through `memory.receipts.get`, and the hold is the arming window that
     /// targets the terminal (second) transaction with the one-shot points.
     GenerationPause,
-    /// One-shot fail at the generation step itself: the pending receipt
+    /// note: One-shot fail at the generation step itself: the pending receipt
     /// settles to an honest terminal `failed` (error + retry class, no cost).
     GenerationFailure,
-    /// The committed response is held until the caller tears the connection.
+    /// note: The committed response is held until the caller tears the connection.
     ResponseDrop,
 }
 
-/// Default bound for a held fault point. Tests that want a shorter bound arm the
+/// note: Default bound for a held fault point. Tests that want a shorter bound arm the
 /// gate with [`FixtureFaults::hold_next_bounded`].
 pub const FAULT_HOLD_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Why a bounded fault observation ended without a real reach.
+/// note: Why a bounded fault observation ended without a real reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultHoldLost {
-    /// No operation reached the point before the observation bound elapsed.
+    /// note: No operation reached the point before the observation bound elapsed.
     Unreached,
-    /// The arm was released, replaced or dropped before the point was reached.
+    /// note: The arm was released, replaced or dropped before the point was reached.
     Disarmed,
 }
 
@@ -69,21 +70,21 @@ impl std::fmt::Display for FaultHoldLost {
     }
 }
 
-/// Why a held operation stopped waiting.
+/// note: Why a held operation stopped waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultHoldFailure {
-    /// The bounded hold expired without a release.
+    /// note: The bounded hold expired without a release.
     Expired,
-    /// The test-side handle was dropped or released without resuming this hold.
+    /// note: The test-side handle was dropped or released without resuming this hold.
     ControlLost,
 }
 
-/// One armed observation. The token lets the test-side handle disarm exactly its
+/// note: One armed observation. The token lets the test-side handle disarm exactly its
 /// own arm without touching a replacement.
 struct Armed {
     token: u64,
     point: FaultPoint,
-    /// `true` for a holding point, `false` for a one-shot fail point.
+    /// note: `true` for a holding point, `false` for a one-shot fail point.
     holding: bool,
     reached: Option<oneshot::Sender<()>>,
     release: Option<oneshot::Receiver<()>>,
@@ -94,13 +95,13 @@ struct Armed {
 struct FaultState {
     next_token: u64,
     armed: Option<Armed>,
-    /// The op-targeted admission arm (distinct from the point-based `armed`
+    /// note: The op-targeted admission arm (distinct from the point-based `armed`
     /// slot, so a capture's legacy `AdmissionPause` arm and a target arm never
     /// consume each other).
     target: Option<TargetArm>,
 }
 
-/// Operator/test-only fault control attached to one provider instance.
+/// note: Operator/test-only fault control attached to one provider instance.
 ///
 /// Cloning the handle shares the same state, so a test can arm a point and the
 /// provider observes it without any process-global registry. Dropping the
@@ -111,7 +112,7 @@ pub struct FixtureFaults {
 }
 
 impl FixtureFaults {
-    /// A fresh, disarmed control attached to one provider.
+    /// note: A fresh, disarmed control attached to one provider.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -130,7 +131,7 @@ impl FixtureFaults {
         state.next_token
     }
 
-    /// Arm a one-shot fail point (`BeforeCommit`, `AfterCommitBeforeResponse`
+    /// note: Arm a one-shot fail point (`BeforeCommit`, `AfterCommitBeforeResponse`
     /// or `GenerationFailure`), replacing any previous arm. The next
     /// operation that reaches `point` fails through the protocol-defined path;
     /// later operations proceed.
@@ -147,14 +148,14 @@ impl FixtureFaults {
         });
     }
 
-    /// Arm a holding point (`BeforeCommit`, `AdmissionPause`, `GenerationPause`
+    /// note: Arm a holding point (`BeforeCommit`, `AdmissionPause`, `GenerationPause`
     /// or `ResponseDrop`) with the default bound and return the test handle.
     #[must_use]
     pub fn hold_next(&self, point: FaultPoint) -> FaultHold {
         self.hold_next_bounded(point, FAULT_HOLD_TIMEOUT)
     }
 
-    /// Arm a holding point (`BeforeCommit`, `AdmissionPause`, `GenerationPause`
+    /// note: Arm a holding point (`BeforeCommit`, `AdmissionPause`, `GenerationPause`
     /// or `ResponseDrop`) bounded by `bound` and return the test handle.
     #[must_use]
     pub fn hold_next_bounded(&self, point: FaultPoint, bound: Duration) -> FaultHold {
@@ -180,7 +181,7 @@ impl FixtureFaults {
         }
     }
 
-    /// Consume a one-shot fail point. Crate-private: only the provider's own
+    /// note: Consume a one-shot fail point. Crate-private: only the provider's own
     /// mutation path may trip a point.
     pub(crate) fn trip(&self, point: FaultPoint) -> bool {
         let mut state = self.state();
@@ -195,7 +196,7 @@ impl FixtureFaults {
         tripped
     }
 
-    /// Block a holding point until the test releases it, or end the wait when
+    /// note: Block a holding point until the test releases it, or end the wait when
     /// the bound elapses or the test-side handle disappears. A point that is
     /// not armed is not reached and returns immediately.
     pub(crate) async fn hold(&self, point: FaultPoint) -> Result<(), FaultHoldFailure> {
@@ -216,7 +217,7 @@ impl FixtureFaults {
             return Ok(());
         };
         if let Some(reached) = reached {
-            // The observation may already be gone; a missing receiver is not a
+            // note: The observation may already be gone; a missing receiver is not a
             // success signal for either side.
             let _ = reached.send(());
         }
@@ -237,7 +238,7 @@ impl Default for FixtureFaults {
     }
 }
 
-/// The test-side handle for one armed holding point.
+/// note: The test-side handle for one armed holding point.
 ///
 /// `wait_reached` is itself bounded, and every non-observation outcome is an
 /// explicit error. Releasing or dropping the handle before the point is reached
@@ -251,7 +252,7 @@ pub struct FaultHold {
 }
 
 impl FaultHold {
-    /// Wait — bounded by this hold's own duration — until the provider reached
+    /// note: Wait — bounded by this hold's own duration — until the provider reached
     /// the armed point.
     ///
     /// Cancellation is owned from the call itself: a wait that ends without a
@@ -266,7 +267,7 @@ impl FaultHold {
     /// [`FaultHoldLost::Disarmed`] when the arm was released, replaced or
     /// dropped first.
     pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
-        // Cancellation ownership is established at the CALL, before the future
+        // why: Cancellation ownership is established at the CALL, before the future
         // can be polled: an observation future that is created and dropped
         // without a first poll still retires this handle's own still-armed
         // entry, so a retained handle cannot make a later operation inherit the
@@ -288,7 +289,7 @@ impl FaultHold {
         }
     }
 
-    /// Resume the held operation. If the point has not been reached yet, this
+    /// note: Resume the held operation. If the point has not been reached yet, this
     /// disarms it instead so a later operation is unaffected.
     pub fn release(&mut self) {
         let mut state = self
@@ -310,7 +311,7 @@ impl FaultHold {
     }
 }
 
-/// Disarms one still-armed token when its observation ends without a reach.
+/// note: Disarms one still-armed token when its observation ends without a reach.
 struct ReachGuard {
     control: Arc<Mutex<FaultState>>,
     token: u64,
@@ -343,15 +344,15 @@ impl Drop for FaultHold {
             .as_ref()
             .is_some_and(|armed| armed.token == self.token)
         {
-            // Never reached: disarm so a later operation cannot inherit it.
+            // why: Never reached: disarm so a later operation cannot inherit it.
             state.armed = None;
         }
-        // A taken arm means the operation is waiting: dropping the release
+        // note: A taken arm means the operation is waiting: dropping the release
         // sender closes its channel, which is an explicit fault failure.
     }
 }
 
-/// One op-targeted admission arm: a bounded pause at the exact mutating
+/// note: One op-targeted admission arm: a bounded pause at the exact mutating
 /// handler entry named by `op`. It is test control only and outcome-neutral:
 /// releasing, expiring or losing control always lets the operation proceed.
 struct TargetArm {
@@ -362,7 +363,7 @@ struct TargetArm {
     bound: Duration,
 }
 
-/// The test-side handle for one op-targeted admission arm.
+/// note: The test-side handle for one op-targeted admission arm.
 ///
 /// Bounded and token-owned: dropping or cancelling the handle can only disarm
 /// its own arm, never a replacement; once the provider has taken the arm the
@@ -377,7 +378,7 @@ pub struct TargetHold {
 }
 
 impl FixtureFaults {
-    /// Arm one op-targeted admission pause for the exact
+    /// note: Arm one op-targeted admission pause for the exact
     /// review/fence/grant-revoke handler entry (replacing any previous target
     /// arm). Only that op consumes it. Reads, other operation names and
     /// malformed payloads (typed decode happens before the gate) never reach it;
@@ -387,7 +388,7 @@ impl FixtureFaults {
         self.hold_next_for_bounded(op, FAULT_HOLD_TIMEOUT)
     }
 
-    /// [`Self::hold_next_for`] with an explicit bound.
+    /// note: [`Self::hold_next_for`] with an explicit bound.
     pub fn hold_next_for_bounded(&self, op: impl Into<String>, bound: Duration) -> TargetHold {
         let (reached_tx, reached_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
@@ -410,7 +411,7 @@ impl FixtureFaults {
         }
     }
 
-    /// The provider-side admission wait for one exact mutating operation.
+    /// note: The provider-side admission wait for one exact mutating operation.
     ///
     /// Takes the armed target only when it names this op, reports the arrival,
     /// and waits for the release no longer than the arm's own bound. Every end
@@ -440,7 +441,7 @@ impl FixtureFaults {
 }
 
 impl TargetHold {
-    /// Wait, bounded, until the provider reached this exact op's admission.
+    /// note: Wait, bounded, until the provider reached this exact op's admission.
     ///
     /// Ownership is established at the CALL, before the future can be polled, so
     /// a created-but-unpolled or cancelled observation retires this handle's own
@@ -469,7 +470,7 @@ impl TargetHold {
         }
     }
 
-    /// Resume the held operation; before it is taken this disarms only its own
+    /// note: Resume the held operation; before it is taken this disarms only its own
     /// arm.
     pub fn release(&mut self) {
         let mut state = self
@@ -491,7 +492,7 @@ impl TargetHold {
     }
 }
 
-/// Disarms one still-armed target arm when its observation ends without a take.
+/// note: Disarms one still-armed target arm when its observation ends without a take.
 struct TargetReachGuard {
     control: Arc<Mutex<FaultState>>,
     token: u64,
@@ -515,7 +516,7 @@ impl Drop for TargetReachGuard {
 
 impl Drop for TargetHold {
     fn drop(&mut self) {
-        // Dropping an untaken handle disarms exactly its own arm; a taken arm is
+        // why: Dropping an untaken handle disarms exactly its own arm; a taken arm is
         // no longer in the slot and a replacement carries a different token, so
         // neither is affected.
         let mut state = self
@@ -580,7 +581,7 @@ mod tests {
             }
         }
 
-        /// Await the provider's own bounded async close (which drains every
+        /// note: Await the provider's own bounded async close (which drains every
         /// pooled connection, including the rollback of a cancelled
         /// transaction), then serve the same file from a new provider instance.
         async fn close_and_reopen(self) -> Self {
@@ -707,7 +708,7 @@ mod tests {
             "loss-1",
         );
 
-        // The response is held after the commit and the caller tears the
+        // note: The response is held after the commit and the caller tears the
         // connection down instead of waiting for it: no receipt is returned and
         // the operation future is cancelled.
         let mut hold = scenario
@@ -726,7 +727,7 @@ mod tests {
         drop(operation);
         let scenario = scenario.close_and_reopen().await;
 
-        // The commit happened before the hold, so the effect and its receipt are
+        // why: The commit happened before the hold, so the effect and its receipt are
         // on disk even though the response never reached the caller.
         let stored_receipt: String = sqlx::query("SELECT receipt_id FROM receipts")
             .fetch_one(scenario.provider.store().pool())
@@ -737,7 +738,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "receipts").await, 1);
         assert_eq!(count_rows(&scenario, "receipt_targets").await, 1);
 
-        // Same key, same payload: the original receipt, never a second effect.
+        // why: Same key, same payload: the original receipt, never a second effect.
         let replayed = scenario
             .provider
             .capture(CLIENT, &request, now)
@@ -747,7 +748,7 @@ mod tests {
         assert_eq!(receipt_id_of(&replayed), stored_receipt);
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
 
-        // A second replay answers the same receipt again.
+        // note: A second replay answers the same receipt again.
         let again = scenario
             .provider
             .capture(CLIENT, &request, now)
@@ -770,7 +771,7 @@ mod tests {
         paused_admission_replays_the_winner(&scenario, now).await;
     }
 
-    /// Cancellation mid-commit stages the capture inside an open transaction and
+    /// note: Cancellation mid-commit stages the capture inside an open transaction and
     /// the caller drops the future; the provider's own async close then drains
     /// the connection (and its rollback) before the same file is reopened.
     async fn midcommit_cancellation_rolls_back(
@@ -815,7 +816,7 @@ mod tests {
         scenario
     }
 
-    /// A clean abort before commit keeps the no-effect boundary, and the
+    /// note: A clean abort before commit keeps the no-effect boundary, and the
     /// same-key retry commits exactly once.
     async fn precommit_abort_retries_once(
         scenario: &Scenario,
@@ -853,7 +854,7 @@ mod tests {
         assert_eq!(count_rows(scenario, "candidates").await, 1);
     }
 
-    /// A commit that succeeds while the response is lost still answers the retry
+    /// note: A commit that succeeds while the response is lost still answers the retry
     /// from the durable receipt after the awaited close and reopen.
     async fn postcommit_loss_resolves_from_receipt(
         scenario: Scenario,
@@ -891,7 +892,7 @@ mod tests {
         scenario
     }
 
-    /// A paused admission replays the effect a competing identical retry
+    /// note: A paused admission replays the effect a competing identical retry
     /// committed while it was parked.
     async fn paused_admission_replays_the_winner(scenario: &Scenario, now: DateTime<Utc>) {
         let paused_request =
@@ -922,7 +923,7 @@ mod tests {
         assert_eq!(count_rows(scenario, "candidates").await, 3);
     }
 
-    /// §14.2/§14.3: a fault after the commit must never look like a clean
+    /// note: §14.2/§14.3: a fault after the commit must never look like a clean
     /// no-effect failure. Expiry of a post-commit hold and a dropped control
     /// both report `OUTCOME_UNCERTAIN` on a durable effect; a pre-commit hold
     /// expiry is a clean retryable failure with no effect.
@@ -932,7 +933,7 @@ mod tests {
         let now = now_instant();
         scenario.subject_and_capture_grant(now).await;
 
-        // Post-commit hold expiry: the committed receipt stays durable and the
+        // why: Post-commit hold expiry: the committed receipt stays durable and the
         // caller must resolve it with the same key.
         let timeout_request = capture_request(
             &scenario.space_id,
@@ -962,7 +963,7 @@ mod tests {
             .expect("the same key resolves the uncertain outcome");
         assert_eq!(receipt_status(&replayed), "committed");
 
-        // Dropped control: the test-side handle disappears while the committed
+        // why: Dropped control: the test-side handle disappears while the committed
         // response is held, which is still an uncertain outcome on a durable
         // receipt, never a clean no-effect failure.
         let dropped_request = capture_request(
@@ -1004,7 +1005,7 @@ mod tests {
         assert_eq!(receipt_status(&replayed), "committed");
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
 
-        // Pre-commit hold expiry: nothing staged is durable, so the clean
+        // why: Pre-commit hold expiry: nothing staged is durable, so the clean
         // retryable internal failure is honest.
         let precommit_request = capture_request(
             &scenario.space_id,
@@ -1035,7 +1036,7 @@ mod tests {
         assert_eq!(receipt_status(&committed), "committed");
     }
 
-    /// F5: the observation is bounded, and disarmed/replaced/dropped arms are
+    /// note: F5: the observation is bounded, and disarmed/replaced/dropped arms are
     /// explicit errors, never a fake reach or a stale fault for a later request.
     #[tokio::test]
     async fn fault_control_bounds_observation_and_never_fakes_a_reach() {
@@ -1043,7 +1044,7 @@ mod tests {
         let now = now_instant();
         scenario.subject_and_capture_grant(now).await;
 
-        // Nothing polls the point: the observation itself times out, and the
+        // why: Nothing polls the point: the observation itself times out, and the
         // dropped handle disarms it so a later capture is unaffected.
         let mut never = scenario
             .provider
@@ -1059,7 +1060,7 @@ mod tests {
             .expect("no stale fault remains after the dropped observation");
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
 
-        // A replacement arm closes the old observation channel: the old handle
+        // note: A replacement arm closes the old observation channel: the old handle
         // reports an explicit disarmed result instead of a reach.
         let mut replaced = scenario
             .provider
@@ -1076,7 +1077,7 @@ mod tests {
         );
         drop(replaced);
 
-        // The replacement fail point is still armed and trips on the next
+        // why: The replacement fail point is still armed and trips on the next
         // operation; it never leaks to a later one.
         let second = capture_request(&scenario.space_id, "Replacement trips.", "control-2");
         assert_eq!(
@@ -1092,7 +1093,7 @@ mod tests {
             .expect("the consumed fail point does not reach a later call");
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
 
-        // Releasing before the point is reached disarms it, so the next
+        // why: Releasing before the point is reached disarms it, so the next
         // operation proceeds without a fault.
         let mut early = scenario
             .provider
@@ -1109,7 +1110,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 3);
     }
 
-    /// F3: a post-commit hold that expires without any release still reports an
+    /// note: F3: a post-commit hold that expires without any release still reports an
     /// uncertain outcome (the operation-side bound, not the observation bound).
     #[tokio::test]
     async fn bounded_fault_hold_reports_uncertain_without_committing_a_clean_failure() {
@@ -1142,7 +1143,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
     }
 
-    /// F5/I185: an observation timeout or a cancelled observation retires its
+    /// note: F5/I185: an observation timeout or a cancelled observation retires its
     /// own still-unreached arm at once, so retaining the handle cannot make a
     /// later operation inherit the fault.
     #[tokio::test]
@@ -1151,7 +1152,7 @@ mod tests {
         let now = now_instant();
         scenario.subject_and_capture_grant(now).await;
 
-        // Timeout with the handle retained: a later capture proceeds normally.
+        // note: Timeout with the handle retained: a later capture proceeds normally.
         let mut timed_out = scenario
             .provider
             .faults()
@@ -1173,7 +1174,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
         drop(timed_out);
 
-        // The same for a post-commit point: a later capture must commit, not
+        // why: The same for a post-commit point: a later capture must commit, not
         // surprise the caller with an uncertain outcome.
         let mut timed_out = scenario
             .provider
@@ -1201,7 +1202,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         drop(timed_out);
 
-        // Cancelling the observation future (without dropping the handle) also
+        // note: Cancelling the observation future (without dropping the handle) also
         // retires its own arm.
         let mut cancelled = scenario
             .provider
@@ -1211,7 +1212,7 @@ mod tests {
             let mut observation = Box::pin(cancelled.wait_reached());
             let raced = tokio::time::timeout(Duration::from_millis(5), &mut observation).await;
             assert!(raced.is_err(), "the observation is still waiting");
-            // Dropping `observation` cancels the observation future here.
+            // note: Dropping `observation` cancels the observation future here.
         }
         let third = capture_request(
             &scenario.space_id,
@@ -1226,7 +1227,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 3);
         drop(cancelled);
 
-        // A reached, still-held operation is not disturbed by another point's
+        // why: A reached, still-held operation is not disturbed by another point's
         // observation timing out: the guard retires only its own token.
         let mut held = scenario
             .provider
@@ -1258,7 +1259,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 4);
     }
 
-    /// A bounded admission hold that expires before any effect is a clean,
+    /// note: A bounded admission hold that expires before any effect is a clean,
     /// retryable failure; the same key then commits exactly once.
     #[tokio::test]
     async fn admission_hold_expiry_is_clean_and_effect_free() {
@@ -1289,7 +1290,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
     }
 
-    /// I185: a retained handle plus an observation future that is created and
+    /// note: I185: a retained handle plus an observation future that is created and
     /// dropped WITHOUT a first poll must retire its own arm, so a later real
     /// capture is unaffected at both fault phases.
     #[tokio::test]
@@ -1298,7 +1299,7 @@ mod tests {
         let now = now_instant();
         scenario.subject_and_capture_grant(now).await;
 
-        // Pre-commit point: the retained handle's unpolled future disarms.
+        // note: Pre-commit point: the retained handle's unpolled future disarms.
         let mut retained = scenario
             .provider
             .faults()
@@ -1320,7 +1321,7 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
         drop(retained);
 
-        // Post-commit point: the same, without an unexpected uncertain outcome.
+        // note: Post-commit point: the same, without an unexpected uncertain outcome.
         let mut retained = scenario
             .provider
             .faults()

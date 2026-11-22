@@ -21,6 +21,7 @@
 //! A typed port method that needs the digest asks for it with
 //! [`admitted`](admitted). A missing or mismatched scope is refused before any
 //! effect, so a direct in-process port call cannot fabricate one.
+// note: test-only fixture slice; the crate-level doc in `lib.rs` names the conformance scope.
 
 use std::future::Future;
 
@@ -30,11 +31,11 @@ use spoke_operations::{jcs_sha256_hex, SpokeReject, SpokeRejectCode, SpokeResult
 use crate::candidates::{required_capabilities, Admitted};
 
 tokio::task_local! {
-    /// The one admitted request this task is serving right now.
+    /// note: The one admitted request this task is serving right now.
     static REQUEST: RequestScope;
 }
 
-/// Digest and identity of the request object one `invoke` received.
+/// note: Digest and identity of the request object one `invoke` received.
 #[derive(Clone, Debug)]
 pub struct RequestScope {
     digest: String,
@@ -42,7 +43,7 @@ pub struct RequestScope {
     provider: String,
 }
 
-/// Compute the request digest for `op` if the op is a mutating one.
+/// note: Compute the request digest for `op` if the op is a mutating one.
 ///
 /// The digest is JCS over the received object, taken once, and the object is
 /// left for the caller to move into the service. Read-only ops carry no
@@ -52,7 +53,7 @@ pub fn admission(
     op: &str,
     provider: &str,
 ) -> Result<Option<RequestScope>, SpokeReject> {
-    // The published §7 capability table is the single statement of which ops
+    // why: The published §7 capability table is the single statement of which ops
     // mutate; it is the same table the receipt target uses, so no second op
     // classification exists here.
     if required_capabilities(op).is_none() {
@@ -68,12 +69,12 @@ pub fn admission(
     }
 }
 
-/// Run `future` with `scope` as the task's admitted request.
+/// note: Run `future` with `scope` as the task's admitted request.
 pub async fn with_scope<F: Future>(scope: RequestScope, future: F) -> F::Output {
     REQUEST.scope(scope, future).await
 }
 
-/// The digest admitted for `op` on `provider`, paired with the typed view the
+/// note: The digest admitted for `op` on `provider`, paired with the typed view the
 /// port method parsed from that same object.
 ///
 /// Fails closed: a call with no scope, or with the scope of another op or
@@ -109,7 +110,7 @@ fn scope_missing(op: &str) -> SpokeReject {
     }
 }
 
-/// §14.2 retry class of one memory-boundary error envelope.
+/// note: §14.2 retry class of one memory-boundary error envelope.
 ///
 /// Only an explicitly unknown outcome is `uncertain`, and `INTERNAL_ERROR` is
 /// `retryable` only because this provider raises it for failures asserted to
@@ -122,7 +123,7 @@ const fn retry_class(code: SpokeRejectCode) -> &'static str {
     }
 }
 
-/// Supply the protocol-required `details.retry_class` on one served result,
+/// note: Supply the protocol-required `details.retry_class` on one served result,
 /// preserving the provider's code, message and existing details.
 ///
 /// This is the memory-boundary normalization: the C4 fault and retention

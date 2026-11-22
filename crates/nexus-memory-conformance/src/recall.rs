@@ -19,6 +19,7 @@
 //! writer can commit both together (MEM-R022/R024). Every authorization
 //! decision uses the single admission instant `now`; nothing here samples the
 //! wall clock.
+// note: test-only fixture slice; the crate-level doc in `lib.rs` names the conformance scope.
 
 use std::num::NonZeroU64;
 
@@ -41,10 +42,10 @@ use crate::spaces::{
     ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
 
-/// Wire schema version carried by every fixture-served object (§6.1).
+/// note: Wire schema version carried by every fixture-served object (§6.1).
 const SCHEMA_VERSION: u64 = 1;
 
-/// Counts bytes without buffering them, for the §9 budget.
+/// note: Counts bytes without buffering them, for the §9 budget.
 #[derive(Default)]
 struct ByteCounter(usize);
 
@@ -59,7 +60,7 @@ impl std::io::Write for ByteCounter {
     }
 }
 
-/// The §9 byte budget of one record's content, measured in the representation
+/// note: The §9 byte budget of one record's content, measured in the representation
 /// the response actually emits.
 ///
 /// The published JCS helper counts canonical ECMAScript number spelling
@@ -74,7 +75,7 @@ fn emitted_content_bytes(content: &Value) -> Result<usize, SpokeReject> {
     Ok(counter.0)
 }
 
-/// `memory.recall` payload (§7.22/§9).
+/// note: `memory.recall` payload (§7.22/§9).
 #[derive(Debug)]
 pub struct RecallPage {
     pub(crate) records: Vec<RetainedRecord>,
@@ -85,22 +86,20 @@ pub struct RecallPage {
     pub(crate) engine_policy_version: String,
 }
 
-/// `memory.profile.get` payload (§7.23).
+/// note: `memory.profile.get` payload (§7.23).
 #[derive(Debug)]
 pub struct ProfilePage {
     pub(crate) profiles: Vec<ProfileDocument>,
 }
 
-/// Content-free result of `memory.profile.update` (§7.24).
+/// note: Content-free result of `memory.profile.update` (§7.24).
 #[derive(Debug)]
 pub struct ProfileChange {
     pub(crate) profile_kind: String,
     pub(crate) revision: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Protocol errors
-// ---------------------------------------------------------------------------
+// note: Protocol errors
 
 fn not_found(message: impl Into<String>) -> SpokeReject {
     SpokeReject {
@@ -158,7 +157,7 @@ fn revision_conflict(expected: NonZeroU64, actual: u64) -> SpokeReject {
     }
 }
 
-/// `expected_revision: null` admits creation only (§7.24), so an existing
+/// note: `expected_revision: null` admits creation only (§7.24), so an existing
 /// document is the same lost-update refusal with a `null` expectation.
 fn profile_create_conflict(actual: u64) -> SpokeReject {
     let mut details = Map::new();
@@ -174,7 +173,7 @@ fn profile_create_conflict(actual: u64) -> SpokeReject {
     }
 }
 
-/// Flatten the published validator envelope into the crate's result shape.
+/// note: Flatten the published validator envelope into the crate's result shape.
 fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
     match result {
         SpokeResult::Ok(()) => Ok(()),
@@ -182,9 +181,7 @@ fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stored row helpers
-// ---------------------------------------------------------------------------
+// note: Stored row helpers
 
 fn timestamp(raw: &str) -> Result<DateTime<Utc>, SpokeReject> {
     DateTime::parse_from_rfc3339(raw)
@@ -209,11 +206,9 @@ fn row_u64(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<u64, SpokeReje
     u64::try_from(raw).map_err(internal_failure)
 }
 
-// ---------------------------------------------------------------------------
-// Stored rows
-// ---------------------------------------------------------------------------
+// note: Stored rows
 
-/// One stored record row projected into what recall needs. `content` stays a
+/// note: One stored record row projected into what recall needs. `content` stays a
 /// JSON value because the budget is measured over its serialized bytes (§9)
 /// and the same value is the wire `content` object.
 struct RecallRow {
@@ -229,7 +224,7 @@ struct RecallRow {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     extensions: Value,
-    /// Set per request: does the record's text carry the optional query hint?
+    /// note: Set per request: does the record's text carry the optional query hint?
     query_rank: bool,
 }
 
@@ -254,9 +249,7 @@ struct StoredProfile {
     extensions: Value,
 }
 
-// ---------------------------------------------------------------------------
-// Loaders
-// ---------------------------------------------------------------------------
+// note: Loaders
 
 async fn space_status(conn: &mut SqliteConnection, space_id: &str) -> Result<String, SpokeReject> {
     let row = sqlx::query("SELECT status FROM spaces WHERE space_id = ?")
@@ -283,7 +276,7 @@ async fn subject_status(
     row.try_get("status").map_err(internal_failure)
 }
 
-/// Read the live records of one subject: the tombstone predicate keeps dead
+/// note: Read the live records of one subject: the tombstone predicate keeps dead
 /// rows out, and candidates live in their own table so they cannot appear
 /// (MEM-R004/MEM-R014).
 async fn load_recall_rows(
@@ -396,11 +389,9 @@ async fn load_profiles(
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// Authorization facets (§6.5, §7.22–§7.24)
-// ---------------------------------------------------------------------------
+// note: Authorization facets (§6.5, §7.22–§7.24)
 
-/// The grant facets a recall selection needs. `subject_all` needs a grant with
+/// note: The grant facets a recall selection needs. `subject_all` needs a grant with
 /// no context restriction at all; a shared read needs the shared facet or no
 /// restriction; a context selection needs coverage of every named context.
 fn selection_requirement<'a>(
@@ -442,7 +433,7 @@ fn grant_capabilities(grant: &MemoryGrant) -> &[String] {
     }
 }
 
-/// §7.23: a profile read needs *any* capability on the subject with shared
+/// note: §7.23: a profile read needs *any* capability on the subject with shared
 /// access or unrestricted coverage. The published evaluator takes one
 /// capability name, so the "any" qualifier is the only facet composed here —
 /// every other rule still comes from `grant_covers`.
@@ -472,7 +463,7 @@ fn any_capability_admits(
     })
 }
 
-/// §8.2: a frozen space admits exactly the maintenance allowlist. The decision
+/// note: §8.2: a frozen space admits exactly the maintenance allowlist. The decision
 /// is the published predicate; only the stored status is read here.
 async fn require_op_admitted(
     conn: &mut SqliteConnection,
@@ -486,9 +477,7 @@ async fn require_op_admitted(
     Err(space_frozen(space_id, op))
 }
 
-// ---------------------------------------------------------------------------
-// Selection, filter, ranking, budget (§6.12, §9)
-// ---------------------------------------------------------------------------
+// note: Selection, filter, ranking, budget (§6.12, §9)
 
 fn selection_admits(selection: &ReadSelection, row: &RecallRow) -> bool {
     match selection {
@@ -501,7 +490,7 @@ fn selection_admits(selection: &ReadSelection, row: &RecallRow) -> bool {
             if row.visibility == "shared" {
                 include_shared.unwrap_or(false)
             } else {
-                // The schema requires a context placement to carry its id.
+                // note: The schema requires a context placement to carry its id.
                 row.context_id
                     .as_deref()
                     .is_some_and(|context_id| context_ids.iter().any(|named| named == context_id))
@@ -510,7 +499,7 @@ fn selection_admits(selection: &ReadSelection, row: &RecallRow) -> bool {
     }
 }
 
-/// §6.13: a filter, never a placement statement — it intersects the record's
+/// note: §6.13: a filter, never a placement statement — it intersects the record's
 /// recorded provenance claim and combines with the selection by AND.
 fn provenance_filter_admits(row: &RecallRow, filter: Option<&ProvenanceFilter>) -> bool {
     let Some(filter) = filter else {
@@ -529,7 +518,7 @@ fn provenance_filter_admits(row: &RecallRow, filter: Option<&ProvenanceFilter>) 
         })
 }
 
-/// Fixture-owned ranking policy (§9 item 2 is provider-variable, so this is
+/// note: Fixture-owned ranking policy (§9 item 2 is provider-variable, so this is
 /// deliberately not Nexus policy):
 ///
 /// 1. records whose untrusted text carries the optional query hint first —
@@ -611,12 +600,10 @@ fn profile_to_wire(row: &StoredProfile) -> Result<ProfileDocument, SpokeReject> 
     .map_err(internal_failure)
 }
 
-// ---------------------------------------------------------------------------
-// Operations
-// ---------------------------------------------------------------------------
+// note: Operations
 
 impl FixtureMemoryProvider {
-    /// The fixture serves exactly one durable space; a request naming another
+    /// note: The fixture serves exactly one durable space; a request naming another
     /// one is refused before any authorization decision touches storage. The
     /// private helper on the spaces slice is same-crate but not visible here,
     /// so this slice keeps its own two-line equality guard over the public
@@ -630,11 +617,9 @@ impl FixtureMemoryProvider {
         )))
     }
 
-    // -----------------------------------------------------------------------
-    // memory.recall (§7.22/§9)
-    // -----------------------------------------------------------------------
+    // note: memory.recall (§7.22/§9)
 
-    /// Authorized, ranked, budgeted read for execution-time context.
+    /// note: Authorized, ranked, budgeted read for execution-time context.
     pub(crate) async fn recall(
         &self,
         principal_id: &str,
@@ -654,7 +639,7 @@ impl FixtureMemoryProvider {
         Ok(page)
     }
 
-    /// [`Self::recall`] on a caller-owned connection: the whole read uses the
+    /// note: [`Self::recall`] on a caller-owned connection: the whole read uses the
     /// caller's snapshot and never begins or commits a transaction.
     pub(crate) async fn recall_in_tx(
         &self,
@@ -669,7 +654,7 @@ impl FixtureMemoryProvider {
         let subject_id = request.subject_id.as_str();
         require_op_admitted(conn, "memory.recall", space_id).await?;
 
-        // §6.5/MEM-R006: authorization before rows, counts, pages and cursors.
+        // note: §6.5/MEM-R006: authorization before rows, counts, pages and cursors.
         let grants = load_grants(conn, space_id).await?;
         if !is_authorized(
             &grants,
@@ -687,7 +672,7 @@ impl FixtureMemoryProvider {
         let snapshot = snapshot_marker(conn, space_id).await?;
         let binding_digest = recall_binding(principal_id, space_id, subject_id, request, snapshot)?;
 
-        // §7.7/§11: an archived subject's records are excluded from recall;
+        // why: §7.7/§11: an archived subject's records are excluded from recall;
         // reads on a merely fenced subject stay admitted. The exclusion is a
         // row-set rule, so the cursor/budget path below stays single.
         let mut rows = load_recall_rows(conn, space_id, subject_id).await?;
@@ -720,7 +705,7 @@ impl FixtureMemoryProvider {
             }
         };
 
-        // §9 item 3: the item cap is a hard cap, and the byte budget is spent
+        // note: §9 item 3: the item cap is a hard cap, and the byte budget is spent
         // in UTF-8 bytes of the serialized content. An oversized first item is
         // surfaced whole instead of being silently dropped; any later item that
         // does not fit is deferred to the next page.
@@ -772,11 +757,9 @@ impl FixtureMemoryProvider {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // memory.profile.get (§7.23)
-    // -----------------------------------------------------------------------
+    // note: memory.profile.get (§7.23)
 
-    /// Read the trusted documents present for one subject. Absent kinds are
+    /// note: Read the trusted documents present for one subject. Absent kinds are
     /// honest-empty, never an error (§4.2).
     pub(crate) async fn profile_get(
         &self,
@@ -797,7 +780,7 @@ impl FixtureMemoryProvider {
         Ok(page)
     }
 
-    /// [`Self::profile_get`] on a caller-owned connection; never begins or
+    /// note: [`Self::profile_get`] on a caller-owned connection; never begins or
     /// commits a transaction.
     pub(crate) async fn profile_get_in_tx(
         &self,
@@ -811,7 +794,7 @@ impl FixtureMemoryProvider {
         let subject_id = request.subject_id.as_str();
         require_op_admitted(conn, "memory.profile.get", space_id).await?;
 
-        // §7.23/MEM-R003: the authenticated principal decides coverage; the
+        // why: §7.23/MEM-R003: the authenticated principal decides coverage; the
         // payload never names a requester.
         let grants = load_grants(conn, space_id).await?;
         if !any_capability_admits(&grants, principal_id, space_id, now, subject_id) {
@@ -831,11 +814,9 @@ impl FixtureMemoryProvider {
         Ok(ProfilePage { profiles })
     }
 
-    // -----------------------------------------------------------------------
-    // memory.profile.update (§7.24)
-    // -----------------------------------------------------------------------
+    // note: memory.profile.update (§7.24)
 
-    /// Create or replace one authored document under revision CAS. The
+    /// note: Create or replace one authored document under revision CAS. The
     /// document body is stored and served byte for byte: profiles are trusted
     /// authored content (§10), never derived from captured text.
     pub(crate) async fn profile_update(
@@ -857,7 +838,7 @@ impl FixtureMemoryProvider {
         Ok(change)
     }
 
-    /// [`Self::profile_update`] on a caller-owned connection: the document
+    /// note: [`Self::profile_update`] on a caller-owned connection: the document
     /// write and its snapshot bump are staged on `conn` and never committed,
     /// so a receipt/dedup writer can commit both in one commit (MEM-R022).
     pub(crate) async fn profile_update_in_tx(
@@ -873,7 +854,7 @@ impl FixtureMemoryProvider {
         require_op_admitted(conn, "memory.profile.update", space_id).await?;
 
         let grants = load_grants(conn, space_id).await?;
-        // §6.5/§7.24: a profile is one subject-level trusted document, not a
+        // why: §6.5/§7.24: a profile is one subject-level trusted document, not a
         // per-context record, so its write must cover shared document access.
         // `reads_shared` is the published facet for exactly that; the plain
         // `requirement()` helper (no contexts, no shared facet) would accept a
@@ -892,7 +873,7 @@ impl FixtureMemoryProvider {
                  document access on this subject",
             ));
         }
-        // A fenced or archived subject rejects every write (§7.7).
+        // note: A fenced or archived subject rejects every write (§7.7).
         if subject_status(conn, space_id, subject_id).await? != "active" {
             return Err(subject_fenced(subject_id, "subject"));
         }
@@ -969,7 +950,7 @@ impl FixtureMemoryProvider {
             }
         };
 
-        // Only an accepted write is an observable change; refusals above left
+        // note: Only an accepted write is an observable change; refusals above left
         // no effect and therefore leave the marker alone.
         bump_snapshot(conn, space_id).await?;
         Ok(ProfileChange {
@@ -979,7 +960,7 @@ impl FixtureMemoryProvider {
     }
 }
 
-/// Cursor binding (§7.0.7/MEM-R026): principal + space + subject + the exact
+/// note: Cursor binding (§7.0.7/MEM-R026): principal + space + subject + the exact
 /// selection/filter/hint + the snapshot marker + the engine policy version. Any
 /// state or grant change moves the marker, so an outstanding cursor is refused
 /// instead of silently resuming over a different result set.
@@ -1029,7 +1010,7 @@ mod tests {
             .with_timezone(&Utc)
     }
 
-    /// The single admission instant every call in these cases supplies.
+    /// note: The single admission instant every call in these cases supplies.
     fn now() -> DateTime<Utc> {
         instant("2026-11-04T10:00:00Z")
     }
@@ -1122,7 +1103,7 @@ mod tests {
                 .grant_id
         }
 
-        /// Arrange one durable record row. A real writer advances the private
+        /// note: Arrange one durable record row. A real writer advances the private
         /// snapshot in the same commit, so the arrangement inserts the row and
         /// its marker step together.
         async fn insert_record(
@@ -1314,9 +1295,7 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Selection (§6.12, C-050/C-051/C-052/C-053)
-    // -----------------------------------------------------------------------
+    // note: Selection (§6.12, C-050/C-051/C-052/C-053)
 
     #[tokio::test]
     async fn selection_modes_admit_exactly_the_placed_rows() {
@@ -1494,13 +1473,13 @@ mod tests {
             );
         }
 
-        // The named context alone is inside the coverage.
+        // note: The named context alone is inside the coverage.
         let page = recall_selection(&scenario, LIMITED, selected_contexts(&["ctx-a"], None))
             .await
             .expect("covered context");
         assert_eq!(sorted_ids(&page), vec!["rec_a"]);
 
-        // Shared access widens the same grant only to shared visibility, and
+        // why: Shared access widens the same grant only to shared visibility, and
         // still never to subject_all.
         scenario
             .grant(LIMITED, &["recall"], Some(&["ctx-a"]), Some(true))
@@ -1578,9 +1557,7 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Budget and cursor (§9, C-055/C-056)
-    // -----------------------------------------------------------------------
+    // note: Budget and cursor (§9, C-055/C-056)
 
     #[tokio::test]
     async fn utf8_budget_counts_bytes_and_surfaces_an_oversized_first_item() {
@@ -1608,7 +1585,7 @@ mod tests {
             )
             .await;
 
-        // rec_one ranks first (most recently written). A one-byte budget cannot
+        // why: rec_one ranks first (most recently written). A one-byte budget cannot
         // hold its serialized content, but the first item is surfaced whole
         // instead of being dropped.
         let page = recall_with_budget(&scenario, budget(10, Some(1)), None).await;
@@ -1617,7 +1594,7 @@ mod tests {
         assert!(page.truncated);
         assert!(page.next_cursor.is_some());
 
-        // The item cap is a hard cap; the cursor continues the same ranked set.
+        // note: The item cap is a hard cap; the cursor continues the same ranked set.
         let page = recall_with_budget(&scenario, budget(1, None), None).await;
         assert_eq!(recalled_ids(&page), vec!["rec_one"]);
         assert!(page.truncated);
@@ -1628,7 +1605,7 @@ mod tests {
         assert!(!page.truncated);
         assert!(page.next_cursor.is_none());
 
-        // The budget is measured in UTF-8 bytes of the serialized content, not
+        // note: The budget is measured in UTF-8 bytes of the serialized content, not
         // in characters: a one-character multi-byte body is larger than one
         // character of budget.
         let one = content_serialized_bytes(&json!({ "text": "é" }));
@@ -1713,7 +1690,7 @@ mod tests {
         assert!(!second.truncated);
         assert!(second.next_cursor.is_none());
 
-        // A cursor issued for another selection never resumes this one.
+        // why: A cursor issued for another selection never resumes this one.
         let request = recall_request(
             &scenario.space_id,
             shared_only(),
@@ -1727,7 +1704,7 @@ mod tests {
             SpokeRejectCode::CursorInvalid
         );
 
-        // A committed state change moves the snapshot marker, so an outstanding
+        // why: A committed state change moves the snapshot marker, so an outstanding
         // cursor is refused instead of silently resuming over new state.
         scenario.grant(STRANGER, &["recall"], None, None).await;
         let request = recall_request(
@@ -1757,9 +1734,7 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Ranking and filter (§9, C-058/C-059)
-    // -----------------------------------------------------------------------
+    // note: Ranking and filter (§9, C-058/C-059)
 
     #[tokio::test]
     async fn ranking_is_deterministic_and_the_query_hint_only_orders() {
@@ -1840,7 +1815,7 @@ mod tests {
         let again = recall_page(scenario, subject_all()).await;
         assert_eq!(recalled_ids(&again), recalled_ids(&first));
 
-        // The hint orders matching records first and never filters.
+        // why: The hint orders matching records first and never filters.
         let hinted = recall_with_query(scenario, "alpaca").await;
         assert_eq!(hinted.total_authorized, 7);
         assert_eq!(
@@ -1858,7 +1833,7 @@ mod tests {
     }
 
     async fn provenance_filter_is_anded_with_the_selection(scenario: &Scenario) {
-        // The provenance filter is ANDed with the selection and never rewrites
+        // why: The provenance filter is ANDed with the selection and never rewrites
         // placement: a record placed in ctx-a is filtered by its origin.
         scenario
             .insert_record(
@@ -1958,7 +1933,7 @@ mod tests {
         assert!(!page.truncated);
         assert!(page.overflow_record_id.is_none());
 
-        // Exclusion is a read rule, not a deletion: the row is still stored.
+        // note: Exclusion is a read rule, not a deletion: the row is still stored.
         let rows = sqlx::query("SELECT COUNT(*) AS stored FROM records WHERE record_id = ?")
             .bind("rec_archived")
             .fetch_one(scenario.provider.store().pool())
@@ -1968,9 +1943,7 @@ mod tests {
         assert_eq!(stored, 1);
     }
 
-    // -----------------------------------------------------------------------
-    // Profiles (§7.23/§7.24, C-060/C-061)
-    // -----------------------------------------------------------------------
+    // note: Profiles (§7.23/§7.24, C-060/C-061)
 
     #[tokio::test]
     async fn profile_documents_preserve_bytes_and_enforce_revision_cas() {
@@ -2038,7 +2011,7 @@ mod tests {
             .expect("update");
         assert_eq!(change.revision, 2);
 
-        // A stale expectation is refused and leaves the stored bytes alone.
+        // note: A stale expectation is refused and leaves the stored bytes alone.
         let stale = scenario
             .provider
             .profile_update(
@@ -2065,7 +2038,7 @@ mod tests {
     }
 
     async fn profile_create_only_then_reopen(scenario: Scenario, second_body: &str) {
-        // `null` admits creation only.
+        // why: `null` admits creation only.
         let create_only = scenario
             .provider
             .profile_update(
@@ -2082,7 +2055,7 @@ mod tests {
             .await;
         assert_eq!(reject_code(create_only), SpokeRejectCode::RevisionConflict);
 
-        // An expectation on an absent document is the same lost-update refusal.
+        // note: An expectation on an absent document is the same lost-update refusal.
         let absent = scenario
             .provider
             .profile_update(
@@ -2100,7 +2073,7 @@ mod tests {
         assert_eq!(reject_code(absent), SpokeRejectCode::RevisionConflict);
         assert!(scenario.raw_profile("preferences").await.is_none());
 
-        // The accepted body survives a real close and reopen of the file.
+        // note: The accepted body survives a real close and reopen of the file.
         let scenario = scenario.reopen().await;
         let page = scenario
             .provider
@@ -2137,7 +2110,7 @@ mod tests {
     }
 
     async fn profile_reads_without_a_grant_are_refused(scenario: &Scenario) {
-        // No grant at all: neither read nor write is admitted.
+        // note: No grant at all: neither read nor write is admitted.
         assert_eq!(
             reject_code(
                 scenario
@@ -2173,7 +2146,7 @@ mod tests {
     }
 
     async fn profile_reads_follow_the_grant_coverage(scenario: &Scenario) {
-        // Any capability with unrestricted coverage admits the read (§7.23),
+        // why: Any capability with unrestricted coverage admits the read (§7.23),
         // but only profile_write admits the write (§7.24).
         scenario.grant(CLIENT, &["recall"], None, None).await;
         let page = scenario
@@ -2211,7 +2184,7 @@ mod tests {
     }
 
     async fn context_limited_shared_facet_widens_the_read(scenario: &Scenario) {
-        // A context-limited grant without shared access cannot read a profile;
+        // why: A context-limited grant without shared access cannot read a profile;
         // the shared facet is what widens it.
         scenario
             .grant(LIMITED, &["recall"], Some(&["ctx-a"]), None)
@@ -2247,7 +2220,7 @@ mod tests {
             2
         );
 
-        // Kind filtering is exact, and an absent kind is honest-empty.
+        // note: Kind filtering is exact, and an absent kind is honest-empty.
         let page = scenario
             .provider
             .profile_get(
@@ -2271,11 +2244,11 @@ mod tests {
         assert!(page.profiles.is_empty());
     }
 
-    /// Returns the stored document sampled before the first refused write so the
+    /// note: Returns the stored document sampled before the first refused write so the
     /// later disjoint-grant phase can compare raw bytes against a pre-grant
     /// baseline rather than one it re-read after issuing a grant.
     async fn profile_writes_require_shared_document_access(scenario: &Scenario) -> String {
-        // profile_write on the same principal admits the update.
+        // note: profile_write on the same principal admits the update.
         scenario.grant(CLIENT, &["profile_write"], None, None).await;
         let change = scenario
             .provider
@@ -2294,7 +2267,7 @@ mod tests {
             .expect("authorized update");
         assert_eq!(change.revision, 2);
 
-        // §6.5/§7.24: a profile is a subject-level trusted document, so the
+        // why: §6.5/§7.24: a profile is a subject-level trusted document, so the
         // write grant must cover shared document access exactly as the read
         // does. A context-restricted grant without shared access never reaches
         // the CAS: no create, no replace, and no bytes, revision or marker
@@ -2361,7 +2334,7 @@ mod tests {
     }
 
     async fn disjoint_contexts_are_never_unioned(scenario: &Scenario, document: &str) {
-        // Two partial grants on disjoint contexts are never unioned into
+        // why: Two partial grants on disjoint contexts are never unioned into
         // shared coverage.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-b"]), None)
@@ -2383,7 +2356,7 @@ mod tests {
             .await;
         assert_eq!(reject_code(refused), SpokeRejectCode::NotAuthorized);
         assert_eq!(scenario.marker().await, union_marker);
-        // Raw bytes, compared against the baseline sampled before this grant.
+        // note: Raw bytes, compared against the baseline sampled before this grant.
         assert_eq!(
             scenario.raw_profile("personality").await.as_deref(),
             Some(document)
@@ -2391,7 +2364,7 @@ mod tests {
     }
 
     async fn the_shared_facet_admits_the_write(scenario: &Scenario) {
-        // The shared facet on the same context restriction is the legal
+        // note: The shared facet on the same context restriction is the legal
         // control: the document is read and written again.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-a"]), Some(true))
@@ -2512,7 +2485,7 @@ mod tests {
         record_before: &str,
         profile_before: &str,
     ) {
-        // Authoring a new profile document never rewrote captured text, and a
+        // why: Authoring a new profile document never rewrote captured text, and a
         // recall never rewrote an authored document.
         scenario
             .provider
@@ -2563,9 +2536,7 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Mutation seam and admission gate (§7.0.4/§8.2, MEM-R022/R024)
-    // -----------------------------------------------------------------------
+    // note: Mutation seam and admission gate (§7.0.4/§8.2, MEM-R022/R024)
 
     #[tokio::test]
     async fn profile_mutation_composes_with_the_caller_transaction_and_the_admission_gate() {
@@ -2592,7 +2563,7 @@ mod tests {
     }
 
     async fn caller_rollback_discards_the_staged_profile(scenario: &Scenario, baseline: u64) {
-        // A caller rollback discards both the staged document and its marker
+        // note: A caller rollback discards both the staged document and its marker
         // step: the mutation owns no commit of its own.
         let mut transaction = scenario
             .provider
@@ -2624,7 +2595,7 @@ mod tests {
     }
 
     async fn caller_commit_applies_the_profile(scenario: &Scenario, baseline: u64) {
-        // A caller commit applies the document and its marker step together.
+        // note: A caller commit applies the document and its marker step together.
         let mut transaction = scenario
             .provider
             .store()
@@ -2661,7 +2632,7 @@ mod tests {
             1
         );
 
-        // A refused CAS is not an observable effect, so the marker stays put.
+        // why: A refused CAS is not an observable effect, so the marker stays put.
         let after_commit = scenario.marker().await;
         let stale = scenario
             .provider
@@ -2682,7 +2653,7 @@ mod tests {
     }
 
     async fn a_frozen_space_refuses_only_the_write(scenario: &Scenario) {
-        // §8.2: a frozen space still admits the read-only ops and refuses the
+        // why: §8.2: a frozen space still admits the read-only ops and refuses the
         // write, leaving no effect behind.
         let freeze: MemorySpacesFreezeRequest = serde_json::from_value(json!({
             "space_id": scenario.space_id,

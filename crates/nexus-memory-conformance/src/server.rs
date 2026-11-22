@@ -27,6 +27,7 @@
 //! constructed advertised); the optional transfer family is not served: its
 //! methods answer the SDK's terminal capability refusal and `memory.describe`
 //! never advertises it.
+// note: test-only fixture slice; the crate-level doc in `lib.rs` names the conformance scope.
 
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -79,7 +80,7 @@ use crate::raw_invoke;
 use crate::spaces::{internal, internal_failure, load_grants};
 
 impl FixtureMemoryProvider {
-    /// The signed Connect memory service for this provider: the unchanged
+    /// note: The signed Connect memory service for this provider: the unchanged
     /// [`MemoryPortService`] mapping wrapped by the D15 request-scope decorator.
     ///
     /// `admission` is the operator's authenticated peer→principal table (see
@@ -95,12 +96,12 @@ impl FixtureMemoryProvider {
     }
 }
 
-/// The D15 decorator: compute the exact received-object digest once, move the
+/// note: The D15 decorator: compute the exact received-object digest once, move the
 /// same request object into the unchanged SDK service, and normalize the
 /// answer's error envelope.
 struct FixtureMemoryService {
     inner: MemoryPortService,
-    /// The provider identity a request scope must name to be trusted.
+    /// note: The provider identity a request scope must name to be trusted.
     provider: String,
 }
 
@@ -109,14 +110,14 @@ impl RemoteMemoryService for FixtureMemoryService {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
         let scope = match raw_invoke::admission(&payload, op, &self.provider) {
             Ok(scope) => scope,
-            // The digest could not be taken over the received object, so no
+            // why: The digest could not be taken over the received object, so no
             // typed decode may run: refuse the request instead of admitting it
             // without its replay identity.
             Err(reject) => return raw_invoke::normalize(SpokeResult::Reject(reject)),
         };
         let result = match scope {
             Some(scope) => {
-                // `payload` is moved into the service: the digest input and the
+                // why: `payload` is moved into the service: the digest input and the
                 // executed request are the same object, never a copy.
                 raw_invoke::with_scope(scope, self.inner.invoke(peer_id, op, payload)).await
             }
@@ -126,9 +127,7 @@ impl RemoteMemoryService for FixtureMemoryService {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Response plumbing
-// ---------------------------------------------------------------------------
+// note: Response plumbing
 
 fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
     match serde_json::from_value(body) {
@@ -137,7 +136,7 @@ fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
     }
 }
 
-/// A mutation's wire answer is its content-free receipt (§7.0.2).
+/// note: A mutation's wire answer is its content-free receipt (§7.0.2).
 fn respond_receipt<T: DeserializeOwned>(receipt: &MemoryReceipt) -> SpokeResult<T> {
     match serde_json::to_value(receipt) {
         Ok(body) => respond(body),
@@ -145,7 +144,7 @@ fn respond_receipt<T: DeserializeOwned>(receipt: &MemoryReceipt) -> SpokeResult<
     }
 }
 
-/// A commit that failed may still have taken effect (§14.3): the caller cannot
+/// note: A commit that failed may still have taken effect (§14.3): the caller cannot
 /// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
 /// clean `retryable` internal error, and never a driver message on the wire.
 fn commit_outcome_unknown() -> SpokeReject {
@@ -170,7 +169,7 @@ fn non_zero(value: u64) -> NonZeroU64 {
     NonZeroU64::new(value).unwrap_or(NonZeroU64::MIN)
 }
 
-/// The §14.2 terminal refusal for an op whose capability family this provider
+/// note: The §14.2 terminal refusal for an op whose capability family this provider
 /// does not serve (mirrors the local provider's published refusal shape).
 fn unsupported<T>(op: &str) -> SpokeResult<T> {
     let mut details = Map::new();
@@ -183,11 +182,9 @@ fn unsupported<T>(op: &str) -> SpokeResult<T> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Mutation frame: target, authorization-before-replay, one-transaction effect
-// ---------------------------------------------------------------------------
+// note: Mutation frame: target, authorization-before-replay, one-transaction effect
 
-/// The content-free requirement one mutation had to satisfy: the published
+/// note: The content-free requirement one mutation had to satisfy: the published
 /// capability list plus the subject, placement-context, shared-visibility and
 /// whole-selection axes.
 ///
@@ -221,13 +218,13 @@ impl OpTarget {
         }
     }
 
-    /// A space-wide requirement: no subject, no named context and the
+    /// note: A space-wide requirement: no subject, no named context and the
     /// unrestricted-coverage facet, so a narrow grant never covers it.
     fn whole_space(capabilities: &'static [&'static str]) -> Self {
         Self::new(capabilities, None, &[], false, true)
     }
 
-    /// A requirement over the record placement named by the operation.
+    /// note: A requirement over the record placement named by the operation.
     fn placement(
         capabilities: &'static [&'static str],
         subject_id: &str,
@@ -257,7 +254,7 @@ impl OpTarget {
         )
     }
 
-    /// Whether one current grant carries every required capability over the
+    /// note: Whether one current grant carries every required capability over the
     /// recorded facets (MEM-R006: grants never union).
     fn admits(
         &self,
@@ -286,13 +283,13 @@ impl OpTarget {
     }
 }
 
-/// The published §7 capability list of one mutating op.
+/// note: The published §7 capability list of one mutating op.
 fn capabilities_of(op: &str) -> Result<&'static [&'static str], SpokeReject> {
     required_capabilities(op)
         .ok_or_else(|| internal(format!("{op} has no published capability list")))
 }
 
-/// How the precheck refuses when the caller's current grants do not cover the
+/// note: How the precheck refuses when the caller's current grants do not cover the
 /// operation's target.
 ///
 /// By-id record refusals stay indistinguishable from a missing id, exactly as
@@ -300,9 +297,9 @@ fn capabilities_of(op: &str) -> Result<&'static [&'static str], SpokeReject> {
 /// authorization failure into an existence oracle.
 #[derive(Clone, Copy)]
 enum PrecheckRefusal {
-    /// The operation's own authorization refusal.
+    /// note: The operation's own authorization refusal.
     Target,
-    /// The records slice's single by-id refusal.
+    /// note: The records slice's single by-id refusal.
     RecordAbsent,
 }
 
@@ -312,7 +309,7 @@ impl PrecheckRefusal {
             Self::Target => not_authorized(
                 "the authenticated principal holds no current grant covering this operation's target",
             ),
-            // Mirrors `records::record_absent` so a foreign record and a missing
+            // why: Mirrors `records::record_absent` so a foreign record and a missing
             // one answer one indistinguishable refusal.
             Self::RecordAbsent => SpokeReject {
                 code: SpokeRejectCode::NotFound,
@@ -324,7 +321,7 @@ impl PrecheckRefusal {
 }
 
 impl FixtureMemoryProvider {
-    /// Execute the revoke and answer with its receipt: the effect, its dedup row
+    /// note: Execute the revoke and answer with its receipt: the effect, its dedup row
     /// and the receipt share this one transaction, and a commit that failed keeps
     /// the honest unknown outcome.
     async fn revoke_effect(
@@ -372,7 +369,7 @@ impl FixtureMemoryProvider {
         respond_receipt(&receipt)
     }
 
-    /// The grant a revoke names, as the receipt target of the grant's own
+    /// note: The grant a revoke names, as the receipt target of the grant's own
     /// facets, or the revoke slice's own refusal when no such row exists.
     ///
     /// A live admin is checked first so a non-admin never learns whether an id
@@ -402,7 +399,7 @@ impl FixtureMemoryProvider {
             .transpose()
     }
 
-    /// Answer a revoke that names no grant row through the revoke slice itself,
+    /// note: Answer a revoke that names no grant row through the revoke slice itself,
     /// discarding the transaction: the slice owns the refusal vocabulary
     /// (`NOT_FOUND` for a whole-space admin, one indistinguishable refusal
     /// otherwise).
@@ -424,7 +421,7 @@ impl FixtureMemoryProvider {
     }
 }
 
-/// §7.21: the receipt target of a promotion covers *both* placements — the
+/// note: §7.21: the receipt target of a promotion covers *both* placements — the
 /// union of the source and target contexts, the shared facet of either side,
 /// and both the `promote` and `records_write` capabilities.
 fn promote_target(
@@ -433,7 +430,7 @@ fn promote_target(
     source_context: Option<&str>,
     target: &PromoteScope,
 ) -> Result<OpTarget, SpokeReject> {
-    // §7.21 authorizes one grant over *both* placements: the receipt target
+    // note: §7.21 authorizes one grant over *both* placements: the receipt target
     // records the union of the source and target contexts, the shared facet
     // of either side, and both required capabilities.
     let (target_visibility, target_context) = match target {
@@ -457,21 +454,21 @@ fn promote_target(
     ))
 }
 
-/// What the replay step decided for this admitted mutation.
+/// note: What the replay step decided for this admitted mutation.
 enum ReplayStep {
-    /// No binding, or a stale one already released inside this transaction.
+    /// note: No binding, or a stale one already released inside this transaction.
     Execute,
-    /// The identical admitted replay: return the stored receipt, no effect.
+    /// note: The identical admitted replay: return the stored receipt, no effect.
     Replayed(Box<MemoryReceipt>),
 }
 
 impl FixtureMemoryProvider {
-    /// The provider identity a request scope must name.
+    /// note: The provider identity a request scope must name.
     fn scope_provider(&self) -> &str {
         &self.identity.authority_host_id
     }
 
-    /// Take this op's exact received-object digest from the D15 scope.
+    /// note: Take this op's exact received-object digest from the D15 scope.
     fn admitted<Request>(
         &self,
         op: &str,
@@ -480,7 +477,7 @@ impl FixtureMemoryProvider {
         raw_invoke::admitted(op, self.scope_provider(), request)
     }
 
-    /// Current authorization, then replay, then (for a fresh request) the
+    /// note: Current authorization, then replay, then (for a fresh request) the
     /// caller's effect — all on the caller's transaction.
     ///
     /// Authorization runs first so a principal that lost coverage can neither
@@ -501,19 +498,19 @@ impl FixtureMemoryProvider {
         refusal: PrecheckRefusal,
         now: DateTime<Utc>,
     ) -> Result<ReplayStep, SpokeReject> {
-        // The producer's own served-space refusal comes first: an unserved
+        // why: The producer's own served-space refusal comes first: an unserved
         // space is NOT_FOUND, never a grant decision.
         self.require_served_space(space_id)?;
         let mutation = Mutation::keyed(op, idempotency_key, admitted);
         match resolve_replay(conn, space_id, principal_id, &mutation, now).await? {
-            // An existing binding authorized against its *retained* target
+            // why: An existing binding authorized against its *retained* target
             // inside `resolve_replay`, in this same transaction. The operation's
             // current entity is irrelevant to it and is never re-derived here.
             ReplayResolution::Replayed(receipt) => Ok(ReplayStep::Replayed(receipt)),
             ReplayResolution::KeyReusable { receipt_id } => {
                 release_expired_binding_in_tx(conn, space_id, principal_id, &mutation, &receipt_id)
                     .await?;
-                // A released key is a fresh execution: the current target must
+                // why: A released key is a fresh execution: the current target must
                 // authorize it before the effect.
                 self.require_target_authority(conn, principal_id, space_id, target, refusal, now)
                     .await?;
@@ -527,7 +524,7 @@ impl FixtureMemoryProvider {
         }
     }
 
-    /// The operation's current authority for a genuinely fresh execution.
+    /// note: The operation's current authority for a genuinely fresh execution.
     async fn require_target_authority(
         &self,
         conn: &mut SqliteConnection,
@@ -545,7 +542,7 @@ impl FixtureMemoryProvider {
         }
     }
 
-    /// Stage one committed receipt, its dedup row and its target on the
+    /// note: Stage one committed receipt, its dedup row and its target on the
     /// caller's transaction, so they commit with the effect exactly once.
     #[allow(clippy::too_many_arguments)]
     async fn stage_committed<Request: Sync>(
@@ -573,7 +570,7 @@ impl FixtureMemoryProvider {
         .await
     }
 
-    /// Open the one writer transaction a mutation owns.
+    /// note: Open the one writer transaction a mutation owns.
     pub(crate) async fn begin_write(
         &self,
     ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, SpokeReject> {
@@ -584,7 +581,7 @@ impl FixtureMemoryProvider {
             .map_err(internal_failure)
     }
 
-    /// Content-free placement of one stored record (`subject_id`,
+    /// note: Content-free placement of one stored record (`subject_id`,
     /// `scope_visibility`, `scope_context_id`), read for the receipt target of
     /// the record mutations whose requirement covers the *current* placement.
     ///
@@ -619,9 +616,7 @@ impl FixtureMemoryProvider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The 25 base operations (§7.1–§7.28)
-// ---------------------------------------------------------------------------
+// note: The 25 base operations (§7.1–§7.28)
 
 #[async_trait]
 impl MemoryPort for FixtureMemoryProvider {
@@ -630,7 +625,7 @@ impl MemoryPort for FixtureMemoryProvider {
         _principal: &Principal,
         _request: MemoryDescribeRequest,
     ) -> SpokeResult<MemoryDescribeResponse> {
-        // §7.1: no grant is required, only authenticated admission — which the
+        // why: §7.1: no grant is required, only authenticated admission — which the
         // service face already performed. The capability list is honest for
         // this provider's construction shape.
         respond(describe_body(self.advertises_reflection()))
@@ -812,7 +807,7 @@ impl MemoryPort for FixtureMemoryProvider {
         principal: &Principal,
         request: MemorySubjectsEnsureRequest,
     ) -> SpokeResult<MemorySubjectsEnsureResponse> {
-        // §7.0.5's sole keyless mutation: no dedup namespace row exists, so a
+        // why: §7.0.5's sole keyless mutation: no dedup namespace row exists, so a
         // keyless receipt records this outcome and can never be replayed.
         let op = "memory.subjects.ensure";
         let principal_id = principal_id(principal);
@@ -894,7 +889,7 @@ impl MemoryPort for FixtureMemoryProvider {
         let idempotency_key = request.idempotency_key.as_str().to_owned();
         let space_id = request.space_id.as_str().to_owned();
         let subject_id = request.subject_id.as_str().to_owned();
-        // The fence authority covers the operation's real target: a whole-subject
+        // note: The fence authority covers the operation's real target: a whole-subject
         // transition needs unrestricted coverage of the subject, a context
         // transition needs that one placement context.
         let target = match (capabilities_of(op), &request.target) {
@@ -914,7 +909,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Test-only, op-targeted admission pause: after the typed decode and the
+        // why: Test-only, op-targeted admission pause: after the typed decode and the
         // authenticated principal, before the operation's clock and its writer
         // transaction. Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
@@ -1092,7 +1087,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Test-only, op-targeted admission pause: after the authenticated typed
+        // why: Test-only, op-targeted admission pause: after the authenticated typed
         // admission and before the operation's clock and writer transaction.
         // Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
@@ -1139,7 +1134,7 @@ impl MemoryPort for FixtureMemoryProvider {
                 return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
-            // Only an authorization refusal is translated into the revoke
+            // note: Only an authorization refusal is translated into the revoke
             // slice's one indistinguishable wording. A replay conflict, an
             // expired/retained outcome or a storage failure keeps its real
             // code and details (§14.2).
@@ -1237,7 +1232,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Test-only, op-targeted admission pause: after the typed decode and the
+        // why: Test-only, op-targeted admission pause: after the typed decode and the
         // authenticated principal, before the private slice opens its writer
         // transaction. Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
@@ -1374,7 +1369,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         let Some((subject_id, visibility, context)) = placement else {
-            // No stored placement to name a target from: let the records slice
+            // why: No stored placement to name a target from: let the records slice
             // answer its own uniform refusal, then discard the transaction.
             let outcome = self
                 .records_update_in_tx(&mut transaction, principal_id, admitted.request(), now)
@@ -1707,7 +1702,7 @@ impl MemoryPort for FixtureMemoryProvider {
         let space_id = request.space_id.as_str().to_owned();
         let subject_id = request.subject_id.as_str().to_owned();
         let idempotency_key = request.idempotency_key.as_str().to_owned();
-        // A profile is one subject-level trusted document: its write covers
+        // note: A profile is one subject-level trusted document: its write covers
         // shared document access, exactly as the profile slice authorizes it.
         let target = match capabilities_of(op) {
             Ok(capabilities) => OpTarget::new(capabilities, Some(&subject_id), &[], true, false),
@@ -1891,11 +1886,9 @@ impl MemoryPort for FixtureMemoryProvider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Request helpers shared by the mutation wrappers
-// ---------------------------------------------------------------------------
+// note: Request helpers shared by the mutation wrappers
 
-/// The space, record and key of an update request (its variant selects the
+/// note: The space, record and key of an update request (its variant selects the
 /// payload, never the identity).
 fn record_update_space(request: &MemoryRecordsUpdateRequest) -> String {
     match request {
@@ -1922,7 +1915,7 @@ fn record_update_key(request: &MemoryRecordsUpdateRequest) -> String {
     }
 }
 
-/// The issuer-side facets of one `memory.grants.grant` request: what the request
+/// note: The issuer-side facets of one `memory.grants.grant` request: what the request
 /// asks to hand out, which is exactly what the granter's admin coverage must
 /// contain (§6.5 non-amplification).
 struct IssuedFacets {
@@ -1970,7 +1963,7 @@ fn issued_facets(request: &MemoryGrantsGrantRequest) -> IssuedFacets {
     }
 }
 
-/// Whether the principal holds any live `admin` grant in the space, whatever
+/// note: Whether the principal holds any live `admin` grant in the space, whatever
 /// its facets — the revoke slice's stage-1 gate, repeated here because the
 /// precheck must refuse with exactly that vocabulary.
 fn has_live_admin(
@@ -2011,7 +2004,7 @@ fn grant_id_of(grant: &MemoryGrant) -> &str {
     }
 }
 
-/// The recorded target facets of an existing grant — the requirement a
+/// note: The recorded target facets of an existing grant — the requirement a
 /// revocation of it has to satisfy.
 fn grant_facets(grant: &MemoryGrant) -> OpTarget {
     match grant {
@@ -2042,7 +2035,7 @@ impl OpTarget {
     }
 }
 
-/// The requester identity of one call: the admission context the service face
+/// note: The requester identity of one call: the admission context the service face
 /// already resolved from the authenticated peer (MEM-R003).
 fn principal_id(principal: &Principal) -> &str {
     principal.principal_id.as_str()

@@ -32,6 +32,7 @@
 //! outcomes, and they stay content-free (MEM-R022): results carry ids, counts
 //! and outcome enums, the dedup row carries the JCS payload digest, and a
 //! consumed candidate keeps only its `content_digest` (§6.7).
+// note: test-only fixture slice; the crate-level doc in `lib.rs` names the conformance scope.
 
 use std::num::NonZeroU64;
 
@@ -65,31 +66,31 @@ use crate::spaces::{
 };
 use crate::FixtureError;
 
-/// Wire schema version carried by every fixture-served object (§6.1).
+/// note: Wire schema version carried by every fixture-served object (§6.1).
 const SCHEMA_VERSION: u64 = 1;
 
-/// `memory.describe.limits.max_content_bytes` for the fixture (§7.1); the
+/// note: `memory.describe.limits.max_content_bytes` for the fixture (§7.1); the
 /// assembly advertises this same value.
 pub const MAX_CONTENT_BYTES: usize = 64 * 1024;
 
-/// Provider candidate retention: a pending candidate stops being listed after
+/// note: Provider candidate retention: a pending candidate stops being listed after
 /// this window without being consumed (§6.7 `expires_at`, §8.1).
 const CANDIDATE_TTL_DAYS: i64 = 30;
 
-/// §7.1 `receipt_retention_seconds`: how long a receipt *body* is served.
+/// note: §7.1 `receipt_retention_seconds`: how long a receipt *body* is served.
 ///
 /// The window starts at `completed_at`, never at admission, so work that stayed
 /// pending keeps its full body window after it settles. Past the window only the
 /// content-free dedup tombstone answers (§6.10/MEM-R021).
 pub const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
 
-/// §7.1 `idempotency_retention_seconds`: the stored receipt-body window.
+/// note: §7.1 `idempotency_retention_seconds`: the stored receipt-body window.
 ///
 /// The fixture keeps it identical to `receipt_retention_seconds`, as the local
 /// provider does, so there is one body lifetime for every terminal receipt.
 pub const IDEMPOTENCY_RETENTION_SECONDS: u64 = RECEIPT_RETENTION_SECONDS;
 
-/// §7.1 `dedup_retention_seconds`: how long the dedup tombstone is kept.
+/// note: §7.1 `dedup_retention_seconds`: how long the dedup tombstone is kept.
 ///
 /// The tombstone (namespace key, payload digest, receipt id, last known status)
 /// is kept **after the body retires**, as §6.10 states. It is not counted from
@@ -98,27 +99,27 @@ pub const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;
 
 const _: () = assert!(DEDUP_RETENTION_SECONDS >= IDEMPOTENCY_RETENTION_SECONDS);
 
-/// One retention window as a signed span, for the deadline arithmetic below.
+/// note: One retention window as a signed span, for the deadline arithmetic below.
 fn retention_span(window_seconds: u64) -> Duration {
     Duration::seconds(i64::try_from(window_seconds).unwrap_or(i64::MAX))
 }
 
-/// The instant a receipt body retires: the terminal completion plus
+/// note: The instant a receipt body retires: the terminal completion plus
 /// `receipt_retention_seconds` (§6.10).
 fn body_expiry(completed: DateTime<Utc>) -> DateTime<Utc> {
     completed + retention_span(RECEIPT_RETENTION_SECONDS)
 }
 
-/// The instant the dedup tombstone retires: the body retirement plus the full
+/// note: The instant the dedup tombstone retires: the body retirement plus the full
 /// `dedup_retention_seconds` window (§6.10/MEM-R021).
 fn tombstone_expiry(completed: DateTime<Utc>) -> DateTime<Utc> {
     body_expiry(completed) + retention_span(DEDUP_RETENTION_SECONDS)
 }
 
-/// Advisory kind recorded when the request carries no `kind_hint` (§6.7).
+/// note: Advisory kind recorded when the request carries no `kind_hint` (§6.7).
 const DEFAULT_CANDIDATE_KIND: &str = "note";
 
-/// One refusal wording for both receipt-disclosure branches, so a caller can
+/// note: One refusal wording for both receipt-disclosure branches, so a caller can
 /// never tell from the response whether a body or only its tombstone exists.
 const RECEIPT_UNAUTHORIZED: &str =
     "the receipt requester holds no current authorization for this operation";
@@ -127,18 +128,16 @@ const OP_CAPTURE: &str = "memory.capture";
 const OP_CANDIDATES_DISMISS: &str = "memory.candidates.dismiss";
 const OP_CANDIDATES_REVIEW: &str = "memory.candidates.review";
 
-/// `memory.candidates.list` payload (§7.12).
+/// note: `memory.candidates.list` payload (§7.12).
 #[derive(Debug)]
 pub struct CandidatePage {
     pub(crate) candidates: Vec<MemoryCandidate>,
     pub(crate) next_cursor: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Admitted request boundary (§6.1, §7.0.1, §7.0.5)
-// ---------------------------------------------------------------------------
+// note: Admitted request boundary (§6.1, §7.0.1, §7.0.5)
 
-/// One request exactly as it was admitted at the transport boundary: the raw
+/// note: One request exactly as it was admitted at the transport boundary: the raw
 /// payload object the caller sent plus the typed view parsed from *that same*
 /// object.
 ///
@@ -155,7 +154,7 @@ pub struct Admitted<Request> {
 }
 
 impl<Request> Admitted<Request> {
-    /// The C7 request-scope bridge (D15): `payload_digest` was computed over the
+    /// note: The C7 request-scope bridge (D15): `payload_digest` was computed over the
     /// `Value` the transport actually received, *before* typed decode, under the
     /// per-request scope's matching op and provider identity. It is never a
     /// reserialization, a normalized fallback or a client-supplied value, and it
@@ -168,18 +167,18 @@ impl<Request> Admitted<Request> {
         }
     }
 
-    /// The canonical `payload_digest` of the admitted object (§6.1/§7.0.5).
+    /// note: The canonical `payload_digest` of the admitted object (§6.1/§7.0.5).
     pub(crate) fn payload_digest(&self) -> &str {
         &self.payload_digest
     }
 
-    /// The typed view parsed from that same object at admission.
+    /// note: The typed view parsed from that same object at admission.
     pub(crate) const fn request(&self) -> &Request {
         &self.request
     }
 }
 
-/// Admission of one received payload: hash the object once and move it into the
+/// note: Admission of one received payload: hash the object once and move it into the
 /// decoder, so the digest input and the executed request are the same bytes and
 /// nothing is cloned or reserialized.
 fn admit<Request>(
@@ -191,28 +190,26 @@ fn admit<Request>(
     Ok(Admitted::from_scope(payload_digest, request))
 }
 
-/// §7.11 `memory.capture` at the boundary.
+/// note: §7.11 `memory.capture` at the boundary.
 pub fn admit_capture(payload: Value) -> Result<Admitted<MemoryCaptureRequest>, SpokeReject> {
     admit(payload, serde_json::from_value)
 }
 
-/// §7.14 `memory.candidates.dismiss` at the boundary.
+/// note: §7.14 `memory.candidates.dismiss` at the boundary.
 pub fn admit_candidates_dismiss(
     payload: Value,
 ) -> Result<Admitted<MemoryCandidatesDismissRequest>, SpokeReject> {
     admit(payload, serde_json::from_value)
 }
 
-/// §7.15 `memory.candidates.review` at the boundary.
+/// note: §7.15 `memory.candidates.review` at the boundary.
 pub fn admit_candidates_review(
     payload: Value,
 ) -> Result<Admitted<MemoryCandidatesReviewRequest>, SpokeReject> {
     admit(payload, serde_json::from_value)
 }
 
-// ---------------------------------------------------------------------------
-// Protocol errors
-// ---------------------------------------------------------------------------
+// note: Protocol errors
 
 fn reject(code: SpokeRejectCode, message: impl Into<String>) -> SpokeReject {
     SpokeReject {
@@ -234,7 +231,7 @@ fn reject_with(
     }
 }
 
-/// §7.13–§7.15 by-id refusal (C-102): a candidate the caller may not act on and
+/// note: §7.13–§7.15 by-id refusal (C-102): a candidate the caller may not act on and
 /// a candidate id that does not exist must be indistinguishable, so the refusal
 /// is the same `NOT_FOUND` and names only the requested id.
 fn candidate_unavailable() -> SpokeReject {
@@ -249,7 +246,7 @@ fn not_found(message: impl Into<String>) -> SpokeReject {
     reject(SpokeRejectCode::NotFound, message)
 }
 
-/// A payload that is not the op's closed request object (§7.0.1): the caller's
+/// note: A payload that is not the op's closed request object (§7.0.1): the caller's
 /// fault, so `INVALID_INPUT` rather than an internal failure.
 fn invalid_payload(error: impl std::fmt::Display) -> SpokeReject {
     reject_with(
@@ -288,7 +285,7 @@ fn candidate_consumed(candidate_id: &str) -> SpokeReject {
     )
 }
 
-/// §6.10/MEM-R021: the dedup tombstone outlived the receipt body, so the key is
+/// note: §6.10/MEM-R021: the dedup tombstone outlived the receipt body, so the key is
 /// bound but no receipt can be disclosed.
 fn receipt_expired(last_known_status: &str) -> SpokeReject {
     reject_with(
@@ -301,7 +298,7 @@ fn receipt_expired(last_known_status: &str) -> SpokeReject {
     )
 }
 
-/// §14.3: the caller cannot tell whether the mutation committed. Resolution is
+/// note: §14.3: the caller cannot tell whether the mutation committed. Resolution is
 /// always a same-key replay (which returns the original receipt) or
 /// `memory.receipts.get`.
 fn outcome_uncertain() -> SpokeReject {
@@ -312,7 +309,7 @@ fn outcome_uncertain() -> SpokeReject {
     )
 }
 
-/// A commit that failed may still have taken effect (§14.3): the caller cannot
+/// note: A commit that failed may still have taken effect (§14.3): the caller cannot
 /// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
 /// clean retryable internal error.
 fn commit_unknown() -> SpokeReject {
@@ -325,7 +322,7 @@ fn commit_unknown() -> SpokeReject {
     }
 }
 
-/// A fixture fault that ended before this operation committed. §14.2 allows the
+/// note: A fixture fault that ended before this operation committed. §14.2 allows the
 /// retryable internal class only when no effect committed, which holds here.
 fn fault_before_effect(point: FaultPoint) -> SpokeReject {
     reject(
@@ -334,7 +331,7 @@ fn fault_before_effect(point: FaultPoint) -> SpokeReject {
     )
 }
 
-/// A receipt target that cannot describe a real requirement (§6.5/§6.12).
+/// note: A receipt target that cannot describe a real requirement (§6.5/§6.12).
 fn invalid_target(message: impl Into<String>) -> SpokeReject {
     reject_with(
         SpokeRejectCode::InvalidInput,
@@ -357,7 +354,7 @@ fn idempotency_conflict() -> SpokeReject {
     )
 }
 
-/// §7.1/§7.15: every content object a review writes to a retained record is
+/// note: §7.1/§7.15: every content object a review writes to a retained record is
 /// measured with the published `content_serialized_bytes` — the same advertised
 /// `max_content_bytes` measure the capture and record validators use — before
 /// any effect. An oversized object fails `INVALID_INPUT` naming the limit.
@@ -378,7 +375,7 @@ fn require_review_content(field: &str, content: &Value) -> Result<(), SpokeRejec
     ))
 }
 
-/// Flatten the published validator envelope into the crate's result shape.
+/// note: Flatten the published validator envelope into the crate's result shape.
 fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
     match result {
         SpokeResult::Ok(()) => Ok(()),
@@ -420,7 +417,7 @@ fn row_i64(value: u64) -> Result<i64, SpokeReject> {
     i64::try_from(value).map_err(internal_failure)
 }
 
-/// The fixture serves exactly one space; any other id has no existence signal.
+/// note: The fixture serves exactly one space; any other id has no existence signal.
 fn require_served_space(
     provider: &FixtureMemoryProvider,
     requested: &str,
@@ -433,7 +430,7 @@ fn require_served_space(
     )))
 }
 
-/// §8.2 gate for a mutating candidate op. The allowlist decision is the
+/// note: §8.2 gate for a mutating candidate op. The allowlist decision is the
 /// published predicate, so the fixture cannot drift from the protocol.
 async fn require_space_admits(
     conn: &mut SqliteConnection,
@@ -456,7 +453,7 @@ async fn require_space_admits(
     ))
 }
 
-/// The subject facts a candidate write needs: the lifecycle status and the
+/// note: The subject facts a candidate write needs: the lifecycle status and the
 /// context-scoped fence allowlist (§7.7/MEM-R024).
 struct CaptureTarget {
     status: String,
@@ -486,7 +483,7 @@ async fn capture_target(
     })
 }
 
-/// Refuse a write that would place content on a fenced subject or into a
+/// note: Refuse a write that would place content on a fenced subject or into a
 /// specific fenced placement context (§8.3/MEM-R024).
 async fn require_write_target(
     conn: &mut SqliteConnection,
@@ -510,7 +507,7 @@ async fn require_write_target(
     Ok(())
 }
 
-/// §7.7: a subject-level fence or archive rejects every write for that subject.
+/// note: §7.7: a subject-level fence or archive rejects every write for that subject.
 async fn require_active_subject(
     conn: &mut SqliteConnection,
     space_id: &str,
@@ -523,7 +520,7 @@ async fn require_active_subject(
     Ok(())
 }
 
-/// §6.5 coverage for one placement scope: a context placement needs that
+/// note: §6.5 coverage for one placement scope: a context placement needs that
 /// context, a shared placement needs shared access.
 fn scope_requirement<'a>(
     capability: &'a str,
@@ -549,7 +546,7 @@ fn scope_requirement<'a>(
     }
 }
 
-/// §6.5/MEM-R006: one grant must cover every facet of every requirement. Two
+/// note: §6.5/MEM-R006: one grant must cover every facet of every requirement. Two
 /// grants never union, so an op that needs two capabilities needs one grant
 /// carrying both.
 fn one_grant_covers(
@@ -566,7 +563,7 @@ fn one_grant_covers(
     })
 }
 
-/// [`one_grant_covers`] as an explicit refusal, for ops whose target the caller
+/// note: [`one_grant_covers`] as an explicit refusal, for ops whose target the caller
 /// names itself (the capture placement, the list subject).
 fn require_one_grant(
     grants: &[MemoryGrant],
@@ -583,7 +580,7 @@ fn require_one_grant(
     ))
 }
 
-/// The content-free authorization target of the operation that produced a
+/// note: The content-free authorization target of the operation that produced a
 /// receipt (§6.5/§7.28): the capabilities it required and the subject and
 /// placement/selection facets a current grant must actually cover.
 ///
@@ -601,7 +598,7 @@ pub struct ReceiptTarget {
 }
 
 impl ReceiptTarget {
-    /// Crate-visible construction for any §7 operation requirement: the
+    /// note: Crate-visible construction for any §7 operation requirement: the
     /// capabilities that operation needed plus its complete subject and
     /// placement/selection facets.
     ///
@@ -665,7 +662,7 @@ impl ReceiptTarget {
         })
     }
 
-    /// §6.5 **whole-space** requirement: the complete published
+    /// note: §6.5 **whole-space** requirement: the complete published
     /// `whole_scope_requirement` shape — no subject, no named context, and the
     /// unrestricted-coverage facet — so a context- or shared-restricted grant
     /// never covers it.
@@ -678,7 +675,7 @@ impl ReceiptTarget {
         Self::new(capabilities, None, &[], false, true)
     }
 
-    /// Target of an op whose requirement is a placement scope: a `context`
+    /// note: Target of an op whose requirement is a placement scope: a `context`
     /// placement needs that context, a `shared` placement needs shared access.
     fn for_scope(
         capabilities: &'static [&'static str],
@@ -695,7 +692,7 @@ impl ReceiptTarget {
         }
     }
 
-    /// Target of an op that names only a subject and no placement facet, such
+    /// note: Target of an op that names only a subject and no placement facet, such
     /// as §7.5 `memory.subjects.ensure`.
     fn for_subject(
         capabilities: &'static [&'static str],
@@ -704,7 +701,7 @@ impl ReceiptTarget {
         Self::new(capabilities, Some(subject_id), &[], false, false)
     }
 
-    /// §6.5/MEM-R006 single-grant coverage of the recorded target: one live
+    /// note: §6.5/MEM-R006 single-grant coverage of the recorded target: one live
     /// grant must carry every required capability *and* cover the recorded
     /// subject and placement facets. Grants are never unioned, so an unrelated
     /// same-capability grant never reopens this receipt.
@@ -784,7 +781,7 @@ async fn fetch_receipt_target(
     .transpose()
 }
 
-/// The capabilities each mutating op required, from the §7 grant tables; `None`
+/// note: The capabilities each mutating op required, from the §7 grant tables; `None`
 /// for an op string the published base table does not define. `admin` in a
 /// grant implies every capability within that grant's coverage (§6.5), so a
 /// grant that literally carries `admin` satisfies any requirement here.
@@ -822,7 +819,7 @@ pub fn required_capabilities(op: &str) -> Option<&'static [&'static str]> {
     })
 }
 
-/// §6.5 treats an expired grant exactly as a revoked one, so the cursor must
+/// note: §6.5 treats an expired grant exactly as a revoked one, so the cursor must
 /// bind the caller's **effective** authorization at the supplied instant, not
 /// only the persistent marker: a grant that expires between two pages changes
 /// this fingerprint without any row changing, and the next page is refused
@@ -883,7 +880,7 @@ fn effective_authorization_digest(
             "shared_access": shared_access,
         }));
     }
-    // One canonical order: the row order of `load_grants` already sorts by
+    // why: One canonical order: the row order of `load_grants` already sorts by
     // grant id, but the digest must not depend on it.
     live.sort_by(|left, right| {
         left["grant_id"]
@@ -894,11 +891,9 @@ fn effective_authorization_digest(
     digest(&Value::Array(live))
 }
 
-// ---------------------------------------------------------------------------
-// Receipts and idempotency (§6.10, §7.0.5, §8.5)
-// ---------------------------------------------------------------------------
+// note: Receipts and idempotency (§6.10, §7.0.5, §8.5)
 
-/// The dedup identity of one admitted mutation: the op, the caller-chosen key
+/// note: The dedup identity of one admitted mutation: the op, the caller-chosen key
 /// and the JCS payload digest that key is bound to (§6.1/§7.0.5).
 ///
 /// Crate-visible with [`resolve_replay`] and [`stage_receipt_in_tx`] so the
@@ -911,7 +906,7 @@ pub struct Mutation {
 }
 
 impl Mutation {
-    /// Keyed dedup identity (§7.0.5). The digest is read from the admitted
+    /// note: Keyed dedup identity (§7.0.5). The digest is read from the admitted
     /// request, so it is always the digest of the object the caller actually
     /// sent — never a typed reserialization.
     pub(crate) fn keyed<Request>(
@@ -926,7 +921,7 @@ impl Mutation {
         }
     }
 
-    /// The §7.0.5 sole keyless mutation (`memory.subjects.ensure`): it binds no
+    /// note: The §7.0.5 sole keyless mutation (`memory.subjects.ensure`): it binds no
     /// dedup namespace row, is never a replay, and still carries the admitted
     /// `payload_digest` on its receipt.
     pub(crate) fn keyless<Request>(op: &'static str, admitted: &Admitted<Request>) -> Self {
@@ -938,7 +933,7 @@ impl Mutation {
     }
 }
 
-/// The state one durable receipt row is written with (§6.10). `Committed`
+/// note: The state one durable receipt row is written with (§6.10). `Committed`
 /// carries the content-free result summary; `Failed` carries the reject whose
 /// envelope is stored with its §14.2 retry class.
 pub enum ReceiptState {
@@ -947,7 +942,7 @@ pub enum ReceiptState {
     Failed(SpokeReject),
 }
 
-/// §14.2 retry classes for the memory codes this slice can store.
+/// note: §14.2 retry classes for the memory codes this slice can store.
 const fn retry_class(code: SpokeRejectCode) -> &'static str {
     match code {
         SpokeRejectCode::OutcomeUncertain => "uncertain",
@@ -986,7 +981,7 @@ struct StoredReceipt {
     error: Option<String>,
     created_at: String,
     completed_at: Option<String>,
-    /// §6.10 body deadline; `None` only while the receipt is pending.
+    /// note: §6.10 body deadline; `None` only while the receipt is pending.
     body_expires_at: Option<String>,
 }
 
@@ -995,7 +990,7 @@ impl StoredReceipt {
         self.status == "pending"
     }
 
-    /// Whether the body is still inside its terminal window at `now`.
+    /// note: Whether the body is still inside its terminal window at `now`.
     fn inside_body_window(&self, now: DateTime<Utc>) -> Result<bool, SpokeReject> {
         let raw = self
             .body_expires_at
@@ -1061,11 +1056,11 @@ async fn fetch_receipt(
     .transpose()
 }
 
-/// The content-free dedup tombstone metadata that outlives the receipt body
+/// note: The content-free dedup tombstone metadata that outlives the receipt body
 /// (§6.10/MEM-R021), kept independently of the body row.
 struct StoredTombstone {
     last_known_status: String,
-    /// §6.10 tombstone deadline; `None` only while the receipt is pending.
+    /// note: §6.10 tombstone deadline; `None` only while the receipt is pending.
     tombstone_expires_at: Option<String>,
 }
 
@@ -1120,17 +1115,17 @@ async fn fetch_tombstone(
     .transpose()
 }
 
-/// §6.10/MEM-R021 logical retention of one receipt at one supplied instant.
+/// note: §6.10/MEM-R021 logical retention of one receipt at one supplied instant.
 ///
 /// It is evaluated from the persisted lifecycle deadlines, not from physical
 /// presence, so an old row that no explicit maintenance pass has reclaimed is
 /// still judged by the contract. Nothing here writes.
 enum ReceiptRetention {
-    /// The body is inside its terminal window and is served as stored.
+    /// note: The body is inside its terminal window and is served as stored.
     Retained,
-    /// The body's window ended; the dedup tombstone still protects the key.
+    /// note: The body's window ended; the dedup tombstone still protects the key.
     Evicted { last_known_status: String },
-    /// The whole lifetime ended (or nothing exists): as good as absent.
+    /// note: The whole lifetime ended (or nothing exists): as good as absent.
     Expired,
 }
 
@@ -1142,7 +1137,7 @@ impl ReceiptRetention {
     ) -> Result<Self, SpokeReject> {
         if let Some(tombstone) = tombstone {
             if tombstone.last_known_status == "pending" {
-                // Live work: never expire it into re-execution, and the body it
+                // why: Live work: never expire it into re-execution, and the body it
                 // belongs to must still exist.
                 return body
                     .map(|_| Self::Retained)
@@ -1160,7 +1155,7 @@ impl ReceiptRetention {
                 }),
             };
         }
-        // No dedup namespace: a keyless receipt has no tombstone by design, and
+        // note: No dedup namespace: a keyless receipt has no tombstone by design, and
         // an orphan keyed body has already outlived its namespace.
         match body {
             None => Ok(Self::Expired),
@@ -1216,7 +1211,7 @@ fn receipt_to_wire(stored: &StoredReceipt) -> Result<MemoryReceipt, SpokeReject>
     serde_json::from_value(value).map_err(internal_failure)
 }
 
-/// Stage one durable receipt plus its dedup row on the caller's connection and
+/// note: Stage one durable receipt plus its dedup row on the caller's connection and
 /// advance the private snapshot marker in the same transaction (§6.10, §8.5).
 /// Never commits, so an effect and its receipt commit together (MEM-R009).
 #[allow(clippy::too_many_arguments)]
@@ -1247,7 +1242,7 @@ pub async fn stage_receipt_in_tx(
             Some(timestamp_text(body_expiry(now))),
         ),
     };
-    // §6.10: the body window starts at terminal completion, so a receipt that
+    // why: §6.10: the body window starts at terminal completion, so a receipt that
     // stayed pending is not born already expired.
     sqlx::query(
         "INSERT INTO receipts (receipt_id, space_id, requester_principal_id, op, idempotency_key, \
@@ -1270,10 +1265,10 @@ pub async fn stage_receipt_in_tx(
     .execute(&mut *conn)
     .await
     .map_err(internal_failure)?;
-    // §7.0.5: the keyless mutation is the sole exemption and binds no dedup
+    // why: §7.0.5: the keyless mutation is the sole exemption and binds no dedup
     // namespace row, so nothing can ever replay it.
     if let Some(idempotency_key) = admission.idempotency_key.as_deref() {
-        // §6.10/MEM-R021: the tombstone deadline starts when the body retires,
+        // why: §6.10/MEM-R021: the tombstone deadline starts when the body retires,
         // so it is the terminal completion plus both declared windows. A
         // pending receipt carries no deadline until it settles.
         let tombstone_expires_at = body_expires_at
@@ -1301,7 +1296,7 @@ pub async fn stage_receipt_in_tx(
             _ => internal_failure(error),
         })?;
     }
-    // The target is written with the receipt and independent of its body, so an
+    // why: The target is written with the receipt and independent of its body, so an
     // evicted body's tombstone read still rechecks the original scope.
     store_receipt_target_in_tx(conn, receipt_id, target).await?;
     bump_snapshot(conn, space_id).await?;
@@ -1311,7 +1306,7 @@ pub async fn stage_receipt_in_tx(
     receipt_to_wire(&stored)
 }
 
-/// Complete a pending receipt and its dedup tombstone (§8.5): stage a
+/// note: Complete a pending receipt and its dedup tombstone (§8.5): stage a
 /// `Pending` receipt, later settle it to `Committed` or `Failed` on the caller's
 /// connection and never return it to pending. The fault and retention slices
 /// drive this transition; a synchronous op skips it and commits directly.
@@ -1340,12 +1335,12 @@ pub async fn settle_receipt_in_tx(
             ))
         }
     };
-    // §6.10/MEM-R021: the body and tombstone windows start at this terminal
+    // why: §6.10/MEM-R021: the body and tombstone windows start at this terminal
     // completion, so pending work that settles late still gets both full
     // declared recoverability windows.
     let body_expires_at = timestamp_text(body_expiry(now));
     let tombstone_expires_at = timestamp_text(tombstone_expiry(now));
-    // A generate receipt settles only for its lease owner; every other
+    // why: A generate receipt settles only for its lease owner; every other
     // receipt carries no owner. `IS` is SQLite's NULL-safe equality, so the
     // None shape matches the unowned rows exactly.
     let settled = sqlx::query(
@@ -1366,7 +1361,7 @@ pub async fn settle_receipt_in_tx(
     .map_err(internal_failure)?;
     if settled.rows_affected() != 1 {
         return Err(match owner {
-            // The lease was lost, not the store (§7.0.3): the receipt stays
+            // why: The lease was lost, not the store (§7.0.3): the receipt stays
             // replayable and this caller resolves it through replay or
             // memory.receipts.get — never a fabricated terminal outcome.
             Some(_) => SpokeReject {
@@ -1400,20 +1395,20 @@ pub async fn settle_receipt_in_tx(
     receipt_to_wire(&stored)
 }
 
-/// §7.0.5/MEM-R021 replay resolution at the supplied instant.
+/// note: §7.0.5/MEM-R021 replay resolution at the supplied instant.
 #[derive(Debug)]
 pub enum ReplayResolution {
-    /// No binding: the operation executes like a first attempt.
+    /// note: No binding: the operation executes like a first attempt.
     Fresh,
-    /// The identical admitted replay returns the stored receipt.
+    /// note: The identical admitted replay returns the stored receipt.
     Replayed(Box<MemoryReceipt>),
-    /// The whole namespace lifetime ended. The caller releases this stale
+    /// note: The whole namespace lifetime ended. The caller releases this stale
     /// binding inside its own transaction before staging the new effect, so a
     /// refusal after this point rolls the release back with the refused effect.
     KeyReusable { receipt_id: String },
 }
 
-/// An identical admitted replay returns the stored receipt without
+/// note: An identical admitted replay returns the stored receipt without
 /// re-executing; a changed payload under the same key is a conflict; a retired
 /// body answers `RECEIPT_EXPIRED` while its tombstone lives, and only a
 /// finished lifetime frees the key again.
@@ -1429,7 +1424,7 @@ pub async fn resolve_replay(
     now: DateTime<Utc>,
 ) -> Result<ReplayResolution, SpokeReject> {
     let Some(idempotency_key) = admission.idempotency_key.as_deref() else {
-        // §7.0.5 sole keyless exemption: no namespace row exists, so there is
+        // why: §7.0.5 sole keyless exemption: no namespace row exists, so there is
         // nothing to replay and the op is admitted like a first attempt.
         return Ok(ReplayResolution::Fresh);
     };
@@ -1455,7 +1450,7 @@ pub async fn resolve_replay(
             .try_get("tombstone_expires_at")
             .map_err(internal_failure)?,
     };
-    // §7.0.5/MEM-R021: the whole lifetime is classified FIRST, independently of
+    // why: §7.0.5/MEM-R021: the whole lifetime is classified FIRST, independently of
     // any authority. A binding that has fully expired is no longer a receipt to
     // disclose — it is a free key, exactly as after an explicit operator sweep,
     // so the caller's current authority for the *new* execution decides (the
@@ -1465,7 +1460,7 @@ pub async fn resolve_replay(
     if tombstone.last_known_status != "pending" && now > tombstone.tombstone_end()? {
         return Ok(ReplayResolution::KeyReusable { receipt_id });
     }
-    // A live body or a live tombstone IS a receipt to disclose, so it is only
+    // why: A live body or a live tombstone IS a receipt to disclose, so it is only
     // revealed to a principal whose *current* grants still cover the target the
     // receipt recorded — the same content-free target `memory.receipts.get`
     // rechecks. This runs in the caller's transaction, before the outcome, the
@@ -1498,7 +1493,7 @@ pub async fn resolve_replay(
     }
 }
 
-/// Resolve replay for a mutation about to execute on the caller's transaction.
+/// note: Resolve replay for a mutation about to execute on the caller's transaction.
 ///
 /// A finished key is released here, inside the same transaction, so a refusal
 /// after this point rolls the release back with the refused effect.
@@ -1520,7 +1515,7 @@ async fn resolve_or_release(
     }
 }
 
-/// Drop the stale binding of a key whose whole lifetime ended.
+/// note: Drop the stale binding of a key whose whole lifetime ended.
 ///
 /// This is not maintenance ahead of an operation: it is the atomic prerequisite
 /// for reusing the key, executed inside the caller's transaction, so a refusal
@@ -1561,25 +1556,25 @@ pub async fn release_expired_binding_in_tx(
     Ok(())
 }
 
-/// What one explicit §6.10 retention pass reclaimed from the fixture's rows.
+/// note: What one explicit §6.10 retention pass reclaimed from the fixture's rows.
 ///
 /// Physical reclamation is operator maintenance only: no read, refusal or
 /// mutation wrapper runs it implicitly, so a refused operation can never commit
 /// an unrelated cleanup. The counts are raised by the statements themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RetentionSweep {
-    /// Keyed receipt bodies reclaimed after their terminal body window.
+    /// note: Keyed receipt bodies reclaimed after their terminal body window.
     pub receipt_bodies_evicted: u64,
-    /// Keyless receipt bodies reclaimed at their body end, together with their
+    /// note: Keyless receipt bodies reclaimed at their body end, together with their
     /// targets (a keyless receipt binds no dedup namespace).
     pub keyless_bodies_evicted: u64,
-    /// Keyed dedup tombstones reclaimed after their full post-body window.
+    /// note: Keyed dedup tombstones reclaimed after their full post-body window.
     pub dedup_tombstones_evicted: u64,
-    /// Receipt targets reclaimed with a keyed tombstone or a keyless body.
+    /// note: Receipt targets reclaimed with a keyed tombstone or a keyless body.
     pub targets_removed: u64,
 }
 
-/// §6.10/MEM-R021 physical reclamation on the caller's connection, at one
+/// note: §6.10/MEM-R021 physical reclamation on the caller's connection, at one
 /// supplied instant (the explicit operator maintenance pass).
 ///
 /// Origins are the persisted lifecycle deadlines, so this pass can never shorten
@@ -1599,7 +1594,7 @@ pub async fn retention_sweep_in_tx(
     let now_text = timestamp_text(now);
     let mut sweep = RetentionSweep::default();
 
-    // Keyed tombstone end: the target and namespace row end together, so the
+    // why: Keyed tombstone end: the target and namespace row end together, so the
     // key is free again and nothing can reauthorize a tombstone that no longer
     // exists.
     let dedup_targets = sqlx::query(
@@ -1626,7 +1621,7 @@ pub async fn retention_sweep_in_tx(
     sweep.targets_removed += dedup_targets.rows_affected();
     sweep.dedup_tombstones_evicted = dedup.rows_affected();
 
-    // Keyless body end: no dedup row exists, so the body and its target end
+    // why: Keyless body end: no dedup row exists, so the body and its target end
     // together.
     let keyless_targets = sqlx::query(
         "DELETE FROM receipt_targets WHERE receipt_id IN ( \
@@ -1652,7 +1647,7 @@ pub async fn retention_sweep_in_tx(
     sweep.targets_removed += keyless_targets.rows_affected();
     sweep.keyless_bodies_evicted = keyless_bodies.rows_affected();
 
-    // Keyed body end: the body leaves alone; its tombstone and recorded target
+    // note: Keyed body end: the body leaves alone; its tombstone and recorded target
     // stay until the tombstone window ends above.
     let keyed_bodies = sqlx::query(
         "DELETE FROM receipts \
@@ -1668,9 +1663,7 @@ pub async fn retention_sweep_in_tx(
     Ok(sweep)
 }
 
-// ---------------------------------------------------------------------------
-// Stored candidates (§6.7)
-// ---------------------------------------------------------------------------
+// note: Stored candidates (§6.7)
 
 struct StoredCandidate {
     candidate_id: String,
@@ -1760,7 +1753,7 @@ impl StoredCandidate {
         self.capture_context_id.as_deref()
     }
 
-    /// §6.7/§7.12: only a pending candidate expires, and an expired pending
+    /// note: §6.7/§7.12: only a pending candidate expires, and an expired pending
     /// candidate is excluded from lists rather than consumed.
     fn expires_at(&self) -> Result<Option<DateTime<Utc>>, SpokeReject> {
         self.expires_at
@@ -1772,7 +1765,7 @@ impl StoredCandidate {
         Ok(self.status == "pending" && self.expires_at()?.is_some_and(|expires| expires <= now))
     }
 
-    /// §6.7 consumption scrub: the digest of the content that is about to leave
+    /// note: §6.7 consumption scrub: the digest of the content that is about to leave
     /// the shell, retained for dedup/audit.
     fn scrubbed_digest(&self) -> Result<String, SpokeReject> {
         let raw = self
@@ -1827,7 +1820,7 @@ fn candidate_to_wire(
             .content_digest
             .as_deref()
             .ok_or_else(|| internal("a consumed candidate carries no content digest"))?;
-        // The shell keeps the identity, the kind and the outcome; the body is
+        // note: The shell keeps the identity, the kind and the outcome; the body is
         // gone (§6.7 consumption scrub).
         value["proposed"] = json!({ "kind": candidate.kind });
         value["consumed_by"] = stored_json(consumed_by, "candidate consumption")?;
@@ -1852,7 +1845,7 @@ const fn status_name(status: CandidateStatus) -> &'static str {
     }
 }
 
-/// The resume index a continuation cursor names on exactly this visible set.
+/// note: The resume index a continuation cursor names on exactly this visible set.
 ///
 /// A cursor is only meaningful against the query and provider state that issued
 /// it: a different digest, a missing entry or a malformed cursor is refused
@@ -1880,7 +1873,7 @@ fn cursor_start(
         .ok_or_else(|| cursor_invalid("cursor no longer matches the candidate set"))
 }
 
-/// §7.15: one grant must cover both `review` and `records_write` over the
+/// note: §7.15: one grant must cover both `review` and `records_write` over the
 /// candidate's capture scope, so no union of grants amplifies coverage.
 fn require_review_authority(
     grants: &[MemoryGrant],
@@ -1904,16 +1897,16 @@ fn require_review_authority(
     if covered {
         return Ok(());
     }
-    // Indistinguishable from a missing id (C-102), including the partial-coverage
+    // why: Indistinguishable from a missing id (C-102), including the partial-coverage
     // case where only one of the two capabilities is held.
     Err(candidate_unavailable())
 }
 
-/// One planned content object: the field it was authored under, its kind and its
+/// note: One planned content object: the field it was authored under, its kind and its
 /// encoded value.
 type PlannedContent = Vec<(String, String, Value)>;
 
-/// Plan every content object one review decision retains, bounding each one
+/// note: Plan every content object one review decision retains, bounding each one
 /// before ANY effect: an oversized override — or a later oversized fragment
 /// after valid earlier ones — can neither consume the candidate nor leave
 /// partial records.
@@ -1924,11 +1917,6 @@ fn plan_review_content(
     candidate: &StoredCandidate,
     decision: &Decision,
 ) -> Result<(String, PlannedContent), SpokeReject> {
-    // §7.1/§7.15: plan every content object this decision will retain and
-    // bound each one before ANY effect, so an oversized override — or a later
-    // oversized fragment after valid earlier ones — cannot consume the
-    // candidate or leave partial records. The decision carries no placement:
-    // created records inherit the candidate's admitted capture scope (§7.15).
     let (outcome, planned) = match decision {
         Decision::Promote {
             content_override,
@@ -1978,7 +1966,7 @@ fn plan_review_content(
     Ok((outcome, planned))
 }
 
-/// The candidates this caller may see in the current snapshot, already filtered
+/// note: The candidates this caller may see in the current snapshot, already filtered
 /// by status, expiry and each candidate's immutable capture scope.
 async fn visible_candidates(
     conn: &mut SqliteConnection,
@@ -1992,7 +1980,7 @@ async fn visible_candidates(
     let subject_id = request.subject_id.as_str();
     let status_filter = request.status.map(status_name);
     let mut visible = Vec::new();
-    // §7.7: `archived` is terminal decommission and excludes the subject's
+    // why: §7.7: `archived` is terminal decommission and excludes the subject's
     // candidates from the listing; fence (`fenced`) still lists so the queue
     // stays inspectable, and reads remain allowed for archived subjects.
     if target.status != "archived" {
@@ -2003,7 +1991,7 @@ async fn visible_candidates(
             if candidate.is_expired_at(now)? {
                 continue;
             }
-            // Each candidate is filtered by its immutable capture scope, so a
+            // why: Each candidate is filtered by its immutable capture scope, so a
             // context-limited review grant never sees another placement.
             if !is_authorized(
                 grants,
@@ -2026,11 +2014,9 @@ async fn visible_candidates(
 }
 
 impl FixtureMemoryProvider {
-    // -----------------------------------------------------------------------
-    // memory.capture (§7.11)
-    // -----------------------------------------------------------------------
+    // note: memory.capture (§7.11)
 
-    /// Capture raw material for one subject; commit the candidates, the receipt
+    /// note: Capture raw material for one subject; commit the candidates, the receipt
     /// and the dedup binding in one transaction.
     ///
     /// The fault points bracket the real commit: an admission pause runs before
@@ -2044,7 +2030,7 @@ impl FixtureMemoryProvider {
     ) -> Result<MemoryReceipt, SpokeReject> {
         let space_id = admitted.request().space_id.as_str();
         require_served_space(self, space_id)?;
-        // Bounded test-only admission pause: it runs before the writer
+        // why: Bounded test-only admission pause: it runs before the writer
         // transaction, so a competing identical retry can commit while this
         // admission waits and this one then replays that receipt. A hold that
         // ends early is a clean no-effect failure: nothing was staged yet.
@@ -2061,7 +2047,7 @@ impl FixtureMemoryProvider {
         let receipt = self
             .capture_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        // A cancellation inside the staged-but-uncommitted window: the caller
+        // why: A cancellation inside the staged-but-uncommitted window: the caller
         // drops this future, so the transaction is never committed and nothing
         // it staged can become durable. An expired control ends the wait with
         // the same no-effect outcome.
@@ -2069,19 +2055,19 @@ impl FixtureMemoryProvider {
             .hold(FaultPoint::BeforeCommit)
             .await
             .map_err(|_| fault_before_effect(FaultPoint::BeforeCommit))?;
-        // Loss before commit (§14.3): dropping the staged transaction leaves no
+        // note: Loss before commit (§14.3): dropping the staged transaction leaves no
         // candidate, record, receipt, dedup row, target or marker behind.
         if self.faults().trip(FaultPoint::BeforeCommit) {
             transaction.rollback().await.map_err(internal_failure)?;
             return Err(outcome_uncertain());
         }
         transaction.commit().await.map_err(|_| commit_unknown())?;
-        // Loss after commit, before the response: the effect is durable and the
+        // why: Loss after commit, before the response: the effect is durable and the
         // caller must resolve the uncertainty through replay or receipts.get.
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
             return Err(outcome_uncertain());
         }
-        // Response drop: the committed answer is held until the caller tears the
+        // why: Response drop: the committed answer is held until the caller tears the
         // connection down. The effect is already durable, so a hold that ends
         // without a release is an uncertain outcome, never a clean failure.
         self.faults()
@@ -2091,7 +2077,7 @@ impl FixtureMemoryProvider {
         Ok(receipt)
     }
 
-    /// §6.10/MEM-R021 explicit operator maintenance at one caller-supplied
+    /// note: §6.10/MEM-R021 explicit operator maintenance at one caller-supplied
     /// instant (the C7 retention seam).
     ///
     /// This is the only physical reclamation path: reads, refusals and mutation
@@ -2124,7 +2110,7 @@ impl FixtureMemoryProvider {
         Ok(sweep)
     }
 
-    /// Stage one durable pending candidate under a caller-named identity.
+    /// note: Stage one durable pending candidate under a caller-named identity.
     ///
     /// **Privileged fixture operator construction, not a client or wire
     /// operation.** The protocol's capture op always mints its own candidate
@@ -2170,7 +2156,7 @@ impl FixtureMemoryProvider {
         let capture_content = CaptureContent {
             structured: content.get("structured").cloned(),
             text: text.to_owned(),
-            // Cognition family stays UNCONSUMED (baseline rule).
+            // note: Cognition family stays UNCONSUMED (baseline rule).
             cognition: None,
         };
         let classification = classify(&capture_content);
@@ -2225,7 +2211,7 @@ impl FixtureMemoryProvider {
         }
     }
 
-    /// [`Self::capture`] on a caller-owned connection; never commits.
+    /// note: [`Self::capture`] on a caller-owned connection; never commits.
     pub(crate) async fn capture_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2247,7 +2233,7 @@ impl FixtureMemoryProvider {
             visibility,
             context_id,
         )?;
-        // Resolve and authorize an EXISTING binding first: its retained target
+        // why: Resolve and authorize an EXISTING binding first: its retained target
         // (and the payload digest) decide the replay, conflict or retention
         // outcome, so a changed request naming a target the caller cannot reach
         // must still answer `IDEMPOTENCY_CONFLICT` rather than an authorization
@@ -2284,14 +2270,14 @@ impl FixtureMemoryProvider {
                 .as_deref()
                 .map_or(DEFAULT_CANDIDATE_KIND, String::as_str);
             let provenance = json!({
-                // Wire members may be absent (presence-sensitive); the stored
+                // note: Wire members may be absent (presence-sensitive); the stored
                 // provenance always carries the schema's arrays.
                 "source_context_ids": request.source_context_ids.clone().unwrap_or_default(),
                 "anchors": request.anchors.clone().unwrap_or_default(),
                 "captured_by": principal_id,
                 "captured_at": timestamp_text(now),
             });
-            // Wire shape of `proposed.content` (§6.6): `structured` is present
+            // why: Wire shape of `proposed.content` (§6.6): `structured` is present
             // only when the request carried it, matching the typed round trip
             // that the consumption digest is computed over.
             let content = request.content.structured.as_ref().map_or_else(
@@ -2327,7 +2313,7 @@ impl FixtureMemoryProvider {
             candidate_ids.push(candidate_id);
         }
 
-        // A zero-candidate capture is a committed outcome whose receipt records
+        // why: A zero-candidate capture is a committed outcome whose receipt records
         // the count, never an empty success without a receipt (§7.11).
         let result = json!({
             "candidate_ids": candidate_ids,
@@ -2346,9 +2332,7 @@ impl FixtureMemoryProvider {
         .await
     }
 
-    // -----------------------------------------------------------------------
-    // memory.candidates.list / get (§7.12/§7.13)
-    // -----------------------------------------------------------------------
+    // note: memory.candidates.list / get (§7.12/§7.13)
 
     pub(crate) async fn candidates_list(
         &self,
@@ -2369,7 +2353,7 @@ impl FixtureMemoryProvider {
         Ok(page)
     }
 
-    /// Whole page read on the caller's snapshot: space access, grants,
+    /// note: Whole page read on the caller's snapshot: space access, grants,
     /// candidates and the cursor marker all agree in one snapshot (MEM-R026).
     pub(crate) async fn candidates_list_in_tx(
         &self,
@@ -2383,7 +2367,7 @@ impl FixtureMemoryProvider {
         require_served_space(self, space_id)?;
         let subject_id = request.subject_id.as_str();
         let grants = load_grants(conn, space_id).await?;
-        // Refuse before revealing whether the subject exists: a principal with
+        // note: Refuse before revealing whether the subject exists: a principal with
         // no `review` grant on the subject gets the same answer either way.
         if !is_authorized(
             &grants,
@@ -2402,7 +2386,7 @@ impl FixtureMemoryProvider {
         let visible =
             visible_candidates(conn, &grants, principal_id, request, &target, now).await?;
 
-        // §6.7/§7.0.7: a pending candidate's expiry is time-dependent, so the
+        // why: §6.7/§7.0.7: a pending candidate's expiry is time-dependent, so the
         // cursor also binds the visible set and every entry's expiry boundary at
         // the supplied instant. An entry that expires after page one changes this
         // fingerprint with no row or marker changing, so the continuation is
@@ -2417,7 +2401,7 @@ impl FixtureMemoryProvider {
             })
             .collect();
         let snapshot = snapshot_marker(conn, space_id).await?;
-        // The cursor binds the caller's *effective* authorization at the supplied
+        // why: The cursor binds the caller's *effective* authorization at the supplied
         // instant as well as the persistent marker: a grant that expires between
         // two pages changes this fingerprint even though no row changed, so the
         // next page is refused instead of silently re-filtered (MEM-R026/§6.5).
@@ -2480,7 +2464,7 @@ impl FixtureMemoryProvider {
         Ok(candidate)
     }
 
-    /// By-id read on the caller's snapshot: current authorization and the row
+    /// note: By-id read on the caller's snapshot: current authorization and the row
     /// are read together, so a revoke cannot slip between them (MEM-R026).
     pub(crate) async fn candidates_get_in_tx(
         &self,
@@ -2496,7 +2480,7 @@ impl FixtureMemoryProvider {
         let candidate = fetch_candidate(conn, space_id, candidate_id)
             .await?
             .ok_or_else(candidate_unavailable)?;
-        // Same refusal as a missing id: holding no coverage for an existing
+        // why: Same refusal as a missing id: holding no coverage for an existing
         // candidate must not be observable (C-102).
         if !one_grant_covers(
             &grants,
@@ -2515,9 +2499,7 @@ impl FixtureMemoryProvider {
         candidate_to_wire(&candidate, space_id)
     }
 
-    // -----------------------------------------------------------------------
-    // memory.candidates.dismiss (§7.14)
-    // -----------------------------------------------------------------------
+    // note: memory.candidates.dismiss (§7.14)
 
     pub(crate) async fn candidates_dismiss(
         &self,
@@ -2538,7 +2520,7 @@ impl FixtureMemoryProvider {
         Ok(receipt)
     }
 
-    /// [`Self::candidates_dismiss`] on a caller-owned connection; never commits.
+    /// note: [`Self::candidates_dismiss`] on a caller-owned connection; never commits.
     pub(crate) async fn candidates_dismiss_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2550,7 +2532,7 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         require_served_space(self, space_id)?;
         let candidate_id = request.candidate_id.as_str();
-        // Replay resolution runs before the target lookup (I-000305): a
+        // why: Replay resolution runs before the target lookup (I-000305): a
         // retained key must resolve its receipt even when the target row is
         // gone, and a changed target under the same key fails with
         // IDEMPOTENCY_CONFLICT instead of replaying. `Fresh` and the
@@ -2582,7 +2564,7 @@ impl FixtureMemoryProvider {
                 candidate.scope_context(),
             )],
         ) {
-            // Indistinguishable from a missing id (C-102).
+            // note: Indistinguishable from a missing id (C-102).
             return Err(candidate_unavailable());
         }
         let target = ReceiptTarget::for_scope(
@@ -2593,12 +2575,12 @@ impl FixtureMemoryProvider {
             candidate.scope_context(),
         )?;
         require_space_admits(conn, OP_CANDIDATES_DISMISS, space_id).await?;
-        // §7.7: a fenced or archived subject rejects every write for it. A
+        // why: §7.7: a fenced or archived subject rejects every write for it. A
         // dismissal admitted before the fence still replays above; a fresh one
         // fails here. The protocol makes context fences apply to writes that
         // place into that context, so only the subject lifecycle applies here.
         require_active_subject(conn, space_id, &candidate.subject_id).await?;
-        // `consumed` is terminal, so it outranks the CAS precondition (§8.1).
+        // why: `consumed` is terminal, so it outranks the CAS precondition (§8.1).
         if candidate.status == "consumed" {
             return Err(candidate_consumed(candidate_id));
         }
@@ -2634,9 +2616,7 @@ impl FixtureMemoryProvider {
         .await
     }
 
-    // -----------------------------------------------------------------------
-    // memory.candidates.review (§7.15)
-    // -----------------------------------------------------------------------
+    // note: memory.candidates.review (§7.15)
 
     pub(crate) async fn candidates_review(
         &self,
@@ -2657,7 +2637,7 @@ impl FixtureMemoryProvider {
         Ok(receipt)
     }
 
-    /// [`Self::candidates_review`] on a caller-owned connection; never commits,
+    /// note: [`Self::candidates_review`] on a caller-owned connection; never commits,
     /// so candidate consumption, every created record and the receipt are one
     /// atomic outcome (MEM-R009).
     pub(crate) async fn candidates_review_in_tx(
@@ -2672,7 +2652,7 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         require_served_space(self, space_id)?;
         let candidate_id = request.candidate_id.as_str();
-        // Replay resolution runs before the target lookup (I-000305): a
+        // why: Replay resolution runs before the target lookup (I-000305): a
         // retained key must resolve its receipt even when the target row is
         // gone, and a changed target under the same key fails with
         // IDEMPOTENCY_CONFLICT instead of replaying. `Fresh` and the
@@ -2756,11 +2736,9 @@ impl FixtureMemoryProvider {
         .await
     }
 
-    // -----------------------------------------------------------------------
-    // memory.receipts.get (§7.28)
-    // -----------------------------------------------------------------------
+    // note: memory.receipts.get (§7.28)
 
-    /// A receipt read is persistently read-only (MEM-R011/§7.28): it opens one
+    /// note: A receipt read is persistently read-only (MEM-R011/§7.28): it opens one
     /// snapshot and never commits a cleanup, whatever the requested receipt or
     /// the caller's authorization is. Physical reclamation belongs to the
     /// explicit operator [`Self::sweep_retained`] pass.
@@ -2783,7 +2761,7 @@ impl FixtureMemoryProvider {
         Ok(receipt)
     }
 
-    /// Receipt read on the caller's snapshot: current authorization, the
+    /// note: Receipt read on the caller's snapshot: current authorization, the
     /// receipt row and its dedup tombstone are read together (MEM-R018/R026),
     /// and the logical retention state is evaluated at the supplied instant, so
     /// an unswept old row answers exactly like a reclaimed one. Nothing here
@@ -2807,7 +2785,7 @@ impl FixtureMemoryProvider {
             &whole_scope_requirement("admin", None),
         );
         let requester = if admin { None } else { Some(principal_id) };
-        // §6.5/§7.28 + §7.0.5/MEM-R021: the recorded target is rechecked against
+        // why: §6.5/§7.28 + §7.0.5/MEM-R021: the recorded target is rechecked against
         // current authorization before any body or tombstone status is
         // disclosed, and it is recorded independently of the body so a retired
         // body rechecks the same subject and placement. A non-admin can only
@@ -2820,12 +2798,12 @@ impl FixtureMemoryProvider {
         let tombstone = fetch_tombstone(conn, space_id, receipt_id, requester).await?;
         let stored = fetch_receipt(conn, space_id, receipt_id, requester).await?;
         match ReceiptRetention::of(tombstone.as_ref(), stored.as_ref(), now)? {
-            // The whole lifetime ended (or there was never a visible row): a
+            // why: The whole lifetime ended (or there was never a visible row): a
             // foreign receipt and a missing one stay indistinguishable.
             ReceiptRetention::Expired => Err(not_found(
                 "no receipt is visible to the authenticated principal",
             )),
-            // A retired body's terminal status is disclosed only after the
+            // why: A retired body's terminal status is disclosed only after the
             // recorded target's recheck passes.
             ReceiptRetention::Evicted { last_known_status } => {
                 if !admin && !caller_covers_target {
@@ -2853,12 +2831,12 @@ fn placement(scope: &CapturePlacement) -> (&'static str, Option<&str>) {
     }
 }
 
-/// One operator-staging failure, reported as fixture construction state.
+/// note: One operator-staging failure, reported as fixture construction state.
 fn stage_error(code: &str, candidate_id: &str) -> FixtureError {
     FixtureError::Bootstrap(format!("candidate {candidate_id} cannot be staged: {code}"))
 }
 
-/// Deterministic advisory classification (§6.7): empty material is dropped
+/// note: Deterministic advisory classification (§6.7): empty material is dropped
 /// without becoming a candidate, everything else becomes one pending candidate.
 fn classify(content: &CaptureContent) -> Value {
     let empty = content.text.trim().is_empty() && content.structured.is_none();
@@ -2875,7 +2853,7 @@ fn classify(content: &CaptureContent) -> Value {
     }
 }
 
-/// One-way consumption with the §6.7 scrub: the body leaves, the digest and the
+/// note: One-way consumption with the §6.7 scrub: the body leaves, the digest and the
 /// outcome arrive, the shell keeps its identity. `pending` is the only status
 /// that can be consumed, so a second consumer sees zero rows.
 async fn consume_candidate(
@@ -2907,7 +2885,7 @@ async fn consume_candidate(
     Ok(())
 }
 
-/// Insert one retained record that inherits the candidate's capture scope. The
+/// note: Insert one retained record that inherits the candidate's capture scope. The
 /// provenance keeps the candidate's claims and takes the reviewing principal as
 /// the provider-populated `captured_by` (§6.6, §7.15).
 async fn insert_record(
@@ -3004,7 +2982,7 @@ mod tests {
             Self { provider, ..self }
         }
 
-        /// Capture one candidate and return its id.
+        /// note: Capture one candidate and return its id.
         async fn captured_candidate(
             &self,
             key: &str,
@@ -3026,7 +3004,7 @@ mod tests {
                 .to_owned()
         }
 
-        /// Stage one receipt through the real producer with an arbitrary target.
+        /// note: Stage one receipt through the real producer with an arbitrary target.
         async fn stage_targeted_receipt(
             &self,
             key: &str,
@@ -3114,7 +3092,7 @@ mod tests {
                 .grant_id
         }
 
-        /// A grant with a natural expiry, for the effective-authorization bound.
+        /// note: A grant with a natural expiry, for the effective-authorization bound.
         async fn grant_until(
             &self,
             grantee: &str,
@@ -3211,7 +3189,7 @@ mod tests {
         }
     }
 
-    /// The one deterministic admission instant the scenario tests supply.
+    /// note: The one deterministic admission instant the scenario tests supply.
     fn now() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(NOW_TEXT)
             .expect("a valid scenario instant")
@@ -3230,7 +3208,7 @@ mod tests {
         json!({ "visibility": "shared" })
     }
 
-    /// The raw capture payload a client sends.
+    /// note: The raw capture payload a client sends.
     fn capture_payload(space: &str, text: &str, scope: Value, key: &str) -> Value {
         let mut payload = json!({
             "space_id": space,
@@ -3243,7 +3221,7 @@ mod tests {
         payload
     }
 
-    /// The admitted view of [`capture_payload`], keeping the raw object that the
+    /// note: The admitted view of [`capture_payload`], keeping the raw object that the
     /// dedup digest is taken over.
     fn capture_request(
         space: &str,
@@ -3401,7 +3379,7 @@ mod tests {
         }
     }
 
-    /// The dedup tombstone's recorded status for one caller-chosen key.
+    /// note: The dedup tombstone's recorded status for one caller-chosen key.
     async fn tombstone(scenario: &Scenario, idempotency_key: &str) -> Option<String> {
         let row = sqlx::query(
             "SELECT last_known_status FROM idempotency_namespace \
@@ -3493,7 +3471,7 @@ mod tests {
         assert!(payload_digest.chars().all(|c| c.is_ascii_hexdigit()));
         assert_no_secret(&payload_digest, secret);
 
-        // Identical retry: same key, same canonical payload.
+        // note: Identical retry: same key, same canonical payload.
         let replay = scenario
             .provider
             .capture(CLIENT, &request, now)
@@ -3507,7 +3485,7 @@ mod tests {
             "a replay never re-executes the effect"
         );
 
-        // Same key, different payload digest.
+        // note: Same key, different payload digest.
         let conflicting = capture_request(
             &scenario.space_id,
             "Another sentence.",
@@ -3518,7 +3496,7 @@ mod tests {
         assert_eq!(conflict.code, SpokeRejectCode::IdempotencyConflict);
         assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
 
-        // A new key is a new admission.
+        // note: A new key is a new admission.
         let second = capture_request(
             &scenario.space_id,
             "Another sentence.",
@@ -3555,7 +3533,7 @@ mod tests {
 
         scenario.freeze(now).await;
 
-        // C-036/MEM-R021: the stored receipt is returned without re-running the
+        // note: C-036/MEM-R021: the stored receipt is returned without re-running the
         // freeze gate the op already passed.
         let replay = scenario
             .provider
@@ -3564,7 +3542,7 @@ mod tests {
             .expect("an admitted replay survives a later freeze");
         assert_eq!(receipt_id_of(&replay), receipt_id_of(&committed));
 
-        // A new admission in the frozen space is refused, with no effect.
+        // note: A new admission in the frozen space is refused, with no effect.
         let fresh = capture_request(
             &scenario.space_id,
             "After freeze.",
@@ -3577,7 +3555,7 @@ mod tests {
         );
         assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
 
-        // MEM-R021: receipt disclosure still requires current authorization.
+        // note: MEM-R021: receipt disclosure still requires current authorization.
         scenario.revoke(&grant_id, now).await;
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &request, now).await).code,
@@ -3675,7 +3653,7 @@ mod tests {
         candidate_id: &str,
         dismissal: &MemoryReceipt,
     ) {
-        // Consumption is terminal and outranks the CAS precondition.
+        // note: Consumption is terminal and outranks the CAS precondition.
         assert_eq!(
             refusal(
                 scenario
@@ -3711,7 +3689,7 @@ mod tests {
             SpokeRejectCode::CandidateConsumed
         );
 
-        // The dismissal itself is replayable and never resurrects the body.
+        // why: The dismissal itself is replayable and never resurrects the body.
         let replay = scenario
             .provider
             .candidates_dismiss(
@@ -3773,7 +3751,7 @@ mod tests {
         let candidate_id = scenario
             .captured_candidate("cap-1", captured_text, now)
             .await;
-        // Two disjoint grants never union: review alone is not enough.
+        // why: Two disjoint grants never union: review alone is not enough.
         let split = refusal(
             scenario
                 .provider
@@ -3943,7 +3921,7 @@ mod tests {
             .expect("candidate id")
             .to_owned();
 
-        // A context-restricted grant without shared access cannot see or review
+        // why: A context-restricted grant without shared access cannot see or review
         // a shared-placement candidate.
         let page = scenario
             .provider
@@ -4094,7 +4072,7 @@ mod tests {
         assert_eq!(refused.len(), 1);
         assert_eq!(refused[0].code, SpokeRejectCode::CandidateConsumed);
         assert_eq!(count_rows(&provider, "records").await, 1);
-        // The capture receipt and the one committed review receipt.
+        // note: The capture receipt and the one committed review receipt.
         assert_eq!(count_rows(&provider, "receipts").await, 2);
     }
 
@@ -4133,7 +4111,7 @@ mod tests {
             .expect("the requester reads its own receipt");
         assert_eq!(receipt_status(&read), "committed");
 
-        // A foreign principal without admin coverage cannot tell this receipt
+        // why: A foreign principal without admin coverage cannot tell this receipt
         // from a missing one.
         let foreign = refusal(
             scenario
@@ -4159,7 +4137,7 @@ mod tests {
         assert_eq!(missing.code, SpokeRejectCode::NotFound);
         assert_eq!(foreign.message, missing.message);
 
-        // The space admin may read another principal's receipt.
+        // note: The space admin may read another principal's receipt.
         let admin_read = scenario
             .provider
             .receipts_get(
@@ -4171,7 +4149,7 @@ mod tests {
             .expect("admin reads the receipt");
         assert_eq!(receipt_id_of(&admin_read), receipt_id);
 
-        // Retention eviction belongs to the fault slice; the read path must
+        // why: Retention eviction belongs to the fault slice; the read path must
         // still resolve the dedup tombstone once the body is gone.
         sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
             .bind(&receipt_id)
@@ -4213,7 +4191,7 @@ mod tests {
 
     async fn a_pending_receipt_is_durable_and_counted(scenario: &Scenario, now: DateTime<Utc>) {
         let space = scenario.space_id.clone();
-        // The probe carries a real admitted capture payload, so its receipt
+        // why: The probe carries a real admitted capture payload, so its receipt
         // binds a genuine digest and a real recorded target.
         let pending_admitted = admit_capture(capture_payload(
             &space,
@@ -4253,7 +4231,7 @@ mod tests {
             .await
             .expect("pending receipt is durable");
         assert_eq!(receipt_status(&pending_read), "pending");
-        // The drain barrier counts the durable pending receipt (MEM-R023).
+        // note: The drain barrier counts the durable pending receipt (MEM-R023).
         let spaces: spoke_operations::spoke_schemas::MemorySpacesListRequest =
             serde_json::from_value(json!({})).expect("valid spaces.list");
         let page = scenario
@@ -4304,7 +4282,7 @@ mod tests {
     async fn a_failed_receipt_keeps_its_coded_envelope(scenario: &Scenario, now: DateTime<Utc>) {
         let space = scenario.space_id.clone();
         let probe_target = capture_receipt_target(CONTEXT_A);
-        // A failed asynchronous receipt keeps a coded envelope with its retry
+        // note: A failed asynchronous receipt keeps a coded envelope with its retry
         // class and no result at all.
         let failed_admitted = admit_capture(capture_payload(
             &space,
@@ -4370,7 +4348,7 @@ mod tests {
         ))
         .expect("valid capture payload");
         let failed_admission = Mutation::keyed(OP_CAPTURE, "async-2", &failed_admitted);
-        // Replay answers the stored receipt whatever its state (§14.3).
+        // note: Replay answers the stored receipt whatever its state (§14.3).
         let mut transaction = scenario
             .provider
             .store()
@@ -4394,7 +4372,7 @@ mod tests {
             Some("failed")
         );
 
-        // Both receipts and the dedup tombstones survive a reopen.
+        // note: Both receipts and the dedup tombstones survive a reopen.
         let scenario = scenario.reopen().await;
         let reopened = scenario
             .provider
@@ -4523,7 +4501,7 @@ mod tests {
         cursor: &str,
         union: &[String],
     ) {
-        // Any observable state change invalidates the outstanding cursor.
+        // note: Any observable state change invalidates the outstanding cursor.
         scenario
             .provider
             .candidates_dismiss(
@@ -4548,7 +4526,7 @@ mod tests {
             SpokeRejectCode::CursorInvalid
         );
 
-        // Pending shells expire out of the list; consumed shells stay for audit.
+        // note: Pending shells expire out of the list; consumed shells stay for audit.
         let expired_at = later(CANDIDATE_TTL_DAYS + 1);
         let expired = scenario
             .provider
@@ -4595,7 +4573,7 @@ mod tests {
             0
         );
 
-        // A space-wide capture grant makes the subject-existence answer real.
+        // note: A space-wide capture grant makes the subject-existence answer real.
         scenario.grant(CLIENT, &["capture"], None, None, now).await;
         let foreign = admit_capture(json!({
             "space_id": scenario.space_id,
@@ -4638,7 +4616,7 @@ mod tests {
             Some(&json!("context"))
         );
 
-        // A sibling context is still admitted.
+        // note: A sibling context is still admitted.
         scenario
             .provider
             .capture(
@@ -4724,7 +4702,7 @@ mod tests {
             .expect("record id")
             .to_owned();
 
-        // The record deletion op belongs to the records slice; the receipt and
+        // why: The record deletion op belongs to the records slice; the receipt and
         // dedup metadata must already be content-free before it happens, and
         // must stay so afterwards.
         sqlx::query("DELETE FROM records WHERE record_id = ?")
@@ -4756,7 +4734,7 @@ mod tests {
             secret,
         );
 
-        // The dedup namespace as a whole carries no captured text either.
+        // note: The dedup namespace as a whole carries no captured text either.
         let rows = sqlx::query("SELECT payload_digest, idempotency_key FROM idempotency_namespace")
             .fetch_all(scenario.provider.store().pool())
             .await
@@ -4797,7 +4775,7 @@ mod tests {
             .to_owned();
         let receipts_after_capture = count_rows(&scenario.provider, "receipts").await;
 
-        // No `review` capability at all: the existing candidate and a missing id
+        // why: No `review` capability at all: the existing candidate and a missing id
         // must produce the same refusal.
         let get_foreign = refusal(
             scenario
@@ -4872,7 +4850,7 @@ mod tests {
         candidate_id: &str,
         receipts_after_capture: i64,
     ) {
-        // The candidate is untouched and nothing was recorded.
+        // note: The candidate is untouched and nothing was recorded.
         let untouched = scenario
             .provider
             .candidates_get(
@@ -4895,7 +4873,7 @@ mod tests {
         candidate_id: &str,
         missing: &SpokeReject,
     ) {
-        // A review grant that does not cover this capture scope is the same
+        // note: A review grant that does not cover this capture scope is the same
         // answer as a missing id, not a distinguishable denial.
         scenario
             .grant(
@@ -4939,7 +4917,7 @@ mod tests {
             .expect("capture commits");
         let receipt_id = receipt_id_of(&captured).to_owned();
 
-        // The capture authority is revoked and an unrelated capability
+        // why: The capture authority is revoked and an unrelated capability
         // survives: the receipt must stay closed with the body present…
         scenario.revoke(&capture_grant, now).await;
         let surviving = scenario
@@ -4958,7 +4936,7 @@ mod tests {
         assert_eq!(denied_body.code, SpokeRejectCode::NotAuthorized);
         assert!(denied_body.details.is_none(), "no status in the refusal");
 
-        // …and it must stay exactly as closed once the body is evicted: an
+        // why: …and it must stay exactly as closed once the body is evicted: an
         // eviction cannot upgrade a denied principal into a tombstone query.
         sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
             .bind(&receipt_id)
@@ -4980,7 +4958,7 @@ mod tests {
             "an evicted body reveals no existence or terminal status"
         );
 
-        // Revoking the last grant changes nothing about that refusal.
+        // note: Revoking the last grant changes nothing about that refusal.
         scenario.revoke(&surviving, now).await;
         let denied_without_grants = refusal(
             scenario
@@ -4994,7 +4972,7 @@ mod tests {
         );
         assert_eq!(denied_without_grants, denied_body);
 
-        // A space admin still resolves the evicted body from the tombstone.
+        // note: A space admin still resolves the evicted body from the tombstone.
         let admin = refusal(
             scenario
                 .provider
@@ -5026,7 +5004,7 @@ mod tests {
             .await;
     }
 
-    /// Two queued captures plus the dismissal of the first one.
+    /// note: Two queued captures plus the dismissal of the first one.
     async fn seed_then_dismiss_the_first_candidate(
         scenario: &Scenario,
         now: DateTime<Utc>,
@@ -5072,7 +5050,7 @@ mod tests {
     ) {
         scenario.fence_subject("fence", 1, now).await;
 
-        // The dismissal admitted before the fence still replays.
+        // note: The dismissal admitted before the fence still replays.
         let replay = scenario
             .provider
             .candidates_dismiss(
@@ -5084,7 +5062,7 @@ mod tests {
             .expect("an admitted dismissal replays across the fence");
         assert_eq!(receipt_id_of(&replay), receipt_id_of(dismissal));
 
-        // A fresh dismissal on the fenced subject is a write and is refused.
+        // note: A fresh dismissal on the fenced subject is a write and is refused.
         let receipts_before = count_rows(&scenario.provider, "receipts").await;
         let fenced = refusal(
             scenario
@@ -5122,7 +5100,7 @@ mod tests {
             "a fenced dismissal records nothing"
         );
 
-        // `fenced` still lists so the queue stays inspectable.
+        // why: `fenced` still lists so the queue stays inspectable.
         let fenced_page = scenario
             .provider
             .candidates_list(
@@ -5140,7 +5118,7 @@ mod tests {
         now: DateTime<Utc>,
         candidate_id: &str,
     ) {
-        // `archived` is terminal decommission and leaves the listing.
+        // note: `archived` is terminal decommission and leaves the listing.
         scenario.fence_subject("archive", 2, now).await;
         let archived_page = scenario
             .provider
@@ -5155,7 +5133,7 @@ mod tests {
             archived_page.candidates.is_empty(),
             "an archived subject is excluded from the candidate listing"
         );
-        // Reads stay allowed, and so does the refusal of further writes.
+        // why: Reads stay allowed, and so does the refusal of further writes.
         let readable = scenario
             .provider
             .candidates_get(CLIENT, &get_request(&scenario.space_id, candidate_id), now)
@@ -5193,7 +5171,7 @@ mod tests {
             .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
             .await;
 
-        // A client may send the member explicitly empty; the typed model
+        // note: A client may send the member explicitly empty; the typed model
         // normalizes it to the same empty vector as an omitted member.
         let mut payload = capture_payload(
             &scenario.space_id,
@@ -5220,7 +5198,7 @@ mod tests {
             .expect("payload object")
             .remove("source_context_ids");
         let without_member = admit_capture(omitted.clone()).expect("valid capture payload");
-        // SPOKE 0.16.0 keeps member presence through the typed view: an
+        // why: SPOKE 0.16.0 keeps member presence through the typed view: an
         // explicit `[]` decodes to `Some([])` and an omitted member to `None`,
         // so the two payloads stay distinguishable after decode.
         assert!(
@@ -5254,7 +5232,7 @@ mod tests {
         );
         assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
 
-        // The identical raw object still replays the original receipt.
+        // note: The identical raw object still replays the original receipt.
         let replay = scenario
             .provider
             .capture(CLIENT, &explicit, now)
@@ -5287,7 +5265,7 @@ mod tests {
             .subjects_ensure_in_tx(&mut transaction, OPERATOR, &ensure, now)
             .await
             .expect("ensure commits its row");
-        // Exactly the C7 request-scope bridge: the digest is taken over the
+        // why: Exactly the C7 request-scope bridge: the digest is taken over the
         // received object before decode, then paired with that typed view.
         let admitted = Admitted::from_scope(digest(&payload).expect("payload digest"), ensure);
         let admission = Mutation::keyless("memory.subjects.ensure", &admitted);
@@ -5367,7 +5345,7 @@ mod tests {
         space: &str,
         now: DateTime<Utc>,
     ) {
-        // Atomicity: a staged ensure plus receipt that the caller rolls back
+        // note: Atomicity: a staged ensure plus receipt that the caller rolls back
         // leaves neither behind.
         let second_payload = json!({
             "space_id": space,
@@ -5453,7 +5431,7 @@ mod tests {
             .expect("capture commits");
         let receipt_id = receipt_id_of(&captured).to_owned();
 
-        // The capture authority is revoked and a same-capability grant for
+        // note: The capture authority is revoked and a same-capability grant for
         // another subject survives: the recorded target is not covered.
         scenario.revoke(&alpha_capture, now).await;
         scenario
@@ -5472,7 +5450,7 @@ mod tests {
         assert_eq!(wrong_subject.code, SpokeRejectCode::NotAuthorized);
         assert!(wrong_subject.details.is_none());
 
-        // A grant that actually covers the recorded subject and placement is
+        // note: A grant that actually covers the recorded subject and placement is
         // still enough: the fix is not a blanket denial.
         let covering = scenario
             .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
@@ -5505,7 +5483,7 @@ mod tests {
         wrong_subject: &SpokeReject,
         covering: &str,
     ) {
-        // Revoke again and evict the body: the tombstone must not reveal the
+        // why: Revoke again and evict the body: the tombstone must not reveal the
         // terminal status to the same wrong-target principal.
         scenario.revoke(covering, now).await;
         sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
@@ -5528,7 +5506,7 @@ mod tests {
             "the evicted path answers exactly like the body path"
         );
 
-        // The space admin still resolves the evicted body.
+        // note: The space admin still resolves the evicted body.
         let admin = refusal(
             scenario
                 .provider
@@ -5589,7 +5567,7 @@ mod tests {
         let shared_id = receipt_id_of(&shared_receipt).to_owned();
         scenario.revoke(&unrestricted, now).await;
 
-        // Same capability, wrong context: neither receipt reopens.
+        // note: Same capability, wrong context: neither receipt reopens.
         scenario
             .grant(
                 CLIENT,
@@ -5612,7 +5590,7 @@ mod tests {
             );
         }
 
-        // The right context covers the context-placed receipt but a restricted
+        // why: The right context covers the context-placed receipt but a restricted
         // grant without shared access still cannot read the shared placement.
         scenario
             .grant(
@@ -5647,7 +5625,7 @@ mod tests {
             SpokeRejectCode::NotAuthorized
         );
 
-        // Shared access over the recorded context covers it.
+        // note: Shared access over the recorded context covers it.
         shared_access_covers_the_shared_placement(&scenario, now, &shared_id).await;
     }
 
@@ -5702,7 +5680,7 @@ mod tests {
         let receipt_id = receipt_id_of(&captured).to_owned();
         scenario.revoke(&capture, now).await;
 
-        // An admin capped to another subject is not the space admin, and its
+        // note: An admin capped to another subject is not the space admin, and its
         // `admin` capability does not extend to this subject.
         scenario
             .grant(CLIENT, &["admin"], Some("subject-beta"), None, now)
@@ -5719,7 +5697,7 @@ mod tests {
         );
         assert_eq!(scoped_admin.code, SpokeRejectCode::NotAuthorized);
 
-        // A genuine space-wide admin grant still reads it.
+        // note: A genuine space-wide admin grant still reads it.
         scenario.grant(CLIENT, &["admin"], None, None, now).await;
         let read = scenario
             .provider
@@ -5758,7 +5736,7 @@ mod tests {
             .expect("capture commits");
         let receipt_id = receipt_id_of(&captured).to_owned();
 
-        // The recorded target carries the capability list and the subject and
+        // why: The recorded target carries the capability list and the subject and
         // placement facets — never payload, content or a digest of the operation.
         let row = sqlx::query(
             "SELECT capabilities_json, subject_id, context_ids_json, reads_shared, subject_all \
@@ -5785,7 +5763,7 @@ mod tests {
         assert_no_secret(&row.get::<String, _>("subject_id"), secret);
         assert_no_secret(&row.get::<String, _>("context_ids_json"), secret);
 
-        // Durability: the target is read back after a real close/reopen.
+        // note: Durability: the target is read back after a real close/reopen.
         let scenario = scenario.reopen().await;
         let reopened = scenario
             .provider
@@ -5797,7 +5775,7 @@ mod tests {
             .await
             .expect("the receipt still resolves after reopen");
 
-        // And it outlives the receipt body: after another reopen the admin still
+        // note: And it outlives the receipt body: after another reopen the admin still
         // resolves the tombstone while the losing principal is refused.
         sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
             .bind(receipt_id_of(&reopened))
@@ -5860,7 +5838,7 @@ mod tests {
                 .await
                 .expect("capture commits");
         }
-        // A survives every page; B expires an hour after the first page.
+        // note: A survives every page; B expires an hour after the first page.
         scenario
             .grant(
                 CLIENT,
@@ -5891,7 +5869,7 @@ mod tests {
             .await
             .expect("first page");
         let cursor = first.next_cursor.clone().expect("page one issues a cursor");
-        // No-change continuation at the same instant keeps working.
+        // note: No-change continuation at the same instant keeps working.
         let second = scenario
             .provider
             .candidates_list(
@@ -5915,7 +5893,7 @@ mod tests {
         now: DateTime<Utc>,
         cursor: &str,
     ) {
-        // Same cursor, later instant: B has expired and A survives, so the
+        // why: Same cursor, later instant: B has expired and A survives, so the
         // subject is still authorized but the effectively authorized set moved.
         let marker_before = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
             .bind(&scenario.space_id)
@@ -5950,7 +5928,7 @@ mod tests {
             "the invalidation is not faked by advancing the persistent marker"
         );
 
-        // A fresh query at that instant performs proper current authorization:
+        // why: A fresh query at that instant performs proper current authorization:
         // only the surviving context's candidates remain.
         let fresh = scenario
             .provider
@@ -5990,7 +5968,7 @@ mod tests {
         impossible_targets_are_refused_at_construction();
     }
 
-    /// §7.29: one op, three genuinely different requirements — a whole-space
+    /// note: §7.29: one op, three genuinely different requirements — a whole-space
     /// export (space-wide), a whole-subject export (`subject_all`) and a
     /// selected-contexts export (multi-context).
     async fn stage_the_three_target_families(
@@ -6037,7 +6015,7 @@ mod tests {
         now: DateTime<Utc>,
         receipt: &str,
     ) {
-        // Space-wide: a subject-scoped grant never covers a whole-space target,
+        // why: Space-wide: a subject-scoped grant never covers a whole-space target,
         // and a space-wide grant does.
         let subject_scoped = scenario
             .grant(CLIENT, &["transfer"], Some(SUBJECT), None, now)
@@ -6068,7 +6046,7 @@ mod tests {
         whole_subject: &str,
         multi_context: &str,
     ) {
-        // Whole-subject: a context-restricted grant never obtains `subject_all`,
+        // why: Whole-subject: a context-restricted grant never obtains `subject_all`,
         // and an unrestricted one does.
         let restricted = scenario
             .grant(
@@ -6106,7 +6084,7 @@ mod tests {
             )
             .await
             .expect("an unrestricted grant covers the whole-subject target");
-        // The same unrestricted grant also covers the multi-context target: an
+        // why: The same unrestricted grant also covers the multi-context target: an
         // omitted context restriction is unrestricted, so it names no context.
         scenario
             .provider
@@ -6162,7 +6140,7 @@ mod tests {
     }
 
     fn impossible_targets_are_refused_at_construction() {
-        // A structurally impossible target is refused at construction.
+        // note: A structurally impossible target is refused at construction.
         for (capabilities, contexts, subject_all) in [
             (&[][..], &[][..], false),
             (&["review", "review"][..], &[][..], false),
@@ -6201,7 +6179,7 @@ mod tests {
             )
             .await;
 
-        // Two staggered captures: the older one expires two hours before the
+        // note: Two staggered captures: the older one expires two hours before the
         // newer one, and page one is anchored on the newer entry.
         let older = scenario
             .captured_candidate("cap-older", "Older pending item.", now - Duration::hours(2))
@@ -6222,7 +6200,7 @@ mod tests {
         assert_eq!(candidate_ids(&first), vec![newer.clone()]);
         let cursor = first.next_cursor.clone().expect("page one issues a cursor");
 
-        // An unchanged continuation at the same instant still works.
+        // note: An unchanged continuation at the same instant still works.
         let second = scenario
             .provider
             .candidates_list(
@@ -6234,7 +6212,7 @@ mod tests {
             .expect("the unchanged continuation is accepted");
         assert_eq!(candidate_ids(&second), vec![older.clone()]);
 
-        // Much later the older entry has expired while the anchor is still live:
+        // note: Much later the older entry has expired while the anchor is still live:
         // the visible set changed with no row, grant or marker change.
         let later = now + Duration::days(29) + Duration::hours(23);
         let marker_before = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
@@ -6269,7 +6247,7 @@ mod tests {
             "the invalidation does not fake a marker advance"
         );
 
-        // A fresh query at that instant applies the expiry filter normally.
+        // note: A fresh query at that instant applies the expiry filter normally.
         let fresh = scenario
             .provider
             .candidates_list(
@@ -6297,7 +6275,7 @@ mod tests {
             )
             .await;
 
-        // The advertised measure is the serialized byte size, not the character
+        // note: The advertised measure is the serialized byte size, not the character
         // count: `{"text":"…"}` contributes eleven bytes of framing.
         let at_limit_text = "x".repeat(MAX_CONTENT_BYTES - 11);
         let over_limit_text = "x".repeat(MAX_CONTENT_BYTES - 10);
@@ -6348,7 +6326,7 @@ mod tests {
         candidate: &str,
         over_limit_text: &str,
     ) {
-        // Promote override over the limit: refused with no effect at all.
+        // note: Promote override over the limit: refused with no effect at all.
         let records_before = count_rows(&scenario.provider, "records").await;
         let receipts_before = count_rows(&scenario.provider, "receipts").await;
         let targets_before = count_rows(&scenario.provider, "receipt_targets").await;
@@ -6425,7 +6403,7 @@ mod tests {
         candidate: &str,
         at_limit_text: &str,
     ) {
-        // Exactly at the limit is admitted.
+        // note: Exactly at the limit is admitted.
         let at_limit = scenario
             .provider
             .candidates_review(
@@ -6472,7 +6450,7 @@ mod tests {
         candidate: &str,
         over_limit_text: &str,
     ) {
-        // A later fragment over the limit must leave no earlier fragment record.
+        // why: A later fragment over the limit must leave no earlier fragment record.
         let records_before_fragments = count_rows(&scenario.provider, "records").await;
         let fragment_rejection = refusal(
             scenario
@@ -6522,7 +6500,7 @@ mod tests {
         now: DateTime<Utc>,
         candidate: &str,
     ) {
-        // The same candidate is still reviewable with bounded fragments.
+        // note: The same candidate is still reviewable with bounded fragments.
         let fragmented = scenario
             .provider
             .candidates_review(
@@ -6554,7 +6532,7 @@ mod tests {
     }
 
     async fn the_limit_counts_multibyte_utf8_bytes(scenario: &Scenario, now: DateTime<Utc>) {
-        // Multibyte content: the measure counts UTF-8 bytes, so the text is filled
+        // why: Multibyte content: the measure counts UTF-8 bytes, so the text is filled
         // with two-byte characters and one ASCII byte to land exactly on the limit
         // (the `{"text":"…"}` framing is eleven bytes) while the character count
         // stays far below it.
@@ -6628,7 +6606,7 @@ mod tests {
             )
             .await;
 
-        // A space-wide grant that still restricts placement is not whole-space
+        // note: A space-wide grant that still restricts placement is not whole-space
         // coverage: the recorded target requires the unrestricted facet.
         let context_limited = scenario
             .grant(
@@ -6647,7 +6625,7 @@ mod tests {
         );
         assert_eq!(denied_body.code, SpokeRejectCode::NotAuthorized);
 
-        // The same context-limited grant still covers a requirement that merely
+        // note: The same context-limited grant still covers a requirement that merely
         // names no context (§7.5-shaped subject target): nothing normalized the
         // omitted facet into "unrestricted".
         let subject_target = ReceiptTarget::new(export, Some(SUBJECT), &[], false, false)
@@ -6670,7 +6648,7 @@ mod tests {
             .await
             .expect("a context-limited space-wide grant covers a subject-only requirement");
 
-        // Genuinely unrestricted coverage reads the whole-space receipt.
+        // note: Genuinely unrestricted coverage reads the whole-space receipt.
         scenario.revoke(&context_limited, now).await;
         let unrestricted = scenario.grant(CLIENT, &["transfer"], None, None, now).await;
         scenario
@@ -6679,7 +6657,7 @@ mod tests {
             .await
             .expect("unrestricted coverage reads a whole-space receipt");
 
-        // Evicted body, restricted grant again: the tombstone refuses exactly as
+        // note: Evicted body, restricted grant again: the tombstone refuses exactly as
         // the body path did and discloses no terminal status.
         scenario.revoke(&unrestricted, now).await;
         let restricted_again = scenario
@@ -6727,7 +6705,7 @@ mod tests {
         );
     }
 
-    /// A deterministic dump of every affected row — all columns — so a test can
+    /// note: A deterministic dump of every affected row — all columns — so a test can
     /// prove a read, refusal, cancellation or rollback changed no persistent
     /// value, including candidate and record effects.
     async fn retention_rows(provider: &FixtureMemoryProvider) -> Vec<String> {
@@ -6785,7 +6763,7 @@ mod tests {
             .get("marker")
     }
 
-    /// The stored-timestamp snapshot of one receipt-scoped count.
+    /// note: The stored-timestamp snapshot of one receipt-scoped count.
     async fn count_receipt_rows(
         provider: &FixtureMemoryProvider,
         table: &str,
@@ -6809,7 +6787,7 @@ mod tests {
             .get("total")
     }
 
-    /// Stage one keyless `subjects.ensure` receipt through the shared producer
+    /// note: Stage one keyless `subjects.ensure` receipt through the shared producer
     /// on a caller-owned transaction; the keyless exemption binds no dedup row.
     async fn stage_keyless_probe(scenario: &Scenario, now: DateTime<Utc>) -> String {
         let subject_id = "subject-keyless-retention";
@@ -6860,7 +6838,7 @@ mod tests {
         receipt_id_of(&receipt).to_owned()
     }
 
-    /// Stage one pending receipt for the same admitted capture request.
+    /// note: Stage one pending receipt for the same admitted capture request.
     async fn stage_pending_receipt(
         scenario: &Scenario,
         admitted: &Admitted<MemoryCaptureRequest>,
@@ -6895,7 +6873,7 @@ mod tests {
         transaction.commit().await.expect("pending receipt commits");
     }
 
-    /// F1: every receipt-read outcome — authorized/expired, unauthorized,
+    /// note: F1: every receipt-read outcome — authorized/expired, unauthorized,
     /// not-found and keyless-expired — leaves every persistent row untouched at
     /// the retention boundary while returning the correct logical result.
     #[tokio::test]
@@ -6924,7 +6902,7 @@ mod tests {
         let before = retention_rows(&scenario.provider).await;
         let marker_before = read_snapshot_marker(&scenario.provider, &scenario.space_id).await;
 
-        // Authorized read of a logically retired body.
+        // note: Authorized read of a logically retired body.
         assert_eq!(
             refusal(
                 scenario
@@ -6944,7 +6922,7 @@ mod tests {
             before,
             "the authorized expired read wrote nothing"
         );
-        // Unauthorized principal: no existence oracle, no write.
+        // note: Unauthorized principal: no existence oracle, no write.
         assert_eq!(
             refusal(
                 scenario
@@ -6964,7 +6942,7 @@ mod tests {
             before,
             "the unauthorized read wrote nothing"
         );
-        // Nonexistent receipt.
+        // note: Nonexistent receipt.
         assert_eq!(
             refusal(
                 scenario
@@ -7001,7 +6979,7 @@ mod tests {
         before: &[String],
         marker_before: i64,
     ) {
-        // A keyless receipt has no tombstone: its body end is its whole life.
+        // note: A keyless receipt has no tombstone: its body end is its whole life.
         assert_eq!(
             refusal(
                 scenario
@@ -7029,7 +7007,7 @@ mod tests {
         );
     }
 
-    /// F2: refusals and a pre-commit abort never commit maintenance for
+    /// note: F2: refusals and a pre-commit abort never commit maintenance for
     /// unrelated expired rows; only the explicit operator pass reclaims them.
     #[tokio::test]
     async fn refusals_and_precommit_abort_commit_no_maintenance() {
@@ -7089,7 +7067,7 @@ mod tests {
         expired: &[String],
         marker_before: i64,
     ) {
-        // Unauthorized capture.
+        // note: Unauthorized capture.
         let unauthorized = capture_request(
             &scenario.space_id,
             "Someone else's attempt.",
@@ -7112,7 +7090,7 @@ mod tests {
             "an unauthorized capture commits no maintenance"
         );
 
-        // Idempotency conflict.
+        // note: Idempotency conflict.
         let conflicting = capture_request(
             &scenario.space_id,
             "A different payload under the same key.",
@@ -7131,7 +7109,7 @@ mod tests {
         );
         assert_eq!(retention_rows(&scenario.provider).await, expired);
 
-        // Stale-revision dismissal.
+        // note: Stale-revision dismissal.
         let dismiss = admit_candidates_dismiss(json!({
             "space_id": scenario.space_id,
             "candidate_id": candidate_id,
@@ -7151,7 +7129,7 @@ mod tests {
         );
         assert_eq!(retention_rows(&scenario.provider).await, expired);
 
-        // Invalid review content: refused before any effect, after replay
+        // note: Invalid review content: refused before any effect, after replay
         // resolution and authorization.
         let review = review_request(
             &scenario.space_id,
@@ -7185,7 +7163,7 @@ mod tests {
         expired: &[String],
         marker_before: i64,
     ) {
-        // Pre-commit abort: the staged transaction rolls back.
+        // note: Pre-commit abort: the staged transaction rolls back.
         let aborted = capture_request(
             &scenario.space_id,
             "Aborted before the commit.",
@@ -7217,7 +7195,7 @@ mod tests {
         scenario: &Scenario,
         after_body: DateTime<Utc>,
     ) {
-        // The explicit operator pass is the only reclamation path.
+        // why: The explicit operator pass is the only reclamation path.
         let sweep = scenario
             .provider
             .sweep_retained(&scenario.space_id, after_body)
@@ -7239,7 +7217,7 @@ mod tests {
         );
     }
 
-    /// §6.10/MEM-R021 + C-028: the body window starts at terminal completion and
+    /// note: §6.10/MEM-R021 + C-028: the body window starts at terminal completion and
     /// the tombstone keeps its full declared window after the body retires. The
     /// logical state is correct on unswept rows; only the explicit operator pass
     /// removes them.
@@ -7269,7 +7247,7 @@ mod tests {
 
         let body_end = base + Duration::seconds(RECEIPT_RETENTION_SECONDS.cast_signed());
 
-        // Before the body end, and at the inclusive boundary, the body is served
+        // note: Before the body end, and at the inclusive boundary, the body is served
         // and nothing is reclaimed.
         for instant in [body_end - Duration::seconds(1), body_end] {
             assert_eq!(
@@ -7296,7 +7274,7 @@ mod tests {
             );
         }
 
-        // One second later the unswept rows already answer logically: the key is
+        // why: One second later the unswept rows already answer logically: the key is
         // protected, the effect never re-runs, the keyless receipt is absent.
         let after_body = body_end + Duration::seconds(1);
         after_the_body_end_the_rows_still_answer_logically(
@@ -7404,7 +7382,7 @@ mod tests {
         secret: &str,
         marker_before: i64,
     ) {
-        // Explicit maintenance: the keyed body leaves alone, the keyless body
+        // note: Explicit maintenance: the keyed body leaves alone, the keyless body
         // and target leave together.
         let sweep = scenario
             .provider
@@ -7431,7 +7409,7 @@ mod tests {
             "maintenance never bumps the snapshot marker"
         );
 
-        // The surviving tombstone and target stay content-free.
+        // note: The surviving tombstone and target stay content-free.
         let tombstone_text: String = sqlx::query_scalar(
             "SELECT idempotency_key || payload_digest || last_known_status \
              FROM idempotency_namespace WHERE receipt_id = ?",
@@ -7459,7 +7437,7 @@ mod tests {
         body_end: DateTime<Utc>,
         after_body: DateTime<Utc>,
     ) {
-        // A reopen keeps the tombstone answering.
+        // note: A reopen keeps the tombstone answering.
         let scenario = scenario.reopen().await;
         assert_eq!(
             refusal(
@@ -7476,7 +7454,7 @@ mod tests {
             SpokeRejectCode::ReceiptExpired
         );
 
-        // Tombstone boundary: protected at the exact end, free one second later.
+        // note: Tombstone boundary: protected at the exact end, free one second later.
         let tombstone_end = body_end + Duration::seconds(DEDUP_RETENTION_SECONDS.cast_signed());
         assert_eq!(
             refusal(
@@ -7540,7 +7518,7 @@ mod tests {
         );
     }
 
-    /// §7.28/C-104 + §6.10: current authorization gates the retired body, and
+    /// note: §7.28/C-104 + §6.10: current authorization gates the retired body, and
     /// the refusal survives a reopen because nothing was physically reclaimed.
     #[tokio::test]
     async fn c_028_evicted_receipt_refuses_a_revoked_requester() {
@@ -7566,7 +7544,7 @@ mod tests {
         let after_body = base + Duration::seconds(RECEIPT_RETENTION_SECONDS.cast_signed() + 1);
         let rows = retention_rows(&scenario.provider).await;
 
-        // The admin and the requester both see the logical tombstone.
+        // note: The admin and the requester both see the logical tombstone.
         for principal in [OPERATOR, CLIENT] {
             assert_eq!(
                 refusal(
@@ -7584,7 +7562,7 @@ mod tests {
             );
         }
 
-        // Current authorization is evaluated before disclosure.
+        // note: Current authorization is evaluated before disclosure.
         scenario.revoke(&grant, after_body).await;
         assert_eq!(
             refusal(
@@ -7617,7 +7595,7 @@ mod tests {
             "the reads and the revoked replay wrote nothing"
         );
 
-        // The refusal is durable because the tombstone and target were never
+        // why: The refusal is durable because the tombstone and target were never
         // physically reclaimed.
         let scenario = scenario.reopen().await;
         assert_eq!(
@@ -7644,7 +7622,7 @@ mod tests {
         );
     }
 
-    /// §6.10/MEM-R021: late settlement gets a full terminal body window and then
+    /// note: §6.10/MEM-R021: late settlement gets a full terminal body window and then
     /// the full post-body tombstone window; the old admission-instant cut is
     /// never used, and the key frees only after both.
     #[tokio::test]
@@ -7663,7 +7641,7 @@ mod tests {
         );
         stage_pending_receipt(&scenario, &request, "rcpt_pending_retention", base).await;
 
-        // Past both old cutoffs the pending receipt is still live, readable and
+        // note: Past both old cutoffs the pending receipt is still live, readable and
         // the replay answer; maintenance leaves it alone.
         let stale = base
             + Duration::seconds(
@@ -7707,7 +7685,7 @@ mod tests {
         scenario: &Scenario,
         stale: DateTime<Utc>,
     ) -> DateTime<Utc> {
-        // Settlement starts both terminal windows at that instant.
+        // note: Settlement starts both terminal windows at that instant.
         let settle_at = stale + Duration::seconds(1);
         let mut transaction = scenario
             .provider
@@ -7784,7 +7762,7 @@ mod tests {
         request: &Admitted<MemoryCaptureRequest>,
         settle_body_end: DateTime<Utc>,
     ) {
-        // The full post-body tombstone window still protects the key.
+        // note: The full post-body tombstone window still protects the key.
         let tombstone_end =
             settle_body_end + Duration::seconds(DEDUP_RETENTION_SECONDS.cast_signed());
         assert_eq!(
@@ -7831,7 +7809,7 @@ mod tests {
         assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
     }
 
-    /// F7: the caller-owned seams enforce the same logical boundaries at the
+    /// note: F7: the caller-owned seams enforce the same logical boundaries at the
     /// supplied instant with no hidden maintenance commit, and a finished key is
     /// released only inside the transaction that stages the new effect.
     #[tokio::test]
@@ -7856,7 +7834,7 @@ mod tests {
         let receipt_id = receipt_id_of(&committed).to_owned();
         let rows = retention_rows(&scenario.provider).await;
 
-        // A caller-owned read transaction answers the logical boundary and
+        // note: A caller-owned read transaction answers the logical boundary and
         // writes nothing.
         let after_body = base + Duration::seconds(RECEIPT_RETENTION_SECONDS.cast_signed() + 1);
         let mut transaction = scenario
@@ -7884,7 +7862,7 @@ mod tests {
         transaction.rollback().await.expect("read rollback");
         assert_eq!(retention_rows(&scenario.provider).await, rows);
 
-        // A caller-owned mutation transaction answers the retired body without
+        // why: A caller-owned mutation transaction answers the retired body without
         // writing it, then rolls back cleanly.
         let mut transaction = scenario
             .provider
@@ -7916,7 +7894,7 @@ mod tests {
         rows: &[String],
         base: DateTime<Utc>,
     ) {
-        // Past the tombstone end the same seam releases the finished binding and
+        // note: Past the tombstone end the same seam releases the finished binding and
         // stages one fresh effect; a rollback restores the old binding, a commit
         // keeps exactly the new effect.
         let after_all = base
@@ -7966,7 +7944,7 @@ mod tests {
         assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 1);
     }
 
-    /// Seed one scenario with two keyed captures at the fixed scenario instant:
+    /// note: Seed one scenario with two keyed captures at the fixed scenario instant:
     /// the returned requests are the same payload for the first key and a
     /// changed payload for the second.
     async fn seed_two_expiring_captures() -> (
@@ -8011,7 +7989,7 @@ mod tests {
         (scenario, same, changed)
     }
 
-    /// F4/I187: after the full tombstone lifetime an UNSWEPT namespace treats
+    /// note: F4/I187: after the full tombstone lifetime an UNSWEPT namespace treats
     /// both the same and a changed payload as a new operation, exactly like an
     /// already-swept one. While the tombstone lives, a changed payload is still
     /// a conflict. A caller rollback restores the released stale binding.
@@ -8029,7 +8007,7 @@ mod tests {
             ) + Duration::seconds(1);
 
         let (scenario, same, _changed) = seed_two_expiring_captures().await;
-        // Simulate a retained target that no longer admits the caller: the
+        // note: Simulate a retained target that no longer admits the caller: the
         // content-free metadata is gone, the binding is not.
         let mut conn = scenario
             .provider
@@ -8044,7 +8022,7 @@ mod tests {
             .expect("drop retained targets");
         drop(conn);
 
-        // Live binding: still a receipt to disclose, so the missing retained
+        // why: Live binding: still a receipt to disclose, so the missing retained
         // target is a refusal, never a silent replay.
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &same, base).await).code,
@@ -8052,7 +8030,7 @@ mod tests {
             "a live binding still requires its retained target"
         );
 
-        // Fully expired binding: the key is free, so the same authorized caller
+        // why: Fully expired binding: the key is free, so the same authorized caller
         // executes it as a new operation instead of being refused for a target
         // that no longer exists.
         let fresh = scenario
@@ -8073,7 +8051,7 @@ mod tests {
             );
         let after = boundary + Duration::seconds(1);
 
-        // Unswept namespace.
+        // note: Unswept namespace.
         let (scenario, same, changed) = seed_two_expiring_captures().await;
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &same, boundary).await).code,
@@ -8110,7 +8088,7 @@ mod tests {
             count_rows(&scenario.provider, "idempotency_namespace").await,
         );
 
-        // The same requests after an explicit maintenance pass must behave the
+        // why: The same requests after an explicit maintenance pass must behave the
         // same way: expiry never depends on the physical sweep.
         let (swept, swept_same, swept_changed) = seed_two_expiring_captures().await;
         let sweep = swept
@@ -8146,7 +8124,7 @@ mod tests {
             "the unswept and swept states produce the same observable outcome"
         );
 
-        // A caller-owned transaction that releases the stale binding and then
+        // why: A caller-owned transaction that releases the stale binding and then
         // rolls back restores every affected row.
         let (rollback, _rollback_same, rollback_changed) = seed_two_expiring_captures().await;
         let rows = retention_rows(&rollback.provider).await;
@@ -8172,7 +8150,7 @@ mod tests {
         assert_eq!(count_rows(&rollback.provider, "candidates").await, 2);
     }
 
-    /// F2/I182 + F4/I184: after the full tombstone expiry, a real operation
+    /// note: F2/I182 + F4/I184: after the full tombstone expiry, a real operation
     /// first releases the stale binding and then hits a later fence refusal; the
     /// release must roll back automatically, preserving the complete old rows
     /// and the candidate effect.
@@ -8184,7 +8162,7 @@ mod tests {
             + Duration::seconds(
                 (RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS).cast_signed() + 1,
             );
-        // A genuine later refusal: the subject is fenced before the write target
+        // note: A genuine later refusal: the subject is fenced before the write target
         // is checked, after replay resolution already released the stale binding.
         scenario.fence_subject("fence", 1, after).await;
         let rows = retention_rows(&scenario.provider).await;
