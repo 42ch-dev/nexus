@@ -1,5 +1,5 @@
 /**
- * note: World KB relationship inspector — create/edit/remove typed relationships
+ * World KB relationship inspector — create/edit/remove typed relationships
  * via `world_kb.patch_relationship` (V1.74 A6).
  *
  * Supports core taxonomy + custom_label escape hatch, symmetric toggle,
@@ -43,18 +43,18 @@ export { entityName } from './relationship-inspector-logic';
 
 export interface RelationshipInspectorProps {
   worldId: string;
-  /** note: Existing relationship → edit mode. Omit → create mode. */
+  /** Existing relationship → edit mode. Omit → create mode. */
   relationship?: WorldKbRelationshipProjection;
-  /** note: Pre-filled source/target for quick-create flows (canvas drag, context menu). */
+  /** Pre-filled source/target for quick-create flows (canvas drag, context menu). */
   initialSourceEntityId?: string;
   initialTargetEntityId?: string;
-  /** note: Confirmed entities for pickers + name resolution. */
+  /** Confirmed entities for pickers + name resolution. */
   entities: WorldKbEntityProjection[];
-  /** note: Available source anchors for grounding picker. */
+  /** Available source anchors for grounding picker. */
   anchors: WorldKbSourceAnchorProjection[];
-  /** note: Called on 409 so the canvas can render the conflict modal. */
+  /** Called on 409 so the canvas can render the conflict modal. */
   onConflict?: (payload: { currentVersion: number; relationshipId: string; draft: RelationshipForm }) => void;
-  /** note: Called after a successful add/update/remove. */
+  /** Called after a successful add/update/remove. */
   onSaved?: () => void;
 }
 
@@ -116,7 +116,7 @@ export function RelationshipInspector({
     patchRelationship.mutate(buildRelationshipRemoveRequest(relationship), {
       onSuccess: () => onSaved?.(),
       onError: (error) => {
-        // why: A 409 on delete = the relationship changed concurrently (or was
+        // A 409 on delete = the relationship changed concurrently (or was
         // already removed). The hook's global onError refetches the graph to
         // canonical state; here we dismiss the inspector since the stale row is
         // no longer editable.

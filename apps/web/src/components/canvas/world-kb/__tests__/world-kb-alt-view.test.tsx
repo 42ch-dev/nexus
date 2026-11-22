@@ -1,5 +1,5 @@
 /**
- * note: World KB non-spatial alternate view tests (V1.73 P0 A6/A8/A9).
+ * World KB non-spatial alternate view tests (V1.73 P0 A6/A8/A9).
  *
  * Verifies sortable columns, keyboard row activation (Enter opens inspector),
  * and that every row is keyboard-focusable — the accessibility invariant that
@@ -63,12 +63,12 @@ describe('WorldKbAltView', () => {
       />);
     const nameHeader = screen.getByRole('button', { name: /Name/i });
 
-    // note: Default asc by name → Aria first.
-    await user.click(nameHeader); // note: toggle to desc
+    // Default asc by name → Aria first.
+    await user.click(nameHeader); // toggle to desc
     const rows = screen.getAllByRole('row');
-    // note: Header is row 0; first data row name:
+    // Header is row 0; first data row name:
     const firstDataCell = rows[1]?.textContent ?? '';
-    expect(firstDataCell).toContain('Cand'); // note: desc → Cand first
+    expect(firstDataCell).toContain('Cand'); // desc → Cand first
   });
 
   it('activates a row via keyboard (Enter) and via click', async () => {
@@ -87,13 +87,13 @@ describe('WorldKbAltView', () => {
       />,
     );
 
-    // note: Click path.
+    // Click path.
     await user.click(screen.getByText('Aria'));
     expect(onSelectNode).toHaveBeenCalled();
     const clicked = onSelectNode.mock.calls[onSelectNode.mock.calls.length - 1][0] as WorldKbNodeData;
     expect(clicked.keyBlockId).toBe('a');
 
-    // note: Keyboard path: focus a row, press Enter.
+    // Keyboard path: focus a row, press Enter.
     const betaRow = screen.getByText('Beta').closest('tr')!;
     betaRow.focus();
     await user.keyboard('{Enter}');
@@ -136,19 +136,19 @@ describe('WorldKbAltView', () => {
     );
     const ariaRow = screen.getByText('Aria').closest('tr')!;
     expect(ariaRow.getAttribute('aria-selected')).toBe('true');
-    // note: Other rows must NOT be selected.
+    // Other rows must NOT be selected.
     const betaRow = screen.getByText('Beta').closest('tr')!;
     expect(betaRow.getAttribute('aria-selected')).toBe('false');
   });
 
   it('does not highlight any row when selectedId is a raw (un-prefixed) id', () => {
-    // note: A raw id — the pre-fix canvas shape — must NOT match any prefixed row.
+    // A raw id — the pre-fix canvas shape — must NOT match any prefixed row.
     render(
       <WorldKbAltView
         nodes={nodes}
         relationships={[]}
         entities={[]}
-        selectedNodeId={'a' /* note: raw keyBlockId, no `entity:` prefix */}
+        selectedNodeId={'a' /* raw keyBlockId, no `entity:` prefix */}
         selectedRelationshipId={null}
         onSelectNode={vi.fn()}
         onSelectRelationship={vi.fn()}

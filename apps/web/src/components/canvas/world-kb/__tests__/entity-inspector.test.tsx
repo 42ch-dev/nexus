@@ -1,5 +1,5 @@
 /**
- * note: World KB entity inspector tests — submit + inline validation + conflict handoff
+ * World KB entity inspector tests — submit + inline validation + conflict handoff
  * (V1.73 P0 A6/A9).
  *
  * Verifies that a dirty field submits `worldKbPatchEntity` with the node's per-row
@@ -99,7 +99,7 @@ describe('EntityInspector', () => {
     );
 
     const body = await findByLabelText(/Body/i);
-    // note: Type a non-JSON string (a bare word is not valid JSON → JSON.parse throws).
+    // Type a non-JSON string (a bare word is not valid JSON → JSON.parse throws).
     await user.type(body, 'not valid json');
 
     (await findByRole('button', { name: /^Save$/i })).click();
@@ -137,7 +137,7 @@ describe('EntityInspector', () => {
     });
   });
 
-  // note: Regression for V1.73 greploop final (greptile P1): the entity patch hook
+  // Regression for V1.73 greploop final (greptile P1): the entity patch hook
   // must surface non-conflict / non-validation failures (500/403/network) as a
   // toast instead of silently swallowing them — mirroring the promotion path's
   // non-conflict guard (extended to also skip 422 validation).
@@ -158,22 +158,22 @@ describe('EntityInspector', () => {
     await user.type(title, '!');
     (await findByRole('button', { name: /^Save$/i })).click();
 
-    // note: The hook's global onError toasts non-conflict/non-validation failures.
+    // The hook's global onError toasts non-conflict/non-validation failures.
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(await screen.findByText('Could not save entity')).toBeInTheDocument();
-    // note: A 500 is neither a conflict nor validation — no modal handoff.
+    // A 500 is neither a conflict nor validation — no modal handoff.
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
     expect(onConflict).not.toHaveBeenCalled();
   });
 
-  // note: QC3-003 / QC1-F001 remainder: a mental-only edit with an untouched
+  // QC3-003 / QC1-F001 remainder: a mental-only edit with an untouched
   // non-array stored belief (raw-seeded fallback) must save — the submit
   // builder constructs/validates only the dirty dialects, so the untouched
   // dialect's builder (whose raw-seeded fallback can report an error even
   // when untouched) never runs and never blocks the write.
   describe('dirty-dialect-only submit construction (QC3-003)', () => {
-    /** note: One recorded `worldKbPatchEntity(worldId, request)` invocation. */
-    /** note: Module dialects carried by a patch request's `modules` key. */
+    /** One recorded `worldKbPatchEntity(worldId, request)` invocation. */
+    /** Module dialects carried by a patch request's `modules` key. */
     type PatchModules = Record<string, unknown>;
 
     type PatchEntityCall = [
@@ -185,9 +185,9 @@ describe('EntityInspector', () => {
       },
     ];
 
-    /** note: All recorded invocations of the mocked patch client method. */
+    /** All recorded invocations of the mocked patch client method. */
     function patchCalls(client: NexusClient): PatchEntityCall[] {
-      // note: vi.mocked exposes the Mock API on the stubbed client method without
+      // vi.mocked exposes the Mock API on the stubbed client method without
       // fabricating a shape: `makeClient` installs this as a resolved vi.fn.
       return vi.mocked(client.worldKbPatchEntity).mock.calls as PatchEntityCall[];
     }
@@ -218,7 +218,7 @@ describe('EntityInspector', () => {
           modules: { mental: { identity: { trait: 'brave' } } },
         },
       });
-      // note: The untouched scalar belief dialect is neither built nor emitted.
+      // The untouched scalar belief dialect is neither built nor emitted.
       expect(call[1].patch.modules?.belief).toBeUndefined();
       expect(Object.keys(call[1].patch.modules ?? {})).toEqual(['mental']);
     });
@@ -246,7 +246,7 @@ describe('EntityInspector', () => {
           },
         },
       });
-      // note: The untouched mental dialect is neither built nor emitted.
+      // The untouched mental dialect is neither built nor emitted.
       expect(call[1].patch.modules?.mental).toBeUndefined();
       expect(Object.keys(call[1].patch.modules ?? {})).toEqual(['belief']);
     });
@@ -282,7 +282,7 @@ describe('EntityInspector', () => {
     });
 
     it('an untouched invalid-raw belief still blocks a belief edit until repaired', async () => {
-      // note: Guard not weakened: once the belief dialect IS dirty, its builder
+      // Guard not weakened: once the belief dialect IS dirty, its builder
       // must still reject a non-array parse.
       const client = makeClient();
       const { findByRole, findByText } = renderWith(

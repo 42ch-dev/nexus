@@ -1,5 +1,5 @@
 /**
- * note: World KB relationship confidence banding (V1.76 γ).
+ * World KB relationship confidence banding (V1.76 γ).
  *
  * PM-locked stepped bands (NOT continuous linear): low / mid / high at the
  * 0.4 / 0.7 thresholds. Each band maps to a DESIGN.md confidence token color
@@ -50,14 +50,14 @@ export const CONFIDENCE_BAND_LABEL: Record<ConfidenceBand, string> = {
   high: 'High',
 };
 
-/** note: Edge stroke width (px) per band (PM-locked: 1 / 2 / 3). */
+/** Edge stroke width (px) per band (PM-locked: 1 / 2 / 3). */
 const CONFIDENCE_BAND_STROKE: Record<ConfidenceBand, number> = {
   low: 1,
   mid: 2,
   high: 3,
 };
 
-/** note: Edge stroke opacity per band (PM-locked: 0.3 / 0.6 / 1.0). */
+/** Edge stroke opacity per band (PM-locked: 0.3 / 0.6 / 1.0). */
 const CONFIDENCE_BAND_OPACITY: Record<ConfidenceBand, number> = {
   low: 0.3,
   mid: 0.6,

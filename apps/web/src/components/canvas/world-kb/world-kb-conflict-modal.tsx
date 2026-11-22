@@ -1,5 +1,5 @@
 /**
- * note: Conflict resolution modal for the World KB canvas write boundary (V1.73).
+ * Conflict resolution modal for the World KB canvas write boundary (V1.73).
  *
  * Two KB-flavored variants (compass §1.1 A6, exact copy) reuse the generic
  * {@link ConflictModalBase} shell so the World KB surface inherits focus
@@ -29,11 +29,11 @@ const ENTITY_FIELD_LABEL_KEYS: Record<WorldKbEntityField, string> = {
 /** Draft carried by the `patch_entity` conflict modal. */
 export interface WorldKbEntityConflictDraft {
   entityName: string;
-  /** note: Fields the user's draft touches (drives overlap detection). */
+  /** Fields the user's draft touches (drives overlap detection). */
   fields: WorldKbEntityField[];
-  /** note: Canonical values that now differ from the user's last known version. */
+  /** Canonical values that now differ from the user's last known version. */
   changedFields: Array<{ field: WorldKbEntityField; from?: string; to?: string }>;
-  /** note: The user's pending field values, for the "What you were about to do" block. */
+  /** The user's pending field values, for the "What you were about to do" block. */
   draftValues: Partial<Record<WorldKbEntityField, string>>;
 }
 
@@ -115,13 +115,13 @@ export type WorldKbCanonicalStatus = 'adopted' | 'rejected' | 'merged';
 
 export interface WorldKbPromoteConflictDraft {
   candidateName: string;
-  /** note: The canonical promotion action that already occurred. */
+  /** The canonical promotion action that already occurred. */
   newStatus: WorldKbCanonicalStatus;
-  /** note: The user's pending promote action. */
+  /** The user's pending promote action. */
   action: WorldKbPromoteAction;
-  /** note: Merge target id, when the user's action is `merge`. */
+  /** Merge target id, when the user's action is `merge`. */
   mergeTargetId?: string;
-  /** note: Merge target label, when the user's action is `merge`. */
+  /** Merge target label, when the user's action is `merge`. */
   mergeTargetLabel?: string;
 }
 
@@ -143,7 +143,7 @@ export function WorldKbPromoteConflictModal({
   onDismiss,
 }: WorldKbPromoteConflictModalProps) {
   const { t } = useTranslation('canvas');
-  // note: The promote variant models a single promotion slot, but the user's pending
+  // The promote variant models a single promotion slot, but the user's pending
   // action is intentionally non-overlapping with the canonical action: "reapply"
   // means "redo my decision against the new version", not "clobber the same
   // field". Distinct ids keep ConflictModalBase's overlap guard from disabling
@@ -217,7 +217,7 @@ export function WorldKbPromoteConflictModal({
 }
 
 /**
- * note: Wrap a value in a <strong> so the entity/candidate name reads with emphasis in
+ * Wrap a value in a <strong> so the entity/candidate name reads with emphasis in
  * the conflict body. The base modal renders the description inline, so this
  * returns a React node rather than a templated string.
  */

@@ -1,5 +1,5 @@
 /**
- * note: World KB relationship inspector logic (V1.74 A6).
+ * World KB relationship inspector logic (V1.74 A6).
  *
  * Pure form construction, validation, and patch-request builders extracted
  * from the React component so both modules stay under the 250-line split cap.

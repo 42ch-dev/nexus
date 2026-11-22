@@ -1,5 +1,5 @@
 /**
- * note: World KB canvas adapter — projects the daemon graph + candidates into React
+ * World KB canvas adapter — projects the daemon graph + candidates into React
  * Flow nodes/edges and renders surface-specific chrome (inspectors, alt-view,
  * a11y summary).
  *
@@ -46,7 +46,7 @@ export interface WorldKbSurfaceGraph {
   worldId: string;
   graph: WorldKbGraphResponse;
   candidates: WorldKbCandidateProjection[];
-  /** note: Confidence threshold for confirmed relationship edges (T4 stub; 0 = show all). */
+  /** Confidence threshold for confirmed relationship edges (T4 stub; 0 = show all). */
   confidenceThreshold: number;
 }
 
@@ -60,24 +60,24 @@ export interface WorldKbSurfaceGraph {
 export interface WorldKbCanvasAdapterContext {
   worldId: string;
   /**
-   * note: Kept for orchestrator-owned paths (conflict handling, relationship
+   * Kept for orchestrator-owned paths (conflict handling, relationship
    * inspector via InspectorPanel). The adapter's `renderInspector(node)` does
    * NOT route from this field — `node.data` is the authority
    * (R-V1114P0QC1-W002).
    */
   selection: Selection;
   /**
-   * note: Full entity list (including rejected) so `renderInspector` can resolve the
+   * Full entity list (including rejected) so `renderInspector` can resolve the
    * entity projection for ANY entity node from `node.data.keyBlockId`. This is
    * cross-node graph context, not per-node data.
    */
   entities: WorldKbEntityProjection[];
   /**
-   * note: Pending promotion candidates so `renderInspector` can resolve the candidate
+   * Pending promotion candidates so `renderInspector` can resolve the candidate
    * projection from `node.data.candidateId`. Cross-node graph context.
    */
   candidates: WorldKbCandidateProjection[];
-  /** note: Confirmed (non-rejected) entities — PromotionInspector merge targets. */
+  /** Confirmed (non-rejected) entities — PromotionInspector merge targets. */
   confirmedEntities: WorldKbEntityProjection[];
   anchors: WorldKbSourceAnchorProjection[];
   relationships: WorldKbRelationshipProjection[];
@@ -141,7 +141,7 @@ export function createWorldKbCanvasAdapter(
   ctxRef: MutableRefObject<WorldKbCanvasAdapterContext>,
 ): WorldKbCanvasAdapter {
   return {
-    // note: CanvasSurfaceKind currently distinguishes 'world-kb-entities' from
+    // CanvasSurfaceKind currently distinguishes 'world-kb-entities' from
     // 'world-kb-relationships'; this surface is the entity projection.
     surfaceKind: 'world-kb-entities',
     nodeTypes: worldKbNodeTypes,
@@ -175,13 +175,13 @@ export function createWorldKbCanvasAdapter(
     },
 
     adaptConflict(_error) {
-      // note: World KB conflicts are write-boundary (entity / promote / relationship)
+      // World KB conflicts are write-boundary (entity / promote / relationship)
       // and are handled by WorldKbCanvasConflicts; no single query-level conflict
       // modal exists for this surface.
       return null as ConflictModalProps | null;
     },
 
-    // note: Future extension point: `renderEdgeInspector?(edge)` on
+    // Future extension point: `renderEdgeInspector?(edge)` on
     // CanvasSurfaceAdapter would let surfaces own edge (relationship) selection
     // inspectors. Currently the relationship inspector stays orchestrator-owned
     // via InspectorPanel (R-V1114P0QC1-W002 known gap). Do NOT expand the
@@ -202,7 +202,7 @@ export function createWorldKbCanvasAdapter(
 }
 
 /**
- * note: Adapter-driven inspector for node-based selections (entity / candidate).
+ * Adapter-driven inspector for node-based selections (entity / candidate).
  *
  * Routes entity-vs-candidate from `node.data` — the contract `node` parameter
  * is the authority, NOT `ctxRef.current.selection` (R-V1114P0QC1-W002). The
@@ -254,7 +254,7 @@ function WorldKbInspectorWrapper({
   return null;
 }
 
-/** note: Adapter-driven alt view; reads current nodes/context at render time. */
+/** Adapter-driven alt view; reads current nodes/context at render time. */
 function WorldKbAltViewWrapper({
   ctxRef,
 }: {

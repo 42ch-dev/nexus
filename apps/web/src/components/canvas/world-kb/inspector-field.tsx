@@ -1,5 +1,5 @@
 /**
- * note: World KB inspector field wrapper (V1.74 A6 split).
+ * World KB inspector field wrapper (V1.74 A6 split).
  *
  * Reusable label + control + error layout used by the entity and relationship
  * inspectors. Kept minimal so the inspector components stay under the split cap.

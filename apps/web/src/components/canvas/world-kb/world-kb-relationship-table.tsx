@@ -1,5 +1,5 @@
 /**
- * note: World KB non-spatial relationship table (V1.74 A6).
+ * World KB non-spatial relationship table (V1.74 A6).
  *
  * Accessible equivalent for relationship editing: sortable columns, row-level
  * edit/delete actions, and a "New Relationship" button that opens the inspector

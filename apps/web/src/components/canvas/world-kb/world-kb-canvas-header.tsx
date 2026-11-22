@@ -1,5 +1,5 @@
 /**
- * note: World KB canvas header (V1.74 A10 split).
+ * World KB canvas header (V1.74 A10 split).
  *
  * Title, entry count, last-fetched staleness, view toggle, and refresh action.
  */

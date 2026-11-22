@@ -1,5 +1,5 @@
 /**
- * note: World KB Suggested relationships pane (V1.76 γ).
+ * World KB Suggested relationships pane (V1.76 γ).
  *
  * The author's primary triage surface for extraction-suggested relationships
  * (`needs_review = 1`, `source = 'extraction'`). A sortable table with
@@ -34,16 +34,16 @@ export interface PromoteAllResult {
 }
 
 export interface SuggestedRelationshipsPaneProps {
-  /** note: Relationships with `needs_review = true` (extraction suggestions). */
+  /** Relationships with `needs_review = true` (extraction suggestions). */
   suggestions: WorldKbRelationshipProjection[];
   entities: WorldKbEntityProjection[];
-  /** note: Promote a single suggestion (clears needs_review). */
+  /** Promote a single suggestion (clears needs_review). */
   onPromote: (rel: WorldKbRelationshipProjection) => void;
-  /** note: Delete a single suggestion. */
+  /** Delete a single suggestion. */
   onDelete: (rel: WorldKbRelationshipProjection) => void;
-  /** note: Promote all currently-visible suggestions (bulk). Returns result counts. */
+  /** Promote all currently-visible suggestions (bulk). Returns result counts. */
   onPromoteAll: (rels: WorldKbRelationshipProjection[]) => Promise<PromoteAllResult>;
-  /** note: Whether a promote/delete mutation is in flight (disables actions). */
+  /** Whether a promote/delete mutation is in flight (disables actions). */
   pending?: boolean;
 }
 
@@ -55,7 +55,7 @@ type PromoteAllStatus =
   | { kind: 'running'; total: number }
   | { kind: 'done'; result: PromoteAllResult };
 
-/** note: A uniform 8px colored dot badge for a confidence band. */
+/** A uniform 8px colored dot badge for a confidence band. */
 function ConfidenceBadge({ confidence, bandLabel }: { confidence: number | undefined | null; bandLabel: string }) {
   const band = confidenceBand(confidence);
   return (
@@ -96,7 +96,7 @@ export function SuggestedRelationshipsPane({
     entities.find((e) => e.key_block_id === id)?.canonical_name ?? id;
 
   const sorted = useMemo(() => {
-    // note: Only stored-direction rows (avoid double-counting symmetric reverses).
+    // Only stored-direction rows (avoid double-counting symmetric reverses).
     const stored = suggestions.filter((r) => r.projection_direction === 'stored');
     stored.sort((a, b) => {
       let cmp = 0;
@@ -112,14 +112,13 @@ export function SuggestedRelationshipsPane({
           break;
         case 'confidence':
         default:
-          // note: Suggestions without confidence sort last (treat as -1).
+          // Suggestions without confidence sort last (treat as -1).
           cmp = (a.confidence ?? -1) - (b.confidence ?? -1);
           break;
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return stored;
-    // note: entityName is a per-render closure; deps are tracked manually.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestions, sortKey, sortDir, entities]);
 
@@ -128,7 +127,7 @@ export function SuggestedRelationshipsPane({
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortKey(key);
-      // note: Confidence defaults to desc (triage highest first); others asc.
+      // Confidence defaults to desc (triage highest first); others asc.
       setSortDir(key === 'confidence' ? 'desc' : 'asc');
     }
   }
@@ -162,7 +161,7 @@ export function SuggestedRelationshipsPane({
       const result = await onPromoteAll(sorted);
       setPromoteAllStatus({ kind: 'done', result });
     } catch {
-      // why: If the parent handler throws instead of returning counts, treat every
+      // If the parent handler throws instead of returning counts, treat every
       // item as failed so the user sees a failure message.
       setPromoteAllStatus({ kind: 'done', result: { succeeded: 0, failed: sorted.length } });
     }

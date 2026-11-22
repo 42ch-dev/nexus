@@ -1,5 +1,5 @@
 /**
- * note: World KB inspector panel (V1.74 A10 split).
+ * World KB inspector panel (V1.74 A10 split).
  *
  * Routes the current selection to the appropriate inspector:
  * entity → EntityInspector, candidate → PromotionInspector, none → placeholder.
@@ -46,7 +46,7 @@ interface InspectorPanelProps {
     draft: RelationshipForm;
   }) => void;
   onRelationshipSaved: () => void;
-  /** note: Optional adapter-driven inspector for node-based selections (graph mode). */
+  /** Optional adapter-driven inspector for node-based selections (graph mode). */
   nodeInspector?: ReactNode;
 }
 

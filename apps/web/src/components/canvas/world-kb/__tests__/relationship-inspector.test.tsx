@@ -1,5 +1,5 @@
 /**
- * note: World KB relationship inspector tests (V1.74 A6).
+ * World KB relationship inspector tests (V1.74 A6).
  *
  * Covers: create vs edit mode, source/target prefilling, validation,
  * custom label requirement, submit mutation payload, remove action, and

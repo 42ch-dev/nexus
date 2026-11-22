@@ -1,5 +1,5 @@
 /**
- * note: World KB relationship conflict modal (V1.74 A6).
+ * World KB relationship conflict modal (V1.74 A6).
  *
  * Reuses {@link ConflictModalBase} with relationship-adapted copy. A 409 on
  * `patch_relationship` means another session changed the row; the author can

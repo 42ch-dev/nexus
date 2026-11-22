@@ -1,5 +1,5 @@
 /**
- * note: World KB canvas projection types (canvas-strategy-surface.md §3.4).
+ * World KB canvas projection types (canvas-strategy-surface.md §3.4).
  *
  * These mirror the design-language contracts `WorldKbNodeData` /
  * `WorldKbEdgeData` from the Draft spec, now backed by the V1.73 generated
@@ -23,42 +23,42 @@ export type EntityLifecycle = 'pending' | 'confirmed' | 'rejected' | 'merged';
 
 /** Node data payload consumed by the World KB custom React Flow node. */
 export interface WorldKbNodeData {
-  /** note: React Flow requires an index signature on node data. */
+  /** React Flow requires an index signature on node data. */
   [key: string]: unknown;
   worldId: string;
-  /** note: Present for confirmed/rejected/merged KeyBlock entities. */
+  /** Present for confirmed/rejected/merged KeyBlock entities. */
   keyBlockId?: string;
-  /** note: Present for pending promotion candidates. */
+  /** Present for pending promotion candidates. */
   candidateId?: string;
-  /** note: Present when the node originates from a promotion candidate row. */
+  /** Present when the node originates from a promotion candidate row. */
   jobId?: string;
   entityKind: BlockType;
   name: string;
   lifecycle: EntityLifecycle;
-  /** note: Per-row OCC version for conflict anticipation (NULL-normalized to 0). */
+  /** Per-row OCC version for conflict anticipation (NULL-normalized to 0). */
   version: number;
-  /** note: Count of source-anchor provenance edges (entities only). */
+  /** Count of source-anchor provenance edges (entities only). */
   sourceAnchorCount: number;
-  /** note: Whether this node represents a computable block (derived badge). */
+  /** Whether this node represents a computable block (derived badge). */
   computable: boolean;
-  /** note: Wall-clock timestamp of last version bump (ISO string). */
+  /** Wall-clock timestamp of last version bump (ISO string). */
   updatedAt?: string;
 }
 
 /** Edge data payload for source-anchor provenance + read-only relationships. */
 export interface WorldKbEdgeData {
-  /** note: React Flow requires an index signature on edge data. */
+  /** React Flow requires an index signature on edge data. */
   [key: string]: unknown;
   relationType: 'source_anchor' | 'relationship';
-  /** note: Source-anchor ids backing this edge (empty for V1.74+ relationships). */
+  /** Source-anchor ids backing this edge (empty for V1.74+ relationships). */
   sourceAnchorIds: string[];
-  /** note: Confidence in [0,1]; omitted for source anchors (provenance is exact). */
+  /** Confidence in [0,1]; omitted for source anchors (provenance is exact). */
   confidence?: number;
-  /** note: Promotion state snapshot if the edge records a promotion event. */
+  /** Promotion state snapshot if the edge records a promotion event. */
   promotionState?: EntityLifecycle;
-  /** note: V1.76: true when the edge is an extraction suggestion (needs_review=1). */
+  /** V1.76: true when the edge is an extraction suggestion (needs_review=1). */
   needsReview?: boolean;
-  /** note: V1.76: relationship provenance — 'manual' (author) or 'extraction'. */
+  /** V1.76: relationship provenance — 'manual' (author) or 'extraction'. */
   source?: 'manual' | 'extraction';
 }
 
@@ -133,7 +133,7 @@ export function lifecycleFromStatus(status: string | undefined): EntityLifecycle
   if (s === 'pending') return 'pending';
   if (s === 'rejected') return 'rejected';
   if (s === 'merged') return 'merged';
-  // note: confirmed, manual, empty, or any unrecognized → confirmed (terminal-ish display).
+  // confirmed, manual, empty, or any unrecognized → confirmed (terminal-ish display).
   return 'confirmed';
 }
 
