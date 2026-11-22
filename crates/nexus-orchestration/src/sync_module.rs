@@ -6,25 +6,22 @@
 //!
 //! V1.36: scans `Works/<work_ref>/Stories/` for chapter正文.
 //! Legacy workspace-root `Stories/` scan is removed (pre-1.0).
+// note: discovery is read-only; the cloud-sync crate owns transport.
 
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-/// Content hash type (SHA-256 hex).
+/// note: Content hash type (SHA-256 hex).
 pub type ContentHash = String;
 
-// ---------------------------------------------------------------------------
-// Path helpers (inline; T4 standalone module deferred)
-// ---------------------------------------------------------------------------
-
-/// Returns `Works/<work_ref>/` under the workspace root.
+/// note: Returns `Works/<work_ref>/` under the workspace root.
 #[must_use]
 pub fn works_dir(workspace_dir: &Path, work_ref: &str) -> PathBuf {
     workspace_dir.join("Works").join(work_ref)
 }
 
-/// Returns `Works/<work_ref>/Stories/<filename>` under the workspace root.
+/// note: Returns `Works/<work_ref>/Stories/<filename>` under the workspace root.
 #[must_use]
 pub fn chapter_body_path(workspace_dir: &Path, work_ref: &str, filename: &str) -> PathBuf {
     works_dir(workspace_dir, work_ref)
@@ -32,61 +29,53 @@ pub fn chapter_body_path(workspace_dir: &Path, work_ref: &str, filename: &str) -
         .join(filename)
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/// A single chapter ready for sync.
+/// note: A single chapter ready for sync.
 #[derive(Debug, Clone)]
 pub struct ChapterContent {
-    /// Chapter filename (e.g. `ch01-introduction.md`).
+    /// note: Chapter filename (e.g. `ch01-introduction.md`).
     pub filename: String,
-    /// SHA-256 hex digest of `content`.
+    /// note: SHA-256 hex digest of `content`.
     pub content_hash: ContentHash,
-    /// Raw file content.
+    /// note: Raw file content.
     pub content: String,
-    /// Chapter status from `work_chapters` table (when DB is available).
+    /// note: Chapter status from `work_chapters` table (when DB is available).
     pub status: Option<String>,
-    /// Actual word count from `work_chapters` table (when DB is available).
+    /// note: Actual word count from `work_chapters` table (when DB is available).
     pub actual_word_count: Option<u32>,
 }
 
-/// A complete story bundle ready for platform sync.
+/// note: A complete story bundle ready for platform sync.
 ///
 /// Wire name `StoryBundle` is unchanged for contract stability.
 #[derive(Debug, Clone)]
 pub struct StoryBundle {
-    /// Parent world identifier (empty string when worldless).
+    /// note: Parent world identifier (empty string when worldless).
     pub world_id: String,
-    /// Work identifier from `works` table.
+    /// note: Work identifier from `works` table.
     pub work_id: String,
-    /// Work directory name under `Works/` (stable slug).
+    /// note: Work directory name under `Works/` (stable slug).
     pub work_ref: String,
-    /// Ordered chapter contents.
+    /// note: Ordered chapter contents.
     pub chapters: Vec<ChapterContent>,
-    /// Number of chapters (redundant with `chapters.len()` for wire convenience).
+    /// note: Number of chapters (redundant with `chapters.len()` for wire convenience).
     pub chapter_count: u32,
-    /// ISO 8601 timestamp of when the bundle was built.
+    /// note: ISO 8601 timestamp of when the bundle was built.
     pub synced_at: String,
 }
 
-/// Discovered work metadata from workspace scan.
+/// note: Discovered work metadata from workspace scan.
 #[derive(Debug, Clone)]
 pub struct DiscoveredWork {
-    /// Work directory name under `Works/`.
+    /// note: Work directory name under `Works/`.
     pub work_ref: String,
-    /// Chapter filenames sorted alphabetically (only `Stories/*.md`).
+    /// note: Chapter filenames sorted alphabetically (only `Stories/*.md`).
     pub chapters: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Discovery
-// ---------------------------------------------------------------------------
-
-/// Files to skip inside `Works/<work_ref>/Stories/`.
+/// note: Files to skip inside `Works/<work_ref>/Stories/`.
 const SKIP_FILES: &[&str] = &["README.md", "foreshadowing.md", "event-index.md"];
 
-/// Discover works with novel chapters in the workspace.
+/// note: Discover works with novel chapters in the workspace.
 ///
 /// Scans `<workspace_dir>/Works/<work_ref>/Stories/*.md` for chapter files.
 /// Hidden files (starting with `.`) are skipped.
@@ -112,15 +101,12 @@ pub fn discover_works(workspace_dir: &Path) -> Vec<DiscoveredWork> {
                 .file_name()
                 .map_or_default(|n| n.to_string_lossy().to_string());
 
-            // Skip hidden dirs
             if name.starts_with('.') {
                 continue;
             }
 
-            // Only scan Stories/ subdirectory for chapters
             let stories_dir = path.join("Stories");
             if !stories_dir.is_dir() {
-                // Work exists but no Stories/ yet — skip silently
                 continue;
             }
 
@@ -137,11 +123,9 @@ pub fn discover_works(workspace_dir: &Path) -> Vec<DiscoveredWork> {
                     }
                     let fname = file.file_name().to_string_lossy().to_string();
 
-                    // Skip hidden files
                     if fname.starts_with('.') {
                         continue;
                     }
-                    // Skip non-chapter files
                     if SKIP_FILES.contains(&fname.as_str()) {
                         continue;
                     }
@@ -162,11 +146,7 @@ pub fn discover_works(workspace_dir: &Path) -> Vec<DiscoveredWork> {
     works
 }
 
-// ---------------------------------------------------------------------------
-// Bundle construction
-// ---------------------------------------------------------------------------
-
-/// Build a story bundle from a discovered work and its workspace directory.
+/// note: Build a story bundle from a discovered work and its workspace directory.
 ///
 /// Reads each chapter file and computes its SHA-256 content hash.
 /// Returns `None` if no chapters yield any content.
@@ -199,8 +179,7 @@ pub fn build_story_bundle(
         return None;
     }
 
-    // Checked conversion: a chapter count beyond u32 yields no bundle
-    // (fail-closed on a corrupt/injected chapter list) rather than truncating.
+    // invariant: a chapter count beyond u32 yields no bundle rather than a truncated one.
     let chapter_count = u32::try_from(chapters.len()).ok()?;
 
     Some(StoryBundle {
@@ -213,7 +192,7 @@ pub fn build_story_bundle(
     })
 }
 
-/// Build a story bundle enriched with `work_chapters` metadata.
+/// note: Build a story bundle enriched with `work_chapters` metadata.
 ///
 /// When `db_pool` is provided, queries the `work_chapters` table for
 /// chapter `status` and `actual_word_count`. Falls back to filesystem-only
@@ -248,7 +227,6 @@ pub async fn build_story_bundle_with_db(
             meta_map.insert(chapter, (status, actual_word_count));
         }
 
-        // Match metadata to chapters by parsing chapter number from filename
         for ch in &mut bundle.chapters {
             let ch_num = parse_chapter_number(&ch.filename);
             if let Some(ch_num) = ch_num {
@@ -263,7 +241,7 @@ pub async fn build_story_bundle_with_db(
     Some(bundle)
 }
 
-/// Parse chapter number from a filename like `ch01-introduction.md`.
+/// note: Parse chapter number from a filename like `ch01-introduction.md`.
 /// Returns `None` if the filename doesn't start with `ch` followed by digits.
 fn parse_chapter_number(filename: &str) -> Option<i32> {
     let name = filename.strip_suffix(".md")?;
@@ -272,9 +250,6 @@ fn parse_chapter_number(filename: &str) -> Option<i32> {
     num_str.parse().ok()
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,9 +269,6 @@ mod tests {
         dir
     }
 
-    // -----------------------------------------------------------------------
-    // 1. No Works/ directory
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_empty() {
         let workspace = setup_workspace();
@@ -304,9 +276,6 @@ mod tests {
         assert!(result.is_empty(), "no Works/ dir should yield empty vec");
     }
 
-    // -----------------------------------------------------------------------
-    // 2. Works with chapters in Stories/
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_with_chapters() {
         let workspace = setup_workspace();
@@ -320,9 +289,6 @@ mod tests {
         assert_eq!(result[0].chapters, vec!["ch01-intro.md", "ch02-rising.md"]);
     }
 
-    // -----------------------------------------------------------------------
-    // 3. Hidden directories skipped
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_skips_hidden_dirs() {
         let workspace = setup_workspace();
@@ -338,9 +304,6 @@ mod tests {
         assert_eq!(result[0].work_ref, "visible-work");
     }
 
-    // -----------------------------------------------------------------------
-    // 4. Hidden files skipped
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_skips_hidden_files() {
         let workspace = setup_workspace();
@@ -353,9 +316,6 @@ mod tests {
         assert_eq!(result[0].chapters, vec!["ch01-intro.md"]);
     }
 
-    // -----------------------------------------------------------------------
-    // 5. Non-chapter files skipped
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_skips_non_chapter_files() {
         let workspace = setup_workspace();
@@ -371,9 +331,6 @@ mod tests {
         assert_eq!(result[0].chapters, vec!["ch01-intro.md"]);
     }
 
-    // -----------------------------------------------------------------------
-    // 6. Outlines/ and Logs/ not scanned
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_ignores_outlines_and_logs() {
         let workspace = setup_workspace();
@@ -395,9 +352,6 @@ mod tests {
         assert_eq!(result[0].chapters, vec!["ch01-intro.md"]);
     }
 
-    // -----------------------------------------------------------------------
-    // 7. Multiple works
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_multiple_works() {
         let workspace = setup_workspace();
@@ -412,9 +366,6 @@ mod tests {
         assert_eq!(result[1].work_ref, "beta-novel");
     }
 
-    // -----------------------------------------------------------------------
-    // 8. Alphabetical ordering
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_alphabetical_ordering() {
         let workspace = setup_workspace();
@@ -428,9 +379,6 @@ mod tests {
         assert_eq!(result[1].work_ref, "zebra-novel");
     }
 
-    // -----------------------------------------------------------------------
-    // 9. Full round-trip: discover → build bundle
-    // -----------------------------------------------------------------------
     #[test]
     fn test_build_story_bundle() {
         let workspace = setup_workspace();
@@ -453,9 +401,6 @@ mod tests {
         assert!(bundle.synced_at.contains('T'));
     }
 
-    // -----------------------------------------------------------------------
-    // 10. Content hash is SHA-256
-    // -----------------------------------------------------------------------
     #[test]
     fn test_build_story_bundle_content_hash() {
         let workspace = setup_workspace();
@@ -471,9 +416,6 @@ mod tests {
         assert_eq!(bundle.chapters[0].content_hash.len(), 64);
     }
 
-    // -----------------------------------------------------------------------
-    // 11. Empty Stories/ dir → discover returns work but bundle is None
-    // -----------------------------------------------------------------------
     #[test]
     fn test_build_story_bundle_empty_stories() {
         let workspace = setup_workspace();
@@ -487,9 +429,6 @@ mod tests {
         assert!(result.is_none(), "empty stories should yield None");
     }
 
-    // -----------------------------------------------------------------------
-    // 12. parse_chapter_number
-    // -----------------------------------------------------------------------
     #[test]
     fn test_parse_chapter_number() {
         assert_eq!(parse_chapter_number("ch01-intro.md"), Some(1));
@@ -499,9 +438,6 @@ mod tests {
         assert_eq!(parse_chapter_number("readme.md"), None);
     }
 
-    // -----------------------------------------------------------------------
-    // 13. Path helpers
-    // -----------------------------------------------------------------------
     #[test]
     fn test_path_helpers() {
         let ws = Path::new("/tmp/workspace");
@@ -515,23 +451,17 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // 14. Work without Stories/ dir is skipped
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_skips_work_without_stories() {
         let workspace = setup_workspace();
         let work_root = works_dir(workspace.path(), "partial-work");
         fs::create_dir_all(work_root.join("Outlines")).expect("Outlines");
-        // No Stories/ created
+        // note: the work root exists but has no Stories/ directory.
 
         let result = discover_works(workspace.path());
         assert!(result.is_empty(), "work without Stories/ should be skipped");
     }
 
-    // -----------------------------------------------------------------------
-    // 15. Rules/ and Logs/ subdirs not scanned (V1.39 P3, DF-65/66)
-    // -----------------------------------------------------------------------
     #[test]
     fn test_discover_works_ignores_rules_and_logs_subdirs() {
         let workspace = setup_workspace();
@@ -546,7 +476,7 @@ mod tests {
         fs::create_dir_all(&logs_review).expect("Logs/review");
 
         write_file(&stories, "ch01-intro.md", "Chapter 1");
-        // Files in Rules/ and Logs/ that should NOT be discovered as chapters
+        // note: these Rules/ and Logs/ files must not be discovered as chapters.
         write_file(&rules, "novel-rules.md", "# Rules\n- POV: first");
         write_file(&rules, "novel-rules-history.md", "| ts | actor | reason |");
         write_file(&logs_write, "draft-session-1.md", "Draft notes");
@@ -561,15 +491,10 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // 16. V1.49 P1: narrative index files are never chapter candidates
-    //     (narrative-indexes overlay §2 — foreshadowing.md / event-index.md
-    //     are SSOT files, not chapters).
-    // -----------------------------------------------------------------------
     #[test]
     fn sync_module_skips_foreshadowing_index_file() {
-        // (a) Explicit boundary: both index filenames are in SKIP_FILES, so a
-        //     stray copy inside Stories/ is not treated as a chapter.
+        // why: both index filenames are in SKIP_FILES, so a stray copy inside
+        // Stories/ is not treated as a chapter.
         assert!(
             SKIP_FILES.contains(&"foreshadowing.md"),
             "foreshadowing.md must be in SKIP_FILES"
@@ -579,10 +504,8 @@ mod tests {
             "event-index.md must be in SKIP_FILES"
         );
 
-        // (b) Canonical location: index files live in Outlines/, which is
-        //     never scanned for chapters (only Stories/ is). Even with a
-        //     populated Outlines/foreshadowing.md, chapter discovery must
-        //     return only the real chapter.
+        // why: index files live in Outlines/, which is never scanned for chapters
+        // (only Stories/ is), so a populated Outlines/foreshadowing.md is ignored.
         let workspace = setup_workspace();
         let work_root = works_dir(workspace.path(), "my-novel");
         let stories = work_root.join("Stories");

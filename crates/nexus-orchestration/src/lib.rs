@@ -34,7 +34,7 @@ pub use stage_gates::{
 
 use std::path::Path;
 
-/// Ensure all skill links for a preset's roles are set up in the workspace.
+/// note: Ensure all skill links for a preset's roles are set up in the workspace.
 ///
 /// This should be called before starting a preset pipeline to ensure
 /// agents can access skill files through `.agents/skills/<slug>/` symlinks.

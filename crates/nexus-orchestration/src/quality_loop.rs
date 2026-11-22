@@ -44,13 +44,13 @@ use regex::Regex;
 use sqlx::SqlitePool;
 use std::sync::OnceLock;
 
-/// Capability name for the LLM extraction pathway (V1.51 T-A P0).
+/// note: Capability name for the LLM extraction pathway (V1.51 T-A P0).
 ///
 /// Registered in `CapabilityRegistry` as a sibling to `judge.llm`; both reuse
 /// the V1.32 LLM worker pool. See `llm-extract.md` §1.
 const LLM_EXTRACT_CAPABILITY: &str = "nexus.llm.extract";
 
-/// Default `block_type` guess for heuristic candidates.
+/// note: Default `block_type` guess for heuristic candidates.
 ///
 /// Capitalized noun phrases in fiction prose are most often character names,
 /// so the heuristic tags every candidate as `character`. V1.51 `nexus.llm.extract`
@@ -58,16 +58,16 @@ const LLM_EXTRACT_CAPABILITY: &str = "nexus.llm.extract";
 /// as the no-worker fallback (entity-scope-model §5.5.6).
 const DEFAULT_BLOCK_TYPE_GUESS: &str = "character";
 
-/// Maximum candidates persisted per review pass (safety cap to avoid
+/// note: Maximum candidates persisted per review pass (safety cap to avoid
 /// flooding `kb_extract_jobs.pending` from a single chapter scan).
 const MAX_CANDIDATES_PER_PASS: usize = 20;
 
-/// Maximum relationship candidates persisted per review pass (V1.76 safety cap;
+/// note: Maximum relationship candidates persisted per review pass (V1.76 safety cap;
 /// mirrors [`MAX_CANDIDATES_PER_PASS`] to avoid flooding `kb_relationships`
 /// suggestions from a single chapter scan).
 const MAX_RELATIONSHIPS_PER_PASS: usize = 20;
 
-/// A review-time KB candidate.
+/// note: A review-time KB candidate.
 ///
 /// Carries both the V1.50 heuristic fields (`canonical_name_guess` +
 /// `proposed_payload`) and the V1.51 LLM-extracted metadata (`block_type`,
@@ -78,24 +78,24 @@ const MAX_RELATIONSHIPS_PER_PASS: usize = 20;
 /// the dedicated LLM columns or leave them NULL.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KbCandidate {
-    /// Canonical entity name (heuristic: matched phrase; LLM: extracted name).
+    /// note: Canonical entity name (heuristic: matched phrase; LLM: extracted name).
     pub canonical_name_guess: String,
-    /// Proposed `KnowledgeEntryBody` serialized as JSON.
+    /// note: Proposed `KnowledgeEntryBody` serialized as JSON.
     pub proposed_payload: String,
-    /// `block_type` (`snake_case` wire value). Heuristic: always `character`;
+    /// note: `block_type` (`snake_case` wire value). Heuristic: always `character`;
     /// LLM: the model's judgement.
     pub block_type: String,
-    /// LLM self-reported confidence in `[0.0, 1.0]`. `None` for heuristic
+    /// note: LLM self-reported confidence in `[0.0, 1.0]`. `None` for heuristic
     /// candidates; `Some(x)` for `nexus.llm.extract` candidates. Stored as
     /// `f64` to match the `SQLite` `REAL` column + JSON number representation
     /// (avoids f32→f64 promotion precision loss in the persisted payload).
     pub confidence: Option<f64>,
-    /// Verbatim chapter excerpt justifying the extraction. `None` for
+    /// note: Verbatim chapter excerpt justifying the extraction. `None` for
     /// heuristic candidates; `Some(s)` for `nexus.llm.extract` candidates.
     pub source_quote: Option<String>,
 }
 
-/// A review-time KB relationship candidate (V1.76).
+/// note: A review-time KB relationship candidate (V1.76).
 ///
 /// Produced by the `nexus.llm.extract` capability alongside entity
 /// [`KbCandidate`]s. Endpoints are referenced by `canonical_name` (+ optional
@@ -105,44 +105,43 @@ pub struct KbCandidate {
 /// NOT confirmed in the same extraction pass — architect lock).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KbRelationshipCandidate {
-    /// Canonical name of the source endpoint.
+    /// note: Canonical name of the source endpoint.
     pub source_canonical_name: String,
-    /// Optional `block_type` hint to disambiguate the source endpoint.
+    /// note: Optional `block_type` hint to disambiguate the source endpoint.
     pub source_block_type: Option<String>,
-    /// Canonical name of the target endpoint.
+    /// note: Canonical name of the target endpoint.
     pub target_canonical_name: String,
-    /// Optional `block_type` hint to disambiguate the target endpoint.
+    /// note: Optional `block_type` hint to disambiguate the target endpoint.
     pub target_block_type: Option<String>,
-    /// `WorldKbRelationshipKind` `snake_case` value; `custom` requires
+    /// note: `WorldKbRelationshipKind` `snake_case` value; `custom` requires
     /// [`custom_label`](Self::custom_label).
     pub relation_type: String,
-    /// Narrative label when `relation_type` is `custom`.
+    /// note: Narrative label when `relation_type` is `custom`.
     pub custom_label: Option<String>,
-    /// Whether the relationship projects in both directions.
+    /// note: Whether the relationship projects in both directions.
     pub symmetric: bool,
-    /// LLM self-reported confidence in `[0.0, 1.0]`.
+    /// note: LLM self-reported confidence in `[0.0, 1.0]`.
     pub confidence: Option<f64>,
-    /// Verbatim chapter excerpt justifying the relationship.
+    /// note: Verbatim chapter excerpt justifying the relationship.
     pub source_quote: Option<String>,
 }
 
-// ── Heuristic ─────────────────────────────────────────────────────────
 
-/// Compile-on-first-use regex for capitalized noun phrases (1–4 words).
+/// note: Compile-on-first-use regex for capitalized noun phrases (1–4 words).
 ///
 /// Matches `Lin Xia`, `The Crimson Order`, `Mount Azure`, etc. Does NOT match
 /// single-letter capitals or all-caps acronyms (those are noisy in prose).
 fn capitalized_phrase_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // \b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b
+        // note: \b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b
         // 1–4 capitalized words (Title Case), each word 2+ lowercase chars.
         Regex::new(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b")
             .expect("static capitalized-phrase regex compiles")
     })
 }
 
-/// Common false positives that are structural prose rather than proper nouns.
+/// note: Common false positives that are structural prose rather than proper nouns.
 ///
 /// Lowercased for case-insensitive filtering. This is intentionally a small,
 /// conservative set — the author can reject any false positive via CLI, and
@@ -228,14 +227,14 @@ fn is_stopword_phrase(phrase: &str) -> bool {
         "dr",
     ];
     let lower = phrase.to_ascii_lowercase();
-    // Single-word stopwords are filtered directly; multi-word phrases whose
+    // note: Single-word stopwords are filtered directly; multi-word phrases whose
     // *first* word is a stopword are also filtered (e.g. "The Crimson Order"
     // is kept only if neither word is a stopword — but "The" alone is filtered
     // by the single-word branch when the phrase is just "The").
     if lower.split_whitespace().count() == 1 {
         return STOPWORDS.contains(&lower.as_str());
     }
-    // For multi-word phrases, filter if the first word is a common article/
+    // note: For multi-word phrases, filter if the first word is a common article/
     // structural word that signals sentence-initial casing rather than a name.
     let first = lower.split_whitespace().next().unwrap_or("");
     matches!(
@@ -244,7 +243,7 @@ fn is_stopword_phrase(phrase: &str) -> bool {
     )
 }
 
-/// Pure heuristic: extract KB candidates from chapter prose.
+/// note: Pure heuristic: extract KB candidates from chapter prose.
 ///
 /// Returns deduplicated candidates ordered by first appearance. Each
 /// candidate's `canonical_name_guess` is the matched phrase as-is; the
@@ -262,13 +261,13 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
             Some(m) => m.as_str().trim(),
             None => continue,
         };
-        // Filter stopwords + require min length 2 (regex already enforces
+        // note: Filter stopwords + require min length 2 (regex already enforces
         // first char uppercase + ≥1 lowercase, so "I" can't match, but a
         // single 2-char word like "Mr" is caught by the stopword list).
         if phrase.len() < 2 || is_stopword_phrase(phrase) {
             continue;
         }
-        // Dedup case-sensitively (phrases are Title Case so this is stable).
+        // note: Dedup case-sensitively (phrases are Title Case so this is stable).
         let key = phrase.to_string();
         if seen.iter().any(|s| s == &key) {
             continue;
@@ -300,9 +299,8 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
         .collect()
 }
 
-// ── Cross-chapter aggregation (V1.51 T-A P1) ──────────────────────────
 
-/// An aggregate of the same canonical entity extracted across multiple
+/// note: An aggregate of the same canonical entity extracted across multiple
 /// chapters of a Work (V1.51 T-A P1 cross-chapter rescan).
 ///
 /// Produced by [`aggregate_candidates_by_canonical_name`]. The
@@ -312,30 +310,30 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
 /// entity so the merged row carries cross-chapter provenance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregatedCandidate {
-    /// Canonical entity name (case preserved from the first chapter that
+    /// note: Canonical entity name (case preserved from the first chapter that
     /// referenced the entity; grouping itself is case-insensitive).
     pub canonical_name: String,
-    /// Chapters that referenced this entity, sorted ascending + deduped
+    /// note: Chapters that referenced this entity, sorted ascending + deduped
     /// (e.g. `[3, 5, 7]`). Injected into `proposed_payload` as a
     /// `source_chapters` JSON array by the aggregator.
     pub source_chapters: Vec<i32>,
-    /// Merged `KnowledgeEntryBody` JSON. Based on the first contributing
+    /// note: Merged `KnowledgeEntryBody` JSON. Based on the first contributing
     /// candidate's payload, with a `source_chapters` array injected so the
     /// upserted row records cross-chapter reuse (entity-scope-model §5.5.1).
     pub proposed_payload: String,
-    /// `block_type` (`snake_case` wire value) from the contributing
+    /// note: `block_type` (`snake_case` wire value) from the contributing
     /// candidates. Heuristic aggregates: `character`; LLM aggregates: the
     /// model's judgement.
     pub block_type: String,
-    /// LLM self-reported confidence, if any contributing candidate carried
+    /// note: LLM self-reported confidence, if any contributing candidate carried
     /// one. `None` for pure-heuristic aggregates.
     pub confidence: Option<f64>,
-    /// Verbatim source quote, if any contributing candidate carried one.
+    /// note: Verbatim source quote, if any contributing candidate carried one.
     /// `None` for pure-heuristic aggregates.
     pub source_quote: Option<String>,
 }
 
-/// Pure aggregation: group per-chapter candidates by `canonical_name`
+/// note: Pure aggregation: group per-chapter candidates by `canonical_name`
 /// (case-insensitive), merging cross-chapter provenance.
 ///
 /// Returns aggregates ordered by first-seen `canonical_name`. Each
@@ -359,10 +357,10 @@ pub fn aggregate_candidates_by_canonical_name(
 ) -> Vec<AggregatedCandidate> {
     use std::collections::HashMap;
 
-    // The HashMap maps the lowercased canonical-name key → index into the
+    // note: The HashMap maps the lowercased canonical-name key → index into the
     // parallel output Vecs. Output order follows first-seen canonical name.
     let mut key_to_idx: HashMap<String, usize> = HashMap::new();
-    // Accumulators keyed by output index.
+    // note: Accumulators keyed by output index.
     let mut canonical_names: Vec<String> = Vec::new();
     let mut chapter_sets: Vec<std::collections::BTreeSet<i32>> = Vec::new();
     let mut payloads: Vec<String> = Vec::new();
@@ -386,9 +384,9 @@ pub fn aggregate_candidates_by_canonical_name(
                 source_quotes.push(candidate.source_quote.clone());
                 i
             };
-            // Record this chapter's contribution.
+            // note: Record this chapter's contribution.
             chapter_sets[idx].insert(*chapter);
-            // Prefer LLM metadata when it appears (strictly more informative
+            // note: Prefer LLM metadata when it appears (strictly more informative
             // than heuristic None). First-seen payload stays the merge base.
             if candidate.confidence.is_some() {
                 confidences[idx] = candidate.confidence;
@@ -399,7 +397,7 @@ pub fn aggregate_candidates_by_canonical_name(
             if candidate.block_type != DEFAULT_BLOCK_TYPE_GUESS
                 && block_types[idx] == DEFAULT_BLOCK_TYPE_GUESS
             {
-                // An LLM-judged block_type overrides the heuristic default.
+                // note: An LLM-judged block_type overrides the heuristic default.
                 block_types[idx].clone_from(&candidate.block_type);
             }
         }
@@ -423,7 +421,7 @@ pub fn aggregate_candidates_by_canonical_name(
         .collect()
 }
 
-/// Inject a `source_chapters` array into a candidate payload JSON.
+/// note: Inject a `source_chapters` array into a candidate payload JSON.
 ///
 /// Parses `base_payload` as a JSON object, sets `source_chapters` to the
 /// sorted chapter list, and re-serializes. If `base_payload` is not a JSON
@@ -442,11 +440,9 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
     serde_json::to_string(&value).unwrap_or_else(|_| base_payload.to_string())
 }
 
-// ── Trusted extraction target (v1.191 P1 T13) ─────────────────────────
 
-// ── Hook entry point ──────────────────────────────────────────────────
 
-/// Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
+/// note: Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
 ///
 /// Mirrors the shape of
 /// [`auto_chain::persist_review_findings_for_schedule`] and
@@ -497,7 +493,7 @@ pub async fn extract_kb_candidates_for_review(
     let Some(ctx) = load_review_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
     };
-    // The trusted target policy is resolved from stored state before the model
+    // note: The trusted target policy is resolved from stored state before the model
     // runs (durable §§3, 8). A stale admission writes nothing at all — it must
     // not become a heuristic pass over a container the run is no longer
     // authorized for.
@@ -514,7 +510,7 @@ pub async fn extract_kb_candidates_for_review(
             return Ok(0);
         }
     };
-    // Pathway selection: LLM when a registry + worker is available, else the
+    // note: Pathway selection: LLM when a registry + worker is available, else the
     // V1.50 heuristic fallback (llm-extract.md §5.1). A refused extraction run
     // (protocol reject, cancelled run, missing trusted identity) is NOT a
     // worker outage: it falls through to zero writes rather than to heuristic
@@ -541,7 +537,7 @@ pub async fn extract_kb_candidates_for_review(
         }
     };
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
-    // The candidates AND the relationship suggestions commit in ONE
+    // why: The candidates AND the relationship suggestions commit in ONE
     // caller-owned transaction (v1.191 P1 T13 review C1, durable §8): a write
     // failure or a dropped (cancelled) future rolls the whole extraction result
     // back, so a failed/cancelled run leaves zero candidate and relationship
@@ -552,7 +548,7 @@ pub async fn extract_kb_candidates_for_review(
         .map_err(|e| AutoChainError::InvalidState(format!("kb-extract: finalize tx: {e}")))?;
     let inserted =
         persist_candidates(&mut tx, schedule_id, &ctx, &existing_names, candidates).await?;
-    // V1.76: persist relationship candidates (idempotent; entity-existence
+    // note: V1.76: persist relationship candidates (idempotent; entity-existence
     // prerequisite enforced inside persist_relationship_candidates).
     let rel_inserted =
         persist_relationship_candidates(&mut tx, schedule_id, &ctx, relationships).await?;
@@ -573,7 +569,7 @@ pub async fn extract_kb_candidates_for_review(
     Ok(inserted)
 }
 
-/// Finalize-time missing-KB detection hook (V1.51 T-A P2).
+/// note: Finalize-time missing-KB detection hook (V1.51 T-A P2).
 ///
 /// When a `novel-writing` schedule completes, scan the finalized chapter prose
 /// for entity references, diff against confirmed `KnowledgeEntryRecord` rows in the Work's
@@ -685,7 +681,7 @@ pub async fn detect_missing_kb_on_finalize(
     Ok(written)
 }
 
-/// Outcome of an LLM extraction attempt (V1.52 T-A P0; V1.76 adds relationships;
+/// note: Outcome of an LLM extraction attempt (V1.52 T-A P0; V1.76 adds relationships;
 /// v1.191 P1 T13 adds the refusal arm).
 ///
 /// - `Candidates`: LLM returned parsed candidates (may be empty if the LLM
@@ -701,7 +697,7 @@ pub async fn detect_missing_kb_on_finalize(
 pub(crate) enum LlmExtractOutcome {
     Candidates {
         candidates: Vec<KbCandidate>,
-        /// V1.76: relationship candidates proposed by the LLM. Empty when the
+        /// note: V1.76: relationship candidates proposed by the LLM. Empty when the
         /// LLM produced no `relationships` array (backward compatible).
         relationships: Vec<KbRelationshipCandidate>,
     },
@@ -709,7 +705,7 @@ pub(crate) enum LlmExtractOutcome {
     Refused(String),
 }
 
-/// Shared LLM extraction invocation used by both the review-time hook and
+/// note: Shared LLM extraction invocation used by both the review-time hook and
 /// `LlmExtractTask::evaluate` (closes R-V151Q3-W001).
 ///
 /// Resolves the capability from `registry`, builds the canonical input shape
@@ -731,7 +727,7 @@ pub(crate) enum LlmExtractOutcome {
 /// source (default review prompt vs. rendered preset template); parsing,
 /// profile-aware payload shaping, and the `MAX_CANDIDATES_PER_PASS` cap are
 /// shared.
-#[allow(clippy::too_many_arguments)] // one shared LLM-extract seam forwarding the caller context
+#[allow(clippy::too_many_arguments)] // note: one shared LLM-extract seam forwarding the caller context
 pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
     capability_name: &str,
@@ -747,13 +743,13 @@ pub(crate) async fn run_llm_extract(
         return LlmExtractOutcome::WorkerUnavailable;
     };
     if registry.is_reserved_only(capability_name) {
-        // Known extraction capability admitted without a binding in this
+        // note: Known extraction capability admitted without a binding in this
         // build (C3 contract): the existing worker refusal BEFORE any
         // effect — never a stand-in and never a heuristic fallback.
         return LlmExtractOutcome::WorkerUnavailable;
     }
     let Some(cap) = registry.get(capability_name) else {
-        // A missing extraction capability is not a worker outage: refuse rather
+        // note: A missing extraction capability is not a worker outage: refuse rather
         // than stand in with heuristic candidates (review I2).
         return LlmExtractOutcome::Refused(format!(
             "capability '{capability_name}' not registered"
@@ -764,24 +760,24 @@ pub(crate) async fn run_llm_extract(
         "prompt": prompt,
         "chapter_prose": chapter_prose,
         "_creator_id": creator_id,
-        // The review-time hook passes the run identity it resolved from the
+        // note: The review-time hook passes the run identity it resolved from the
         // schedule's stored session (v1.191 P1 T13). The capability refuses an
         // empty/missing identity instead of inventing a default run.
         "_session_id": session_id,
-        // The trusted job/task target policy resolved from stored state before
+        // note: The trusted job/task target policy resolved from stored state before
         // the model ran (durable §§3, 8). Never model output.
         "_extract_target": target.context_value(),
-        // The admitted chapter artifact the run is resolved over.
+        // note: The admitted chapter artifact the run is resolved over.
         "_extract_source_id": source_id,
     });
 
     let output = match cap.run(input).await {
         Ok(o) => o,
-        // The only outcome that may fall back to the heuristic: no worker IPC.
+        // why: The only outcome that may fall back to the heuristic: no worker IPC.
         Err(CapabilityError::WorkerUnavailable) => {
             return LlmExtractOutcome::WorkerUnavailable;
         }
-        // Everything else is a failed/refused extraction run: a `ke-extraction`
+        // why: Everything else is a failed/refused extraction run: a `ke-extraction`
         // protocol reject, an extractor failure, a cancelled run, or a missing
         // trusted identity/target. The caller writes NOTHING — a heuristic pass
         // must never stand in for a failed extraction (durable §8, review I2).
@@ -793,7 +789,7 @@ pub(crate) async fn run_llm_extract(
     };
 
     let candidates_json = output.get("candidates").and_then(|v| v.as_array());
-    // R-V152TA-S007: skip the `filter_map` + `collect` allocation when the LLM
+    // note: R-V152TA-S007: skip the `filter_map` + `collect` allocation when the LLM
     // produced no candidate array (or an empty one). Avoids the prior
     // `.cloned().unwrap_or_default()` which always allocated a `Vec<Value>`.
     let candidates: Vec<KbCandidate> = match candidates_json {
@@ -805,7 +801,7 @@ pub(crate) async fn run_llm_extract(
         _ => Vec::new(),
     };
 
-    // V1.76: parse relationship candidates (best-effort; empty when the LLM
+    // note: V1.76: parse relationship candidates (best-effort; empty when the LLM
     // produced no `relationships` array).
     let relationships_json = output.get("relationships").and_then(|v| v.as_array());
     let relationships: Vec<KbRelationshipCandidate> = match relationships_json {
@@ -823,7 +819,7 @@ pub(crate) async fn run_llm_extract(
     }
 }
 
-/// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter.
+/// note: Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter.
 ///
 /// Thin wrapper around [`run_llm_extract`] that supplies the review-time hook's
 /// default extraction prompt and identity fields from [`ChapterContext`].
@@ -834,7 +830,7 @@ async fn extract_via_llm(
     ctx: &ChapterContext,
     target: &ExtractionTarget,
 ) -> LlmExtractOutcome {
-    // High-level extraction instruction. The capability wraps this with the
+    // note: High-level extraction instruction. The capability wraps this with the
     // JSON output-format framing + the verbatim chapter prose (llm-extract.md §1.3).
     let prompt = "Extract the fictional entities (characters, locations, organizations, items, events, abilities, conflicts, info points) that appear in the chapter prose below. For each entity, judge the most appropriate wire block_type, give a confidence in [0.0,1.0], and quote a verbatim excerpt from the chapter that justifies the extraction.";
 
@@ -844,7 +840,7 @@ async fn extract_via_llm(
         prompt,
         &ctx.prose,
         &ctx.creator_id,
-        // v1.191 P1 T13: the real production run identity resolved from the
+        // note: v1.191 P1 T13: the real production run identity resolved from the
         // schedule's stored session — never an empty placeholder.
         &ctx.run_id,
         &ctx.work_profile,
@@ -854,7 +850,7 @@ async fn extract_via_llm(
     .await
 }
 
-/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
+/// note: Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
 /// scoped to the novel `work_profile`.
 ///
 /// Convenience wrapper around [`candidate_from_llm_json_for_profile`] with
@@ -872,7 +868,7 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
     candidate_from_llm_json_for_profile(c, "novel")
 }
 
-/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
+/// note: Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
 /// producing a `proposed_payload` shaped for the given `work_profile`.
 ///
 /// Returns `None` when `canonical_name` is missing/empty (no point persisting
@@ -955,7 +951,7 @@ pub(crate) fn candidate_from_llm_json_for_profile(
         "source_quote": source_quote.clone().unwrap_or_default(),
         "confidence": confidence.unwrap_or(0.0),
     });
-    // If the LLM gave no explicit summary, drop the placeholder so the
+    // note: If the LLM gave no explicit summary, drop the placeholder so the
     // KnowledgeEntryBody summary is None (cleaner adopt surface).
     if summary.is_none() {
         if let Some(obj) = payload.as_object_mut() {
@@ -972,7 +968,7 @@ pub(crate) fn candidate_from_llm_json_for_profile(
     })
 }
 
-/// Build a [`KbRelationshipCandidate`] from one LLM-returned relationship JSON
+/// note: Build a [`KbRelationshipCandidate`] from one LLM-returned relationship JSON
 /// object (V1.76).
 ///
 /// Returns `None` when either `source_canonical_name` or
@@ -1043,7 +1039,7 @@ pub(crate) fn relationship_from_llm_json(c: &serde_json::Value) -> Option<KbRela
     })
 }
 
-/// Map a wire `block_type` (`snake_case`) to the novel-profile `novel_category`
+/// note: Map a wire `block_type` (`snake_case`) to the novel-profile `novel_category`
 /// body attribute (entity-scope-model §5.1.1 recommended default mapping).
 ///
 /// Used when constructing the `proposed_payload` for LLM-extracted candidates
@@ -1059,13 +1055,13 @@ fn block_type_to_novel_category(block_type: &str) -> &'static str {
         "item" => "economy",
         "conflict" => "rules",
         "event" => "background",
-        // `info_point`, `ability`, and any unknown value → foundation (generic;
+        // note: `info_point`, `ability`, and any unknown value → foundation (generic;
         // the V1.40 validator emits the advisory mismatch warning on adopt).
         _ => "foundation",
     }
 }
 
-/// Map a wire `block_type` (`snake_case`) to the game-bible `game_bible_category`
+/// note: Map a wire `block_type` (`snake_case`) to the game-bible `game_bible_category`
 /// body attribute (game-bible-profile.md §7.2 mapping).
 ///
 /// V1.55 P2: used when constructing the `proposed_payload` for game-bible
@@ -1083,7 +1079,7 @@ fn block_type_to_novel_category(block_type: &str) -> &'static str {
 #[must_use]
 pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
     match block_type {
-        // V1.54 new game-bible BlockTypes: direct mapping.
+        // note: V1.54 new game-bible BlockTypes: direct mapping.
         "species" => "species",
         "faction" => "faction",
         "magic_system" => "magic_system",
@@ -1091,13 +1087,13 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
         "deity" => "deity",
         "level" => "level",
         "economy_tier" => "economy_tier",
-        // Cross-domain reuse: existing BlockType → closest game_bible_category.
-        "character" => "species", // Characters → species (biological/cultural)
-        "ability" => "magic_system", // Abilities → magic/superpower system
-        "scene" => "level",       // Scenes → levels
-        "organization" | "conflict" => "faction", // Organizations/Conflicts → faction dynamics
-        "item" => "technology",   // Items → technology/artifacts
-        "info_point" | "event" => "deity", // Info points/Events → deity (lore)
+        // note: Cross-domain reuse: existing BlockType → closest game_bible_category.
+        "character" => "species", // note: Characters → species (biological/cultural)
+        "ability" => "magic_system", // note: Abilities → magic/superpower system
+        "scene" => "level",       // note: Scenes → levels
+        "organization" | "conflict" => "faction", // note: Organizations/Conflicts → faction dynamics
+        "item" => "technology",   // note: Items → technology/artifacts
+        "info_point" | "event" => "deity", // note: Info points/Events → deity (lore)
         _ => {
             tracing::debug!(
                 block_type,
@@ -1108,7 +1104,7 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
     }
 }
 
-/// Map a wire `block_type` (`snake_case`) to the script-profile `script_category`
+/// note: Map a wire `block_type` (`snake_case`) to the script-profile `script_category`
 /// body attribute (script-profile.md §7.2 mapping).
 ///
 /// V1.60 P1: used when constructing the `proposed_payload` for script
@@ -1125,19 +1121,19 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
 #[must_use]
 pub fn block_type_to_script_category(block_type: &str) -> &'static str {
     match block_type {
-        // V1.55 P3 new script BlockTypes: direct mapping.
+        // note: V1.55 P3 new script BlockTypes: direct mapping.
         "dialogue" => "dialogue",
         "beat" => "beat",
         "act" => "act",
-        // Cross-domain reuse: existing BlockType → closest script_category.
-        "character" => "dialogue",  // Characters express through dialogue
-        "scene" => "act",           // Scenes belong to acts
-        "event" => "beat",          // Events are beats in narrative
-        "organization" => "act",    // Organizations anchor acts
-        "conflict" => "beat",       // Conflict is beat-level tension
-        "info_point" => "dialogue", // Info conveyed through dialogue
-        "ability" => "dialogue",    // Abilities expressed in dialogue
-        "item" => "beat",           // Items are beat-level props
+        // note: Cross-domain reuse: existing BlockType → closest script_category.
+        "character" => "dialogue",  // note: Characters express through dialogue
+        "scene" => "act",           // note: Scenes belong to acts
+        "event" => "beat",          // note: Events are beats in narrative
+        "organization" => "act",    // note: Organizations anchor acts
+        "conflict" => "beat",       // note: Conflict is beat-level tension
+        "info_point" => "dialogue", // note: Info conveyed through dialogue
+        "ability" => "dialogue",    // note: Abilities expressed in dialogue
+        "item" => "beat",           // note: Items are beat-level props
         _ => {
             tracing::debug!(
                 block_type,
@@ -1148,7 +1144,7 @@ pub fn block_type_to_script_category(block_type: &str) -> &'static str {
     }
 }
 
-/// Loaded chapter context: schedule → work → chapter prose.
+/// note: Loaded chapter context: schedule → work → chapter prose.
 ///
 /// Returned by [`load_review_context`] and [`load_finalize_context`] when all
 /// preconditions are met (preset matches, work has a world, chapter body is
@@ -1159,25 +1155,25 @@ struct ChapterContext {
     world_id: String,
     chapter: i32,
     workspace_id: String,
-    /// The schedule's stored production run identity (`current_session_id`),
+    /// note: The schedule's stored production run identity (`current_session_id`),
     /// resolved at admission. A missing one is a no-op skip, never an empty
     /// placeholder session (v1.191 P1 T13, durable §8).
     run_id: String,
-    /// The admitted chapter artifact's workspace-relative path: the source the
+    /// note: The admitted chapter artifact's workspace-relative path: the source the
     /// extraction run is resolved over and the wire `sources[].source_id`
     /// (v1.191 P1 T13, durable §8).
     source_id: String,
-    /// Human-readable Work slug for on-disk paths (`work_ref`, falling back to
+    /// note: Human-readable Work slug for on-disk paths (`work_ref`, falling back to
     /// `story_ref`). `None` in hermetic DB-only tests where no workspace exists.
     work_ref: Option<String>,
-    /// Work profile (e.g. `"novel"`, `"game_bible"`) for profile-aware
+    /// note: Work profile (e.g. `"novel"`, `"game_bible"`) for profile-aware
     /// KB extraction payloads. Defaults to `"novel"` when the Work row carries
     /// `work_profile = NULL` (backward compatibility with pre-V1.36 Works).
     work_profile: String,
     prose: String,
 }
 
-/// Resolve the schedule → work → chapter body for the review-time extraction hook.
+/// note: Resolve the schedule → work → chapter body for the review-time extraction hook.
 ///
 /// Returns `Ok(None)` for every no-op early return (non-`review-master`
 /// preset, NULL `work_id`, no `workspace_dir`, missing work/world/chapter/body).
@@ -1197,7 +1193,7 @@ async fn load_review_context(
     .await
 }
 
-/// Resolve the schedule → work → chapter body for the finalize-time missing-KB hook.
+/// note: Resolve the schedule → work → chapter body for the finalize-time missing-KB hook.
 ///
 /// Returns `Ok(None)` for every no-op early return (non-`novel-writing`
 /// preset, NULL `work_id`, no `workspace_dir`, missing work/world/chapter/body).
@@ -1216,7 +1212,7 @@ async fn load_finalize_context(
     .await
 }
 
-/// Shared loader for [`ChapterContext`].
+/// note: Shared loader for [`ChapterContext`].
 ///
 /// `log_prefix` is used in `tracing` events so review-time and finalize-time
 /// skips are distinguishable in logs.
@@ -1251,7 +1247,7 @@ async fn load_context_for_preset(
         .map_err(|e| AutoChainError::InvalidState(format!("decode work_id: {e}")))?;
     let creator_id: String = sqlx::Row::try_get(&row, "creator_id")
         .map_err(|e| AutoChainError::InvalidState(format!("decode creator_id: {e}")))?;
-    // The run identity the schedule was admitted under. Extraction runs through
+    // note: The run identity the schedule was admitted under. Extraction runs through
     // `orchestrate_extract`, which refuses an empty run id, so a schedule with
     // no stored session is a skip rather than a fabricated `""` run
     // (v1.191 P1 T13, durable §8: never invent a default session).
@@ -1299,7 +1295,7 @@ async fn load_context_for_preset(
 
     let workspace_id = resolve_workspace_id(pool, &creator_id).await;
     let work_ref = work.work_ref.clone().or_else(|| work.story_ref.clone());
-    // V1.55 P2 fix-wave (F-001): read work_profile from the Work row so the
+    // note: V1.55 P2 fix-wave (F-001): read work_profile from the Work row so the
     // extraction hook produces profile-aware KB candidates. Defaults to "novel"
     // for Works created before V1.36 (work_profile = NULL).
     let work_profile = work
@@ -1327,7 +1323,7 @@ async fn load_context_for_preset(
     }))
 }
 
-/// Load the chapter body prose from the workspace filesystem.
+/// note: Load the chapter body prose from the workspace filesystem.
 ///
 /// Returns `Ok(None)` when the chapter row or body file is missing (logged at
 /// `debug` — non-fatal skip).
@@ -1338,7 +1334,7 @@ async fn load_chapter_prose(
     chapter: i32,
     ws_dir: &std::path::Path,
 ) -> Result<Option<(String, String)>, AutoChainError> {
-    // Volume defaults to 1 for single-volume works (V1.42 backfill).
+    // note: Volume defaults to 1 for single-volume works (V1.42 backfill).
     let chapter_row =
         match nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, 1).await {
             Ok(Some(c)) => c,
@@ -1375,7 +1371,7 @@ async fn load_chapter_prose(
     }
 }
 
-/// Filter candidates against existing names + idempotency, then insert pending.
+/// note: Filter candidates against existing names + idempotency, then insert pending.
 ///
 /// Returns the count of newly-inserted rows. Per-candidate insert errors are
 /// logged at `warn!` and do not abort the loop.
@@ -1405,7 +1401,7 @@ async fn persist_candidates(
         {
             continue;
         }
-        // Convert for the REAL column; both are None for heuristic candidates.
+        // note: Convert for the REAL column; both are None for heuristic candidates.
         let llm_confidence = candidate.confidence;
         let llm_source_quote = candidate.source_quote.as_deref();
         match insert_pending_with_llm(
@@ -1438,7 +1434,7 @@ async fn persist_candidates(
     Ok(inserted)
 }
 
-/// Resolve relationship-candidate endpoints to existing `KnowledgeEntry` rows and persist
+/// note: Resolve relationship-candidate endpoints to existing `KnowledgeEntry` rows and persist
 /// idempotent extraction-sourced suggestions into `kb_relationships` (V1.76).
 ///
 /// Implements the architect-locked entity-existence prerequisite: a
@@ -1466,7 +1462,7 @@ async fn persist_relationship_candidates(
     let now = chrono::Utc::now().to_rfc3339();
     let mut inserted = 0usize;
     for rel in relationships {
-        // Resolve both endpoints to existing non-deleted KnowledgeEntries. When a
+        // note: Resolve both endpoints to existing non-deleted KnowledgeEntries. When a
         // block_type hint is provided, resolve by (world, block_type, name);
         // otherwise case-insensitive by name only when exactly one matches.
         let source_id = resolve_entity_by_canonical_name(
@@ -1485,7 +1481,7 @@ async fn persist_relationship_candidates(
         .await?;
 
         let (Some(source_id), Some(target_id)) = (source_id, target_id) else {
-            // Entity-existence prerequisite: skip + log. The suggestion may be
+            // note: Entity-existence prerequisite: skip + log. The suggestion may be
             // re-proposed on a later rescan after the author promotes the
             // endpoint entities (architect lock).
             tracing::debug!(
@@ -1516,7 +1512,7 @@ async fn persist_relationship_candidates(
         {
             Ok(true) => inserted += 1,
             Ok(false) => {
-                // Idempotent skip: suggestion already exists from a prior rescan.
+                // note: Idempotent skip: suggestion already exists from a prior rescan.
             }
             Err(e) => {
                 tracing::warn!(
@@ -1535,7 +1531,7 @@ async fn persist_relationship_candidates(
     Ok(inserted)
 }
 
-/// Fetch the set of active `canonical_name` values for a world.
+/// note: Fetch the set of active `canonical_name` values for a world.
 ///
 /// Used to filter heuristic candidates that already exist as `KnowledgeEntryRecord`s
 /// (avoids offering the author a duplicate they will reject).
@@ -1607,7 +1603,7 @@ async fn write_missing_kb_log(
     };
 
     let date = chrono::Utc::now().format("%Y-%m-%d");
-    // The port creates the parent directories; the log name is date+chapter
+    // note: The port creates the parent directories; the log name is date+chapter
     // unique, so a repeat finalize replaces the same file.
     let rel_child = std::path::Path::new("Logs")
         .join("kb")
@@ -1671,7 +1667,7 @@ async fn write_missing_kb_log(
     Ok(missing.len())
 }
 
-/// YAML-frontmatter candidate entry for the missing-KB log.
+/// note: YAML-frontmatter candidate entry for the missing-KB log.
 #[derive(Debug, serde::Serialize)]
 struct MissingLogCandidate {
     canonical_name: String,
@@ -1680,7 +1676,7 @@ struct MissingLogCandidate {
     confidence: Option<f64>,
 }
 
-/// YAML-frontmatter header for the missing-KB log.
+/// note: YAML-frontmatter header for the missing-KB log.
 #[derive(Debug, serde::Serialize)]
 struct MissingLogFrontmatter {
     generated_at: String,
@@ -1692,11 +1688,7 @@ struct MissingLogFrontmatter {
     candidates: Vec<MissingLogCandidate>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.52 T-A P0 — Outline 五问 quality gate
-// ═══════════════════════════════════════════════════════════════════════
-
-/// Per-dimension results of the outline 五问 heuristic check.
+/// note: Per-dimension results of the outline 五问 heuristic check.
 ///
 /// The five dimensions are intentionally different from the finalize 五問:
 /// they evaluate the *outline* before any正文 is drafted.
@@ -1705,30 +1697,30 @@ struct MissingLogFrontmatter {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FiveQDimensions {
-    /// Outline has clear beat-level structure (headings, bullets, numbered beats).
+    /// note: Outline has clear beat-level structure (headings, bullets, numbered beats).
     pub structure: bool,
-    /// A character or situation arc is present (conflict, stakes, change).
+    /// note: A character or situation arc is present (conflict, stakes, change).
     pub arc: bool,
-    /// At least one future-setup / foreshadowing signal is present.
+    /// note: At least one future-setup / foreshadowing signal is present.
     pub foreshadow: bool,
-    /// Outline length is within sane bounds (not empty, not a full draft).
+    /// note: Outline length is within sane bounds (not empty, not a full draft).
     pub pacing: bool,
-    /// Final line ends with tension, a question, or unresolved action.
+    /// note: Final line ends with tension, a question, or unresolved action.
     pub hook: bool,
 }
 
-/// Verdict returned by [`outline_five_q_check`].
+/// note: Verdict returned by [`outline_five_q_check`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FiveQVerdict {
-    /// `true` only when all five dimensions pass.
+    /// note: `true` only when all five dimensions pass.
     pub go: bool,
-    /// Per-dimension breakdown.
+    /// note: Per-dimension breakdown.
     pub dimensions: FiveQDimensions,
-    /// Human-readable reason summarizing pass/fail dimensions.
+    /// note: Human-readable reason summarizing pass/fail dimensions.
     pub reason: String,
 }
 
-/// Build the [`FiveQVerdict`] from already-computed dimensions.
+/// note: Build the [`FiveQVerdict`] from already-computed dimensions.
 ///
 /// R-V152TA-S006: centralizes the NOGO info-log so every caller of
 /// [`outline_five_q_check`] gets consistent observability of the per-dimension
@@ -1758,7 +1750,7 @@ fn build_five_q_verdict(dimensions: FiveQDimensions) -> FiveQVerdict {
     let reason = if go {
         "outline 五问: all dimensions pass (structure, arc, foreshadow, pacing, hook)".to_string()
     } else {
-        // R-V152TA-S006: info-log NOGO with per-dimension scores so operators
+        // note: R-V152TA-S006: info-log NOGO with per-dimension scores so operators
         // can see why the heuristic gate blocked draft generation.
         tracing::info!(
             structure = structure,
@@ -1779,7 +1771,7 @@ fn build_five_q_verdict(dimensions: FiveQDimensions) -> FiveQVerdict {
     }
 }
 
-/// Pure heuristic evaluation of a chapter outline against the outline 五问 gate.
+/// note: Pure heuristic evaluation of a chapter outline against the outline 五问 gate.
 ///
 /// This is the deterministic / no-worker complement to the `llm_judge` outline
 /// gate in the `novel-writing` preset. It returns GO only when all five
@@ -1798,12 +1790,12 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
         .collect();
     let lower = trimmed.to_ascii_lowercase();
 
-    // 1. structure: at least 3 non-empty lines and visible beats/sections.
+    // note: 1. structure: at least 3 non-empty lines and visible beats/sections.
     let has_headings = trimmed.contains("##") || trimmed.contains("# ");
     let has_bullets = trimmed.contains("- ") || trimmed.contains("* ") || trimmed.contains("1. ");
     let structure = non_empty_lines.len() >= 3 && (has_headings || has_bullets);
 
-    // 2. arc: conflict / stakes / change language.
+    // note: 2. arc: conflict / stakes / change language.
     let arc_signals = [
         "conflict",
         "stakes",
@@ -1824,7 +1816,7 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     ];
     let arc = arc_signals.iter().any(|s| lower.contains(s));
 
-    // 3. foreshadow: explicit F### or future-setup language.
+    // note: 3. foreshadow: explicit F### or future-setup language.
     let fore_signals = [
         "f###",
         "foreshadow",
@@ -1839,11 +1831,11 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     ];
     let foreshadow = fore_signals.iter().any(|s| lower.contains(s));
 
-    // 4. pacing: not empty and not a full draft dumped into the outline field.
+    // note: 4. pacing: not empty and not a full draft dumped into the outline field.
     let char_count = trimmed.chars().count();
     let pacing = (80..=2000).contains(&char_count);
 
-    // 5. hook: final non-empty line ends with punctuation or word signals that
+    // note: 5. hook: final non-empty line ends with punctuation or word signals that
     //    leave the reader hanging.
     let hook_signals = [
         "cliffhanger",
@@ -1873,11 +1865,8 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     })
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.55 P2 — Game-bible design 五问 quality rubric
-// ═══════════════════════════════════════════════════════════════════════
 
-/// Per-dimension results of the game-bible design 五问 rubric.
+/// note: Per-dimension results of the game-bible design 五问 rubric.
 ///
 /// Unlike the novel outline/finalize gates, this rubric evaluates
 /// **design documents** — not prose chapters. The five dimensions are:
@@ -1898,7 +1887,7 @@ pub struct DesignFiveQDimensions {
     pub clarity: bool,
 }
 
-/// Verdict returned by [`design_five_q_check`].
+/// note: Verdict returned by [`design_five_q_check`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesignFiveQVerdict {
     pub go: bool,
@@ -1906,7 +1895,7 @@ pub struct DesignFiveQVerdict {
     pub reason: String,
 }
 
-/// Pure heuristic evaluation of a game-bible design section against the
+/// note: Pure heuristic evaluation of a game-bible design section against the
 /// design 五问 rubric (V1.55 P2).
 ///
 /// Deterministic / no-worker complement to the `llm_judge` gate for the
@@ -1926,7 +1915,7 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
         .filter(|l| !l.is_empty())
         .collect();
 
-    // 1. pillars: section references a design pillar or constraint.
+    // note: 1. pillars: section references a design pillar or constraint.
     let pillar_signals = [
         "pillar",
         "constraint",
@@ -1942,7 +1931,7 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
     ];
     let pillars = pillar_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 5;
 
-    // 2. mechanics: concrete gameplay mechanics.
+    // note: 2. mechanics: concrete gameplay mechanics.
     let mechanics_signals = [
         "damage", "health", "mana", "currency", "resource", "costs", "requires", "grants", "loop",
         "feedback", "cycle", "phase", "turn", "per", "level", "unlock", "skill", "craft", "trade",
@@ -1951,7 +1940,7 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
     let mechanics =
         mechanics_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 8;
 
-    // 3. continuity: cross-references and relational language.
+    // note: 3. continuity: cross-references and relational language.
     let continuity_signals = [
         "see also",
         "above",
@@ -1968,7 +1957,7 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
     let continuity = continuity_signals.iter().any(|s| lower.contains(s))
         || char_count_range(trimmed, 200, 10_000);
 
-    // 4. playability: player experience signals.
+    // note: 4. playability: player experience signals.
     let playability_signals = [
         "player",
         "players",
@@ -1990,7 +1979,7 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
     let playability =
         playability_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 5;
 
-    // 5. clarity: no TBD/placeholder, not a stub.
+    // note: 5. clarity: no TBD/placeholder, not a stub.
     let placeholder_signals = [
         "tbd",
         "todo",
@@ -2041,11 +2030,8 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.63 P2 — Essay 4-dimension quality rubric
-// ═══════════════════════════════════════════════════════════════════════
 
-/// Per-dimension results of the essay 4-dimension quality rubric.
+/// note: Per-dimension results of the essay 4-dimension quality rubric.
 ///
 /// The four dimensions evaluate the essay as a complete artifact:
 ///
@@ -2067,7 +2053,7 @@ pub struct EssayFourDimDimensions {
     pub ending_takeaway: bool,
 }
 
-/// Verdict returned by [`essay_four_dim_check`].
+/// note: Verdict returned by [`essay_four_dim_check`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EssayFourDimVerdict {
     pub go: bool,
@@ -2075,7 +2061,7 @@ pub struct EssayFourDimVerdict {
     pub reason: String,
 }
 
-/// Pure heuristic evaluation of an essay against the 4-dimension quality
+/// note: Pure heuristic evaluation of an essay against the 4-dimension quality
 /// rubric (V1.63 P2).
 ///
 /// Deterministic / no-worker complement to the `llm_judge` gate for the
@@ -2094,7 +2080,7 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         .filter(|l| !l.is_empty())
         .collect();
 
-    // 1. thesis_clarity: identifiable thesis statement with argumentative language.
+    // note: 1. thesis_clarity: identifiable thesis statement with argumentative language.
     let thesis_signals = [
         "argue",
         "thesis",
@@ -2109,7 +2095,7 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         "main argument",
     ];
     let has_thesis_language = thesis_signals.iter().any(|s| lower.contains(s));
-    // Also check: essay has enough substance (not a stub) and contains declarative
+    // note: Also check: essay has enough substance (not a stub) and contains declarative
     // language suggesting a specific argument.
     let has_argument_structure = lower.contains("because")
         || lower.contains("therefore")
@@ -2121,7 +2107,7 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
     let thesis_clarity =
         has_thesis_language && has_argument_structure && non_empty_lines.len() >= 5;
 
-    // 2. evidence_support: specific evidence markers vs vague authority.
+    // note: 2. evidence_support: specific evidence markers vs vague authority.
     let evidence_signals = [
         "according to",
         "study by",
@@ -2145,7 +2131,7 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         "statistic",
     ];
     let has_specific_evidence = evidence_signals.iter().any(|s| lower.contains(s));
-    // Vague authority patterns that should lower confidence.
+    // note: Vague authority patterns that should lower confidence.
     let vague_signals = [
         "studies show",
         "research shows",
@@ -2156,11 +2142,11 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         "obviously",
     ];
     let vague_count = vague_signals.iter().filter(|s| lower.contains(*s)).count();
-    // Evidence passes if specific markers present AND not relying solely on vague authority.
+    // note: Evidence passes if specific markers present AND not relying solely on vague authority.
     let evidence_support =
         has_specific_evidence && (vague_count < 3 || char_count_range(trimmed, 500, 50_000));
 
-    // 3. coherence: logical flow markers and paragraph structure.
+    // note: 3. coherence: logical flow markers and paragraph structure.
     let coherence_signals = [
         "first",
         "second",
@@ -2185,9 +2171,9 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         .iter()
         .filter(|s| lower.contains(*s))
         .count();
-    // Also check: the essay has paragraphs (multi-line structure).
+    // note: Also check: the essay has paragraphs (multi-line structure).
     let has_paragraphs = non_empty_lines.len() >= 6;
-    // Counterargument language: essay engages with opposing views.
+    // note: Counterargument language: essay engages with opposing views.
     let counterarg_signals = [
         "objection",
         "counterargument",
@@ -2206,7 +2192,7 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
     let has_counterarg = counterarg_signals.iter().any(|s| lower.contains(s));
     let coherence = coherence_signal_count >= 3 && has_paragraphs && has_counterarg;
 
-    // 4. ending_takeaway: conclusion delivers insight beyond summary.
+    // note: 4. ending_takeaway: conclusion delivers insight beyond summary.
     let takeaway_signals = [
         "conclusion",
         "in summary",
@@ -2228,7 +2214,7 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         "the point is",
     ];
     let has_takeaway_language = takeaway_signals.iter().any(|s| lower.contains(s));
-    // Also check: the last non-empty lines contain forward-looking or
+    // note: Also check: the last non-empty lines contain forward-looking or
     // insight-oriented language, not just mechanical restatement.
     let last_few_lines: String = non_empty_lines
         .iter()
@@ -2279,13 +2265,13 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
     }
 }
 
-/// Check whether the character count of `text` falls within `[min, max]`.
+/// note: Check whether the character count of `text` falls within `[min, max]`.
 fn char_count_range(text: &str, min: usize, max: usize) -> bool {
     let count = text.chars().count();
     count >= min && count <= max
 }
 
-/// Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.
+/// note: Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.
 ///
 /// Falls back to the `creator_id` when no workspace is registered (the column
 /// is informational; the extraction logic keys off `world_id` + `work_id`).
@@ -2317,7 +2303,7 @@ mod tests {
     #[test]
     fn extracts_multi_word_names() {
         let text = "The Crimson Order met at Mount Azure.";
-        // "The Crimson Order": first word "The" is filtered for multi-word.
+        // note: "The Crimson Order": first word "The" is filtered for multi-word.
         // "Mount Azure": kept.
         let names: Vec<_> = extract_candidates_from_text(text)
             .into_iter()
@@ -2342,7 +2328,7 @@ mod tests {
     fn filters_stopwords() {
         let text = "The cat sat. When morning came, Chapter 5 began.";
         let candidates = extract_candidates_from_text(text);
-        // "The", "When", "Chapter" should all be filtered.
+        // note: "The", "When", "Chapter" should all be filtered.
         for c in &candidates {
             assert!(
                 !matches!(c.canonical_name_guess.as_str(), "The" | "When" | "Chapter"),
@@ -2354,7 +2340,7 @@ mod tests {
 
     #[test]
     fn caps_at_max_candidates() {
-        // Generate 30 distinct capitalized names.
+        // note: Generate 30 distinct capitalized names.
         let names: String = (0..30)
             .map(|i| format!("Name{i} Person"))
             .collect::<Vec<_>>()
@@ -2379,7 +2365,6 @@ mod tests {
         assert_eq!(payload["attributes"]["aliases"][0], "Aria Stormblade");
     }
 
-    // ── V1.51 T-A P0: heuristic candidates carry the new fields as defaults ──
 
     #[test]
     fn heuristic_candidates_default_block_type_and_null_llm_fields() {
@@ -2390,7 +2375,6 @@ mod tests {
         assert_eq!(candidates[0].source_quote, None);
     }
 
-    // ── V1.51 T-A P0: block_type -> novel_category mapping ───────────────────
 
     #[test]
     fn block_type_mapping_covers_known_types() {
@@ -2401,12 +2385,11 @@ mod tests {
         assert_eq!(block_type_to_novel_category("conflict"), "rules");
         assert_eq!(block_type_to_novel_category("info_point"), "foundation");
         assert_eq!(block_type_to_novel_category("event"), "background");
-        // Unknown / ability -> foundation (generic).
+        // note: Unknown / ability -> foundation (generic).
         assert_eq!(block_type_to_novel_category("ability"), "foundation");
         assert_eq!(block_type_to_novel_category("nonsense"), "foundation");
     }
 
-    // ── V1.51 T-A P0: candidate_from_llm_json builder ─────────────────────────
 
     #[test]
     fn candidate_from_llm_json_builds_full_payload() {
@@ -2426,7 +2409,7 @@ mod tests {
             Some("...the eastern gate groaned open...")
         );
 
-        // proposed_payload JSON carries the 4 LLM keys + derived novel_category.
+        // note: proposed_payload JSON carries the 4 LLM keys + derived novel_category.
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
         assert_eq!(payload["block_type"], "scene");
         assert_eq!(payload["canonical_name"], "Azure Gate");
@@ -2464,7 +2447,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_defaults_missing_optional_fields() {
-        // Only canonical_name is required; block_type defaults to character,
+        // note: Only canonical_name is required; block_type defaults to character,
         // confidence/source_quote to None.
         let c = serde_json::json!({"canonical_name": "Y"});
         let built = candidate_from_llm_json(&c).unwrap();
@@ -2473,7 +2456,6 @@ mod tests {
         assert_eq!(built.source_quote, None);
     }
 
-    // ── V1.55 P2 fix-wave (F-001): profile-aware candidate materialization ──
 
     #[test]
     fn candidate_from_llm_json_for_profile_game_bible_produces_game_bible_category() {
@@ -2488,7 +2470,7 @@ mod tests {
             candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
 
-        // game-bible payload MUST have game_bible_category, NOT novel_category.
+        // note: game-bible payload MUST have game_bible_category, NOT novel_category.
         assert_eq!(
             payload["attributes"]["game_bible_category"], "species",
             "game-bible profile: species block_type → game_bible_category species"
@@ -2497,10 +2479,10 @@ mod tests {
             payload["attributes"].get("novel_category").is_none(),
             "game-bible profile: must NOT emit novel_category"
         );
-        // Tags must be game-bible scoped.
+        // note: Tags must be game-bible scoped.
         assert_eq!(payload["tags"][0], "game-bible");
         assert_eq!(payload["tags"][1], "llm-extracted");
-        // LLM keys still present.
+        // note: LLM keys still present.
         assert_eq!(payload["block_type"], "species");
         assert_eq!(payload["canonical_name"], "Eldritch Species");
         assert_eq!(payload["confidence"], 0.88);
@@ -2512,7 +2494,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_for_profile_game_bible_cross_domain_maps_character_to_species() {
-        // Cross-domain: character BlockType → species game_bible_category.
+        // note: Cross-domain: character BlockType → species game_bible_category.
         let c = serde_json::json!({
             "canonical_name": "Hero",
             "block_type": "character",
@@ -2545,7 +2527,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_for_profile_game_bible_unknown_defaults_species() {
-        // Unknown block_type defaults to species per the mapping.
+        // note: Unknown block_type defaults to species per the mapping.
         let c = serde_json::json!({
             "canonical_name": "???",
             "block_type": "goblin_king",
@@ -2559,7 +2541,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_novel_profile_still_works() {
-        // Regression: the novel wrapper must produce novel_category as before.
+        // note: Regression: the novel wrapper must produce novel_category as before.
         let c = serde_json::json!({
             "canonical_name": "Azure Gate",
             "block_type": "scene",
@@ -2576,7 +2558,6 @@ mod tests {
         assert_eq!(payload["tags"][1], "llm-extracted");
     }
 
-    // ── V1.60 P1: profile-aware candidate materialization for script ──
 
     #[test]
     fn candidate_from_llm_json_for_profile_script_produces_script_category() {
@@ -2591,7 +2572,7 @@ mod tests {
             candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
 
-        // script payload MUST have script_category, NOT novel_category or game_bible_category.
+        // note: script payload MUST have script_category, NOT novel_category or game_bible_category.
         assert_eq!(
             payload["attributes"]["script_category"], "dialogue",
             "script profile: dialogue block_type → script_category dialogue"
@@ -2604,10 +2585,10 @@ mod tests {
             payload["attributes"].get("game_bible_category").is_none(),
             "script profile: must NOT emit game_bible_category"
         );
-        // Tags must be script scoped.
+        // note: Tags must be script scoped.
         assert_eq!(payload["tags"][0], "script");
         assert_eq!(payload["tags"][1], "llm-extracted");
-        // LLM keys still present.
+        // note: LLM keys still present.
         assert_eq!(payload["block_type"], "dialogue");
         assert_eq!(payload["canonical_name"], "Alice's Confession");
         assert_eq!(payload["confidence"], 0.92);
@@ -2619,7 +2600,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_for_profile_script_cross_domain_maps_character_to_dialogue() {
-        // Cross-domain: character BlockType → dialogue script_category.
+        // note: Cross-domain: character BlockType → dialogue script_category.
         let c = serde_json::json!({
             "canonical_name": "Bob",
             "block_type": "character",
@@ -2638,7 +2619,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_for_profile_script_cross_domain_event_to_beat() {
-        // Cross-domain: event BlockType → beat script_category.
+        // note: Cross-domain: event BlockType → beat script_category.
         let c = serde_json::json!({
             "canonical_name": "The Explosion",
             "block_type": "event",
@@ -2653,7 +2634,7 @@ mod tests {
 
     #[test]
     fn candidate_from_llm_json_for_profile_script_unknown_defaults_dialogue() {
-        // Unknown block_type defaults to dialogue per the mapping.
+        // note: Unknown block_type defaults to dialogue per the mapping.
         let c = serde_json::json!({
             "canonical_name": "???",
             "block_type": "unknown_thing",
@@ -2711,9 +2692,8 @@ mod tests {
         );
     }
 
-    // ── V1.51 T-A P1: cross-chapter aggregation ───────────────────────────
 
-    /// Helper: a heuristic candidate for `name` (the shape
+    /// note: Helper: a heuristic candidate for `name` (the shape
     /// `extract_candidates_from_text` produces).
     fn heuristic_candidate(name: &str) -> KbCandidate {
         KbCandidate {
@@ -2732,7 +2712,7 @@ mod tests {
 
     #[test]
     fn aggregate_collapses_same_name_across_chapters() {
-        // Chapters 3, 5, 7 each reference "Aelin".
+        // note: Chapters 3, 5, 7 each reference "Aelin".
         let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
             (3, vec![heuristic_candidate("Aelin")]),
             (5, vec![heuristic_candidate("Aelin")]),
@@ -2766,7 +2746,7 @@ mod tests {
 
     #[test]
     fn aggregate_is_case_insensitive_and_preserves_first_seen_case() {
-        // "Aelin" in ch1, "aelin" in ch2 (different case, same entity).
+        // note: "Aelin" in ch1, "aelin" in ch2 (different case, same entity).
         let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
             (1, vec![heuristic_candidate("Aelin")]),
             (2, vec![heuristic_candidate("aelin")]),
@@ -2782,7 +2762,7 @@ mod tests {
 
     #[test]
     fn aggregate_dedupes_chapter_list() {
-        // Chapter 1 mentions "Aelin" twice (defensive — the heuristic dedupes
+        // note: Chapter 1 mentions "Aelin" twice (defensive — the heuristic dedupes
         // already, but aggregation must be robust to duplicates) + chapter 2
         // mentions it once.
         let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
@@ -2828,7 +2808,7 @@ mod tests {
     fn aggregate_skips_chapters_with_no_candidates() {
         let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
             (1, vec![heuristic_candidate("Aelin")]),
-            (2, vec![]), // chapter 2 has no candidates
+            (2, vec![]), // note: chapter 2 has no candidates
             (3, vec![heuristic_candidate("Aelin")]),
         ];
         let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
@@ -2838,7 +2818,7 @@ mod tests {
 
     #[test]
     fn aggregate_preserves_llm_metadata_when_present() {
-        // An LLM-pathway candidate (confidence + source_quote) aggregating with
+        // note: An LLM-pathway candidate (confidence + source_quote) aggregating with
         // a heuristic candidate: the LLM metadata is carried forward.
         let llm = KbCandidate {
             canonical_name_guess: "Azure Gate".to_string(),
@@ -2863,9 +2843,8 @@ mod tests {
         assert_eq!(aggregates[0].block_type, "scene");
     }
 
-    // ── V1.52 T-A P0: outline 五问 heuristic gate ───────────────────────
 
-    // Serialize every test that can trigger `outline_five_q_check`'s info!
+    // note: Serialize every test that can trigger `outline_five_q_check`'s info!
     // callsite: the first trigger registers the callsite process-wide, and a
     // first registration from a dispatcher-less test can race the capture
     // test's interest rebuild, leaving the capture vector empty (CI-only
@@ -2908,7 +2887,7 @@ mod tests {
 
     #[test]
     fn outline_five_q_fails_without_arc_or_hook() {
-        // Structured and paced, but no conflict/change and no hook.
+        // note: Structured and paced, but no conflict/change and no hook.
         let outline = "## Scene 1\n- The party walks through the forest.\n- They see many trees.\n## Scene 2\n- They stop for lunch.\n";
         let verdict = {
             let _lock = tracing_test_lock();
@@ -2926,7 +2905,7 @@ mod tests {
 
     #[test]
     fn outline_five_q_detects_hook_via_question() {
-        // Minimal structured outline with arc and foreshadow words; hook via '?'.
+        // note: Minimal structured outline with arc and foreshadow words; hook via '?'.
         let outline = "## Beat 1\n- Kael must steal the map before dawn.\n- He plants a promise that the guard will return.\n## Beat 2\n- Will he make it out alive?";
         let verdict = {
             let _lock = tracing_test_lock();
@@ -2935,12 +2914,12 @@ mod tests {
         assert!(verdict.go, "expected GO, got: {verdict:?}");
     }
 
-    // R-V152TA-S006 / R-V167P2-QC1-S1: regression test confirming that a NOGO
+    // note: R-V152TA-S006 / R-V167P2-QC1-S1: regression test confirming that a NOGO
     // verdict emits a structured info log carrying every dimension score. The
     // log is the primary operator observability for why the heuristic gate
     // blocked draft generation.
     #[test]
-    // The tracing-serialization lock and the captured `msgs` guard are both
+    // note: The tracing-serialization lock and the captured `msgs` guard are both
     // held through the assertion (the failure message reads `msgs`);
     // early-drop adds nothing in this test.
     #[allow(clippy::significant_drop_tightening)]
@@ -2984,12 +2963,12 @@ mod tests {
             );
 
         tracing::subscriber::with_default(subscriber, || {
-            // Re-register callsite interest under THIS test's subscriber: an
+            // note: Re-register callsite interest under THIS test's subscriber: an
             // earlier trigger from a dispatcher-less context may have cached
             // `Interest::NEVER` for the gate's info! callsite, which would
             // silently skip our capture layer (process-wide cache).
             tracing::callsite::rebuild_interest_cache();
-            // Structured and paced, but lacks arc, foreshadow, and hook.
+            // note: Structured and paced, but lacks arc, foreshadow, and hook.
             let outline = "## Scene 1\n\
                 - The party walks through the ancient forest in the late afternoon light.\n\
                 - They see many trees, some fallen, and a narrow path winding east toward the river.\n\
@@ -3019,7 +2998,7 @@ mod tests {
         );
     }
 
-    // R-V152TA-S001: regression test confirming the single shared LLM→KbCandidate
+    // note: R-V152TA-S001: regression test confirming the single shared LLM→KbCandidate
     // parser (`candidate_from_llm_json_for_profile`) is used by both extraction
     // pathways. If the two call sites ever diverge, this test still guards the
     // canonical mapping shape.
@@ -3044,12 +3023,12 @@ mod tests {
             Some("...the eastern gate groaned open...")
         );
 
-        // Profile-aware payload shaping: novel uses novel_category.
+        // note: Profile-aware payload shaping: novel uses novel_category.
         let payload: serde_json::Value =
             serde_json::from_str(&candidate.proposed_payload).expect("valid JSON payload");
         assert_eq!(payload["attributes"]["novel_category"], "location");
 
-        // The same LLM JSON parsed for game_bible/script profiles keeps the
+        // note: The same LLM JSON parsed for game_bible/script profiles keeps the
         // core fields identical; only the profile-specific category attribute
         // changes. This proves the parser is the shared source of truth.
         let game_bible_candidate =
@@ -3061,9 +3040,6 @@ mod tests {
         assert_eq!(gb_payload["attributes"]["game_bible_category"], "level");
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // V1.55 P2 — Game-bible design 五问 rubric + category mapping tests
-    // ═══════════════════════════════════════════════════════════════════════
 
     #[test]
     fn design_five_q_passes_on_good_design_section() {
@@ -3151,9 +3127,6 @@ mod tests {
         assert_eq!(block_type_to_game_bible_category("nonsense"), "species");
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // V1.63 P2 — Essay 4-dimension rubric tests
-    // ═══════════════════════════════════════════════════════════════════════
 
     #[test]
     fn essay_four_dim_passes_on_good_essay() {
@@ -3212,7 +3185,7 @@ mod tests {
             It is important to consider. Some say one thing, others say another. \
             In conclusion, this is a complex topic that deserves more thought.\n";
         let verdict = essay_four_dim_check(essay);
-        // Should fail on multiple dimensions: no specific thesis language,
+        // note: Should fail on multiple dimensions: no specific thesis language,
         // no evidence, poor coherence.
         assert!(!verdict.go);
         assert!(
@@ -3232,7 +3205,7 @@ mod tests {
             But dogs offer more companionship. Therefore, dogs are the best pets. \
             In the end, choosing a dog is the right decision.\n";
         let verdict = essay_four_dim_check(essay);
-        // Has thesis language and coherence, but no specific evidence
+        // note: Has thesis language and coherence, but no specific evidence
         // (no named studies, data, percentages, specific examples).
         assert!(
             !verdict.dimensions.evidence_support,
@@ -3263,7 +3236,7 @@ mod tests {
             altered communication habits. The topic is multifaceted and \
             continues to be studied by researchers worldwide.\n";
         let verdict = essay_four_dim_check(essay);
-        // Has thesis, evidence, and coherence, but ending lacks insight -
+        // note: Has thesis, evidence, and coherence, but ending lacks insight -
         // merely descriptively restates without "so what?" or forward-looking language.
         assert!(
             !verdict.dimensions.ending_takeaway,

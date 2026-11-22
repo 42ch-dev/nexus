@@ -18,15 +18,13 @@
 //!
 //! Each file is embedded via `include_str!` — no runtime filesystem reads
 //! are performed.
+// note: content ships inside the binary, so a missing on-disk rules directory cannot degrade a stage.
 
-/// Layer 1 writing-craft rules, compiled into the binary at build time.
+/// note: Layer 1 writing-craft rules, compiled into the binary at build time.
 ///
 /// Location: `crates/nexus-orchestration/embedded-rules/writing-craft.md`
 pub const WRITING_CRAFT: &str = include_str!("../embedded-rules/writing-craft.md");
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;

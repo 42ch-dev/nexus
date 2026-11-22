@@ -20,20 +20,20 @@ use serde::{Deserialize, Serialize};
 use nexus_capability::builtins::work_commit::{commit_work_bytes, require_executor};
 use nexus_capability::WorkspaceExecutor;
 
-/// Current schema version for the completion-lock file.
+/// note: Current schema version for the completion-lock file.
 const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-/// Completion-lock payload written to disk.
+/// note: Completion-lock payload written to disk.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompletionLock {
-    /// Schema version for forward-compatibility. Defaults to 1.
+    /// note: Schema version for forward-compatibility. Defaults to 1.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
-    /// The Work ID this lock protects.
+    /// note: The Work ID this lock protects.
     pub work_id: String,
-    /// ISO-8601 timestamp when the lock was applied.
+    /// note: ISO-8601 timestamp when the lock was applied.
     pub locked_at: String,
-    /// Reason for the lock (currently always `"completion"`).
+    /// note: Reason for the lock (currently always `"completion"`).
     pub reason: String,
 }
 
@@ -41,10 +41,10 @@ const fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
 }
 
-/// File name used inside the Work directory.
+/// note: File name used inside the Work directory.
 const LOCK_FILE_NAME: &str = ".completion-lock.json";
 
-/// Return the path to the completion-lock file for a given Work.
+/// note: Return the path to the completion-lock file for a given Work.
 ///
 /// ```
 /// # use nexus_orchestration::completion_lock::completion_lock_path;
@@ -89,7 +89,7 @@ pub async fn write_completion_lock(
     .map_err(std::io::Error::other)
 }
 
-/// Read the completion-lock file if present.
+/// note: Read the completion-lock file if present.
 ///
 /// Returns `Ok(Some(lock))` if the file exists and parses correctly,
 /// `Ok(None)` if the file does not exist, or `Err` on I/O / parse failure.
@@ -115,8 +115,8 @@ pub fn read_completion_lock(
         )
     })?;
 
-    // Backward-compat: missing schema_version treated as 1 (via serde default).
-    // Forward-compat: reject unknown future versions.
+    // why: a pre-V1.41 file carries no schema_version, so serde's default makes it 1;
+    // a newer writer's version is refused rather than misread.
     if lock.schema_version > CURRENT_SCHEMA_VERSION {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -128,7 +128,6 @@ pub fn read_completion_lock(
         ));
     }
 
-    // Normalize missing schema_version (pre-V1.41 lock files) to 1.
     if lock.schema_version == 0 {
         lock.schema_version = 1;
     }
@@ -199,7 +198,6 @@ mod tests {
         let work_dir = ws.join("Works").join("test-novel");
         std::fs::create_dir_all(&work_dir).unwrap();
 
-        // Write a lock file without schema_version (pre-V1.41 format)
         let legacy_json =
             r#"{"work_id":"wrk_old","locked_at":"2026-06-10T10:00:00Z","reason":"completion"}"#;
         let lock_path = completion_lock_path(ws, "test-novel");
@@ -264,7 +262,6 @@ mod tests {
     #[test]
     fn release_idempotent_on_missing() {
         let dir = TempDir::new().unwrap();
-        // Should succeed even if file never existed
         release_completion_lock(dir.path(), "no-such-work").unwrap();
     }
 }

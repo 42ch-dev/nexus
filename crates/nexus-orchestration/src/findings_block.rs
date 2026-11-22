@@ -26,11 +26,12 @@
 //! builder itself does not filter by status — it renders whatever slice
 //! the caller passes — but the docstring and constant re-export below
 //! document the contract for callers building the input slice.
+// note: rendering is pure, so the caller owns the fetch and the pool.
 
 use nexus_local_db::findings::Finding;
 use std::fmt::Write;
 
-/// V1.49 F6 — re-export of the canonical actionable-status set.
+/// note: V1.49 F6 — re-export of the canonical actionable-status set.
 ///
 /// Statuses that the prompt consumer (`open_findings_block`) treats as
 /// eligible for prompt injection. Mirrors
@@ -41,17 +42,17 @@ use std::fmt::Write;
 pub const ACTIONABLE_FINDING_STATUSES: &[&str] =
     nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES;
 
-/// Overlay §2.2 — max number of findings listed in the block.
+/// note: Overlay §2.2 — max number of findings listed in the block.
 pub const MAX_FINDINGS: usize = 8;
 
-/// Overlay §2.2 — max `body` chars per finding.
+/// note: Overlay §2.2 — max `body` chars per finding.
 pub const MAX_BODY_CHARS: usize = 400;
 
-/// Overlay §2.2 — max total block chars. The builder stops appending
+/// note: Overlay §2.2 — max total block chars. The builder stops appending
 /// once the rendered block would exceed this size.
 pub const MAX_TOTAL_BLOCK_CHARS: usize = 3200;
 
-/// Overlay §2.1 — map severity to a numeric rank for ordering
+/// note: Overlay §2.1 — map severity to a numeric rank for ordering
 /// (blocker > major > minor > info). Unknown severities sort lowest.
 ///
 /// Exposed so callers that fetch findings outside the chapter-scoped DAO
@@ -63,11 +64,11 @@ pub fn severity_rank(severity: &str) -> i32 {
         "blocker" => 4,
         "major" => 3,
         "minor" => 2,
-        _ => 1, // "info" and any unknown severity
+        _ => 1, // note: "info" and any unknown severity
     }
 }
 
-/// Overlay §2.1 — sort a `&mut [Finding]` in place.
+/// note: Overlay §2.1 — sort a `&mut [Finding]` in place.
 ///
 /// Severity DESC (blocker > major > minor > info), then `created_at`
 /// ASC. This is the same ordering the chapter-scoped DAO query
@@ -82,7 +83,7 @@ pub fn sort_open_findings(findings: &mut [Finding]) {
     });
 }
 
-/// V1.48 P1 (overlay §2.2) — render the `{{ open_findings_block }}`
+/// note: V1.48 P1 (overlay §2.2) — render the `{{ open_findings_block }}`
 /// template variable for `novel-writing` outline/draft prompts.
 ///
 /// The block is a Markdown section with one bullet per finding:
@@ -149,8 +150,8 @@ pub fn build_open_findings_block(findings: &[Finding], chapter_label: &str) -> S
             ),
         };
 
-        // Stop appending once the total block would exceed the cap.
-        // We never want to half-render a finding line, so the check is
+        // why: stop appending once the total block would exceed the cap, so a
+        // bullet is never half-rendered; the check is
         // "would adding this line overflow?" rather than "trim to cap".
         if out.len() + line.len() > MAX_TOTAL_BLOCK_CHARS {
             break;
@@ -158,9 +159,8 @@ pub fn build_open_findings_block(findings: &[Finding], chapter_label: &str) -> S
         out.push_str(&line);
     }
 
-    // If after applying the total-char cap nothing got appended past the
-    // heading, return empty so the template guard omits the whole block
-    // (avoids rendering a heading with no body).
+    // why: if the total-char cap left nothing past the heading, return empty so
+    // the template guard omits the whole block instead of a heading with no body.
     let heading = format!("## Open findings (chapter {chapter_label})\n\n");
     if out.len() == heading.len() {
         return String::new();
@@ -169,7 +169,7 @@ pub fn build_open_findings_block(findings: &[Finding], chapter_label: &str) -> S
     out
 }
 
-/// Truncate `s` to at most `max_chars` Unicode scalar values, appending
+/// note: Truncate `s` to at most `max_chars` Unicode scalar values, appending
 /// an ellipsis (`…`) when truncation occurred. Returns the (possibly
 /// truncated) string.
 fn truncate_chars(s: &str, max_chars: usize) -> String {
@@ -202,14 +202,14 @@ mod tests {
         }
     }
 
-    /// AC2 (overlay §2.2): no findings → empty string, no sentinel noise.
+    /// note: AC2 (overlay §2.2): no findings → empty string, no sentinel noise.
     #[test]
     fn findings_block_builder_returns_empty_when_no_findings() {
         let block = build_open_findings_block(&[], "01");
         assert!(block.is_empty(), "empty findings must yield empty block");
     }
 
-    /// Overlay §2.2 count cap: 20 findings → exactly `MAX_FINDINGS` bullets.
+    /// note: Overlay §2.2 count cap: 20 findings → exactly `MAX_FINDINGS` bullets.
     #[test]
     fn findings_block_builder_respects_token_cap_count() {
         let findings: Vec<Finding> = (0..20)
@@ -223,7 +223,7 @@ mod tests {
         );
     }
 
-    /// Plan T4 alias — combined token-cap coverage: count cap (20 → ≤8
+    /// note: Plan T4 alias — combined token-cap coverage: count cap (20 → ≤8
     /// bullets) AND body truncation (oversize bodies get an ellipsis).
     /// With oversize bodies the total-block cap may also bind (further
     /// reducing the bullet count below `MAX_FINDINGS`); the assertion
@@ -236,14 +236,14 @@ mod tests {
             .collect();
         let block = build_open_findings_block(&findings, "01");
 
-        // Count cap (≤ MAX_FINDINGS) — total-char cap may further reduce.
+        // note: count cap (≤ MAX_FINDINGS); the total-char cap may reduce it further.
         let bullet_count = block.lines().filter(|l| l.starts_with("- [")).count();
         assert!(
             bullet_count <= MAX_FINDINGS,
             "expected at most {MAX_FINDINGS} bullets when 20 findings seeded; got {bullet_count}"
         );
 
-        // Body truncation — every emitted bullet should carry an ellipsis.
+        // note: body truncation — every emitted bullet carries an ellipsis.
         let bullets: Vec<&str> = block.lines().filter(|l| l.starts_with("- [")).collect();
         for b in &bullets {
             assert!(
@@ -252,7 +252,7 @@ mod tests {
             );
         }
 
-        // Total-char cap invariant.
+        // invariant: the rendered block never exceeds MAX_TOTAL_BLOCK_CHARS.
         assert!(
             block.len() <= MAX_TOTAL_BLOCK_CHARS,
             "block must not exceed MAX_TOTAL_BLOCK_CHARS ({MAX_TOTAL_BLOCK_CHARS}); got {}",
@@ -260,7 +260,7 @@ mod tests {
         );
     }
 
-    /// Overlay §2.2 body cap: a body over `MAX_BODY_CHARS` is truncated
+    /// note: Overlay §2.2 body cap: a body over `MAX_BODY_CHARS` is truncated
     /// with ellipsis.
     #[test]
     fn findings_block_builder_truncates_oversize_body() {
@@ -268,27 +268,26 @@ mod tests {
         let findings = vec![make_finding("major", "craft", "t1", &long_body)];
         let block = build_open_findings_block(&findings, "01");
         assert!(block.contains('…'), "expected ellipsis on truncated body");
-        // The body line itself should be no longer than MAX_BODY_CHARS + ellipsis.
         let body_line = block
             .lines()
             .find(|l| l.starts_with("- ["))
             .expect("bullet line should exist");
         let body_part = body_line.split(": ").nth(1).unwrap_or_default();
-        // body_part may include `\n  Suggested rule: ...` if suggestion present,
-        // but we set rule_suggestion=None above, so it's just the truncated body.
+        // why: body_part may also carry `\n  Suggested rule: ...`, but the fixture
+        // above sets rule_suggestion=None, so only the truncated body remains.
         assert!(
-            body_part.chars().count() <= MAX_BODY_CHARS + 1, // +1 for ellipsis
+            body_part.chars().count() <= MAX_BODY_CHARS + 1, // note: +1 for the ellipsis
             "body should be truncated to {} chars + ellipsis; got {} chars",
             MAX_BODY_CHARS,
             body_part.chars().count()
         );
     }
 
-    /// Overlay §2.2 total cap: a block that would exceed
+    /// note: Overlay §2.2 total cap: a block that would exceed
     /// `MAX_TOTAL_BLOCK_CHARS` stops appending before the overflow.
     #[test]
     fn findings_block_builder_respects_total_block_cap() {
-        // 8 findings × 600-char body each → exceeds MAX_TOTAL_BLOCK_CHARS.
+        // note: 8 findings × 600-char bodies exceed MAX_TOTAL_BLOCK_CHARS.
         let long_body = "y".repeat(600);
         let findings: Vec<Finding> = (0..MAX_FINDINGS)
             .map(|i| make_finding("major", "craft", &format!("t{i}"), &long_body))
@@ -301,7 +300,7 @@ mod tests {
         );
     }
 
-    /// Overlay §2.2 — `rule_suggestion` line present when set, omitted when None.
+    /// note: Overlay §2.2 — `rule_suggestion` line present when set, omitted when None.
     #[test]
     fn findings_block_builder_emits_rule_suggestion_when_present() {
         let mut f = make_finding("minor", "craft", "with-rule", "body text");
@@ -313,7 +312,7 @@ mod tests {
         );
     }
 
-    /// Section heading interpolates `chapter_label` per overlay §2.2.
+    /// note: Section heading interpolates `chapter_label` per overlay §2.2.
     #[test]
     fn findings_block_builder_heading_carries_chapter_label() {
         let findings = vec![make_finding("info", "craft", "h1", "body")];

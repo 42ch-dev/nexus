@@ -46,6 +46,7 @@
 //! The old daemon rule 4 (`engine.has_runner`, boot-time in-memory state) is
 //! NOT derivable from persisted data and is never part of a verdict here —
 //! consumers carry it as the separate `runner_check` caveat.
+// note: both consumers read these predicates, so a rule change lands in one place.
 
 use nexus_session_storage::run_state::RunStateV1;
 use nexus_session_storage::SessionStatus;
@@ -76,23 +77,23 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryClass {
-    /// Authoritative completed/failed/cancelled (v1).
+    /// note: Authoritative completed/failed/cancelled (v1).
     Terminal,
-    /// Corrupt/unsupported metadata; non-replayable, never silently reinterpreted.
+    /// note: Corrupt/unsupported metadata; non-replayable, never silently reinterpreted.
     Unreadable,
-    /// In-flight/uncertain work; stopped, never auto-retried.
+    /// note: In-flight/uncertain work; stopped, never auto-retried.
     Interrupted,
-    /// `waiting_for_input` outside a chain — token preserved, not stepped at boot.
+    /// note: `waiting_for_input` outside a chain — token preserved, not stepped at boot.
     HumanWait,
-    /// Parked converge/merge chain with live join keys — bounded join resume only.
+    /// note: Parked converge/merge chain with live join keys — bounded join resume only.
     ConvergeMerge,
-    /// v1 running/paused at a fully committed step boundary — may reconstruct.
+    /// note: v1 running/paused at a fully committed step boundary — may reconstruct.
     SafeBoundary,
-    /// v0 legacy row: status diagnostic only.
+    /// note: v0 legacy row: status diagnostic only.
     LegacyUnverified,
 }
 
-/// Classify a v1 run record (authoritative status + durable state) against
+/// note: Classify a v1 run record (authoritative status + durable state) against
 /// the A7 precedence.
 ///
 /// `gate_park_live` is the exact current-task `_gate_park_<task>` marker used
@@ -111,8 +112,8 @@ pub const fn classify_recovery(
     state: Option<&RunStateV1>,
     gate_park_live: bool,
 ) -> RecoveryClass {
-    // 1. Authoritative v1 status wins (A2: status is the SSOT for v1 rows).
-    //    Terminal lookup stays authoritative even when the durable state
+    // note: 1. authoritative v1 status wins (A2: status is the SSOT for v1 rows);
+    //    terminal lookup stays authoritative even when the durable state
     //    blob is absent/corrupt (A7 rule 1).
     match status {
         SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled => {
@@ -120,13 +121,13 @@ pub const fn classify_recovery(
         }
         _ => {}
     }
-    // 2. A v1 row without a parseable/structurally valid state blob is
+    // note: 2. a v1 row without a parseable/structurally valid state blob is
     //    corrupt/unsupported and non-replayable — this precedes interrupted
     //    evidence, including an explicit `interrupted` status (A7 rule 2).
     let Some(state) = state else {
         return RecoveryClass::Unreadable;
     };
-    // 3. Interrupted evidence wins over old join keys; never retried:
+    // note: 3. interrupted evidence wins over old join keys; never retried:
     //    explicit interrupted status, unresolved cancel, a dispatching/
     //    active in-flight prompt, or an unfinished step mark.
     if matches!(status, SessionStatus::Interrupted)
@@ -136,14 +137,14 @@ pub const fn classify_recovery(
     {
         return RecoveryClass::Interrupted;
     }
-    // 4. A durable A4 human-wait token beats old scheduler join keys: a
+    // note: 4. a durable A4 human-wait token beats old scheduler join keys: a
     //    token-bearing wait is a human wait even when live converge/merge
     //    join keys exist (a scheduler join park must be represented without
     //    a human wait token).
     if state.wait.is_some() {
         return RecoveryClass::HumanWait;
     }
-    // 5. Waiting without a durable wait token: a live join key names a
+    // note: 5. waiting without a durable wait token: a live join key names a
     //    parked converge/merge chain (bounded join resume); a tokenless
     //    bare wait stays conservatively human-wait-shaped and is never
     //    advanced at boot.
@@ -154,7 +155,7 @@ pub const fn classify_recovery(
             RecoveryClass::HumanWait
         };
     }
-    // 6. Running/paused at a committed boundary.
+    // note: 6. running/paused at a committed boundary.
     if gate_park_live {
         RecoveryClass::ConvergeMerge
     } else {
@@ -162,21 +163,21 @@ pub const fn classify_recovery(
     }
 }
 
-/// Non-terminal status set — the recovery filter at
+/// note: Non-terminal status set — the recovery filter at
 /// `storage/sqlite.rs::list_non_terminal_sessions` (rule 1).
 #[must_use]
 pub fn is_non_terminal_status(status: &str) -> bool {
     matches!(status, "running" | "paused" | "waiting_for_input")
 }
 
-/// Extract the `data` map (the `{"data": {...}}` top-level context shape)
+/// note: Extract the `data` map (the `{"data": {...}}` top-level context shape)
 /// from a parsed context root.
 #[must_use]
 pub fn context_data(root: &Value) -> Option<&Map<String, Value>> {
     root.get("data").and_then(Value::as_object)
 }
 
-/// Presence of a typed failure record (rule 2): either `_run_status` or
+/// note: Presence of a typed failure record (rule 2): either `_run_status` or
 /// `_run_error` is a JSON **string**. Mirrors `graph_flow::Context::get`:
 /// `Value::Null` and non-string values are absent.
 #[must_use]
@@ -186,7 +187,7 @@ pub fn typed_failure_keys_present(data: &Map<String, Value>) -> bool {
         .any(|k| matches!(data.get(*k), Some(Value::String(_))))
 }
 
-/// Typed failure record extracted from `_run_status` / `_run_error`
+/// note: Typed failure record extracted from `_run_status` / `_run_error`
 /// (string values only, mirroring `Context::get`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedFailureRecord {
@@ -194,7 +195,7 @@ pub struct TypedFailureRecord {
     pub run_error: Option<String>,
 }
 
-/// `Some` exactly when [`typed_failure_keys_present`] is `true`.
+/// note: `Some` exactly when [`typed_failure_keys_present`] is `true`.
 #[must_use]
 pub fn typed_failure_record(data: &Map<String, Value>) -> Option<TypedFailureRecord> {
     let text_value =
@@ -206,7 +207,7 @@ pub fn typed_failure_record(data: &Map<String, Value>) -> Option<TypedFailureRec
     (record.run_status.is_some() || record.run_error.is_some()).then_some(record)
 }
 
-/// Live join keys (rule 3): non-null values under the join-tracker prefixes,
+/// note: Live join keys (rule 3): non-null values under the join-tracker prefixes,
 /// sorted for deterministic output. Cleared keys are `Value::Null` (never
 /// removed) and are not live.
 #[must_use]
@@ -220,7 +221,7 @@ pub fn live_join_keys(data: &Map<String, Value>) -> Vec<String> {
     keys
 }
 
-/// Chain-class predicate (rule 3 positive): at least one live join key.
+/// note: Chain-class predicate (rule 3 positive): at least one live join key.
 ///
 /// Round-4 note: the routing writers (`resolve_labeled_target` /
 /// `resolve_expression_target` / `record_converge_arrival`) emit
@@ -236,7 +237,7 @@ pub fn is_converge_merge_chain(data: &Map<String, Value>) -> bool {
     data.iter().any(|(k, v)| !v.is_null() && is_join_key(k))
 }
 
-/// Authoritative current-gate scheduler-park predicate (round 4, Critical 1).
+/// note: Authoritative current-gate scheduler-park predicate (round 4, Critical 1).
 ///
 /// Returns `true` only when the context carries a live `_gate_park_{task}`
 /// marker for the task the run is CURRENTLY parked at. The gated
@@ -266,7 +267,7 @@ const fn error_key() -> &'static str {
     "_run_error"
 }
 
-/// Canonical resume classification (rules 1–4 projection, rule 4 excluded).
+/// note: Canonical resume classification (rules 1–4 projection, rule 4 excluded).
 ///
 /// Order matches the daemon: rule 1 (terminal status) first, then context
 /// unreadable, then typed failure, then chain class — a row is classified by
@@ -280,7 +281,7 @@ pub enum ResumeClass {
     ChainClassNoFailure,
 }
 
-/// Classify from the persisted status + context data map (detail path).
+/// note: Classify from the persisted status + context data map (detail path).
 ///
 /// `data: None` means the context is unreadable (corrupt blob or unexpected
 /// `data` shape) — never fabricate a verdict from it.
@@ -294,7 +295,7 @@ pub fn classify_resumability(status: &str, data: Option<&Map<String, Value>>) ->
     )
 }
 
-/// Classify from pre-extracted predicates (list path — the storage layer
+/// note: Classify from pre-extracted predicates (list path — the storage layer
 /// evaluates the predicates in SQL so no `context_json` blob is loaded).
 ///
 /// This is the single cascade: both call sites (detail + list) must produce
@@ -353,7 +354,7 @@ mod tests {
             })
         );
 
-        // Null / non-string values are absent (Context::get semantics).
+        // note: null / non-string values are absent (Context::get semantics).
         let nulls = data(&json!({"_run_status": null, "_run_error": null}));
         assert!(!typed_failure_keys_present(&nulls));
         assert_eq!(typed_failure_record(&nulls), None);
@@ -395,27 +396,27 @@ mod tests {
         assert!(!is_converge_merge_chain(&cleared));
     }
 
-    // Round-4 Critical 1: the current-gate park marker is the ONLY
-    // authoritative scheduler-park evidence. A genuine manual wait reached
-    // through labeled/conditional routing carries broad join keys but NO
+    // why: the current-gate park marker is the ONLY authoritative scheduler-park
+    // evidence (round-4 Critical 1). A genuine manual wait reached through
+    // labeled/conditional routing carries broad join keys but NO
     // marker for its own state — `gate_park_live` must return false there,
     // while a parked merge/converge gate carries a live marker for the
     // CURRENT task.
     #[test]
     fn gate_park_marker_is_current_task_authoritative() {
-        // Parked gate: live marker for the current task.
+        // note: parked gate — live marker for the current task.
         let parked = data(&json!({
             "_gate_park_join": true,
             "_converge_arrivals_join": ["a"],
             "_join_wait_start_join": 1
         }));
         assert!(gate_park_live(&parked, "join"));
-        // A DIFFERENT current task (e.g. the routed manual wait) is not the
+        // note: a DIFFERENT current task (e.g. the routed manual wait) is not the
         // gate — the marker names the gate state, not this task.
         assert!(!gate_park_live(&parked, "manual_wait_state"));
 
-        // Manual wait with broad/stale join keys but no marker for its own
-        // state: never classified as a scheduler park.
+        // note: manual wait with broad/stale join keys but no marker for its own
+        // state — never classified as a scheduler park.
         let manual_with_joins = data(&json!({
             "_converge_arrivals_manual_wait_state": ["pred"],
             "_merge_manual_wait_state": ["go"],
@@ -423,14 +424,14 @@ mod tests {
         }));
         assert!(!gate_park_live(&manual_with_joins, "manual_wait_state"));
 
-        // Cleared marker (null) is not live.
+        // note: cleared marker (null) is not live.
         let cleared_marker = data(&json!({"_gate_park_join": null}));
         assert!(!gate_park_live(&cleared_marker, "join"));
 
-        // Absent marker + no keys: not a park.
+        // note: absent marker and no keys — not a park.
         let plain = data(&json!({"_creator_id": "c"}));
         assert!(!gate_park_live(&plain, "join"));
-        // A live marker with the same key name but value present for the
+        // note: a live marker with the same key name but value present for the
         // current task is live regardless of other stale keys.
         let marked_with_stale = data(&json!({
             "_gate_park_manual_wait_state": true,
@@ -443,7 +444,7 @@ mod tests {
     #[test]
     fn classification_cascade_rule_1_first() {
         let chain = data(&json!({"_merge_j1": ["x"]}));
-        // Terminal status wins even with live join keys (schedule-cancel).
+        // note: terminal status wins even with live join keys (schedule-cancel).
         assert_eq!(
             classify_resumability("cancelled", Some(&chain)),
             ResumeClass::TerminalStatus
@@ -514,10 +515,6 @@ mod tests {
         assert!(context_data(&json!({})).is_none());
     }
 
-    // ------------------------------------------------------------------
-    // v1.186 P0 Task 2 — canonical A7 recovery classification
-    // ------------------------------------------------------------------
-
     fn state(step_in_flight: Option<&str>, cancel_requested: bool, wait: bool) -> RunStateV1 {
         RunStateV1 {
             wait: wait.then(|| nexus_session_storage::run_state::WaitRecord {
@@ -538,7 +535,7 @@ mod tests {
     fn a7_terminal_status_wins_over_all_evidence() {
         use nexus_session_storage::SessionStatus::*;
         for status in [Completed, Failed, Cancelled] {
-            // Even with interrupted evidence + chain keys, terminal wins.
+            // note: even with interrupted evidence and chain keys, terminal wins.
             let s = state(Some("t"), true, false);
             assert_eq!(
                 classify_recovery(&status, Some(&s), true),
@@ -559,17 +556,17 @@ mod tests {
     #[test]
     fn a7_interrupted_wins_over_old_join_keys_and_never_retries() {
         use nexus_session_storage::SessionStatus::*;
-        // In-flight mark + live chain keys → Interrupted, not ConvergeMerge.
+        // note: in-flight mark + live chain keys → Interrupted, not ConvergeMerge.
         assert_eq!(
             classify_recovery(&Running, Some(&state(Some("t3"), false, false)), true),
             RecoveryClass::Interrupted
         );
-        // Unresolved cancel + chain keys → Interrupted.
+        // note: unresolved cancel + chain keys → Interrupted.
         assert_eq!(
             classify_recovery(&Running, Some(&state(None, true, false)), true),
             RecoveryClass::Interrupted
         );
-        // Explicit interrupted status → Interrupted even with chain keys.
+        // note: explicit interrupted status → Interrupted even with chain keys.
         assert_eq!(
             classify_recovery(&Interrupted, Some(&state(None, false, false)), true),
             RecoveryClass::Interrupted
@@ -579,19 +576,19 @@ mod tests {
     #[test]
     fn a7_human_wait_stays_distinct_and_is_never_stepped_at_boot() {
         use nexus_session_storage::SessionStatus::WaitingForInput;
-        // No live join keys → HumanWait (A4 token preserved, not advanced).
+        // note: no live join keys → HumanWait (A4 token preserved, not advanced).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), false),
             RecoveryClass::HumanWait
         );
-        // A durable human-wait token beats old scheduler join keys — a
+        // note: a durable human-wait token beats old scheduler join keys — a
         // token-bearing wait is HumanWait even in a chain-shaped context
         // (scheduler joins must be represented without a human wait token).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), true),
             RecoveryClass::HumanWait
         );
-        // Tokenless wait at live chain keys → parked converge/merge join
+        // note: tokenless wait at live chain keys → parked converge/merge join
         // resume (bounded re-drive only).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, false)), true),
@@ -602,7 +599,7 @@ mod tests {
     #[test]
     fn a7_terminal_status_wins_even_when_state_absent_or_corrupt() {
         use nexus_session_storage::SessionStatus::*;
-        // A terminal row with NO durable state blob is still terminal
+        // note: a terminal row with NO durable state blob is still terminal
         // (A7 rule 1 beats rule 2) — lookup stays authoritative without a
         // live runner.
         for status in [Completed, Failed, Cancelled] {
@@ -617,14 +614,14 @@ mod tests {
     #[test]
     fn a7_corrupt_state_precedes_interrupted_status() {
         use nexus_session_storage::SessionStatus::Interrupted;
-        // A7 rule 2 (corrupt/unsupported metadata) fires before rule 3
+        // note: A7 rule 2 (corrupt/unsupported metadata) fires before rule 3
         // (interrupted evidence): `Interrupted` status + missing state blob
         // is Unreadable, not Interrupted.
         assert_eq!(
             classify_recovery(&Interrupted, None, false),
             RecoveryClass::Unreadable
         );
-        // With a readable state blob, the interrupted status fires rule 3.
+        // note: with a readable state blob, the interrupted status fires rule 3.
         assert_eq!(
             classify_recovery(&Interrupted, Some(&state(None, false, false)), false),
             RecoveryClass::Interrupted
@@ -642,7 +639,7 @@ mod tests {
             classify_recovery(&Paused, Some(&RunStateV1::default()), false),
             RecoveryClass::SafeBoundary
         );
-        // Running with live chain keys → converge/merge (existing re-drive).
+        // note: running with live chain keys → converge/merge (existing re-drive).
         assert_eq!(
             classify_recovery(&Running, Some(&RunStateV1::default()), true),
             RecoveryClass::ConvergeMerge

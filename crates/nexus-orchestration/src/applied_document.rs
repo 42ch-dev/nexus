@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-/// Resolves the current applied identity a schedule run executes (P4).
+/// note: Resolves the current applied identity a schedule run executes (P4).
 ///
 /// Admission builds an applied run from the strategy's applied document instead
 /// of its YAML descriptor; recovery therefore asks THIS source for the same
@@ -25,7 +25,7 @@ use async_trait::async_trait;
 /// user bundle; an embedded bundle always resolves its document.
 #[async_trait]
 pub trait AppliedDocumentSource: Send + Sync {
-    /// The current apply of `preset_id` — its frozen identity plus the verified
+    /// note: The current apply of `preset_id` — its frozen identity plus the verified
     /// document that identity pins — or `None` when the strategy has no current
     /// apply.
     ///
@@ -46,15 +46,15 @@ pub trait AppliedDocumentSource: Send + Sync {
     ) -> Result<Option<AppliedDocument>, String>;
 }
 
-/// A strategy's current apply: the identity it installed and the document it pinned.
+/// note: A strategy's current apply: the identity it installed and the document it pinned.
 ///
 /// Built only after the document's frozen bytes re-verified against
 /// `identity.content_hash`, so holding one means the pair is consistent.
 #[derive(Debug, Clone)]
 pub struct AppliedDocument {
-    /// The apply row that is current for the strategy.
+    /// note: The apply row that is current for the strategy.
     pub identity: nexus_session_storage::run_state::AppliedRunIdentity,
-    /// The verified document those bytes decode to.
+    /// note: The verified document those bytes decode to.
     pub document:
         nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument,
 }

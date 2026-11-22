@@ -15,47 +15,40 @@
 //!
 //! The directory tree is embedded via `include_dir!` — no runtime filesystem
 //! reads are performed.
+// note: skill bytes are part of the binary, so skill lookup never touches the user's home directory.
 
 use include_dir::include_dir;
 use include_dir::Dir;
 use serde::Deserialize;
 
-// ---------------------------------------------------------------------------
-// Embedded directory
-// ---------------------------------------------------------------------------
-
-/// Embedded skills directory, compiled into the binary at build time.
+/// note: Embedded skills directory, compiled into the binary at build time.
 ///
 /// Location: `crates/nexus-orchestration/embedded-skills/`
 static EMBEDDED_SKILLS: Dir = include_dir!("$CARGO_MANIFEST_DIR/embedded-skills");
 
-/// Return a reference to the compile-time embedded skills directory.
+/// note: Return a reference to the compile-time embedded skills directory.
 #[must_use]
 pub fn embedded_skill_dir() -> &'static Dir<'static> {
     &EMBEDDED_SKILLS
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/// A single entry from the embedded skill manifest, enriched with the full
+/// note: A single entry from the embedded skill manifest, enriched with the full
 /// markdown content of the skill document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddedSkillEntry {
-    /// Unique skill identifier (e.g., `"novel-writing-assistant"`).
+    /// note: Unique skill identifier (e.g., `"novel-writing-assistant"`).
     pub id: String,
-    /// Monotonically increasing version of the embedded skill.
+    /// note: Monotonically increasing version of the embedded skill.
     pub version: u32,
-    /// Human-readable description of the skill.
+    /// note: Human-readable description of the skill.
     pub description: String,
-    /// Relative path to the SKILL.md file within the `embedded-skills/` tree.
+    /// note: Relative path to the SKILL.md file within the `embedded-skills/` tree.
     pub source: String,
-    /// Full UTF-8 content of the SKILL.md file.
+    /// note: Full UTF-8 content of the SKILL.md file.
     pub content: String,
 }
 
-/// Intermediate struct for deserialising the skill manifest JSON.
+/// note: Intermediate struct for deserialising the skill manifest JSON.
 #[derive(Debug, Deserialize)]
 struct SkillManifest {
     #[allow(dead_code)]
@@ -63,7 +56,7 @@ struct SkillManifest {
     skills: Vec<SkillManifestEntry>,
 }
 
-/// A single skill record inside `SKILL_MANIFEST.json`.
+/// note: A single skill record inside `SKILL_MANIFEST.json`.
 #[derive(Debug, Deserialize)]
 struct SkillManifestEntry {
     id: String,
@@ -72,11 +65,7 @@ struct SkillManifestEntry {
     source: String,
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Parse `SKILL_MANIFEST.json` from the embedded directory and return
+/// note: Parse `SKILL_MANIFEST.json` from the embedded directory and return
 /// structured entries, each including the full content of its SKILL.md file.
 ///
 /// # Panics
@@ -122,7 +111,7 @@ pub fn list_embedded_skills() -> Vec<EmbeddedSkillEntry> {
         .collect()
 }
 
-/// Look up an embedded skill by its unique identifier.
+/// note: Look up an embedded skill by its unique identifier.
 ///
 /// Returns `None` when no skill with the given `id` exists in the manifest.
 #[must_use]
@@ -130,9 +119,6 @@ pub fn get_embedded_skill(id: &str) -> Option<EmbeddedSkillEntry> {
     list_embedded_skills().into_iter().find(|s| s.id == id)
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,11 +131,9 @@ mod tests {
             .contents_utf8()
             .expect("must be valid UTF-8");
 
-        // If this parses, the manifest is valid JSON.
         let parsed: serde_json::Value =
             serde_json::from_str(raw).expect("SKILL_MANIFEST.json must be valid JSON");
 
-        // Sanity check top-level structure.
         assert!(parsed.get("schema_version").is_some());
         assert!(parsed.get("skills").is_some());
     }
@@ -182,7 +166,6 @@ mod tests {
             !skill.content.is_empty(),
             "SKILL.md content must not be empty"
         );
-        // Content should be a markdown file with a heading.
         assert!(
             skill.content.contains("# "),
             "SKILL.md should contain at least one markdown heading"
