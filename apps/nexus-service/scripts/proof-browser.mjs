@@ -104,7 +104,8 @@ function commandLineMatchesCargo(commandLine) {
   return CARGO_FAMILY.test(commandLine) || NATIVE_BUILD.test(commandLine);
 }
 
-// note: Child process lifecycle (tracked + reaped on every exit path)
+// ── Child process lifecycle (tracked + reaped on every exit path) ────────────
+// note: section anchor — proof-browser-children.test.mjs and proof-browser-acceptance.test.mjs slice this section verbatim.
 
 const trackedChildren = new Set();
 let cleanedUp = false;
@@ -274,7 +275,8 @@ async function cleanupChildren() {
   }
 }
 
-// note: HTTP helpers
+// ── HTTP helpers ────────────────────────────────────────────────────────────
+// note: section anchor — proof-browser-children.test.mjs and proof-browser-acceptance.test.mjs end their helper slice here.
 
 function httpRequest(url, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -843,7 +845,8 @@ function collectChildOutput(fixtureHome) {
   return rows;
 }
 
-// note: Direct CLI writer
+// ── Direct CLI writer ───────────────────────────────────────────────────────
+// note: section anchor — proof-browser-children.test.mjs ends its CLI-writer slice here.
 
 /**
  * invariant: Transient admission contention between the standalone service's engine owner
@@ -1551,7 +1554,8 @@ async function traceDuringEdit(resolveRootPids, work, { intervalMs = 50 } = {}) 
   }
 }
 
-// note: Reversible edit outcome precedence
+// ── Reversible edit outcome precedence ──────────────────────────────────────
+// note: section anchor — proof-browser-acceptance.test.mjs slices this section verbatim.
 
 /**
  * invariant: Run one reversible-edit operation together with its restore gate, and decide
@@ -1600,7 +1604,8 @@ async function runWithRestoreGate(work, restore) {
   );
 }
 
-/** note: Byte-preserving tracked edit that restores the file even on failure. */
+/** Byte-preserving tracked edit that restores the file even on failure.
+ * note: section anchor — proof-browser-acceptance.test.mjs ends its restore-gate slice here. */
 class TrackedEdit {
   constructor(absPath) {
     this.absPath = absPath;
@@ -1759,7 +1764,8 @@ async function restartServiceFromEdit(ctx) {
   return next;
 }
 
-// note: Adapter edit restore gate
+// ── Adapter edit restore gate ───────────────────────────────────────────────
+// note: section anchor — proof-browser-children.test.mjs slices this section verbatim.
 
 /**
  * why: The real provider session an adapter sample runs in the page: create a
@@ -1826,10 +1832,11 @@ async function assertRestoredAdapterBaseline(ctx, marker) {
 }
 
 /**
- * note: TS SDK adapter edit sample: rewrite the real TS ACP adapter source marker,
+ * TS SDK adapter edit sample: rewrite the real TS ACP adapter source marker,
  * rebuild the adapter package with its existing tooling, restart the service,
  * and re-run a real provider session so the changed adapter is exercised.
  * Counts Cargo traces throughout (must be 0).
+ * note: section anchor — proof-browser-children.test.mjs slices this doc block verbatim.
  */
 async function runAdapterEditSample(ctx, sampleIndex) {
   const targetPath = resolve(repoRoot, 'packages/nexus-provider-acp/src/acp.ts');
@@ -1951,7 +1958,8 @@ async function runAdapterEditSample(ctx, sampleIndex) {
   );
 }
 
-// note: Acceptance derivations (pure; extracted verbatim by focused tests)
+// ── Acceptance derivations (pure; extracted verbatim by focused tests) ──────
+// note: section anchor — proof-browser-acceptance.test.mjs slices this section verbatim.
 
 // invariant: Locked sampling protocol (proof matrix §1/§2): DB-1 requires 100
 // deterministic competing-write pairs; LIFE-2/LIFE-3 require 10 cycles each.
@@ -2110,7 +2118,8 @@ function deriveProvenanceCompleteness(provenance) {
   return { complete: missing.length === 0, missing };
 }
 
-// note: Environment provenance (common evidence protocol)
+// ── Environment provenance (common evidence protocol) ───────────────────────
+// note: section anchor — proof-browser-acceptance.test.mjs ends its derivation slice here.
 
 /** note: First non-empty stdout line of a version probe; null when unavailable. */
 function firstVersionLine(command, args) {
