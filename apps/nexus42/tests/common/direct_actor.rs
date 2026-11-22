@@ -28,6 +28,7 @@
 //! returning, so the real CLI child spawned by [`DirectActor::cli`] always
 //! finds the workspace claimable. The fixture holds no running server and no
 //! live writer.
+// invariant: every seed runs through an authorized core writer and releases it before returning.
 
 use crate::direct::DirectFixture;
 use nexus_contracts::world_kb_patch_entity_request::{
@@ -40,30 +41,30 @@ use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-/// Workspace the fixture materializes and selects (the shared
+/// note: Workspace the fixture materializes and selects (the shared
 /// [`crate::direct::DirectFixture`] selection).
 const WORKSPACE_SLUG: &str = "default";
 
-/// One seeded Character with the initial binding created alongside it.
-#[allow(dead_code)] // the subset each Character-family test crate uses differs
+/// note: One seeded Character with the initial binding created alongside it.
+#[allow(dead_code)] // why: the subset each Character-family test crate uses differs
 pub struct SeededCharacter {
-    /// Stored Character id (`chr_…`).
+    /// note: Stored Character id (`chr_…`).
     pub character_id: String,
-    /// The Character's initial active binding id (`awb_…`).
+    /// note: The Character's initial active binding id (`awb_…`).
     pub binding_id: String,
 }
 
-/// A hermetic direct-core home with one active creator, plus authorized seed
+/// note: A hermetic direct-core home with one active creator, plus authorized seed
 /// helpers for the actor graph and a runner for the real CLI child.
-#[allow(dead_code)] // targets that include this module only for `fixture_creator_id`
+#[allow(dead_code)] // why: targets that include this module only for `fixture_creator_id`
 pub struct DirectActor {
     fixture: DirectFixture,
     creator_id: String,
 }
 
-#[allow(dead_code)] // the subset each Character-family test crate uses differs
+#[allow(dead_code)] // why: the subset each Character-family test crate uses differs
 impl DirectActor {
-    /// Create the hermetic home and select an initialized creator/workspace.
+    /// note: Create the hermetic home and select an initialized creator/workspace.
     ///
     /// # Panics
     ///
@@ -78,17 +79,17 @@ impl DirectActor {
         }
     }
 
-    /// The hermetic `HOME` (parent of `.nexus42`).
+    /// note: The hermetic `HOME` (parent of `.nexus42`).
     pub fn home(&self) -> &Path {
         self.fixture.home.path()
     }
 
-    /// The active creator the fixture registered and selected.
+    /// note: The active creator the fixture registered and selected.
     pub fn creator_id(&self) -> &str {
         &self.creator_id
     }
 
-    /// Run the real `nexus42` binary against this actor's hermetic `HOME`.
+    /// note: Run the real `nexus42` binary against this actor's hermetic `HOME`.
     ///
     /// # Panics
     ///
@@ -101,7 +102,7 @@ impl DirectActor {
             .expect("spawn nexus42")
     }
 
-    /// Seed one owned, active World through the core and return its id.
+    /// note: Seed one owned, active World through the core and return its id.
     ///
     /// # Panics
     ///
@@ -122,7 +123,7 @@ impl DirectActor {
         created.world_id
     }
 
-    /// Seed one owned Character with its initial active binding on `world_id`.
+    /// note: Seed one owned Character with its initial active binding on `world_id`.
     ///
     /// # Panics
     ///
@@ -152,7 +153,7 @@ impl DirectActor {
         }
     }
 
-    /// Seed one additional active binding for `character_id` on `world_id` and
+    /// note: Seed one additional active binding for `character_id` on `world_id` and
     /// return the new binding id.
     ///
     /// # Panics
@@ -174,13 +175,13 @@ impl DirectActor {
         created.binding.binding_id.as_str().to_string()
     }
 
-    /// The selected workspace `state.db` path — the read handle a test uses for
+    /// note: The selected workspace `state.db` path — the read handle a test uses for
     /// stored-row assertions once every seed writer has been released.
     pub fn state_db_path(&self) -> PathBuf {
         self.db_path()
     }
 
-    /// The released workspace `state.db`, opened read-only for stored-row
+    /// invariant: The released workspace `state.db`, opened read-only for stored-row
     /// assertions.
     ///
     /// The handle is a plain read-only pool: a test takes it, asserts, and
@@ -196,7 +197,7 @@ impl DirectActor {
             .expect("open fixture state db read-only")
     }
 
-    /// Seed one World-owned `character` `KeyBlock` — the only shape a binding
+    /// invariant: Seed one World-owned `character` `KeyBlock` — the only shape a binding
     /// may link as its `WorldSheet` (a shared, live, World-owned character
     /// entry) — through the core's own World-KB authoring path.
     ///
@@ -221,7 +222,7 @@ impl DirectActor {
         .await;
     }
 
-    /// Same seed as [`Self::seed_world_character_sheet`], with a stored
+    /// note: Same seed as [`Self::seed_world_character_sheet`], with a stored
     /// `KnowledgeEntry` body (`summary` / `attributes` / `tags`) so a test can
     /// assert the body a read surface prints.
     ///
@@ -259,12 +260,12 @@ impl DirectActor {
         self.close_seed_core(core).await;
     }
 
-    /// The selected workspace `state.db` (the writer admission key).
+    /// note: The selected workspace `state.db` (the writer admission key).
     fn db_path(&self) -> PathBuf {
         workspace_state_db_path(self.home(), &self.creator_id, WORKSPACE_SLUG)
     }
 
-    /// Open the direct-writer core over this actor's home and admit the
+    /// note: Open the direct-writer core over this actor's home and admit the
     /// fixture's own active principal.
     async fn open_seed_core(&self) -> (CoreService, Principal) {
         let core = CoreService::open(CoreOpenOptions {
@@ -281,7 +282,7 @@ impl DirectActor {
         (core, principal)
     }
 
-    /// Close a seed core and release the writer it retained *in this process*,
+    /// note: Close a seed core and release the writer it retained *in this process*,
     /// so the next CLI child admits its own instead of finding the workspace
     /// held by the fixture.
     async fn close_seed_core(&self, core: CoreService) {
@@ -290,7 +291,7 @@ impl DirectActor {
     }
 }
 
-/// The fixture home holds exactly one creator; its id is the directory name
+/// note: The fixture home holds exactly one creator; its id is the directory name
 /// under the nexus root's `creators/`.
 pub fn fixture_creator_id(home: &Path) -> String {
     let creators_root = nexus_root_from_home(home).join("creators");

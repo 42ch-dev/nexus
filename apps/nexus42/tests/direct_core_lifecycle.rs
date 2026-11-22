@@ -38,6 +38,7 @@
 //! release a writer the seam forgot to close. The in-process half of the same
 //! contract — the writer is released before `finish_direct` returns — lives in
 //! `src/core.rs` (`direct_writer_lifetime`).
+// invariant: a rejected mutation still closes the direct writer, so the next writer opens and commits.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -59,7 +60,7 @@ const SEEDED_TITLE: &str = "Seeded Hero";
 const STALE_TITLE: &str = "Stale Overwrite";
 const REOPENED_TITLE: &str = "Reopened Hero";
 
-/// Seed one owned World plus one KB entity through the direct core seam, then
+/// note: Seed one owned World plus one KB entity through the direct core seam, then
 /// close that seed core so no writer survives into the CLI children. Returns
 /// the world id and the revision the created entity settled at.
 async fn seed_world_and_entity(home: &Path) -> (String, u64) {
@@ -113,7 +114,7 @@ async fn seed_world_and_entity(home: &Path) -> (String, u64) {
     (world_id, seeded_version)
 }
 
-/// One `key_block_id` / `version` / `canonical_name` snapshot of the graph.
+/// note: One `key_block_id` / `version` / `canonical_name` snapshot of the graph.
 fn graph_entity(fixture: &DirectFixture, world_id: &str) -> (String, u64, String) {
     let out = fixture
         .command()
@@ -152,7 +153,7 @@ async fn direct_writer_reopens_after_rejected_mutation() {
     let (world_id, seeded_version) = seed_world_and_entity(fixture.home.path()).await;
     let stale_version = seeded_version - 1;
 
-    // ── 1. A real CLI mutation with a stale CAS is rejected. ──────────────
+    // note: 1. A real CLI mutation with a stale CAS is rejected.
     let rejected = fixture
         .command()
         .args([
@@ -190,7 +191,7 @@ async fn direct_writer_reopens_after_rejected_mutation() {
         "{conflict}"
     );
 
-    // ── 2. Rejected without change: the graph still shows the seeded row. ──
+    // note: 2. Rejected without change: the graph still shows the seeded row.
     let (entity_id, version, canonical_name) = graph_entity(&fixture, &world_id);
     assert_eq!(entity_id, ENTITY_ID);
     assert_eq!(
@@ -202,7 +203,7 @@ async fn direct_writer_reopens_after_rejected_mutation() {
         "rejected mutation must not overwrite the canonical name"
     );
 
-    // ── 3. The next CLI writer reopens and commits. ───────────────────────
+    // note: 3. The next CLI writer reopens and commits.
     let committed_version = seeded_version + 1;
     let reopened = fixture
         .command()
@@ -235,14 +236,14 @@ async fn direct_writer_reopens_after_rejected_mutation() {
     );
     assert!(text.contains(REOPENED_TITLE), "{text}");
 
-    // ── 4. The committed change is the replayed next revision. ────────────
+    // note: 4. The committed change is the replayed next revision.
     let (entity_id, version, canonical_name) = graph_entity(&fixture, &world_id);
     assert_eq!(entity_id, ENTITY_ID);
     assert_eq!(version, committed_version, "the reopened writer commits");
     assert_eq!(canonical_name, REOPENED_TITLE);
 }
 
-/// The `creator world kb pack` family renders only after the seam settled.
+/// invariant: The `creator world kb pack` family renders only after the seam settled.
 ///
 /// `pack import --from-st` used to print its `SillyTavern` conversion notes
 /// *inside* the outcome — before `finish_direct` released the direct writer —
@@ -267,7 +268,7 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
     let fixture = DirectFixture::new().await;
     let (world_id, _) = seed_world_and_entity(fixture.home.path()).await;
     let lorebook = fixture.home.path().join("lorebook.json");
-    // One documented entry carrying an undocumented field: the converter emits
+    // note: One documented entry carrying an undocumented field: the converter emits
     // a Warning note, so the run has output of its own before it reaches the
     // core.
     std::fs::write(
@@ -284,7 +285,7 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
     )
     .expect("write lorebook");
 
-    // ── 1. A refused run prints nothing on stdout. ────────────────────────
+    // note: 1. A refused run prints nothing on stdout.
     let refused = fixture
         .command()
         .args([
@@ -315,7 +316,7 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
         stderr(&refused)
     );
 
-    // ── 2. An admitted run still prints the notes, before its summary. ────
+    // note: 2. An admitted run still prints the notes, before its summary.
     let admitted = fixture
         .command()
         .args([
@@ -352,7 +353,7 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
         "the retained order is notes-then-summary: {text}"
     );
 
-    // ── 3. The writer is free again: the seam closed on this run. ─────────
+    // note: 3. The writer is free again: the seam closed on this run.
     let reopened = fixture
         .command()
         .args(["creator", "world", "kb", "graph", "--world-id", &world_id])
@@ -365,7 +366,7 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
     );
 }
 
-/// The creator id the identity bootstrap reports
+/// note: The creator id the identity bootstrap reports
 /// (`Created anonymous identity: ctr_anon…`).
 fn anonymous_creator_id(out: &str) -> String {
     out.lines()
@@ -445,7 +446,7 @@ fn anonymous_selection_is_refused_before_any_storage_write() {
     );
 }
 
-/// Every `creator world kb` entrance inherits that refusal.
+/// note: Every `creator world kb` entrance inherits that refusal.
 ///
 /// The KB router opened the legacy workspace pool — whose `Schema::init`
 /// migrates, and therefore *creates*, the selected workspace — before it
@@ -479,7 +480,7 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
     let pack_out = home.path().join("pack.json");
     let pack_out = pack_out.to_str().expect("utf-8 pack path");
     let entrances: [&[&str]; 4] = [
-        // Direct-core leaves (the seam's own consumers).
+        // note: Direct-core leaves (the seam's own consumers).
         &[
             "creator",
             "world",
@@ -504,7 +505,7 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
             "--title",
             "Absent",
         ],
-        // Local leaves: `list` is pool-only, `pack export` hands that pool to a
+        // invariant: Local leaves: `list` is pool-only, `pack export` hands that pool to a
         // core route, so both owe the same admission.
         &["creator", "world", "kb", "list", "wld_absent", "--json"],
         &[
@@ -565,7 +566,7 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
     );
 }
 
-/// The workspace `state.db` the fixture materialized (one creator, `default`).
+/// note: The workspace `state.db` the fixture materialized (one creator, `default`).
 #[cfg(unix)]
 fn fixture_state_db(home: &Path) -> std::path::PathBuf {
     let mut creators = std::fs::read_dir(home.join(".nexus42").join("creators"))
@@ -584,7 +585,7 @@ fn fixture_state_db(home: &Path) -> std::path::PathBuf {
     )
 }
 
-/// A selected workspace whose `state.db` cannot be probed is a storage failure,
+/// invariant: A selected workspace whose `state.db` cannot be probed is a storage failure,
 /// never the selection refusal.
 ///
 /// `Path::exists()` answers `false` for **every** failed lookup, so a
@@ -604,7 +605,7 @@ async fn unreadable_workspace_db_is_not_reported_as_an_unset_selection() {
         db_path.display()
     );
 
-    // A self-referential symlink keeps the directory entry while making every
+    // why: A self-referential symlink keeps the directory entry while making every
     // metadata lookup fail with `ELOOP` — a `NotFound`-free metadata error, and
     // one that does not depend on the test's uid (unlike a permission-only
     // probe, which root bypasses).
@@ -637,17 +638,17 @@ async fn unreadable_workspace_db_is_not_reported_as_an_unset_selection() {
     );
 }
 
-/// One entry of a recursive hermetic-home snapshot.
+/// note: One entry of a recursive hermetic-home snapshot.
 #[derive(Debug, PartialEq, Eq)]
 enum HomeEntry {
-    /// An empty-directory marker: the storage entropy here creates the
+    /// note: An empty-directory marker: the storage entropy here creates the
     /// workspace directory before any file lands in it.
     Dir,
-    /// A file and its bytes.
+    /// note: A file and its bytes.
     File(Vec<u8>),
 }
 
-/// Recursive `relative path → entry` snapshot of a hermetic home.
+/// note: Recursive `relative path → entry` snapshot of a hermetic home.
 ///
 /// Directories are captured as well as files, because the refused entrances
 /// created the workspace *directory* before `Schema::init` wrote `state.db`
@@ -678,7 +679,7 @@ fn home_tree(root: &Path) -> std::collections::BTreeMap<String, HomeEntry> {
     entries
 }
 
-/// Create the anonymous (never-materialized) identity under `home` and return
+/// invariant: Create the anonymous (never-materialized) identity under `home` and return
 /// the minted creator id.
 fn anonymous_home(home: &Path) -> String {
     let created = assert_cmd::Command::cargo_bin("nexus42")
@@ -696,7 +697,7 @@ fn anonymous_home(home: &Path) -> String {
     anonymous_creator_id(&stdout(&created))
 }
 
-/// Run one direct-core leaf that the seam refuses in **both** the pre-fix and
+/// note: Run one direct-core leaf that the seam refuses in **both** the pre-fix and
 /// the fixed tree, so the CLI's incidental start-up writes (`.nexus42/device-id`)
 /// land before the snapshot and the comparison isolates what the refused
 /// entrance under test does.
@@ -715,7 +716,7 @@ fn warm_home(home: &Path) {
     );
 }
 
-/// The retained `creator world event-add` narrative writer opens the same
+/// note: The retained `creator world event-add` narrative writer opens the same
 /// migrating workspace pool, so an anonymous selection must be refused there
 /// too — never materialized, never a raw migration error.
 #[test]

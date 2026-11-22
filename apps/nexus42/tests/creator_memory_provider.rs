@@ -3,6 +3,7 @@
 //! The real `nexus42` binary runs against a hermetic `HOME`: no daemon, no
 //! creator, no credential file. The command persists only the non-secret
 //! `[memory_provider]` table and never accepts a secret argument.
+// invariant: only the non-secret `[memory_provider]` table is persisted; no secret argument is accepted.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;

@@ -26,20 +26,20 @@ use nexus42::commands::creator::works::cron::{
 async fn cron_dao_round_trip_set_then_show() {
     let (_dir, pool) = fresh_seeded_pool().await;
 
-    // `set my-work --brainstorm "0 3,9,15,21 * * *" --tz Asia/Shanghai`
+    // note: `set my-work --brainstorm "0 3,9,15,21 * * *" --tz Asia/Shanghai`
     let args = CronSetArgs {
         brainstorm: Some("0 3,9,15,21 * * *".to_string()),
         tz: Some("Asia/Shanghai".to_string()),
         ..Default::default()
     };
-    let base = resolve_schedule(None); // fresh Work → defaults
+    let base = resolve_schedule(None); // note: fresh Work → defaults
     let schedule = apply_set_args(base, &args).expect("valid args must apply");
     let blob = serde_json::to_string(&schedule).unwrap();
     nexus_local_db::works::set_schedule_json(&pool, "wrk_seed", &blob, "2026-06-18T00:00:00Z")
         .await
         .unwrap();
 
-    // `show my-work` — re-render from the stored blob.
+    // note: `show my-work` — re-render from the stored blob.
     let stored = nexus_local_db::works::get_schedule_json(&pool, "wrk_seed")
         .await
         .unwrap()
@@ -47,7 +47,7 @@ async fn cron_dao_round_trip_set_then_show() {
     let resolved = resolve_schedule(Some(&stored));
     assert_eq!(resolved.tz, "Asia/Shanghai");
     assert_eq!(resolved.roles.brainstorm.cron, "0 3,9,15,21 * * *");
-    // write/review kept at defaults.
+    // why: write/review kept at defaults.
     assert!(resolved.roles.write.enabled);
     assert!(resolved.roles.review.enabled);
 
@@ -88,12 +88,12 @@ async fn cron_set_no_review_disables_role() {
 #[tokio::test]
 async fn cron_list_across_workspace() {
     let (_dir, pool) = fresh_seeded_pool().await;
-    // Seed a second Work.
+    // note: Seed a second Work.
     let other = sample_work_record("wrk_other", "other-ref");
     nexus_local_db::works::create_work(&pool, &other)
         .await
         .unwrap();
-    // Keep `wrk_other` at defaults; set a custom blob on `wrk_seed`.
+    // note: Keep `wrk_other` at defaults; set a custom blob on `wrk_seed`.
     let custom = apply_set_args(
         WorkSchedule::defaults(),
         &CronSetArgs {
@@ -123,7 +123,7 @@ async fn cron_list_across_workspace() {
     assert!(rendered.contains("seed-ref"));
     assert!(rendered.contains("other-ref"));
     assert!(rendered.contains("America/New_York"));
-    // Defaults shown as canonical cron for the unset Work.
+    // note: Defaults shown as canonical cron for the unset Work.
     assert!(rendered.contains("0 3,9,15,21 * * *"));
 }
 
@@ -141,8 +141,8 @@ async fn cron_show_on_unset_work_uses_defaults() {
     let resolved = resolve_schedule(stored.as_deref());
     assert_eq!(resolved, WorkSchedule::defaults());
     let rendered = render_show("seed-ref", &resolved);
-    assert!(rendered.contains("UTC")); // default tz
-    assert!(rendered.contains("0,30 * * * *")); // default review cron
+    assert!(rendered.contains("UTC")); // note: default tz
+    assert!(rendered.contains("0,30 * * * *")); // note: default review cron
 }
 
 /// AC #4 (negative): `set` with no flags resets an existing custom schedule
@@ -150,7 +150,7 @@ async fn cron_show_on_unset_work_uses_defaults() {
 #[tokio::test]
 async fn cron_set_no_flags_resets_to_defaults() {
     let (_dir, pool) = fresh_seeded_pool().await;
-    // First, set a custom blob.
+    // note: First, set a custom blob.
     let custom = apply_set_args(
         WorkSchedule::defaults(),
         &CronSetArgs {
@@ -165,7 +165,7 @@ async fn cron_set_no_flags_resets_to_defaults() {
         .await
         .unwrap();
 
-    // Now `set <work>` with no flags → reset to defaults.
+    // note: Now `set <work>` with no flags → reset to defaults.
     let current = resolve_schedule(
         nexus_local_db::works::get_schedule_json(&pool, "wrk_seed")
             .await
@@ -176,11 +176,9 @@ async fn cron_set_no_flags_resets_to_defaults() {
     assert_eq!(reset, WorkSchedule::defaults());
 }
 
-// =============================================================================
 // CLI binary surface (AC #5: invalid cron/TZ → ValidationError exit)
-// =============================================================================
 
-/// `creator works cron` is registered as a subcommand of `creator works`.
+/// note: `creator works cron` is registered as a subcommand of `creator works`.
 #[test]
 fn works_help_lists_cron_subcommand() {
     use assert_cmd::Command;
@@ -199,7 +197,7 @@ fn works_help_lists_cron_subcommand() {
     );
 }
 
-/// `creator works cron --help` lists set/show/list.
+/// note: `creator works cron --help` lists set/show/list.
 #[test]
 fn cron_help_lists_set_show_list() {
     use assert_cmd::Command;
@@ -220,7 +218,7 @@ fn cron_help_lists_set_show_list() {
     }
 }
 
-/// `creator works cron set --help` documents the role flags.
+/// note: `creator works cron set --help` documents the role flags.
 #[test]
 fn cron_set_help_documents_flags() {
     use assert_cmd::Command;
@@ -248,7 +246,7 @@ fn cron_set_help_documents_flags() {
     }
 }
 
-/// R-V150P0-W4: `creator works cron list` accepts a `--limit <N>` flag.
+/// note: R-V150P0-W4: `creator works cron list` accepts a `--limit <N>` flag.
 #[test]
 fn cron_list_help_documents_limit_flag() {
     use assert_cmd::Command;
@@ -267,11 +265,9 @@ fn cron_list_help_documents_limit_flag() {
     );
 }
 
-// =============================================================================
-// Test helpers
-// =============================================================================
+// note: Test helpers
 
-/// Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
+/// note: Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
 /// `seed-ref`) under `ctr_test` / `default`.
 ///
 /// Returns `(dir, pool)` so callers bind the owner first: the pool drops
@@ -290,7 +286,7 @@ async fn fresh_seeded_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     (dir, pool)
 }
 
-/// Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
+/// note: Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
 fn sample_work_record(work_id: &str, work_ref: &str) -> nexus_local_db::works::WorkRecord {
     use nexus_local_db::works::WorkRecord;
     WorkRecord {

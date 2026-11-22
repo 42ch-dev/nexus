@@ -42,11 +42,11 @@ const OWNER: &str = "ctr_owner";
 const OTHER: &str = "ctr_other";
 const WORLD: &str = "wld_rescan";
 const WORK_ID: &str = "wrk_rescan";
-/// Human-readable `work_ref` (= `works.story_ref`) the CLI targets.
+/// note: Human-readable `work_ref` (= `works.story_ref`) the CLI targets.
 const WORK_REF: &str = "rescan-novel";
 const CHAPTER_BODY_REL: &str = "Works/rescan-novel/Stories/01-chapter.md";
 
-/// Build a fresh migrated pool + seed a world (owned by OWNER), a works row
+/// note: Build a fresh migrated pool + seed a world (owned by OWNER), a works row
 /// (with `story_ref = WORK_REF` + `world_id = WORLD`), and a `work_chapters`
 /// row pointing at `CHAPTER_BODY_REL`.
 async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
@@ -87,7 +87,7 @@ async fn seed_work_and_chapter(pool: &sqlx::SqlitePool) {
     .await
     .unwrap();
 
-    // Seed the chapter row the rescan reads.
+    // note: Seed the chapter row the rescan reads.
     sqlx::query(
         "INSERT OR IGNORE INTO work_chapters \
          (work_id, chapter, volume, slug, planned_word_count, status, body_path, \
@@ -101,7 +101,7 @@ async fn seed_work_and_chapter(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
-/// Write chapter prose to `<ws_dir>/<CHAPTER_BODY_REL>`.
+/// note: Write chapter prose to `<ws_dir>/<CHAPTER_BODY_REL>`.
 fn write_chapter_prose(ws_dir: &Path, prose: &str) {
     let path = ws_dir.join(CHAPTER_BODY_REL);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -112,7 +112,7 @@ fn target() -> String {
     format!("{WORK_REF}/1")
 }
 
-// ── AC1: idempotent re-run on unchanged text → empty diff ──────────────────
+// note: AC1: idempotent re-run on unchanged text → empty diff
 
 #[tokio::test]
 async fn rescan_idempotent_rerun_produces_empty_diff() {
@@ -128,7 +128,7 @@ async fn rescan_idempotent_rerun_produces_empty_diff() {
         first.candidates_inserted
     );
 
-    // Re-run on unchanged text → no candidate changes, no kb updates.
+    // note: Re-run on unchanged text → no candidate changes, no kb updates.
     let second = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();
@@ -139,7 +139,7 @@ async fn rescan_idempotent_rerun_produces_empty_diff() {
     assert_eq!(second.candidates_unchanged, 1);
 }
 
-// ── AC2/AC5: edited text → candidate upsert + KB refresh; no edit → empty ──
+// note: AC2/AC5: edited text → candidate upsert + KB refresh; no edit → empty
 
 #[tokio::test]
 async fn rescan_after_chapter_edit_updates_candidate_rows() {
@@ -150,7 +150,7 @@ async fn rescan_after_chapter_edit_updates_candidate_rows() {
         .await
         .unwrap();
 
-    // Edit the chapter: drop "Lin Xia", add "Marcus Vale".
+    // note: Edit the chapter: drop "Lin Xia", add "Marcus Vale".
     write_chapter_prose(dir.path(), "Marcus Vale surveyed the quiet harbor.");
 
     let after_edit = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
@@ -170,7 +170,7 @@ async fn rescan_after_chapter_edit_updates_candidate_rows() {
         after_edit.candidates_removed
     );
 
-    // KB rows reflect the new extraction: Marcus Vale is advisory-new (no
+    // note: KB rows reflect the new extraction: Marcus Vale is advisory-new (no
     // KnowledgeEntryRecord yet), Lin Xia is advisory-removed (no KnowledgeEntryRecord either, since it
     // was only ever a pending candidate here).
     assert!(after_edit
@@ -178,7 +178,7 @@ async fn rescan_after_chapter_edit_updates_candidate_rows() {
         .iter()
         .any(|n| n == "Marcus Vale"));
 
-    // No-edit re-run → empty diff (AC5 second half).
+    // note: No-edit re-run → empty diff (AC5 second half).
     let idle = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();
@@ -190,7 +190,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
     let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
-    // First scan + adopt → confirmed KnowledgeEntryRecord carrying the heuristic payload.
+    // note: First scan + adopt → confirmed KnowledgeEntryRecord carrying the heuristic payload.
     let scan = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();
@@ -204,7 +204,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         .unwrap();
     let _ = scan;
 
-    // Manually drift the confirmed KnowledgeEntryRecord body away from the chapter's
+    // note: Manually drift the confirmed KnowledgeEntryRecord body away from the chapter's
     // extraction (simulates a body that fell out of sync with the source text).
     let store = SqliteKbStore::new(pool.clone());
     let mut blocks = store.list_by_world(WORLD).await.unwrap();
@@ -218,7 +218,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
     kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
     store.update_knowledge_entry(kb).await.unwrap();
 
-    // Rescan → diff_and_apply refreshes the confirmed body back to the
+    // note: Rescan → diff_and_apply refreshes the confirmed body back to the
     // extraction, so KB rows reflect the current chapter text (AC2/AC5).
     let rescan = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
@@ -229,7 +229,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         rescan.kb_updated
     );
 
-    // The stored body now matches the heuristic extraction again.
+    // note: The stored body now matches the heuristic extraction again.
     let after = SqliteKbStore::new(pool.clone())
         .list_by_world(WORLD)
         .await
@@ -245,14 +245,14 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         after[0].body
     );
 
-    // No-edit re-run → empty diff (the body is back in sync).
+    // note: No-edit re-run → empty diff (the body is back in sync).
     let idle = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();
     assert!(idle.is_empty(), "no-edit rerun must be empty: {idle:?}");
 }
 
-// ── AC3: dry-run shows diff without writing ───────────────────────────────
+// note: AC3: dry-run shows diff without writing
 
 #[tokio::test]
 async fn dry_run_shows_diff_without_writing() {
@@ -274,7 +274,7 @@ async fn dry_run_shows_diff_without_writing() {
         dry.kb_inserted_advisory
     );
 
-    // Nothing was actually written: no pending candidate, no KnowledgeEntryRecord.
+    // note: Nothing was actually written: no pending candidate, no KnowledgeEntryRecord.
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert!(
         pending.is_empty(),
@@ -287,7 +287,7 @@ async fn dry_run_shows_diff_without_writing() {
     assert!(blocks.is_empty(), "dry-run must not write KnowledgeEntries");
 }
 
-// ── AC4: cross-author attempt returns 403 ──────────────────────────────────
+// note: AC4: cross-author attempt returns 403
 
 #[tokio::test]
 async fn rescan_cross_author_returns_403() {
@@ -308,12 +308,12 @@ async fn rescan_cross_author_returns_403() {
         other => panic!("expected Api 403, got: {other:?}"),
     }
 
-    // No candidate was written (the gate fires before any upsert).
+    // note: No candidate was written (the gate fires before any upsert).
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert!(pending.is_empty());
 }
 
-// ── Error handling: malformed target / missing work ────────────────────────
+// note: Error handling: malformed target / missing work
 
 #[tokio::test]
 async fn malformed_target_returns_clean_error() {
@@ -340,14 +340,14 @@ async fn missing_work_returns_clean_error() {
     }
 }
 
-// ── Sanity: a pre-existing pending candidate is reused, not duplicated ─────
+// note: Sanity: a pre-existing pending candidate is reused, not duplicated
 
 #[tokio::test]
 async fn rescan_reuses_preexisting_pending_candidate_without_duplicate() {
     let (dir, pool) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
-    // Seed a pending candidate exactly as the review-time hook would.
+    // note: Seed a pending candidate exactly as the review-time hook would.
     let payload = serde_json::json!({
         "summary": "Candidate extracted from chapter prose: Lin Xia",
         "attributes": {"novel_category": "character", "aliases": ["Lin Xia"]},
@@ -371,14 +371,14 @@ async fn rescan_reuses_preexisting_pending_candidate_without_duplicate() {
     let report = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();
-    // The pre-existing candidate is reused (unchanged), not re-inserted.
+    // note: The pre-existing candidate is reused (unchanged), not re-inserted.
     assert!(
         report.candidates_inserted.is_empty(),
         "should not duplicate the pre-existing candidate: {report:?}"
     );
     assert_eq!(report.candidates_unchanged, 1);
 
-    // Still exactly one row.
+    // note: Still exactly one row.
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert_eq!(
         pending
@@ -389,11 +389,11 @@ async fn rescan_reuses_preexisting_pending_candidate_without_duplicate() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// note: ═══════════════════════════════════════════════════════════════════════
 // v1.193 P0-T13 — obsolete entrances retired, retained neighbours intact
 // ═══════════════════════════════════════════════════════════════════════
 
-/// The retired `creator kb` / `creator knowledge` / `creator reference` groups
+/// note: The retired `creator kb` / `creator knowledge` / `creator reference` groups
 /// are unknown.
 ///
 /// Regression: every leaf of these groups read the retiring work-scope file
@@ -432,7 +432,7 @@ async fn retired_knowledge_and_reference_groups_are_unknown() {
     }
 }
 
-/// The rebound `creator world kb rescan` leaf fails closed unless exactly one
+/// note: The rebound `creator world kb rescan` leaf fails closed unless exactly one
 /// scan scope is named, and the refusal names the supported spellings.
 ///
 /// Reachable without a seeded Work: the scope check runs before the pool open,

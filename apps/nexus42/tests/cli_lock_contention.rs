@@ -2,6 +2,7 @@
 //!
 //! Tests the `CliError::Locked` error variant and its exit code mapping.
 //! Full CLI binary integration testing is deferred to QA.
+// note: covers `CliError::Locked` and its exit-code mapping without a daemon.
 
 use nexus42::errors::CliError;
 
@@ -37,6 +38,6 @@ fn locked_error_matches_pattern_for_exit_code() {
         holder_name: "test".to_string(),
         stale: false,
     };
-    // Verify the matches! pattern used in main.rs works correctly.
+    // note: Verify the matches! pattern used in main.rs works correctly.
     assert!(matches!(err, CliError::Locked { .. }));
 }

@@ -14,6 +14,7 @@
 //! revision + node + conflicting path + recovery hint, with the durable
 //! revision and content left unchanged), the invalid-field path (bad slug →
 //! `outline_validation_failed`), and the not-found path for an unknown work.
+// note: each test seeds a World + Work + chapter row, releases every writer, then drives the REAL binary.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -35,14 +36,14 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Output;
 
-/// Workspace the fixture materializes and selects.
+/// note: Workspace the fixture materializes and selects.
 const WORKSPACE_SLUG: &str = "default";
-/// Deterministic `story_ref` — the core resolves the outline file against it.
+/// note: Deterministic `story_ref` — the core resolves the outline file against it.
 const WORK_REF: &str = "outline-test-novel";
-/// World title the seeded World is created under.
+/// note: World title the seeded World is created under.
 const WORLD_TITLE: &str = "Outline Test World";
 
-/// The revision-0 work-level outline file: one volume holding chapter 1, the
+/// note: The revision-0 work-level outline file: one volume holding chapter 1, the
 /// default frontmatter shape the canvas operations read.
 const OUTLINE_REVISION_0: &str = "---\n\
      outline_revision: 0\n\
@@ -56,7 +57,7 @@ const OUTLINE_REVISION_0: &str = "---\n\
      updated_at: \"2024-01-01T00:00:00Z\"\n\
      ---\nbody\n";
 
-/// A hermetic direct-core home with the seeded Work/chapter and the
+/// note: A hermetic direct-core home with the seeded Work/chapter and the
 /// revision-0 outline file on disk.
 struct OutlineEnv {
     fixture: DirectFixture,
@@ -65,25 +66,25 @@ struct OutlineEnv {
 }
 
 impl OutlineEnv {
-    /// The work-level outline markdown the canvas operations read and write.
+    /// note: The work-level outline markdown the canvas operations read and write.
     fn outline_path(&self) -> PathBuf {
         self.creative_root
             .join(format!("Works/{WORK_REF}/Outlines/outline.md"))
     }
 
-    /// The per-chapter outline prose path the core derives for chapter 1.
+    /// note: The per-chapter outline prose path the core derives for chapter 1.
     fn chapter_outline_path(&self) -> PathBuf {
         self.creative_root.join(format!(
             "Works/{WORK_REF}/Outlines/chapters/ch01-outline.md"
         ))
     }
 
-    /// The stored work-level outline file (the durable storage truth).
+    /// note: The stored work-level outline file (the durable storage truth).
     fn stored_outline(&self) -> String {
         std::fs::read_to_string(self.outline_path()).expect("stored outline file")
     }
 
-    /// Run the real `nexus42` binary against this fixture's hermetic `HOME`.
+    /// note: Run the real `nexus42` binary against this fixture's hermetic `HOME`.
     fn cli(&self, args: &[&str]) -> Output {
         self.fixture
             .command()
@@ -93,7 +94,7 @@ impl OutlineEnv {
     }
 }
 
-/// Seed one owned World, one Work bound to it (`story_ref = WORK_REF`), one
+/// note: Seed one owned World, one Work bound to it (`story_ref = WORK_REF`), one
 /// chapter row and the revision-0 outline file — then release every seed
 /// writer so the CLI child can admit its own.
 async fn fresh_env() -> OutlineEnv {
@@ -102,7 +103,7 @@ async fn fresh_env() -> OutlineEnv {
     let db_path = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let creative_root = fixture.home.path().join("creative");
 
-    // The core resolves workspace files against the operational `meta.json`
+    // note: The core resolves workspace files against the operational `meta.json`
     // `local_root` — the same key the CLI's own workspace registration writes.
     std::fs::create_dir_all(&creative_root).expect("materialize creative root");
     std::fs::write(
@@ -119,7 +120,7 @@ async fn fresh_env() -> OutlineEnv {
     )
     .expect("write meta.json");
 
-    // A Work must bind to an owned World, so the World comes first. Both go
+    // why: A Work must bind to an owned World, so the World comes first. Both go
     // through the core seam, which owns the ids, the ownership rows and the
     // work directory.
     let core = CoreService::open(CoreOpenOptions {
@@ -162,7 +163,7 @@ async fn fresh_env() -> OutlineEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // The chapter row is the canvas's SSOT for the node's existence; it goes
+    // note: The chapter row is the canvas's SSOT for the node's existence; it goes
     // in after the Work row (the row carries the Work foreign key).
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
@@ -185,7 +186,7 @@ async fn fresh_env() -> OutlineEnv {
     .await
     .expect("seed chapter");
     pool.close().await;
-    // A CLI child must not be handed a home another writer still holds.
+    // invariant: A CLI child must not be handed a home another writer still holds.
     release_retained_writer_guards(&db_path);
 
     let env = OutlineEnv {
@@ -199,7 +200,7 @@ async fn fresh_env() -> OutlineEnv {
     env
 }
 
-// ── outline show ───────────────────────────────────────────────────────────
+// note: outline show
 
 #[tokio::test]
 async fn outline_show_prints_revision_and_volumes() {
@@ -253,7 +254,7 @@ async fn outline_show_unknown_work_surfaces_404() {
     );
 }
 
-// ── outline patch (structure) ──────────────────────────────────────────────
+// note: outline patch (structure)
 
 #[tokio::test]
 async fn outline_patch_move_chapter_bumps_revision() {
@@ -282,7 +283,7 @@ async fn outline_patch_move_chapter_bumps_revision() {
     let text = stdout(&out);
     assert!(text.contains("new_revision: 1"), "{text}");
 
-    // The outline file on disk now has the chapter in volume 2.
+    // note: The outline file on disk now has the chapter in volume 2.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 1"), "{on_disk}");
     assert!(on_disk.contains("volume_id: 2"), "{on_disk}");
@@ -323,7 +324,7 @@ async fn outline_patch_json_emits_dto_verbatim() {
 async fn outline_patch_stale_revision_surfaces_conflict() {
     let env = fresh_env().await;
 
-    // base_revision 5 vs current 0 → the outline_conflict CAS family.
+    // note: base_revision 5 vs current 0 → the outline_conflict CAS family.
     let out = env.cli(&[
         "creator",
         "works",
@@ -343,14 +344,14 @@ async fn outline_patch_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("outline_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry status 409: {err}");
-    // All four conflict fields render: current revision, conflicting node,
+    // note: All four conflict fields render: current revision, conflicting node,
     // conflicting path, recovery hint.
     assert!(err.contains("current_revision"), "stderr: {err}");
     assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 
-    // The refusal left the durable revision and the chapter's volume binding
+    // note: The refusal left the durable revision and the chapter's volume binding
     // exactly as the rejected write found them.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 0"), "{on_disk}");
@@ -361,7 +362,7 @@ async fn outline_patch_stale_revision_surfaces_conflict() {
 async fn outline_patch_missing_required_flag_fails_fast() {
     let env = fresh_env().await;
 
-    // move_chapter without --volume → CLI fail-fast.
+    // note: move_chapter without --volume → CLI fail-fast.
     let out = env.cli(&[
         "creator",
         "works",
@@ -381,12 +382,12 @@ async fn outline_patch_missing_required_flag_fails_fast() {
         "stderr should name --volume: {}",
         stderr(&out)
     );
-    // The rejected invocation wrote nothing.
+    // note: The rejected invocation wrote nothing.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 0"), "{on_disk}");
 }
 
-// ── chapter patch (outline node) ───────────────────────────────────────────
+// note: chapter patch (outline node)
 
 #[tokio::test]
 async fn chapter_patch_updates_metadata_and_bumps_revision() {
@@ -419,7 +420,7 @@ async fn chapter_patch_updates_metadata_and_bumps_revision() {
     let text = stdout(&out);
     assert!(text.contains("new_revision: 1"), "{text}");
 
-    // The outline file on disk carries the title + revision bump.
+    // note: The outline file on disk carries the title + revision bump.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 1"), "{on_disk}");
     assert!(on_disk.contains("Chapter One"), "{on_disk}");
@@ -458,7 +459,7 @@ async fn chapter_patch_json_emits_dto_verbatim() {
 async fn chapter_patch_stale_revision_surfaces_conflict() {
     let env = fresh_env().await;
 
-    // base_revision 3 vs current 0 → the outline_conflict CAS family.
+    // note: base_revision 3 vs current 0 → the outline_conflict CAS family.
     let out = env.cli(&[
         "creator",
         "works",
@@ -481,7 +482,7 @@ async fn chapter_patch_stale_revision_surfaces_conflict() {
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 
-    // The rejected write left the durable revision and the stored title
+    // note: The rejected write left the durable revision and the stored title
     // untouched.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 0"), "{on_disk}");
@@ -492,7 +493,7 @@ async fn chapter_patch_stale_revision_surfaces_conflict() {
 async fn chapter_patch_invalid_slug_surfaces_validation_failed() {
     let env = fresh_env().await;
 
-    // Uppercase slug violates the kebab-case rule → the
+    // note: Uppercase slug violates the kebab-case rule → the
     // outline_validation_failed family (the invalid-field path).
     let out = env.cli(&[
         "creator",
@@ -547,7 +548,7 @@ async fn chapter_patch_no_set_field_fails_fast() {
 async fn chapter_patch_content_file_writes_outline_prose() {
     let env = fresh_env().await;
 
-    // Seed an existing per-chapter outline file so the content patch has a
+    // why: Seed an existing per-chapter outline file so the content patch has a
     // target (the core derives `Works/<ref>/Outlines/chapters/ch01-outline.md`
     // for a chapter row with no stored `outline_path`).
     let chapter_outline = env.chapter_outline_path();
@@ -590,7 +591,7 @@ async fn chapter_patch_content_file_writes_outline_prose() {
     );
 }
 
-// ── timeline patch ─────────────────────────────────────────────────────────
+// note: timeline patch
 
 #[tokio::test]
 async fn timeline_patch_add_event_bumps_revision() {
@@ -616,7 +617,7 @@ async fn timeline_patch_add_event_bumps_revision() {
     assert!(out.status.success(), "add_event failed: {}", stderr(&out));
     assert!(stdout(&out).contains("new_revision: 1"), "{}", stdout(&out));
 
-    // The outline file on disk now carries the event.
+    // note: The outline file on disk now carries the event.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 1"), "{on_disk}");
     assert!(on_disk.contains("The storm"), "{on_disk}");
@@ -655,7 +656,7 @@ async fn timeline_patch_json_emits_dto_verbatim() {
 async fn timeline_patch_stale_revision_surfaces_conflict() {
     let env = fresh_env().await;
 
-    // base_revision 2 vs current 0 → the outline_conflict CAS family.
+    // note: base_revision 2 vs current 0 → the outline_conflict CAS family.
     let out = env.cli(&[
         "creator",
         "works",
@@ -678,7 +679,7 @@ async fn timeline_patch_stale_revision_surfaces_conflict() {
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 
-    // No event landed: the durable revision and event list are untouched.
+    // note: No event landed: the durable revision and event list are untouched.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 0"), "{on_disk}");
     assert!(on_disk.contains("timeline_events: []"), "{on_disk}");
@@ -689,7 +690,7 @@ async fn timeline_patch_stale_revision_surfaces_conflict() {
 async fn timeline_patch_missing_required_flag_fails_fast() {
     let env = fresh_env().await;
 
-    // add_event without --title → CLI fail-fast.
+    // note: add_event without --title → CLI fail-fast.
     let out = env.cli(&[
         "creator",
         "works",
@@ -709,7 +710,7 @@ async fn timeline_patch_missing_required_flag_fails_fast() {
     );
 }
 
-// ── help ───────────────────────────────────────────────────────────────────
+// note: help
 
 #[test]
 fn outline_help_documents_route_family_and_retry() {
@@ -739,7 +740,7 @@ fn chapter_help_pins_outline_node_route_distinction() {
         .stdout
         .clone();
     let text = String::from_utf8(output).expect("help output is UTF-8");
-    // The route-family guard: the leaf names the outline node patch and the
+    // note: The route-family guard: the leaf names the outline node patch and the
     // V1.65 chapter-content distinction (AR-84).
     assert!(text.contains("chapters/:n/patch"), "{text}");
     assert!(text.contains("V1.65"), "{text}");

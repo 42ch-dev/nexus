@@ -3,6 +3,7 @@
 //! observe-only inspector packet / `--json` DTO against a hermetic
 //! direct-core home — no daemon, no Node child (`common/direct.rs` precedent).
 //! Also pins PL-6: absent from `creator --help`.
+// invariant: the `creator inspector` group stays hidden — absent from `creator --help`.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -21,14 +22,14 @@ use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::Path;
 use std::process::Output;
 
-/// Workspace the fixture materializes and selects.
+/// note: Workspace the fixture materializes and selects.
 const WORKSPACE_SLUG: &str = "default";
-/// Deterministic `story_ref` for the seeded Work.
+/// note: Deterministic `story_ref` for the seeded Work.
 const STORY_REF: &str = "inspector-test-novel";
-/// Lore row the packet must place (constant activation → always fires).
+/// invariant: Lore row the packet must place (constant activation → always fires).
 const LORE_ROW: &str = "Harbor Master";
 
-/// A hermetic direct-core home with one owned World (+ one lore row) and,
+/// note: A hermetic direct-core home with one owned World (+ one lore row) and,
 /// optionally, one Work bound to that World.
 struct InspectorEnv {
     fixture: DirectFixture,
@@ -36,7 +37,7 @@ struct InspectorEnv {
 }
 
 impl InspectorEnv {
-    /// Run the real `nexus42` binary against this fixture's hermetic `HOME`.
+    /// note: Run the real `nexus42` binary against this fixture's hermetic `HOME`.
     fn cli(&self, args: &[&str]) -> Output {
         self.fixture
             .command()
@@ -46,7 +47,7 @@ impl InspectorEnv {
     }
 }
 
-/// Seed one owned World plus one `constant`-activation lore row (always fires
+/// invariant: Seed one owned World plus one `constant`-activation lore row (always fires
 /// → non-empty placement), then release every seed writer.
 async fn fresh_env() -> InspectorEnv {
     let fixture = DirectFixture::new().await;
@@ -100,7 +101,7 @@ async fn fresh_env() -> InspectorEnv {
     InspectorEnv { fixture, world_id }
 }
 
-/// Seed one extra owned Work bound to this fixture's World.
+/// note: Seed one extra owned Work bound to this fixture's World.
 async fn seed_bound_work(env: &InspectorEnv) -> String {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.fixture.home.path().to_path_buf(),
@@ -138,7 +139,7 @@ async fn seed_bound_work(env: &InspectorEnv) -> String {
     work_id
 }
 
-/// The core resolves workspace files against the operational `meta.json`
+/// note: The core resolves workspace files against the operational `meta.json`
 /// `local_root` — the same key the CLI's own workspace registration writes.
 fn write_workspace_meta(home: &Path, creator_id: &str) {
     let creative_root = home.join("creative");
@@ -214,7 +215,7 @@ async fn inspector_moment_supports_work_and_stage_flags() {
     );
     let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("json packet");
     assert!(json["modules"].is_object(), "{json}");
-    // No directive is seeded, so the packet's moment_directive is the "none"
+    // why: No directive is seeded, so the packet's moment_directive is the "none"
     // status shape — success itself proves the core accepted the work→world
     // binding (a mismatch surfaces 400).
     assert_eq!(json["moment_directive"]["status"], "none", "{json}");
@@ -284,7 +285,7 @@ async fn inspector_foreign_world_rejected_403() {
 async fn inspector_hidden_from_creator_help_but_usable() {
     let env = fresh_env().await;
 
-    // PL-6: `creator --help` must NOT list the hidden inspector group.
+    // invariant: PL-6: `creator --help` must NOT list the hidden inspector group.
     let help = env.cli(&["creator", "--help"]);
     assert!(help.status.success());
     let text = stdout(&help);
@@ -297,7 +298,7 @@ async fn inspector_hidden_from_creator_help_but_usable() {
         "reading should be visible:\n{text}"
     );
 
-    // But the hidden group still resolves its own help.
+    // note: But the hidden group still resolves its own help.
     let hidden = env.cli(&["creator", "inspector", "--help"]);
     assert!(
         hidden.status.success(),

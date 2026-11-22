@@ -7,6 +7,7 @@
 //! #[path = "common/cli_support.rs"]
 //! mod cli_support;
 //! ```
+// note: each integration target includes only the subset it uses; unused items are expected.
 #![allow(dead_code)]
 
 use nexus_contracts::BlockType;
@@ -15,18 +16,18 @@ use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 use std::process::Output;
 
-/// Decode a child's stdout as UTF-8. A real binary may emit invalid bytes, so
+/// note: Decode a child's stdout as UTF-8. A real binary may emit invalid bytes, so
 /// the lossy conversion is deliberate: the assertions read text, not bytes.
 pub fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// Decode a child's stderr as UTF-8 (lossy, same rationale as [`stdout`]).
+/// note: Decode a child's stderr as UTF-8 (lossy, same rationale as [`stdout`]).
 pub fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-/// Build a fresh migrated pool holding one owner-scoped world and one
+/// note: Build a fresh migrated pool holding one owner-scoped world and one
 /// `Character` KB entry.
 ///
 /// Returns `(dir, pool, entry_id)`. The tempdir owner comes **first** so that

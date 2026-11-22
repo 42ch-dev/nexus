@@ -27,17 +27,17 @@ use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::PathBuf;
 use std::process::Output;
 
-/// Workspace the fixture materializes and selects.
+/// note: Workspace the fixture materializes and selects.
 const WORKSPACE_SLUG: &str = "default";
 
-/// A hermetic direct-core home with one active creator/workspace.
+/// note: A hermetic direct-core home with one active creator/workspace.
 struct MemoryEnv {
     fixture: DirectFixture,
     creator_id: String,
 }
 
 impl MemoryEnv {
-    /// Run the real `nexus42` binary against this fixture's hermetic `HOME`.
+    /// note: Run the real `nexus42` binary against this fixture's hermetic `HOME`.
     fn cli(&self, args: &[&str]) -> Output {
         self.fixture
             .command()
@@ -56,7 +56,7 @@ async fn fresh_env() -> MemoryEnv {
     }
 }
 
-/// The released workspace state DB, opened for seeding only.
+/// invariant: The released workspace state DB, opened for seeding only.
 ///
 /// [`release`](WorkspaceSeed::release) hands the workspace back: the real CLI
 /// child must never start while a seed writer is still admitted.
@@ -82,7 +82,7 @@ impl WorkspaceSeed {
     }
 }
 
-/// Seed `n` pending-review rows for the fixture creator.
+/// note: Seed `n` pending-review rows for the fixture creator.
 async fn seed_pending(env: &MemoryEnv, n: usize) {
     let seed = WorkspaceSeed::open(env).await;
     for i in 0..n {
@@ -105,13 +105,13 @@ async fn seed_pending(env: &MemoryEnv, n: usize) {
     seed.release().await;
 }
 
-/// Seed `n` pending-review rows with strictly-decreasing `created_at` so the
+/// why: Seed `n` pending-review rows with strictly-decreasing `created_at` so the
 /// core's `created_at DESC` page order is deterministic (row `0` newest).
 async fn seed_pending_desc(env: &MemoryEnv, n: usize) {
     let seed = WorkspaceSeed::open(env).await;
     let base = chrono::Utc::now();
     for i in 0..n {
-        // `i` is bounded by the test's seed count (60), far below `i64::MAX`.
+        // note: `i` is bounded by the test's seed count (60), far below `i64::MAX`.
         let minutes_back = i64::try_from(i).expect("seed count fits in i64");
         let record = PendingReviewRecord {
             pending_id: format!("pending_test_{i}"),
@@ -132,7 +132,7 @@ async fn seed_pending_desc(env: &MemoryEnv, n: usize) {
     seed.release().await;
 }
 
-/// Seed one stored memory fragment for the fixture creator.
+/// note: Seed one stored memory fragment for the fixture creator.
 async fn seed_fragment(env: &MemoryEnv) {
     let seed = WorkspaceSeed::open(env).await;
     sqlx::query(
@@ -148,7 +148,7 @@ async fn seed_fragment(env: &MemoryEnv) {
     seed.release().await;
 }
 
-// ── pending count ─────────────────────────────────────────────────────────
+// note: pending count
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_count_reports_seeded_depth() {
@@ -181,9 +181,9 @@ async fn pending_count_zero_when_empty() {
     assert!(text.contains("0 pending review(s)"), "{text}");
 }
 
-// ── capture (default timestamp path) ──────────────────────────────────────
+// note: capture (default timestamp path)
 
-/// `creator memory capture` runs through the real binary without `--created-at`,
+/// note: `creator memory capture` runs through the real binary without `--created-at`,
 /// and re-running it replays instead of failing (NXM-6 fix round 1, F4/F5).
 ///
 /// The command is the Creator half of the explicit-capture contract: argument
@@ -214,7 +214,7 @@ async fn capture_defaults_timestamp_and_replays_on_retry() {
     assert!(text.contains("pend_cli_capture"), "{text}");
     assert!(!text.trim_start().starts_with('{'));
 
-    // The default-timestamp retry replays: one queued row, no idempotency error.
+    // note: The default-timestamp retry replays: one queued row, no idempotency error.
     let out = env.cli(&args);
     assert!(
         out.status.success(),
@@ -246,7 +246,7 @@ async fn capture_defaults_timestamp_and_replays_on_retry() {
     );
 }
 
-// ── review drain ──────────────────────────────────────────────────────────
+// note: review drain
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_drains_small_queue() {
@@ -256,7 +256,7 @@ async fn review_drains_small_queue() {
     let out = env.cli(&["creator", "memory", "review"]);
     assert!(out.status.success(), "review failed: {}", stderr(&out));
     let text = stdout(&out);
-    // Research digests classify as FragmentOnly → fragmented count ≥ 1.
+    // note: Research digests classify as FragmentOnly → fragmented count ≥ 1.
     assert!(text.contains("fragmented="), "{text}");
 }
 
@@ -281,7 +281,7 @@ async fn review_empty_queue_prints_no_pending() {
     assert!(text.contains("No pending memories"), "{text}");
 }
 
-// ── pending-list --json ────────────────────────────────────────────────────
+// note: pending-list --json
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_list_json_emits_dto_verbatim() {
@@ -310,7 +310,7 @@ async fn fragments_json_emits_wrapper_dto() {
     let out = env.cli(&["creator", "memory", "fragments", "--json"]);
     assert!(out.status.success(), "fragments failed: {}", stderr(&out));
     let parsed: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid JSON");
-    // The wire shape is `{ "fragments": [ … ] }` — the wrapper, not a bare array.
+    // note: The wire shape is `{ "fragments": [ … ] }` — the wrapper, not a bare array.
     let fragments = parsed["fragments"]
         .as_array()
         .expect("fragments wrapper array");
@@ -321,13 +321,13 @@ async fn fragments_json_emits_wrapper_dto() {
 
 // ── pending-show pagination walk (PR #230 Greptile P1) ────────────────────
 
-/// `pending-show` must find an ID past the first page (50-row default list
+/// invariant: `pending-show` must find an ID past the first page (50-row default list
 /// limit): the leaf walks `pagination.next_cursor` until the ID is found or
 /// the pages are exhausted instead of reporting not-found from page 1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_show_finds_id_beyond_first_page() {
     let env = fresh_env().await;
-    // Row `pending_test_0` is newest → it lands on page 1; row 55 lands on
+    // note: Row `pending_test_0` is newest → it lands on page 1; row 55 lands on
     // page 2 (newest-first DESC order, 50 rows/page).
     seed_pending_desc(&env, 60).await;
 
@@ -342,7 +342,7 @@ async fn pending_show_finds_id_beyond_first_page() {
     assert!(text.contains("sess_test_55"), "{text}");
 }
 
-/// The pagination walk must terminate with the not-found error when the ID
+/// invariant: The pagination walk must terminate with the not-found error when the ID
 /// does not exist anywhere (bounded loop — no infinite page following).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_show_missing_id_past_first_page_fails_closed() {
@@ -363,9 +363,9 @@ async fn pending_show_missing_id_past_first_page_fails_closed() {
     );
 }
 
-// ── migrate-legacy (P5) ───────────────────────────────────────────────────
+// note: migrate-legacy (P5)
 
-/// `creator memory migrate-legacy` runs the P5 pass on the real binary and is
+/// note: `creator memory migrate-legacy` runs the P5 pass on the real binary and is
 /// idempotent: the first call migrates the legacy rows and the bearer file, the
 /// second verifies the recorded manifest and reports no change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -397,7 +397,7 @@ async fn migrate_legacy_migrates_then_verifies() {
     assert_eq!(report["families"]["memory_fragments"], 1, "{report}");
     assert_eq!(report["families"]["memory_long_term"], 1, "{report}");
 
-    // After the marker the unified read path serves the migrated memory.
+    // note: After the marker the unified read path serves the migrated memory.
     let listed = env.cli(&["creator", "memory", "list"]);
     assert!(listed.status.success(), "stderr: {}", stderr(&listed));
     assert!(

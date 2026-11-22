@@ -4,6 +4,7 @@
 //! the JavaScript boundary deliberately small: one NDJSON request on stdin,
 //! one correlated NDJSON response on stdout. Diagnostics stay on stderr so
 //! stdout remains machine-parseable.
+// invariant: stdout carries only correlated NDJSON; diagnostics stay on stderr.
 
 use anyhow::{anyhow, Context};
 use libp2p::identity::Keypair;
@@ -74,7 +75,7 @@ fn bridge_manifest() -> HostCapabilityManifest {
         namespaces: Vec::new(),
         roles: vec!["input-source".into()],
         schema_version: NonZeroU64::new(1).expect("one is non-zero"),
-        // V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
+        // note: V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
         tools: Vec::new(),
     }
 }
@@ -90,7 +91,7 @@ fn served_ops(manifest: &HostCapabilityManifest) -> Vec<String> {
         .collect()
 }
 
-#[expect(clippy::missing_const_for_fn)] // match-only mapping kept non-const; const conversion is an off-path refactor (AR-100 off-path set)
+#[expect(clippy::missing_const_for_fn)] // why: match-only mapping kept non-const; const conversion is an off-path refactor (AR-100 off-path set)
 fn transport_code(error: &InvokeError) -> &'static str {
     match error {
         InvokeError::SessionClosed | InvokeError::SequenceExhausted => "SESSION_CLOSED",
@@ -126,7 +127,7 @@ async fn connect_host(
 }
 
 #[tokio::main]
-#[expect(clippy::too_many_lines)] // AR-102: linear bridge setup + event-loop teardown in one executable; extraction out of scope
+#[expect(clippy::too_many_lines)] // why: AR-102: linear bridge setup + event-loop teardown in one executable; extraction out of scope
 async fn main() -> anyhow::Result<()> {
     let args = parse_args()?;
     let identity = load_identity(&args.identity_seed)?;

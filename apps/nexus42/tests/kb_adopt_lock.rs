@@ -3,10 +3,11 @@
 //! These tests verify the lock acquisition logic without a running daemon.
 //! They exercise the error mapping path: `FileLockError` → `CliError::Locked` / `CliError::LockIo`
 //! with the correct holder-name format (`cli:kb-adopt`).
+// note: exercises the lock error mapping without a running daemon.
 
 use nexus42::errors::CliError;
 
-/// Simulates what happens when `try_acquire` returns `Locked` during `kb adopt`.
+/// note: Simulates what happens when `try_acquire` returns `Locked` during `kb adopt`.
 /// The CLI must surface the same error shape as other lock-protected commands.
 #[test]
 fn kb_adopt_lock_contention_maps_to_locked_error() {
@@ -30,7 +31,7 @@ fn kb_adopt_lock_contention_maps_to_locked_error() {
     );
 }
 
-/// Verifies that I/O errors during lock acquisition in `kb adopt`
+/// note: Verifies that I/O errors during lock acquisition in `kb adopt`
 /// map to `E_LOCK_IO`, not `E_LOCK`.
 #[test]
 fn kb_adopt_io_error_maps_to_lock_io_not_locked() {
@@ -52,7 +53,7 @@ fn kb_adopt_io_error_maps_to_lock_io_not_locked() {
     );
 }
 
-/// Verifies that the suggestion in `LockIo` does not imply retry.
+/// note: Verifies that the suggestion in `LockIo` does not imply retry.
 #[test]
 fn kb_adopt_lock_io_suggestion_no_retry() {
     let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "read-only fs");

@@ -8,6 +8,7 @@
 //! <id>/workspaces/<slug>`) had every write refused. The fixture therefore
 //! registers a creative root that is deliberately NOT the operational
 //! directory, and the assertions pin the bytes to it.
+// invariant: Works writes land under the workspace's REGISTERED creative root, not the operational directory.
 
 #[path = "common/direct.rs"]
 mod direct;
@@ -25,11 +26,11 @@ use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-/// Workspace the fixture materializes and selects.
+/// note: Workspace the fixture materializes and selects.
 const WORKSPACE_SLUG: &str = "default";
-/// The Work directory name both commands write under.
+/// note: The Work directory name both commands write under.
 const WORK_REF: &str = "rules-root-novel";
-/// The rule suggestion the accepted finding carries.
+/// note: The rule suggestion the accepted finding carries.
 const RULE: &str = "Always keep dialogue tags in the past tense.";
 
 fn cli(fixture: &DirectFixture, args: &[&str]) -> Output {
@@ -49,7 +50,7 @@ fn describe(out: &Output) -> String {
     )
 }
 
-/// A hermetic home whose registered creative root is NOT the operational
+/// note: A hermetic home whose registered creative root is NOT the operational
 /// workspace dir, with one Work (carrying `WORK_REF`) and one finding whose
 /// `rule_suggestion` is [`RULE`].
 struct RulesEnv {
@@ -61,7 +62,7 @@ struct RulesEnv {
     finding_id: String,
 }
 
-/// Point the workspace's operational `meta.json` at `creative_root` — a tree
+/// note: Point the workspace's operational `meta.json` at `creative_root` — a tree
 /// distinct from the operational directory, exactly like a workspace
 /// registered on a user path. The core resolves every workspace file against
 /// this `local_root`.
@@ -89,7 +90,7 @@ async fn fresh_env() -> RulesEnv {
     std::fs::create_dir_all(&creative_root).expect("materialize creative root");
     register_creative_root(&op_dir, &creator_id, &creative_root);
 
-    // A Work binds to an owned World, so the World comes first.
+    // why: A Work binds to an owned World, so the World comes first.
     let core = CoreService::open(CoreOpenOptions {
         user_home: fixture.home.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
@@ -130,7 +131,7 @@ async fn fresh_env() -> RulesEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // The Work directory name a scaffold would claim, plus one open finding
+    // note: The Work directory name a scaffold would claim, plus one open finding
     // carrying the rule suggestion `findings accept` appends.
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
@@ -171,7 +172,7 @@ async fn fresh_env() -> RulesEnv {
     .await
     .expect("seed finding");
     pool.close().await;
-    // A CLI child must not be handed a home another writer still holds.
+    // invariant: A CLI child must not be handed a home another writer still holds.
     release_retained_writer_guards(&db_path);
 
     RulesEnv {
@@ -193,7 +194,7 @@ async fn rules_writes_land_under_the_registered_creative_root() {
         .join(WORK_REF)
         .join("AGENTS.md");
 
-    // 1. `findings accept` appends the rule under the creative root.
+    // note: 1. `findings accept` appends the rule under the creative root.
     let out = cli(
         &env.fixture,
         &[
@@ -227,7 +228,7 @@ async fn rules_writes_land_under_the_registered_creative_root() {
         "nothing may land beside the operational workspace dir"
     );
 
-    // 2. `rules reset` restores the scaffold in that same tree.
+    // note: 2. `rules reset` restores the scaffold in that same tree.
     let out = cli(
         &env.fixture,
         &[
@@ -246,7 +247,7 @@ async fn rules_writes_land_under_the_registered_creative_root() {
         describe(&out)
     );
     let body: serde_json::Value = serde_json::from_slice(&out.stdout).expect("reset prints json");
-    // The executor canonicalizes its root, so the reported path carries the
+    // why: The executor canonicalizes its root, so the reported path carries the
     // resolved form (on macOS `/var` → `/private/var`).
     let reported = std::fs::canonicalize(&agents_md).expect("canonical agents.md path");
     assert_eq!(
@@ -268,7 +269,7 @@ async fn rules_writes_land_under_the_registered_creative_root() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_creative_root_names_the_root_not_the_creator() {
     let env = fresh_env().await;
-    // Re-register the workspace on a directory that no longer exists: the
+    // note: Re-register the workspace on a directory that no longer exists: the
     // creator/workspace selection is intact, only the creative root is
     // unresolvable.
     register_creative_root(

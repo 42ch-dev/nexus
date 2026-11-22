@@ -12,6 +12,7 @@
 //!    seed helpers) to exercise list/show/edit/delete without `$HOME` or a daemon.
 //!
 //! Run with: cargo test -p nexus42 --test `world_kb_cli`
+// note: CLI surface plus a hermetic round-trip against a fresh temp DB.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -27,16 +28,14 @@ const OWNER: &str = "ctr_owner";
 const WORLD: &str = "wld_test";
 const CANON_NAME: &str = "char_hero";
 
-/// Read the body summary for assertion convenience.
+/// note: Read the body summary for assertion convenience.
 fn summary_of(block: &KnowledgeEntryRecord) -> Option<&str> {
     block.body.as_ref().and_then(|b| b.summary.as_deref())
 }
 
-// =============================================================================
-// CLI surface (assert_cmd)
-// =============================================================================
+// note: CLI surface (assert_cmd)
 
-/// `creator world kb --help` lists the author and the rebound extract/rescan
+/// note: `creator world kb --help` lists the author and the rebound extract/rescan
 /// leaves.
 ///
 /// The last three entries are the v231 retire-file-index rebind: the extract
@@ -73,7 +72,7 @@ fn world_kb_help_lists_subcommands() {
     }
 }
 
-/// `creator world kb rescan --help` advertises the work-scoped `--work` mode.
+/// note: `creator world kb rescan --help` advertises the work-scoped `--work` mode.
 #[test]
 fn world_kb_rescan_help_shows_the_work_mode() {
     let output = Command::cargo_bin("nexus42")
@@ -96,7 +95,7 @@ fn world_kb_rescan_help_shows_the_work_mode() {
     );
 }
 
-/// `creator world kb list --help` documents the `world_ref` arg and `--json`.
+/// note: `creator world kb list --help` documents the `world_ref` arg and `--json`.
 #[test]
 fn world_kb_list_help_shows_expected_text() {
     let output = Command::cargo_bin("nexus42")
@@ -119,7 +118,7 @@ fn world_kb_list_help_shows_expected_text() {
     );
 }
 
-/// `creator world kb edit --help` documents `--body` (required for edit).
+/// note: `creator world kb edit --help` documents `--body` (required for edit).
 #[test]
 fn world_kb_edit_help_shows_body_flag() {
     let output = Command::cargo_bin("nexus42")
@@ -138,7 +137,7 @@ fn world_kb_edit_help_shows_body_flag() {
     );
 }
 
-/// `creator world kb delete --help` documents `--yes` / `-y`.
+/// note: `creator world kb delete --help` documents `--yes` / `-y`.
 #[test]
 fn world_kb_delete_help_shows_yes_flag() {
     let output = Command::cargo_bin("nexus42")
@@ -161,11 +160,9 @@ fn world_kb_delete_help_shows_yes_flag() {
     );
 }
 
-// =============================================================================
-// Hermetic round-trip (fresh pool per test — no $HOME, no daemon)
-// =============================================================================
+// note: Hermetic round-trip (fresh pool per test — no $HOME, no daemon)
 
-/// `kb_list` returns the seeded block (human + JSON paths do not error).
+/// note: `kb_list` returns the seeded block (human + JSON paths do not error).
 #[tokio::test]
 async fn list_returns_seeded_block() {
     let (_dir, pool, block_id) = fresh_pool_with_block(
@@ -188,7 +185,7 @@ async fn list_returns_seeded_block() {
     assert_eq!(blocks[0].canonical_name, CANON_NAME);
 }
 
-/// `kb_show` returns the full block, including the seeded body.
+/// note: `kb_show` returns the full block, including the seeded body.
 #[tokio::test]
 async fn show_returns_full_block() {
     let (_dir, pool, block_id) = fresh_pool_with_block(
@@ -212,7 +209,7 @@ async fn show_returns_full_block() {
     assert_eq!(summary_of(&block), Some("Original summary"));
 }
 
-/// `kb_edit` updates the body in place and the change is persisted.
+/// note: `kb_edit` updates the body in place and the change is persisted.
 #[tokio::test]
 async fn edit_updates_body_in_place() {
     let (_dir, pool, block_id) = fresh_pool_with_block(
@@ -249,7 +246,7 @@ async fn edit_updates_body_in_place() {
     assert!(tags.contains(&"hero".to_string()));
 }
 
-/// `kb_edit` re-runs Novel validation: a body missing `novel_category` is rejected
+/// note: `kb_edit` re-runs Novel validation: a body missing `novel_category` is rejected
 /// and the original body is left unchanged.
 #[tokio::test]
 async fn edit_rejects_body_missing_novel_category() {
@@ -286,7 +283,7 @@ async fn edit_rejects_body_missing_novel_category() {
     assert_eq!(summary_of(&block), Some("Original summary"));
 }
 
-/// `kb_delete` soft-deletes the block; `list` no longer returns it, the row is retained.
+/// note: `kb_delete` soft-deletes the block; `list` no longer returns it, the row is retained.
 #[tokio::test]
 async fn delete_soft_deletes_block() {
     let (_dir, pool, block_id) = fresh_pool_with_block(

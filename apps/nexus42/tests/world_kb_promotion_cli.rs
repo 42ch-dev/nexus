@@ -32,14 +32,14 @@ use nexus_local_db::kb_store::SqliteKbStore;
 const OWNER: &str = "ctr_owner";
 const OTHER: &str = "ctr_other";
 const WORLD: &str = "wld_promo";
-/// `work_id` seeded for promotion candidates (R-V150KBED-05 test surface).
+/// note: `work_id` seeded for promotion candidates (R-V150KBED-05 test surface).
 const WORK_ID: &str = "wrk_test";
-/// Human-readable `work_ref` (`works.story_ref`) seeded for `WORK_ID`. The
+/// note: Human-readable `work_ref` (`works.story_ref`) seeded for `WORK_ID`. The
 /// reject audit log MUST land under `Works/<WORK_REF>/...`, not
 /// `Works/<WORK_ID>/...` (R-V150KBED-05).
 const WORK_REF: &str = "test-novel";
 
-/// Build a fresh migrated pool + seed a world owned by [`OWNER`] and a minimal
+/// note: Build a fresh migrated pool + seed a world owned by [`OWNER`] and a minimal
 /// `works` row so the reject audit-log path can resolve `WORK_REF` from
 /// `WORK_ID` (R-V150KBED-05).
 async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
@@ -63,7 +63,7 @@ async fn fresh_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     (dir, pool)
 }
 
-/// Seed a minimal `works` row (`work_id=WORK_ID`, `story_ref=WORK_REF`) so the
+/// why: Seed a minimal `works` row (`work_id=WORK_ID`, `story_ref=WORK_REF`) so the
 /// R-V150KBED-05 `work_ref` resolution in `kb_reject` succeeds. `INSERT OR
 /// IGNORE` makes this safe to call once per pool.
 async fn seed_work_for_log(pool: &sqlx::SqlitePool) {
@@ -86,7 +86,7 @@ async fn seed_work_for_log(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
-/// Seed a pending candidate in [`WORLD`] owned by [`OWNER`].
+/// note: Seed a pending candidate in [`WORLD`] owned by [`OWNER`].
 async fn seed_pending(
     pool: &sqlx::SqlitePool,
     name: &str,
@@ -112,7 +112,7 @@ async fn seed_pending(
     .unwrap()
 }
 
-// ── AC3: pending lists candidates; cross-author 403 ─────────────────────────
+// note: AC3: pending lists candidates; cross-author 403
 
 #[tokio::test]
 async fn pending_lists_candidates_for_owner() {
@@ -120,7 +120,7 @@ async fn pending_lists_candidates_for_owner() {
     seed_pending(&pool, "Lin Xia").await;
     seed_pending(&pool, "Marcus Vale").await;
 
-    // Owner sees both.
+    // note: Owner sees both.
     let pending = nexus_local_db::kb_extract_job::list_pending_for_world(&pool, WORLD, None)
         .await
         .unwrap();
@@ -147,26 +147,26 @@ async fn pending_cross_author_returns_403() {
     }
 }
 
-// ── AC4: adopt creates a confirmed KnowledgeEntryRecord ─────────────────────────────────
+// note: AC4: adopt creates a confirmed KnowledgeEntryRecord
 
 #[tokio::test]
 async fn adopt_creates_confirmed_key_block() {
     let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Aria Stormblade").await;
 
-    // Adopt.
+    // note: Adopt.
     kb_adopt(&pool, OWNER, &candidate.job_id, None, false)
         .await
         .unwrap();
 
-    // The promotion row is now confirmed.
+    // note: The promotion row is now confirmed.
     let row = get_promotion(&pool, &candidate.job_id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(row.promotion_status, "confirmed");
 
-    // A KnowledgeEntryRecord exists in the world with status=confirmed.
+    // note: A KnowledgeEntryRecord exists in the world with status=confirmed.
     let store = SqliteKbStore::new(pool.clone());
     let blocks = store.list_by_world(WORLD).await.unwrap();
     let adopted = blocks
@@ -192,7 +192,7 @@ async fn adopt_cross_author_returns_403() {
         other => panic!("expected Api 403, got: {other:?}"),
     }
 
-    // Row is still pending (adopt was rejected).
+    // note: Row is still pending (adopt was rejected).
     let row = get_promotion(&pool, &candidate.job_id)
         .await
         .unwrap()
@@ -200,7 +200,7 @@ async fn adopt_cross_author_returns_403() {
     assert_eq!(row.promotion_status, "pending");
 }
 
-// ── AC5: reject marks rejected + writes audit log ───────────────────────────
+// note: AC5: reject marks rejected + writes audit log
 
 #[tokio::test]
 async fn reject_marks_rejected_and_writes_log() {
@@ -211,14 +211,14 @@ async fn reject_marks_rejected_and_writes_log() {
         .await
         .unwrap();
 
-    // Row is rejected.
+    // note: Row is rejected.
     let row = get_promotion(&pool, &candidate.job_id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(row.promotion_status, "rejected");
 
-    // Audit log written under Works/<work_ref>/Logs/kb/rejected/ (R-V150KBED-05:
+    // note: Audit log written under Works/<work_ref>/Logs/kb/rejected/ (R-V150KBED-05:
     // work_ref = works.story_ref, not the opaque work_id).
     let log_path = dir
         .path()
@@ -256,7 +256,7 @@ async fn reject_cross_author_returns_403() {
     }
 }
 
-// ── Adopt then pending-list excludes it ─────────────────────────────────────
+// note: Adopt then pending-list excludes it
 
 #[tokio::test]
 async fn adopted_candidate_disappears_from_pending() {
@@ -275,19 +275,19 @@ async fn adopted_candidate_disappears_from_pending() {
     assert_eq!(pending[0].canonical_name_guess.as_deref(), Some("Beta"));
 }
 
-// ── Double-adopt is rejected cleanly ────────────────────────────────────────
+// note: Double-adopt is rejected cleanly
 
 #[tokio::test]
 async fn double_adopt_is_rejected() {
     let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Gamma").await;
 
-    // First adopt succeeds.
+    // note: First adopt succeeds.
     kb_adopt(&pool, OWNER, &candidate.job_id, None, false)
         .await
         .unwrap();
 
-    // Second adopt fails (row no longer pending).
+    // note: Second adopt fails (row no longer pending).
     let err = kb_adopt(&pool, OWNER, &candidate.job_id, None, false)
         .await
         .unwrap_err();
@@ -302,9 +302,9 @@ async fn double_adopt_is_rejected() {
     }
 }
 
-// ── R-V150KBED-03: adopt transaction rollback on mark_confirmed race ────────
+// note: R-V150KBED-03: adopt transaction rollback on mark_confirmed race
 
-/// Regression for R-V150KBED-03 (qc3 W-001 + qc2 Warning).
+/// note: Regression for R-V150KBED-03 (qc3 W-001 + qc2 Warning).
 ///
 /// Asserts that when `mark_confirmed` returns `Ok(false)` after the `KnowledgeEntryRecord`
 /// insert succeeds (the promotion row was confirmed/rejected by a concurrent
@@ -324,11 +324,11 @@ async fn kb_adopt_failure_rolls_back_insert() {
     let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Race Candidate").await;
 
-    // Simulate the race winner: a concurrent writer confirms the row before
+    // note: Simulate the race winner: a concurrent writer confirms the row before
     // our adopt tx reaches mark_confirmed.
     mark_confirmed(&pool, &candidate.job_id).await.unwrap();
 
-    // Replicate the kb_adopt tx boundary (entity-scope-model §5.5.3).
+    // note: Replicate the kb_adopt tx boundary (entity-scope-model §5.5.3).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
     let mut kb = KnowledgeEntryRecord::new(
         WORLD,
@@ -349,13 +349,13 @@ async fn kb_adopt_failure_rolls_back_insert() {
 
     let mut tx = pool.begin().await.unwrap();
 
-    // Insert succeeds inside the tx (visible only to this tx).
+    // invariant: Insert succeeds inside the tx (visible only to this tx).
     let _inserted = store
         .insert_key_block_in_tx(&mut tx, kb)
         .await
         .expect("insert_key_block_in_tx should succeed against the tx");
 
-    // mark_confirmed_in_tx must return false (row already confirmed by the race).
+    // invariant: mark_confirmed_in_tx must return false (row already confirmed by the race).
     let flipped = mark_confirmed_in_tx(&mut tx, &candidate.job_id)
         .await
         .expect("mark_confirmed_in_tx query should not error");
@@ -365,10 +365,10 @@ async fn kb_adopt_failure_rolls_back_insert() {
          (row was pre-flipped to confirmed)"
     );
 
-    // kb_adopt rolls back on !flipped — replicate.
+    // note: kb_adopt rolls back on !flipped — replicate.
     tx.rollback().await.expect("rollback must succeed");
 
-    // Core invariant: NO orphan KnowledgeEntryRecord in kb_key_blocks.
+    // note: Core invariant: NO orphan KnowledgeEntryRecord in kb_key_blocks.
     let verifier = SqliteKbStore::new(pool.clone());
     let blocks = verifier.list_by_world(WORLD).await.unwrap();
     assert!(
@@ -377,7 +377,7 @@ async fn kb_adopt_failure_rolls_back_insert() {
          persist after rollback, got: {blocks:?}"
     );
 
-    // Candidate state preserved — the race winner's confirmation is intact,
+    // note: Candidate state preserved — the race winner's confirmation is intact,
     // and our failed adopt did not duplicate or corrupt the promotion row.
     let row = get_promotion(&pool, &candidate.job_id)
         .await
@@ -389,9 +389,9 @@ async fn kb_adopt_failure_rolls_back_insert() {
     );
 }
 
-// ── R-V150KBED-05: reject log path uses work_ref, not work_id ───────────────
+// note: R-V150KBED-05: reject log path uses work_ref, not work_id
 
-/// Regression for R-V150KBED-05 (qc2 Warning).
+/// note: Regression for R-V150KBED-05 (qc2 Warning).
 ///
 /// Asserts the reject audit log lands under `Works/<work_ref>/Logs/kb/rejected/`
 /// where `work_ref = works.story_ref` (the human-readable slug), and **not**
@@ -410,7 +410,7 @@ async fn kb_reject_writes_log_under_work_ref_path() {
         .await
         .expect("reject should succeed: works.story_ref is seeded");
 
-    // 1. Log dir exists under Works/<WORK_REF>/ (human slug).
+    // note: 1. Log dir exists under Works/<WORK_REF>/ (human slug).
     let work_ref_dir = dir
         .path()
         .join("Works")
@@ -428,7 +428,7 @@ async fn kb_reject_writes_log_under_work_ref_path() {
         "R-V150KBED-05: log must exist under Works/{WORK_REF}/Logs/kb/rejected/"
     );
 
-    // 2. The log file's absolute path contains WORK_REF and does NOT contain
+    // note: 2. The log file's absolute path contains WORK_REF and does NOT contain
     //    WORK_ID (the opaque DB id the old code used).
     let log_path = ref_entries[0].path();
     let log_path_str = log_path.to_string_lossy();
@@ -441,7 +441,7 @@ async fn kb_reject_writes_log_under_work_ref_path() {
         "R-V150KBED-05: log path must NOT contain opaque work_id '{WORK_ID}', got: {log_path_str}"
     );
 
-    // 3. The log body records both work_id (audit) and work_ref (path component).
+    // note: 3. The log body records both work_id (audit) and work_ref (path component).
     let body = std::fs::read_to_string(&log_path).unwrap();
     assert!(
         body.contains(&format!("**work_id**: {WORK_ID}")),
@@ -453,14 +453,14 @@ async fn kb_reject_writes_log_under_work_ref_path() {
     );
 }
 
-/// R-V150KBED-05 validation gate: rejecting a candidate whose `work_id` has no
+/// note: R-V150KBED-05 validation gate: rejecting a candidate whose `work_id` has no
 /// resolvable `story_ref` MUST fail before the DB flip (no rejected row, no
 /// orphan log under a wrong path).
 #[tokio::test]
 async fn kb_reject_fails_when_work_ref_missing() {
     let (dir, pool) = fresh_pool().await;
 
-    // Seed a candidate pointing at a work_id that has NO works row (so
+    // note: Seed a candidate pointing at a work_id that has NO works row (so
     // resolve_work_ref_for_log returns "work_id does not exist"). We bypass
     // seed_pending to control the work_id, and insert directly via the DAO.
     let candidate = insert_pending(
@@ -468,7 +468,7 @@ async fn kb_reject_fails_when_work_ref_missing() {
         OWNER,
         "ws",
         WORLD,
-        Some("wrk_orphan"), // no works row with this id
+        Some("wrk_orphan"), // note: no works row with this id
         Some(1),
         "character",
         "Orphan Work",
@@ -490,7 +490,7 @@ async fn kb_reject_fails_when_work_ref_missing() {
         other => panic!("expected Other error for missing work_ref, got: {other:?}"),
     }
 
-    // No rejected row — the DB flip must NOT have happened.
+    // invariant: No rejected row — the DB flip must NOT have happened.
     let row = get_promotion(&pool, &candidate.job_id)
         .await
         .unwrap()
@@ -500,7 +500,7 @@ async fn kb_reject_fails_when_work_ref_missing() {
         "candidate must remain pending when work_ref resolution fails"
     );
 
-    // No log directory created at all.
+    // note: No log directory created at all.
     let any_works = dir.path().join("Works");
     assert!(
         !any_works.exists(),

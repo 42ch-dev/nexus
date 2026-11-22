@@ -14,8 +14,9 @@
 //! The leaves are the rebound World KB entrances (v231 retire-file-index
 //! Task 1): the job names a Work artifact through `--work-id` / `--chapter`,
 //! and no leaf touches the retired work-scope file index.
+// note: rendered text is pinned line-for-line so the core migration cannot reorder CLI output.
 
-#![allow(clippy::too_many_lines)] // one end-to-end CLI scenario per test
+#![allow(clippy::too_many_lines)] // note: one end-to-end CLI scenario per test
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -29,7 +30,7 @@ use direct::DirectFixture;
 use direct_actor::fixture_creator_id;
 use std::process::Output;
 
-/// Run `creator world kb queue-extract` with `args`.
+/// note: Run `creator world kb queue-extract` with `args`.
 fn queue_extract(fixture: &DirectFixture, args: &[&str]) -> Output {
     let mut command_args = vec!["creator", "world", "kb", "queue-extract"];
     command_args.extend_from_slice(args);
@@ -40,7 +41,7 @@ fn queue_extract(fixture: &DirectFixture, args: &[&str]) -> Output {
         .expect("run world kb queue-extract")
 }
 
-/// Run `creator world kb extract-status` with `args`.
+/// note: Run `creator world kb extract-status` with `args`.
 fn extract_status(fixture: &DirectFixture, args: &[&str]) -> Output {
     let mut command_args = vec!["creator", "world", "kb", "extract-status"];
     command_args.extend_from_slice(args);
@@ -51,7 +52,7 @@ fn extract_status(fixture: &DirectFixture, args: &[&str]) -> Output {
         .expect("run kb extract-status")
 }
 
-/// The job id carried by a `queue-extract` render.
+/// note: The job id carried by a `queue-extract` render.
 fn queued_job_id(rendered: &str) -> String {
     rendered
         .lines()
@@ -63,7 +64,7 @@ fn queued_job_id(rendered: &str) -> String {
         .to_string()
 }
 
-/// Queue → status round trip keeps the full human render, and the enqueue is
+/// why: Queue → status round trip keeps the full human render, and the enqueue is
 /// idempotent on its `(creator, work entry, world)` key.
 #[tokio::test]
 async fn queue_extract_and_status_round_trip() {
@@ -96,7 +97,7 @@ async fn queue_extract_and_status_round_trip() {
         lines[4]
     );
 
-    // Re-queue while the job is still `queued`: the store returns the same job
+    // note: Re-queue while the job is still `queued`: the store returns the same job
     // (no duplicate row), so the leaf renders the same "queued" line.
     let again = queue_extract(&fixture, &["kb_smoke", "--world-id", "wld_smoke"]);
     assert!(
@@ -112,7 +113,7 @@ async fn queue_extract_and_status_round_trip() {
         "{re_rendered}"
     );
 
-    // The list arm renders the header (twice, unchanged) plus exactly one job
+    // note: The list arm renders the header (twice, unchanged) plus exactly one job
     // row — the idempotency key never duplicates a row.
     let listed = extract_status(&fixture, &[]);
     assert!(
@@ -145,7 +146,7 @@ async fn queue_extract_and_status_round_trip() {
         "job row"
     );
 
-    // Detail arm: the same seven-line render the local implementation printed.
+    // note: Detail arm: the same seven-line render the local implementation printed.
     let detail = extract_status(&fixture, &["--job-id", &job_id]);
     assert!(
         detail.status.success(),
@@ -163,7 +164,7 @@ async fn queue_extract_and_status_round_trip() {
     assert_eq!(detail_lines[5], "  Status:      queued");
     assert_eq!(detail_lines[6], format!("  Created:     {created_at}"));
 
-    // A non-`queued` existing job is what the "already exists" branch renders.
+    // note: A non-`queued` existing job is what the "already exists" branch renders.
     // Move the row between runs on the fixture's own workspace DB (the CLI
     // child releases its admission when it exits).
     let db_path =
@@ -196,7 +197,7 @@ async fn queue_extract_and_status_round_trip() {
     assert_eq!(running_lines[3], "  Status:       running");
 }
 
-/// `--chapter N` fills the artifact-locator lines through the core, and the
+/// note: `--chapter N` fills the artifact-locator lines through the core, and the
 /// list arm shows the same job with its truncated columns.
 #[tokio::test]
 async fn chapter_sugar_renders_the_locator_lines() {
@@ -234,7 +235,7 @@ async fn chapter_sugar_renders_the_locator_lines() {
     assert!(lines[8].starts_with("  Created:      "));
 }
 
-/// A chapter below 1 keeps its legacy refusal wording, and an unknown job id
+/// why: A chapter below 1 keeps its legacy refusal wording, and an unknown job id
 /// keeps the legacy not-found wording — both without writing a job.
 #[tokio::test]
 async fn refused_inputs_keep_their_legacy_wording() {
@@ -259,7 +260,7 @@ async fn refused_inputs_keep_their_legacy_wording() {
         stderr(&missing)
     );
 
-    // Neither refusal enqueued anything.
+    // note: Neither refusal enqueued anything.
     let listed = extract_status(&fixture, &[]);
     assert!(listed.status.success(), "{}", stderr(&listed));
     assert_eq!(

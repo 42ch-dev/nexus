@@ -27,10 +27,10 @@ use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::PathBuf;
 use std::process::Output;
 
-/// The fixture's workspace slug (mirrors `common/direct.rs`).
+/// note: The fixture's workspace slug (mirrors `common/direct.rs`).
 const WORKSPACE_SLUG: &str = "default";
 
-/// The payload of the first output line carrying `label`.
+/// note: The payload of the first output line carrying `label`.
 fn labelled(out: &str, label: &str) -> String {
     out.lines()
         .find_map(|line| line.split_once(label).map(|(_, rest)| rest.trim()))
@@ -40,7 +40,7 @@ fn labelled(out: &str, label: &str) -> String {
         )
 }
 
-/// The fixture's workspace state DB (`.../creators/<id>/workspaces/default/state.db`).
+/// note: The fixture's workspace state DB (`.../creators/<id>/workspaces/default/state.db`).
 fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
     workspace_state_db_path(
         fixture.home.path(),
@@ -49,7 +49,7 @@ fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
     )
 }
 
-/// Seed an owned World with one parent-branch event through the REAL CLI
+/// note: Seed an owned World with one parent-branch event through the REAL CLI
 /// (create + the retained local narrative writer); returns
 /// `(world_id, parent_branch_id, fork_point_event_id)`.
 fn seed_world_with_fork_point(fixture: &DirectFixture) -> (String, String, String) {
@@ -88,7 +88,7 @@ fn seed_world_with_fork_point(fixture: &DirectFixture) -> (String, String, Strin
     (world_id, parent_branch, fork_point)
 }
 
-/// Seed a World owned by another creator into the fixture's workspace DB.
+/// note: Seed a World owned by another creator into the fixture's workspace DB.
 ///
 /// The core ownership guard compares `narrative_worlds.owner_creator_id`
 /// against the admitted principal, so the foreign row must live in the SAME
@@ -114,7 +114,7 @@ async fn seed_foreign_world(fixture: &DirectFixture, world_id: &str) {
     release_retained_writer_guards(&db_path);
 }
 
-/// Run one `creator world fork` invocation against the fixture home.
+/// note: Run one `creator world fork` invocation against the fixture home.
 fn fork_cli(fixture: &DirectFixture, args: &[&str]) -> Output {
     let mut full = vec!["creator", "world", "fork"];
     full.extend_from_slice(args);
@@ -125,14 +125,14 @@ fn fork_cli(fixture: &DirectFixture, args: &[&str]) -> Output {
         .expect("spawn nexus42 fork")
 }
 
-/// `create` then `list --branch`: the projection returns the created fork
+/// note: `create` then `list --branch`: the projection returns the created fork
 /// marker with its derived parent branch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_create_and_list_projection() {
     let fixture = DirectFixture::new().await;
     let (world_id, parent_branch, fork_point) = seed_world_with_fork_point(&fixture);
 
-    // Create a fork with an explicit label; the parent branch is derived
+    // note: Create a fork with an explicit label; the parent branch is derived
     // from the fork-point event's branch via the timeline-events read.
     let create = fork_cli(
         &fixture,
@@ -154,7 +154,7 @@ async fn fork_create_and_list_projection() {
     assert!(created.contains("Fork created"), "{created}");
     assert!(created.contains(&parent_branch), "{created}");
     assert!(created.contains(&fork_point), "{created}");
-    // The new fork branch id is printed by create — read it back.
+    // note: The new fork branch id is printed by create — read it back.
     let branch_id = created
         .lines()
         .find_map(|line| line.trim().strip_prefix("branch_id:"))
@@ -163,7 +163,7 @@ async fn fork_create_and_list_projection() {
         .to_string();
     assert!(branch_id.starts_with("fbk_"), "{branch_id}");
 
-    // List with --branch = pure projection of the fork_created marker.
+    // note: List with --branch = pure projection of the fork_created marker.
     let list = fork_cli(
         &fixture,
         &["list", &world_id, "--branch", &branch_id, "--json"],
@@ -178,7 +178,7 @@ async fn fork_create_and_list_projection() {
     assert_eq!(marker["forked_from_event_id"], fork_point);
     assert_eq!(marker["label"], "alt-ending");
 
-    // Human list renders the same projection.
+    // note: Human list renders the same projection.
     let human = fork_cli(&fixture, &["list", &world_id, "--branch", &branch_id]);
     assert!(human.status.success());
     let text = stdout(&human);
@@ -186,7 +186,7 @@ async fn fork_create_and_list_projection() {
     assert!(text.contains("alt-ending"), "{text}");
 }
 
-/// A World with no fork carries no marker on its current branch, and the
+/// note: A World with no fork carries no marker on its current branch, and the
 /// message names `--branch` as the way to read a fork branch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_list_empty_world() {
@@ -206,14 +206,14 @@ async fn fork_list_empty_world() {
     );
 }
 
-/// A fork point that is not on the given parent branch is rejected by the
+/// note: A fork point that is not on the given parent branch is rejected by the
 /// core's typed input validation (non-zero exit, no marker written).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_create_bad_fork_point_rejected_as_input_error() {
     let fixture = DirectFixture::new().await;
     let (world_id, parent_branch, _) = seed_world_with_fork_point(&fixture);
 
-    // Pass an explicit --parent-branch so the CLI derivation is skipped and
+    // why: Pass an explicit --parent-branch so the CLI derivation is skipped and
     // the core's fork-point validation rejects the unknown event.
     let out = fork_cli(
         &fixture,
@@ -238,7 +238,7 @@ async fn fork_create_bad_fork_point_rejected_as_input_error() {
     );
 }
 
-/// Without `--parent-branch` the CLI derives it from the timeline projection,
+/// note: Without `--parent-branch` the CLI derives it from the timeline projection,
 /// cannot find the event, and fails closed naming the remediation flag.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_create_unknown_fork_point_derivation_fails_closed() {
@@ -257,7 +257,7 @@ async fn fork_create_unknown_fork_point_derivation_fails_closed() {
     );
 }
 
-/// A foreign World is refused by the core ownership guard (403 family) — the
+/// note: A foreign World is refused by the core ownership guard (403 family) — the
 /// held classification survives without an HTTP status transport.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_create_foreign_world_rejected_403() {
@@ -288,7 +288,7 @@ async fn fork_create_foreign_world_rejected_403() {
     );
 }
 
-/// `fork list` on an unknown World surfaces the core's `not_found` (404)
+/// note: `fork list` on an unknown World surfaces the core's `not_found` (404)
 /// family.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_list_unknown_world_surfaces_not_found() {
@@ -303,7 +303,7 @@ async fn fork_list_unknown_world_surfaces_not_found() {
     );
 }
 
-/// `fork create --json` emits the created fork DTO verbatim.
+/// note: `fork create --json` emits the created fork DTO verbatim.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_create_json_emits_dto() {
     let fixture = DirectFixture::new().await;

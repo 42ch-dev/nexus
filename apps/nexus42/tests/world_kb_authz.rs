@@ -9,6 +9,7 @@
 //! against a fresh temp DB (no `$HOME`, no daemon).
 //!
 //! Run with: cargo test -p nexus42 --test `world_kb_authz`
+// invariant: edit and delete require the active creator to own the world.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -27,7 +28,7 @@ const CANON_NAME: &str = "char_hero";
 const VALID_BODY: &str =
     r#"{"summary":"updated","attributes":{"novel_category":"character"},"tags":["novel"]}"#;
 
-/// Cross-author `kb_edit` returns `403 WORLD_KB_FORBIDDEN` and does not mutate the row.
+/// note: Cross-author `kb_edit` returns `403 WORLD_KB_FORBIDDEN` and does not mutate the row.
 #[tokio::test]
 async fn cross_author_edit_returns_403() {
     let (_dir, pool, block_id) = fresh_pool_with_block(
@@ -60,7 +61,7 @@ async fn cross_author_edit_returns_403() {
         other => panic!("expected CliError::Api {{ status: 403, .. }}, got: {other:?}"),
     }
 
-    // Row must be unchanged.
+    // invariant: Row must be unchanged.
     let block = SqliteKbStore::new(pool)
         .get_knowledge_entry(&block_id)
         .await
@@ -72,7 +73,7 @@ async fn cross_author_edit_returns_403() {
     );
 }
 
-/// Cross-author `kb_delete` returns `403 WORLD_KB_FORBIDDEN` and the row survives.
+/// note: Cross-author `kb_delete` returns `403 WORLD_KB_FORBIDDEN` and the row survives.
 #[tokio::test]
 async fn cross_author_delete_returns_403() {
     let (_dir, pool, block_id) = fresh_pool_with_block(
@@ -101,7 +102,7 @@ async fn cross_author_delete_returns_403() {
         other => panic!("expected CliError::Api {{ status: 403, .. }}, got: {other:?}"),
     }
 
-    // Block must still be listed (not soft-deleted).
+    // invariant: Block must still be listed (not soft-deleted).
     let blocks = SqliteKbStore::new(pool).list_by_world(WORLD).await.unwrap();
     assert_eq!(
         blocks.len(),
@@ -110,7 +111,7 @@ async fn cross_author_delete_returns_403() {
     );
 }
 
-/// Positive control: the world owner can edit and delete.
+/// note: Positive control: the world owner can edit and delete.
 #[tokio::test]
 async fn owner_can_edit_and_delete() {
     let (_dir, pool, block_id) = fresh_pool_with_block(
@@ -124,12 +125,12 @@ async fn owner_can_edit_and_delete() {
     )
     .await;
 
-    // Owner edit succeeds.
+    // note: Owner edit succeeds.
     kb_edit(&pool, OWNER, WORLD, &block_id, VALID_BODY, false)
         .await
         .unwrap();
 
-    // Owner delete succeeds.
+    // note: Owner delete succeeds.
     kb_delete(&pool, OWNER, WORLD, &block_id, true)
         .await
         .unwrap();
@@ -141,7 +142,7 @@ async fn owner_can_edit_and_delete() {
     );
 }
 
-/// A non-existent world yields a clean not-found error (not a 403).
+/// note: A non-existent world yields a clean not-found error (not a 403).
 #[tokio::test]
 async fn edit_on_missing_world_is_not_a_403() {
     let dir = tempfile::tempdir().unwrap();

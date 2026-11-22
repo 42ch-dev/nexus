@@ -13,8 +13,9 @@
 //!
 //! Both ACP roles run in-process over the SDK's `Channel::duplex()`; the SDK
 //! owns the JSON-RPC framing.
+// invariant: generic `mcp_servers` descriptors reach the agent verbatim; the Model A factory is gone.
 
-// Justification (repo convention, cf. tests/works_api.rs): integration-test
+// note: Justification (repo convention, cf. tests/works_api.rs): integration-test
 // assertions operate on fixed local fixtures where a panic IS the failure
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -28,7 +29,7 @@ use agent_client_protocol::v1::schema::{
 };
 use agent_client_protocol::{Agent, Channel, Client};
 
-/// The three generic descriptor kinds a client may attach to `newSession`.
+/// note: The three generic descriptor kinds a client may attach to `newSession`.
 fn generic_descriptors() -> Vec<McpServer> {
     vec![
         McpServer::Stdio(
@@ -41,10 +42,10 @@ fn generic_descriptors() -> Vec<McpServer> {
     ]
 }
 
-/// `(name, command, args, env pairs)` lifted off a `Stdio` descriptor.
+/// note: `(name, command, args, env pairs)` lifted off a `Stdio` descriptor.
 type StdioEvidence = (String, PathBuf, Vec<String>, Vec<(String, String)>);
 
-/// Descriptors observed by the scripted agent's `session/new` handler.
+/// note: Descriptors observed by the scripted agent's `session/new` handler.
 #[derive(Debug)]
 struct DescriptorEvidence {
     count: usize,
@@ -53,7 +54,7 @@ struct DescriptorEvidence {
     sse: Option<(String, String)>,
 }
 
-/// The scripted agent: records the `mcp_servers` it received and replies
+/// note: The scripted agent: records the `mcp_servers` it received and replies
 /// with the session id. It never spawns a child — the generic ACP contract is
 /// descriptor delivery, not a prescribed nexus42 process.
 async fn run_scripted_agent(
@@ -111,7 +112,7 @@ async fn acp_session_delivers_generic_mcp_server_descriptors() {
 
     let agent_task = tokio::spawn(run_scripted_agent(agent_channel, evidence_tx));
 
-    // Client side: initialize, then newSession carrying all three generic
+    // note: Client side: initialize, then newSession carrying all three generic
     // descriptor kinds.
     let client_result = Client
         .v1()

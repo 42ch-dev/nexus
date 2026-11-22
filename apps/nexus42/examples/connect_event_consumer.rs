@@ -106,6 +106,7 @@
 //! the RN-OGA-4 replay/gap entry — which this example acks. Once a publisher
 //! lands, the same command receives data frames and prints the advanced
 //! cursor.
+// invariant: the event lane stays loopback-only and fail-closed; the example only presents the identity the operator admitted.
 
 use libp2p::identity::Keypair;
 use nexus_connect::{
@@ -127,12 +128,12 @@ use tokio::net::TcpStream;
 
 const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
 const DELIVER_EVENTS_TOOL: &str = "tools.nexus.deliver_events";
-/// The host registers its per-session `tools.nexus.subscribe` handler on the
+/// note: The host registers its per-session `tools.nexus.subscribe` handler on the
 /// tick after the handshake is established (~25 ms), so the first invoke can
 /// arrive before registration and be refused `op_unsupported`. Retry bounded.
 const SUBSCRIBE_ATTEMPTS: u32 = 20;
 const SUBSCRIBE_RETRY_DELAY: Duration = Duration::from_millis(50);
-/// This consumer's persistent Ed25519 identity file, under the
+/// note: This consumer's persistent Ed25519 identity file, under the
 /// `--home`-selected `connect/` dir. Generated with the OS CSPRNG on first
 /// use and reused thereafter, so the operator's allowlist entry is stable
 /// without shipping a public private key.
@@ -145,12 +146,12 @@ const USAGE: &str = "usage: connect_event_consumer <ADDR> \
 [--cursor <EPOCH>:<SEQ>] [--identity-key <PATH>] [--seed <N> (TEST-ONLY)] \
 [--timeout-secs <N>] [--print-peer-only]";
 
-/// The reverse-invoke handler future: the same boxed shape as
+/// note: The reverse-invoke handler future: the same boxed shape as
 /// `spoke_connect::remote::ToolHandler` (kept local so the example needs no
 /// `futures` dependency).
 type HandlerFuture = std::pin::Pin<Box<dyn Future<Output = SpokeResult<Value>> + Send>>;
 
-/// A failure with the process exit code it maps to.
+/// note: A failure with the process exit code it maps to.
 struct Failure {
     code: i32,
     message: String,
@@ -165,7 +166,7 @@ impl Failure {
     }
 }
 
-/// Example-local transport-observation seam — the same shape as the lane's
+/// note: Example-local transport-observation seam — the same shape as the lane's
 /// own `ObservedTransport`: it records the delivery request's `request_id`
 /// and then signals only once the matching signed ack response has completed
 /// its transport write. This is what distinguishes "the handler returned
@@ -178,7 +179,7 @@ struct AckObservation {
 }
 
 impl AckObservation {
-    /// The delivery request's `request_id`, if a delivery arrived.
+    /// note: The delivery request's `request_id`, if a delivery arrived.
     fn delivery_request_id(&self) -> Option<String> {
         self.delivery_request_id
             .lock()
@@ -223,7 +224,7 @@ impl AckObservation {
     }
 }
 
-/// Transport decorator around the WS transport (see [`AckObservation`]).
+/// note: Transport decorator around the WS transport (see [`AckObservation`]).
 struct AckObservedTransport {
     inner: Arc<dyn Transport>,
     observation: Arc<AckObservation>,
@@ -238,7 +239,7 @@ impl AckObservedTransport {
 #[async_trait::async_trait]
 impl Transport for AckObservedTransport {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
-        // Observe only AFTER the write resolved: `WsTransport::send` resolves
+        // invariant: Observe only AFTER the write resolved: `WsTransport::send` resolves
         // once the socket accepted the bytes.
         let result = self.inner.send(envelope).await;
         if result.is_ok() {
@@ -258,7 +259,7 @@ impl Transport for AckObservedTransport {
     }
 }
 
-/// Wait (bounded) for the signed ack response's transport write to complete.
+/// note: Wait (bounded) for the signed ack response's transport write to complete.
 async fn wait_for_ack_write(observation: &AckObservation, timeout: Duration) -> Option<String> {
     if !observation.ack_response_written.load(Ordering::SeqCst) {
         tokio::time::timeout(timeout, observation.written.notified())
@@ -272,25 +273,25 @@ async fn wait_for_ack_write(observation: &AckObservation, timeout: Duration) -> 
     }
 }
 
-/// Parsed run arguments.
+/// note: Parsed run arguments.
 struct Args {
-    /// Lane address, e.g. `ws://127.0.0.1:8425/connect`.
+    /// note: Lane address, e.g. `ws://127.0.0.1:8425/connect`.
     addr: String,
-    /// Event-lane trust anchor: the responder's Ed25519 public key, hex.
+    /// note: Event-lane trust anchor: the responder's Ed25519 public key, hex.
     host_pubkey: Option<String>,
-    /// Event-lane trust anchor: path to the responder's raw 32-byte seed.
+    /// note: Event-lane trust anchor: path to the responder's raw 32-byte seed.
     host_identity_key: Option<PathBuf>,
-    /// Event stream name to subscribe to.
+    /// note: Event stream name to subscribe to.
     stream: String,
-    /// Optional `last_event_id` cursor (`<epoch>:<seq>`) for replay/resume.
+    /// note: Optional `last_event_id` cursor (`<epoch>:<seq>`) for replay/resume.
     cursor: Option<String>,
-    /// Persistent identity seed file; default under `~/.nexus42/connect/`.
+    /// note: Persistent identity seed file; default under `~/.nexus42/connect/`.
     identity_key: Option<PathBuf>,
-    /// TEST-ONLY fixed Ed25519 seed; forces the public `[N; 32]` identity.
+    /// invariant: TEST-ONLY fixed Ed25519 seed; forces the public `[N; 32]` identity.
     seed: Option<u8>,
-    /// Print the consumer identity and exit (no lane contact).
+    /// note: Print the consumer identity and exit (no lane contact).
     print_peer_only: bool,
-    /// Delivery wait, in seconds.
+    /// note: Delivery wait, in seconds.
     timeout_secs: u64,
 }
 
@@ -407,7 +408,7 @@ async fn main() {
     }
 }
 
-/// One subscribe → reverse `deliver_events` → ack round-trip.
+/// note: One subscribe → reverse `deliver_events` → ack round-trip.
 async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
     let observation = Arc::new(AckObservation::default());
     let adapter = connect_lane(&args, identity_seed, Arc::clone(&observation)).await?;
@@ -416,7 +417,7 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
     let handler: ToolHandler = Arc::new(move |arguments: Value| -> HandlerFuture {
         let tx = tx.clone();
         Box::pin(async move {
-            // Answering `Ok` IS the cursor ack the host waits for before it
+            // note: Answering `Ok` IS the cursor ack the host waits for before it
             // sends the next batch (v1.207 ack-gated delivery).
             let _ = tx.send(arguments).await;
             SpokeResult::Ok(json!({}))
@@ -440,7 +441,7 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
                 if reject.code == SpokeRejectCode::CapabilityPortMissing
                     && attempt < SUBSCRIBE_ATTEMPTS =>
             {
-                // The host registers the per-session subscribe handler on its
+                // note: The host registers the per-session subscribe handler on its
                 // established-poll tick after the handshake, so the first
                 // invoke can land before registration.
                 tokio::time::sleep(SUBSCRIBE_RETRY_DELAY).await;
@@ -487,7 +488,7 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
         }
     }
 
-    // The handler's `Ok` only queues the acknowledgment; the adapter signs
+    // invariant: The handler's `Ok` only queues the acknowledgment; the adapter signs
     // the response and writes it in its own task afterwards. Do not claim (or
     // exit on) acknowledgment until that write completed.
     if let Some(request_id) = wait_for_ack_write(&observation, args.timeout()).await {
@@ -509,7 +510,7 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Resolve the lane trust anchor, upgrade the address to a WebSocket, and
+/// note: Resolve the lane trust anchor, upgrade the address to a WebSocket, and
 /// finish the signed-hello handshake.
 async fn connect_lane(
     args: &Args,
@@ -559,7 +560,7 @@ async fn connect_lane(
     .map_err(|e| Failure::new(1, format!("Connect handshake failed: {e}")))
 }
 
-/// The event-lane Ed25519 public key: the explicit `--host-pubkey`, else the
+/// note: The event-lane Ed25519 public key: the explicit `--host-pubkey`, else the
 /// public key derived from the lane identity seed file.
 fn resolve_host_pubkey(args: &Args) -> Result<[u8; 32], Failure> {
     if let Some(text) = &args.host_pubkey {
@@ -605,14 +606,14 @@ fn resolve_host_pubkey(args: &Args) -> Result<[u8; 32], Failure> {
     Ok(pubkey_from_seed(&bytes))
 }
 
-/// The lane's identity seed at its default location: `$NEXUS42_HOME` else
+/// note: The lane's identity seed at its default location: `$NEXUS42_HOME` else
 /// `$HOME`, under `~/.nexus42/connect/daemon_identity.key`.
 fn default_host_identity_key() -> Option<PathBuf> {
     let base = std::env::var_os("NEXUS42_HOME").or_else(|| std::env::var_os("HOME"))?;
     Some(PathBuf::from(base).join(".nexus42/connect/daemon_identity.key"))
 }
 
-/// This consumer's identity seed file: the explicit `--identity-key`, else
+/// note: This consumer's identity seed file: the explicit `--identity-key`, else
 /// `$NEXUS42_HOME` else `$HOME`, under `~/.nexus42/connect/`.
 fn default_consumer_identity_key() -> Option<PathBuf> {
     let base = std::env::var_os("NEXUS42_HOME").or_else(|| std::env::var_os("HOME"))?;
@@ -623,7 +624,7 @@ fn default_consumer_identity_key() -> Option<PathBuf> {
     )
 }
 
-/// Resolve this consumer's Ed25519 seed: the persisted **generated** identity
+/// note: Resolve this consumer's Ed25519 seed: the persisted **generated** identity
 /// by default (created `0600` with the OS CSPRNG on first run, reused
 /// thereafter), or the **TEST-ONLY** fixed `--seed` when explicitly given.
 fn resolve_consumer_seed(args: &Args) -> Result<[u8; 32], Failure> {
@@ -656,7 +657,7 @@ fn resolve_consumer_seed(args: &Args) -> Result<[u8; 32], Failure> {
     Ok(seed)
 }
 
-/// The Ed25519 public key for a raw 32-byte secret seed (the same derivation
+/// note: The Ed25519 public key for a raw 32-byte secret seed (the same derivation
 /// spoke's `RemoteIdentity` uses).
 fn pubkey_from_seed(seed: &[u8; 32]) -> [u8; 32] {
     Keypair::ed25519_from_bytes(*seed)
@@ -667,7 +668,7 @@ fn pubkey_from_seed(seed: &[u8; 32]) -> [u8; 32] {
         .to_bytes()
 }
 
-/// Decode exactly 64 lowercase/uppercase hex characters into 32 bytes.
+/// note: Decode exactly 64 lowercase/uppercase hex characters into 32 bytes.
 fn hex32(text: &str) -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
     let bytes = text.as_bytes();
@@ -682,7 +683,7 @@ fn hex32(text: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-/// Print one delivered batch. The acknowledgment outcome is printed by `run`
+/// note: Print one delivered batch. The acknowledgment outcome is printed by `run`
 /// only after the signed response write completes.
 fn report_delivery(delivery: &Value) {
     let Some(frames) = delivery.get("frames").and_then(Value::as_array) else {
@@ -716,7 +717,7 @@ fn report_delivery(delivery: &Value) {
     }
 }
 
-/// The consumer hello manifest: it opts the session into the host-served
+/// note: The consumer hello manifest: it opts the session into the host-served
 /// `tools.nexus.subscribe` (negotiation = capability intersection) and
 /// advertises the consumer-served reverse tool `tools.nexus.deliver_events`,
 /// which the host pushes event batches through.
@@ -747,7 +748,7 @@ fn consumer_manifest() -> HostCapabilityManifest {
     .expect("static consumer manifest is valid")
 }
 
-/// Lowercase hex — `peer_keys.json` pins the 32-byte Ed25519 public key in
+/// note: Lowercase hex — `peer_keys.json` pins the 32-byte Ed25519 public key in
 /// that form.
 fn hex_lower(bytes: &[u8]) -> String {
     use std::fmt::Write as _;

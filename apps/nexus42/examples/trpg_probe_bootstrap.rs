@@ -3,6 +3,7 @@
 //! Production `nexus-runtime` deliberately refuses to invent narrative
 //! worlds. The probe therefore bootstraps its disposable workspace through
 //! Nexus' own schema and narrative-write API before opening the runtime.
+// why: `nexus-runtime` refuses to invent narrative worlds, so the probe bootstraps its own disposable workspace.
 
 use anyhow::{anyhow, Context};
 use nexus42::config::{resolve_state_db_path_from_home, CliConfig};
@@ -33,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let pool = Schema::init(&db_path)
         .await
         .context("initialize workspace DB")?;
-    // v1.191 P1 T4: the one Creator materialization helper also commits the
+    // note: v1.191 P1 T4: the one Creator materialization helper also commits the
     // stable holder registry row with the workspace subject (§2.1).
     nexus_local_db::ensure_creator_row(&pool, CREATOR_ID, "Trpg Probe")
         .await

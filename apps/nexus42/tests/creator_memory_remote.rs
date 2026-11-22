@@ -12,6 +12,7 @@
 //! The remote arm is compiled only with the non-default `memory-remote` feature
 //! (`cargo test -p nexus42 --features memory-remote --test creator_memory_remote`).
 //! Without it the target still runs the local pin and the feature-off refusal.
+// note: the remote arm is compiled only with the non-default `memory-remote` feature.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -23,14 +24,14 @@ const SLUG: &str = "c111-pinned-memory";
 const KIND: &str = "story_summary";
 const BODY: &str = "C111MARKER the pinned provider served this row to the real CLI";
 const CREDENTIAL_ID: &str = "cred-c111-remote";
-/// Bound on one spawned CLI child, covering startup, dial and output drain.
+/// note: Bound on one spawned CLI child, covering startup, dial and output drain.
 const CLI_BOUND: Duration = Duration::from_secs(180);
-/// Bound on observing a killed/errored child's exit status (never a bare wait).
+/// invariant: Bound on observing a killed/errored child's exit status (never a bare wait).
 const SETTLE_BOUND: Duration = Duration::from_secs(5);
-/// The fixture host's Connect identity (the provider side of the session).
+/// note: The fixture host's Connect identity (the provider side of the session).
 #[cfg(feature = "memory-remote")]
 const HOST_SEED: [u8; 32] = [0x42; 32];
-/// The CLI's Connect identity; the credential file holds exactly this seed.
+/// note: The CLI's Connect identity; the credential file holds exactly this seed.
 #[cfg(feature = "memory-remote")]
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
 
@@ -44,7 +45,7 @@ mod direct_actor;
 use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
 
-/// Spawn the real binary and bound the WHOLE child/output lifecycle.
+/// note: Spawn the real binary and bound the WHOLE child/output lifecycle.
 ///
 /// Child output goes to regular temp files (not inherited pipes), so a
 /// descendant that keeps an inherited pipe open can never block the test after
@@ -117,7 +118,7 @@ fn run_cli_with(home: &Path, args: &[&str], bound: Duration) -> Result<Output, S
     })
 }
 
-/// Settle an owned child after a wait/timeout failure without an unbounded
+/// note: Settle an owned child after a wait/timeout failure without an unbounded
 /// `wait()`. `kill` and every later `try_wait` are checked; the message never
 /// claims "reaped" unless an exit status was actually observed, and an OS
 /// failure is preserved verbatim.
@@ -170,14 +171,12 @@ fn cli_ok(home: &Path, args: &[&str]) -> Output {
     output
 }
 
-/// The provider's physical markdown projection files for this workspace.
+/// note: The provider's physical markdown projection files for this workspace.
 fn provider_store(home: &Path, creator: &str) -> PathBuf {
     nexus_home_layout::operational_workspace_dir(home, creator, WORKSPACE).join("memory-store")
 }
 
-// ---------------------------------------------------------------------------
-// C-111 local arm
-// ---------------------------------------------------------------------------
+// note: C-111 local arm
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn c_111_creator_cli_uses_pinned_provider_local() {
@@ -199,7 +198,7 @@ async fn c_111_creator_cli_uses_pinned_provider_local() {
         ],
     );
 
-    // The write landed in the PINNED LOCAL PROVIDER's store, not a legacy
+    // note: The write landed in the PINNED LOCAL PROVIDER's store, not a legacy
     // long-term memory file: the provider owns the record projection.
     let store = provider_store(home, creator);
     let projections = walk_markdown(&store);
@@ -276,9 +275,7 @@ fn walk_markdown(root: &Path) -> Vec<String> {
     out
 }
 
-// ---------------------------------------------------------------------------
-// C-111 remote arm (the non-default `memory-remote` feature)
-// ---------------------------------------------------------------------------
+// note: C-111 remote arm (the non-default `memory-remote` feature)
 
 #[cfg(feature = "memory-remote")]
 mod remote {
@@ -320,17 +317,17 @@ mod remote {
             }
         };
     }
-    /// A fixture-only row seeded before the CLI runs; it exists in no local
+    /// invariant: A fixture-only row seeded before the CLI runs; it exists in no local
     /// store, so the CLI can only return it by reading the remote provider.
     const SEED_SLUG: &str = "c111-remote-seeded";
     const SEED_BODY: &str = "C111REMOTESEED the fixture-only row only the remote provider holds";
     const SEED_MEMORY_ID: &str = "mem_c111remoteseed";
-    /// A conflicting local artifact: if the CLI fell back to local content it
+    /// note: A conflicting local artifact: if the CLI fell back to local content it
     /// would surface this body under this slug.
     const TRAP_SLUG: &str = "c111-local-trap";
     const TRAP_BODY: &str = "LEGACYTRAP a local artifact no pinned remote read may serve";
 
-    /// Test decorator over the REAL fixture service: forwards every operation
+    /// note: Test decorator over the REAL fixture service: forwards every operation
     /// unchanged and counts the record list/get boundary the CLI must cross.
     struct CountingService {
         inner: Arc<dyn RemoteMemoryService>,
@@ -372,7 +369,7 @@ mod remote {
         }
     }
 
-    /// The responder's baseline half: `spoke-baseline` is never negotiated, so
+    /// invariant: The responder's baseline half: `spoke-baseline` is never negotiated, so
     /// every baseline port answers honestly instead of being reached.
     struct MemoryOnlyHost;
 
@@ -479,7 +476,7 @@ mod remote {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
-    /// Bind the real loopback listener early, so the selection can name it.
+    /// why: Bind the real loopback listener early, so the selection can name it.
     async fn bind() -> (TcpListener, SocketAddr) {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -488,7 +485,7 @@ mod remote {
         (listener, addr)
     }
 
-    /// Serve `rounds` sequential CLI opens on the already-bound listener.
+    /// note: Serve `rounds` sequential CLI opens on the already-bound listener.
     ///
     /// Each created responder is appended to the shared list immediately, so
     /// cleanup can close every session that was actually created, on success
@@ -543,7 +540,7 @@ mod remote {
         })
     }
 
-    /// Close every responder through the SDK's supported `close()` and wait,
+    /// note: Close every responder through the SDK's supported `close()` and wait,
     /// bounded, for its public state to report `Closed`. The SDK's internal
     /// runner task is not publicly joinable (disclosed in the report).
     async fn close_responders(responders: &[Arc<ConnectResponder>]) -> Result<(), String> {
@@ -562,7 +559,7 @@ mod remote {
         Ok(())
     }
 
-    /// Abort and bounded-join the accept task (when still owned), then close
+    /// note: Abort and bounded-join the accept task (when still owned), then close
     /// every responder actually created. Runs on success and on failure so no
     /// owned fixture resource is detached or left open.
     async fn teardown(
@@ -574,7 +571,7 @@ mod remote {
             task.abort();
             match tokio::time::timeout(BOUND, task).await {
                 Ok(Ok(())) => {}
-                // Expected after our own abort: a cancelled join is not a
+                // note: Expected after our own abort: a cancelled join is not a
                 // cleanup failure.
                 Ok(Err(error)) if error.is_cancelled() => {}
                 Ok(Err(error)) => failures.push(format!("accept join: {error}")),
@@ -592,7 +589,7 @@ mod remote {
         }
     }
 
-    /// Write the operator-provisioned credential for `seed` at mode 0600.
+    /// note: Write the operator-provisioned credential for `seed` at mode 0600.
     fn write_credential(home: &Path, seed: &[u8; 32]) {
         let dir = home.join(".nexus42").join("memory-credentials");
         std::fs::create_dir_all(&dir).expect("credential dir");
@@ -613,7 +610,7 @@ mod remote {
         }
     }
 
-    /// Run one CLI call without blocking the runtime that serves the fixture.
+    /// note: Run one CLI call without blocking the runtime that serves the fixture.
     async fn cli(home: PathBuf, args: Vec<String>) -> Result<Output, String> {
         tokio::task::spawn_blocking(move || {
             let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -635,7 +632,7 @@ mod remote {
         Ok(output)
     }
 
-    /// Seed a row that exists ONLY in the remote fixture, through the fixture's
+    /// invariant: Seed a row that exists ONLY in the remote fixture, through the fixture's
     /// own service (the same operation mapping the signed session uses).
     async fn seed_fixture_row(
         service: &Arc<dyn RemoteMemoryService>,
@@ -701,7 +698,7 @@ mod remote {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn c_111_creator_cli_uses_pinned_provider_remote() {
-        // The durable independent fixture. Its admission table maps the dialing
+        // note: The durable independent fixture. Its admission table maps the dialing
         // credential's peer id to the operator principal holding `admin`.
         let fixture_home = TempDir::new().expect("fixture home");
         let provider = Arc::new(
@@ -724,7 +721,7 @@ mod remote {
         let creator = actor.creator_id().to_string();
         write_credential(&home, &CLIENT_SEED);
 
-        // The fixture's real service, wrapped only to count its record list/get
+        // invariant: The fixture's real service, wrapped only to count its record list/get
         // boundary. The seeded row exists in no local store.
         let counting = Arc::new(CountingService::new(provider.server(directory.admission())));
         let service: Arc<dyn RemoteMemoryService> = counting.clone();
@@ -756,7 +753,7 @@ mod remote {
         .await
         .expect("the CLI selection is written");
 
-        // A meaningful conflicting local artifact: its authored body differs
+        // note: A meaningful conflicting local artifact: its authored body differs
         // from every remote row, so a local fallback would be visible.
         let trap = home
             .join(".nexus42")
@@ -774,7 +771,7 @@ mod remote {
         )
         .expect("seed the local trap");
 
-        // list, show, create, list: one signed session each.
+        // note: list, show, create, list: one signed session each.
         let responders = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut accept_task = Some(serve(
             listener,
@@ -825,7 +822,7 @@ mod remote {
                 "the CLI's show crossed the remote provider's record read boundary"
             );
 
-            // The remote create path is retained: a CLI-authored row reaches
+            // note: The remote create path is retained: a CLI-authored row reaches
             // the same pinned provider and is listed with the seeded row.
             cli_ok_remote(
                 &home,
@@ -865,7 +862,7 @@ mod remote {
                 "the shown identity stayed the fixture's (seeded {seeded_id})"
             );
 
-            // Poll the owned handle BY REFERENCE: a timeout must leave the
+            // invariant: Poll the owned handle BY REFERENCE: a timeout must leave the
             // handle owned here so teardown can abort and join the SAME task.
             let Some(task) = accept_task.as_mut() else {
                 return Err("accept task missing".to_string());
@@ -899,7 +896,7 @@ mod remote {
         }
     }
 
-    /// Cancel and bounded-join one owned test task, distinguishing the expected
+    /// note: Cancel and bounded-join one owned test task, distinguishing the expected
     /// cancellation after our own abort from a real join failure.
     async fn stop_task(task: &mut Option<tokio::task::JoinHandle<()>>) -> Result<(), String> {
         if let Some(task) = task.take() {
@@ -915,7 +912,7 @@ mod remote {
         }
     }
 
-    /// Deterministic small regression for the two failure-only cleanup branches.
+    /// invariant: Deterministic small regression for the two failure-only cleanup branches.
     ///
     /// (a) a real owned accept task is still listening when the wait expires;
     /// teardown must abort and bounded-join that SAME task and release the
@@ -924,7 +921,7 @@ mod remote {
     /// runner must kill and reap the child and report it truthfully.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn c_111_cleanup_timeout_paths_are_bounded() {
-        // (a) accept-timeout ownership and cancellation.
+        // note: (a) accept-timeout ownership and cancellation.
         let fixture_home = TempDir::new().expect("fixture home");
         let provider = Arc::new(
             FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
@@ -979,7 +976,7 @@ mod remote {
             "the aborted task released the listener: {rebind:?}"
         );
 
-        // (b) real-child timeout at a short deterministic test deadline. The
+        // note: (b) real-child timeout at a short deterministic test deadline. The
         // holder acknowledges an ACTUAL successful TCP accept and retains the
         // accepted socket until the child is killed and reaped, so a CLI stall
         // before the dial fails this proof instead of passing it. The fallible
@@ -1090,7 +1087,7 @@ mod remote {
             }
         }
 
-        // (c) expected early real-CLI failure after the holder task exists: the
+        // note: (c) expected early real-CLI failure after the holder task exists: the
         // error is routed through the same bounded stop, and the listener is
         // released (rebind) before the expected failure is accepted.
         let actor = DirectActor::new().await;
@@ -1155,9 +1152,7 @@ mod remote {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Feature-off preservation: the remote selection still refuses, never falls back
-// ---------------------------------------------------------------------------
+// invariant: Feature-off preservation: the remote selection still refuses, never falls back
 
 #[cfg(not(feature = "memory-remote"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1166,7 +1161,7 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
     let home = actor.home();
     let creator = actor.creator_id();
 
-    // A real local provider row exists first.
+    // note: A real local provider row exists first.
     cli_ok(
         home,
         &[
@@ -1182,7 +1177,7 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
     );
     assert_eq!(walk_markdown(&provider_store(home, creator)).len(), 1);
 
-    // The remote selection, written through the real CLI, has no client in this
+    // note: The remote selection, written through the real CLI, has no client in this
     // graph: the pinned provider refuses instead of serving the local store.
     cli_ok(
         home,

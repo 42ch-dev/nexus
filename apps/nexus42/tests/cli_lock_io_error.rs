@@ -3,6 +3,7 @@
 //! Verifies that `FileLockError::Io` maps to `CliError::LockIo` with
 //! stable code `E_LOCK_IO` and exit code 78 (`EX_CONFIG`), **not** exit
 //! code 75 (`EX_TEMPFAIL`) which is reserved for temporary contention.
+// invariant: `FileLockError::Io` maps to `E_LOCK_IO` / exit 78, never the contention code 75.
 
 use nexus42::errors::CliError;
 
@@ -35,7 +36,7 @@ fn lock_io_error_matches_for_exit_code_78() {
     let io_err = std::io::Error::other("disk full");
     let cli_err = CliError::LockIo(io_err);
 
-    // Verify the error pattern for exit-code matching in main.rs.
+    // note: Verify the error pattern for exit-code matching in main.rs.
     assert!(
         matches!(cli_err, CliError::LockIo(_)),
         "LockIo must match CliError::LockIo pattern"
@@ -81,7 +82,7 @@ fn lock_io_source_returns_inner_error() {
 
 #[test]
 fn locked_error_unchanged_after_refactor() {
-    // Regression: ensure the Locked variant display didn't change.
+    // note: Regression: ensure the Locked variant display didn't change.
     let err = CliError::Locked {
         holder_pid: 1234,
         holder_name: "cli:cron-set".to_string(),

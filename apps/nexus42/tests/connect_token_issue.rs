@@ -6,6 +6,7 @@
 //! id), no secrets echoed, create-once 0600 issuer key, and usage errors
 //! exit non-zero. Compiled only with `--features connect-host` (same gate
 //! as the `connect` command).
+// note: compiled only with `--features connect-host`, like the `connect` command it tests.
 
 #![cfg(feature = "connect-host")]
 
@@ -15,7 +16,7 @@ use std::path::Path;
 use std::process::Output;
 use tempfile::TempDir;
 
-/// The canonical key file path inside a hermetic home (literal `.nexus42`
+/// note: The canonical key file path inside a hermetic home (literal `.nexus42`
 /// join so the test does not need the layout crate).
 fn issuer_key_path(home: &Path) -> std::path::PathBuf {
     home.join(".nexus42").join("connect").join("issuer.key")
@@ -35,7 +36,7 @@ fn now_plus(secs: u64) -> u64 {
         + secs
 }
 
-/// Run `connect token issue` with the standard happy-path flags plus `extra`.
+/// note: Run `connect token issue` with the standard happy-path flags plus `extra`.
 fn issue(home: &Path, extra: &[&str]) -> Output {
     let mut cmd = cmd_with_home(home);
     cmd.args([
@@ -65,7 +66,7 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // stdout is the token JSON — nothing else (no key material, no status
+    // note: stdout is the token JSON — nothing else (no key material, no status
     // chatter).
     let stdout = String::from_utf8(out.stdout).expect("utf8 stdout");
     let proof: Value = serde_json::from_str(stdout.trim()).expect("stdout parses as token JSON");
@@ -77,7 +78,7 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
     let sig = proof["sig"].as_str().expect("sig string");
     assert!(!sig.is_empty(), "signature present");
 
-    // The issuer peer id derives from the on-disk key; default iss equals it.
+    // note: The issuer peer id derives from the on-disk key; default iss equals it.
     let key_bytes = std::fs::read(issuer_key_path(tmp.path())).expect("issuer.key on disk");
     let keypair = libp2p::identity::Keypair::from_protobuf_encoding(&key_bytes)
         .expect("key parses as protobuf");
@@ -87,7 +88,7 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
         "default iss = issuer-derived peer id"
     );
 
-    // Issue → verify green (spoke, correct trusted_issuers).
+    // note: Issue → verify green (spoke, correct trusted_issuers).
     let proof: spoke_connect::core::CapabilityTokenProof =
         serde_json::from_str(stdout.trim()).expect("proof shape");
     let granted = spoke_connect::core::verify_capability_token(
@@ -100,7 +101,7 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
     .expect("token verifies green");
     assert_eq!(granted, vec!["spoke-baseline".to_string()]);
 
-    // No secrets echoed: the raw stdout is exactly the JSON token (claims
+    // note: No secrets echoed: the raw stdout is exactly the JSON token (claims
     // carry only the public issuer peer id — never key material).
     assert!(!stdout.contains("issuer.key"), "key path must not leak");
     assert!(!stdout.contains("-----BEGIN"), "no PEM-style key material");
@@ -188,7 +189,7 @@ fn token_issue_rejects_exp_within_skew_window() {
 
 #[test]
 fn token_issue_rejects_empty_sub_and_aud() {
-    // QC2 F-001: clap enforces *presence* only — empty/blank values must
+    // invariant: QC2 F-001: clap enforces *presence* only — empty/blank values must
     // still be usage errors (exit non-zero, message names the flag).
     let tmp = TempDir::new().expect("tempdir");
     for (flag, sub, aud) in [

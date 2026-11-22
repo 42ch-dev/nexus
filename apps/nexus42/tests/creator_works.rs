@@ -9,14 +9,13 @@
 //! completion-lock behavior are in `nexus-daemon-runtime/tests/works_api.rs`.
 //!
 //! Run with: cargo test -p nexus42 --test `creator_works`
+// note: CLI surface and help-text assertions; no daemon is required.
 
 use assert_cmd::Command;
 
-// =============================================================================
-// `creator works use` — CLI surface
-// =============================================================================
+// note: `creator works use` — CLI surface
 
-/// `creator works use --help` documents the subcommand.
+/// note: `creator works use --help` documents the subcommand.
 #[test]
 fn works_use_help_shows_expected_text() {
     let output = Command::cargo_bin("nexus42")
@@ -44,7 +43,7 @@ fn works_use_help_shows_expected_text() {
     );
 }
 
-/// `creator works use` requires a `work_id` positional argument.
+/// note: `creator works use` requires a `work_id` positional argument.
 #[test]
 fn works_use_requires_work_id() {
     Command::cargo_bin("nexus42")
@@ -55,11 +54,9 @@ fn works_use_requires_work_id() {
         .stderr(predicates::str::contains("WORK_ID"));
 }
 
-// =============================================================================
-// `creator works completion-lock` — CLI surface
-// =============================================================================
+// note: `creator works completion-lock` — CLI surface
 
-/// `creator works completion-lock --help` shows subcommands.
+/// note: `creator works completion-lock --help` shows subcommands.
 #[test]
 fn works_completion_lock_help_shows_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -79,7 +76,7 @@ fn works_completion_lock_help_shows_subcommands() {
     );
 }
 
-/// `creator works completion-lock release --help` documents flags.
+/// note: `creator works completion-lock release --help` documents flags.
 #[test]
 fn works_completion_lock_release_help_shows_expected_text() {
     let output = Command::cargo_bin("nexus42")
@@ -103,7 +100,7 @@ fn works_completion_lock_release_help_shows_expected_text() {
     );
 }
 
-/// `creator works completion-lock release` requires a `work_id` argument.
+/// note: `creator works completion-lock release` requires a `work_id` argument.
 #[test]
 fn works_completion_lock_release_requires_work_id() {
     Command::cargo_bin("nexus42")
@@ -114,11 +111,9 @@ fn works_completion_lock_release_requires_work_id() {
         .stderr(predicates::str::contains("WORK_ID"));
 }
 
-// =============================================================================
-// Cross-reference: `creator works` subcommand enumeration
-// =============================================================================
+// note: Cross-reference: `creator works` subcommand enumeration
 
-/// The trimmed lines clap renders between `Commands:` and the blank line that
+/// note: The trimmed lines clap renders between `Commands:` and the blank line that
 /// ends the block.
 fn commands_block(help_text: &str) -> Vec<&str> {
     help_text
@@ -130,7 +125,7 @@ fn commands_block(help_text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Verify that `creator works --help` lists all expected subcommands in its
+/// note: Verify that `creator works --help` lists all expected subcommands in its
 /// Commands block (not as bare prose tokens).
 #[test]
 fn works_help_lists_all_expected_subcommands() {
@@ -157,11 +152,9 @@ fn works_help_lists_all_expected_subcommands() {
     }
 }
 
-// =============================================================================
-// `creator works reconcile-chapters` — dry-run / --yes flags (V1.49 P2, R-V148P4-W2)
-// =============================================================================
+// note: `creator works reconcile-chapters` — dry-run / --yes flags (V1.49 P2, R-V148P4-W2)
 
-/// `creator works reconcile-chapters --help` documents the new safety flags.
+/// note: `creator works reconcile-chapters --help` documents the new safety flags.
 #[test]
 fn works_reconcile_chapters_help_lists_dry_run_and_yes() {
     let output = Command::cargo_bin("nexus42")
@@ -189,7 +182,7 @@ fn works_reconcile_chapters_help_lists_dry_run_and_yes() {
     );
 }
 
-/// `--yes` help text must not over-promise an inline preview (V1.49 P2 fix,
+/// invariant: `--yes` help text must not over-promise an inline preview (V1.49 P2 fix,
 /// R-V149P2-01 / qc1 W-1). `confirm_reconcile_interactive` only prompts; the
 /// preview lives behind `--dry-run`, which the help text must point to.
 #[test]
@@ -205,24 +198,22 @@ fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // The over-promising phrase from qc1 W-1 must be gone.
+    // invariant: The over-promising phrase from qc1 W-1 must be gone.
     assert!(
         !help_text.contains("prints a preview"),
         "reconcile-chapters --help for --yes must not promise an inline preview: {help_text}"
     );
-    // The preview is accurately routed to --dry-run.
+    // note: The preview is accurately routed to --dry-run.
     assert!(
         help_text.contains("--dry-run") && help_text.contains("preview"),
         "reconcile-chapters --help must point to --dry-run for the preview: {help_text}"
     );
 }
 
-// =============================================================================
-// `creator workspace` init/list/use, `creator demo-seed` and `creator status`
+// note: `creator workspace` init/list/use, `creator demo-seed` and `creator status`
 // — direct local path (v1.193 P0-T2)
-// =============================================================================
 
-/// Run the real `nexus42` binary against a hermetic `HOME` from a working
+/// note: Run the real `nexus42` binary against a hermetic `HOME` from a working
 /// directory that contains no workspace marker.
 fn hermetic_cli(
     home: &std::path::Path,
@@ -239,7 +230,7 @@ fn hermetic_cli(
         .expect("run nexus42")
 }
 
-/// Combined `stdout` + `stderr` of a child run.
+/// note: Combined `stdout` + `stderr` of a child run.
 ///
 /// Next-step instructions are printed on `stdout`, so an assertion on
 /// `stderr` alone cannot see a retired-command instruction
@@ -252,24 +243,24 @@ fn combined_output(output: &std::process::Output) -> String {
     )
 }
 
-/// Display name seeded into the core-owned identity cache by
+/// note: Display name seeded into the core-owned identity cache by
 /// [`patch_core_identity`].
 const CORE_OWNED_DISPLAY_NAME: &str = "Core Owned Author";
 
-/// Display name the core owner holds for a creator the CLI metadata cache
+/// note: Display name the core owner holds for a creator the CLI metadata cache
 /// knows by id only (v1.193 P0-T2 fix 3).
 const CORE_ONLY_DISPLAY_NAME: &str = "Core Only Author";
 
-/// Stale CLI-local display name for the creator the core owner also holds —
+/// note: Stale CLI-local display name for the creator the core owner also holds —
 /// the value a pre-fix `creator list` rendered (v1.193 P0-T2 fix 3).
 const CLI_STALE_DISPLAY_NAME: &str = "CLI Stale Name";
 
-/// Handle only the CLI-local cache holds: the core owner's production writer
+/// invariant: Handle only the CLI-local cache holds: the core owner's production writer
 /// persists no handle, so this field must keep falling back to the CLI cache
 /// (v1.193 P0-T2 fix 3).
 const CLI_FALLBACK_HANDLE: &str = "cli-h";
 
-/// Seed the core-owned identity projection through its production writer
+/// note: Seed the core-owned identity projection through its production writer
 /// (v1.193 P0-T2 fix 2).
 ///
 /// `CoreHomeService::patch_creator` is the writer the daemon PATCH route and
@@ -292,7 +283,7 @@ fn patch_core_identity(home: &std::path::Path, creator_id: &str, display_name: &
     });
 }
 
-/// Shared fixture for the core-owner identity regressions: a `daemon_url`
+/// note: Shared fixture for the core-owner identity regressions: a `daemon_url`
 /// nothing listens on, the `local` creator selected, and its workspace
 /// materialized.
 ///
@@ -347,14 +338,14 @@ fn seed_selected_local_creator(home: &std::path::Path, cwd: &std::path::Path) {
 /// nothing listens on, and every command asserts on the combined
 /// `stdout`+`stderr` stream, so a reintroduced daemon instruction (or a health
 /// probe warning) fails the case on whichever stream it appears.
-#[allow(clippy::too_many_lines)] // single local-home lifecycle proof
+#[allow(clippy::too_many_lines)] // why: single local-home lifecycle proof
 #[test]
 fn workspace_init_and_demo_seed_are_local_and_idempotent() {
     let home = tempfile::tempdir().expect("temp home");
-    // Initialization refuses a directory tree that already contains a
+    // note: Initialization refuses a directory tree that already contains a
     // workspace marker (`.nexus42`), so the child runs from a clean tree.
     let cwd = tempfile::tempdir().expect("temp cwd");
-    // Explicit creative root: the whole flow stays inside the temp home on
+    // note: Explicit creative root: the whole flow stays inside the temp home on
     // every platform instead of resolving a documents directory.
     let creative_root = home.path().join("creative");
 
@@ -366,7 +357,7 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
     )
     .expect("seed config.toml");
 
-    // --- 1. A local creator selection, committed locally (no listener) ---
+    // note: 1. A local creator selection, committed locally (no listener)
     let select_creator = hermetic_cli(home.path(), cwd.path(), &["creator", "use", "local"]);
     let select_creator_stdout = String::from_utf8_lossy(&select_creator.stdout);
     let select_creator_stderr = String::from_utf8_lossy(&select_creator.stderr);
@@ -381,7 +372,7 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "creator use must not consult a daemon (stdout+stderr): {select_creator_output}"
     );
 
-    // --- 2. Init: local materialization + committed selection, no listener ---
+    // note: 2. Init: local materialization + committed selection, no listener
     let creative_arg = creative_root.to_str().expect("utf-8 creative root");
     let init = hermetic_cli(
         home.path(),
@@ -437,7 +428,7 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "init must commit the active creator locally: {config}"
     );
 
-    // --- 3. The committed selection stays usable ---
+    // note: 3. The committed selection stays usable
     let list = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", "list"]);
     let list_stdout = String::from_utf8_lossy(&list.stdout);
     let list_stderr = String::from_utf8_lossy(&list.stderr);
@@ -481,7 +472,7 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "selecting a workspace that was never materialized must fail"
     );
 
-    // --- 4. demo-seed is real work and idempotent without --force ---
+    // note: 4. demo-seed is real work and idempotent without --force
     let seed = hermetic_cli(home.path(), cwd.path(), &["creator", "demo-seed"]);
     let seed_stdout = String::from_utf8_lossy(&seed.stdout);
     let seed_stderr = String::from_utf8_lossy(&seed.stderr);
@@ -528,7 +519,7 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
          {seeded_again_output}"
     );
 
-    // --- 5. The removed workspace leaves are unknown ---
+    // note: 5. The removed workspace leaves are unknown
     for leaf in ["clone", "link", "unlink", "status"] {
         let output = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", leaf]);
         let combined = combined_output(&output);
@@ -543,7 +534,7 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
     }
 }
 
-/// NEW (v1.193 P0-T2 fix 1): `creator status` reads local identity and
+/// note: NEW (v1.193 P0-T2 fix 1): `creator status` reads local identity and
 /// credential state and never mediates through the configured daemon URL.
 ///
 /// Discriminating regression for the removed daemon transport: the fixture
@@ -562,7 +553,7 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
     let home = tempfile::tempdir().expect("temp home");
     let cwd = tempfile::tempdir().expect("temp cwd");
 
-    // Counting loopback listener standing in for the configured daemon URL.
+    // note: Counting loopback listener standing in for the configured daemon URL.
     // Accept-and-close: a probe is counted, never answered.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
     listener
@@ -605,10 +596,10 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
         combined_output(&select_creator)
     );
 
-    // Attribute every observed connection to `creator status` alone.
+    // note: Attribute every observed connection to `creator status` alone.
     probes.store(0, Ordering::SeqCst);
     let status = hermetic_cli(home.path(), cwd.path(), &["creator", "status"]);
-    // Drain window: a connection the child opened is queued and accepted here.
+    // note: Drain window: a connection the child opened is queued and accepted here.
     std::thread::sleep(Duration::from_millis(100));
     stop.store(true, Ordering::SeqCst);
     accept_loop.join().expect("join probe listener");
@@ -646,7 +637,7 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
     );
 }
 
-/// NEW (v1.193 P0-T2 fix 2): `creator status` renders the identity the **core
+/// note: NEW (v1.193 P0-T2 fix 2): `creator status` renders the identity the **core
 /// owner** holds, with no daemon.
 ///
 /// The core cache (`creator_identity_cache.json`) is written by
@@ -666,7 +657,7 @@ fn creator_status_renders_core_owned_identity() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // The production writer the daemon PATCH route calls: the core owns the
+    // note: The production writer the daemon PATCH route calls: the core owns the
     // identity cache, not the CLI.
     patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
 
@@ -707,7 +698,7 @@ fn creator_status_renders_core_owned_identity() {
     );
 }
 
-/// NEW (v1.193 P0-T2 fix 3): `creator list` renders the identity the **core
+/// note: NEW (v1.193 P0-T2 fix 3): `creator list` renders the identity the **core
 /// owner** holds, per field over the CLI-local cache.
 ///
 /// `list` projected `handle`/`display_name` from the CLI-private
@@ -730,12 +721,12 @@ fn creator_list_renders_core_owned_identity() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // The core owner's values: one overriding stale CLI metadata, one for a
+    // note: The core owner's values: one overriding stale CLI metadata, one for a
     // creator the CLI metadata cache knows by id only.
     patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
     patch_core_identity(home.path(), "ctr_coreonly", CORE_ONLY_DISPLAY_NAME);
 
-    // The CLI metadata cache is the platform row source and the per-field
+    // note: The CLI metadata cache is the platform row source and the per-field
     // fallback. Seeded as JSON: its production writer resolves `HOME` from
     // this process's environment, which a shared test binary must not mutate.
     let cli_cache = serde_json::json!({
@@ -790,7 +781,7 @@ fn creator_list_renders_core_owned_identity() {
         "creator list must render a core-held identity the CLI cache lacks: {list_stdout}"
     );
 
-    // The pinned machine DTO carries the same projection with exact fields
+    // note: The pinned machine DTO carries the same projection with exact fields
     // (the human table above is asserted by content, not by column offsets).
     let json = hermetic_cli(home.path(), cwd.path(), &["creator", "list", "--json"]);
     let json_output = combined_output(&json);
@@ -826,12 +817,10 @@ fn creator_list_renders_core_owned_identity() {
     );
 }
 
-// =============================================================================
-// `creator works pool` / `creator works inspire` — separate stores, direct core
+// note: `creator works pool` / `creator works inspire` — separate stores, direct core
 // (v1.193 P0-T5)
-// =============================================================================
 
-/// Parse a `--json` child's stdout, failing the case with both streams when the
+/// note: Parse a `--json` child's stdout, failing the case with both streams when the
 /// payload is not the expected JSON document.
 fn json_stdout(output: &std::process::Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
@@ -842,7 +831,7 @@ fn json_stdout(output: &std::process::Output) -> serde_json::Value {
     })
 }
 
-/// NEW (v1.193 P0-T5): the pool-level inspiration store (`inspiration_items`,
+/// note: NEW (v1.193 P0-T5): the pool-level inspiration store (`inspiration_items`,
 /// `works pool inspiration …`) and the per-Work `inspiration_log`
 /// (`works inspire`) are separate producers, and `works status|use` read the
 /// Work from the core without touching the configured daemon URL.
@@ -869,7 +858,7 @@ fn json_stdout(output: &std::process::Output) -> serde_json::Value {
 /// the promotion wrote; [`omitted_work_id_uses_pool_active_entry`] is the
 /// regression that discriminates that selector (two Works, a newer non-active
 /// pool row, an explicit id, and the no-active refusal).
-#[allow(clippy::too_many_lines)] // one cross-write negative proof over a single local home
+#[allow(clippy::too_many_lines)] // why: one cross-write negative proof over a single local home
 #[test]
 fn work_pool_and_work_inspiration_do_not_cross_write() {
     use std::io::ErrorKind;
@@ -881,7 +870,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // Counting loopback listener standing in for the configured daemon URL:
+    // note: Counting loopback listener standing in for the configured daemon URL:
     // accept-and-close, so a probe is counted and never answered. The accept
     // loop is deliberately local to this case — the frozen v1.193 P0-T2 case
     // keeps its own copy rather than being reworked.
@@ -911,7 +900,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         })
     };
 
-    // Re-point the seeded selection at the probe. `seed_selected_local_creator`
+    // note: Re-point the seeded selection at the probe. `seed_selected_local_creator`
     // writes the dead-port literal below; re-reading the file keeps the
     // `active_creator_id` / workspace keys `workspace init` committed.
     let config_path = home.path().join(".nexus42").join("config.toml");
@@ -926,10 +915,10 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     )
     .expect("re-point daemon_url at the probe listener");
 
-    // Attribute every observed connection to the sequence below.
+    // note: Attribute every observed connection to the sequence below.
     probes.store(0, Ordering::SeqCst);
 
-    // --- 1. A pool inspiration item is a pool-store write only ------------
+    // note: 1. A pool inspiration item is a pool-store write only
     let add = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1024,7 +1013,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the pool wire shape must not leak the stored creator id: {idea_page}"
     );
 
-    // --- 2. Promotion creates the Work, and writes no Work note ----------
+    // note: 2. Promotion creates the Work, and writes no Work note
     let promote = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1097,7 +1086,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "a pool promotion must not append to the Work's inspiration_log: {promoted_work}"
     );
 
-    // --- 3. `works inspire` writes the Work store only -------------------
+    // note: 3. `works inspire` writes the Work store only
     let inspire = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1184,7 +1173,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the pool wire shape must not leak the stored creator id: {pool_entries}"
     );
 
-    // --- 4. `works use` writes the selection, still from the core --------
+    // note: 4. `works use` writes the selection, still from the core
     let use_output = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1218,7 +1207,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "works use must leave the selected Work as the pool `active` row: {selected}"
     );
 
-    // The omitted `<work_id>` resolves that same pool `active` row. The
+    // note: The omitted `<work_id>` resolves that same pool `active` row. The
     // selection reads `novel_pool_entries` — which holds this Work as `active`
     // — and not the Work's own `works.status` column, which a promotion leaves
     // at `draft` (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE; the selector
@@ -1247,7 +1236,7 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the pool-active Work keeps its own draft status: {omitted_resolved}"
     );
 
-    // --- 5. No step of the sequence consulted the configured daemon ------
+    // note: 5. No step of the sequence consulted the configured daemon
     // Drain window: a connection the child opened is queued and accepted here.
     std::thread::sleep(Duration::from_millis(100));
     let observed = probes.load(Ordering::SeqCst);
@@ -1260,30 +1249,28 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     );
 }
 
-/// Title of the pool-level inspiration item this case adds.
+/// note: Title of the pool-level inspiration item this case adds.
 const POOL_ITEM_TITLE: &str = "Pool-only idea";
 
-/// Note appended to the Work's own `inspiration_log`.
+/// note: Note appended to the Work's own `inspiration_log`.
 const WORK_NOTE: &str = "Work-side note";
 
-// =============================================================================
-// Omitted `<work_id>` → pool `active` Work
+// note: Omitted `<work_id>` → pool `active` Work
 // (v1.194 P2-T1 — R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE)
-// =============================================================================
 
-/// Title of the first Work promoted by [`omitted_work_id_uses_pool_active_entry`].
+/// note: Title of the first Work promoted by [`omitted_work_id_uses_pool_active_entry`].
 const POOL_ACTIVE_ALPHA_TITLE: &str = "Alpha pool idea";
 
-/// Title of the second promoted Work — the one the pool holds `active`.
+/// note: Title of the second promoted Work — the one the pool holds `active`.
 const POOL_ACTIVE_BETA_TITLE: &str = "Beta pool idea";
 
-/// Note the omitted-`<work_id>` `works inspire` appends.
+/// note: Note the omitted-`<work_id>` `works inspire` appends.
 const OMITTED_ID_NOTE: &str = "note via the pool-active Work";
 
-/// Note the explicit-`<work_id>` `works inspire` appends.
+/// note: Note the explicit-`<work_id>` `works inspire` appends.
 const EXPLICIT_ID_NOTE: &str = "note via an explicit Work id";
 
-/// Add a pool inspiration item titled `title`, promote it, and return the Work
+/// note: Add a pool inspiration item titled `title`, promote it, and return the Work
 /// the promotion created.
 ///
 /// Both steps go through the real leaves: `pool inspiration add` (pool-store
@@ -1356,7 +1343,7 @@ fn promote_pool_idea(home: &std::path::Path, cwd: &std::path::Path, title: &str)
     work_id
 }
 
-/// The pool listing's entry for `work_id`, failing the case when it holds none.
+/// note: The pool listing's entry for `work_id`, failing the case when it holds none.
 fn pool_entry_for(pool_page: &serde_json::Value, work_id: &str) -> serde_json::Value {
     pool_page
         .get("entries")
@@ -1368,7 +1355,7 @@ fn pool_entry_for(pool_page: &serde_json::Value, work_id: &str) -> serde_json::V
         .clone()
 }
 
-/// Read one Work through `works status --json` (an explicit `<work_id>`).
+/// note: Read one Work through `works status --json` (an explicit `<work_id>`).
 fn work_status_json(
     home: &std::path::Path,
     cwd: &std::path::Path,
@@ -1387,7 +1374,7 @@ fn work_status_json(
     json_stdout(&output)
 }
 
-/// The note texts the Work's own `inspiration_log` holds, in stored order.
+/// note: The note texts the Work's own `inspiration_log` holds, in stored order.
 fn inspiration_note_texts(work: &serde_json::Value) -> Vec<String> {
     work.get("inspiration_log")
         .and_then(|v| v.as_array())
@@ -1398,7 +1385,7 @@ fn inspiration_note_texts(work: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-/// Every Work id the active creator's `works list` page holds, in page order.
+/// note: Every Work id the active creator's `works list` page holds, in page order.
 fn listed_work_ids(home: &std::path::Path, cwd: &std::path::Path) -> Vec<String> {
     let page = json_stdout(&hermetic_cli(
         home,
@@ -1414,7 +1401,7 @@ fn listed_work_ids(home: &std::path::Path, cwd: &std::path::Path) -> Vec<String>
         .collect()
 }
 
-/// NEW (v1.194 P2-T1, R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE): an omitted
+/// note: NEW (v1.194 P2-T1, R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE): an omitted
 /// `<work_id>` resolves the pool `active` Work.
 ///
 /// The selection pool (`novel_pool_entries.status = 'active'`, written by
@@ -1435,19 +1422,19 @@ fn listed_work_ids(home: &std::path::Path, cwd: &std::path::Path) -> Vec<String>
 /// What it does not establish: the other omitted-`<work_id>` arms (`reopen`,
 /// `reconcile-chapters`, the findings/rules leaves), pool pagination beyond the
 /// two entries, and any concurrency behavior.
-#[allow(clippy::too_many_lines)] // one selection-domain proof over a single local home
+#[allow(clippy::too_many_lines)] // why: one selection-domain proof over a single local home
 #[test]
 fn omitted_work_id_uses_pool_active_entry() {
     let home = tempfile::tempdir().expect("temp home");
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // --- 1. Two promoted Works; the pool holds the second one `active` ----
+    // note: 1. Two promoted Works; the pool holds the second one `active`
     let alpha = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_ALPHA_TITLE);
     let beta = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_BETA_TITLE);
     assert_ne!(alpha, beta, "each promotion must create its own Work");
 
-    // Promotion writes the pool row, never `works.status`: both Works stay
+    // invariant: Promotion writes the pool row, never `works.status`: both Works stay
     // `draft`, so no Work in this fixture satisfies the retired selector.
     for work_id in [&alpha, &beta] {
         let work = work_status_json(home.path(), cwd.path(), work_id);
@@ -1486,7 +1473,7 @@ fn omitted_work_id_uses_pool_active_entry() {
         .expect("the pool entry carries its id")
         .to_string();
 
-    // Archive the *queued* Work's pool row: the archived, non-active entry
+    // note: Archive the *queued* Work's pool row: the archived, non-active entry
     // becomes the pool listing's newest row, which is what discriminates the
     // `status = 'active'` filter from a first-row read.
     let archive_queued = hermetic_cli(
@@ -1532,7 +1519,7 @@ fn omitted_work_id_uses_pool_active_entry() {
         "the first pool row is the archived entry: {pool_after_archive}"
     );
 
-    // --- 2. Omitted `works status` resolves the pool-active Work ----------
+    // note: 2. Omitted `works status` resolves the pool-active Work
     let omitted_status = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1560,7 +1547,7 @@ fn omitted_work_id_uses_pool_active_entry() {
         "the resolved pool Work keeps its own draft status: {resolved}"
     );
 
-    // --- 3. Omitted `works inspire` writes the same Work -----------------
+    // note: 3. Omitted `works inspire` writes the same Work
     let omitted_inspire = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1601,7 +1588,7 @@ fn omitted_work_id_uses_pool_active_entry() {
         "the omitted <work_id> must not append to the other Work"
     );
 
-    // --- 4. An explicit `<work_id>` still wins over the pool default -----
+    // note: 4. An explicit `<work_id>` still wins over the pool default
     let explicit = work_status_json(home.path(), cwd.path(), &alpha);
     assert_eq!(
         explicit.get("work_id").and_then(|v| v.as_str()),
@@ -1650,7 +1637,7 @@ fn omitted_work_id_uses_pool_active_entry() {
         "an explicit <work_id> must not append to the pool-active Work"
     );
 
-    // --- 5. No pool `active` entry: refuse, and write no Work -------------
+    // note: 5. No pool `active` entry: refuse, and write no Work
     let works_before = listed_work_ids(home.path(), cwd.path());
     assert_eq!(
         works_before.len(),

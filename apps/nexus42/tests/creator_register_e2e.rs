@@ -11,13 +11,14 @@
 //! - config.json  → `platform_url` pointing at wiremock server
 //! - auth.json    → a `CreatorAuthState` with a non-empty `access_token`
 //!   (`obtain_auth_token` scans creators for a non-empty `access_token`)
+// note: wiremock stubs the platform register/verify endpoints under a seeded `$HOME`.
 
 use std::process::Command;
 
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Seed the temp HOME with minimal config and auth state so the CLI can
+/// why: Seed the temp HOME with minimal config and auth state so the CLI can
 /// reach the mock platform and find an auth token.
 ///
 /// - `$HOME/.nexus42/config.json`  → { "`platform_url"`: "<`mock_url`>" }
@@ -26,7 +27,7 @@ fn seed_home(home: &std::path::Path, mock_url: &str) {
     let nexus_dir = home.join(".nexus42");
     std::fs::create_dir_all(&nexus_dir).expect("create .nexus42 dir");
 
-    // config.json with platform_url pointing at mock
+    // note: config.json with platform_url pointing at mock
     let config = serde_json::json!({
         "platform_url": mock_url,
         "daemon_url": "http://127.0.0.1:8420",
@@ -38,7 +39,7 @@ fn seed_home(home: &std::path::Path, mock_url: &str) {
     )
     .expect("write config.json");
 
-    // auth.json with a seed creator that has an access_token
+    // note: auth.json with a seed creator that has an access_token
     let auth = serde_json::json!({
         "creators": {
             "crt_seed_token": {
@@ -55,7 +56,7 @@ fn seed_home(home: &std::path::Path, mock_url: &str) {
     .expect("write auth.json");
 }
 
-/// Build a CLI command with HOME set to the temp dir.
+/// note: Build a CLI command with HOME set to the temp dir.
 fn cli_cmd(home: &std::path::Path) -> Command {
     let bin = env!("CARGO_BIN_EXE_nexus42");
     let mut cmd = Command::new(bin);
@@ -63,19 +64,17 @@ fn cli_cmd(home: &std::path::Path) -> Command {
     cmd
 }
 
-// ---------------------------------------------------------------------------
-// T2: Happy-path E2E test
-// ---------------------------------------------------------------------------
+// note: T2: Happy-path E2E test
 
 #[tokio::test]
 async fn creator_register_happy_path() {
     let mock = MockServer::start().await;
     let home = tempfile::tempdir().unwrap();
 
-    // Seed HOME with config + auth pointing at mock
+    // note: Seed HOME with config + auth pointing at mock
     seed_home(home.path(), &mock.uri());
 
-    // Mock POST /api/v1/creators/register → solvable challenge (5 + 3 = 8)
+    // note: Mock POST /api/v1/creators/register → solvable challenge (5 + 3 = 8)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -84,7 +83,7 @@ async fn creator_register_happy_path() {
         .mount(&mock)
         .await;
 
-    // Mock POST /api/v1/creators/verify → verified with api_key
+    // note: Mock POST /api/v1/creators/verify → verified with api_key
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -93,7 +92,7 @@ async fn creator_register_happy_path() {
         .mount(&mock)
         .await;
 
-    // Run the CLI
+    // note: Run the CLI
     let output = cli_cmd(home.path())
         .args(["creator", "register", "--name", "test-creator"])
         .output()
@@ -107,7 +106,7 @@ async fn creator_register_happy_path() {
         "register exited non-zero:\nSTDOUT: {stdout}\nSTDERR: {stderr}"
     );
 
-    // Assert credential file exists at $HOME/.nexus42/auth.json
+    // note: Assert credential file exists at $HOME/.nexus42/auth.json
     let creds_path = home.path().join(".nexus42/auth.json");
     assert!(
         creds_path.exists(),
@@ -118,7 +117,7 @@ async fn creator_register_happy_path() {
     let creds_json: serde_json::Value =
         serde_json::from_str(&creds).expect("parse auth.json as JSON");
 
-    // The api_key should have been stored for the creator
+    // note: The api_key should have been stored for the creator
     let creators = creds_json["creators"].as_object().expect("creators object");
     assert!(
         creators.contains_key("crt_e2e_test_12345"),
@@ -131,9 +130,7 @@ async fn creator_register_happy_path() {
     assert_eq!(api_key, "nexus_live_active_e2e_key");
 }
 
-// ---------------------------------------------------------------------------
-// T3: Negative tests
-// ---------------------------------------------------------------------------
+// note: T3: Negative tests
 
 #[tokio::test]
 async fn creator_register_challenge_unsolvable_falls_back_or_errors() {
@@ -141,7 +138,7 @@ async fn creator_register_challenge_unsolvable_falls_back_or_errors() {
     let home = tempfile::tempdir().unwrap();
     seed_home(home.path(), &mock.uri());
 
-    // Mock register with an unsolvable challenge
+    // note: Mock register with an unsolvable challenge
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -159,13 +156,13 @@ async fn creator_register_challenge_unsolvable_falls_back_or_errors() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
 
-    // Should fail: challenge solver can't parse "this is not a valid math problem at all"
+    // note: Should fail: challenge solver can't parse "this is not a valid math problem at all"
     assert!(
         !output.status.success(),
         "register should fail with unsolvable challenge; got stdout={stdout} stderr={stderr}"
     );
 
-    // Error output should mention "challenge" (ChallengeFailed error)
+    // note: Error output should mention "challenge" (ChallengeFailed error)
     assert!(
         combined.contains("challenge"),
         "error output should mention 'challenge'; got: {combined}"
@@ -178,7 +175,7 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
     let home = tempfile::tempdir().unwrap();
     seed_home(home.path(), &mock.uri());
 
-    // Mock register → solvable challenge (5 + 3 = 8)
+    // note: Mock register → solvable challenge (5 + 3 = 8)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -187,7 +184,7 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
         .mount(&mock)
         .await;
 
-    // Mock verify → rejected (wrong_answer, 0 remaining)
+    // note: Mock verify → rejected (wrong_answer, 0 remaining)
     // Both auto-retry attempts will get wrong_answer back
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
@@ -211,18 +208,18 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
         "register should fail when verify rejects; got stdout={stdout} stderr={stderr}"
     );
 
-    // Error should mention verification-related terms
+    // note: Error should mention verification-related terms
     assert!(
         combined.contains("Verification") || combined.contains("verification"),
         "error must mention verification; got: {combined}"
     );
 
-    // No credential file should be created for the new creator after verify failure
+    // note: No credential file should be created for the new creator after verify failure
     let creds_path = home.path().join(".nexus42/auth.json");
     if creds_path.exists() {
         let creds = std::fs::read_to_string(&creds_path).expect("read auth.json");
         let creds_json: serde_json::Value = serde_json::from_str(&creds).expect("parse auth.json");
-        // The only creator in auth.json should be our seed token, NOT the registered one
+        // invariant: The only creator in auth.json should be our seed token, NOT the registered one
         let creators = creds_json["creators"].as_object().expect("creators object");
         assert!(
             !creators.contains_key("crt_e2e_test_12345"),
@@ -231,9 +228,7 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// T4: Idempotency test
-// ---------------------------------------------------------------------------
+// note: T4: Idempotency test
 
 #[tokio::test]
 async fn creator_register_twice_does_not_double_write_credentials() {
@@ -241,7 +236,7 @@ async fn creator_register_twice_does_not_double_write_credentials() {
     let home = tempfile::tempdir().unwrap();
     seed_home(home.path(), &mock.uri());
 
-    // Mock register → solvable challenge (5 + 3 = 8)
+    // note: Mock register → solvable challenge (5 + 3 = 8)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -250,7 +245,7 @@ async fn creator_register_twice_does_not_double_write_credentials() {
         .mount(&mock)
         .await;
 
-    // Mock verify → verified
+    // note: Mock verify → verified
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -259,14 +254,14 @@ async fn creator_register_twice_does_not_double_write_credentials() {
         .mount(&mock)
         .await;
 
-    // --- First run ---
+    // note: First run
     let output1 = cli_cmd(home.path())
         .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("first run");
     assert!(output1.status.success(), "first register should succeed");
 
-    // --- Second run (same mock, same name) ---
+    // note: Second run (same mock, same name)
     let output2 = cli_cmd(home.path())
         .args(["creator", "register", "--name", "test-creator"])
         .output()
@@ -278,7 +273,7 @@ async fn creator_register_twice_does_not_double_write_credentials() {
     let creds_after_second = std::fs::read_to_string(home.path().join(".nexus42/auth.json"))
         .expect("read auth.json after second run");
 
-    // Lock the observed behaviour: the CLI currently has no idempotency guard,
+    // note: Lock the observed behaviour: the CLI currently has no idempotency guard,
     // so the second run will re-register (the mock always returns the same
     // creator_id). The credential file should still be valid (not corrupted).
     //
@@ -299,13 +294,13 @@ async fn creator_register_twice_does_not_double_write_credentials() {
         "api_key must not be empty after second run; got: {creds_after_second}"
     );
 
-    // Verify the api_key value is still correct (not overwritten with garbage).
+    // note: Verify the api_key value is still correct (not overwritten with garbage).
     assert_eq!(
         api_key, "nexus_live_active_e2e_key",
         "api_key should retain its correct value after second run"
     );
 
-    // Regression guard: seed token must still be intact (no data loss for
+    // invariant: Regression guard: seed token must still be intact (no data loss for
     // other creator entries in the auth store).
     assert!(
         creators.contains_key("crt_seed_token"),
@@ -313,9 +308,7 @@ async fn creator_register_twice_does_not_double_write_credentials() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fix 1 — QC1-W-1: stored-token absence negative test
-// ---------------------------------------------------------------------------
+// note: Fix 1 — QC1-W-1: stored-token absence negative test
 // Plan listed 3 failure paths; this adds the missing "credential already
 // exists" idempotency guard test. After a successful register + verify
 // sequence writes a known api_key, a second register + verify that the
@@ -328,7 +321,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
     let home = tempfile::tempdir().unwrap();
     seed_home(home.path(), &mock.uri());
 
-    // --- First register + verify (writes credential with known api_key) ---
+    // note: First register + verify (writes credential with known api_key)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -355,7 +348,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
         String::from_utf8_lossy(&output1.stderr)
     );
 
-    // Read the stored api_key after first successful registration
+    // note: Read the stored api_key after first successful registration
     let creds_after_first = std::fs::read_to_string(home.path().join(".nexus42/auth.json"))
         .expect("read auth.json after first run");
     let first_json: serde_json::Value =
@@ -365,7 +358,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
         .expect("creator_api_key after first run");
     assert_eq!(original_key, "nexus_live_active_e2e_key");
 
-    // --- Second register attempt (same creator, mock could issue different key) ---
+    // note: Second register attempt (same creator, mock could issue different key)
     // If the CLI had an idempotency guard, it should skip/error before
     // reaching verify. If it doesn't (current behavior), the mock still
     // returns the same api_key because wiremock reuses the mounted response.
@@ -388,7 +381,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
     let _stdout2 = String::from_utf8_lossy(&output2.stdout);
     let _stderr2 = String::from_utf8_lossy(&output2.stderr);
 
-    // Regardless of whether the second run succeeds or fails, the stored
+    // note: Regardless of whether the second run succeeds or fails, the stored
     // credential for crt_e2e_test_12345 must still be the ORIGINAL key.
     let creds_after_second = std::fs::read_to_string(home.path().join(".nexus42/auth.json"))
         .expect("read auth.json after second run");
@@ -405,9 +398,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fix 2 — QC2-M1: HTTP 5xx / network-error coverage for verify endpoint
-// ---------------------------------------------------------------------------
+// note: Fix 2 — QC2-M1: HTTP 5xx / network-error coverage for verify endpoint
 
 #[tokio::test]
 async fn creator_register_verify_http_500_exits_with_error() {
@@ -415,7 +406,7 @@ async fn creator_register_verify_http_500_exits_with_error() {
     let home = tempfile::tempdir().unwrap();
     seed_home(home.path(), &mock.uri());
 
-    // Register returns a solvable challenge
+    // note: Register returns a solvable challenge
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -424,7 +415,7 @@ async fn creator_register_verify_http_500_exits_with_error() {
         .mount(&mock)
         .await;
 
-    // Verify returns HTTP 500 Internal Server Error
+    // note: Verify returns HTTP 500 Internal Server Error
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
         .respond_with(
@@ -448,22 +439,20 @@ async fn creator_register_verify_http_500_exits_with_error() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
 
-    // CLI must exit with non-zero status on HTTP 500
+    // invariant: CLI must exit with non-zero status on HTTP 500
     assert!(
         !output.status.success(),
         "register should fail when verify returns HTTP 500; stdout={stdout} stderr={stderr}"
     );
 
-    // Error output should mention the HTTP 500 status or "verification"
+    // note: Error output should mention the HTTP 500 status or "verification"
     assert!(
         combined.contains("500") || combined.contains("verification"),
         "error output should reference the 500 status or verification failure; got: {combined}"
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fix 3 — QC2-M2: challenge expiry boundary test
-// ---------------------------------------------------------------------------
+// note: Fix 3 — QC2-M2: challenge expiry boundary test
 // The verify endpoint returns {"status": "expired"} indicating the
 // challenge is no longer valid by the time the CLI submits the answer.
 // The CLI must exit non-zero with an appropriate expiry-related message.
@@ -474,7 +463,7 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
     let home = tempfile::tempdir().unwrap();
     seed_home(home.path(), &mock.uri());
 
-    // Register returns a solvable challenge
+    // note: Register returns a solvable challenge
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -483,7 +472,7 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
         .mount(&mock)
         .await;
 
-    // Verify returns expired status
+    // note: Verify returns expired status
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -501,19 +490,19 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
 
-    // CLI must exit with non-zero status when challenge is expired
+    // invariant: CLI must exit with non-zero status when challenge is expired
     assert!(
         !output.status.success(),
         "register should fail when verify reports expired challenge; stdout={stdout} stderr={stderr}"
     );
 
-    // Error output should mention expiry
+    // note: Error output should mention expiry
     assert!(
         combined.contains("expired") || combined.contains("timed out"),
         "error output should mention expiry or timeout; got: {combined}"
     );
 
-    // No credential file should be created for the new creator after expiry failure
+    // note: No credential file should be created for the new creator after expiry failure
     let creds_path = home.path().join(".nexus42/auth.json");
     if creds_path.exists() {
         let creds = std::fs::read_to_string(&creds_path).expect("read auth.json");
@@ -530,9 +519,7 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// T5 — Positional syntax rejection (migration hint)
-// ---------------------------------------------------------------------------
+// note: T5 — Positional syntax rejection (migration hint)
 // WS-C requirement: positional syntax (old `creator register <name>` without --name)
 // should produce a clear error message guiding users to the new flag syntax.
 
@@ -540,7 +527,7 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
 async fn creator_register_positional_syntax_rejected_with_migration_hint() {
     let home = tempfile::tempdir().unwrap();
 
-    // Seed minimal config (no auth token needed for this CLI-args-only rejection test)
+    // invariant: Seed minimal config (no auth token needed for this CLI-args-only rejection test)
     let nexus_dir = home.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_dir).expect("create .nexus42 dir");
     let config = serde_json::json!({
@@ -554,7 +541,7 @@ async fn creator_register_positional_syntax_rejected_with_migration_hint() {
     )
     .expect("write config.json");
 
-    // Try using old positional syntax: nexus42 creator register "My Agent"
+    // note: Try using old positional syntax: nexus42 creator register "My Agent"
     // (without --name flag)
     let output = cli_cmd(home.path())
         .args(["creator", "register", "My Agent"])
@@ -565,13 +552,13 @@ async fn creator_register_positional_syntax_rejected_with_migration_hint() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
 
-    // CLI must exit with non-zero status when positional syntax is used
+    // invariant: CLI must exit with non-zero status when positional syntax is used
     assert!(
         !output.status.success(),
         "register should fail when positional syntax is used; stdout={stdout} stderr={stderr}"
     );
 
-    // Error output should mention --name specifically
+    // note: Error output should mention --name specifically
     assert!(
         combined.contains("--name"),
         "error output should mention --name; got: {combined}"

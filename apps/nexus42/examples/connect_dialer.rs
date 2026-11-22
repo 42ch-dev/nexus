@@ -19,6 +19,7 @@
 //! The dialer identity comes from a fixed Ed25519 seed (``--seed <n>``,
 //! default 7) so the host's ``--allow-peer`` entry is stable across runs; a
 //! different seed is the "non-allowlisted outsider" run.
+// note: the dialer identity is a fixed seed so the host's `--allow-peer` entry stays stable.
 
 use libp2p::identity::Keypair;
 use nexus_spoke_adapter::manifest::ConnectHelloManifest;
@@ -28,7 +29,7 @@ const CORE_OPS: [&str; 7] = [
     "upsert", "promote", "relate", "check", "assemble", "project", "compute",
 ];
 
-/// Deterministic Ed25519 keypair (same helper shape as the interop tests).
+/// note: Deterministic Ed25519 keypair (same helper shape as the interop tests).
 fn fixed_keypair(seed: u8) -> Keypair {
     Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
 }
@@ -79,7 +80,7 @@ async fn main() {
         .await
         .expect("dialer node starts");
 
-    // Dial the running host.
+    // note: Dial the running host.
     let session = match node
         .connect(parse_multiaddr(&addr).expect("host addr parses"))
         .await
@@ -97,7 +98,7 @@ async fn main() {
         session.remote_peer_id()
     );
 
-    // Manifest read (§2.5 — delivered inside the signed hello).
+    // note: Manifest read (§2.5 — delivered inside the signed hello).
     println!(
         "MANIFEST {}",
         serde_json::to_string(session.remote_manifest()).expect("manifest serializes")
@@ -107,7 +108,7 @@ async fn main() {
         session.negotiated_capabilities()
     );
 
-    // Every core op + a garbage op must be refused `op_unsupported` with the
+    // invariant: Every core op + a garbage op must be refused `op_unsupported` with the
     // session staying open (N-C0 §3).
     let mut failures = Vec::new();
     for op in CORE_OPS.iter().chain(std::iter::once(&"garbage-op")) {
@@ -127,7 +128,7 @@ async fn main() {
             other => failures.push(format!("{op}: expected op_unsupported, got {other:?}")),
         }
     }
-    // Session must still be usable after refusals.
+    // invariant: Session must still be usable after refusals.
     match session
         .invoke("check", serde_json::json!({ "extensions": {} }))
         .await
@@ -149,7 +150,7 @@ async fn main() {
     }
 }
 
-/// Minimal peer manifest (the dialer is a reference peer, not the host — its
+/// note: Minimal peer manifest (the dialer is a reference peer, not the host — its
 /// manifest shape does not matter to the assertions). Uses the type
 /// re-exported by the spoke-adapter boundary (no direct spoke-schemas dep).
 fn spoke_connect_manifest() -> ConnectHelloManifest {
@@ -161,7 +162,7 @@ fn spoke_connect_manifest() -> ConnectHelloManifest {
         namespaces: Vec::new(),
         roles: vec!["input-source".into()],
         schema_version: std::num::NonZeroU64::new(1).expect("non-zero"),
-        // V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
+        // note: V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
         tools: Vec::new(),
     }
 }

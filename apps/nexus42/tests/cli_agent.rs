@@ -2,6 +2,7 @@
 //!
 //! Tests that the `nexus42 acp` commands produce correct output
 //! in various formats (text and JSON).
+// note: asserts the text and JSON output of the `nexus42 acp` commands.
 
 use std::path::Path;
 
@@ -9,14 +10,14 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// Agent id the seeded registry cache advertises.
+/// note: Agent id the seeded registry cache advertises.
 const CACHED_AGENT_ID: &str = "fixture-agent";
-/// Version of that agent in the seeded manifest.
+/// note: Version of that agent in the seeded manifest.
 const CACHED_AGENT_VERSION: &str = "9.9.9";
-/// Registry manifest version in the seeded cache.
+/// note: Registry manifest version in the seeded cache.
 const REGISTRY_VERSION: &str = "1.0.0";
 
-/// Seed a fresh ACP registry cache under `home`, so `acp registry list` serves
+/// note: Seed a fresh ACP registry cache under `home`, so `acp registry list` serves
 /// `registry/cache.json` instead of reaching the CDN.
 fn seed_registry_cache(home: &Path) {
     let cache_dir = home.join(".nexus42").join("registry");
@@ -42,7 +43,7 @@ fn seed_registry_cache(home: &Path) {
         .expect("write cache_meta.json");
 }
 
-/// Test `nexus42 acp registry list --format json` produces valid JSON.
+/// note: Test `nexus42 acp registry list --format json` produces valid JSON.
 #[test]
 fn acp_registry_list_json_format() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
@@ -81,7 +82,7 @@ fn acp_registry_list_json_format() {
     assert_eq!(agent["version"], CACHED_AGENT_VERSION);
 }
 
-/// Test `nexus42 acp registry inspect --help` shows usage.
+/// note: Test `nexus42 acp registry inspect --help` shows usage.
 #[test]
 fn acp_registry_inspect_shows_help() {
     Command::cargo_bin("nexus42")
@@ -96,7 +97,7 @@ fn acp_registry_inspect_shows_help() {
         .stdout(predicate::str::contains("<AGENT_REF>"));
 }
 
-/// Test `nexus42 acp registry inspect` with unknown agent.
+/// note: Test `nexus42 acp registry inspect` with unknown agent.
 #[test]
 fn acp_registry_inspect_unknown_agent() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
@@ -113,7 +114,7 @@ fn acp_registry_inspect_unknown_agent() {
         .stderr(predicate::str::contains("not found").or(predicate::str::contains("error")));
 }
 
-/// Test `nexus42 acp probe --help` shows usage.
+/// note: Test `nexus42 acp probe --help` shows usage.
 #[test]
 fn acp_probe_shows_help() {
     Command::cargo_bin("nexus42")
@@ -128,7 +129,7 @@ fn acp_probe_shows_help() {
         .stdout(predicate::str::contains("--agent"));
 }
 
-/// Test `nexus42 acp` command group shows the retained subcommands.
+/// note: Test `nexus42 acp` command group shows the retained subcommands.
 ///
 /// v1.193 P1-T4: the daemon-health leaves `status` and `doctor` are removed
 /// from the group; the local ACP parser groups survive.
@@ -149,7 +150,7 @@ fn acp_command_group_shows_subcommands() {
         .stdout(predicate::str::contains("run"));
 }
 
-/// Test invalid format argument produces error.
+/// note: Test invalid format argument produces error.
 #[test]
 fn acp_registry_list_invalid_format() {
     Command::cargo_bin("nexus42")
@@ -164,7 +165,7 @@ fn acp_registry_list_invalid_format() {
         .stderr(predicate::str::contains("invalid").or(predicate::str::contains("error")));
 }
 
-/// Test `nexus42 acp registry list --format text` works.
+/// note: Test `nexus42 acp registry list --format text` works.
 #[test]
 fn acp_registry_list_explicit_text_format() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
@@ -206,23 +207,23 @@ fn acp_registry_list_explicit_text_format() {
     );
 }
 
-/// Test `nexus42 acp agent use` with a valid agent ref succeeds.
+/// note: Test `nexus42 acp agent use` with a valid agent ref succeeds.
 #[test]
 fn acp_agent_use_success() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
 
-    // Set up a creator and workspace in the config
+    // note: Set up a creator and workspace in the config
     let nexus_home = tmp.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_home).expect("create nexus home");
 
-    // Write a config.toml with active creator
+    // note: Write a config.toml with active creator
     let config_content = r#"active_creator_id = "ctr_test"
 [active_workspace_slug_by_creator]
 ctr_test = "default"
 "#;
     std::fs::write(nexus_home.join("config.toml"), config_content).expect("write config");
 
-    // Create the workspace directory so the config path is valid
+    // why: Create the workspace directory so the config path is valid
     let ws_dir = nexus_home
         .join("creators")
         .join("ctr_test")
@@ -241,7 +242,7 @@ ctr_test = "default"
         .success()
         .stdout(predicate::str::contains("Default agent set to: claude-acp"));
 
-    // Verify the config file was written
+    // note: Verify the config file was written
     let config_file = ws_dir.join("acp-default-agent.toml");
     assert!(config_file.exists(), "Config file should exist");
     let content = std::fs::read_to_string(&config_file).expect("read config");
@@ -249,7 +250,7 @@ ctr_test = "default"
     assert!(content.contains("default_agent_ref = \"claude-acp\""));
 }
 
-/// Test `nexus42 acp agent use` requires an agent ref argument.
+/// note: Test `nexus42 acp agent use` requires an agent ref argument.
 #[test]
 fn acp_agent_use_requires_arg() {
     Command::cargo_bin("nexus42")
@@ -261,7 +262,7 @@ fn acp_agent_use_requires_arg() {
         .failure();
 }
 
-/// Test `nexus42 acp agent use` persistence: set then read on new invocation.
+/// note: Test `nexus42 acp agent use` persistence: set then read on new invocation.
 #[test]
 fn acp_agent_use_persistence() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
@@ -282,7 +283,7 @@ ctr_persist = "default"
         .join("default");
     std::fs::create_dir_all(&ws_dir).expect("create workspace dir");
 
-    // Set agent
+    // note: Set agent
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("acp")
@@ -293,12 +294,12 @@ ctr_persist = "default"
         .assert()
         .success();
 
-    // Verify file persists
+    // note: Verify file persists
     let config_file = ws_dir.join("acp-default-agent.toml");
     let content = std::fs::read_to_string(&config_file).expect("read config");
     assert!(content.contains("my-test-agent@1.0"));
 
-    // Set a different agent (overwrite)
+    // note: Set a different agent (overwrite)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("acp")
@@ -312,13 +313,13 @@ ctr_persist = "default"
             "Default agent set to: other-agent",
         ));
 
-    // Verify overwrite
+    // note: Verify overwrite
     let content_after = std::fs::read_to_string(&config_file).expect("read config after");
     assert!(content_after.contains("other-agent"));
     assert!(!content_after.contains("my-test-agent"));
 }
 
-/// v1.193 P1-T4 (AC2/AC5): the daemon-health leaves `acp status` and
+/// note: v1.193 P1-T4 (AC2/AC5): the daemon-health leaves `acp status` and
 /// `acp doctor` (loopback `DaemonClient` probes) are removed — unknown, not
 /// hidden — while the retained ACP parser groups keep their own options.
 #[test]
@@ -341,7 +342,7 @@ fn acp_daemon_health_leaves_are_unknown_and_retained_groups_parse() {
     }
 }
 
-/// v1.193 P2-T12 (AC1/AC5): the `daemon` command group (`start`/`stop`/
+/// note: v1.193 P2-T12 (AC1/AC5): the `daemon` command group (`start`/`stop`/
 /// `restart`/`status`/`logs`/`doctor`/`schedule`) and the hidden `daemon-run`
 /// self-spawn entry are gone from the parser — `daemon --help` is clap's
 /// unrecognized-subcommand error, never a group page.
@@ -358,7 +359,7 @@ fn daemon_group_is_unknown() {
     }
 }
 
-/// Test `nexus42 --help` no longer shows agent/session/policy/permission as top-level.
+/// note: Test `nexus42 --help` no longer shows agent/session/policy/permission as top-level.
 #[test]
 fn help_no_longer_shows_old_top_level_commands() {
     let output = Command::cargo_bin("nexus42")
@@ -369,7 +370,7 @@ fn help_no_longer_shows_old_top_level_commands() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // These should NOT appear as visible top-level commands
+    // note: These should NOT appear as visible top-level commands
     // (they're hidden behind `#[command(hide = true)]`)
     // Check that 'agent' is not a primary command name (agent as subtext in other words is ok)
     assert!(
@@ -386,7 +387,7 @@ fn help_no_longer_shows_old_top_level_commands() {
     );
 }
 
-/// Test `nexus42 --help` shows acp as a top-level command.
+/// note: Test `nexus42 --help` shows acp as a top-level command.
 #[test]
 fn help_shows_acp_top_level() {
     Command::cargo_bin("nexus42")

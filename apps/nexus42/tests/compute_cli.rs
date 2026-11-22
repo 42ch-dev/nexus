@@ -4,13 +4,14 @@
 //! / 3 pairing), install identity + absent-hash rejections, and the
 //! `--output text|json` clap constraint. The daemon-backed `run` leaf is
 //! retired (v1.193 P1) — its scenarios left with it.
+// note: daemon-free exit-code, install and output-mode scenarios for `nexus42 compute`.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::json;
 use std::path::Path;
 
-/// Write a manifest JSON to `dir` and return its path.
+/// note: Write a manifest JSON to `dir` and return its path.
 fn write_manifest(dir: &Path, module_id: &str, extra: &serde_json::Value) -> std::path::PathBuf {
     let mut manifest = json!({
         "module_id": module_id,
@@ -67,7 +68,7 @@ fn compute_validate_invalid_exits_two() {
 #[test]
 fn compute_validate_pairing_mismatch_exits_three() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // A well-formed hash that does not match the wasm bytes.
+    // note: A well-formed hash that does not match the wasm bytes.
     let manifest = write_manifest(
         dir.path(),
         "basic-combat",
@@ -91,7 +92,7 @@ fn compute_validate_pairing_mismatch_exits_three() {
 
 #[test]
 fn compute_validate_wasm_absent_hash_exits_three() {
-    // qc2 S-1: `validate --wasm` requests pairing verification — an absent
+    // note: qc2 S-1: `validate --wasm` requests pairing verification — an absent
     // `wasm_sha256` cannot be paired, so it must fail with the pairing exit
     // code (3) and a field-level `wasm_sha256` error, not silently pass.
     let dir = tempfile::tempdir().expect("tempdir");
@@ -114,7 +115,7 @@ fn compute_validate_wasm_absent_hash_exits_three() {
 
 #[test]
 fn compute_validate_rejects_path_traversal_module_id() {
-    // qc2 W-1: `validate` must not report a traversal module id as valid —
+    // invariant: qc2 W-1: `validate` must not report a traversal module id as valid —
     // the id becomes a directory name under dist/ and the module store.
     // The JSON verdict carries a field-level `module_id` error (exit 2).
     let dir = tempfile::tempdir().expect("tempdir");
@@ -176,7 +177,7 @@ fn compute_install_rejects_absent_hash() {
 
 #[test]
 fn output_flag_rejects_non_text_json_values() {
-    // I9: the global `--output` flag is constrained to `text|json` — clap
+    // note: I9: the global `--output` flag is constrained to `text|json` — clap
     // rejects anything else before command dispatch (exit 2).
     let dir = tempfile::tempdir().expect("tempdir");
     let manifest = write_manifest(dir.path(), "basic-combat", &json!({}));

@@ -14,6 +14,7 @@
 //! The World-rule seam is `CoreService::{create_world_rule, list_world_rules,
 //! update_world_rule}`: the core owns World ownership, the closed carrier
 //! grammar, the `rul_` id mint and the AR-1 status set.
+// invariant: the core owns World ownership, the carrier grammar, the `rul_` id mint and the AR-1 status set.
 
 #![allow(clippy::unwrap_used)]
 
@@ -31,14 +32,14 @@ use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, Principal};
 use nexus_home_layout::workspace_state_db_path;
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 
-/// World owned by the fixture's active creator.
+/// note: World owned by the fixture's active creator.
 const WORLD: &str = "wld_rule_test";
-/// Second World of the SAME creator — the cross-World rule-id filter (AR-6).
+/// note: Second World of the SAME creator — the cross-World rule-id filter (AR-6).
 const OTHER_OWNED_WORLD: &str = "wld_rule_other_owned";
-/// World owned by another creator — the World-ownership guard (AR-3).
+/// note: World owned by another creator — the World-ownership guard (AR-3).
 const FOREIGN_WORLD: &str = "wld_rule_foreign";
 
-/// A hermetic direct-core home: one active creator/workspace, the owned and
+/// note: A hermetic direct-core home: one active creator/workspace, the owned and
 /// foreign Worlds seeded, and the seed writer released before the direct core
 /// is opened.
 struct RuleEnv {
@@ -47,7 +48,7 @@ struct RuleEnv {
     principal: Principal,
 }
 
-/// Seed the owned / second-owned / foreign World rows, release the seed
+/// note: Seed the owned / second-owned / foreign World rows, release the seed
 /// writer, then open the direct-writer core the leaves run on.
 async fn fresh_env() -> RuleEnv {
     let fixture = DirectFixture::new().await;
@@ -106,13 +107,13 @@ async fn fresh_env() -> RuleEnv {
     }
 }
 
-/// The stored rules of an owned World, through the core projection the CLI
+/// note: The stored rules of an owned World, through the core projection the CLI
 /// renders. The default read (archived omitted) is what the CLI renders.
 async fn stored_rules(env: &RuleEnv, world_id: &str) -> Vec<WorldRulesListResponseRulesItem> {
     stored_rules_including(env, world_id, false).await
 }
 
-/// The same projection with the caller-selected inclusion (V1.198 §13): the
+/// note: The same projection with the caller-selected inclusion (V1.198 §13): the
 /// default read omits archived rows, `include_archived = true` reveals them.
 async fn stored_rules_including(
     env: &RuleEnv,
@@ -126,15 +127,13 @@ async fn stored_rules_including(
         .rules
 }
 
-/// The canonical valid carriers used across the round-trip tests.
+/// note: The canonical valid carriers used across the round-trip tests.
 const MODULE_PRESENCE_CARRIER: &str = r#"{"family":"module_presence","module_key":"characters"}"#;
 const OBSERVER_CARDINALITY_CARRIER: &str = r#"{"family":"observer_cardinality","min":0,"max":3}"#;
 
-// =============================================================================
-// CLI surface (assert_cmd)
-// =============================================================================
+// note: CLI surface (assert_cmd)
 
-/// The real binary renders the same core projection: `creator world rule list
+/// note: The real binary renders the same core projection: `creator world rule list
 /// --json` against the hermetic home (no server, no Node child). The in-process
 /// seed core is closed first so the child admits its own direct writer.
 #[tokio::test]
@@ -189,7 +188,7 @@ async fn cli_rule_list_json_renders_core_projection() {
     );
 }
 
-/// `creator world rule --help` lists the four subcommands.
+/// note: `creator world rule --help` lists the four subcommands.
 #[test]
 fn world_rule_help_lists_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -209,7 +208,7 @@ fn world_rule_help_lists_subcommands() {
     }
 }
 
-/// `creator world rule list --help` documents the inclusion switch.
+/// note: `creator world rule list --help` documents the inclusion switch.
 #[test]
 fn world_rule_list_help_shows_include_archived() {
     let output = Command::cargo_bin("nexus42")
@@ -229,7 +228,7 @@ fn world_rule_list_help_shows_include_archived() {
     }
 }
 
-/// `creator world rule add --help` documents the PD-1 flag surface.
+/// note: `creator world rule add --help` documents the PD-1 flag surface.
 #[test]
 fn world_rule_add_help_shows_flags() {
     let output = Command::cargo_bin("nexus42")
@@ -258,11 +257,9 @@ fn world_rule_add_help_shows_flags() {
     }
 }
 
-// =============================================================================
-// Round-trip (one hermetic direct-core home per test — no $HOME, no daemon)
-// =============================================================================
+// note: Round-trip (one hermetic direct-core home per test — no $HOME, no daemon)
 
-/// add → stored `status=active` → list (human + JSON) → deactivate →
+/// note: add → stored `status=active` → list (human + JSON) → deactivate →
 /// stored `status=deprecated`; list still shows the row (all statuses).
 #[tokio::test]
 async fn add_list_deactivate_round_trip() {
@@ -290,7 +287,7 @@ async fn add_list_deactivate_round_trip() {
         rule_id.len()
     );
 
-    // Stored truth: default status=active (auto-include needs no step).
+    // note: Stored truth: default status=active (auto-include needs no step).
     let rows = stored_rules(&env, WORLD).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].rule_id, rule_id);
@@ -312,7 +309,7 @@ async fn add_list_deactivate_round_trip() {
         "constraint is projected first-class from extensions.nexus.constraint"
     );
 
-    // list: human + JSON paths do not error.
+    // note: list: human + JSON paths do not error.
     rule_list(&env.core, &env.principal, WORLD, false, false)
         .await
         .unwrap();
@@ -320,7 +317,7 @@ async fn add_list_deactivate_round_trip() {
         .await
         .unwrap();
 
-    // deactivate: spoke vocabulary "deprecated" (never "inactive").
+    // invariant: deactivate: spoke vocabulary "deprecated" (never "inactive").
     rule_deactivate(&env.core, &env.principal, WORLD, &rule_id)
         .await
         .expect("deactivate on an owned world must succeed");
@@ -329,7 +326,7 @@ async fn add_list_deactivate_round_trip() {
     assert_eq!(rows[0].status.as_deref(), Some("deprecated"));
     assert_ne!(rows[0].status.as_deref(), Some("inactive"), "spoke vocab");
 
-    // list after deactivate still shows the row (all statuses visible).
+    // note: list after deactivate still shows the row (all statuses visible).
     rule_list(&env.core, &env.principal, WORLD, false, false)
         .await
         .unwrap();
@@ -338,7 +335,7 @@ async fn add_list_deactivate_round_trip() {
         .unwrap();
 }
 
-/// The listed item exposes `rule_id` / `canonical_name` / `kind` / `status` /
+/// note: The listed item exposes `rule_id` / `canonical_name` / `kind` / `status` /
 /// `severity_hint` / `statement` / `target_entry_types` and the first-class
 /// `constraint` projection from `extensions.nexus.constraint`.
 #[tokio::test]
@@ -382,9 +379,9 @@ async fn json_summary_shape_projects_carrier_first_class() {
     );
 }
 
-// ── Malformed carrier rejects (core member-aware gate, fail early) ─────
+// note: Malformed carrier rejects (core member-aware gate, fail early)
 
-/// Each malformed carrier is rejected with a message naming the offending
+/// note: Each malformed carrier is rejected with a message naming the offending
 /// member, and nothing is written to storage. The closed-shape grammar is
 /// owned by the spoke adapter behind the core seam (`constraint.<member>`);
 /// only the JSON-object root shape is checked at the CLI boundary.
@@ -392,45 +389,45 @@ async fn json_summary_shape_projects_carrier_first_class() {
 async fn malformed_carrier_rejects_naming_member_no_write() {
     let env = fresh_env().await;
     let cases: &[(&str, &str)] = &[
-        // non-object JSON (CLI boundary: the request carries a JSON object)
+        // note: non-object JSON (CLI boundary: the request carries a JSON object)
         (r"[1,2,3]", "constraint must be a JSON object"),
         (r#""tone""#, "constraint must be a JSON object"),
-        // unknown family
+        // note: unknown family
         (
             r#"{"family":"tone","module_key":"x"}"#,
             r#"unknown family "tone""#,
         ),
-        // entry-level field outside the closed set
+        // note: entry-level field outside the closed set
         (
             r#"{"family":"required_field","field":"body.plot"}"#,
             r#"unknown "field" value "body.plot""#,
         ),
-        // required_field with none of the operand forms
+        // note: required_field with none of the operand forms
         (
             r#"{"family":"required_field"}"#,
             r#"missing required member "field""#,
         ),
-        // required_field with both operand forms (entry field + module_key)
+        // note: required_field with both operand forms (entry field + module_key)
         (
             r#"{"family":"required_field","field":"body.summary","module_key":"characters"}"#,
             "entry-level",
         ),
-        // min > max
+        // note: min > max
         (
             r#"{"family":"observer_cardinality","min":5,"max":3}"#,
             r#""min" (5) must not exceed "max" (3)"#,
         ),
-        // empty module_key
+        // note: empty module_key
         (
             r#"{"family":"module_presence","module_key":""}"#,
             r#""module_key" must be a non-empty string"#,
         ),
-        // unknown extra member (closed shapes)
+        // note: unknown extra member (closed shapes)
         (
             r#"{"family":"module_presence","module_key":"x","bogus":1}"#,
             r#"unknown member "bogus""#,
         ),
-        // invalid JSON entirely (CLI boundary)
+        // note: invalid JSON entirely (CLI boundary)
         ("{not json", "invalid JSON"),
     ];
 
@@ -462,7 +459,7 @@ async fn malformed_carrier_rejects_naming_member_no_write() {
     );
 }
 
-/// `--entry-type` alongside an `observer_cardinality` carrier is rejected
+/// note: `--entry-type` alongside an `observer_cardinality` carrier is rejected
 /// early (events carry no `entry_type` — AR-2; no silent ignore).
 #[tokio::test]
 async fn entry_type_with_observer_cardinality_rejected() {
@@ -493,7 +490,7 @@ async fn entry_type_with_observer_cardinality_rejected() {
     );
 }
 
-/// `--entry-type` alongside an entry-family carrier is fine (targeting axis).
+/// note: `--entry-type` alongside an entry-family carrier is fine (targeting axis).
 #[tokio::test]
 async fn entry_type_with_entry_family_carrier_accepted() {
     let env = fresh_env().await;
@@ -517,9 +514,9 @@ async fn entry_type_with_entry_family_carrier_accepted() {
     assert_eq!(rows[0].target_entry_types, vec!["character".to_string()]);
 }
 
-// ── Ownership guards (named reject, no write) ─────────────────────────
+// note: Ownership guards (named reject, no write)
 
-/// Foreign world (active creator does not own it) → named reject, no write.
+/// note: Foreign world (active creator does not own it) → named reject, no write.
 #[tokio::test]
 async fn add_on_foreign_world_rejected_no_write() {
     let env = fresh_env().await;
@@ -543,18 +540,18 @@ async fn add_on_foreign_world_rejected_no_write() {
         "named reject naming the world, got: {msg}"
     );
 
-    // The core refuses the read of a foreign World too, so the write refusal
+    // why: The core refuses the read of a foreign World too, so the write refusal
     // is asserted on the owned World staying empty.
     assert!(stored_rules(&env, WORLD).await.is_empty());
 }
 
-/// `deactivate` with a `rule_id` that belongs to another World → named reject
+/// note: `deactivate` with a `rule_id` that belongs to another World → named reject
 /// naming the rule id (AR-6: unknown and cross-World ids are
 /// indistinguishable), and the rule's status is untouched.
 #[tokio::test]
 async fn deactivate_cross_world_rule_rejected_naming_rule_id() {
     let env = fresh_env().await;
-    // The rule lives in a second World of the SAME creator.
+    // note: The rule lives in a second World of the SAME creator.
     let cross_world_rule_id = rule_add(
         &env.core,
         &env.principal,
@@ -588,7 +585,7 @@ async fn deactivate_cross_world_rule_rejected_naming_rule_id() {
     );
 }
 
-/// `deactivate` on an unknown rule id → named reject naming the rule id.
+/// note: `deactivate` on an unknown rule id → named reject naming the rule id.
 #[tokio::test]
 async fn deactivate_unknown_rule_rejected_naming_rule_id() {
     let env = fresh_env().await;
@@ -602,7 +599,7 @@ async fn deactivate_unknown_rule_rejected_naming_rule_id() {
     );
 }
 
-/// `deactivate` on a foreign world (creator does not own the world at all)
+/// note: `deactivate` on a foreign world (creator does not own the world at all)
 /// → world-level named reject before any per-rule lookup.
 #[tokio::test]
 async fn deactivate_on_foreign_world_rejected() {
@@ -613,9 +610,9 @@ async fn deactivate_on_foreign_world_rejected() {
     assert!(err.to_string().contains("does not own"), "got: {err}");
 }
 
-// ── --status staging ──────────────────────────────────────────────────
+// note: status staging
 
-/// `--status draft` creates a row whose stored status is `draft` — it stays
+/// note: `--status draft` creates a row whose stored status is `draft` — it stays
 /// out of the auto-include set (status filtering is the adapter boundary,
 /// AR-1/T3; storage keeps the verbatim value).
 #[tokio::test]
@@ -642,7 +639,7 @@ async fn draft_status_row_stored_verbatim() {
     assert_eq!(rows[0].canonical_name, "Staged rule");
 }
 
-/// A `--status` value outside the AR-1 core set is **rejected** by the core's
+/// note: A `--status` value outside the AR-1 core set is **rejected** by the core's
 /// typed rule gate instead of being stored (the old CLI-side "store verbatim
 /// + warn" path is gone with the direct-core retarget; an unvalidated status
 /// could never auto-include anyway) — and nothing is written.
@@ -658,7 +655,7 @@ async fn non_core_status_rejected_no_write() {
         "statement",
         "warning",
         &[],
-        "Active", // capitalized typo — outside the core set
+        "Active", // note: capitalized typo — outside the core set
         MODULE_PRESENCE_CARRIER,
     )
     .await
@@ -675,11 +672,9 @@ async fn non_core_status_rejected_no_write() {
     );
 }
 
-// =============================================================================
-// Archive lifecycle (V1.198 §13: terminal, retained, hidden by default)
-// =============================================================================
+// note: Archive lifecycle (V1.198 §13: terminal, retained, hidden by default)
 
-/// `archive` writes the terminal `archived` status, retains the row and
+/// note: `archive` writes the terminal `archived` status, retains the row and
 /// succeeds idempotently on repetition. The default read omits it; only the
 /// explicit inclusion returns it.
 #[tokio::test]
@@ -723,7 +718,7 @@ async fn archive_round_trip_terminal_retained_and_idempotent() {
         "archiving retains the carrier"
     );
 
-    // Repetition is retry-safe for scripts and loses no field.
+    // note: Repetition is retry-safe for scripts and loses no field.
     rule_archive(&env.core, &env.principal, WORLD, &rule_id)
         .await
         .expect("repeating archive must succeed");
@@ -733,7 +728,7 @@ async fn archive_round_trip_terminal_retained_and_idempotent() {
     assert_eq!(after_repeat[0].canonical_name, "Retire me");
 }
 
-/// Archiving reaches `archived` from each prior status — an `active`, a
+/// note: Archiving reaches `archived` from each prior status — an `active`, a
 /// create-time `draft` and a `deactivate`d (`deprecated`) rule all end as
 /// retained archived rows.
 #[tokio::test]
@@ -762,7 +757,7 @@ async fn archive_transitions_from_each_prior_status() {
         .rule_id;
         ids.push((name.to_string(), id));
     }
-    // The third row reaches `deprecated` through the CLI seam, not at create.
+    // note: The third row reaches `deprecated` through the CLI seam, not at create.
     let deprecated_id = ids.last().expect("three seeded rules").1.clone();
     rule_deactivate(&env.core, &env.principal, WORLD, &deprecated_id)
         .await
@@ -799,7 +794,7 @@ async fn archive_transitions_from_each_prior_status() {
     }
 }
 
-/// The human table and the `--json` array agree on the selected set: the
+/// note: The human table and the `--json` array agree on the selected set: the
 /// default read omits the archived row from both, and the explicit inclusion
 /// shows it in both — with the `STATUS` column printing the stored value.
 #[tokio::test]
@@ -919,7 +914,7 @@ fn assert_cli_archives_rule(fixture: &DirectFixture, rule_id: &str) {
     );
 }
 
-/// The real binary honours `--include-archived` (AC-7): the default read omits
+/// note: The real binary honours `--include-archived` (AC-7): the default read omits
 /// the archived row, the flag reveals it in both renderings.
 #[tokio::test]
 async fn cli_rule_list_include_archived_flag() {
@@ -1023,7 +1018,7 @@ async fn cli_rule_list_include_archived_flag() {
     );
 }
 
-/// The archived row is a terminal tombstone on the CLI seams: the
+/// note: The archived row is a terminal tombstone on the CLI seams: the
 /// `deactivate` status exit is refused by name (`status`) with no mutation,
 /// and `add` refuses `archived` as a create state.
 #[tokio::test]
@@ -1061,7 +1056,7 @@ async fn archived_row_refuses_status_exit_and_create_archived() {
     assert_eq!(stored[0].status.as_deref(), Some("archived"));
     assert_eq!(stored[0].canonical_name, "Terminal rule");
 
-    // `--status archived` is refused at create (archive is a transition only).
+    // invariant: `--status archived` is refused at create (archive is a transition only).
     let err = rule_add(
         &env.core,
         &env.principal,
@@ -1088,7 +1083,7 @@ async fn archived_row_refuses_status_exit_and_create_archived() {
     );
 }
 
-/// `creator world rule add --status archived` (the real binary) still refuses
+/// note: `creator world rule add --status archived` (the real binary) still refuses
 /// the create with the field-level status error — `archived` is a transition,
 /// never an authoring state (V1.198 §13).
 #[tokio::test]
@@ -1129,7 +1124,7 @@ async fn cli_rule_add_status_archived_refused() {
     );
 }
 
-/// Ownership and id-addressing guards are unchanged for `archive`: an unknown
+/// note: Ownership and id-addressing guards are unchanged for `archive`: an unknown
 /// or cross-World rule id is the named 404 (indistinguishable, AR-6) and a
 /// foreign World is the world-ownership refusal.
 #[tokio::test]

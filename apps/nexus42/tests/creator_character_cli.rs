@@ -6,6 +6,7 @@
 //! explicit `--expected-revision` CAS and the core's own admitted
 //! holder-filtered knowledge view. The memory/ToM/run family keeps its own
 //! test crates until P0-T11 migrates it.
+// note: the REAL binary runs against a hermetic direct-core home — no daemon, no Node child.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -18,7 +19,7 @@ use cli_support::{stderr, stdout};
 use direct_actor::DirectActor;
 use serde_json::Value;
 
-/// `WorldSheet` `KeyBlock` ids the direct-core fixture seeds (stored `kb_<hex>`).
+/// note: `WorldSheet` `KeyBlock` ids the direct-core fixture seeds (stored `kb_<hex>`).
 const SHEET_A: &str = "kb_5ee70001";
 const SHEET_B: &str = "kb_5ee70002";
 const SHEET_RETAINED: &str = "kb_5ee70003";
@@ -124,7 +125,7 @@ async fn create_bind_remove_journey_human_and_json() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::too_many_lines, clippy::similar_names)] // e2e pagination proof (A/B pages)
+#[allow(clippy::too_many_lines, clippy::similar_names)] // why: e2e pagination proof (A/B pages)
 async fn binding_list_human_and_json_paginate() {
     let actor = DirectActor::new().await;
     let world_a = actor.create_world("Pagination World A").await;
@@ -469,7 +470,7 @@ async fn unrepresentable_expected_revision_is_refused_not_wrapped() {
         .unwrap()
         .to_string();
 
-    // `u64::MAX` exceeds every stored `i64` revision: the leaf must refuse it
+    // invariant: `u64::MAX` exceeds every stored `i64` revision: the leaf must refuse it
     // rather than cast it into a negative revision that addresses a different
     // row revision.
     let overflow = actor.cli(&[
@@ -849,7 +850,7 @@ async fn knowledge_show_edit_remove_summary_journey() {
     assert!(clear_body["summary"].is_null());
     let rev3 = clear_body["item"]["revision"].as_u64().unwrap();
 
-    // The stored revision advanced with each write, so the pre-edit revision is
+    // why: The stored revision advanced with each write, so the pre-edit revision is
     // now stale: the CAS must refuse it instead of deleting the row.
     let stale = actor.cli(&[
         "creator",
@@ -919,7 +920,7 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         oversized.to_str().unwrap(),
     ]);
     assert!(!out.status.success(), "expected failure: {}", stderr(&out));
-    // The precheck wording is emitted **only** by the metadata precheck in
+    // invariant: The precheck wording is emitted **only** by the metadata precheck in
     // `read_file_bounded` (`cannot read …` is the read failure), so naming the
     // metadata size is direct evidence of the precheck path. The v1.193
     // direct-core seam admits the writer before this leaf validates, so the
@@ -934,7 +935,7 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         "the refusal must name the metadata size, not a post-read length: {err}"
     );
 
-    // The refusal is zero-mutation: nothing reached the stored rows.
+    // note: The refusal is zero-mutation: nothing reached the stored rows.
     let listed = actor.cli(&[
         "creator",
         "character",
@@ -952,7 +953,7 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
     );
 }
 
-/// v1.215 P1-T5 (compass D8, `R-V1208-P2-06`): a World-owned create rejects a
+/// note: v1.215 P1-T5 (compass D8, `R-V1208-P2-06`): a World-owned create rejects a
 /// summary — `actor-product-model.md` §11.5 has the server answer **422
 /// `invalid_input`**, as cli-spec.md §6.2I.2 records. The CLI now refuses the
 /// combination on flag presence, before any write, naming both the constraint
@@ -1012,7 +1013,7 @@ async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
         );
     }
 
-    // The narrowing is the summary, not World ownership: the same create
+    // note: The narrowing is the summary, not World ownership: the same create
     // without a summary still lands.
     let allowed = actor.cli(
         &base
@@ -1029,7 +1030,7 @@ async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
     );
 }
 
-/// v1.215 P1-T5 fix wave 1 (W1): the owner-scope refusal is an argv check, so
+/// note: v1.215 P1-T5 fix wave 1 (W1): the owner-scope refusal is an argv check, so
 /// it fires **before** the direct-core writer is opened. The discriminating
 /// home is one with no selected creator and no materialized workspace: the
 /// core open refuses that selection first, so before this fix the guard was

@@ -36,12 +36,12 @@ use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use std::path::PathBuf;
 use std::process::Output;
 
-/// The fixture's workspace slug (mirrors `common/direct.rs`).
+/// note: The fixture's workspace slug (mirrors `common/direct.rs`).
 const WORKSPACE_SLUG: &str = "default";
-/// The foreign holder the pack's private row claims — never this workspace's.
+/// invariant: The foreign holder the pack's private row claims — never this workspace's.
 const FOREIGN_HOLDER: &str = "hld_foreign_peer";
 
-/// The payload of the first output line carrying `label`.
+/// note: The payload of the first output line carrying `label`.
 fn labelled(out: &str, label: &str) -> String {
     out.lines()
         .find_map(|line| line.split_once(label).map(|(_, rest)| rest.trim()))
@@ -51,7 +51,7 @@ fn labelled(out: &str, label: &str) -> String {
         )
 }
 
-/// The batch id the quarantine report tells the operator to review with.
+/// note: The batch id the quarantine report tells the operator to review with.
 fn reported_batch_id(report: &str) -> String {
     report
         .lines()
@@ -62,7 +62,7 @@ fn reported_batch_id(report: &str) -> String {
         )
 }
 
-/// The fixture's workspace state DB (`.../creators/<id>/workspaces/default/state.db`).
+/// note: The fixture's workspace state DB (`.../creators/<id>/workspaces/default/state.db`).
 fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
     workspace_state_db_path(
         fixture.home.path(),
@@ -71,7 +71,7 @@ fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
     )
 }
 
-/// Run one `creator world kb` invocation against the fixture home.
+/// note: Run one `creator world kb` invocation against the fixture home.
 fn kb_cli(fixture: &DirectFixture, args: &[&str]) -> Output {
     let mut full = vec!["creator", "world", "kb"];
     full.extend_from_slice(args);
@@ -82,7 +82,7 @@ fn kb_cli(fixture: &DirectFixture, args: &[&str]) -> Output {
         .expect("spawn nexus42 world kb")
 }
 
-/// Create one owned World through the real CLI; returns its `wld_` id.
+/// note: Create one owned World through the real CLI; returns its `wld_` id.
 fn create_world(fixture: &DirectFixture) -> String {
     let out = fixture
         .command()
@@ -99,7 +99,7 @@ fn create_world(fixture: &DirectFixture) -> String {
     world_id
 }
 
-/// Seed one `KnowledgeEntryRecord` at revision 0 into the fixture's state DB
+/// note: Seed one `KnowledgeEntryRecord` at revision 0 into the fixture's state DB
 /// and return its `entry_id`.
 ///
 /// The row is written through a registered engine writer (the fixture's
@@ -125,7 +125,7 @@ async fn seed_entity(fixture: &DirectFixture, world_id: &str) -> String {
     result.entry_id
 }
 
-/// Seed `count` stored relationships between `entity_id` and itself through the
+/// note: Seed `count` stored relationships between `entity_id` and itself through the
 /// fixture's released seed writer (the graph projection's cap note needs 1000
 /// rows). Both endpoints must exist, so they name the seeded entity.
 async fn seed_relationships(
@@ -163,7 +163,7 @@ async fn seed_relationships(
     release_retained_writer_guards(&db_path);
 }
 
-/// Read one stored row's `(holder_entry_id, disclosure)` — the governance a
+/// note: Read one stored row's `(holder_entry_id, disclosure)` — the governance a
 /// pack atom landed under, or `None` when the entry was never stored.
 async fn stored_governance(
     fixture: &DirectFixture,
@@ -183,7 +183,7 @@ async fn stored_governance(
     row
 }
 
-/// Read one stored entry's `body.summary` (the dry-run no-write proof: an
+/// note: Read one stored entry's `body.summary` (the dry-run no-write proof: an
 /// overwrite plan would have replaced it).
 async fn stored_summary(fixture: &DirectFixture, entry_id: &str) -> Option<String> {
     let pool = nexus_local_db::open_pool_read_only(&fixture_state_db(fixture))
@@ -208,7 +208,7 @@ async fn stored_summary(fixture: &DirectFixture, entry_id: &str) -> Option<Strin
     })
 }
 
-// ── entity patch ───────────────────────────────────────────────────────────
+// note: entity patch
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn entity_patch_updates_title_and_bumps_version() {
@@ -272,7 +272,7 @@ async fn entity_patch_stale_version_surfaces_conflict() {
     let world_id = create_world(&fixture);
     let entity_id = seed_entity(&fixture, &world_id).await;
 
-    // Bump the entity to revision 1 via a first patch.
+    // note: Bump the entity to revision 1 via a first patch.
     let first = kb_cli(
         &fixture,
         &[
@@ -294,7 +294,7 @@ async fn entity_patch_stale_version_surfaces_conflict() {
         stderr(&first)
     );
 
-    // Replay with the stale version 0 → 409 world_kb_conflict.
+    // note: Replay with the stale version 0 → 409 world_kb_conflict.
     let out = kb_cli(
         &fixture,
         &[
@@ -312,7 +312,7 @@ async fn entity_patch_stale_version_surfaces_conflict() {
     );
     assert!(!out.status.success(), "stale patch should fail");
     let err = stderr(&out);
-    // v1.189 P1-T3: graph/patch now ride the core direct-writer, not the
+    // note: v1.189 P1-T3: graph/patch now ride the core direct-writer, not the
     // daemon HTTP route. The locked direct-core error contract keeps the same
     // structured `world_kb_conflict` surface: the stable code, the row's
     // current version, the caller's expected version (so a stale CAS names
@@ -372,7 +372,7 @@ async fn entity_patch_help_documents_expected_version_retry() {
     assert!(text.contains("refetch the graph"), "{text}");
 }
 
-// ── kb graph ──────────────────────────────────────────────────────────────
+// note: kb graph
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kb_graph_lists_entity_with_version() {
@@ -405,7 +405,7 @@ async fn kb_graph_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kb_graph_notes_relationship_cap_when_hit() {
-    // qc3 W-002: the graph read caps the relationship projection at 1000 stored
+    // note: qc3 W-002: the graph read caps the relationship projection at 1000 stored
     // relationships with no wire `truncated` flag; when the count hits the cap
     // the human output must state plainly that the graph may be truncated (the
     // note itself is honest about the missing flag).
@@ -429,9 +429,9 @@ async fn kb_graph_notes_relationship_cap_when_hit() {
     assert!(text.contains("no wire `truncated` flag"), "{text}");
 }
 
-// ── pack export + dry run: the CLI surface itself ─────────────────────────
+// note: pack export + dry run: the CLI surface itself
 
-/// `creator world kb pack export` and `pack import --dry-run` run end to end
+/// note: `creator world kb pack export` and `pack import --dry-run` run end to end
 /// against the real binary on the direct-core seam: the export writes the
 /// admitted pack and the dry run reports its plan without touching a row.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -466,14 +466,14 @@ async fn pack_export_and_dry_run_without_server() {
     let entries = pack["entries"].as_array().expect("entries array");
     assert_eq!(entries.len(), 1, "the seeded entity must be exported");
     assert_eq!(entries[0]["entry_id"], entity_id);
-    // Private facts of the only admitted holder are not exported without the
+    // invariant: Private facts of the only admitted holder are not exported without the
     // explicit `--include-owned-private` intent.
     assert!(
         text.contains("shared rows only"),
         "scope line missing: {text}"
     );
 
-    // Dry run with the overwrite policy: the plan says the row would be
+    // note: Dry run with the overwrite policy: the plan says the row would be
     // replaced, and nothing is written — the body still reads as stored.
     let dry = kb_cli(
         &fixture,
@@ -503,9 +503,9 @@ async fn pack_export_and_dry_run_without_server() {
     );
 }
 
-// ── pack import: holder governance without a server ───────────────────────
+// note: pack import: holder governance without a server
 
-/// A pack atom governed by an unmapped foreign holder must stay quarantined —
+/// invariant: A pack atom governed by an unmapped foreign holder must stay quarantined —
 /// **not** published as the importing Creator's own private fact — and the
 /// batch must be reviewable and then adoptable through the CLI alone.
 ///
@@ -515,7 +515,7 @@ async fn pack_export_and_dry_run_without_server() {
 /// daemon (and no pool) in between. An implementation that quietly remapped the
 /// foreign holder onto the local creator holder — the "publication by
 /// accident" failure — would store the row and pass every count assertion.
-#[allow(clippy::too_many_lines)] // one governance journey asserted end to end
+#[allow(clippy::too_many_lines)] // why: one governance journey asserted end to end
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pack_import_quarantines_unmapped_holder_without_server() {
     let fixture = DirectFixture::new().await;
@@ -544,7 +544,7 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
     )
     .expect("write pack");
 
-    // ── Unmapped import: quarantined, never stored ─────────────────────
+    // note: Unmapped import: quarantined, never stored
     let out = kb_cli(
         &fixture,
         &[
@@ -577,7 +577,7 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         err.contains("rejected"),
         "a quarantined atom is not a plain success: {err}"
     );
-    // The atom stayed OUT of the KB stores: nothing was published under the
+    // note: The atom stayed OUT of the KB stores: nothing was published under the
     // importing Creator's own holder (and nothing under any other).
     assert_eq!(
         stored_governance(&fixture, "kb_governed_foreign").await,
@@ -585,11 +585,11 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         "an unmapped foreign atom must never be stored"
     );
 
-    // The reported batch id is the one the review arm accepts.
+    // note: The reported batch id is the one the review arm accepts.
     let batch_id = reported_batch_id(&text);
     assert!(batch_id.starts_with("pib_"), "{batch_id}");
 
-    // ── Review arm: read-only, original governance verbatim ────────────
+    // note: Review arm: read-only, original governance verbatim
     let review = kb_cli(
         &fixture,
         &["pack", "import", &world_id, "--review-import", &batch_id],
@@ -620,7 +620,7 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         "the review arm never writes"
     );
 
-    // ── Explicit adoption: the operator's own mapping lands the row ─────
+    // note: Explicit adoption: the operator's own mapping lands the row
     let adopted = kb_cli(
         &fixture,
         &[

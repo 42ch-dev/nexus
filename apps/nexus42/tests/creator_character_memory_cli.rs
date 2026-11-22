@@ -11,6 +11,7 @@
 //!   with zero memory mutation;
 //! - the retired `creator character run` / `soul reflect` entrances are
 //!   unknown commands while core capture/synthesis behavior stays in place.
+// note: the whole memory lifecycle runs the REAL binary against the actor fixture.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -24,7 +25,7 @@ use direct_actor::DirectActor;
 use serde_json::Value;
 use std::process::Output;
 
-/// Deterministic marker strings seeded through public operations only.
+/// invariant: Deterministic marker strings seeded through public operations only.
 const SHARED_MEMORY_MARKER: &str =
     "SHAREDMEMORYMARKER the harbor accord holds because Ava keeps it";
 const LOCAL_MEMORY_MARKER: &str = "LOCALMEMORYMARKER only W1 saw the lantern signal at dusk";
@@ -39,12 +40,12 @@ fn json_out(out: &Output) -> Value {
     serde_json::from_str(&stdout(out)).unwrap_or_else(|_| panic!("json: {}", stdout(out)))
 }
 
-/// >= 50 chars with research task kind → FragmentOnly.
+/// note: >= 50 chars with research task kind → FragmentOnly.
 fn fragment_digest(marker: &str) -> String {
     format!("{marker} — researched background detail for texture and continuity.")
 }
 
-/// Count the stored pending-review rows on the released workspace DB.
+/// note: Count the stored pending-review rows on the released workspace DB.
 async fn pending_row_count(actor: &DirectActor) -> i64 {
     let pool = actor.read_only_pool().await;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM character_memory_pending_review")
@@ -56,7 +57,7 @@ async fn pending_row_count(actor: &DirectActor) -> i64 {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::too_many_lines)] // single lifecycle parity proof
+#[allow(clippy::too_many_lines)] // why: single lifecycle parity proof
 async fn character_memory_lifecycle_json_and_human_parity() {
     let actor = DirectActor::new().await;
     let world_w1 = actor.create_world("Memory World One").await;
@@ -64,7 +65,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let chr = seeded.character_id.as_str();
     let binding = seeded.binding_id.as_str();
 
-    // capture (json): returns the generated response DTO.
+    // note: capture (json): returns the generated response DTO.
     let out = cli_ok(
         &actor,
         &[
@@ -89,7 +90,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert_eq!(payload["success"], true);
     assert_eq!(payload["pending_id"], "pend_cli_1");
 
-    // capture (human): deterministic labeled lines, not JSON.
+    // note: capture (human): deterministic labeled lines, not JSON.
     let out = cli_ok(
         &actor,
         &[
@@ -115,7 +116,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert!(human.contains("pend_cli_2"));
     assert!(!human.trim_start().starts_with('{'));
 
-    // pending-count, both scopes, both output modes.
+    // note: pending-count, both scopes, both output modes.
     let out = cli_ok(
         &actor,
         &[
@@ -157,7 +158,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     );
     assert_eq!(json_out(&out)["count"], 1);
 
-    // pending-list: shared scope shows pend_cli_1 only.
+    // invariant: pending-list: shared scope shows pend_cli_1 only.
     let out = cli_ok(
         &actor,
         &[
@@ -175,7 +176,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["pending_id"], "pend_cli_1");
 
-    // review (json): the unscoped drain empties the shared scope only; the
+    // invariant: review (json): the unscoped drain empties the shared scope only; the
     // binding scope is drained explicitly afterwards.
     let out = cli_ok(
         &actor,
@@ -208,7 +209,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     );
     assert!(stdout(&out).contains("fragmented=1"));
 
-    // fragments: the binding-local row carries revision 0 and the marker.
+    // note: fragments: the binding-local row carries revision 0 and the marker.
     let out = cli_ok(
         &actor,
         &[
@@ -233,7 +234,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
         .contains(LOCAL_MEMORY_MARKER));
     let fragment_id = fragments[0]["fragment_id"].as_str().unwrap().to_string();
 
-    // promote: stale revision is a stable failure with no mutation.
+    // note: promote: stale revision is a stable failure with no mutation.
     let out = actor.cli(&[
         "creator",
         "character",
@@ -253,7 +254,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
         stderr(&out)
     );
 
-    // promote: correct revision clears provenance (shared scope gains it).
+    // note: promote: correct revision clears provenance (shared scope gains it).
     let out = cli_ok(
         &actor,
         &[
@@ -276,14 +277,14 @@ async fn character_memory_lifecycle_json_and_human_parity() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::too_many_lines)] // fail-closed proof
+#[allow(clippy::too_many_lines)] // why: fail-closed proof
 async fn character_memory_fail_closed_no_mutation() {
     let actor = DirectActor::new().await;
     let world_w1 = actor.create_world("Memory World One").await;
     let character_a = actor.create_character("Ava", &world_w1).await;
     let character_b = actor.create_character("Ben", &world_w1).await;
 
-    // Foreign (missing) character id: every memory verb fails.
+    // note: Foreign (missing) character id: every memory verb fails.
     let missing = "chr_ffffffffffffffffffffffffffffffff";
     for args in [
         vec![
@@ -343,7 +344,7 @@ async fn character_memory_fail_closed_no_mutation() {
         );
     }
 
-    // Cross-character binding: A's memory verbs must not accept B's binding.
+    // invariant: Cross-character binding: A's memory verbs must not accept B's binding.
     let out = actor.cli(&[
         "creator",
         "character",
@@ -362,7 +363,7 @@ async fn character_memory_fail_closed_no_mutation() {
     ]);
     assert!(!out.status.success(), "cross-character binding accepted");
 
-    // Inactive character: archive B through the core's own lifecycle
+    // note: Inactive character: archive B through the core's own lifecycle
     // transition, then its write verbs deny (reads may retain).
     cli_ok(
         &actor,
@@ -391,7 +392,7 @@ async fn character_memory_fail_closed_no_mutation() {
     ]);
     assert!(!out.status.success(), "inactive character write must deny");
 
-    // Zero mutation proof: A's queues stay empty, and no pending row exists.
+    // note: Zero mutation proof: A's queues stay empty, and no pending row exists.
     let out = cli_ok(
         &actor,
         &[
@@ -412,7 +413,7 @@ async fn character_memory_fail_closed_no_mutation() {
     );
 }
 
-/// The retired entrances stay retired: `creator character run` (daemon-stream
+/// note: The retired entrances stay retired: `creator character run` (daemon-stream
 /// plus durable owner-outcome observation) and `creator character soul
 /// reflect` (registry-backed forced synthesis) have no complete direct CLI
 /// closure, so both are unknown commands while core host capture/session and

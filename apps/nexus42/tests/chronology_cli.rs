@@ -16,11 +16,9 @@
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chronology::{advance_manual, outline_path, AdvanceOutcome};
 
-// =============================================================================
-// DAO round-trip layer (AC §8: set/show/advance)
-// =============================================================================
+// note: DAO round-trip layer (AC §8: set/show/advance)
 
-/// AC §8: `chronology set my-work --auto true` round-trips through the DAO.
+/// note: AC §8: `chronology set my-work --auto true` round-trips through the DAO.
 #[tokio::test]
 async fn chronology_set_true_persists() {
     let (_dir, pool) = fresh_seeded_pool().await;
@@ -33,7 +31,7 @@ async fn chronology_set_true_persists() {
     );
 }
 
-/// AC §8: `chronology set my-work --auto false` disables the flag (default).
+/// note: AC §8: `chronology set my-work --auto false` disables the flag (default).
 #[tokio::test]
 async fn chronology_set_false_disables() {
     let (_dir, pool) = fresh_seeded_pool().await;
@@ -49,7 +47,7 @@ async fn chronology_set_false_disables() {
     );
 }
 
-/// AC §8: `show` reports the persisted flag (defaults to false on a fresh Work).
+/// note: AC §8: `show` reports the persisted flag (defaults to false on a fresh Work).
 #[tokio::test]
 async fn chronology_show_defaults_false() {
     let (_dir, pool) = fresh_seeded_pool().await;
@@ -59,13 +57,13 @@ async fn chronology_show_defaults_false() {
     );
 }
 
-/// AC §8 / §4.4: `advance my-work --volume 2 --chapters 3` creates the outline
+/// note: AC §8 / §4.4: `advance my-work --volume 2 --chapters 3` creates the outline
 /// + seeds 3 chapters, regardless of the `auto_chronology` flag.
 #[tokio::test]
 async fn chronology_advance_round_trip() {
     let (_dir, pool) = fresh_seeded_pool().await;
     let ws = tempfile::tempdir().unwrap();
-    // The Work is NOT opted in; manual advance must still work (spec §2.2).
+    // invariant: The Work is NOT opted in; manual advance must still work (spec §2.2).
     assert!(
         !works::get_auto_chronology(&pool, "wrk_seed").await.unwrap(),
         "advance target is not opted in"
@@ -88,14 +86,14 @@ async fn chronology_advance_round_trip() {
         }
     }
 
-    // Outline created at the spec path layout.
+    // note: Outline created at the spec path layout.
     let outline = outline_path(ws.path(), "seed-ref", 2);
     assert!(outline.exists(), "advance must create the outline");
     assert!(std::fs::read_to_string(&outline)
         .unwrap()
         .contains("Volume 2 Outline"));
 
-    // Chapters seeded in the DB.
+    // note: Chapters seeded in the DB.
     let vol2_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_seed' AND volume = 2",
     )
@@ -105,7 +103,7 @@ async fn chronology_advance_round_trip() {
     assert_eq!(vol2_count, 3, "advance must seed the requested chapters");
 }
 
-/// AC §8 (negative): a second `advance` to the same volume is idempotent
+/// note: AC §8 (negative): a second `advance` to the same volume is idempotent
 /// (returns `AlreadyAdvanced`, does not clobber).
 #[tokio::test]
 async fn chronology_advance_idempotent_on_repeat() {
@@ -126,11 +124,9 @@ async fn chronology_advance_idempotent_on_repeat() {
     ));
 }
 
-// =============================================================================
-// CLI binary surface (help text — AC §8: subcommand registered)
-// =============================================================================
+// note: CLI binary surface (help text — AC §8: subcommand registered)
 
-/// `creator works chronology` is registered as a subcommand of `creator works`.
+/// note: `creator works chronology` is registered as a subcommand of `creator works`.
 #[test]
 fn works_help_lists_chronology_subcommand() {
     use assert_cmd::Command;
@@ -149,7 +145,7 @@ fn works_help_lists_chronology_subcommand() {
     );
 }
 
-/// `creator works chronology --help` lists set/show/advance.
+/// note: `creator works chronology --help` lists set/show/advance.
 #[test]
 fn chronology_help_lists_set_show_advance() {
     use assert_cmd::Command;
@@ -170,7 +166,7 @@ fn chronology_help_lists_set_show_advance() {
     }
 }
 
-/// `creator works chronology set --help` documents the `--auto` flag.
+/// note: `creator works chronology set --help` documents the `--auto` flag.
 #[test]
 fn chronology_set_help_documents_auto_flag() {
     use assert_cmd::Command;
@@ -189,7 +185,7 @@ fn chronology_set_help_documents_auto_flag() {
     );
 }
 
-/// `creator works chronology advance --help` documents `--volume` + `--chapters`.
+/// note: `creator works chronology advance --help` documents `--volume` + `--chapters`.
 #[test]
 fn chronology_advance_help_documents_flags() {
     use assert_cmd::Command;
@@ -212,7 +208,7 @@ fn chronology_advance_help_documents_flags() {
     );
 }
 
-/// `creator works chronology advance --help` documents `--force` (R-V150P3AUTOCHRONO-04).
+/// note: `creator works chronology advance --help` documents `--force` (R-V150P3AUTOCHRONO-04).
 #[test]
 fn chronology_advance_help_documents_force_flag() {
     use assert_cmd::Command;
@@ -231,11 +227,9 @@ fn chronology_advance_help_documents_force_flag() {
     );
 }
 
-// =============================================================================
-// Test helpers
-// =============================================================================
+// note: Test helpers
 
-/// Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
+/// note: Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
 /// `seed-ref`) under `ctr_test` / `default`.
 ///
 /// Returns `(dir, pool)` so callers bind the owner first: the pool drops
@@ -254,7 +248,7 @@ async fn fresh_seeded_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     (dir, pool)
 }
 
-/// Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
+/// note: Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
 fn sample_work_record(work_id: &str, work_ref: &str) -> WorkRecord {
     WorkRecord {
         work_id: work_id.to_string(),

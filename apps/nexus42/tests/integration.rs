@@ -1,10 +1,11 @@
 //! Integration Tests — CLI binary behavior
+// note: CLI binary behaviour, driven end to end.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// `system debug dump-workspace` is a local-only dump (v1.193 P2-T12): the
+/// invariant: `system debug dump-workspace` is a local-only dump (v1.193 P2-T12): the
 /// retired daemon probe contributes no `daemon_status` block, so the dump
 /// reports the config snapshot verbatim — including a `daemon_url` the retired
 /// client would have rejected — plus the resolved home.
@@ -59,7 +60,7 @@ fn debug_dump_reports_local_state_without_daemon_status() {
     }
 }
 
-/// Test that CLI shows help — the root parser advertises only the retained
+/// invariant: Test that CLI shows help — the root parser advertises only the retained
 /// groups (v1.193 P2-T12: the `daemon` group is no longer a top-level command).
 #[test]
 fn cli_shows_help() {
@@ -74,7 +75,7 @@ fn cli_shows_help() {
         .stdout(predicate::str::contains("daemon").not());
 }
 
-/// Test that CLI shows version
+/// note: Test that CLI shows version
 #[test]
 fn cli_shows_version() {
     Command::cargo_bin("nexus42")
@@ -88,7 +89,7 @@ fn cli_shows_version() {
         )));
 }
 
-/// Test init workspace command (now under `creator init`)
+/// note: Test init workspace command (now under `creator init`)
 #[test]
 fn init_workspace_creates_structure() {
     let tmp = TempDir::new().unwrap();
@@ -96,7 +97,7 @@ fn init_workspace_creates_structure() {
     let project = home.join("project");
     std::fs::create_dir_all(&project).unwrap();
 
-    // Create a persistent identity first (creator commands require active creator)
+    // note: Create a persistent identity first (creator commands require active creator)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -129,7 +130,7 @@ fn init_workspace_creates_structure() {
         );
 }
 
-/// Test init workspace does not re-initialize
+/// note: Test init workspace does not re-initialize
 #[test]
 fn init_workspace_idempotent() {
     let tmp = TempDir::new().unwrap();
@@ -137,7 +138,7 @@ fn init_workspace_idempotent() {
     let project = home.join("proj");
     std::fs::create_dir_all(&project).unwrap();
 
-    // Create a persistent identity first (creator commands require active creator)
+    // note: Create a persistent identity first (creator commands require active creator)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -164,7 +165,7 @@ fn init_workspace_idempotent() {
         .assert()
         .success();
 
-    // Second init should no-op (same creator/slug registration)
+    // note: Second init should no-op (same creator/slug registration)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -183,7 +184,7 @@ fn init_workspace_idempotent() {
         );
 }
 
-/// Test auth status (no daemon running — uses local `AuthStore`)
+/// note: Test auth status (no daemon running — uses local `AuthStore`)
 #[test]
 fn auth_status_not_logged_in() {
     Command::cargo_bin("nexus42")
@@ -197,12 +198,12 @@ fn auth_status_not_logged_in() {
         .stdout(predicate::str::contains("Not logged in"));
 }
 
-/// Test auth login with token (writes to local `AuthStore`, no daemon)
+/// note: Test auth login with token (writes to local `AuthStore`, no daemon)
 #[test]
 fn auth_token_login() {
     let tmp = TempDir::new().unwrap();
 
-    // V1.10: login_with_token writes to local AuthStore, no daemon needed
+    // note: V1.10: login_with_token writes to local AuthStore, no daemon needed
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("platform")
@@ -218,12 +219,12 @@ fn auth_token_login() {
         .stderr(predicate::str::contains("test-access").not());
 }
 
-/// Test auth logout (clears local `AuthStore`, no daemon)
+/// note: Test auth logout (clears local `AuthStore`, no daemon)
 #[test]
 fn auth_logout() {
     let tmp = TempDir::new().unwrap();
 
-    // V1.10: logout clears local AuthStore, no daemon needed.
+    // note: V1.10: logout clears local AuthStore, no daemon needed.
     // When not logged in, prints "Not logged in." (success exit).
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -236,7 +237,7 @@ fn auth_logout() {
         .stdout(predicate::str::contains("Not logged in"));
 }
 
-/// Test creator command group
+/// note: Test creator command group
 #[test]
 fn creator_help() {
     Command::cargo_bin("nexus42")
@@ -251,7 +252,7 @@ fn creator_help() {
         .stdout(predicate::str::contains("credentials"));
 }
 
-/// Test creator list (no data)
+/// note: Test creator list (no data)
 #[test]
 fn creator_list_empty() {
     let tmp = TempDir::new().unwrap();
@@ -264,7 +265,7 @@ fn creator_list_empty() {
         .success();
 }
 
-/// v1.193 P2-T12: the `daemon` service group is no longer a parser entrance —
+/// note: v1.193 P2-T12: the `daemon` service group is no longer a parser entrance —
 /// the local CLI holds no daemon client. Both shapes the retired test drove
 /// (`daemon status --port <p>` and the group help) are clap's
 /// unrecognized-subcommand error.
@@ -285,7 +286,7 @@ fn daemon_group_is_unknown() {
     }
 }
 
-/// Test sync status works without a daemon — the retained `platform sync`
+/// note: Test sync status works without a daemon — the retained `platform sync`
 /// leaf queries the local outbox directly (v1.193 P2-T12: the hidden top-level
 /// `sync` alias is gone; `platform sync` is the surviving entrance).
 #[test]
@@ -300,7 +301,7 @@ fn sync_status_without_daemon() {
         .stdout(predicate::str::contains("Sync Status"));
 }
 
-/// Test sync push is blocked in `local_only` mode with `PlatformOperationProhibited` error
+/// note: Test sync push is blocked in `local_only` mode with `PlatformOperationProhibited` error
 #[test]
 fn sync_push_blocked_in_local_only() {
     let tmp = TempDir::new().unwrap();
@@ -317,7 +318,7 @@ fn sync_push_blocked_in_local_only() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// v1.193 P2-T12: the exit-2 `platform context assemble` guidance leaf was
+/// note: v1.193 P2-T12: the exit-2 `platform context assemble` guidance leaf was
 /// removed in P1-T5, so both invocations the retired tests drove (bare, and
 /// with `--world-id`) are now clap's unrecognized-subcommand error on the real
 /// binary. Parser only — `assemble-moment` remains the local SSOT.
@@ -344,7 +345,7 @@ fn retired_platform_context_assemble_is_unknown() {
     }
 }
 
-/// Test soul command group help (now under `creator soul`)
+/// note: Test soul command group help (now under `creator soul`)
 #[test]
 fn soul_help() {
     Command::cargo_bin("nexus42")
@@ -360,7 +361,7 @@ fn soul_help() {
         .stdout(predicate::str::contains("validate"));
 }
 
-/// Test soul requires active creator
+/// note: Test soul requires active creator
 #[test]
 fn soul_requires_active_creator() {
     let tmp = TempDir::new().unwrap();
@@ -375,7 +376,7 @@ fn soul_requires_active_creator() {
         .stderr(predicate::str::contains("No active creator"));
 }
 
-/// Test soul validate requires active creator
+/// note: Test soul validate requires active creator
 #[test]
 fn soul_validate_requires_active_creator() {
     let tmp = TempDir::new().unwrap();
@@ -390,11 +391,9 @@ fn soul_validate_requires_active_creator() {
         .stderr(predicate::str::contains("No active creator"));
 }
 
-// =============================================================================
-// E8: Integration tests for CLI commands (clone, config, debug, doctor)
-// =============================================================================
+// note: E8: Integration tests for CLI commands (clone, config, debug, doctor)
 
-/// v1.193 P2-T12: the hard-deprecated `creator workspace clone` leaf is gone
+/// note: v1.193 P2-T12: the hard-deprecated `creator workspace clone` leaf is gone
 /// from the parser — every invocation shape the six retired clone tests drove
 /// (help, a missing `WORLD_REF`, each `--source` variant under `--dry-run`, and
 /// a malformed `wld_` ref) is clap's unrecognized-subcommand error, never a
@@ -456,7 +455,7 @@ fn retired_creator_workspace_clone_is_unknown() {
         );
     }
 
-    // The retained `creator workspace` group still parses and does not
+    // note: The retained `creator workspace` group still parses and does not
     // advertise the removed leaf.
     let help = Command::cargo_bin("nexus42")
         .unwrap()
@@ -479,7 +478,7 @@ fn retired_creator_workspace_clone_is_unknown() {
     );
 }
 
-/// Test config command shows help (now under `system config`)
+/// note: Test config command shows help (now under `system config`)
 #[test]
 fn config_help() {
     Command::cargo_bin("nexus42")
@@ -495,7 +494,7 @@ fn config_help() {
         .stdout(predicate::str::contains("path"));
 }
 
-/// Test config get existing key (`runtime_mode` has default)
+/// note: Test config get existing key (`runtime_mode` has default)
 #[test]
 fn config_get_runtime_mode() {
     let tmp = TempDir::new().unwrap();
@@ -511,11 +510,11 @@ fn config_get_runtime_mode() {
         .stdout(predicate::str::contains("runtime_mode"));
 }
 
-/// Test config get non-existent key shows unset
+/// note: Test config get non-existent key shows unset
 #[test]
 fn config_get_nonexistent_key() {
     let tmp = TempDir::new().unwrap();
-    // workspace_path is optional and defaults to empty
+    // note: workspace_path is optional and defaults to empty
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -528,7 +527,7 @@ fn config_get_nonexistent_key() {
         .stdout(predicate::str::contains("(unset)"));
 }
 
-/// Test config set updates value
+/// note: Test config set updates value
 #[test]
 fn config_set_platform_url() {
     let tmp = TempDir::new().unwrap();
@@ -545,7 +544,7 @@ fn config_set_platform_url() {
         .stdout(predicate::str::contains("Set platform_url"));
 }
 
-/// Test config set invalid key fails
+/// note: Test config set invalid key fails
 #[test]
 fn config_set_invalid_key_fails() {
     let tmp = TempDir::new().unwrap();
@@ -562,11 +561,11 @@ fn config_set_invalid_key_fails() {
         .stderr(predicate::str::contains("Invalid config key"));
 }
 
-/// Test config unset reverts to default
+/// note: Test config unset reverts to default
 #[test]
 fn config_unset_resets_to_default() {
     let tmp = TempDir::new().unwrap();
-    // First set a custom value
+    // note: First set a custom value
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -578,7 +577,7 @@ fn config_unset_resets_to_default() {
         .assert()
         .success();
 
-    // Then unset it
+    // note: Then unset it
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -591,7 +590,7 @@ fn config_unset_resets_to_default() {
         .stdout(predicate::str::contains("Unset"));
 }
 
-/// Test config path shows location
+/// note: Test config path shows location
 #[test]
 fn config_path_shows_location() {
     let tmp = TempDir::new().unwrap();
@@ -606,7 +605,7 @@ fn config_path_shows_location() {
         .stdout(predicate::str::contains("config.toml"));
 }
 
-/// Test debug command shows help (now under `system debug`). v1.193 P2-T12:
+/// note: Test debug command shows help (now under `system debug`). v1.193 P2-T12:
 /// only the local `dump-workspace` leaf survives — the daemon-backed
 /// `replay-delta` leaf is gone, so help must not advertise it.
 #[test]
@@ -622,7 +621,7 @@ fn debug_help() {
         .stdout(predicate::str::contains("replay-delta").not());
 }
 
-/// Test debug dump-workspace runs without error (daemon may not be running)
+/// note: Test debug dump-workspace runs without error (daemon may not be running)
 #[test]
 fn debug_dump_workspace_no_panic() {
     let tmp = TempDir::new().unwrap();
@@ -633,10 +632,10 @@ fn debug_dump_workspace_no_panic() {
         .arg("dump-workspace")
         .env("HOME", tmp.path())
         .assert()
-        .success(); // Should not panic, may show daemon not running
+        .success(); // note: Should not panic, may show daemon not running
 }
 
-/// Test debug dump-workspace with json format (default)
+/// note: Test debug dump-workspace with json format (default)
 #[test]
 fn debug_dump_workspace_json_format() {
     let tmp = TempDir::new().unwrap();
@@ -653,7 +652,7 @@ fn debug_dump_workspace_json_format() {
         .stdout(predicate::str::contains("\"config\""));
 }
 
-/// Test debug dump-workspace with toml format
+/// note: Test debug dump-workspace with toml format
 #[test]
 fn debug_dump_workspace_toml_format() {
     let tmp = TempDir::new().unwrap();
@@ -670,7 +669,7 @@ fn debug_dump_workspace_toml_format() {
         .stdout(predicate::str::contains("config"));
 }
 
-/// v1.193 P2-T12: the daemon-backed `system debug replay-delta` leaf was
+/// note: v1.193 P2-T12: the daemon-backed `system debug replay-delta` leaf was
 /// removed in P1-T4 — both invocations the retired tests drove (missing
 /// `DELTA_ID`, and a nonexistent delta id) are now clap's
 /// unrecognized-subcommand error, never a "Daemon not running" refusal.
@@ -692,7 +691,7 @@ fn retired_debug_replay_delta_is_unknown() {
     }
 }
 
-/// Test doctor command shows help (now under `system doctor`)
+/// note: Test doctor command shows help (now under `system doctor`)
 #[test]
 fn doctor_help() {
     Command::cargo_bin("nexus42")
@@ -705,7 +704,7 @@ fn doctor_help() {
         .stdout(predicate::str::contains("Diagnostic"));
 }
 
-/// Test doctor runs (daemon may not be running)
+/// note: Test doctor runs (daemon may not be running)
 #[test]
 fn doctor_check_no_panic() {
     let tmp = TempDir::new().unwrap();
@@ -719,7 +718,7 @@ fn doctor_check_no_panic() {
         .stdout(predicate::str::contains("system doctor"));
 }
 
-/// v1.193 P2-T12: the daemon-connectivity probe was removed from
+/// note: v1.193 P2-T12: the daemon-connectivity probe was removed from
 /// `system doctor` (P1-T4), so the command reports exactly the two local
 /// checks — ACP registry reachability and the `~/.nexus42` home — and closes
 /// with a verdict summary.
@@ -760,7 +759,7 @@ fn doctor_check_reports_only_local_checks() {
     );
 }
 
-/// Test doctor shows home directory check
+/// note: Test doctor shows home directory check
 #[test]
 fn doctor_check_shows_config_status() {
     let tmp = TempDir::new().unwrap();
@@ -774,7 +773,7 @@ fn doctor_check_shows_config_status() {
         .stdout(predicate::str::contains("Home directory"));
 }
 
-/// Test doctor shows combined diagnostics output
+/// note: Test doctor shows combined diagnostics output
 #[test]
 fn doctor_check_shows_database_status() {
     let tmp = TempDir::new().unwrap();
@@ -788,7 +787,7 @@ fn doctor_check_shows_database_status() {
         .stdout(predicate::str::contains("diagnostics"));
 }
 
-/// Test doctor shows ACP registry check
+/// note: Test doctor shows ACP registry check
 #[test]
 fn doctor_check_shows_version_compatibility() {
     let tmp = TempDir::new().unwrap();
@@ -802,7 +801,7 @@ fn doctor_check_shows_version_compatibility() {
         .stdout(predicate::str::contains("ACP registry"));
 }
 
-/// Test identity command shows help (now under `system identity`)
+/// note: Test identity command shows help (now under `system identity`)
 #[test]
 fn identity_help() {
     Command::cargo_bin("nexus42")
@@ -819,7 +818,7 @@ fn identity_help() {
         .stdout(predicate::str::contains("unlink"));
 }
 
-/// Test identity unlink requires `creator_id`
+/// note: Test identity unlink requires `creator_id`
 #[test]
 fn identity_unlink_requires_creator_id() {
     let tmp = TempDir::new().unwrap();
@@ -834,7 +833,7 @@ fn identity_unlink_requires_creator_id() {
         .stderr(predicate::str::contains("CREATOR_ID"));
 }
 
-/// Test identity unlink with nonexistent `creator_id` (local database exists but identity not found)
+/// note: Test identity unlink with nonexistent `creator_id` (local database exists but identity not found)
 #[test]
 fn identity_unlink_nonexistent_creator() {
     let tmp = TempDir::new().unwrap();
@@ -850,11 +849,9 @@ fn identity_unlink_nonexistent_creator() {
         .stderr(predicate::str::contains("not found"));
 }
 
-// =============================================================================
-// V1.176 P0 T1 (AR-88): shared bootstrap helper — persistent-identity parity
-// =============================================================================
+// note: V1.176 P0 T1 (AR-88): shared bootstrap helper — persistent-identity parity
 
-/// `system identity create --persistent --name <n>` reaches the same
+/// note: `system identity create --persistent --name <n>` reaches the same
 /// observable end state as `register --local` (compass PL-3): the identity is
 /// active and the workspace `creators` row is materialized, so
 /// `creator world create` succeeds immediately (no FK miss).
@@ -878,7 +875,7 @@ fn persistent_identity_create_converges_workspace_row() {
         .stdout(predicate::str::contains("Created persistent identity"))
         .stdout(predicate::str::contains("Set as active identity."));
 
-    // The workspace `creators` row must exist — `creator world create` passes
+    // invariant: The workspace `creators` row must exist — `creator world create` passes
     // its FK precheck immediately after the persistent-identity bootstrap.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -899,7 +896,7 @@ fn persistent_identity_create_converges_workspace_row() {
     );
 }
 
-/// `creator register --local --name <n>` converges the same three-store end
+/// note: `creator register --local --name <n>` converges the same three-store end
 /// state (identity active + workspace row) — `creator world create` succeeds
 /// immediately after.
 #[test]
@@ -940,11 +937,9 @@ fn register_local_converges_workspace_row() {
     );
 }
 
-// =============================================================================
-// V1.176 P0 T2 (AR-89): idempotent re-register + partial-bootstrap recovery
-// =============================================================================
+// note: V1.176 P0 T2 (AR-89): idempotent re-register + partial-bootstrap recovery
 
-/// Open the global identity store at `$HOME/.nexus42/state.db` (same path
+/// note: Open the global identity store at `$HOME/.nexus42/state.db` (same path
 /// the CLI resolves) and return the single persistent identity's creator id.
 fn single_persistent_id(home: &std::path::Path) -> String {
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -960,7 +955,7 @@ fn single_persistent_id(home: &std::path::Path) -> String {
     })
 }
 
-/// Delete the workspace `creators` row for `creator_id` — simulates the
+/// note: Delete the workspace `creators` row for `creator_id` — simulates the
 /// DF-83 partial (identity present, workspace row missing).
 ///
 /// v1.191 P1 T4 commits a Creator's `knowledge_holders` row with the subject
@@ -984,13 +979,13 @@ fn delete_workspace_row(home: &std::path::Path, creator_id: &str) {
             .execute(&pool)
             .await
             .expect("delete workspace row");
-        // Hand the writer lock back before the next CLI child boots.
+        // note: Hand the writer lock back before the next CLI child boots.
         pool.close().await;
         nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
     });
 }
 
-/// No-op success on `system identity create --persistent`: re-running the
+/// note: No-op success on `system identity create --persistent`: re-running the
 /// same name exits 0, must NOT print "Created", and mints no second identity.
 #[test]
 fn persistent_identity_create_noop_does_not_claim_new_mint() {
@@ -1012,7 +1007,7 @@ fn persistent_identity_create_noop_does_not_claim_new_mint() {
         .stdout(predicate::str::contains("Created persistent identity"));
     let id = single_persistent_id(home);
 
-    // Re-run the same name → no-op success: exit 0, no "Created", no new mint.
+    // note: Re-run the same name → no-op success: exit 0, no "Created", no new mint.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -1031,7 +1026,7 @@ fn persistent_identity_create_noop_does_not_claim_new_mint() {
     assert_eq!(single_persistent_id(home), id, "no second identity minted");
 }
 
-/// No-op success on `creator register --local`: re-running the same name
+/// note: No-op success on `creator register --local`: re-running the same name
 /// exits 0, must NOT print "Created", and mints no second identity.
 #[test]
 fn register_local_noop_does_not_claim_new_mint() {
@@ -1067,7 +1062,7 @@ fn register_local_noop_does_not_claim_new_mint() {
     assert_eq!(single_persistent_id(home), id, "no second identity minted");
 }
 
-/// Repair on `system identity create --persistent`: after the workspace row
+/// note: Repair on `system identity create --persistent`: after the workspace row
 /// is deleted (simulated partial), re-running the same name materializes the
 /// row again (exit 0, repair named, no "Created").
 #[test]
@@ -1108,7 +1103,7 @@ fn persistent_identity_create_repairs_missing_workspace_row() {
     assert_eq!(single_persistent_id(home), id, "no second identity minted");
 }
 
-/// Repair on `creator register --local`: after the workspace row is deleted,
+/// note: Repair on `creator register --local`: after the workspace row is deleted,
 /// re-running the same name materializes the row again (exit 0, repair named,
 /// no "Created").
 #[test]
@@ -1167,7 +1162,7 @@ fn persistent_identity_create_nameless_converges_active() {
         .stdout(predicate::str::contains("Created persistent identity"));
     let id = single_persistent_id(home);
 
-    // Nameless re-run → converge the active persistent identity (no mint).
+    // note: Nameless re-run → converge the active persistent identity (no mint).
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -1206,7 +1201,7 @@ fn anonymous_identity_does_not_materialize_workspace_row() {
         .success()
         .stdout(predicate::str::contains("Created anonymous identity"));
 
-    // No workspace `creators` row exists for the anonymous identity — the
+    // note: No workspace `creators` row exists for the anonymous identity — the
     // workspace-scoped writer must refuse it with the selection class.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -1222,11 +1217,9 @@ fn anonymous_identity_does_not_materialize_workspace_row() {
         .stderr(predicate::str::contains("referenced creator").not());
 }
 
-// =============================================================================
-// V1.176 P0 T3 (AR-90): creator list local-identity visibility + --json
-// =============================================================================
+// note: V1.176 P0 T3 (AR-90): creator list local-identity visibility + --json
 
-/// Seed a platform creator in the identity cache (`creator-identities.json`)
+/// note: Seed a platform creator in the identity cache (`creator-identities.json`)
 /// — exactly today's platform source for `creator list`.
 fn seed_platform_cache(home: &std::path::Path, creator_id: &str, handle: &str, display_name: &str) {
     let dir = home.join(".nexus42");
@@ -1244,7 +1237,7 @@ fn seed_platform_cache(home: &std::path::Path, creator_id: &str, handle: &str, d
     std::fs::write(&path, serde_json::to_string_pretty(&cache).unwrap()).unwrap();
 }
 
-/// ORIGIN cell of one rendered human row, sliced at the header's ORIGIN
+/// note: ORIGIN cell of one rendered human row, sliced at the header's ORIGIN
 /// column offset. The CREATOR ID column is padded to the widest id in the
 /// listing, so header and data rows share the same column layout — this
 /// pins the ORIGIN cell itself, not a substring (a plain `contains("local")`
@@ -1254,7 +1247,7 @@ fn origin_cell<'a>(line: &'a str, header_line: &str) -> &'a str {
     line.get(col..col + 8).unwrap_or("").trim()
 }
 
-/// Mixed local+platform listing (AR-90): a persistent local identity appears
+/// note: Mixed local+platform listing (AR-90): a persistent local identity appears
 /// marked `local` (HANDLE renders `-`, never `[local]`); a seeded platform row
 /// keeps its id/handle/display byte-stable marked `platform`. `--json` emits
 /// the pinned DTO array verbatim (`origin` key; nullable `handle`/`display_name`).
@@ -1263,10 +1256,10 @@ fn creator_list_mixed_local_and_platform() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Platform row via the identity cache (today's platform source).
+    // note: Platform row via the identity cache (today's platform source).
     seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
 
-    // Local persistent row via the shared bootstrap helper.
+    // note: Local persistent row via the shared bootstrap helper.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1280,7 +1273,7 @@ fn creator_list_mixed_local_and_platform() {
         .stdout(predicate::str::contains("Created persistent identity"));
     let local_id = single_persistent_id(home);
 
-    // Human default: additive ORIGIN column — local row marked, platform row
+    // note: Human default: additive ORIGIN column — local row marked, platform row
     // byte-stable (id/handle/display unchanged).
     let human = Command::cargo_bin("nexus42")
         .unwrap()
@@ -1294,7 +1287,7 @@ fn creator_list_mixed_local_and_platform() {
         stdout.contains("ORIGIN"),
         "table must gain the ORIGIN header: {stdout}"
     );
-    // Column-aware ORIGIN pin: slice each row's ORIGIN cell at the header
+    // note: Column-aware ORIGIN pin: slice each row's ORIGIN cell at the header
     // column offset — a plain substring would already match `ctr_local*` ids
     // (which embed "local") and "Alice Platform" (which embeds "platform").
     let header_line = stdout
@@ -1332,7 +1325,7 @@ fn creator_list_mixed_local_and_platform() {
         "ORIGIN cell on the platform row: {platform_line}"
     );
 
-    // `--json`: pinned DTO array verbatim.
+    // note: `--json`: pinned DTO array verbatim.
     let json_out = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1381,7 +1374,7 @@ fn creator_list_excludes_anonymous_identity() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // A persistent local row + a seeded platform row keep the listing
+    // note: A persistent local row + a seeded platform row keep the listing
     // non-empty while the anonymous identity is active.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -1396,7 +1389,7 @@ fn creator_list_excludes_anonymous_identity() {
         .stdout(predicate::str::contains("Created persistent identity"));
     seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
 
-    // The anonymous identity becomes the active creator (ephemeral — no
+    // note: The anonymous identity becomes the active creator (ephemeral — no
     // `local_identities` row, no workspace row).
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -1448,7 +1441,7 @@ fn creator_list_excludes_anonymous_identity() {
     );
 }
 
-/// `creator list --json` on an empty identity surface emits `[]` (DTO
+/// note: `creator list --json` on an empty identity surface emits `[]` (DTO
 /// verbatim); the human default keeps the unchanged empty-state copy.
 #[test]
 fn creator_list_empty_states_json_and_human() {
@@ -1475,7 +1468,7 @@ fn creator_list_empty_states_json_and_human() {
         .stdout(predicate::str::contains("No registered Creators found."));
 }
 
-/// `creator list --help` documents the new `--json` flag.
+/// note: `creator list --help` documents the new `--json` flag.
 #[test]
 fn creator_list_help_documents_json() {
     Command::cargo_bin("nexus42")
@@ -1487,10 +1480,8 @@ fn creator_list_help_documents_json() {
         .success()
         .stdout(predicate::str::contains("--json"));
 }
-// =============================================================================
 // V1.176 P0 QC fix wave (qc2 S#2 / qc3 S-003): hermetic CLI pins for the
 // shipped-but-unpinned legs + local-source failure mode
-// =============================================================================
 
 /// `creator list` must not materialize `~/.nexus42/state.db` when it is
 /// absent (lazy-open pin, qc2 S#2 leg 1) — even while the platform cache
@@ -1587,7 +1578,7 @@ fn persistent_identity_create_session_selection_activates_matched_id() {
         .stdout(predicate::str::contains("Created persistent identity"));
     let target_id = single_persistent_id(home);
 
-    // A second persistent identity becomes the active one.
+    // note: A second persistent identity becomes the active one.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -1601,7 +1592,7 @@ fn persistent_identity_create_session_selection_activates_matched_id() {
         .assert()
         .success();
 
-    // Re-running the target name → single match → activate the matched id.
+    // note: Re-running the target name → single match → activate the matched id.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -1668,7 +1659,7 @@ fn persistent_identity_create_nameless_first_mint() {
             "nameless mint stores no name"
         );
 
-        // The workspace db is per-creator + per-workspace-slug, resolved under
+        // note: The workspace db is per-creator + per-workspace-slug, resolved under
         // the test's HOME (the child binary's HOME env does not change this
         // process), so use `paths::state_db_path` with the explicit home.
         let db_path = nexus42::paths::state_db_path(home, &rows[0].creator_id, "default");
@@ -1688,7 +1679,7 @@ fn persistent_identity_create_nameless_first_mint() {
     });
 }
 
-/// `creator list` degrades with a warning when the local source
+/// note: `creator list` degrades with a warning when the local source
 /// (`~/.nexus42/state.db`) exists but is unreadable (qc3 S-003): platform
 /// rows still render, stderr carries an honest note, and exit stays 0.
 #[test]
@@ -1697,7 +1688,7 @@ fn creator_list_degrades_when_local_source_unreadable() {
     let home = tmp.path();
     seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
 
-    // Corrupt the local store: garbage bytes make the read-only open fail.
+    // invariant: Corrupt the local store: garbage bytes make the read-only open fail.
     let dir = home.join(".nexus42");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("state.db"), b"this is not a sqlite database file").unwrap();
@@ -1713,7 +1704,7 @@ fn creator_list_degrades_when_local_source_unreadable() {
         .stderr(predicate::str::contains("warning"))
         .stderr(predicate::str::contains("local identities unavailable"));
 
-    // `--json` keeps its machine contract on the same degraded path.
+    // why: `--json` keeps its machine contract on the same degraded path.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")

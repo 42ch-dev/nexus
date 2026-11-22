@@ -10,6 +10,7 @@
 //! writer** before any CLI child is spawned. Drop is not proof of release, so
 //! the release is an explicit call. The fixture holds no running server and no
 //! live writer afterwards.
+// invariant: the fixture releases its seed writer before any CLI child is spawned.
 
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use nexus_core::CoreHomeService;
@@ -17,19 +18,19 @@ use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use tempfile::TempDir;
 
-/// Creator display name the fixture registers (a persistent local identity).
+/// note: Creator display name the fixture registers (a persistent local identity).
 const CREATOR_NAME: &str = "Direct Fixture Author";
-/// Workspace the fixture materializes and selects.
+/// note: Workspace the fixture materializes and selects.
 const WORKSPACE_SLUG: &str = "default";
 
-/// An isolated raw `HOME` with one active creator + workspace and no daemon.
+/// note: An isolated raw `HOME` with one active creator + workspace and no daemon.
 pub struct DirectFixture {
-    /// Hermetic `HOME` (parent of `.nexus42`). Kept alive for the whole test.
+    /// why: Hermetic `HOME` (parent of `.nexus42`). Kept alive for the whole test.
     pub home: TempDir,
 }
 
 impl DirectFixture {
-    /// Create the hermetic home and select an initialized creator/workspace.
+    /// note: Create the hermetic home and select an initialized creator/workspace.
     ///
     /// # Panics
     ///
@@ -51,7 +52,7 @@ impl DirectFixture {
             .expect("register fixture creator");
         let creator_id = creator.creator_id;
 
-        // `select_workspace` initializes only a workspace that exists on disk,
+        // invariant: `select_workspace` initializes only a workspace that exists on disk,
         // so materialize the operational directory first — the same layout the
         // CLI's own home resolution reads.
         std::fs::create_dir_all(operational_workspace_dir(
@@ -68,7 +69,7 @@ impl DirectFixture {
             .await
             .expect("select fixture workspace");
 
-        // The selection above admits a direct writer and retains its OS
+        // note: The selection above admits a direct writer and retains its OS
         // admission guard in THIS process. A CLI child must not be handed a
         // home some other writer still holds, so release it explicitly.
         release_retained_writer_guards(&workspace_state_db_path(
@@ -80,7 +81,7 @@ impl DirectFixture {
         Self { home }
     }
 
-    /// The real `nexus42` binary, pointed at this fixture's hermetic `HOME`.
+    /// note: The real `nexus42` binary, pointed at this fixture's hermetic `HOME`.
     pub fn command(&self) -> assert_cmd::Command {
         let mut command = assert_cmd::Command::cargo_bin("nexus42").expect("nexus42 binary");
         command.env("HOME", self.home.path()).env("RUST_LOG", "off");

@@ -3,22 +3,21 @@
 //! Covers R1-R3, R5 (R4 already verified in T6)
 //!
 //! Run with: cargo test --test regression
+// note: covers R1-R3 and R5; R4 was verified in T6.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-// =============================================================================
-// R1: local_only anonymous identity end-to-end
-// =============================================================================
+// note: R1: local_only anonymous identity end-to-end
 
-/// Regression R1: Anonymous identity works and sync is blocked in `local_only` mode
+/// note: Regression R1: Anonymous identity works and sync is blocked in `local_only` mode
 #[test]
 fn r1_anonymous_identity_e2e() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create anonymous identity
+    // note: Create anonymous identity
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -32,12 +31,12 @@ fn r1_anonymous_identity_e2e() {
         .assert()
         .success();
 
-    // Verify the identity was created with a ctr_ prefix (anonymous identity marker)
+    // note: Verify the identity was created with a ctr_ prefix (anonymous identity marker)
     output
         .stdout(predicate::str::contains("ctr_"))
         .stdout(predicate::str::contains("Created anonymous identity"));
 
-    // Verify runtime mode is local_only (default)
+    // note: Verify runtime mode is local_only (default)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -48,7 +47,7 @@ fn r1_anonymous_identity_e2e() {
         .success()
         .stdout(predicate::str::contains("local_only"));
 
-    // Verify sync push is blocked in local_only mode (v1.193 P2-T12:
+    // note: Verify sync push is blocked in local_only mode (v1.193 P2-T12:
     // `platform sync` is the parser entrance; the top-level alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -61,13 +60,13 @@ fn r1_anonymous_identity_e2e() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// Regression R1: Anonymous identity shows as active (ephemeral - not persisted)
+/// note: Regression R1: Anonymous identity shows as active (ephemeral - not persisted)
 #[test]
 fn r1_anonymous_identity_active_session() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create anonymous identity
+    // note: Create anonymous identity
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -81,7 +80,7 @@ fn r1_anonymous_identity_active_session() {
         .assert()
         .success();
 
-    // In the same session, identity is usable
+    // note: In the same session, identity is usable
     // (ephemeral means it won't persist to list in a new session)
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -94,17 +93,15 @@ fn r1_anonymous_identity_active_session() {
         .stdout(predicate::str::contains("local_only"));
 }
 
-// =============================================================================
-// R2: local_only local persistent identity end-to-end
-// =============================================================================
+// note: R2: local_only local persistent identity end-to-end
 
-/// Regression R2: Local persistent identity persists across sessions
+/// note: Regression R2: Local persistent identity persists across sessions
 #[test]
 fn r2_persistent_identity_e2e() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create persistent local identity
+    // note: Create persistent local identity
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -118,10 +115,10 @@ fn r2_persistent_identity_e2e() {
         .assert()
         .success();
 
-    // Verify identity was created
+    // note: Verify identity was created
     output.stdout(predicate::str::contains("Created persistent identity"));
 
-    // Verify identity can be used in second session (same HOME, new process)
+    // note: Verify identity can be used in second session (same HOME, new process)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -132,7 +129,7 @@ fn r2_persistent_identity_e2e() {
         .success()
         .stdout(predicate::str::contains("TestWriter"));
 
-    // Verify runtime mode is local_only
+    // note: Verify runtime mode is local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -144,13 +141,13 @@ fn r2_persistent_identity_e2e() {
         .stdout(predicate::str::contains("local_only"));
 }
 
-/// Regression R2: Persistent identity persists in `SQLite` state.db
+/// note: Regression R2: Persistent identity persists in `SQLite` state.db
 #[test]
 fn r2_persistent_identity_config_persists() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create persistent identity
+    // note: Create persistent identity
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -164,14 +161,14 @@ fn r2_persistent_identity_config_persists() {
         .assert()
         .success();
 
-    // Verify state.db exists in ~/.nexus42/ (identity storage)
+    // note: Verify state.db exists in ~/.nexus42/ (identity storage)
     let db_path = home.join(".nexus42/state.db");
     assert!(
         db_path.exists(),
         "state.db should exist after creating persistent identity"
     );
 
-    // List identities to verify persistence
+    // note: List identities to verify persistence
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -183,11 +180,9 @@ fn r2_persistent_identity_config_persists() {
         .stdout(predicate::str::contains("PersistentUser"));
 }
 
-// =============================================================================
-// R3: Local truth core chain (SOUL/memory/KB/output)
-// =============================================================================
+// note: R3: Local truth core chain (SOUL/memory/KB/output)
 
-/// Regression R3: Local truth chain - SOUL → memory → context assembly
+/// note: Regression R3: Local truth chain - SOUL → memory → context assembly
 #[test]
 fn r3_local_truth_chain() {
     let tmp = TempDir::new().unwrap();
@@ -195,7 +190,7 @@ fn r3_local_truth_chain() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Create a persistent identity first (SOUL requires active creator)
+    // note: Create a persistent identity first (SOUL requires active creator)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -209,7 +204,7 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Init workspace
+    // note: Init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -223,7 +218,7 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Init SOUL
+    // note: Init SOUL
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -234,7 +229,7 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Verify SOUL was initialized
+    // note: Verify SOUL was initialized
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -245,7 +240,7 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Create memory
+    // note: Create memory
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -259,7 +254,7 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // List memories to verify it was created
+    // note: List memories to verify it was created
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -271,10 +266,10 @@ fn r3_local_truth_chain() {
         .success()
         .stdout(predicate::str::contains("world_building"));
 
-    // R3 verification: SOUL init + memory creation chain works
+    // note: R3 verification: SOUL init + memory creation chain works
 }
 
-/// Regression R3: context assemble-moment executes without panic or skip
+/// note: Regression R3: context assemble-moment executes without panic or skip
 ///
 /// Validates the clap -h flag collision fix (hint short alias removed)
 /// and that assemble-moment runs successfully in a `local_only` workspace.
@@ -285,7 +280,7 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Create a persistent identity (required for workspace operations)
+    // note: Create a persistent identity (required for workspace operations)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -299,7 +294,7 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // Init workspace
+    // note: Init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -313,7 +308,7 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // Init SOUL (required by assemble-moment Stage0)
+    // note: Init SOUL (required by assemble-moment Stage0)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -324,7 +319,7 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // v1.191 P1 T9: the admitted knowledge view is World-scoped — a worldless
+    // note: v1.191 P1 T9: the admitted knowledge view is World-scoped — a worldless
     // `assemble-moment` fails closed in `creator_view_scope` ("an admitted
     // knowledge view requires a World: pass `--world-id wld_...`"; re-smoked on
     // the real binary in v1.194 P2-T2), so the R3 chain materializes a World and
@@ -357,7 +352,7 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .expect("created world id")
         .to_string();
 
-    // Run context assemble-moment — must not panic and succeed
+    // invariant: Run context assemble-moment — must not panic and succeed
     Command::cargo_bin("nexus42")
         .unwrap()
         .args([
@@ -375,7 +370,7 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .success();
 }
 
-/// Regression R3 (I-000039): a worldless `assemble-moment` fails closed.
+/// note: Regression R3 (I-000039): a worldless `assemble-moment` fails closed.
 ///
 /// v1.191 P1 T9 made the admitted knowledge view World-scoped: the
 /// `creator_view_scope` guard in `commands/platform/context.rs` refuses a
@@ -389,7 +384,7 @@ fn r3_context_assemble_moment_worldless_refuses() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // The guard runs once the active Creator resolves, so identity + workspace
+    // note: The guard runs once the active Creator resolves, so identity + workspace
     // must be in place for the refusal — not a missing-creator error — to fire.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -421,7 +416,7 @@ fn r3_context_assemble_moment_worldless_refuses() {
         .assert()
         .success();
 
-    // No `--world-id`: exit 1 with the worldless refusal, never a widened read.
+    // invariant: No `--world-id`: exit 1 with the worldless refusal, never a widened read.
     Command::cargo_bin("nexus42")
         .unwrap()
         .args(["platform", "context", "assemble-moment"])
@@ -434,7 +429,7 @@ fn r3_context_assemble_moment_worldless_refuses() {
         ));
 }
 
-/// Regression R3: SOUL validation works
+/// note: Regression R3: SOUL validation works
 #[test]
 fn r3_soul_validation() {
     let tmp = TempDir::new().unwrap();
@@ -442,7 +437,7 @@ fn r3_soul_validation() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Create identity and init workspace
+    // note: Create identity and init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -469,7 +464,7 @@ fn r3_soul_validation() {
         .assert()
         .success();
 
-    // Init SOUL
+    // note: Init SOUL
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -480,7 +475,7 @@ fn r3_soul_validation() {
         .assert()
         .success();
 
-    // Validate SOUL structure
+    // note: Validate SOUL structure
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -493,17 +488,15 @@ fn r3_soul_validation() {
         .stdout(predicate::str::contains("valid").or(predicate::str::contains("Valid")));
 }
 
-// =============================================================================
-// R5: No-platform dependency guard for local_only path
-// =============================================================================
+// note: R5: No-platform dependency guard for local_only path
 
-/// Regression R5: Platform sync push blocked in `local_only` mode
+/// note: Regression R5: Platform sync push blocked in `local_only` mode
 #[test]
 fn r5_platform_guard_blocks_sync_push() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
+    // note: Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -514,7 +507,7 @@ fn r5_platform_guard_blocks_sync_push() {
         .assert()
         .success();
 
-    // Verify sync push blocked (v1.193 P2-T12: `platform sync` is the parser
+    // note: Verify sync push blocked (v1.193 P2-T12: `platform sync` is the parser
     // entrance; the hidden top-level `sync` alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -527,7 +520,7 @@ fn r5_platform_guard_blocks_sync_push() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// Regression R5 (v1.193 P2-T12): the deferred `platform explore` leaf was
+/// note: Regression R5 (v1.193 P2-T12): the deferred `platform explore` leaf was
 /// removed in P1-T5, so no `local_only` guard question survives for it — the
 /// parser rejects before any runtime-mode branch, and every invocation is
 /// clap's unrecognized-subcommand error rather than a help page.
@@ -536,7 +529,7 @@ fn r5_platform_guard_explore_is_unknown() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
+    // note: Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -562,13 +555,13 @@ fn r5_platform_guard_explore_is_unknown() {
     }
 }
 
-/// Regression R5: local sync status works in `local_only` mode
+/// note: Regression R5: local sync status works in `local_only` mode
 #[test]
 fn r5_platform_guard_sync_status_works() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
+    // note: Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -579,7 +572,7 @@ fn r5_platform_guard_sync_status_works() {
         .assert()
         .success();
 
-    // Verify sync status still works (local outbox query, no platform needed)
+    // note: Verify sync status still works (local outbox query, no platform needed)
     // With no active creator configured, it should still respond gracefully.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -592,13 +585,13 @@ fn r5_platform_guard_sync_status_works() {
         .stdout(predicate::str::contains("Sync Status"));
 }
 
-/// Regression R5: `local_only` mode persists across sessions
+/// note: Regression R5: `local_only` mode persists across sessions
 #[test]
 fn r5_local_only_mode_persists() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
+    // note: Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -609,7 +602,7 @@ fn r5_local_only_mode_persists() {
         .assert()
         .success();
 
-    // Verify mode persisted (new process, same HOME)
+    // note: Verify mode persisted (new process, same HOME)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -621,11 +614,9 @@ fn r5_local_only_mode_persists() {
         .stdout(predicate::str::contains("local_only"));
 }
 
-// =============================================================================
-// V1.29 Memory Session Review Loop (Plan A1)
-// =============================================================================
+// note: V1.29 Memory Session Review Loop (Plan A1)
 
-/// Verify `creator memory pending list --help` returns usage without error.
+/// note: Verify `creator memory pending list --help` returns usage without error.
 #[test]
 fn v1_29_pending_list_help() {
     Command::cargo_bin("nexus42")
@@ -639,7 +630,7 @@ fn v1_29_pending_list_help() {
         .stdout(predicate::str::contains("pending-list"));
 }
 
-/// Verify `creator memory pending show --help` returns usage without error.
+/// note: Verify `creator memory pending show --help` returns usage without error.
 #[test]
 fn v1_29_pending_show_help() {
     Command::cargo_bin("nexus42")
@@ -653,7 +644,7 @@ fn v1_29_pending_show_help() {
         .stdout(predicate::str::contains("PENDING_ID"));
 }
 
-/// Verify `creator memory pending dismiss --help` returns usage without error.
+/// note: Verify `creator memory pending dismiss --help` returns usage without error.
 #[test]
 fn v1_29_pending_dismiss_help() {
     Command::cargo_bin("nexus42")
@@ -667,7 +658,7 @@ fn v1_29_pending_dismiss_help() {
         .stdout(predicate::str::contains("PENDING_ID"));
 }
 
-/// Verify `creator memory --help` shows pending subcommands.
+/// note: Verify `creator memory --help` shows pending subcommands.
 #[test]
 fn v1_29_memory_help_shows_pending_commands() {
     Command::cargo_bin("nexus42")

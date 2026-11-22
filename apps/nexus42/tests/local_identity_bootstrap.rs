@@ -4,6 +4,7 @@
 //! (the I-000304 refusal) under the writer lock before the identity INSERT,
 //! so a refused bootstrap persists nothing instead of leaving a minted,
 //! unselected persistent identity row behind.
+// invariant: a refused bootstrap persists nothing — the admission read runs before the identity INSERT.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -11,7 +12,7 @@ mod cli_support;
 use assert_cmd::Command;
 use cli_support::stderr;
 
-/// A config document that cannot be read (the I-000304 refusal shape) must
+/// invariant: A config document that cannot be read (the I-000304 refusal shape) must
 /// fail the persistent identity mint before any store write: the CLI exits
 /// non-zero with zero identity rows committed — nothing left minted and
 /// unselected.
@@ -20,11 +21,11 @@ async fn a_refused_config_document_leaves_no_identity_row_behind() {
     let home = tempfile::tempdir().expect("temp home");
     let nexus = home.path().join(".nexus42");
     std::fs::create_dir_all(&nexus).expect("nexus home");
-    // A directory at the document path is an existing entry that cannot be
+    // invariant: A directory at the document path is an existing entry that cannot be
     // read — the portable stand-in for a dangling link, same refusal shape.
     std::fs::create_dir_all(nexus.join("config.toml")).expect("unreadable config entry");
 
-    // The named mint leg reaches `mint_and_materialize` straight from the
+    // note: The named mint leg reaches `mint_and_materialize` straight from the
     // empty-store decision tree; the nameless leg would refuse earlier, at
     // the plain `CliConfig::load` of the selection probe.
     let output = Command::cargo_bin("nexus42")
@@ -40,7 +41,7 @@ async fn a_refused_config_document_leaves_no_identity_row_behind() {
         stderr(&output)
     );
 
-    // The store the mint leg created must hold zero identity rows: the
+    // invariant: The store the mint leg created must hold zero identity rows: the
     // INSERT never ran.
     let pool = nexus_local_db::open_pool_read_only(&nexus.join("state.db"))
         .await

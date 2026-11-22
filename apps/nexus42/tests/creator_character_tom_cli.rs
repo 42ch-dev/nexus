@@ -8,6 +8,7 @@
 //! verb, and every belief is recorded/read back through the migrated core arms
 //! — carrier admission, the revision CAS and the reviewer's keyset order are
 //! the core's own.
+// note: every belief is recorded and read back through the migrated core arms.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -31,7 +32,7 @@ fn json_out(out: &Output) -> Value {
     serde_json::from_str(&stdout(out)).unwrap_or_else(|_| panic!("json: {}", stdout(out)))
 }
 
-/// Seed one `character`-owned carrier for `character_id` through the shipped
+/// note: Seed one `character`-owned carrier for `character_id` through the shipped
 /// `creator character knowledge add` authoring verb.
 fn seed_tom_carrier(actor: &DirectActor, character_id: &str) -> String {
     let out = cli_ok(
@@ -58,7 +59,7 @@ fn seed_tom_carrier(actor: &DirectActor, character_id: &str) -> String {
         .to_string()
 }
 
-#[allow(clippy::too_many_arguments)] // CLI argv mapping
+#[allow(clippy::too_many_arguments)] // why: CLI argv mapping
 fn record_argv(
     character_id: &str,
     world_id: &str,
@@ -121,7 +122,7 @@ async fn character_tom_record_show_json_and_human_parity() {
     let character_b = actor.create_character("Ben", &world_w1).await;
     let carrier = seed_tom_carrier(&actor, &character_a.character_id);
 
-    // L1: the viewer Character's own belief, `--json`, first CAS step.
+    // note: L1: the viewer Character's own belief, `--json`, first CAS step.
     let json_args = record_argv(
         &character_a.character_id,
         &world_w1,
@@ -137,7 +138,7 @@ async fn character_tom_record_show_json_and_human_parity() {
     assert_eq!(payload["revision"], 1);
     assert_eq!(payload["carrier_entry_id"], carrier);
 
-    // L2: a belief about another Character, human output, next CAS step.
+    // note: L2: a belief about another Character, human output, next CAS step.
     let human_args = record_argv(
         &character_a.character_id,
         &world_w1,
@@ -199,7 +200,7 @@ async fn character_tom_record_show_json_and_human_parity() {
     assert!(text.contains("CLI belief proposition"));
 }
 
-/// Count the stored derivative `MindState` rows on the released workspace DB.
+/// note: Count the stored derivative `MindState` rows on the released workspace DB.
 async fn mind_state_count(actor: &DirectActor) -> i64 {
     let pool = actor.read_only_pool().await;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mind_states")

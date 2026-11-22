@@ -3,6 +3,7 @@
 //! Each sample is copied to a fresh temp directory (the command touches only `workflow.json`
 //! and `preset.yaml`), driven through the compiled binary, and compared byte for byte with the
 //! committed manifest: the pair is reproducible, not merely value-equal.
+// note: exported pairs are compared byte for byte, so the committed manifests stay reproducible.
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
@@ -20,7 +21,7 @@ fn repo_root() -> PathBuf {
         .expect("repository root resolves")
 }
 
-/// Copy the bundle's `workflow.json` and `preset.yaml` into a fresh temp directory.
+/// note: Copy the bundle's `workflow.json` and `preset.yaml` into a fresh temp directory.
 fn copy_bundle(bundle: &str) -> (tempfile::TempDir, PathBuf) {
     let source = repo_root().join(bundle);
     let dir = tempfile::tempdir().expect("temp dir");
@@ -79,7 +80,7 @@ fn malformed_json_leaves_the_manifest_untouched() {
 
 #[test]
 fn unprojectable_document_leaves_the_manifest_untouched() {
-    // A document `serde` accepts that `export_preset` refuses: a preset carries exactly one
+    // note: A document `serde` accepts that `export_preset` refuses: a preset carries exactly one
     // terminal node, so an empty `terminal` list has no projection.
     let json = std::fs::read_to_string(repo_root().join(SAMPLES[1]).join("workflow.json"))
         .expect("read the sample workflow.json");
@@ -91,7 +92,7 @@ fn unprojectable_document_leaves_the_manifest_untouched() {
     assert_refusal_keeps_manifest(SAMPLES[1], &workflow, "workflow IR conversion refused");
 }
 
-/// Replace the bundle's `workflow.json` with `workflow`, run the export, require the refusal
+/// note: Replace the bundle's `workflow.json` with `workflow`, run the export, require the refusal
 /// named by `refusal`, and require the prior `preset.yaml` to be byte-identical.
 fn assert_refusal_keeps_manifest(bundle: &str, workflow: &[u8], refusal: &str) {
     let (_dir, path) = copy_bundle(bundle);

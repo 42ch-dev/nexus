@@ -6,6 +6,7 @@
 //! through the same CAS every compose operation uses. These tests drive the real
 //! binary against an isolated `HOME` seeded through the direct-core seam — no
 //! daemon, no provider.
+// note: import commits through the same CAS as every other compose operation.
 
 #[path = "common/cli_support.rs"]
 mod cli_support;
@@ -17,7 +18,7 @@ use std::path::Path;
 use cli_support::{stderr, stdout};
 use direct::DirectFixture;
 
-/// The strategy id every CLI fixture declares.
+/// note: The strategy id every CLI fixture declares.
 const PARTNER: &str = "cli-partner-fixture";
 
 fn write_bundle(bundle: &Path, yaml: &str) {
@@ -25,7 +26,7 @@ fn write_bundle(bundle: &Path, yaml: &str) {
     std::fs::write(bundle.join("preset.yaml"), yaml).expect("preset.yaml");
 }
 
-/// A partner bundle the loader, the shared validator and the static walk all accept.
+/// note: A partner bundle the loader, the shared validator and the static walk all accept.
 fn partner_bundle() -> String {
     format!(
         r#"preset:
@@ -50,7 +51,7 @@ states:
     )
 }
 
-/// The same shape, but a judged state with two labeled branches and no `default`
+/// note: The same shape, but a judged state with two labeled branches and no `default`
 /// edge: the walk refuses to guess a branch.
 fn unsimulatable_bundle() -> String {
     format!(
@@ -110,7 +111,7 @@ async fn preset_import_prints_the_candidate_and_the_trajectory_approve_accepts()
         "the printed trajectory must be the walk of the stored bytes"
     );
 
-    // The stored row is the conflict on a second import: the source cannot overwrite it.
+    // invariant: The stored row is the conflict on a second import: the source cannot overwrite it.
     let again = fixture
         .command()
         .args(["preset", "import", bundle.to_str().expect("utf-8 path")])
