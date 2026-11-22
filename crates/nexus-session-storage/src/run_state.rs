@@ -1,4 +1,4 @@
-//! Durable run state types (v1.186 P0, A2).
+//! note: durable run state types (v1.186 P0, A2).
 //!
 //! Authoritative contracts for the durable workflow-state slice. These types
 //! freeze the server-side run descriptor, the durable wait/in-flight/cancel/
@@ -16,22 +16,19 @@ use serde::{Deserialize, Serialize};
 use crate::{SessionId, SessionStatus, StorageError};
 use nexus_preset::source_identity::PresetSourceIdentity;
 
-/// Frozen server-side descriptor for a v1 run (A2).
+/// note: frozen server-side descriptor for a v1 run (A2).
 ///
 /// Validated and frozen at admission. Contains **no** env values, credentials
 /// or live handles — only the identity needed to reconstruct a supported
 /// preset session after restart.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunDescriptorV1 {
-    /// Owning creator id.
     pub creator_id: String,
-    /// Optional work id (schedule/chain origin).
+    /// note: optional work id (schedule/chain origin).
     pub work_id: Option<String>,
-    /// Resolved workspace root the run executes in.
     pub workspace_root: PathBuf,
-    /// Preset identifier.
     pub preset_id: String,
-    /// Preset schema version of the **bundle** admission resolved.
+    /// note: preset schema version of the **bundle** admission resolved.
     ///
     /// Provenance, not the executed identity: an applied run executes its IR
     /// document, and the identity that governs it is `applied` (I-000443).
@@ -39,22 +36,20 @@ pub struct RunDescriptorV1 {
     /// source proof is these two fields, child runs inherit them, and the
     /// `preset_version` column is `NOT NULL`; an applied run reads neither.
     pub preset_version: u32,
-    /// Content-addressed **bundle** source identity (A2/A7).
+    /// note: content-addressed **bundle** source identity (A2/A7).
     ///
     /// Provenance for an applied run, for the same reason as
     /// [`Self::preset_version`]: admission did resolve this bundle, and only a
     /// user bundle can carry the apply, but the bytes the run executes are the
     /// applied document's. Recovery reads it on the no-apply arm only.
     pub source: PresetSourceIdentity,
-    /// Frozen preset input map.
     pub input: serde_json::Map<String, serde_json::Value>,
-    /// Role → provider binding map (A1).
     pub agent_bindings: HashMap<String, AgentBinding>,
-    /// Parent session id for inner-graph child runs.
+    /// note: parent session id for inner-graph child runs.
     pub parent_session_id: Option<SessionId>,
-    /// Named inner graph this run executes (child runs).
+    /// note: named inner graph this run executes (child runs).
     pub graph_name: Option<String>,
-    /// Applied identity the run was admitted under: `None` when admission saw
+    /// note: applied identity the run was admitted under: `None` when admission saw
     /// no apply, and for any row persisted before this field existed.
     ///
     /// When `Some`, THIS is the run's frozen source — the document it executes
@@ -68,7 +63,7 @@ pub struct RunDescriptorV1 {
     /// serializes byte for byte as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied: Option<AppliedRunIdentity>,
-    /// Intake mode the run was admitted under (`strategy_intake` config at
+    /// note: intake mode the run was admitted under (`strategy_intake` config at
     /// admission): `Some` on new user-preset runs, `None` for embedded and
     /// `_system.` presets and for any row persisted before this field
     /// existed. Recovery follows the RECORDED mode, not the current config —
@@ -80,25 +75,20 @@ pub struct RunDescriptorV1 {
     pub intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
 }
 
-/// The applied identity a run was admitted under.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppliedRunIdentity {
-    /// The `strategy_applies.apply_id` that was current at admission.
+    /// note: the `strategy_applies.apply_id` that was current at admission.
     pub apply_id: String,
-    /// The `content_hash` that apply pinned.
     pub content_hash: String,
 }
 
-/// Role → provider binding (A1).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentBinding {
-    /// Provider id.
     pub provider_id: String,
-    /// Optional model id.
     pub model: Option<String>,
 }
 
-/// Admission matrix snapshot for a schedule (N-1).
+/// note: admission matrix snapshot for a schedule (N-1).
 ///
 /// The store re-checks due-time, dependency satisfaction, and the
 /// per-creator concurrency rule INSIDE the same `BEGIN IMMEDIATE` claim
@@ -109,187 +99,169 @@ pub struct AgentBinding {
 /// the write lock where the running set is authoritative.
 #[derive(Debug, Clone)]
 pub struct ScheduleAdmissionGate {
-    /// Owning creator id (per-creator concurrency scope).
+    /// note: owning creator id (per-creator concurrency scope).
     pub creator_id: String,
-    /// `scheduled_at` (Unix seconds) — `None` = on-demand, always due.
+    /// note: `scheduled_at` (Unix seconds) — `None` = on-demand, always due.
     pub scheduled_at: Option<i64>,
-    /// `depends_on` entries; each must be `completed` or `cancelled`.
+    /// note: `depends_on` entries; each must be `completed` or `cancelled`.
     pub depends_on: Vec<String>,
-    /// `serial` | `parallel_with` | `parallel_any` (unknown → fail closed).
+    /// note: `serial` | `parallel_with` | `parallel_any` (unknown → fail closed).
     pub concurrency_kind: String,
-    /// JSON array of whitelisted schedule ids for `parallel_with`.
+    /// note: JSON array of whitelisted schedule ids for `parallel_with`.
     pub concurrency_whitelist: Option<String>,
 }
 
-/// Durable human-wait record (A4).
+/// note: durable human-wait record (A4).
 ///
 /// A fresh token is generated on **each** arrival at a human wait, even if
 /// the same task loops; it is retained through restart until a successful
 /// CAS consumes it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WaitRecord {
-    /// Fresh UUID token per arrival.
+    /// note: fresh UUID token per arrival.
     pub wait_id: String,
-    /// Task id at the wait point.
     pub task_id: String,
-    /// Child session id when the wait is on a nested child.
     pub child_session_id: Option<String>,
-    /// Child task id when the wait is on a nested child.
     pub child_task_id: Option<String>,
-    /// Wait kind — always `manual` for human waits.
+    /// note: wait kind — always `manual` for human waits.
     pub kind: WaitKind,
 }
 
-/// Wait kind.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WaitKind {
-    /// Human approval wait.
+    /// note: human approval wait.
     Manual,
 }
 
-/// In-flight prompt attempt (A2).
+/// note: in-flight prompt attempt (A2).
 ///
 /// Persisted in `dispatching` phase **before** any external Host effect, so a
 /// crash after the effect but before the result checkpoint leaves the run
 /// interrupted (never auto-replayed).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptAttempt {
-    /// Attempt id (UUID).
+    /// note: attempt id (UUID).
     pub attempt_id: String,
-    /// Task id the prompt belongs to.
     pub task_id: String,
-    /// Dispatch phase.
     pub phase: PromptPhase,
-    /// Host session id once allocated.
+    /// note: host session id once allocated.
     pub host_session_id: Option<String>,
-    /// Host operation id once allocated.
+    /// note: host operation id once allocated.
     pub operation_id: Option<String>,
-    /// Owned process identity once launched (A5).
+    /// note: owned process identity once launched (A5).
     pub process_identity: Option<OwnedProcessIdentity>,
 }
 
-/// Prompt dispatch phase.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptPhase {
-    /// Persisted before the external Host effect.
+    /// invariant: persisted before the external Host effect.
     Dispatching,
-    /// Host effect in flight.
+    /// note: host effect in flight.
     Active,
 }
 
-/// Opaque owned process identity (A5) — PID plus platform process-birth and
+/// note: opaque owned process identity (A5) — PID plus platform process-birth and
 /// owned group identity; never PID alone.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OwnedProcessIdentity {
-    /// Process id.
     pub pid: u32,
-    /// Platform process-birth identity (e.g. start time) for reuse detection.
+    /// note: platform process-birth identity (e.g. start time) for reuse detection.
     pub process_birth: Option<String>,
-    /// Owned process-group identity for tree cleanup.
+    /// note: owned process-group identity for tree cleanup.
     pub group_id: Option<String>,
 }
 
-/// Stable machine failure code (A2) — not provider-prose parsing.
+/// note: stable machine failure code (A2) — not provider-prose parsing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunFailure {
-    /// Stable machine code.
     pub code: String,
-    /// Human-readable message.
     pub message: String,
 }
 
-/// Durable run state (A2).
+/// note: durable run state (A2).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RunStateV1 {
-    /// Active human wait (None when not waiting).
+    /// note: active human wait (`None` when not waiting).
     pub wait: Option<WaitRecord>,
-    /// Current task id set before stepping, cleared only with a completed
+    /// invariant: current task id set before stepping, cleared only with a completed
     /// checkpoint (a current-position safety marker, not an activity journal).
     pub step_in_flight: Option<String>,
-    /// In-flight prompt attempt (None when no prompt is dispatching/active).
+    /// note: in-flight prompt attempt (`None` when no prompt is dispatching/active).
     pub in_flight: Option<PromptAttempt>,
-    /// Durable failure record (None when not failed).
+    /// note: durable failure record (`None` when not failed).
     pub failure: Option<RunFailure>,
-    /// Cancellation requested but not yet confirmed.
+    /// note: cancellation requested but not yet confirmed.
     pub cancel_requested: bool,
 }
 
-/// Authoritative run record (A2).
+/// note: authoritative run record (A2).
 ///
 /// `execution_version = 0` marks a **legacy/unverified** row: the status is
 /// not authoritative and the descriptor/state are absent. v1 rows carry the
 /// authoritative status plus descriptor and state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunRecord {
-    /// Run id.
     pub session_id: SessionId,
-    /// Authoritative status (v1 rows) or legacy diagnostic (v0 rows).
+    /// note: authoritative status (v1 rows) or legacy diagnostic (v0 rows).
     pub status: SessionStatus,
-    /// Current state revision (CAS anchor).
+    /// note: current state revision (CAS anchor).
     pub state_revision: u64,
-    /// Execution version — `0` = legacy/unverified, `>=1` = v1 authoritative.
+    /// note: execution version — `0` = legacy/unverified, `>=1` = v1 authoritative.
     pub execution_version: u32,
-    /// Frozen descriptor (v1 rows only).
+    /// note: frozen descriptor (v1 rows only).
     pub descriptor: Option<RunDescriptorV1>,
-    /// Durable run state (v1 rows only).
+    /// note: durable run state (v1 rows only).
     pub state: Option<RunStateV1>,
-    /// Durable graph-flow session version (graph clock; distinct from the
+    /// note: durable graph-flow session version (graph clock; distinct from the
     /// workflow control CAS `state_revision`).
     pub graph_version: u64,
 }
 
-/// Child checkpoint (A2) — carries the child session, status and run state.
+/// note: child checkpoint (A2) — carries the child session, status and run state.
 #[derive(Debug, Clone)]
 pub struct ChildCheckpoint {
-    /// Child session snapshot.
     pub session: graph_flow::Session,
-    /// Child status.
     pub status: SessionStatus,
-    /// Child durable run state.
     pub state: RunStateV1,
-    /// Child state revision (CAS anchor for the child row).
+    /// note: child state revision (CAS anchor for the child row).
     pub state_revision: u64,
-    /// Named inner graph this child executes (A2 child identity).
+    /// note: named inner graph this child executes (A2 child identity).
     pub graph_name: Option<String>,
 }
 
-/// Batched root/child checkpoint (A2).
+/// note: batched root/child checkpoint (A2).
 ///
 /// Carries existing root/child snapshots without requiring a graph/context
 /// clone at the trait boundary.
 #[derive(Debug, Clone)]
 pub struct RunCheckpoint<'a> {
-    /// Root session snapshot.
     pub root: &'a graph_flow::Session,
-    /// Child session snapshots.
     pub children: &'a [ChildCheckpoint],
 }
 
-/// Terminal status written by the single settlement authority (P4 §6.2).
+/// note: terminal status written by the single settlement authority (P4 §6.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalSettlementTarget {
-    /// Normal completion.
     Completed,
-    /// Confirmed cancellation after cleanup.
+    /// note: confirmed cancellation after cleanup.
     Cancelled,
-    /// Confirmed failure after cleanup.
+    /// note: confirmed failure after cleanup.
     Failed,
 }
 
-/// Result of a revision-fenced terminal settlement (P4 §6.2).
+/// note: result of a revision-fenced terminal settlement (P4 §6.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementResult {
-    /// This caller won the CAS and wrote the terminal transition.
+    /// note: this caller won the CAS and wrote the terminal transition.
     Applied(RunRecord),
-    /// A durable terminal winner already owns the row — not proof this caller
+    /// invariant: a durable terminal winner already owns the row — not proof this caller
     /// performed cleanup.
     Observed(RunRecord),
 }
 
 impl SettlementResult {
-    /// The durable record either written or observed.
     #[must_use]
     pub const fn record(&self) -> &RunRecord {
         match self {
@@ -298,7 +270,7 @@ impl SettlementResult {
     }
 }
 
-/// Whether a persisted row reflects a cancel request that already reached a
+/// note: whether a persisted row reflects a cancel request that already reached a
 /// defined public outcome (never a spurious 409).
 #[must_use]
 pub fn durable_cancel_outcome_accomplished(record: &RunRecord) -> bool {
@@ -318,13 +290,13 @@ pub fn durable_cancel_outcome_accomplished(record: &RunRecord) -> bool {
     false
 }
 
-/// Transactional workflow state store (A2).
+/// note: transactional workflow state store (A2).
 ///
 /// The SQLite adapter commits root+child state atomically under the root
 /// revision. In-memory parity exists only for tests / Tier-0 non-executing use.
 #[async_trait]
 pub trait WorkflowStateStore: Send + Sync {
-    /// Load the authoritative run record for a session.
+    /// note: load the authoritative run record for a session.
     ///
     /// Returns `None` when the session does not exist. v0 rows return a
     /// legacy/unverified record (`execution_version = 0`, no descriptor/state).
@@ -333,7 +305,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// Returns [`StorageError`] on storage failure.
     async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, StorageError>;
 
-    /// Start a new v1 run with a frozen descriptor.
+    /// note: start a new v1 run with a frozen descriptor.
     ///
     /// Creates the authoritative v1 record (`execution_version = 1`,
     /// `state_revision = 1`, status `Running`) and writes the descriptor plus
@@ -350,7 +322,7 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, StorageError>;
 
-    /// Atomically admit a schedule as a driven v1 run (A3).
+    /// note: atomically admit a schedule as a driven v1 run (A3).
     ///
     /// One Creator-DB transaction linearizes: the schedule claim
     /// (`status='running'`, `current_session_id=<session_id>`,
@@ -381,7 +353,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// # Errors
     /// Returns [`StorageError`] on storage failure, policy refusal, or when
     /// the schedule is not in an admissible state.
-    #[allow(clippy::too_many_arguments)] // atomic claim payload; grouping into a struct would leak the CAS-fence coupling
+    #[allow(clippy::too_many_arguments)] // why: atomic claim payload; grouping into a struct would leak the CAS-fence coupling
     async fn admit_schedule_run(
         &self,
         schedule_id: &str,
@@ -394,7 +366,7 @@ pub trait WorkflowStateStore: Send + Sync {
         admission_gate: Option<&ScheduleAdmissionGate>,
     ) -> Result<RunRecord, StorageError>;
 
-    /// Atomically persist a transition under a root revision compare-and-swap.
+    /// note: atomically persist a transition under a root revision compare-and-swap.
     ///
     /// Writes the root checkpoint position/context, status and execution
     /// metadata, plus child checkpoints, in one transaction. Fails (CAS) when
@@ -421,7 +393,7 @@ pub trait WorkflowStateStore: Send + Sync {
         .await
     }
 
-    /// [`commit_transition`](Self::commit_transition) with an additional
+    /// note: [`commit_transition`](Self::commit_transition) with an additional
     /// graph-clock fence: when `expected_graph_version` is `Some`, the
     /// commit CAS additionally requires the persisted `graph_version` to
     /// equal it, so a graph-only writer that advanced the session clock
@@ -442,7 +414,7 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, StorageError>;
 
-    /// Atomically settle a run to a terminal status under the revision/graph
+    /// note: atomically settle a run to a terminal status under the revision/graph
     /// fences (P4 §6.2).
     ///
     /// Consolidates cancelled/failed/completed terminal writes. On a lost CAS
@@ -462,7 +434,7 @@ pub trait WorkflowStateStore: Send + Sync {
         terminal_target: TerminalSettlementTarget,
     ) -> Result<SettlementResult, StorageError>;
 
-    /// Atomically restore a pre-step root snapshot via ONE revision-fenced
+    /// note: atomically restore a pre-step root snapshot via ONE revision-fenced
     /// storage operation (Important 3).
     ///
     /// Unlike a separate check-then-save (which races concurrent transitions),
@@ -487,7 +459,7 @@ pub trait WorkflowStateStore: Send + Sync {
         pre_step: &graph_flow::Session,
     ) -> Result<RunRecord, StorageError>;
 
-    /// Persist the in-flight (current-position safety) intent BEFORE an
+    /// note: persist the in-flight (current-position safety) intent BEFORE an
     /// external effect dispatch (A2/A7 Important 5), so a crash after an
     /// effect but before the result checkpoint leaves an interrupted (never
     /// replayable) run.
@@ -519,7 +491,7 @@ pub trait WorkflowStateStore: Send + Sync {
         step_state: &RunStateV1,
     ) -> Result<RunRecord, StorageError>;
 
-    /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
+    /// note: persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
     /// the external Host effect, and update it to `Active` once the Host
     /// session/operation IDs are known.
     ///
@@ -560,7 +532,7 @@ pub trait WorkflowStateStore: Send + Sync {
         attempt: &PromptAttempt,
     ) -> Result<(), StorageError>;
 
-    /// Clear the durable `in_flight` prompt-attempt marker after the owning
+    /// note: clear the durable `in_flight` prompt-attempt marker after the owning
     /// operation completed successfully.
     ///
     /// Fenced on the same linearization anchor (`state_revision`,
@@ -584,7 +556,7 @@ pub trait WorkflowStateStore: Send + Sync {
         attempt_id: &str,
     ) -> Result<(), StorageError>;
 
-    /// Load all persisted child runs whose `parent_session_id` matches.
+    /// note: load all persisted child runs whose `parent_session_id` matches.
     ///
     /// Used to hydrate the engine's in-memory children map during recovery
     /// (Important 1): a restarted parent must know its child checkpoints so
