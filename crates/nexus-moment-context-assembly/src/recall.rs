@@ -75,9 +75,11 @@ pub enum FragmentScope {
     Context(String),
 }
 
-/// note: a legacy memory file's frontmatter plus its body. A migrated record
-/// carries these fields in `nexus_legacy`; a provider-native record never had a
-/// file, so its frontmatter is derived from the retained record itself.
+/// note: a legacy memory file's frontmatter plus its body.
+///
+/// A migrated record carries these fields in `nexus_legacy`; a provider-native
+/// record never had a file, so its frontmatter is derived from the retained
+/// record itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryDocument {
     /// note: `nexus_memory_version` — the legacy file format version.
@@ -200,8 +202,10 @@ pub fn memory_slug(record: &RetainedRecord) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// note: the memory-file document a promoted record stands for. The frontmatter
-/// is the one the migration preserves verbatim in `nexus_legacy`, plus the body.
+/// note: the memory-file document a promoted record stands for.
+///
+/// The frontmatter is the one the migration preserves verbatim in
+/// `nexus_legacy`, plus the body.
 /// A record the provider authored natively never had a file, so its frontmatter
 /// is derived from the record (record id as the memory id, the bare kind, its
 /// own `updated_at`).

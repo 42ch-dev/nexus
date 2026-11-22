@@ -26,13 +26,13 @@ use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
 /// invariant: the admitted ActorView snapshot already selected by the caller is
-/// the **only** knowledge input the prompt builders accept
-/// (v1.191 P1 T11, durable §4.2): the rows were chosen by an admitted
-/// `KnowledgeReadScope` (the actor's exact holder plus its authorized
-/// containers, Character-global shared rows included), so MCA never performs
-/// a World-wide read of its own and has no way to fall back to one. An empty
-/// snapshot means "this actor sees nothing" — it yields empty sections,
-/// never a wider query.
+/// the **only** knowledge input the prompt builders accept.
+///
+/// The rows were chosen by an admitted `KnowledgeReadScope` (v1.191 P1 T11,
+/// durable §4.2): the actor's exact holder plus its authorized containers,
+/// Character-global shared rows included — so MCA never performs a World-wide
+/// read of its own and has no way to fall back to one. An empty snapshot means
+/// "this actor sees nothing" — it yields empty sections, never a wider query.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterViewInput {
     /// note: complete admitted ActorView rows for this actor + World (+ binding).

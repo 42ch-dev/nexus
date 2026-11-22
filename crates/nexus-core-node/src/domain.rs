@@ -72,7 +72,6 @@ where
 
 #[napi]
 impl NativeCore {
-
     /// note: `GET /v1/daemon/narrative/worlds` — read-model World list.
     #[napi]
     pub async fn narrative_list_worlds(&self, principal_handle: String) -> Result<Buffer> {

@@ -89,8 +89,10 @@ const HINT_AFTER_DEFS: &str = "after_defs";
 const HINT_OUTLET: &str = "outlet";
 
 /// note: named, ordered slots produced by routing the V1.149 matched candidate
-/// list. Slots keep the V1.149 emitted order within themselves (priority
-/// desc, order asc, stable index; `constant:true` band first).
+/// list.
+///
+/// Slots keep the V1.149 emitted order within themselves (priority desc, order
+/// asc, stable index; `constant:true` band first).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SlotRouting {
     /// note: `world.before` — entries with `position_hint:"before_defs"`.

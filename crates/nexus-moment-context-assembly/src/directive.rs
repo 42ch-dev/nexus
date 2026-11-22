@@ -137,8 +137,9 @@ pub struct ActiveDirective {
     pub scope_id: String,
 }
 
-/// note: scope pair of a Moment Directive (`work` | `world` + the scoped id),
-/// the metadata surface of the inspector packet's `moment_directive` section
+/// note: scope pair of a Moment Directive (`work` | `world` + the scoped id).
+///
+/// The metadata surface of the inspector packet's `moment_directive` section
 /// (V1.151 P0, DF-76 spec §2 H6). Status-only: never the body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MomentDirectiveScope {
@@ -148,9 +149,11 @@ pub struct MomentDirectiveScope {
     pub id: String,
 }
 
-/// note: status-only metadata of the active Moment Directive, the source of the
-/// inspector packet's `moment_directive` section (V1.151 P0, DF-76 spec §2 H6).
-/// **NEVER carries the directive body** — body exclusion is by construction:
+/// note: status-only metadata of the active Moment Directive.
+///
+/// The source of the inspector packet's `moment_directive` section (V1.151 P0,
+/// DF-76 spec §2 H6). **NEVER carries the directive body** — body exclusion is
+/// by construction:
 /// the packet builder reads only this metadata, never
 /// `MomentContext::moment_directive` (AC-I3).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,8 +189,9 @@ impl From<&ActiveDirective> for MomentDirectiveStatus {
     }
 }
 
-/// note: provider boundary for the directive persistence adapter, implemented at
-/// the composition root (`nexus42`'s `LocalDirectiveStore`) over
+/// note: provider boundary for the directive persistence adapter.
+///
+/// Implemented at the composition root (`nexus42`'s `LocalDirectiveStore`) over
 /// `nexus-local-db`, with in-memory stubs in tests. All failures degrade to
 /// "no directive" / "no lifecycle write" — a broken directive store must
 /// never fail the whole assembly (consistent with `assemble_moment`'s
@@ -225,6 +229,7 @@ pub trait DirectiveStore {
 }
 
 /// note: no-op store used by the plain [`crate::assemble_moment`] entry point.
+///
 /// This is what guarantees the neutral-only byte-equivalence promise (AC-I1b):
 /// without a store no directive can ever load, so nothing renders and nothing
 /// decrements — the assembly is byte-identical to V1.149 / P0.

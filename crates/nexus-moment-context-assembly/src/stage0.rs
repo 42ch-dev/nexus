@@ -214,10 +214,11 @@ pub const fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }
 
-/// note: truncate sections to fit within a token budget. Each section is
-/// `(heading, content, non_truncatable)`: the heading counts toward the tokens,
-/// non-truncatable sections are always included regardless of budget, and
-/// truncatable sections are included greedily from the start.
+/// note: truncate sections to fit within a token budget.
+///
+/// Each section is `(heading, content, non_truncatable)`: the heading counts
+/// toward the tokens, non-truncatable sections are always included regardless
+/// of budget, and truncatable sections are included greedily from the start.
 #[must_use]
 pub fn truncate_with_budget(
     sections: &[(String, String, bool)],
