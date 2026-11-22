@@ -1,3 +1,4 @@
+// note: parse and render keep the authored frontmatter and body spans.
 //! Long-term memory domain model.
 //!
 //! Parsed representation of a long-term memory Markdown file with YAML
@@ -12,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-/// Schema version for long-term memory files.
+/// note: Schema version for long-term memory files.
 pub const MEMORY_FILE_VERSION: u32 = 1;
 
-/// Long-term memory frontmatter (spec §3.3).
+/// note: Long-term memory frontmatter (spec §3.3).
 ///
 /// Required fields:
 /// - `nexus_memory_version`: file format version (currently 1)
@@ -33,23 +34,23 @@ pub struct LongTermMemoryFrontmatter {
     pub source_session_ids: Vec<String>,
 }
 
-/// Parsed representation of a long-term memory Markdown file.
+/// note: Parsed representation of a long-term memory Markdown file.
 ///
 /// Contains the frontmatter metadata and the body markdown content.
 /// The `source_path` is set when loaded from disk and used to derive the slug.
 #[derive(Debug, Clone)]
 pub struct LongTermMemory {
-    /// Parsed frontmatter.
+    /// note: Parsed frontmatter.
     pub frontmatter: LongTermMemoryFrontmatter,
-    /// Body markdown content (everything after the closing `---`).
+    /// note: Body markdown content (everything after the closing `---`).
     pub body: String,
-    /// File path this memory was loaded from (used for slug derivation).
+    /// note: File path this memory was loaded from (used for slug derivation).
     pub source_path: Option<PathBuf>,
 }
 
 impl LongTermMemory {
     #[must_use]
-    /// Create a new long-term memory with auto-generated `memory_id`.
+    /// note: Create a new long-term memory with auto-generated `memory_id`.
     ///
     /// `memory_id` format: `mem_<uuid>` (dashes stripped from UUID).
     /// `updated_at` is set to the current UTC time in ISO-8601.
@@ -69,7 +70,7 @@ impl LongTermMemory {
         }
     }
 
-    /// Validate the memory document.
+    /// note: Validate the memory document.
     ///
     /// Checks:
     /// - `nexus_memory_version` is the expected version
@@ -100,7 +101,6 @@ impl LongTermMemory {
                 "memory_kind must be non-empty".to_string(),
             ));
         }
-        // Validate memory_kind against known enum values
         if MemoryKind::from_str(&self.frontmatter.memory_kind).is_err() {
             return Err(MemoryError::ValidationError(format!(
                 "invalid memory_kind: '{}' (expected one of: {})",
@@ -113,7 +113,6 @@ impl LongTermMemory {
                 "updated_at must be non-empty".to_string(),
             ));
         }
-        // Validate slug safety if source_path is set
         if let Some(ref path) = self.source_path {
             if let Some(stem) = path.file_stem() {
                 if let Some(slug) = stem.to_str() {
@@ -128,14 +127,11 @@ impl LongTermMemory {
         Ok(())
     }
 
-    /// Derive the slug from `source_path` (filename without `.md` extension).
+    /// note: Derive the slug from `source_path` (filename without `.md` extension).
     ///
     /// Returns an empty string if `source_path` is not set or the stem
     /// cannot be extracted.
     #[must_use]
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
     pub fn slug(&self) -> String {
         self.source_path
             .as_ref()
@@ -145,7 +141,7 @@ impl LongTermMemory {
             .to_string()
     }
 
-    /// Render the full memory file content (frontmatter + body).
+    /// note: Render the full memory file content (frontmatter + body).
     ///
     /// Output format:
     /// ```text
@@ -167,16 +163,14 @@ impl LongTermMemory {
         })?;
         Ok(format!("---\n{yaml}---\n{}", self.body))
     }
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    /// Parse a memory file's content (frontmatter + body).
+    /// note: Parse a memory file's content (frontmatter + body).
     ///
     /// Extracts the YAML frontmatter between `---` delimiters and
     /// treats everything after the closing `---` as the body.
+    ///
+    /// # Errors
+    /// Returns [`MemoryError::ValidationError`] when the delimiters or the
+    /// YAML frontmatter are invalid.
     pub fn parse(content: &str) -> Result<Self, MemoryError> {
         let (fm_str, body) = extract_frontmatter_and_body(content)
             .map_err(|e| MemoryError::ValidationError(format!("cannot parse memory file: {e}")))?;
@@ -193,13 +187,13 @@ impl LongTermMemory {
         })
     }
 
-    /// Set the body content and update `updated_at`.
+    /// note: Set the body content and update `updated_at`.
     pub fn set_body(&mut self, body: &str) {
         self.body = body.to_string();
         self.frontmatter.updated_at = chrono::Utc::now().to_rfc3339();
     }
 
-    /// Add a source session ID (deduped).
+    /// note: Add a source session ID (deduped).
     pub fn add_source_session(&mut self, session_id: &str) {
         if !self
             .frontmatter
@@ -212,13 +206,13 @@ impl LongTermMemory {
         }
     }
 
-    /// Touch the memory (update `updated_at` without changing content).
+    /// note: Touch the memory (update `updated_at` without changing content).
     pub fn touch(&mut self) {
         self.frontmatter.updated_at = chrono::Utc::now().to_rfc3339();
     }
 }
 #[must_use]
-/// Check if a slug is path-safe (no `..`, `/`, `\`, null bytes, or control chars).
+/// note: Check if a slug is path-safe (no `..`, `/`, `\`, null bytes, or control chars).
 pub fn slug_is_safe(slug: &str) -> bool {
     if slug.is_empty() {
         return false;
@@ -229,13 +223,13 @@ pub fn slug_is_safe(slug: &str) -> bool {
         && !slug.chars().any(char::is_control)
 }
 
-/// The `memory_id` prefix a minted id carries.
+/// note: The `memory_id` prefix a minted id carries.
 pub const MEMORY_ID_PREFIX: &str = "mem_";
 
-/// The slug prefix a minted `memory_id` maps to.
+/// note: The slug prefix a minted `memory_id` maps to.
 pub const MEMORY_SLUG_PREFIX: &str = "memory-";
 
-/// The authored slug of a minted memory id: one-to-one with every accepted id.
+/// note: The authored slug of a minted memory id: one-to-one with every accepted id.
 ///
 /// Only the leading `mem_` becomes `memory-` and everything after it stays
 /// verbatim. A global replace is not one-to-one: `mem_a_mem_b` and
@@ -253,21 +247,21 @@ pub fn slug_from_memory_id(memory_id: &str) -> Option<String> {
         .map(|rest| format!("{MEMORY_SLUG_PREFIX}{rest}"))
 }
 
-/// The exact source spans of a memory file's frontmatter and body.
+/// note: The exact source spans of a memory file's frontmatter and body.
 ///
 /// Each span starts at the authored text, after the line break that ends the
 /// file's own `---` delimiter line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySourceSpans {
-    /// The YAML block between the delimiters, verbatim: extra fields and
+    /// note: The YAML block between the delimiters, verbatim: extra fields and
     /// comments the parsed frontmatter drops are inside this span.
     pub frontmatter: std::ops::Range<usize>,
-    /// Everything after the closing delimiter, verbatim: the blank or indented
+    /// note: Everything after the closing delimiter, verbatim: the blank or indented
     /// first line the parsed body trims away is inside this span.
     pub body: std::ops::Range<usize>,
 }
 
-/// Locate the frontmatter and body spans of memory file content.
+/// note: Locate the frontmatter and body spans of memory file content.
 ///
 /// A caller that must keep the file's bytes (the P5 migration) slices the same
 /// framing [`LongTermMemory::parse`] read, instead of re-deriving it: the
@@ -281,7 +275,7 @@ pub fn source_spans(content: &str) -> Result<MemorySourceSpans, MemoryError> {
         .map_err(|e| MemoryError::ValidationError(format!("cannot parse memory file: {e}")))
 }
 
-/// The first byte after the line break at `at`, if one starts there.
+/// note: The first byte after the line break at `at`, if one starts there.
 fn after_line_break(content: &str, at: usize) -> usize {
     let bytes = content.as_bytes();
     match (bytes.get(at), bytes.get(at + 1)) {
@@ -297,21 +291,20 @@ fn locate_spans(content: &str) -> Result<MemorySourceSpans, String> {
     if !trimmed.starts_with("---") {
         return Err("content does not start with frontmatter delimiter '---'".to_string());
     }
-    // Find closing ---
     let after_open = &trimmed[3..];
     let end_offset = after_open
         .find("\n---")
         .ok_or_else(|| "missing closing frontmatter delimiter '---'".to_string())?;
-    let body = offset + 3 + end_offset + 4; // skip "---\n---"
+    let body = offset + 3 + end_offset + 4; // note: skip "---\n---"
     let frontmatter_end = offset + 3 + end_offset;
     Ok(MemorySourceSpans {
-        // An empty block (`---\n---`) has no line break to skip past.
+        // why: an empty block (`---\n---`) has no line break to skip past.
         frontmatter: after_line_break(content, offset + 3).min(frontmatter_end)..frontmatter_end,
         body: after_line_break(content, body)..content.len(),
     })
 }
 
-/// Extract YAML frontmatter and body from markdown content.
+/// note: Extract YAML frontmatter and body from markdown content.
 ///
 /// Returns `(frontmatter_yaml_string, body_string)`.
 /// Returns an error if the content doesn't start with `---`.
@@ -422,7 +415,6 @@ mod tests {
     #[test]
     fn validate_rejects_unsafe_slug_from_source_path() {
         let mut mem = LongTermMemory::new("story_summary");
-        // Use a slug with '..' in the filename stem
         mem.source_path = Some(PathBuf::from("/path/to/memories/foo..bar.md"));
         assert!(mem.validate().is_err());
         assert!(mem
@@ -541,7 +533,6 @@ Character analysis: Alice is a determined protagonist.
             source_session_ids: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&fm).unwrap();
-        // Empty vec should be skipped by skip_serializing_if
         assert!(!yaml.contains("source_session_ids"));
     }
 
@@ -549,7 +540,7 @@ Character analysis: Alice is a determined protagonist.
     fn set_body_updates_timestamp() {
         let mut mem = LongTermMemory::new("story_summary");
         let original_ts = mem.frontmatter.updated_at.clone();
-        // Small delay to ensure different timestamp
+        // why: sleep so the millisecond-resolution timestamp can differ.
         std::thread::sleep(std::time::Duration::from_millis(2));
         mem.set_body("new body");
         assert_ne!(mem.frontmatter.updated_at, original_ts);
@@ -573,8 +564,6 @@ Character analysis: Alice is a determined protagonist.
         mem.touch();
         assert_ne!(mem.frontmatter.updated_at, original_ts);
     }
-
-    // ── slug_is_safe tests ───────────────────────────────────────────
 
     #[test]
     fn slug_safe_valid() {
@@ -612,7 +601,7 @@ Character analysis: Alice is a determined protagonist.
 
     #[test]
     fn slug_from_memory_id_is_one_to_one_on_minted_ids() {
-        // The two ids a global replace folded into one slug stay distinct.
+        // invariant: a global replace would fold two distinct ids into one slug.
         assert_eq!(
             slug_from_memory_id("mem_a_mem_b").as_deref(),
             Some("memory-a_mem_b")
@@ -621,8 +610,8 @@ Character analysis: Alice is a determined protagonist.
             slug_from_memory_id("mem_a_memory-b").as_deref(),
             Some("memory-a_memory-b")
         );
-        // `mem_a` and `memory-a` must not address one file: the out-of-namespace
-        // id has no slug at all.
+        // invariant: `mem_a` and `memory-a` must not address one file; the
+        // out-of-namespace id has no slug at all.
         assert_eq!(slug_from_memory_id("mem_a").as_deref(), Some("memory-a"));
         assert_eq!(slug_from_memory_id("memory-a"), None);
     }
@@ -655,7 +644,7 @@ Character analysis: Alice is a determined protagonist.
         assert_eq!(body, "");
     }
 
-    /// The spans name the bytes the parsed view drops: an extra YAML field and
+    /// note: The spans name the bytes the parsed view drops: an extra YAML field and
     /// comment, and the blank first body line `trim_start` removes.
     #[test]
     fn source_spans_keep_what_the_parsed_view_drops() {

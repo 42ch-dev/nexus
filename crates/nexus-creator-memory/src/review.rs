@@ -1,3 +1,4 @@
+// note: classification is deterministic; promotion adds the idempotency guard.
 //! Review algorithm for memory pipeline.
 //!
 //! Implements classification heuristics for pending review entries,
@@ -21,34 +22,34 @@ use crate::review_quality::is_high_signal;
 
 use serde::{Deserialize, Serialize};
 
-/// Review action determined by classification algorithm.
+/// note: Review action determined by classification algorithm.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewAction {
-    /// Not worth keeping — discard the pending entry.
+    /// note: Not worth keeping — discard the pending entry.
     Drop,
-    /// Keep as lightweight keyword fragment.
+    /// note: Keep as lightweight keyword fragment.
     FragmentOnly,
-    /// Create or update long-term memory Markdown file.
+    /// note: Create or update long-term memory Markdown file.
     PromoteToLongTerm,
-    /// Merge content into existing long-term memory.
+    /// note: Merge content into existing long-term memory.
     MergeIntoExisting,
-    /// Only trigger SOUL experience aggregation (metadata update).
+    /// note: Only trigger SOUL experience aggregation (metadata update).
     TriggerSoulExperienceOnly,
 }
 
-/// Decision from review classification.
+/// note: Decision from review classification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewDecision {
-    /// The pending review entry ID.
+    /// note: The pending review entry ID.
     pub pending_id: String,
-    /// The determined action.
+    /// note: The determined action.
     pub action: ReviewAction,
-    /// Reason for the decision (for audit).
+    /// note: Reason for the decision (for audit).
     pub reason: String,
 }
 
-/// Task kinds that can be detected from session metadata.
+/// note: Task kinds that can be detected from session metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TaskKind {
     Brainstorm,
@@ -58,7 +59,7 @@ pub enum TaskKind {
     Unknown,
 }
 
-/// Error type for `TaskKind` parsing (always succeeds, Unknown is fallback).
+/// note: Error type for `TaskKind` parsing (always succeeds, Unknown is fallback).
 #[derive(Debug, Clone)]
 pub struct ParseTaskKindError(());
 
@@ -81,12 +82,12 @@ impl FromStr for TaskKind {
             "research" => Ok(Self::Research),
             "unknown" => Ok(Self::Unknown),
             other => {
-                // S-002: Log when an unrecognized task_kind is encountered
+                // note: S-002 — log when an unrecognized task_kind is encountered.
                 tracing::warn!(
                     task_kind = other,
                     "Unrecognized task_kind, falling back to Unknown"
                 );
-                Ok(Self::Unknown) // Fallback to Unknown for invalid values
+                Ok(Self::Unknown) // note: fallback to Unknown for invalid values
             }
         }
     }
@@ -94,7 +95,7 @@ impl FromStr for TaskKind {
 
 impl TaskKind {
     #[must_use]
-    /// Convert to string representation.
+    /// note: Convert to string representation.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Brainstorm => "brainstorm",
@@ -105,21 +106,21 @@ impl TaskKind {
         }
     }
 
-    /// Parse task kind from string (convenience wrapper that never fails).
+    /// note: Parse task kind from string (convenience wrapper that never fails).
     #[must_use]
     pub fn parse_fallible(s: &str) -> Self {
         s.parse().unwrap_or(Self::Unknown)
     }
 }
 
-/// Pending review data for classification (input from DB).
+/// note: Pending review data for classification (input from DB).
 #[derive(Debug, Clone)]
 pub struct PendingReviewInput {
     pub pending_id: String,
     pub session_id: String,
-    /// Bearer primary id (`ctr_…` Creator or `chr_…` Character).
+    /// note: Bearer primary id (`ctr_…` Creator or `chr_…` Character).
     pub bearer_id: String,
-    /// Bearer scope provenance: the Creator arm's world id, or the Character
+    /// note: Bearer scope provenance: the Creator arm's world id, or the Character
     /// arm's binding id. `None` = no scope (whole Creator / shared Character).
     pub scope_id: Option<String>,
     pub task_kind: String,
@@ -127,7 +128,7 @@ pub struct PendingReviewInput {
     pub created_at: String,
 }
 
-/// Classify a pending review entry using rule-based heuristics.
+/// note: Classify a pending review entry using rule-based heuristics.
 ///
 /// Initial implementation is deterministic (no LLM). LLM-assisted classification
 /// can be added later when needed.
@@ -164,16 +165,15 @@ pub struct PendingReviewInput {
 /// }
 /// ```
 pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
-    // Threshold constants
-    const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
-    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // High-signal creative content can promote shorter
-    const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // Unknown tasks promote at this length
+    const DROP_THRESHOLD: usize = 50; // note: very short = no meaningful content
+    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // note: high-signal creative content can promote shorter
+    const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // note: unknown tasks promote at this length
 
     let digest_len = record.raw_digest.len();
     let task_kind: TaskKind = {
         let parsed: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
         if parsed == TaskKind::Unknown && record.task_kind.to_lowercase() != "unknown" {
-            // S-002: Already logged in FromStr, but ensure classification is aware
+            // note: S-002 — already logged in FromStr, but ensure classification is aware.
             tracing::warn!(
                 task_kind = %record.task_kind,
                 pending_id = %record.pending_id,
@@ -183,13 +183,12 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         parsed
     };
 
-    // Rule 1: Creative tasks use quality signal for promotion decisions
     if matches!(
         task_kind,
         TaskKind::Brainstorm | TaskKind::Outline | TaskKind::Chapter
     ) {
-        // Creative tasks never get dropped based solely on length (experience value).
-        // Promotion requires both minimum length AND high quality signal.
+        // why: creative tasks never get dropped based solely on length (experience
+        // value); promotion requires both minimum length and high quality signal.
         if is_high_signal(&record.raw_digest) && digest_len >= HIGH_SIGNAL_MIN_LENGTH {
             return ReviewDecision {
                 pending_id: record.pending_id.clone(),
@@ -201,7 +200,6 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
                 ),
             };
         }
-        // Creative tasks with medium/low-signal digest go to fragment
         return ReviewDecision {
             pending_id: record.pending_id.clone(),
             action: ReviewAction::FragmentOnly,
@@ -212,7 +210,6 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         };
     }
 
-    // Rule 2: Drop if digest is very short (< 50 chars) for non-creative tasks
     if digest_len < DROP_THRESHOLD {
         return ReviewDecision {
             pending_id: record.pending_id.clone(),
@@ -221,8 +218,8 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         };
     }
 
-    // Rule 3: FragmentOnly for research/exploration tasks
-    // These are informational but not typically worth long-term storage
+    // why: research/exploration digests are informational but not typically worth
+    // long-term storage, so they become fragments.
     if task_kind == TaskKind::Research {
         return ReviewDecision {
             pending_id: record.pending_id.clone(),
@@ -231,7 +228,6 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         };
     }
 
-    // Rule 4: Unknown tasks - medium digest -> FragmentOnly, substantial -> PromoteToLongTerm
     if digest_len < DEFAULT_PROMOTE_THRESHOLD {
         return ReviewDecision {
             pending_id: record.pending_id.clone(),
@@ -240,7 +236,6 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         };
     }
 
-    // Default: PromoteToLongTerm for substantial content with unknown task kind
     ReviewDecision {
         pending_id: record.pending_id.clone(),
         action: ReviewAction::PromoteToLongTerm,
@@ -248,26 +243,26 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
     }
 }
 
-/// Memory fragment data for creation.
+/// note: Memory fragment data for creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryFragment {
-    /// Unique fragment ID.
+    /// note: Unique fragment ID.
     pub fragment_id: String,
-    /// Session ID that generated this fragment.
+    /// note: Session ID that generated this fragment.
     pub session_id: String,
-    /// Bearer ID for ownership (`ctr_…` Creator or `chr_…` Character).
+    /// note: Bearer ID for ownership (`ctr_…` Creator or `chr_…` Character).
     pub bearer_id: String,
-    /// Keywords extracted from digest.
+    /// note: Keywords extracted from digest.
     pub keywords: Vec<String>,
-    /// Short summary.
+    /// note: Short summary.
     pub summary: String,
-    /// Creation timestamp.
+    /// note: Creation timestamp.
     pub created_at: String,
-    /// Optional TTL.
+    /// note: Optional TTL.
     pub ttl: Option<String>,
 }
 
-/// Create a memory fragment from a pending review entry.
+/// note: Create a memory fragment from a pending review entry.
 ///
 /// This is a pure data transformation — no LLM needed.
 /// Keywords are extracted by simple text analysis:
@@ -297,17 +292,14 @@ pub struct MemoryFragment {
 /// ```
 #[must_use]
 pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragment {
-    // Generate fragment ID (derived from pending_id with frag_ prefix)
     let fragment_id = format!("frag_{}", record.pending_id);
 
-    // Extract keywords from raw_digest
     let keywords = extract_keywords(&record.raw_digest);
 
-    // Generate summary (truncate to 200 bytes max, UTF-8 safe). The raw digest
-    // may contain multibyte code points (CJK, emoji); slicing at a fixed byte
-    // offset can land mid-codepoint and panic. Walk back to the nearest char
-    // boundary (same discipline as `promote_to_long_term`'s MAX_DIGEST_BYTES
-    // cap, R-V141HYG-01).
+    // why: the raw digest may contain multibyte code points (CJK, emoji);
+    // slicing at a fixed byte offset can land mid-codepoint and panic, so walk
+    // back to the nearest char boundary (same discipline as
+    // `promote_to_long_term`'s MAX_DIGEST_BYTES cap, R-V141HYG-01).
     let summary = if record.raw_digest.len() > 200 {
         let mut end = 197;
         while !record.raw_digest.is_char_boundary(end) {
@@ -318,15 +310,15 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
         record.raw_digest.clone()
     };
 
-    // Default TTL based on task kind
-    // V1.2 residual R9 (pipeline, nit): Fragment TTL has no cleanup mechanism
-    // Fragment TTL cleanup deferred to V1.4; expired fragments consume disk until manual cleanup
+    // note: V1.2 residual R9 (pipeline, nit) — fragment TTL has no cleanup
+    // mechanism; expired fragments consume disk until manual cleanup, deferred
+    // to V1.4.
     let ttl = match record
         .task_kind
         .parse::<TaskKind>()
         .unwrap_or(TaskKind::Unknown)
     {
-        TaskKind::Research => Some("90d".to_string()), // Research expires faster
+        TaskKind::Research => Some("90d".to_string()),
         TaskKind::Brainstorm | TaskKind::Outline => Some("180d".to_string()),
         TaskKind::Chapter => Some("365d".to_string()),
         TaskKind::Unknown => Some("30d".to_string()),
@@ -343,7 +335,7 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
     }
 }
 
-/// Extract keywords from text using simple heuristics.
+/// note: Extract keywords from text using simple heuristics.
 ///
 /// - Split on whitespace and punctuation
 /// - Filter common stop words
@@ -351,7 +343,6 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
 /// - Limit to top 10 keywords
 #[allow(clippy::too_many_lines)]
 fn extract_keywords(text: &str) -> Vec<String> {
-    // Common English stop words to filter out
     const STOP_WORDS: &[&str] = &[
         "the",
         "a",
@@ -448,7 +439,7 @@ fn extract_keywords(text: &str) -> Vec<String> {
         "here",
         "there",
         "then",
-        // Session-specific noise
+        // note: session-specific noise.
         "session",
         "task",
         "output",
@@ -466,7 +457,6 @@ fn extract_keywords(text: &str) -> Vec<String> {
         "ended",
     ];
 
-    // Split on whitespace and punctuation
     let words: Vec<String> = text
         .to_lowercase()
         .split(|c: char| {
@@ -480,38 +470,29 @@ fn extract_keywords(text: &str) -> Vec<String> {
         .map(std::string::ToString::to_string)
         .collect();
 
-    // Filter stop words and dedupe using HashSet for O(1) lookups (R13).
     let mut seen: HashSet<String> = HashSet::new();
     let mut keywords: Vec<String> = Vec::new();
     for word in words {
-        // Skip stop words
         if STOP_WORDS.contains(&word.as_str()) {
             continue;
         }
-        // Skip very short words (likely noise)
         if word.len() < 3 {
             continue;
         }
-        // Skip numbers
         if word.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        // Dedupe via HashSet (O(1) instead of Vec::contains O(N))
+        // why: HashSet dedupe is O(1) instead of Vec::contains O(N).
         if seen.insert(word.clone()) {
             keywords.push(word);
         }
     }
 
-    // Limit to top 10 keywords
     keywords.truncate(10);
     keywords
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Promotion functions (T5.9, T5.10)
-// ──────────────────────────────────────────────────────────────────────────
-
-/// Trait for summarizing session digests into long-term memory content.
+/// note: Trait for summarizing session digests into long-term memory content.
 ///
 /// This abstracts the ACP-based summarization so the domain layer
 /// doesn't need to depend on the CLI's ACP client directly.
@@ -520,7 +501,7 @@ fn extract_keywords(text: &str) -> Vec<String> {
 /// The trait is designed for async operations since ACP calls are async.
 #[allow(async_fn_in_trait)]
 pub trait SessionDigestSummarizer: Send + Sync {
-    /// Summarize a session digest into a long-term memory markdown body.
+    /// note: Summarize a session digest into a long-term memory markdown body.
     ///
     /// The implementation should:
     /// - Generate a well-structured memory entry
@@ -537,7 +518,7 @@ pub trait SessionDigestSummarizer: Send + Sync {
     ) -> impl Future<Output = Result<String, MemoryError>> + Send;
 }
 
-/// Check if a session has already been promoted to long-term memory.
+/// note: Check if a session has already been promoted to long-term memory.
 ///
 /// Idempotency check (T5.10): The same `session_id` must not produce
 /// duplicate long-term memories. This function scans all memories
@@ -571,10 +552,8 @@ pub fn check_session_already_promoted(
     bearer: MemoryBearerRef<'_>,
     session_id: &str,
 ) -> Result<bool, MemoryError> {
-    // List all long-term memories for this bearer
     let slugs = crate::memory_io::list_memories(home, bearer)?;
 
-    // Check each memory's source_session_ids
     for slug in slugs {
         if let Ok(memory) = crate::memory_io::load_memory(home, bearer, &slug) {
             if memory
@@ -590,7 +569,7 @@ pub fn check_session_already_promoted(
     Ok(false)
 }
 
-/// Promote a pending review to a long-term memory file.
+/// note: Promote a pending review to a long-term memory file.
 ///
 /// This function (T5.9):
 /// 1. Checks idempotency (skips if session already promoted)
@@ -649,16 +628,15 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     summarizer: &S,
 ) -> Result<LongTermMemory, MemoryError> {
     const MAX_DIGEST_BYTES: usize = 256 * 1024;
-    // 1. Check idempotency
     if check_session_already_promoted(home, bearer, &record.session_id)? {
         return Err(MemoryError::AlreadyPromoted {
             session_id: record.session_id.clone(),
         });
     }
 
-    // R-V133P4-06: Size guard — cap raw_digest before summarization to prevent
-    // unbounded LTM file growth. 256 KiB is generous for a session digest.
-    // R-V141HYG-01: Use floor_char_boundary to avoid panicking on multi-byte content.
+    // why: R-V133P4-06 — cap raw_digest before summarization to prevent unbounded
+    // LTM file growth; 256 KiB is generous for a session digest. R-V141HYG-01:
+    // use floor_char_boundary to avoid panicking on multi-byte content.
     let raw_digest = if record.raw_digest.len() > MAX_DIGEST_BYTES {
         tracing::warn!(
             session_id = %record.session_id,
@@ -677,7 +655,6 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
         &record.raw_digest
     };
 
-    // 2. Call summarizer to generate content
     let body = summarizer
         .summarize(
             &record.session_id,
@@ -687,25 +664,21 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
         )
         .await?;
 
-    // 3. Determine memory_kind from task_kind
     let memory_kind = task_kind_to_memory_kind(&record.task_kind);
 
-    // 4. Create LongTermMemory
     let mut memory = LongTermMemory::new(memory_kind);
     memory.set_body(&body);
     memory.add_source_session(&record.session_id);
 
-    // 5. Validate before saving
     memory.validate()?;
 
-    // 6. Generate the authored slug from memory_id: only the leading `mem_`
-    // prefix maps, so the derivation is one-to-one and two memories can never
-    // address one file. The id is minted by `LongTermMemory::new`, so a missing
-    // prefix is a broken local invariant, not a caller error.
+    // why: only the leading `mem_` prefix maps, so the derivation is one-to-one
+    // and two memories can never address one file. The id is minted by
+    // `LongTermMemory::new`, so a missing prefix is a broken local invariant, not
+    // a caller error.
     let slug = crate::long_term_memory::slug_from_memory_id(&memory.frontmatter.memory_id)
         .ok_or_else(|| MemoryError::InvalidIdFormat(memory.frontmatter.memory_id.clone()))?;
 
-    // 7. Save via memory_io
     crate::memory_io::save_memory(home, bearer, &slug, &memory)?;
 
     tracing::info!(
@@ -718,7 +691,7 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     Ok(memory)
 }
 
-/// Map `task_kind` to `memory_kind` for promotion.
+/// note: Map `task_kind` to `memory_kind` for promotion.
 ///
 /// This determines the appropriate `memory_kind` field in the
 /// long-term memory frontmatter based on the session's task type.
@@ -814,9 +787,7 @@ mod tests {
         );
         let fragment = create_fragment_from_review(&input);
         assert_ne!(fragment.keywords, [] as [std::string::String; 0]);
-        // Stop words should be filtered
         assert!(!fragment.keywords.contains(&"and".to_string()));
-        // Should have substantive keywords
         assert!(fragment
             .keywords
             .iter()
@@ -888,7 +859,6 @@ mod tests {
         assert_eq!("chapter".parse::<TaskKind>().unwrap(), TaskKind::Chapter);
         assert_eq!("research".parse::<TaskKind>().unwrap(), TaskKind::Research);
         assert_eq!("unknown".parse::<TaskKind>().unwrap(), TaskKind::Unknown);
-        // Invalid values fall back to Unknown
         assert_eq!("invalid".parse::<TaskKind>().unwrap(), TaskKind::Unknown);
     }
 
@@ -921,8 +891,6 @@ mod tests {
         assert!(decision.reason.contains("outline"));
     }
 
-    // ── Promotion tests ────────────────────────────────────────────────────
-
     #[test]
     fn task_kind_to_memory_kind_mapping() {
         assert_eq!(task_kind_to_memory_kind("brainstorm"), "story_summary");
@@ -951,9 +919,9 @@ mod tests {
     async fn promote_to_long_term_creates_valid_memory() {
         use std::path::PathBuf;
 
-        // Mock summarizer
         struct MockSummarizer;
-        // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+        // why: `unused_async_trait_impl` (clippy 1.98) — test mock, no async I/O;
+        // the trait contract requires async.
         #[allow(clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for MockSummarizer {
             async fn summarize(
@@ -982,7 +950,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Check memory properties
         assert!(memory.frontmatter.memory_id.starts_with("mem_"));
         assert_eq!(memory.frontmatter.memory_kind, "story_summary");
         assert!(memory.body.contains("summarized memory entry"));
@@ -1000,7 +967,8 @@ mod tests {
         use std::path::PathBuf;
 
         struct MockSummarizer;
-        // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+        // why: `unused_async_trait_impl` (clippy 1.98) — test mock, no async I/O;
+        // the trait contract requires async.
         #[allow(clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for MockSummarizer {
             async fn summarize(
@@ -1020,7 +988,6 @@ mod tests {
         let input = sample_input("chapter", "First promotion.");
         let summarizer = MockSummarizer;
 
-        // First promotion succeeds
         let _ = promote_to_long_term(
             &home,
             MemoryBearerRef::Creator("ctr_test"),
@@ -1030,7 +997,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Second promotion with same session_id fails
         let result = promote_to_long_term(
             &home,
             MemoryBearerRef::Creator("ctr_test"),
@@ -1050,7 +1016,8 @@ mod tests {
         use std::path::PathBuf;
 
         struct FailingSummarizer;
-        // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+        // why: `unused_async_trait_impl` (clippy 1.98) — test mock, no async I/O;
+        // the trait contract requires async.
         #[allow(clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for FailingSummarizer {
             async fn summarize(
@@ -1088,8 +1055,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    // ── Quality signal tests (T1) ──────────────────────────────────────────
-
     #[test]
     fn classify_rejects_long_low_signal_noise() {
         let input = PendingReviewInput {
@@ -1121,7 +1086,7 @@ mod tests {
         assert_eq!(decision.action, ReviewAction::PromoteToLongTerm);
     }
 
-    /// R-V141HYG-01: UTF-8-safe truncation — boundary must not land mid-character.
+    /// note: R-V141HYG-01 — UTF-8-safe truncation; boundary must not land mid-character.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest_at_utf8_boundary() {
         struct Passthrough;
@@ -1141,10 +1106,10 @@ mod tests {
         let home = PathBuf::from("/tmp/test_promotion_utf8_boundary");
         let _ = std::fs::remove_dir_all(&home);
 
-        // Each CJK char is 3 bytes in UTF-8. Fill to just over 256 KiB so that the
-        // byte boundary at MAX_DIGEST_BYTES lands mid-character.
+        // why: each CJK char is 3 bytes in UTF-8; fill to just over 256 KiB so
+        // the byte boundary at MAX_DIGEST_BYTES lands mid-character.
         // 256*1024 / 3 = 87381.33... → 87382 chars = 262146 bytes (> 256 KiB).
-        let cjk_char = '\u{4E16}'; // '世'
+        let cjk_char = '\u{4E16}'; // note: '世'
         let mut big_digest = String::with_capacity(256 * 1024 + 10);
         for _ in 0..87382 {
             big_digest.push(cjk_char);
@@ -1164,7 +1129,7 @@ mod tests {
             created_at: "2026-04-15T00:00:00Z".into(),
         };
 
-        // Must not panic — the old code did &string[..256*1024] which panics here.
+        // why: must not panic — the old code did &string[..256*1024], which panics here.
         let memory = promote_to_long_term(
             &home,
             MemoryBearerRef::Creator("ctr_test"),
@@ -1174,20 +1139,18 @@ mod tests {
         .await
         .expect("promotion should succeed with UTF-8-safe truncation");
 
-        // The body must be valid UTF-8 and <= MAX_DIGEST_BYTES
+        // invariant: the body must be valid UTF-8 and <= MAX_DIGEST_BYTES.
         assert!(
             memory.body.len() <= 256 * 1024,
             "body should be truncated to max_digest_bytes, got {} bytes",
             memory.body.len()
         );
-        // Verify the truncated string is valid UTF-8 (no panic above proves it,
-        // but explicitly assert for clarity).
         assert!(memory.body.is_char_boundary(memory.body.len()));
 
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// R-V133P4-06: Size guard truncates oversized `raw_digest` before summarization.
+    /// note: R-V133P4-06 — size guard truncates oversized `raw_digest` before summarization.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest() {
         struct Passthrough;
@@ -1200,7 +1163,7 @@ mod tests {
                 raw_digest: &str,
                 _: Option<&str>,
             ) -> Result<String, MemoryError> {
-                // Return raw_digest as body — simulates PassthroughSummarizer
+                // note: return raw_digest as body — simulates PassthroughSummarizer.
                 Ok(raw_digest.to_string())
             }
         }
@@ -1208,7 +1171,6 @@ mod tests {
         let home = PathBuf::from("/tmp/test_promotion_size_guard");
         let _ = std::fs::remove_dir_all(&home);
 
-        // Create a digest larger than 256 KiB
         let big_digest = "x".repeat(300 * 1024);
         let input = PendingReviewInput {
             pending_id: "p_trunc".into(),
@@ -1228,7 +1190,6 @@ mod tests {
         )
         .await
         .expect("promotion should succeed");
-        // The body should be truncated to 256 KiB, not the full 300 KiB input
         assert!(
             memory.body.len() <= 256 * 1024,
             "body should be truncated to max_digest_bytes, got {} bytes",
@@ -1257,9 +1218,9 @@ mod utf8_fragment_tests {
 
     #[test]
     fn fragment_summary_is_utf8_safe_for_cjk_and_emoji() {
-        // A multibyte digest over 200 bytes where byte offset 197 lands
+        // note: a multibyte digest over 200 bytes where byte offset 197 lands
         // mid-codepoint; the old `&text[..197]` would panic.
-        let cjk = "字".repeat(200); // 3-byte chars -> byte 197 is mid-codepoint
+        let cjk = "字".repeat(200); // note: 3-byte chars -> byte 197 is mid-codepoint
         let frag = create_fragment_from_review(&pending(&cjk));
         assert!(
             frag.summary.ends_with("..."),
@@ -1270,14 +1231,14 @@ mod utf8_fragment_tests {
             "summary must be valid UTF-8"
         );
 
-        // Emoji (4-byte) digest.
-        let emoji = "🫠".repeat(200); // 4-byte astral chars
+        // note: emoji (4-byte) digest.
+        let emoji = "🫠".repeat(200); // note: 4-byte astral chars
         let frag = create_fragment_from_review(&pending(&emoji));
         assert!(frag.summary.ends_with("..."));
         assert!(frag.summary.is_char_boundary(frag.summary.len()));
 
-        // A short multibyte digest under 200 bytes is not truncated.
-        let short = "猫".repeat(50); // 150 bytes
+        // note: a short multibyte digest under 200 bytes is not truncated.
+        let short = "猫".repeat(50); // note: 150 bytes
         let frag = create_fragment_from_review(&pending(&short));
         assert!(!frag.summary.ends_with("..."));
         assert_eq!(frag.summary, short);

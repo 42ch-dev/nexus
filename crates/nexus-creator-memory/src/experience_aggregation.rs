@@ -1,3 +1,4 @@
+// note: the ACP path and its deterministic fallback share one entry point.
 //! Experience aggregation from long-term memories (spec §4.3).
 //!
 //! Scans long-term memory MD files for experience-kind entries, optionally
@@ -14,7 +15,7 @@ use crate::long_term_memory::LongTermMemory;
 use crate::memory_io;
 use std::path::Path;
 
-/// Memory kinds that contribute to the Experience section.
+/// note: Memory kinds that contribute to the Experience section.
 // V1.2 residual R14 (pipeline, nit): EXPERIENCE_MEMORY_KINDS hardcoded not derived from enum
 // Hardcoded array intentional; derive-from-enum requires const generics or macro
 const EXPERIENCE_MEMORY_KINDS: &[&str] = &[
@@ -26,26 +27,26 @@ const EXPERIENCE_MEMORY_KINDS: &[&str] = &[
     "theme_analysis",
 ];
 
-/// Maximum body characters included per memory in deterministic fallback.
+/// note: Maximum body characters included per memory in deterministic fallback.
 const FALLBACK_EXCERPT_LENGTH: usize = 200;
 
-/// Result of experience aggregation.
+/// note: Result of experience aggregation.
 #[derive(Debug, Clone)]
 pub struct AggregationResult {
-    /// The generated markdown body for the `## Experience` section.
+    /// note: The generated markdown body for the `## Experience` section.
     pub experience_markdown: String,
-    /// Number of experience-type memories found.
+    /// note: Number of experience-type memories found.
     pub memories_processed: usize,
-    /// Whether ACP was used (true) or deterministic fallback (false).
+    /// note: Whether ACP was used (true) or deterministic fallback (false).
     pub used_acp: bool,
 }
 
-/// Trait for LLM-assisted experience synthesis.
+/// note: Trait for LLM-assisted experience synthesis.
 ///
 /// Implementations call an LLM (via ACP or other mechanism) to
 /// synthesize experience entries into a coherent markdown section.
 pub trait ExperienceSynthesizer: Send + Sync {
-    /// Synthesize a list of experience memories into an aggregated markdown section.
+    /// note: Synthesize a list of experience memories into an aggregated markdown section.
     ///
     /// Returns the markdown body (without `## Experience` heading — the caller
     /// adds it).
@@ -55,20 +56,20 @@ pub trait ExperienceSynthesizer: Send + Sync {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, MemoryError>> + Send + '_>>;
 }
 
-/// A single experience entry for synthesis.
+/// note: A single experience entry for synthesis.
 #[derive(Debug, Clone)]
 pub struct ExperienceEntry {
-    /// Memory kind (e.g., "`story_summary`").
+    /// note: Memory kind (e.g., "`story_summary`").
     pub memory_kind: String,
-    /// Memory slug / filename stem.
+    /// note: Memory slug / filename stem.
     pub slug: String,
-    /// Body text of the memory.
+    /// note: Body text of the memory.
     pub body: String,
-    /// Timestamp (ISO-8601).
+    /// note: Timestamp (ISO-8601).
     pub updated_at: String,
 }
 
-/// Aggregate experience from long-term memories and update SOUL.md.
+/// note: Aggregate experience from long-term memories and update SOUL.md.
 ///
 /// Steps:
 /// 1. List all long-term memories for the creator
@@ -94,7 +95,6 @@ pub async fn aggregate_experience(
 
     let (experience_markdown, used_acp) = generate_experience_markdown(&entries, synthesizer).await;
 
-    // Update SOUL.md
     let mut soul = crate::soul_io::load(home, bearer)?;
     soul.set_experience(experience_markdown.clone());
     crate::soul_io::save(home, bearer, &soul)?;
@@ -105,16 +105,13 @@ pub async fn aggregate_experience(
         used_acp,
     })
 }
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-/// Aggregate experience without updating SOUL.md.
+/// note: Aggregate experience without updating SOUL.md.
 ///
 /// Returns the generated markdown and metadata, but does NOT write to disk.
 /// Useful for preview or dry-run scenarios.
+///
+/// # Errors
+/// Returns `Err(MemoryError::...)` if validation fails.
 pub async fn aggregate_experience_preview(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -133,7 +130,7 @@ pub async fn aggregate_experience_preview(
     })
 }
 
-/// Collect and filter experience-kind memory entries for a creator.
+/// note: Collect and filter experience-kind memory entries for a creator.
 ///
 /// Shared helper extracted to deduplicate between `aggregate_experience`
 /// and `aggregate_experience_preview` (R4 pipeline).
@@ -168,13 +165,13 @@ fn collect_experience_entries(
         }
     }
 
-    // Sort by recency (most recent first)
+    // note: sort descending so the most recent memory is first.
     experience_entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
     Ok(experience_entries)
 }
 
-/// Generate experience markdown from collected entries.
+/// note: Generate experience markdown from collected entries.
 ///
 /// Shared helper extracted to deduplicate between `aggregate_experience`
 /// and `aggregate_experience_preview` (R4 pipeline).
@@ -190,7 +187,7 @@ async fn generate_experience_markdown(
             match synth.synthesize(entries).await {
                 Ok(text) => return (text, true),
                 Err(_) => {
-                    // ACP failed — fall back to deterministic
+                    // note: ACP failure falls back to deterministic output.
                     return (deterministic_concat(entries), false);
                 }
             }
@@ -199,7 +196,7 @@ async fn generate_experience_markdown(
     (deterministic_concat(entries), false)
 }
 
-/// Deterministic fallback: concatenate experience memories sorted by recency.
+/// note: Deterministic fallback: concatenate experience memories sorted by recency.
 ///
 /// Each memory gets a `### <memory_kind>: <slug>` heading.
 /// Body is truncated to `FALLBACK_EXCERPT_LENGTH` chars with "...".
@@ -219,7 +216,7 @@ fn deterministic_concat(entries: &[ExperienceEntry]) -> String {
     parts.join("\n\n")
 }
 
-/// Format a `memory_kind` `snake_case` string into a human-readable label.
+/// note: Format a `memory_kind` `snake_case` string into a human-readable label.
 fn format_kind_label(kind: &str) -> String {
     kind.split('_')
         .map(|word| {
@@ -232,16 +229,14 @@ fn format_kind_label(kind: &str) -> String {
         .join(" ")
 }
 
-/// Truncate body text to approximately `max_chars` characters.
+/// note: Truncate body text to approximately `max_chars` characters.
 ///
 /// Uses char-safe iteration to avoid panicking on multi-byte UTF-8 characters.
 fn truncate_body(body: &str, max_chars: usize) -> String {
     if body.chars().count() <= max_chars {
         return body.to_string();
     }
-    // Take first max_chars characters (char-safe, not byte-safe)
     let end: String = body.chars().take(max_chars).collect();
-    // Break at last space before limit
     end.rfind(' ')
         .map_or_else(|| format!("{end}..."), |pos| format!("{}...", &end[..pos]))
 }
@@ -295,7 +290,6 @@ mod tests {
             ),
         ];
         let result = deterministic_concat(&entries);
-        // Most recent first
         let alice_pos = result.find("alice").expect("should contain alice");
         let setting_pos = result.find("setting").expect("should contain setting");
         assert!(
@@ -316,9 +310,7 @@ mod tests {
             "2026-04-14T00:00:00Z",
         )];
         let result = deterministic_concat(&entries);
-        // Should be truncated with "..."
         assert!(result.ends_with("..."));
-        // Should not include the full body
         assert!(result.len() < long_body.len() + 50);
     }
 
@@ -399,7 +391,6 @@ mod tests {
         let home = std::path::PathBuf::from("/tmp/test_agg_exp_empty");
         let _ = std::fs::remove_dir_all(&home);
 
-        // Create soul first
         crate::soul_io::create(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
 
         let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), None)
@@ -409,7 +400,6 @@ mod tests {
         assert!(!result.used_acp);
         assert_eq!(result.experience_markdown, "");
 
-        // Verify soul still has empty experience
         let soul = crate::soul_io::load(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert_eq!(soul.experience.as_deref().unwrap_or(""), "");
 
@@ -421,10 +411,8 @@ mod tests {
         let home = std::path::PathBuf::from("/tmp/test_agg_exp_determ");
         let _ = std::fs::remove_dir_all(&home);
 
-        // Create soul
         crate::soul_io::create(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
 
-        // Create experience memories
         let mut mem1 = LongTermMemory::new("story_summary");
         mem1.set_body("A grand adventure story about heroes saving the world from darkness.");
         memory_io::save_memory(
@@ -447,7 +435,6 @@ mod tests {
         )
         .unwrap();
 
-        // Create a non-experience memory (should be ignored)
         let mut mem3 = LongTermMemory::new("research_material");
         mem3.set_body("Research on medieval castles.");
         memory_io::save_memory(
@@ -468,7 +455,6 @@ mod tests {
         assert!(result.experience_markdown.contains("Character Note"));
         assert!(!result.experience_markdown.contains("research"));
 
-        // Verify SOUL.md was updated
         let soul = crate::soul_io::load(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         let exp = soul.experience.as_deref().unwrap_or("");
         assert!(exp.contains("adventure-story"));
@@ -567,7 +553,6 @@ mod tests {
 
         assert!(!result.used_acp);
         assert_eq!(result.memories_processed, 1);
-        // Should have deterministic fallback output
         assert!(result.experience_markdown.contains("Story Summary"));
 
         let _ = std::fs::remove_dir_all(&home);
@@ -577,7 +562,7 @@ mod tests {
     // Note: Stage0Assembly E2E tests moved to nexus-moment-context-assembly (Batch C).
     // Remaining E2E tests only use experience_aggregation + soul + memory_io.
 
-    /// Verify experience aggregation → SOUL.md updated
+    /// note: Verify experience aggregation → SOUL.md updated
     #[tokio::test]
     async fn e2e_experience_aggregation_updates_soul() {
         let home = std::path::PathBuf::from("/tmp/test_e2e_agg_soul");
@@ -585,12 +570,10 @@ mod tests {
 
         let creator_id = "ctr_aggsoul";
 
-        // Create SOUL with empty experience
         let soul = crate::soul_io::create(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         let exp_before = soul.experience.as_deref().unwrap_or("");
         assert_eq!(exp_before, "");
 
-        // Create experience memories
         let mut mem1 = LongTermMemory::new("theme_analysis");
         mem1.set_body("Themes of isolation and connection in modern fiction.");
         memory_io::save_memory(
@@ -601,14 +584,12 @@ mod tests {
         )
         .unwrap();
 
-        // Aggregate
         let result = aggregate_experience(&home, MemoryBearerRef::Creator(creator_id), None)
             .await
             .unwrap();
         assert_eq!(result.memories_processed, 1);
         assert!(result.experience_markdown.contains("isolation-theme"));
 
-        // Verify SOUL.md was updated on disk
         let reloaded = crate::soul_io::load(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         let exp_after = reloaded.experience.as_deref().unwrap_or("");
         assert_ne!(exp_after, "");
@@ -617,7 +598,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Verify personality push-down → verify memory file created
+    /// note: Verify personality push-down → verify memory file created
     #[tokio::test]
     async fn e2e_personality_push_creates_memory_file() {
         let home = std::path::PathBuf::from("/tmp/test_e2e_push");
@@ -625,12 +606,10 @@ mod tests {
 
         let creator_id = "ctr_pushtest";
 
-        // Create SOUL with personality
         let mut soul = crate::soul_io::create(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         soul.set_personality("A minimalist prose style with sharp dialogue.".to_string());
         crate::soul_io::save(&home, MemoryBearerRef::Creator(creator_id), &soul).unwrap();
 
-        // Push personality to memory
         let memory = crate::personality_sync::push_personality_to_memory(
             &home,
             MemoryBearerRef::Creator(creator_id),
@@ -638,7 +617,6 @@ mod tests {
         )
         .unwrap();
 
-        // Verify file exists and is valid
         let loaded = memory_io::load_memory(
             &home,
             MemoryBearerRef::Creator(creator_id),
@@ -649,7 +627,6 @@ mod tests {
         assert!(loaded.body.contains("minimalist prose style"));
         assert!(loaded.validate().is_ok());
 
-        // Re-push should preserve memory_id
         let memory2 = crate::personality_sync::push_personality_to_memory(
             &home,
             MemoryBearerRef::Creator(creator_id),

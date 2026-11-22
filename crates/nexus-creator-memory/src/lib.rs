@@ -1,3 +1,4 @@
+// note: the module list below is the pipeline's full stage set.
 //! Nexus memory pipeline — SOUL, LTM, review, personality IO.
 //!
 //! This crate owns the bearer-scoped memory operations: SOUL document

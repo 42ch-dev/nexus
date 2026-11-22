@@ -1,3 +1,4 @@
+// note: SOUL's personality section is the anchor; every push wins over the memory copy.
 //! Personality push-down: SOUL → long-term memory sync.
 //!
 //! When a SOUL document's `## Personality` section is saved or modified,
@@ -19,10 +20,10 @@ use crate::memory_io::{load_memory, save_memory};
 use crate::soul::SoulDocument;
 use std::path::Path;
 
-/// Slug used for the personality memory file.
+/// note: Slug used for the personality memory file.
 pub const PERSONALITY_MEMORY_SLUG: &str = "personality-core";
 
-/// Push personality section from SOUL.md to long-term memory.
+/// note: Push personality section from SOUL.md to long-term memory.
 ///
 /// Creates or updates `personality-core.md` in the creator's
 /// `memory/long-term/` directory.
@@ -51,7 +52,6 @@ pub fn push_personality_to_memory(
     soul: &SoulDocument,
 ) -> Result<LongTermMemory, MemoryError> {
     bearer.validate()?;
-    // 1. Extract personality content
     let personality_content = soul.personality.as_deref().unwrap_or("").trim();
     if personality_content.is_empty() {
         return Err(MemoryError::ValidationError(
@@ -59,15 +59,12 @@ pub fn push_personality_to_memory(
         ));
     }
 
-    // 2. Check if personality memory already exists to preserve memory_id
     let existing = load_memory(home, bearer, PERSONALITY_MEMORY_SLUG).ok();
 
-    // 3. Create or update LongTermMemory
     let mut memory = if let Some(mut existing_mem) = existing {
-        // Preserve memory_id and source_session_ids from existing
         existing_mem.set_body(personality_content);
-        // Personality is user-written, not session-derived:
-        // clear any source_session_ids that may have been added externally
+        // why: personality is user-written, not session-derived; clear any
+        // source_session_ids that may have been added externally.
         existing_mem.frontmatter.source_session_ids.clear();
         existing_mem
     } else {
@@ -76,10 +73,8 @@ pub fn push_personality_to_memory(
         new_mem
     };
 
-    // 4. Save to disk
     save_memory(home, bearer, PERSONALITY_MEMORY_SLUG, &memory)?;
 
-    // 5. Set source_path on returned memory for downstream use
     memory.source_path = Some(crate::memory_io::memory_path(
         home,
         bearer,
@@ -139,7 +134,6 @@ mod tests {
             .unwrap()
             .contains("personality-core.md"));
 
-        // Verify file exists on disk
         assert!(memory.source_path.as_ref().unwrap().exists());
         cleanup(&home);
     }
@@ -153,7 +147,6 @@ mod tests {
         let memory =
             push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul).unwrap();
 
-        // Validate frontmatter fields
         assert!(
             memory.frontmatter.memory_id.starts_with("mem_"),
             "memory_id should start with mem_"
@@ -171,7 +164,6 @@ mod tests {
             "memory_kind should be personality_core"
         );
 
-        // Verify the file passes LongTermMemory validation
         let loaded = load_memory(
             &home,
             MemoryBearerRef::Creator("ctr_test"),
@@ -187,18 +179,15 @@ mod tests {
         let home = fake_home();
         cleanup(&home);
 
-        // First push
         let soul1 = make_soul_with_personality("Original personality.");
         let mem1 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul1)
             .unwrap();
         let original_id = mem1.frontmatter.memory_id;
 
-        // Second push with different content
         let soul2 = make_soul_with_personality("Updated personality v2.");
         let mem2 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul2)
             .unwrap();
 
-        // memory_id should be preserved (SOUL wins but keeps same memory)
         assert_eq!(
             mem2.frontmatter.memory_id, original_id,
             "re-push should preserve memory_id"
@@ -208,7 +197,6 @@ mod tests {
             "body should have new content"
         );
 
-        // Verify on disk
         let loaded = load_memory(
             &home,
             MemoryBearerRef::Creator("ctr_test"),
@@ -225,12 +213,11 @@ mod tests {
         let home = fake_home();
         cleanup(&home);
 
-        // First push
         let soul1 = make_soul_with_personality("Initial.");
         let _mem1 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul1)
             .unwrap();
 
-        // Manually add session IDs (simulating external edit)
+        // why: simulate an external edit that added session ids.
         let mut loaded = load_memory(
             &home,
             MemoryBearerRef::Creator("ctr_test"),
@@ -247,7 +234,6 @@ mod tests {
         )
         .unwrap();
 
-        // Re-push should clear session IDs
         let soul2 = make_soul_with_personality("Re-pushed personality.");
         let mem2 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul2)
             .unwrap();

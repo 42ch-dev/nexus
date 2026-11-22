@@ -1,3 +1,4 @@
+// note: goldens pin the Creator arm's bytes against the pre-refactor pipeline.
 //! v1.184 P3 Task 2 — Creator output byte-stability goldens.
 //!
 //! The golden strings below were captured from the pre-refactor Creator
@@ -30,15 +31,15 @@ const fn creator() -> MemoryBearerRef<'static> {
     MemoryBearerRef::Creator(GOLDEN_HOME_ID)
 }
 
-/// Bytes of a freshly created Creator SOUL.md (pre-refactor capture).
+/// note: Bytes of a freshly created Creator SOUL.md (pre-refactor capture).
 const GOLDEN_SOUL_CREATE: &str =
     "---\ncreator_id: ctr_golden\nschema_version: 1\n---\n\n## Personality\n\n\n\n## Experience\n\n\n";
 
-/// Bytes of a long-term memory file with a fully fixed frontmatter
+/// note: Bytes of a long-term memory file with a fully fixed frontmatter
 /// (pre-refactor capture).
 const GOLDEN_MEMORY_SAVE: &str = "---\nnexus_memory_version: 1\nmemory_id: mem_0123456789abcdef0123456789abcdef\nmemory_kind: story_summary\nupdated_at: 2026-01-02T03:04:05Z\nsource_session_ids:\n- sess_1\n---\nBody text line one.\nSecond line.\n";
 
-/// Bytes of SOUL.md after deterministic experience aggregation over two
+/// note: Bytes of SOUL.md after deterministic experience aggregation over two
 /// fixed memories plus the fixed-frontmatter one (pre-refactor capture).
 const GOLDEN_AGGREGATE_SOUL: &str = "---\ncreator_id: ctr_golden\nschema_version: 1\n---\n\n## Personality\n\n\n\n## Experience\n\n### Story Summary: adventure-story\n\nA grand adventure story about heroes.\n\n### Story Summary: fixed-slug\n\nBody text line one.\nSecond line.\n\n\n### Character Note: alice-note\n\nAlice is brave and cautious.\n";
 
@@ -117,8 +118,8 @@ async fn creator_experience_aggregation_bytes_are_byte_stable() {
 struct FixedSummarizer;
 
 impl SessionDigestSummarizer for FixedSummarizer {
-    // `async` is required by the `SessionDigestSummarizer` trait signature even
-    // though this fixed test double performs no awaits.
+    // why: `async` is required by the `SessionDigestSummarizer` trait signature
+    // even though this fixed test double performs no awaits.
     #[allow(clippy::unused_async_trait_impl)]
     async fn summarize(
         &self,
@@ -131,7 +132,7 @@ impl SessionDigestSummarizer for FixedSummarizer {
     }
 }
 
-/// Promotion output shape golden: the only volatile fields are the minted
+/// note: Promotion output shape golden: the only volatile fields are the minted
 /// `memory_id` and `updated_at`; everything else is pinned byte-for-byte.
 #[tokio::test]
 async fn creator_promote_output_shape_is_stable() {
@@ -152,7 +153,6 @@ async fn creator_promote_output_shape_is_stable() {
         .await
         .unwrap();
 
-    // Volatile field shapes are still constrained.
     let id_suffix = memory
         .frontmatter
         .memory_id
@@ -166,9 +166,10 @@ async fn creator_promote_output_shape_is_stable() {
         "RFC3339 timestamp: {ts}"
     );
 
-    // Slug derivation is pinned by the contract, not by the helper: `mem_<id>`
-    // → `memory-<id>`. Computing the expectation with `slug_from_memory_id`
-    // would assert the function against itself (fix round 3, F2).
+    // why: slug derivation is pinned by the contract, not by the helper —
+    // `mem_<id>` → `memory-<id>`. Computing the expectation with
+    // `slug_from_memory_id` would assert the function against itself (fix
+    // round 3, F2).
     let expected_slug = format!("memory-{id_suffix}");
     let file = memory_io::memory_path(&home, creator(), &expected_slug);
     assert!(file.exists(), "promoted memory file at {file:?}");

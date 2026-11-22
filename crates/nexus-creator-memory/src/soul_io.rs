@@ -1,3 +1,4 @@
+// note: path resolution is bearer-dispatched, so traversal checks live in one place.
 //! SOUL.md file I/O operations.
 //!
 //! Handles reading, writing, and creating SOUL.md files on disk.
@@ -13,7 +14,7 @@ use crate::errors::MemoryError;
 use crate::soul::SoulDocument;
 use std::path::{Path, PathBuf};
 #[must_use]
-/// Resolve the SOUL.md path for a bearer using the home layout.
+/// note: Resolve the SOUL.md path for a bearer using the home layout.
 ///
 /// # Panics (defense-in-depth)
 ///
@@ -25,18 +26,18 @@ pub fn soul_path(home: &Path, bearer: MemoryBearerRef<'_>) -> PathBuf {
     bearer.soul_path(home)
 }
 
-/// Check if a SOUL.md exists for the given bearer.
+/// note: Check if a SOUL.md exists for the given bearer.
 #[must_use]
 pub fn exists(home: &Path, bearer: MemoryBearerRef<'_>) -> bool {
-    // Existence check: silently return false for invalid ids rather than
-    // erroring, matching common "check then maybe create" patterns.
+    // why: silently return false for invalid ids rather than erroring,
+    // matching common "check then maybe create" patterns.
     if bearer.validate().is_err() {
         return false;
     }
     soul_path(home, bearer).exists()
 }
 
-/// Read and parse SOUL.md for a bearer.
+/// note: Read and parse SOUL.md for a bearer.
 ///
 /// # Errors
 ///
@@ -58,10 +59,10 @@ pub fn load(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, Me
     doc.source_path = Some(path);
     Ok(doc)
 }
+/// note: Create a new SOUL.md for a bearer. Fails if it already exists.
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Create a new SOUL.md for a bearer. Fails if it already exists.
 pub fn create(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, MemoryError> {
     bearer.validate()?;
     let path = soul_path(home, bearer);
@@ -83,10 +84,10 @@ pub fn create(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, 
     loaded_doc.source_path = Some(path);
     Ok(loaded_doc)
 }
+/// note: Save an existing SOUL.md (overwrites). Must already exist.
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Save an existing SOUL.md (overwrites). Must already exist.
 pub fn save(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -105,23 +106,20 @@ pub fn save(
         .map_err(|e| MemoryError::ValidationError(format!("cannot write SOUL.md: {e}")))?;
     Ok(())
 }
+/// note: Validate an existing SOUL.md (check sections and return parsed doc).
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Validate an existing SOUL.md (check sections and return parsed doc).
 pub fn validate(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, MemoryError> {
     bearer.validate()?;
     let doc = load(home, bearer)?;
     doc.validate()?;
     Ok(doc)
 }
+/// note: Delete SOUL.md for a bearer.
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-/// Delete SOUL.md for a bearer.
 pub fn delete(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<(), MemoryError> {
     bearer.validate()?;
     let path = soul_path(home, bearer);
@@ -142,7 +140,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn fake_home() -> PathBuf {
-        // Each test gets a unique temp dir to avoid parallel test races.
+        // why: each test gets a unique temp dir to avoid parallel test races.
         let id = std::thread::current()
             .name()
             .unwrap_or("unknown")
@@ -217,8 +215,6 @@ mod tests {
         assert!(validate(&home, MemoryBearerRef::Creator("ctr_val")).is_ok());
         cleanup(&home);
     }
-
-    // ── R1: path traversal rejection tests ─────────────────────────────
 
     #[test]
     fn load_rejects_path_traversal() {

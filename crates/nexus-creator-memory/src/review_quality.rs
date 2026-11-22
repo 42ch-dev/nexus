@@ -1,3 +1,4 @@
+// note: scoring is pure so review classification stays deterministic and testable.
 //! Content quality signal scoring for review classification.
 //!
 //! Pure functions that analyze text to determine whether digest content
@@ -6,24 +7,24 @@
 
 use std::collections::HashMap;
 
-/// Signal metrics extracted from text content.
+/// note: Signal metrics extracted from text content.
 #[derive(Debug, Clone)]
 pub struct QualitySignal {
-    /// Ratio of unique tokens to total tokens (0.0 – 1.0).
+    /// note: Ratio of unique tokens to total tokens (0.0 – 1.0).
     pub unique_ratio: f32,
-    /// Ratio of alphabetic characters to total non-whitespace characters (0.0 – 1.0).
+    /// note: Ratio of alphabetic characters to total non-whitespace characters (0.0 – 1.0).
     pub alpha_ratio: f32,
-    /// Ratio of the most frequent token's count to total tokens (0.0 – 1.0).
+    /// note: Ratio of the most frequent token's count to total tokens (0.0 – 1.0).
     /// High values indicate repetition.
     pub repeated_token_ratio: f32,
 }
 #[must_use]
-/// Tokenize text on whitespace and compute quality signal metrics.
+/// note: Tokenize text on whitespace and compute quality signal metrics.
 ///
 /// This is a pure function with no I/O or external dependencies.
 /// Tokens are lowercased for deduplication but alpha ratio is computed
 /// against the original text.
-#[allow(clippy::cast_precision_loss)] // heuristic f32 score: f32 rounding is intended
+#[allow(clippy::cast_precision_loss)] // note: heuristic f32 score: f32 rounding is intended
 pub fn quality_signal(input: &str) -> QualitySignal {
     let tokens: Vec<&str> = input.split_whitespace().collect();
     let total = tokens.len();
@@ -36,7 +37,6 @@ pub fn quality_signal(input: &str) -> QualitySignal {
         };
     }
 
-    // Unique ratio: unique lowercased tokens / total tokens
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut max_count: usize = 0;
     for tok in &tokens {
@@ -51,7 +51,6 @@ pub fn quality_signal(input: &str) -> QualitySignal {
     let unique_ratio = unique_count as f32 / total as f32;
     let repeated_token_ratio = max_count as f32 / total as f32;
 
-    // Alpha ratio: alphabetic chars / non-whitespace chars in original text
     let alpha_count = input.chars().filter(|c| c.is_alphabetic()).count();
     let non_ws_count = input.chars().filter(|c| !c.is_whitespace()).count();
     let alpha_ratio = if non_ws_count > 0 {
@@ -67,7 +66,7 @@ pub fn quality_signal(input: &str) -> QualitySignal {
     }
 }
 
-/// Determine whether text has high informational signal.
+/// note: Determine whether text has high informational signal.
 ///
 /// Thresholds tuned to reject repetitive noise while accepting
 /// substantive creative content:
@@ -142,11 +141,9 @@ mod tests {
         assert!(is_high_signal(text));
     }
 
-    // --- Boundary tests (W-001) ---
-
     #[test]
     fn single_token_passes_unique_and_alpha_but_fails_repeated() {
-        // 1 token: unique_ratio=1.0, alpha_ratio=1.0, repeated_token_ratio=1.0
+        // note: 1 token: unique_ratio=1.0, alpha_ratio=1.0, repeated_token_ratio=1.0
         // repeated_token_ratio 1.0 > 0.45 → fails
         assert!(!is_high_signal("hello"));
         let q = quality_signal("hello");
@@ -156,7 +153,7 @@ mod tests {
 
     #[test]
     fn exact_thresholds_all_met() {
-        // Construct text where all three thresholds are barely met
+        // note: construct text where all three thresholds are barely met
         // Need: unique ≥ 0.35, alpha ≥ 0.65, repeated ≤ 0.45
         // "one two three four five six seven" = 7 unique tokens
         // unique_ratio=1.0, alpha=1.0, repeated=1/7≈0.143
@@ -165,9 +162,9 @@ mod tests {
 
     #[test]
     fn just_below_unique_ratio_threshold() {
-        // Need unique_ratio < 0.35: many tokens but few unique
+        // note: need unique_ratio < 0.35: many tokens but few unique
         // 10 tokens, 3 unique = 0.30 < 0.35
-        let text = "x x x x x x x y z"; // 9 tokens, 3 unique → 0.333 < 0.35
+        let text = "x x x x x x x y z"; // note: 9 tokens, 3 unique → 0.333 < 0.35
         let q = quality_signal(text);
         assert!(
             q.unique_ratio < 0.35,
@@ -179,8 +176,8 @@ mod tests {
 
     #[test]
     fn just_above_repeated_token_threshold() {
-        // 10 tokens, one token repeated 5 times = 0.50 > 0.45 → fails
-        let text = "word word word word word a b c d e"; // 5/10 = 0.50
+        // note: 10 tokens, one token repeated 5 times = 0.50 > 0.45 → fails
+        let text = "word word word word word a b c d e"; // note: 5/10 = 0.50
         let q = quality_signal(text);
         assert!(
             q.repeated_token_ratio > 0.45,
@@ -192,15 +189,14 @@ mod tests {
 
     #[test]
     fn just_below_repeated_token_threshold_passes() {
-        // 10 tokens, one token repeated 4 times = 0.40 ≤ 0.45 → passes (if other thresholds met)
-        let text = "alpha beta alpha beta alpha delta epsilon zeta"; // 7 tokens, alpha=3/7≈0.43 ≤ 0.45
+        // note: 10 tokens, one token repeated 4 times = 0.40 ≤ 0.45 → passes (if other thresholds met)
+        let text = "alpha beta alpha beta alpha delta epsilon zeta"; // note: 7 tokens, alpha=3/7≈0.43 ≤ 0.45
         let q = quality_signal(text);
         assert!(
             q.repeated_token_ratio <= 0.45,
             "repeated_token_ratio should be at or below 0.45: got {}",
             q.repeated_token_ratio
         );
-        // Also check other thresholds are met
         assert!(q.unique_ratio >= 0.35, "unique_ratio: {}", q.unique_ratio);
         assert!(q.alpha_ratio >= 0.65, "alpha_ratio: {}", q.alpha_ratio);
         assert!(is_high_signal(text));

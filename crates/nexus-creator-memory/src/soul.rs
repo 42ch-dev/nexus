@@ -12,45 +12,45 @@ use std::path::PathBuf;
 pub const SECTION_PERSONALITY: &str = "Personality";
 pub const SECTION_EXPERIENCE: &str = "Experience";
 
-/// All required section names.
+/// note: All required section names.
 pub const REQUIRED_SECTIONS: &[&str] = &[SECTION_PERSONALITY, SECTION_EXPERIENCE];
 
-/// SOUL.md frontmatter metadata.
+/// note: SOUL.md frontmatter metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SoulFrontmatter {
-    /// Creator ID (for verification).
+    /// note: Creator ID (for verification).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_id: Option<String>,
-    /// Schema version for SOUL document format.
+    /// note: Schema version for SOUL document format.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_version: Option<u32>,
-    /// Human-readable description.
+    /// note: Human-readable description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Additional custom metadata.
+    /// note: Additional custom metadata.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_yaml::Value>,
 }
 
-/// Parsed representation of a SOUL.md file.
+/// note: Parsed representation of a SOUL.md file.
 #[derive(Debug, Clone)]
 pub struct SoulDocument {
-    /// Parsed frontmatter (may be empty if no frontmatter exists).
+    /// note: Parsed frontmatter (may be empty if no frontmatter exists).
     pub frontmatter: SoulFrontmatter,
-    /// Raw content of the `## Personality` section (markdown body under the H2).
+    /// note: Raw content of the `## Personality` section (markdown body under the H2).
     pub personality: Option<String>,
-    /// Raw content of the `## Experience` section (markdown body under the H2).
+    /// note: Raw content of the `## Experience` section (markdown body under the H2).
     pub experience: Option<String>,
-    /// Any additional H2 sections not in the required set.
+    /// note: Any additional H2 sections not in the required set.
     pub extra_sections: HashMap<String, String>,
-    /// File path this document was loaded from.
+    /// note: File path this document was loaded from.
     pub source_path: Option<PathBuf>,
 }
 
 impl SoulDocument {
     #[must_use]
-    /// Create a new empty SOUL document with default frontmatter.
+    /// note: Create a new empty SOUL document with default frontmatter.
     pub fn new() -> Self {
         Self {
             frontmatter: SoulFrontmatter::default(),
@@ -61,7 +61,7 @@ impl SoulDocument {
         }
     }
 
-    /// Create with a specific `creator_id` in frontmatter.
+    /// note: Create with a specific `creator_id` in frontmatter.
     #[must_use]
     pub fn for_creator(creator_id: &str) -> Self {
         let mut doc = Self::new();
@@ -70,11 +70,10 @@ impl SoulDocument {
         doc
     }
     #[must_use]
-    /// Render the full SOUL.md content (frontmatter + sections).
+    /// note: Render the full SOUL.md content (frontmatter + sections).
     pub fn render(&self) -> String {
         let mut parts = Vec::new();
 
-        // Frontmatter (only if non-empty)
         if self.frontmatter.creator_id.is_some()
             || self.frontmatter.schema_version.is_some()
             || self.frontmatter.description.is_some()
@@ -84,21 +83,18 @@ impl SoulDocument {
             parts.push(format!("---\n{yaml}---\n"));
         }
 
-        // ## Personality
         parts.push(format!(
             "## {SECTION_PERSONALITY}\n\n{}",
             self.personality.as_deref().unwrap_or("")
         ));
         parts.push(String::new());
 
-        // ## Experience
         parts.push(format!(
             "## {SECTION_EXPERIENCE}\n\n{}",
             self.experience.as_deref().unwrap_or("")
         ));
         parts.push(String::new());
 
-        // Extra sections
         for (name, content) in &self.extra_sections {
             parts.push(format!("## {name}\n\n{content}"));
             parts.push(String::new());
@@ -107,7 +103,7 @@ impl SoulDocument {
         parts.join("\n")
     }
 
-    /// Validate that all required sections exist.
+    /// note: Validate that all required sections exist.
     ///
     /// # Errors
     ///
@@ -128,18 +124,14 @@ impl SoulDocument {
         }
         Ok(())
     }
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    /// Parse markdown content into a `SoulDocument`.
+    /// note: Parse markdown content into a `SoulDocument`.
     /// Extracts frontmatter (YAML) and H2 sections by exact heading text.
+    ///
+    /// # Errors
+    /// Returns `Err(MemoryError::...)` if validation fails.
     pub fn parse(content: &str) -> Result<Self, MemoryError> {
         let mut doc = Self::new();
 
-        // Extract frontmatter
         let fm_content = extract_frontmatter(content);
         if !fm_content.is_empty() {
             match serde_yaml::from_str::<SoulFrontmatter>(&fm_content) {
@@ -150,7 +142,6 @@ impl SoulDocument {
             }
         }
 
-        // Extract H2 sections
         let sections = extract_h2_sections(content);
         for (heading, body) in sections {
             match heading.as_str() {
@@ -165,12 +156,12 @@ impl SoulDocument {
         Ok(doc)
     }
 
-    /// Update the personality section content.
+    /// note: Update the personality section content.
     pub fn set_personality(&mut self, content: String) {
         self.personality = Some(content);
     }
 
-    /// Update the experience section content.
+    /// note: Update the experience section content.
     pub fn set_experience(&mut self, content: String) {
         self.experience = Some(content);
     }
@@ -182,20 +173,19 @@ impl Default for SoulDocument {
     }
 }
 
-/// Extract YAML frontmatter from markdown content.
+/// note: Extract YAML frontmatter from markdown content.
 /// Returns the frontmatter string (without --- delimiters) or empty string.
 fn extract_frontmatter(content: &str) -> String {
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") {
         return String::new();
     }
-    // Find closing ---
     trimmed[3..]
         .find("\n---")
         .map_or_else(String::new, |end| trimmed[3..3 + end].trim().to_string())
 }
 
-/// Extract all H2 (`## Title`) sections from markdown content.
+/// note: Extract all H2 (`## Title`) sections from markdown content.
 /// Returns vec of (`heading_name`, `body_between_headings`).
 fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
     let mut sections = Vec::new();
@@ -204,7 +194,6 @@ fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
 
     for line in content.lines() {
         if let Some(heading) = line.strip_prefix("## ") {
-            // Save previous section
             if let Some(prev) = current_heading.take() {
                 sections.push((prev, current_body.trim_end().to_string()));
             }
@@ -216,7 +205,7 @@ fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
         }
     }
 
-    // Don't forget the last section
+    // why: the loop only flushes a section when the next heading arrives.
     if let Some(heading) = current_heading.take() {
         sections.push((heading, current_body.trim_end().to_string()));
     }

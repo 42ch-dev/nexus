@@ -1,3 +1,4 @@
+// note: structured memory entity carrying provenance and scope rules.
 //! `MemoryItem` aggregate — structured memory for creator experience and world context.
 //!
 //! `MemoryItem` carries canon, working, and experience memories with provenance
@@ -8,7 +9,7 @@ use nexus_contracts::MemoryType;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// Memory status enum.
+/// note: Memory status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryStatus {
@@ -43,13 +44,13 @@ pub enum MemoryKind {
     WorldBuilding,
     PlotOutline,
     ThemeAnalysis,
-    /// Personality track pushed from SOUL.md (spec §4.2).
+    /// note: Personality track pushed from SOUL.md (spec §4.2).
     PersonalityCore,
     Custom,
 }
 
 impl MemoryKind {
-    /// Get the string representation (same as Display via strum).
+    /// note: Get the string representation (same as Display via strum).
     #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
@@ -65,7 +66,7 @@ impl MemoryKind {
         }
     }
     #[must_use]
-    /// Get all valid memory kinds as strings.
+    /// note: Get all valid memory kinds as strings.
     pub fn all_as_strings() -> Vec<String> {
         vec![
             "story_summary".to_string(),
@@ -81,7 +82,7 @@ impl MemoryKind {
     }
 }
 
-/// Error type for `MemoryKind` parsing.
+/// note: Error type for `MemoryKind` parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseMemoryKindError(String);
 
@@ -112,14 +113,14 @@ impl FromStr for MemoryKind {
     }
 }
 
-/// Source reference for provenance.
+/// note: Source reference for provenance.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceRef {
     pub kind: String,
     pub id: String,
 }
 
-/// Creator quota for validation.
+/// note: Creator quota for validation.
 #[derive(Debug, Clone)]
 pub struct CreatorQuota {
     pub max_canon_memories: usize,
@@ -137,7 +138,7 @@ impl Default for CreatorQuota {
     }
 }
 
-/// `MemoryItem` aggregate — structured memory entity.
+/// note: `MemoryItem` aggregate — structured memory entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryItem {
     pub schema_version: u32,
@@ -164,7 +165,7 @@ pub struct MemoryItem {
 }
 
 impl MemoryItem {
-    /// Create a new memory item.
+    /// note: Create a new memory item.
     /// Precondition: creator must have active pairing (for persistence).
     #[must_use]
     pub fn new(
@@ -192,7 +193,7 @@ impl MemoryItem {
         }
     }
 
-    /// Transition status: active → superseded.
+    /// note: Transition status: active → superseded.
     ///
     /// # Errors
     ///
@@ -209,10 +210,11 @@ impl MemoryItem {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
+    /// note: Archive this memory item.
     ///
     /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    /// Archive this memory item.
+    /// Returns [`MemoryError::AlreadyInState`] when the item is already
+    /// archived.
     pub fn archive(&mut self) -> Result<(), MemoryError> {
         if self.status == MemoryStatus::Archived.as_str() {
             return Err(MemoryError::AlreadyInState("archived".to_string()));
@@ -221,20 +223,17 @@ impl MemoryItem {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    /// Record access for decay/reinforcement weighting.
+    /// note: Record access for decay/reinforcement weighting.
     pub fn record_access(&mut self) {
         self.last_accessed_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Record reinforcement (e.g., from context assembly hit).
+    /// note: Record reinforcement (e.g., from context assembly hit).
     pub fn record_reinforcement(&mut self) {
         self.last_reinforced_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Add a source reference for provenance.
+    /// note: Add a source reference for provenance.
     pub fn add_source_ref(&mut self, kind: &str, id: &str) {
         let refs = self.source_refs.get_or_insert_with(Vec::new);
         if !refs.iter().any(|r| r.kind == kind && r.id == id) {
@@ -244,44 +243,40 @@ impl MemoryItem {
             });
         }
     }
+    /// note: Validate creator/world scope and quota.
+    /// Per consistency-rules-v1.md §3.6.
     ///
     /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    /// Validate creator/world scope and quota.
-    /// Per consistency-rules-v1.md §3.6.
+    /// Returns [`MemoryError::ValidationError`] when the memory is archived.
     pub fn validate_scope(&self, _creator_quota: &CreatorQuota) -> Result<(), MemoryError> {
-        // Domain-level validation: ensure active status allows operations
         if self.status == MemoryStatus::Archived.as_str() {
             return Err(MemoryError::ValidationError(
                 "archived memory cannot be used".to_string(),
             ));
         }
-        // Full quota validation would require a repository query
-        // (how many active memories of this type exist for this creator/world)
-        // Here we validate structural correctness only.
+        // why: full quota validation needs a repository query, so this checks
+        // structural correctness only.
         Ok(())
     }
 
-    /// Check if this memory is active and accessible.
+    /// note: Check if this memory is active and accessible.
     #[must_use]
     pub fn is_active(&self) -> bool {
         self.status == MemoryStatus::Active.as_str()
     }
 
-    /// Set summary text.
+    /// note: Set summary text.
     pub fn set_summary(&mut self, summary: &str) {
         self.summary = Some(summary.to_string());
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Set embedding reference.
+    /// note: Set embedding reference.
     pub fn set_embedding_ref(&mut self, ref_id: &str) {
         self.embedding_ref = Some(ref_id.to_string());
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::Memory> for MemoryItem {
     fn from(c: nexus_contracts::Memory) -> Self {
@@ -468,8 +463,6 @@ mod tests {
         let deserialized: MemoryItem = serde_json::from_str(&json).unwrap();
         assert_eq!(mi, deserialized);
     }
-
-    // ── MemoryKind Enum Tests ──────────────────────────────────────
 
     #[test]
     fn test_memory_kind_all_variants() {

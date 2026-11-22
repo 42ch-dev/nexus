@@ -1,3 +1,4 @@
+// note: every public entrypoint validates the bearer before building a path.
 //! Long-term memory file I/O operations.
 //!
 //! Handles reading, writing, listing, and deleting long-term memory
@@ -19,7 +20,7 @@ use crate::long_term_memory::LongTermMemory;
 use std::path::{Path, PathBuf};
 
 #[must_use]
-/// Resolve the memory directory path for a bearer.
+/// note: Resolve the memory directory path for a bearer.
 ///
 /// Returns `<home>/.nexus42/creators/<creator_id>/memory/long-term/` for the
 /// Creator arm, or the Character arm's `…/characters/<character_id>/memory/long-term/`.
@@ -27,7 +28,7 @@ pub fn memory_dir(home: &Path, bearer: MemoryBearerRef<'_>) -> PathBuf {
     bearer.long_term_memory_dir(home)
 }
 
-/// Resolve the full path for a memory file.
+/// note: Resolve the full path for a memory file.
 ///
 /// Returns `<memory_dir>/<slug>.md`.
 ///
@@ -40,7 +41,7 @@ pub fn memory_path(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Path
     bearer.long_term_memory_path(home, slug)
 }
 
-/// List all memory slugs (filenames without `.md` extension) in the
+/// note: List all memory slugs (filenames without `.md` extension) in the
 /// memory directory for a bearer.
 ///
 /// Returns an empty list only when the directory is genuinely absent
@@ -54,9 +55,9 @@ pub fn memory_path(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Path
 /// Returns [`MemoryError`] on a permission, I/O, or malformed-path failure.
 pub fn list_memories(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<Vec<String>, MemoryError> {
     let dir = bearer.validated_long_term_memory_dir(home)?;
-    // Attempt the read directly rather than gating on `Path::exists()`, which
-    // returns false both for a missing path and for an unreadable path. A
-    // missing directory is the only honest-empty case; metadata/permission
+    // why: attempt the read directly rather than gating on `Path::exists()`,
+    // which returns false both for a missing path and for an unreadable path; a
+    // missing directory is the only honest-empty case, so metadata/permission
     // errors must surface to the caller.
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -73,12 +74,12 @@ pub fn list_memories(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<Vec<Str
             MemoryError::ValidationError(format!("cannot read directory entry: {e}"))
         })?;
         let path = entry.path();
-        // Resolve the entry type with a result-bearing metadata operation that
-        // follows symlinks (matching the previous `Path::is_file()` semantics).
-        // A per-entry permission/I/O/metadata failure is propagated rather than
-        // silently dropping the file; an entry that vanished between `read_dir`
-        // and this stat is treated as ordinary absence (skipped), and a
-        // non-file entry (directory, FIFO, socket) remains excluded.
+        // why: resolve the entry type with a result-bearing metadata operation
+        // that follows symlinks (matching the previous `Path::is_file()`
+        // semantics). A per-entry permission/I/O/metadata failure is propagated
+        // rather than silently dropping the file; an entry that vanished between
+        // `read_dir` and this stat is treated as ordinary absence (skipped), and
+        // a non-file entry (directory, FIFO, socket) remains excluded.
         let metadata = match std::fs::metadata(&path) {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -104,13 +105,13 @@ pub fn list_memories(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<Vec<Str
     slugs.sort();
     Ok(slugs)
 }
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-/// Load and parse a long-term memory file.
+/// note: Load and parse a long-term memory file.
 ///
 /// The file is read from `<memory_dir>/<slug>.md`, frontmatter is parsed,
 /// and a `LongTermMemory` with the `source_path` set is returned.
+///
+/// # Errors
+/// Returns `Err(MemoryError::...)` if validation fails.
 pub fn load_memory(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -119,7 +120,7 @@ pub fn load_memory(
     load_memory_source(home, bearer, slug).map(|(memory, _)| memory)
 }
 
-/// [`load_memory`] plus the file's exact source text.
+/// note: [`load_memory`] plus the file's exact source text.
 ///
 /// The parsed view trims the body and keeps only the known frontmatter fields,
 /// so a caller that must preserve the file's bytes (the P5 migration) keeps the
@@ -152,10 +153,7 @@ pub fn load_memory_source(
     memory.source_path = Some(path);
     Ok((memory, content))
 }
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-/// Save a long-term memory file to disk.
+/// note: Save a long-term memory file to disk.
 ///
 /// Creates the memory directory if it doesn't exist. Serializes the
 /// frontmatter and body to the standard Markdown format and writes
@@ -163,6 +161,9 @@ pub fn load_memory_source(
 ///
 /// Uses atomic write (write to `.tmp` then rename) to prevent corruption
 /// on crash or disk-full (R-V133P4-05).
+///
+/// # Errors
+/// Returns `Err(MemoryError::...)` if validation fails.
 pub fn save_memory(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -179,22 +180,22 @@ pub fn save_memory(
     let content = memory.render()?;
     let path = memory_path(home, bearer, slug);
 
-    // R-V133P4-05: Atomic write — write to temp file, then rename.
-    // POSIX rename is atomic within a filesystem, preventing partial writes.
+    // why: R-V133P4-05 — POSIX rename is atomic within a filesystem, so writing
+    // a temp file first prevents partial writes on crash or disk-full.
     let tmp_path = path.with_extension("md.tmp");
     std::fs::write(&tmp_path, &content)
         .map_err(|e| MemoryError::ValidationError(format!("cannot write temp memory file: {e}")))?;
     std::fs::rename(&tmp_path, &path).map_err(|e| {
-        // Clean up temp file on rename failure (best effort).
+        // note: clean up temp file on rename failure (best effort).
         let _ = std::fs::remove_file(&tmp_path);
         MemoryError::ValidationError(format!("cannot rename temp memory file: {e}"))
     })?;
     Ok(())
 }
+/// note: Delete a long-term memory file.
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Delete a long-term memory file.
 pub fn delete_memory(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -218,23 +219,20 @@ pub fn delete_memory(
     Ok(())
 }
 
-/// Check if a slug is path-safe (no `..`, `/`, `\`, null bytes, or control chars).
+/// note: Check if a slug is path-safe (no `..`, `/`, `\`, null bytes, or control chars).
 ///
 /// Re-exported from `long_term_memory::slug_is_safe` for convenience.
 #[must_use]
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
 pub fn slug_is_safe(slug: &str) -> bool {
     crate::long_term_memory::slug_is_safe(slug)
 }
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-/// Ensure the memory directory exists for a bearer.
+/// note: Ensure the memory directory exists for a bearer.
 ///
 /// Creates the bearer's `memory/long-term/` directory (and all parents) if
 /// it doesn't exist.
+///
+/// # Errors
+/// Returns `Err(MemoryError::...)` if validation fails.
 pub fn ensure_memory_dir(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<(), MemoryError> {
     bearer.validate()?;
     let dir = memory_dir(home, bearer);
@@ -368,7 +366,7 @@ mod tests {
     fn list_memories_missing_dir_is_honest_empty() {
         let home = fake_home();
         cleanup(&home);
-        // Never create the memory directory: genuine absence is honest-empty.
+        // why: never create the memory directory; genuine absence is honest-empty.
         let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert_eq!(slugs, [] as [std::string::String; 0]);
         cleanup(&home);
@@ -378,8 +376,8 @@ mod tests {
     fn list_memories_propagates_non_notfound_read_error() {
         let home = fake_home();
         cleanup(&home);
-        // Place a regular file where the memory directory should be so
-        // read_dir fails with NotADirectory (not NotFound) — a metadata/read
+        // why: place a regular file where the memory directory should be so
+        // read_dir fails with NotADirectory (not NotFound); a metadata/read
         // failure must propagate rather than be treated as absence.
         let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
         std::fs::create_dir_all(&dir).unwrap();
@@ -404,8 +402,8 @@ mod tests {
         mem.set_body("Body.");
         save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "keep-me", &mem).unwrap();
 
-        // A directory named like a memory file and a non-md regular file must
-        // both be excluded; only the regular `.md` file is collected.
+        // why: a directory named like a memory file and a non-md regular file
+        // must both be excluded; only the regular `.md` file is collected.
         let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
         std::fs::create_dir_all(dir.join("subdir.md")).unwrap();
         std::fs::write(dir.join("note.txt"), "not a memory").unwrap();
@@ -422,8 +420,8 @@ mod tests {
         let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
         std::fs::create_dir_all(&dir).unwrap();
 
-        // A self-loop symlink makes the following `fs::metadata` fail with a
-        // non-NotFound error (filesystem loop), which must propagate rather
+        // why: a self-loop symlink makes the following `fs::metadata` fail with
+        // a non-NotFound error (filesystem loop), which must propagate rather
         // than silently drop the entry.
         #[cfg(unix)]
         std::os::unix::fs::symlink("loop_self", dir.join("loop_self")).unwrap();
@@ -470,8 +468,6 @@ mod tests {
             PathBuf::from("/h/.nexus42/creators/ctr_test/memory/long-term/my-slug.md")
         );
     }
-
-    // ── Path traversal rejection tests ─────────────────────────────
 
     #[test]
     fn load_rejects_path_traversal_creator_id() {
@@ -572,7 +568,6 @@ mod tests {
         )
         .unwrap();
 
-        // Load, modify, save
         let mut loaded =
             load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
         loaded.set_body("Updated content");
@@ -594,7 +589,7 @@ mod tests {
     fn save_creates_parent_dirs() {
         let home = fake_home();
         cleanup(&home);
-        // Don't call ensure_memory_dir explicitly; save should handle it
+        // why: save owns directory creation; the test must not pre-create it.
         let mem = LongTermMemory::new("custom");
         assert!(save_memory(&home, MemoryBearerRef::Creator("ctr_new"), "auto-dir", &mem).is_ok());
         assert!(memory_path(&home, MemoryBearerRef::Creator("ctr_new"), "auto-dir").exists());

@@ -1,3 +1,4 @@
+// note: the two-arm enum keeps the pipeline closed; no generic Actor layer exists.
 //! Closed memory bearer reference (v1.184 P3 Task 2).
 //!
 //! The Creator/Character memory pipeline is keyed by a **closed**
@@ -22,31 +23,31 @@ use crate::errors::MemoryError;
 use nexus_creator::is_valid_creator_id;
 use std::path::{Path, PathBuf};
 
-/// Memory directory relative to the bearer's home layout root.
+/// note: Memory directory relative to the bearer's home layout root.
 const MEMORY_SUBDIR: &str = "memory/long-term";
 
-/// Closed bearer reference for the shared Creator/Character memory pipeline.
+/// note: Closed bearer reference for the shared Creator/Character memory pipeline.
 ///
 /// Copyable borrowed form; pipeline functions take it by value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryBearerRef<'a> {
-    /// The Creator bearer: files under `~/.nexus42/creators/<creator_id>/`.
+    /// note: The Creator bearer: files under `~/.nexus42/creators/<creator_id>/`.
     Creator(&'a str),
-    /// A Character bearer: files under
+    /// note: A Character bearer: files under
     /// `~/.nexus42/creators/<owner_creator_id>/characters/<character_id>/`.
     /// `owner_creator_id` is the actor/owner provenance; the daemon wiring
     /// resolves it from the active Creator and verifies ownership via
     /// `nexus-local-db` before any Character persistence.
     Character {
-        /// Owning Creator id (provenance; also the path parent).
+        /// note: Owning Creator id (provenance; also the path parent).
         owner_creator_id: &'a str,
-        /// Character id (`chr_` + 32 lowercase hex, as minted).
+        /// note: Character id (`chr_` + 32 lowercase hex, as minted).
         character_id: &'a str,
     },
 }
 
 impl MemoryBearerRef<'_> {
-    /// The bearer's primary id (`ctr_…` for Creator, `chr_…` for Character).
+    /// note: The bearer's primary id (`ctr_…` for Creator, `chr_…` for Character).
     #[must_use]
     pub const fn id(&self) -> &str {
         match *self {
@@ -55,7 +56,7 @@ impl MemoryBearerRef<'_> {
         }
     }
 
-    /// Validate both id components for format and path safety.
+    /// note: Validate both id components for format and path safety.
     ///
     /// Creator arm: `^ctr_[a-zA-Z0-9]+$` (legacy rule, unchanged message).
     /// Character arm: owner must be a valid Creator id and the Character id
@@ -83,7 +84,7 @@ impl MemoryBearerRef<'_> {
         }
     }
 
-    /// Resolve the SOUL.md path for this bearer via the home layout.
+    /// note: Resolve the SOUL.md path for this bearer via the home layout.
     ///
     /// # Panics
     ///
@@ -103,7 +104,7 @@ impl MemoryBearerRef<'_> {
         }
     }
 
-    /// Resolve the long-term memory directory after validating bearer ids.
+    /// note: Resolve the long-term memory directory after validating bearer ids.
     ///
     /// Prefer this over [`Self::long_term_memory_dir`] at public I/O entrypoints
     /// so path construction is gated on closed Creator/Character id formats.
@@ -117,7 +118,7 @@ impl MemoryBearerRef<'_> {
         Ok(self.long_term_memory_dir(home))
     }
 
-    /// Resolve the long-term memory directory for this bearer.
+    /// note: Resolve the long-term memory directory for this bearer.
     ///
     /// The Creator arm is byte-identical to the legacy
     /// `memory_io::memory_dir` construction.
@@ -154,7 +155,7 @@ impl MemoryBearerRef<'_> {
         }
     }
 
-    /// Resolve the full path for a long-term memory file (`<slug>.md`).
+    /// note: Resolve the full path for a long-term memory file (`<slug>.md`).
     ///
     /// # Panics
     ///
@@ -172,7 +173,7 @@ impl MemoryBearerRef<'_> {
         self.long_term_memory_dir(home).join(format!("{slug}.md"))
     }
 
-    /// Resolve the ACP worker identity for this bearer.
+    /// note: Resolve the ACP worker identity for this bearer.
     ///
     /// The `creator_id` is the Creator that owns a registered worker (== the
     /// bearer id for the Creator arm; the Character's `owner_creator_id` for
@@ -197,17 +198,17 @@ impl MemoryBearerRef<'_> {
     }
 }
 
-/// The ACP worker identity of a bearer: the owner Creator that routes to the
+/// note: The ACP worker identity of a bearer: the owner Creator that routes to the
 /// worker registry plus the optional Character being reflected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BearerIdentity<'a> {
-    /// Owner Creator id used for ACP worker routing (`registry.get`).
+    /// note: Owner Creator id used for ACP worker routing (`registry.get`).
     pub creator_id: &'a str,
-    /// Character id when the bearer is a Character; `None` for the Creator arm.
+    /// note: Character id when the bearer is a Character; `None` for the Creator arm.
     pub character_id: Option<&'a str>,
 }
 
-/// Validate that a Creator id is safe to use in filesystem paths.
+/// note: Validate that a Creator id is safe to use in filesystem paths.
 ///
 /// Rejects ids containing path separators, `..` components, backslashes,
 /// or control characters, and requires the standard `ctr_` prefix.
