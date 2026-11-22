@@ -80,24 +80,24 @@ use crate::{Scope, SpokeReject, SpokeRejectCode};
 /// handler-owned `sqlx::Transaction` for the duration of one orchestrate call.
 pub struct NexusAdapter<'a> {
     pool: SqlitePool,
-    /// The admitted read authority for this adapter (durable §4.1).
+    /// note: The admitted read authority for this adapter (durable §4.1).
     /// `None` = host metadata/tools construction: every KE-bearing port fails
     /// closed instead of reading outside an admitted selection.
     read_scope: Option<KnowledgeReadScope>,
-    /// Injected installation identity (`~/.nexus42/device-id` UUID) for the
+    /// note: Injected installation identity (`~/.nexus42/device-id` UUID) for the
     /// `HostCapabilityManifest`. `None` → `HostManifestPort` resolves the
     /// device id from the standard nexus home on demand. V1.148 P3 N-C0:
     /// replaces the former static `"nexus-local"` host id (honesty lock —
     /// installation-scoped stable id, not a `PeerId` / world id).
     host_id: Option<String>,
-    /// Host-local compute module store (`~/.nexus42/modules/`) when
+    /// invariant: Host-local compute module store (`~/.nexus42/modules/`) when
     /// configured (V1.154 P2 — the Connect host). `None` ⇒ `ComputablePort`
     /// serves only the embedded ship set (baseline consumers, V1.146
     /// behavior unchanged). When set, compute modules MUST be installed
     /// under `<dir>/<id>/<id>.wasm` + `<dir>/<id>/manifest.json` — bytes
     /// are never peer-supplied (spec §2.1).
     user_modules_dir: Option<PathBuf>,
-    /// Compiled-module cache (P2 QC fix wave FW-2), keyed by
+    /// why: Compiled-module cache (P2 QC fix wave FW-2), keyed by
     /// `(module id, bytes hash, manifest hash)` so the expensive wasmtime
     /// compile runs once per distinct module content instead of once per
     /// compute invocation.
@@ -111,7 +111,7 @@ pub struct NexusAdapter<'a> {
     /// private cache (tests, one-shot CLI paths).
     #[cfg(feature = "compute")]
     module_cache: Arc<ModuleCache>,
-    /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
+    /// note: When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
     /// transaction instead of opening its own. The handler moves the
     /// `sqlx::Transaction` into the shared cell before `orchestrate_promote`
     /// and takes it back out for sibling writes + `commit()`.
@@ -119,7 +119,7 @@ pub struct NexusAdapter<'a> {
 }
 
 impl NexusAdapter<'static> {
-    /// Construct a KE-capable adapter bound to one validated request scope.
+    /// invariant: Construct a KE-capable adapter bound to one validated request scope.
     ///
     /// V1.153 P0 T2: no tokio runtime is captured anymore — the port methods
     /// are natively `async fn` (spoke-operations 0.9.1 surface) and await
@@ -134,7 +134,7 @@ impl NexusAdapter<'static> {
         Self::with_read_scope(pool, Some(read_scope))
     }
 
-    /// Construct the **host metadata/tools** adapter: no knowledge read scope.
+    /// note: Construct the **host metadata/tools** adapter: no knowledge read scope.
     ///
     /// Used where only host metadata and the connect tool surface are served.
     /// Every KE-bearing port (`KnowledgeEntryPort`, `ScopeQueryPort`,
@@ -146,7 +146,7 @@ impl NexusAdapter<'static> {
         Self::with_read_scope(pool, None)
     }
 
-    // Clippy wants const, but the `compute` feature builds `Arc::new` here; suppress.
+    // note: Clippy wants const, but the `compute` feature builds `Arc::new` here; suppress.
     #[allow(clippy::missing_const_for_fn)]
     fn with_read_scope(pool: SqlitePool, read_scope: Option<KnowledgeReadScope>) -> Self {
         NexusAdapter {
@@ -163,13 +163,13 @@ impl NexusAdapter<'static> {
 
 #[allow(clippy::elidable_lifetime_names)]
 impl<'a> NexusAdapter<'a> {
-    /// The bound admitted read selection, or `None` for a host-only adapter.
+    /// note: The bound admitted read selection, or `None` for a host-only adapter.
     #[must_use]
     pub const fn read_scope(&self) -> Option<&KnowledgeReadScope> {
         self.read_scope.as_ref()
     }
 
-    /// Require the bound read selection of a KE-bearing port (durable §4.1).
+    /// note: Require the bound read selection of a KE-bearing port (durable §4.1).
     ///
     /// A host-only adapter ([`NexusAdapter::new_host`]) has none, so every KE
     /// read/mutate entry point fails closed rather than widening to an
@@ -187,7 +187,7 @@ impl<'a> NexusAdapter<'a> {
             .ok_or_else(|| unbound_scope_reject(context))
     }
 
-    /// Whether the bound selection authorizes this container.
+    /// note: Whether the bound selection authorizes this container.
     #[must_use]
     pub(crate) fn admits_container(&self, owner: &KnowledgeOwnerRef) -> bool {
         self.read_scope
@@ -195,7 +195,7 @@ impl<'a> NexusAdapter<'a> {
             .is_some_and(|selection| selection.containers().contains(owner))
     }
 
-    /// The durable §4.2 visibility rule for one stored row, applied against
+    /// invariant: The durable §4.2 visibility rule for one stored row, applied against
     /// the bound selection: the row must sit in an authorized container, and
     /// `owner-private` must resolve to a holder the policy admits (the exact
     /// resolved holder for `ActorView`, the known-governance holder set for
@@ -229,7 +229,7 @@ impl<'a> NexusAdapter<'a> {
         }
     }
 
-    /// Load one knowledge entry by id **inside the bound selection**.
+    /// note: Load one knowledge entry by id **inside the bound selection**.
     ///
     /// The returned value is `None` both for an absent id and for a row the
     /// selection does not admit, so a hidden read-by-id is indistinguishable
@@ -254,7 +254,7 @@ impl<'a> NexusAdapter<'a> {
         Ok(self.admits_record(&record).then_some(record))
     }
 
-    /// Refuse a wire-supplied `Scope.viewpoint` that is not the bound resolved
+    /// invariant: Refuse a wire-supplied `Scope.viewpoint` that is not the bound resolved
     /// holder (durable §4.1/§9).
     ///
     /// `Scope.viewpoint` is the separately resolved holder `entry_id` of an
@@ -286,7 +286,7 @@ impl<'a> NexusAdapter<'a> {
         })
     }
 
-    /// Inject the installation identity used by [`crate::HostManifestPort`]
+    /// note: Inject the installation identity used by [`crate::HostManifestPort`]
     /// (`HostCapabilityManifest.host_id`).
     ///
     /// V1.148 P3 N-C0 honesty lock: the manifest `host_id` is the installation
@@ -300,7 +300,7 @@ impl<'a> NexusAdapter<'a> {
         self
     }
 
-    /// Share one host-owned compiled-module cache across adapters (v1.191 P1
+    /// invariant: Share one host-owned compiled-module cache across adapters (v1.191 P1
     /// T8).
     ///
     /// The Connect host builds one [`ModuleCache`] per process and clones this
@@ -315,7 +315,7 @@ impl<'a> NexusAdapter<'a> {
         self
     }
 
-    /// Configure the host-local compute module store (V1.154 P2 — the
+    /// invariant: Configure the host-local compute module store (V1.154 P2 — the
     /// Connect host's `~/.nexus42/modules/`). When set, `ComputablePort`
     /// resolves compute modules from `<dir>/<id>/<id>.wasm` +
     /// `<dir>/<id>/manifest.json` ONLY (spec §2.1 — module bytes are never
@@ -328,14 +328,14 @@ impl<'a> NexusAdapter<'a> {
         self
     }
 
-    /// The configured host-local module store, if any — the Connect compute
+    /// note: The configured host-local module store, if any — the Connect compute
     /// gate requires one (a host without a store serves no compute module).
     #[must_use]
     pub fn user_modules_dir(&self) -> Option<&Path> {
         self.user_modules_dir.as_deref()
     }
 
-    /// The compiled-module cache backing this adapter. Test seam: in-crate
+    /// note: The compiled-module cache backing this adapter. Test seam: in-crate
     /// tests observe cache hits / recompiles through it, and the shared-cache
     /// proof compares two scoped adapters over one cache.
     #[cfg(feature = "compute")]
@@ -344,7 +344,7 @@ impl<'a> NexusAdapter<'a> {
         &self.module_cache
     }
 
-    /// Attach a shared transaction cell for the duration of one adopt/orchestrate
+    /// note: Attach a shared transaction cell for the duration of one adopt/orchestrate
     /// call. The handler installs the open `sqlx::Transaction` in the cell before
     /// calling [`Self::with_bound_tx`], then removes it afterward for job flip +
     /// `commit()`.
@@ -359,7 +359,7 @@ impl<'a> NexusAdapter<'a> {
         }
     }
 
-    /// Run `f` while the adapter's bound transaction cell (if any) is active.
+    /// note: Run `f` while the adapter's bound transaction cell (if any) is active.
     ///
     /// `orchestrate_promote` and the other `orchestrate_*` entrypoints (now
     /// native `async fn`) are awaited from async handlers while the bound
@@ -392,14 +392,13 @@ impl<'a> NexusAdapter<'a> {
     }
 }
 
-// ── Request-bound scope reject helpers (v1.191 P1 T8) ────────────────────
 
-/// Contents marker for the missing-scope reject, so hosts classify it by
+/// note: Contents marker for the missing-scope reject, so hosts classify it by
 /// marker instead of sniffing the message (same pattern as
 /// `module_identity_missing` / `world_conflict`).
 const READ_SCOPE_MISSING_MARKER: &str = "read_scope_missing";
 
-/// The fail-closed reject a KE-bearing port produces on a host-only adapter
+/// note: The fail-closed reject a KE-bearing port produces on a host-only adapter
 /// ([`NexusAdapter::new_host`]).
 ///
 /// It is an `InternalError` — a host wiring fault, not client input — and it
@@ -419,7 +418,7 @@ pub(crate) fn unbound_scope_reject(context: &str) -> SpokeReject {
     }
 }
 
-/// Details payload for a wire-scope refusal: the requested scope id only —
+/// invariant: Details payload for a wire-scope refusal: the requested scope id only —
 /// never the client-supplied viewpoint (durable §4.1 — a client value is not
 /// authority and is not echoed as if it named one).
 fn scope_reject_details(scope_id: &str) -> Map<String, Value> {
@@ -432,7 +431,7 @@ fn scope_reject_details(scope_id: &str) -> Map<String, Value> {
 mod tests {
     use super::*;
 
-    /// Compile-time proof that `NexusAdapter` satisfies the
+    /// note: Compile-time proof that `NexusAdapter` satisfies the
     /// `BaselinePorts` blanket impl once all 6 port families are in scope
     /// (spec §7.4 — production-vs-stub matrix is complete).
     ///
@@ -477,7 +476,7 @@ mod tests {
         accepts_rule_query_port(&adapter);
         accepts_host_manifest_port(&adapter);
 
-        // The metadata/tool families stay reachable without any knowledge
+        // invariant: The metadata/tool families stay reachable without any knowledge
         // scope; the KE-bearing ones are compiled for the type but fail closed
         // at runtime (proved in `tests/adapter_surface.rs`).
         accepts_rule_query_port(&host);
@@ -485,7 +484,7 @@ mod tests {
         accepts_fork_timeline_port(&host);
     }
 
-    /// Any well-formed selection: the trait-upcast proof never reads through it.
+    /// invariant: Any well-formed selection: the trait-upcast proof never reads through it.
     fn test_read_scope() -> KnowledgeReadScope {
         KnowledgeReadScope::creator_management(
             vec![KnowledgeOwnerRef::world("wld_upcast")],

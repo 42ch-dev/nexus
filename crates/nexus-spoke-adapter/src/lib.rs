@@ -1,4 +1,5 @@
 //! # nexus-spoke-adapter
+//! contract — docs/specs/architecture/spoke-adapter-architecture.md §1.2 / §7 / §7.4.
 //!
 //! The single boundary that crosses between nexus domain concerns and SPOKE
 //! standard objects, and the **spoke capability-aggregation layer** for nexus
@@ -50,27 +51,27 @@
 //! spoke-only.)
 
 pub mod adapter;
-// V1.166 AR-2 — the structured-rule constraint carrier (types + strict
+// note: V1.166 AR-2 — the structured-rule constraint carrier (types + strict
 // validator + evaluator read path). Sole consumer of the carrier grammar at
 // the spoke-adapter boundary (spoke-type handling + carrier types stay here;
 // evaluator logic is daemon-side).
 pub mod constraint;
 pub mod conversion;
 pub mod extensions;
-// v1.191 P1 T12 — the adapter-owned production extraction wrapper (durable §8):
+// note: v1.191 P1 T12 — the adapter-owned production extraction wrapper (durable §8):
 // `ResolvedExtractionPort` + `extract_candidates` around upstream
 // `orchestrate_extract`. No orchestration/core import; no persistence.
 pub mod extraction;
 pub mod ops;
 
-/// The HostCapabilityManifest single builder SSOT (DF-72 N-C0, §4.1).
+/// note: The HostCapabilityManifest single builder SSOT (DF-72 N-C0, §4.1).
 ///
 /// [`manifest::build_local_host_manifest`] is shared by
 /// `HostManifestPort::get_host_capability_manifest` and the Connect Host's
 /// `ConnectConfig.local_manifest`.
 pub mod manifest;
 
-/// Narrative Knowledge Pack build/parse helpers.
+/// invariant: Narrative Knowledge Pack build/parse helpers.
 ///
 /// Implements the pack dialect defined in the spoke handbook
 /// `domain-profile-narrative-knowledge-pack.md` — a portable lore bundle
@@ -85,24 +86,24 @@ pub mod manifest;
 /// validation rules, and round-trip guarantees.
 pub mod pack;
 
-// V1.145 P1b — production adapter re-export so consumers can construct
+// note: V1.145 P1b — production adapter re-export so consumers can construct
 // `NexusAdapter` through the single spoke-adapter import boundary
 // (spec §7.4 import path: `nexus_spoke_adapter::NexusAdapter`).
 pub use adapter::NexusAdapter;
 
-// V1.155 P0 N-C3 — the adapter-level observed-peer read (operator/CLI
+// note: V1.155 P0 N-C3 — the adapter-level observed-peer read (operator/CLI
 // surface): the peer's manifest + the nexus-local `last_seen` observation
 // metadata (not part of the spoke wire type; the `HostManifestPort` trait
 // surface stays manifest-only).
 pub use adapter::host_manifest_port::ObservedPeerHost;
 
-// V1.154 P2 (R3 closure): shared world-conflict classification predicate for
+// note: V1.154 P2 (R3 closure): shared world-conflict classification predicate for
 // the adapter's `SpokeReject` carries (spec §3.2 — fixed `world_conflict`
 // wire spelling). Host mappings (Connect ErrorEnvelope, daemon HTTP) use it
 // instead of re-sniffing the details marker.
 pub use adapter::knowledge_entry_port::is_world_conflict_reject;
 
-// V1.154 P2 (P2 QC fix wave FW-5): shared predicate for the
+// invariant: V1.154 P2 (P2 QC fix wave FW-5): shared predicate for the
 // missing-module-identity reject (`module_identity_missing` details marker
 // on `resolve_module_id`'s InvalidInput) — the Connect compute gate
 // classifies the defined `module_not_found` denial by marker, never by
@@ -110,39 +111,38 @@ pub use adapter::knowledge_entry_port::is_world_conflict_reject;
 #[cfg(feature = "compute")]
 pub use adapter::computable_port::is_module_identity_missing_reject;
 
-// V1.154 P2 (P2 QC fix wave FW-4): shared single-component module-id
+// note: V1.154 P2 (P2 QC fix wave FW-4): shared single-component module-id
 // path-safety check — the Connect gate's host-store check and the adapter's
 // user-module loader route through it so gate and execution guard cannot
 // drift.
 #[cfg(feature = "compute")]
 pub use adapter::computable_port::is_safe_module_id;
 
-// V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
+// note: V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
 // `assemble_moment` wiring site) + the scoped-read result type. Re-exported so
 // the MCA composition root (`apps/nexus42`) constructs it through the single
 // spoke-adapter import boundary (spec §7.4 V1.145 P2 amendment).
 pub use adapter::mca_read::{ScopedKbRead, SpokeBackedKbStore};
 
-// ── Spoke type re-exports (consumer convenience) ────────────────────────
 //
-// Consumers depend on `nexus-spoke-adapter` for both the accessors and the
+// note: Consumers depend on `nexus-spoke-adapter` for both the accessors and the
 // spoke types that appear in the public API surface, so they do not need a
 // direct `spoke-schemas` / `spoke-operations` dependency just to spell the
 // operand types. These mirror `spoke_operations`' own `pub use spoke_schemas`.
 
 pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
-// The generated extension-key newtype is module-local at 0.15.1 and every
+// note: The generated extension-key newtype is module-local at 0.15.1 and every
 // module names it `ExtensionKey`, so the types cannot be re-exported side by
 // side. Re-export the crate instead: consumers spell
 // `spoke_schemas::<module>::ExtensionKey` for the map they hold.
 pub use spoke_schemas;
-// Spoke 0.5.0 timeline beat-assist pure helpers (Surface A) — pass-through,
+// invariant: Spoke 0.5.0 timeline beat-assist pure helpers (Surface A) — pass-through,
 // no nexus logic (call-boundary invariant §7 preserved).
 pub use spoke_operations::{
     filter_timeline_events_by_moment_scale, order_timeline_events_by_ids,
     order_timeline_events_by_precedes, OrderTimelineEventsByPrecedesOptions,
 };
-// Surface A operands (existing) + Surface B operands (spoke ≥ 0.3.0):
+// note: Surface A operands (existing) + Surface B operands (spoke ≥ 0.3.0):
 // the 4 existing wire types stay listed; the remaining names are the ops
 // envelopes + capability types the orchestrators accept/return.
 pub use spoke_schemas::{
@@ -153,9 +153,8 @@ pub use spoke_schemas::{
     UpsertRequest, UpsertResponse,
 };
 
-// ── Spoke adapter port + orchestration surface (spoke ≥ 0.3.0) ─────────
 //
-// Surface B in spec §7.3 — consumers implement these port traits and call
+// invariant: Surface B in spec §7.3 — consumers implement these port traits and call
 // the orchestrate_* entrypoints; the adapter stays the import boundary.
 // Re-exports only — no nexus logic, no parallel types (call-boundary
 // invariant §7 preserved). Coverage: 8 port traits + 4 composition/adapter
@@ -170,7 +169,7 @@ pub use spoke_operations::{
     RuleQueryPort, ScopeQueryPort,
 };
 
-// v1.190 P3-T3 — the peer-tool spine's spoke primitives. The peer registry
+// invariant: v1.190 P3-T3 — the peer-tool spine's spoke primitives. The peer registry
 // lives in `nexus-connect::peer_tools` (v1.244; `nexus-core::execution`
 // before that), so a consumer needs the tool-grammar and manifest validators
 // WITHOUT taking a
@@ -181,7 +180,7 @@ pub use spoke_operations::{
     parse_tool_capability_id, validate_manifest_tools, validate_tool_arguments, ToolDescriptor,
 };
 
-// v1.191 P1 T1 (spoke 0.13.0) — the `ke-extraction` surface: the injected
+// note: v1.191 P1 T1 (spoke 0.13.0) — the `ke-extraction` surface: the injected
 // product source loader, its operand/result types and the `orchestrate_extract`
 // entrypoint. `ExtractionPort` is deliberately NOT a member of
 // `BaselinePorts` / `FullPorts` upstream (it is a standalone injected boundary,
@@ -192,7 +191,7 @@ pub use spoke_operations::{
     orchestrate_extract, ExtractRunInput, ExtractionPort, ExtractionResult,
 };
 
-// v1.191 P1 T12 (durable §8) — the production wrapper that actually drives
+// note: v1.191 P1 T12 (durable §8) — the production wrapper that actually drives
 // `orchestrate_extract` for nexus: an injected admitted source bundle
 // (`ResolvedExtractionInput` → `ResolvedExtractionPort`) plus the native
 // callback (`NativeExtractionOutput`), returning the upstream-validated
@@ -205,7 +204,7 @@ pub use extraction::{
     ResolvedExtractionPort,
 };
 
-// V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics
+// note: V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics
 // at the spoke import boundary, spoke untouched): pre-expands empty
 // `rule_refs` to the check world's `status=active` rules and fail-closes on
 // foreign-world refs before delegating to spoke `orchestrate_check`. Both
@@ -214,7 +213,7 @@ pub use extraction::{
 pub use adapter::knowledge_entry_port::put_knowledge_entry_in_tx;
 pub use adapter::rule_query_port::orchestrate_check_world_scoped;
 
-// K2 §5.1 P0 — the in-memory `KnowledgeEntryPort` stub (mutation log included).
+// note: K2 §5.1 P0 — the in-memory `KnowledgeEntryPort` stub (mutation log included).
 // `ToolContext::new_simulated` selects it, so a context built through that twin
 // records a `nexus.kb_snapshot.write` put and writes no row.
 pub use adapter::knowledge_entry_stub::{StubKnowledgeEntryMutation, StubKnowledgeEntryPort};

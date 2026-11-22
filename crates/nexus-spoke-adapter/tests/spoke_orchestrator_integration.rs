@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Production orchestrator integration test — proves `orchestrate_upsert` +
 //! `orchestrate_promote` work end-to-end through `NexusAdapter` against
 //! REAL `SQLite` storage (in-memory pool + migrations), not the V1.141 mock.
@@ -36,7 +37,7 @@ use async_trait::async_trait;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_local_db::{open_pool, run_migrations};
-// V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
+// note: V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
 use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_relate, orchestrate_upsert, FindingPort, HostManifestPort,
@@ -50,13 +51,12 @@ use std::sync::Mutex;
 
 const WORLD_ID: &str = "wld_1";
 
-// ── Pool + fixture helpers ───────────────────────────────────────────────
 
-/// Fresh in-memory-ish pool: `tempfile::tempdir` + `open_pool` + `run_migrations`.
+/// note: Fresh in-memory-ish pool: `tempfile::tempdir` + `open_pool` + `run_migrations`.
 ///
 /// Mirrors the canonical nexus-local-db test harness pattern (see
 /// `tests/kb_extract_jobs_upsert.rs::fresh_pool` and the production adapter's
-/// own `fresh_pool` in `src/spoke_adapter/knowledge_entry_port.rs`). Returns
+/// own `fresh_pool` in `src/adapter/knowledge_entry_port.rs`). Returns
 /// the pool AND the `TempDir` guard so the temp DB stays alive for the test
 /// body.
 /// A KE-capable adapter whose selection authorizes the worlds these
@@ -71,7 +71,7 @@ fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
     scoped_worlds(pool, &[WORLD_ID, "wld_2"])
 }
 
-/// A KE-capable adapter bound to an explicit world selection — the admission
+/// invariant: A KE-capable adapter bound to an explicit world selection — the admission
 /// boundary under test (a row outside it is hidden, never observable).
 fn scoped_worlds(pool: sqlx::SqlitePool, worlds: &[&str]) -> NexusAdapter<'static> {
     NexusAdapter::new(
@@ -97,7 +97,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Seed the FK parents (`creators`, `narrative_worlds`) the `kb_key_blocks`
+/// note: Seed the FK parents (`creators`, `narrative_worlds`) the `kb_key_blocks`
 /// FK requires. One row each — sufficient for any `kb_key_blocks` insert
 /// driven through the orchestrator.
 async fn seed_world(pool: &sqlx::SqlitePool) {
@@ -120,7 +120,7 @@ async fn seed_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
-/// Build a spoke `KnowledgeEntry` via the production `KnowledgeEntryRecord → spoke`
+/// note: Build a spoke `KnowledgeEntry` via the production `KnowledgeEntryRecord → spoke`
 /// conversion seam (spec §7.1) so it satisfies the `kb_key_blocks` storage
 /// shape (`world_id` under `extensions.nexus`, `canonical_name` format-valid,
 /// `entry_type` derived from `BlockType`). Mirrors the production adapter's
@@ -142,7 +142,7 @@ fn spoke_entry(
     nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&world)
 }
 
-/// Build an `UpsertRequest` from a single spoke `KnowledgeEntry`. The entry is
+/// note: Build an `UpsertRequest` from a single spoke `KnowledgeEntry`. The entry is
 /// serialized to wire JSON and re-deserialized as the orchestrator's request
 /// shape — this mirrors the programmatic Surface B twin at
 /// `nexus-spoke-adapter/tests/orchestration_adoption.rs::upsert_request`, just
@@ -154,14 +154,14 @@ fn upsert_request(entry: &nexus_spoke_adapter::KnowledgeEntry) -> UpsertRequest 
         .expect("valid UpsertRequest fixture")
 }
 
-/// Build a `PromoteRequest` from a single spoke `KnowledgeEntry` candidate.
+/// note: Build a `PromoteRequest` from a single spoke `KnowledgeEntry` candidate.
 /// See [`upsert_request`] for the wire round-trip rationale.
 fn promote_request(entry: &nexus_spoke_adapter::KnowledgeEntry) -> PromoteRequest {
     let wire = serde_json::to_value(entry).expect("KnowledgeEntry serializable");
     serde_json::from_value(json!({ "candidate": wire })).expect("valid PromoteRequest fixture")
 }
 
-/// INDEPENDENT direct sqlx read of a `kb_key_blocks` row.
+/// note: INDEPENDENT direct sqlx read of a `kb_key_blocks` row.
 ///
 /// This is the post-state verification seam: it does NOT go through the
 /// orchestrator or the adapter, so it proves the storage was actually mutated
@@ -194,7 +194,7 @@ async fn read_kb_row(
     )
 }
 
-/// Assert a `SpokeResult` is a reject carrying the expected code; panic with
+/// why: Assert a `SpokeResult` is a reject carrying the expected code; panic with
 /// context otherwise.
 fn expect_reject_with_code<T: std::fmt::Debug>(result: SpokeResult<T>, code: SpokeRejectCode) {
     match result {
@@ -209,9 +209,8 @@ fn expect_reject_with_code<T: std::fmt::Debug>(result: SpokeResult<T>, code: Spo
     }
 }
 
-// ── 1. orchestrate_upsert — happy create ─────────────────────────────────
 //
-// Create path: orchestrator loads (NotFound), validates `validate_create_path`
+// note: Create path: orchestrator loads (NotFound), validates `validate_create_path`
 // (candidate revision None OK), derives `expected_base_revision = None`, calls
 // the adapter's `put_knowledge_entry(candidate, None)`. Production adapter
 // inserts and normalizes revision to 1 (V1.73 NULL-normalization rule).
@@ -241,7 +240,7 @@ async fn orchestrate_upsert_happy_create() {
         _ => panic!("expected upsert success, got {result:?}"),
     }
 
-    // INDEPENDENT post-state verification: read row directly from kb_key_blocks
+    // note: INDEPENDENT post-state verification: read row directly from kb_key_blocks
     // — proves the storage was mutated, not just the orchestrator return value.
     let (name, status, rev, world_id, body) = read_kb_row(&pool, entry_id).await;
     assert_eq!(name, "CreateHappy");
@@ -254,9 +253,8 @@ async fn orchestrate_upsert_happy_create() {
     );
 }
 
-// ── 2. orchestrate_upsert — happy update (CAS bump) ──────────────────────
 //
-// Create → revision 1. Then upsert-update with candidate carrying revision =
+// note: Create → revision 1. Then upsert-update with candidate carrying revision =
 // stored revision (1). Orchestrator's `validate_update_path` calls
 // `assert_revision_match(1, 1)` OK; derives `expected_base_revision = Some(1)`;
 // adapter CAS accepts and bumps to 2.
@@ -266,7 +264,7 @@ async fn orchestrate_upsert_happy_update() {
     let (pool, _dir) = fresh_pool().await;
     let adapter = scoped(pool.clone());
 
-    // Create → stored at revision 1.
+    // note: Create → stored at revision 1.
     let entry_id = "kb_update_happy";
     let created = spoke_entry(entry_id, "UpdateHappy", None, "provisional");
     let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
@@ -275,7 +273,7 @@ async fn orchestrate_upsert_happy_update() {
         "create must succeed first"
     );
 
-    // Build candidate carrying revision = Some(1) (matches stored), flip
+    // note: Build candidate carrying revision = Some(1) (matches stored), flip
     // status provisional → confirmed (valid transition per the cross-product
     // table) and tweak canonical_name to prove row mutation beyond just the
     // revision bump.
@@ -297,7 +295,7 @@ async fn orchestrate_upsert_happy_update() {
         _ => panic!("expected upsert success, got {result:?}"),
     }
 
-    // INDEPENDENT verification: row was mutated (name + status + revision).
+    // note: INDEPENDENT verification: row was mutated (name + status + revision).
     let (name, status, rev, world_id, _body) = read_kb_row(&pool, entry_id).await;
     assert_eq!(name, "UpdateHappy Revised", "canonical_name was replaced");
     assert_eq!(status, "confirmed", "status was flipped via CAS update");
@@ -305,9 +303,8 @@ async fn orchestrate_upsert_happy_update() {
     assert_eq!(world_id, WORLD_ID, "world_id preserved across update");
 }
 
-// ── 3. orchestrate_upsert — stale reject (STORED_REVISION_STALE) ──────────
 //
-// Create → revision 1. Bump it (revision → 2). Then attempt another upsert
+// note: Create → revision 1. Bump it (revision → 2). Then attempt another upsert
 // with a candidate carrying revision 1 (caller read a stale base). The
 // orchestrator loads stored (revision 2), `validate_update_path` →
 // `assert_revision_match(1, 2)` fires `STORED_REVISION_STALE` from the
@@ -319,11 +316,11 @@ async fn orchestrate_upsert_stale_reject() {
     let (pool, _dir) = fresh_pool().await;
     let adapter = scoped(pool.clone());
 
-    // Create → revision 1.
+    // note: Create → revision 1.
     let entry_id = "kb_stale_reject";
     let created = spoke_entry(entry_id, "StaleReject", None, "provisional");
     let _ = orchestrate_upsert(&adapter, upsert_request(&created)).await;
-    // Bump → revision 2 (happy update with matching revision).
+    // note: Bump → revision 2 (happy update with matching revision).
     let bumped = spoke_entry(entry_id, "StaleReject", Some(1), "provisional");
     let bump_result = orchestrate_upsert(&adapter, upsert_request(&bumped)).await;
     assert!(
@@ -331,12 +328,12 @@ async fn orchestrate_upsert_stale_reject() {
         "first update must succeed to advance the stored revision"
     );
 
-    // Stale candidate: revision 1 < stored 2.
+    // note: Stale candidate: revision 1 < stored 2.
     let stale_candidate = spoke_entry(entry_id, "StaleReject", Some(1), "provisional");
     let result = orchestrate_upsert(&adapter, upsert_request(&stale_candidate)).await;
     expect_reject_with_code(result, SpokeRejectCode::StoredRevisionStale);
 
-    // INDEPENDENT verification: row is unchanged at revision 2 (the stale
+    // note: INDEPENDENT verification: row is unchanged at revision 2 (the stale
     // candidate did NOT mutate storage).
     let (name, status, rev, _world_id, _body) = read_kb_row(&pool, entry_id).await;
     assert_eq!(name, "StaleReject");
@@ -347,9 +344,8 @@ async fn orchestrate_upsert_stale_reject() {
     );
 }
 
-// ── 4. orchestrate_promote — happy path (provisional → confirmed) ────────
 //
-// Create a provisional entry → revision 1. Then `orchestrate_promote` with a
+// note: Create a provisional entry → revision 1. Then `orchestrate_promote` with a
 // candidate carrying revision = Some(1). Orchestrator's
 // `assert_revision_match(1, 1)` passes; `validate_promote_request` accepts the
 // provisional candidate; `apply_promote_acceptance` sets status = confirmed;
@@ -362,7 +358,7 @@ async fn orchestrate_promote_happy() {
     let (pool, _dir) = fresh_pool().await;
     let adapter = scoped(pool.clone());
 
-    // Create a provisional entry → stored at revision 1.
+    // note: Create a provisional entry → stored at revision 1.
     let entry_id = "kb_promote_happy";
     let created = spoke_entry(entry_id, "PromoteHappy", None, "provisional");
     let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
@@ -371,7 +367,7 @@ async fn orchestrate_promote_happy() {
         "create must succeed before promote"
     );
 
-    // Build promote candidate carrying revision = Some(1), status = provisional
+    // note: Build promote candidate carrying revision = Some(1), status = provisional
     // (validate_promote_request enforces provisional).
     let candidate = spoke_entry(entry_id, "PromoteHappy", Some(1), "provisional");
     let result = orchestrate_promote(&adapter, promote_request(&candidate)).await;
@@ -393,16 +389,15 @@ async fn orchestrate_promote_happy() {
         _ => panic!("expected promote success, got {result:?}"),
     }
 
-    // INDEPENDENT verification: row is confirmed at revision 2.
+    // note: INDEPENDENT verification: row is confirmed at revision 2.
     let (name, status, rev, _world_id, _body) = read_kb_row(&pool, entry_id).await;
     assert_eq!(name, "PromoteHappy", "canonical_name preserved by promote");
     assert_eq!(status, "confirmed", "DB status flipped to confirmed");
     assert_eq!(rev, 2, "DB revision bumped to 2 via promote CAS path");
 }
 
-// ── 5. (stretch) orchestrate_assemble — scope-filtered happy path ────────
 //
-// Create two entries in world wld_1. Assemble with a scope filtering to one
+// note: Create two entries in world wld_1. Assemble with a scope filtering to one
 // entry id. Verify the packet contains exactly that entry — proving the
 // ScopeQueryPort production impl returns rows from real SQLite storage and
 // spoke's scope helpers filter them through the orchestrator.
@@ -414,13 +409,13 @@ async fn orchestrate_assemble_scope_filtered() {
     let (pool, _dir) = fresh_pool().await;
     let adapter = scoped(pool);
 
-    // Create two entries in wld_1.
+    // note: Create two entries in wld_1.
     let a = spoke_entry("kb_assemble_a", "AssembleA", None, "provisional");
     let b = spoke_entry("kb_assemble_b", "AssembleB", None, "provisional");
     let _ = orchestrate_upsert(&adapter, upsert_request(&a)).await;
     let _ = orchestrate_upsert(&adapter, upsert_request(&b)).await;
 
-    // Scope filters to entry A only.
+    // note: Scope filters to entry A only.
     let request = serde_json::from_value(json!({
         "scope": { "scope_id": WORLD_ID, "entry_ids": ["kb_assemble_a"] },
         "max_entries": 10
@@ -442,9 +437,8 @@ async fn orchestrate_assemble_scope_filtered() {
     }
 }
 
-// ── 6. R3 closure: world-aware CAS (spec §3) ────────────────────────────
 //
-// The N-C1 invoke gate's stored-world check is check-then-act. The durable
+// invariant: The N-C1 invoke gate's stored-world check is check-then-act. The durable
 // fix is the orchestrator/storage CAS carrying the stored `world_id`:
 // writer 1's world-verified preimage is invalidated by writer 2 moving the row
 // to another world between that read and the conditional write. The CAS must
@@ -475,7 +469,7 @@ async fn orchestrate_assemble_scope_filtered() {
 // measured `STORED_REVISION_STALE`, which is why the residual was misread as
 // production folding.
 
-/// Seed a second world row so a test can FK-move rows across worlds.
+/// note: Seed a second world row so a test can FK-move rows across worlds.
 async fn seed_second_world(pool: &sqlx::SqlitePool) {
     // SAFETY: test-only static seed insert against the post-migration schema.
     sqlx::query(
@@ -488,7 +482,7 @@ async fn seed_second_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
-/// Build a spoke `Relation` fixture carrying `extensions.nexus.world_id`
+/// note: Build a spoke `Relation` fixture carrying `extensions.nexus.world_id`
 /// (required by the production adapter's persist path).
 fn relate_relation(relation_id: &str, from_id: &str, to_id: &str) -> nexus_spoke_adapter::Relation {
     serde_json::from_value(json!({
@@ -504,14 +498,14 @@ fn relate_relation(relation_id: &str, from_id: &str, to_id: &str) -> nexus_spoke
     .expect("valid Relation fixture")
 }
 
-/// Build a `RelateRequest` from a spoke `Relation` (wire round-trip, mirrors
+/// note: Build a `RelateRequest` from a spoke `Relation` (wire round-trip, mirrors
 /// [`upsert_request`]).
 fn relate_request(relation: &nexus_spoke_adapter::Relation) -> RelateRequest {
     let wire = serde_json::to_value(relation).expect("Relation serializable");
     serde_json::from_value(json!({ "relation": wire })).expect("valid RelateRequest fixture")
 }
 
-/// Assert a reject is the adapter's world-conflict classification (details
+/// note: Assert a reject is the adapter's world-conflict classification (details
 /// marker), and specifically NOT a collapse into `RevisionConflict` /
 /// `StoredRevisionStale` (spec §3.2).
 fn expect_world_conflict_reject<T: std::fmt::Debug>(
@@ -531,7 +525,7 @@ fn expect_world_conflict_reject<T: std::fmt::Debug>(
                 SpokeRejectCode::StoredRevisionStale,
                 "world conflict must never collapse into STORED_REVISION_STALE"
             );
-            // The pinned spoke-operations `SpokeRejectCode` has no
+            // note: The pinned spoke-operations `SpokeRejectCode` has no
             // conflict-class code; the adapter carries the classification on
             // the `InternalError` carrier with a `world_conflict` details
             // marker, and the host mappings (Connect / daemon) remap it to
@@ -570,7 +564,7 @@ fn expect_world_conflict_reject<T: std::fmt::Debug>(
     }
 }
 
-/// Move a `kb_key_blocks` row to another world before the request reads it —
+/// note: Move a `kb_key_blocks` row to another world before the request reads it —
 /// the **initially hidden** fixture (§7): the row lives outside the request's
 /// selection from the first read on, so it must behave exactly like an absent
 /// one. Not a race: nothing here is interleaved.
@@ -584,7 +578,7 @@ async fn move_key_block_to_world(pool: &sqlx::SqlitePool, entry_id: &str, world_
         .unwrap();
 }
 
-/// One `kb_relationships` row's observable columns, read directly from the
+/// note: One `kb_relationships` row's observable columns, read directly from the
 /// store — every mutable column a leaked CAS write could change (the immutable
 /// `source` is excluded; `world_id`/`revision` are the second writer's).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -597,7 +591,7 @@ struct RelationRow {
     updated_at: String,
 }
 
-/// INDEPENDENT direct sqlx read of a `kb_relationships` row.
+/// note: INDEPENDENT direct sqlx read of a `kb_relationships` row.
 async fn read_relation_row(pool: &sqlx::SqlitePool, relation_id: &str) -> RelationRow {
     // SAFETY: test-only verification query against the post-migration
     // kb_relationships schema.
@@ -619,7 +613,7 @@ async fn read_relation_row(pool: &sqlx::SqlitePool, relation_id: &str) -> Relati
     }
 }
 
-/// The `(world_id, revision)` a second writer left on a row — the preimage the
+/// note: The `(world_id, revision)` a second writer left on a row — the preimage the
 /// denied conditional write must not disturb.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorldRevision {
@@ -627,14 +621,14 @@ struct WorldRevision {
     revision: i64,
 }
 
-/// The table a [`SecondWriterMove`] rewrites.
+/// note: The table a [`SecondWriterMove`] rewrites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SecondWriterTable {
     KeyBlocks,
     Relations,
 }
 
-/// One world move by the interleaved "second writer" (a second Connect process
+/// note: One world move by the interleaved "second writer" (a second Connect process
 /// / the daemon on the same workspace DB). It carries no revision: the move is
 /// a plain world write, and the store's revision-bump trigger advances the row
 /// exactly as a foreign writer's own CAS would.
@@ -663,7 +657,7 @@ impl SecondWriterMove {
     }
 }
 
-/// Deterministic two-writer barrier at the orchestrator's admission read.
+/// note: Deterministic two-writer barrier at the orchestrator's admission read.
 ///
 /// A pass-through wrapper over the production adapter that implements the six
 /// baseline port families (delegating every method) and fires one armed
@@ -696,7 +690,7 @@ impl<'a> SecondWriterBarrier<'a> {
         }
     }
 
-    /// The `(world_id, revision)` this barrier's move left on `id`.
+    /// note: The `(world_id, revision)` this barrier's move left on `id`.
     fn left(&self, id: &str) -> WorldRevision {
         self.left
             .lock()
@@ -709,7 +703,7 @@ impl<'a> SecondWriterBarrier<'a> {
             )
     }
 
-    /// Run the armed move (once). A later admission read is a no-op, so the
+    /// note: Run the armed move (once). A later admission read is a no-op, so the
     /// second writer cannot fire twice.
     async fn fire(&self) {
         let Some(r#move) = self.pending.lock().expect("barrier state lock").take() else {
@@ -872,7 +866,7 @@ async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verificati
     seed_second_world(&pool).await;
     let adapter = scoped(pool.clone());
 
-    // Writer 1 creates the entry in WORLD_ID → revision 1.
+    // note: Writer 1 creates the entry in WORLD_ID → revision 1.
     let entry_id = "kb_wc_upsert";
     let created = spoke_entry(entry_id, "WorldCasUpsert", None, "provisional");
     let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
@@ -886,7 +880,7 @@ async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verificati
         "precondition: the created row is in the claimed world"
     );
 
-    // Writer 2 is armed on the admission read: the orchestrator reads the
+    // note: Writer 2 is armed on the admission read: the orchestrator reads the
     // world-A preimage (admitted by this request), writer 2 moves the row to
     // wld_2 — still inside the admitted selection — and only then does writer 1
     // attempt its conditional write.
@@ -896,13 +890,13 @@ async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verificati
         SecondWriterMove::key_block(entry_id, "wld_2"),
     );
 
-    // The candidate carries a distinct payload, so any leaked write is visible
+    // note: The candidate carries a distinct payload, so any leaked write is visible
     // in the post-state.
     let candidate = spoke_entry(entry_id, "WorldCasUpsert Rewritten", Some(1), "provisional");
     let result = orchestrate_upsert(&barrier, upsert_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 
-    // INDEPENDENT verification: the denied CAS left the row exactly as the
+    // note: INDEPENDENT verification: the denied CAS left the row exactly as the
     // second writer left it — its world and revision, plus the pre-move
     // canonical_name/body. A cross-world rewrite would show all four.
     let left = barrier.left(entry_id);
@@ -935,7 +929,7 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
     seed_second_world(&pool).await;
     let adapter = scoped(pool.clone());
 
-    // Writer 1 creates a provisional entry in WORLD_ID → revision 1.
+    // note: Writer 1 creates a provisional entry in WORLD_ID → revision 1.
     let entry_id = "kb_wc_promote";
     let created = spoke_entry(entry_id, "WorldCasPromote", None, "provisional");
     let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
@@ -944,14 +938,14 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
         "create must succeed first"
     );
 
-    // Armed on the admission read, exactly as in the upsert regression.
+    // note: Armed on the admission read, exactly as in the upsert regression.
     let barrier = SecondWriterBarrier::new(
         &adapter,
         pool.clone(),
         SecondWriterMove::key_block(entry_id, "wld_2"),
     );
 
-    // Writer 1 promotes its world-A preimage (revision 1); the orchestrator
+    // note: Writer 1 promotes its world-A preimage (revision 1); the orchestrator
     // bases the accepted revision on that preimage (= stored + 1). The
     // candidate carries a distinct body, so a leaked write is visible in the
     // post-state (the store's create path already wrote the summary).
@@ -960,7 +954,7 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
     let result = orchestrate_promote(&barrier, promote_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 
-    // INDEPENDENT verification: neither the world/revision nor the promotion
+    // note: INDEPENDENT verification: neither the world/revision nor the promotion
     // landed — the row is still provisional with its pre-race body in the
     // second writer's world.
     let left = barrier.left(entry_id);
@@ -988,7 +982,7 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
     seed_second_world(&pool).await;
     let adapter = scoped(pool.clone());
 
-    // Endpoints must exist in WORLD_ID (kb_relationships FKs on key_block_id).
+    // note: Endpoints must exist in WORLD_ID (kb_relationships FKs on key_block_id).
     for endpoint in ["kb_wc_src", "kb_wc_dst"] {
         let ep = spoke_entry(endpoint, endpoint, None, "confirmed");
         let r = orchestrate_upsert(&adapter, upsert_request(&ep)).await;
@@ -998,7 +992,7 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
         );
     }
 
-    // Writer 1 creates the relation in WORLD_ID → revision 1.
+    // note: Writer 1 creates the relation in WORLD_ID → revision 1.
     let relation_id = "rel_wc";
     let created_relation = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
     let create_result = orchestrate_relate(&adapter, relate_request(&created_relation)).await;
@@ -1006,7 +1000,7 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
         matches!(create_result, SpokeResult::Ok(_)),
         "relate create must succeed first"
     );
-    // Capture the row the create left, so "untouched" is checked against the
+    // note: Capture the row the create left, so "untouched" is checked against the
     // pre-race values of every mutable column rather than a table of literals.
     let before = read_relation_row(&pool, relation_id).await;
     assert_eq!(
@@ -1014,14 +1008,14 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
         "precondition: the relation row is in the claimed world"
     );
 
-    // Armed on the relation admission read.
+    // note: Armed on the relation admission read.
     let barrier = SecondWriterBarrier::new(
         &adapter,
         pool.clone(),
         SecondWriterMove::relation(relation_id, "wld_2"),
     );
 
-    // Writer 1 replays its world-A preimage with a distinct label AND a
+    // note: Writer 1 replays its world-A preimage with a distinct label AND a
     // distinct metadata bag, so a leaked write is visible in the post-state.
     let mut candidate = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
     candidate.revision = Some(1);
@@ -1032,7 +1026,7 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
     let result = orchestrate_relate(&barrier, relate_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 
-    // INDEPENDENT verification: apart from the second writer's move, the
+    // note: INDEPENDENT verification: apart from the second writer's move, the
     // relation row is exactly what the create left — the candidate's label and
     // metadata bag, and the update timestamp, are all unchanged.
     let left = barrier.left(relation_id);
@@ -1066,9 +1060,8 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
     );
 }
 
-// ── 7. Initially hidden rows stay indistinguishable from absent ─────────
 //
-// The other half of the classification: a row the request never admitted (it
+// invariant: The other half of the classification: a row the request never admitted (it
 // was moved outside the selection before the read, or it is owned elsewhere)
 // must not be observable at all — the same refusal an absent id produces, no
 // world-conflict classification, and no world id in the outcome. These are
@@ -1078,7 +1071,7 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
 // differ only in whether the hidden row exists, and compares the full
 // observable outcome. Anything else is an existence oracle.
 
-/// The observable shape of a result — code, message and details; everything a
+/// note: The observable shape of a result — code, message and details; everything a
 /// caller can see.
 fn outcome<T: std::fmt::Debug>(result: &SpokeResult<T>) -> String {
     match result {
@@ -1090,7 +1083,7 @@ fn outcome<T: std::fmt::Debug>(result: &SpokeResult<T>) -> String {
     }
 }
 
-/// Whether a result carries the adapter's world-conflict classification (the
+/// note: Whether a result carries the adapter's world-conflict classification (the
 /// marker Connect's `map_reject` remaps to the `world_conflict` wire code).
 fn carries_world_conflict<T: std::fmt::Debug>(result: &SpokeResult<T>) -> bool {
     match result {
@@ -1104,7 +1097,7 @@ async fn initially_hidden_entry_is_indistinguishable_from_absent() {
     let entry_id = "kb_hidden_parity";
     let candidate = spoke_entry(entry_id, "HiddenParity", Some(1), "provisional");
 
-    // (A) the row exists, but a second writer moved it to wld_2 before the
+    // note: (A) the row exists, but a second writer moved it to wld_2 before the
     // request read it; the probing selection admits only WORLD_ID.
     let (hidden_pool, _hidden_dir) = fresh_pool().await;
     seed_second_world(&hidden_pool).await;
@@ -1118,11 +1111,11 @@ async fn initially_hidden_entry_is_indistinguishable_from_absent() {
     move_key_block_to_world(&hidden_pool, entry_id, "wld_2").await;
     let hidden = scoped_worlds(hidden_pool.clone(), &[WORLD_ID]);
 
-    // (B) the same request against a store where the id never existed.
+    // invariant: (B) the same request against a store where the id never existed.
     let (absent_pool, _absent_dir) = fresh_pool().await;
     let absent = scoped_worlds(absent_pool.clone(), &[WORLD_ID]);
 
-    // Port level — the classification owner. Hidden and absent must produce the
+    // invariant: Port level — the classification owner. Hidden and absent must produce the
     // identical reject, and never the world-conflict marker.
     let hidden_port = hidden.put_knowledge_entry(candidate.clone(), Some(1)).await;
     let absent_port = absent.put_knowledge_entry(candidate.clone(), Some(1)).await;
@@ -1142,7 +1135,7 @@ async fn initially_hidden_entry_is_indistinguishable_from_absent() {
         outcome(&hidden_port)
     );
 
-    // Orchestrator level — the request sees the same absent-shaped outcome.
+    // note: Orchestrator level — the request sees the same absent-shaped outcome.
     let hidden_orch = orchestrate_upsert(&hidden, upsert_request(&candidate)).await;
     let absent_orch = orchestrate_upsert(&absent, upsert_request(&candidate)).await;
     assert_eq!(
@@ -1160,7 +1153,7 @@ async fn initially_hidden_entry_is_indistinguishable_from_absent() {
         outcome(&hidden_orch)
     );
 
-    // The probes never touched the hidden row.
+    // invariant: The probes never touched the hidden row.
     let (_, _, _, world, _) = read_kb_row(&hidden_pool, entry_id).await;
     assert_eq!(world, "wld_2", "the hidden row is left where it was moved");
 }
@@ -1170,7 +1163,7 @@ async fn initially_hidden_relation_is_indistinguishable_from_absent() {
     let relation_id = "rel_hidden_parity";
     let endpoints = ["kb_hp_src", "kb_hp_dst"];
 
-    // (A) the relation exists, but its endpoints were moved to wld_2 before the
+    // note: (A) the relation exists, but its endpoints were moved to wld_2 before the
     // request read it — relation visibility is endpoint-scoped (durable §4.2),
     // so the probing selection (WORLD_ID only) cannot see either the endpoints
     // or the relation.
@@ -1196,11 +1189,11 @@ async fn initially_hidden_relation_is_indistinguishable_from_absent() {
     }
     let hidden = scoped_worlds(hidden_pool.clone(), &[WORLD_ID]);
 
-    // (B) the same request against a store where the relation never existed.
+    // invariant: (B) the same request against a store where the relation never existed.
     let (absent_pool, _absent_dir) = fresh_pool().await;
     let absent = scoped_worlds(absent_pool.clone(), &[WORLD_ID]);
 
-    // Port level: the hidden relation is served the single not-found shape.
+    // note: Port level: the hidden relation is served the single not-found shape.
     let hidden_get = hidden.get_relation(relation_id).await;
     let absent_get = absent.get_relation(relation_id).await;
     assert_eq!(
@@ -1239,7 +1232,7 @@ async fn initially_hidden_relation_is_indistinguishable_from_absent() {
         outcome(&hidden_put)
     );
 
-    // Orchestrator level — same absent-shaped outcome for both stores.
+    // note: Orchestrator level — same absent-shaped outcome for both stores.
     let hidden_orch = orchestrate_relate(&hidden, relate_request(&candidate)).await;
     let absent_orch = orchestrate_relate(&absent, relate_request(&candidate)).await;
     assert_eq!(
@@ -1257,7 +1250,7 @@ async fn initially_hidden_relation_is_indistinguishable_from_absent() {
         outcome(&hidden_orch)
     );
 
-    // Both fixture rows are untouched by the probes.
+    // note: Both fixture rows are untouched by the probes.
     for endpoint in endpoints {
         let (_, _, _, world, _) = read_kb_row(&hidden_pool, endpoint).await;
         assert_eq!(world, "wld_2");

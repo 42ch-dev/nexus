@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Production `RuleQueryPort` impl — resolves spoke `rule_refs` against the
 //! persisted `spoke_rules` table (spec §7.4; V1.148 P1, closes R-V1142P1-001).
 //!
@@ -61,7 +62,7 @@ use spoke_schemas::data::rule::{ExtensionKey, RuleCanonicalName};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 
-/// The one status that enters check scope (v1.198 §13: "only `status=active`
+/// note: The one status that enters check scope (v1.198 §13: "only `status=active`
 /// rules enter check scope", applied by the World-scoped wrapper to both
 /// automatic inclusion and explicit refs).
 const ACTIVE_STATUS: &str = "active";
@@ -85,7 +86,7 @@ impl RuleQueryPort for NexusAdapter<'_> {
     }
 }
 
-/// Project a persisted `spoke_rules` row onto the spoke [`Rule`] wire type.
+/// note: Project a persisted `spoke_rules` row onto the spoke [`Rule`] wire type.
 ///
 /// Returns `None` for rows that cannot be represented on the wire — spoke
 /// requires `schema_version >= 1` and a non-empty `canonical_name`, and the
@@ -126,7 +127,7 @@ fn row_to_rule(row: &SpokeRuleRow) -> Option<Rule> {
     })
 }
 
-/// Construct a `SpokeResult::Reject` (mirrors the helper in
+/// note: Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `knowledge_entry_port.rs` / `relation_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
     let details_map = match details {
@@ -144,7 +145,7 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
     })
 }
 
-/// V1.166 AR-1 — world-scoped `orchestrate_check` seam.
+/// invariant: V1.166 AR-1 — world-scoped `orchestrate_check` seam.
 ///
 /// The single choke point where `CheckRequest.rule_refs` become
 /// world-owned before spoke orchestration. Both production callers (daemon
@@ -194,7 +195,7 @@ pub async fn orchestrate_check_world_scoped<F>(
 where
     F: FnOnce(CheckRunInput) -> SpokeResult<Vec<Finding>>,
 {
-    // Gate 1 — embedded rules are not an authoring path this iteration
+    // note: Gate 1 — embedded rules are not an authoring path this iteration
     // (AR-1): they would punch a hole in world binding via spoke's
     // by-`rule_id` priority over resolved refs.
     if !request.rules.is_empty() {
@@ -207,7 +208,7 @@ where
 
     let pool = adapter.pool.clone();
 
-    // Gate 2 — auto-include: empty/omitted `rule_refs` materialize this
+    // note: Gate 2 — auto-include: empty/omitted `rule_refs` materialize this
     // world's active rules (status filter at this boundary; storage order).
     if request.rule_refs.is_empty() {
         let rows = match list_rules_by_world(&pool, world_id).await {
@@ -225,10 +226,10 @@ where
             .filter(|row| row.status.as_deref() == Some(ACTIVE_STATUS))
             .map(|row| row.rule_id.clone())
             .collect();
-        // Zero active rules ⇒ refs stay [] ⇒ spoke skips `list_rules`.
+        // note: Zero active rules ⇒ refs stay [] ⇒ spoke skips `list_rules`.
     }
 
-    // Gate 3 — foreign-id reject (fail closed): refs non-empty → verify
+    // invariant: Gate 3 — foreign-id reject (fail closed): refs non-empty → verify
     // every resolvable row is owned by `world_id`. Unknown ids (no row)
     // are not foreign — they pass through to spoke subset-omit (gate 4).
     if !request.rule_refs.is_empty() {
@@ -258,7 +259,7 @@ where
             );
         }
 
-        // Gate 4 — active-only scope (v1.198, §13): the World-scoped wrapper,
+        // invariant: Gate 4 — active-only scope (v1.198, §13): the World-scoped wrapper,
         // not the port, owns the status filter, and it covers explicit refs as
         // well as automatic inclusion — so an archived tombstone (or any other
         // non-active status) can never enter check scope by being named
@@ -278,12 +279,11 @@ where
         });
     }
 
-    // Gates 5 + delegate: unknown ids pass through verbatim (spoke
+    // note: Gates 5 + delegate: unknown ids pass through verbatim (spoke
     // subset-omit); world-scoped active refs run the spoke orchestrator.
     orchestrate_check(adapter, request, run_checker).await
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -292,7 +292,7 @@ mod tests {
     use nexus_local_db::spoke_rules::{insert_spoke_rule_for_test, SpokeRuleRow};
     use nexus_local_db::{open_pool, run_migrations};
 
-    /// A KE-capable adapter whose selection authorizes the worlds these
+    /// note: A KE-capable adapter whose selection authorizes the worlds these
     /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
     fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
         NexusAdapter::new(
@@ -315,7 +315,7 @@ mod tests {
         (pool, dir)
     }
 
-    /// Seed a `spoke_rules` row through the local-db test helper (the only
+    /// note: Seed a `spoke_rules` row through the local-db test helper (the only
     /// writer in P1 — no author-facing rule write API exists).
     async fn seed_rule(
         pool: &sqlx::SqlitePool,
@@ -343,7 +343,7 @@ mod tests {
         insert_spoke_rule_for_test(pool, &row).await.unwrap();
     }
 
-    /// Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.
+    /// note: Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.
     fn unwrap_ok<T>(result: SpokeResult<T>, label: &str) -> T {
         match result {
             SpokeResult::Ok(v) => v,
@@ -351,7 +351,6 @@ mod tests {
         }
     }
 
-    // ── list_rules ────────────────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_rules_returns_known_rules_and_omits_missing() {
@@ -371,14 +370,14 @@ mod tests {
             "list_rules",
         );
 
-        // Known ids returned; the unknown ref is omitted (empty subset, not an
+        // note: Known ids returned; the unknown ref is omitted (empty subset, not an
         // error — spoke semantics).
         assert_eq!(rules.len(), 2, "missing ref must be omitted");
         let mut ids: Vec<&str> = rules.iter().map(|r| r.rule_id.as_str()).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec!["rule_a", "rule_b"]);
 
-        // Full field mapping on the projected wire `Rule`.
+        // note: Full field mapping on the projected wire `Rule`.
         let rule = rules.iter().find(|r| r.rule_id == "rule_a").unwrap();
         assert_eq!(rule.schema_version.get(), 1, "INTEGER column → NonZeroU64");
         assert_eq!(rule.canonical_name.to_string(), "Rule rule_a");
@@ -424,12 +423,12 @@ mod tests {
         assert_eq!(rules.len(), 1);
         let rule = &rules[0];
 
-        // `source_anchor` deserialized from `source_anchor_json`.
+        // note: `source_anchor` deserialized from `source_anchor_json`.
         let anchor = rule.source_anchor.as_ref().expect("source_anchor present");
         assert_eq!(anchor.source_id, "src_01");
         assert_eq!(anchor.schema_version.get(), 1);
 
-        // `extensions` bag round-trips verbatim (no fabrication, no drops).
+        // note: `extensions` bag round-trips verbatim (no fabrication, no drops).
         let ext = serde_json::to_value(&rule.extensions).unwrap();
         assert_eq!(
             ext,
@@ -490,9 +489,8 @@ mod tests {
         }
     }
 
-    // ── orchestrate_check_world_scoped (V1.166 AR-1) ────────────────
 
-    /// Seed a rule with explicit `canonical_name` + `status` (auto-include
+    /// note: Seed a rule with explicit `canonical_name` + `status` (auto-include
     /// order / status tests need control over both).
     async fn seed_rule_full(
         pool: &sqlx::SqlitePool,
@@ -520,7 +518,7 @@ mod tests {
         insert_spoke_rule_for_test(pool, &row).await.unwrap();
     }
 
-    /// A minimal valid `CheckRequest` over `scope_id` with the given refs.
+    /// note: A minimal valid `CheckRequest` over `scope_id` with the given refs.
     fn check_request(scope_id: &str, rule_refs: &[&str]) -> CheckRequest {
         serde_json::from_value(json!({
             "scope": { "scope_id": scope_id },
@@ -529,7 +527,7 @@ mod tests {
         .unwrap()
     }
 
-    /// AR-1 gate 1: embedded `request.rules` reject with the locked message
+    /// note: AR-1 gate 1: embedded `request.rules` reject with the locked message
     /// BEFORE any storage access — embedded wire rules carry no `world_id`
     /// and spoke gives them by-`rule_id` priority over resolved refs, which
     /// would bypass world binding (PD-3 hole closure).
@@ -565,7 +563,7 @@ mod tests {
         }
     }
 
-    /// AR-1 gate 2: empty `rule_refs` expand to this world's `status=active`
+    /// invariant: AR-1 gate 2: empty `rule_refs` expand to this world's `status=active`
     /// rule ids in storage order (`canonical_name ASC, rule_id ASC`) —
     /// drafts/deprecated stay out and foreign-world active rules are never
     /// pulled in (world-filtered by construction).
@@ -576,7 +574,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn world_scoped_auto_include_expands_active_only_in_storage_order() {
         let (pool, _dir) = fresh_pool().await;
-        // Storage order: Alpha, Archived, Beta, Charlie, Delta → active
+        // note: Storage order: Alpha, Archived, Beta, Charlie, Delta → active
         // expansion is exactly [rul_a, rul_d].
         seed_rule_full(&pool, "rul_b", "wld_1", "Beta", "draft").await;
         seed_rule_full(&pool, "rul_arch", "wld_1", "Archived", "archived").await;
@@ -605,7 +603,7 @@ mod tests {
         }
     }
 
-    /// AR-1 gate 2 zero-active case: world with no `active` rules → refs
+    /// note: AR-1 gate 2 zero-active case: world with no `active` rules → refs
     /// stay `[]` → spoke skips `list_rules` (the empty-rules fast path is
     /// emergent — the checker receives an empty rule set, not an error).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -635,7 +633,7 @@ mod tests {
         }
     }
 
-    /// v1.198 §13 (`spoke-adapter-architecture.md` rule vocabulary amendment):
+    /// invariant: v1.198 §13 (`spoke-adapter-architecture.md` rule vocabulary amendment):
     /// the World-scoped wrapper applies `status == "active"` to **explicit
     /// refs** too, so an archived tombstone named by id never enters check
     /// scope (it evaluates nothing and persists nothing). Same-world
@@ -651,7 +649,7 @@ mod tests {
         seed_rule_full(&pool, "rul_draft", "wld_1", "Draft", "draft").await;
         seed_rule_full(&pool, "rul_deprecated", "wld_1", "Deprecated", "deprecated").await;
 
-        // The raw port still resolves every stored id (including archived) —
+        // note: The raw port still resolves every stored id (including archived) —
         // the filter belongs to the wrapper, not to the port.
         let adapter = scoped(pool);
         let raw = unwrap_ok(
@@ -697,7 +695,7 @@ mod tests {
         }
     }
 
-    /// AR-1 gate 3 (PD-3, fail closed): a mixed refs set (same-world + two
+    /// invariant: AR-1 gate 3 (PD-3, fail closed): a mixed refs set (same-world + two
     /// foreign) rejects the WHOLE check in ONE `InvalidInput` naming every
     /// foreign id — `details.foreign_rule_ids` carries the ids only (no
     /// statement / `canonical_name` leak), the checker never runs, nothing
@@ -750,7 +748,7 @@ mod tests {
             SpokeResult::Ok(_) => panic!("foreign refs must reject the whole check"),
         }
 
-        // No persistence: the reject fires before FindingPort runs.
+        // note: No persistence: the reject fires before FindingPort runs.
         let persisted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM world_findings")
             .fetch_one(&pool)
             .await
@@ -758,7 +756,7 @@ mod tests {
         assert_eq!(persisted, 0, "foreign reject must persist nothing");
     }
 
-    /// AR-1 gate 4: unknown ids (no row) pass through to spoke VERBATIM —
+    /// invariant: AR-1 gate 4: unknown ids (no row) pass through to spoke VERBATIM —
     /// the wrapper never drops or rewrites them; spoke subset-omit resolves
     /// the known same-world ref only.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -786,7 +784,7 @@ mod tests {
         }
     }
 
-    /// AR-1 gate 5 (auto-include path): storage failure surfaces
+    /// note: AR-1 gate 5 (auto-include path): storage failure surfaces
     /// `InternalError` (the `reject()` helper idiom).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn world_scoped_storage_failure_on_auto_include_rejects_internal_error() {
@@ -815,7 +813,7 @@ mod tests {
         }
     }
 
-    /// AR-1 gate 5 (foreign-check path): storage failure on the
+    /// note: AR-1 gate 5 (foreign-check path): storage failure on the
     /// by-ids lookup surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn world_scoped_storage_failure_on_foreign_check_rejects_internal_error() {

@@ -1,4 +1,5 @@
 //! # Call-boundary invariant static check (spec §7 enforcement)
+//! enforcement of docs/specs/architecture/spoke-adapter-architecture.md §7.
 //!
 //! Regression guard proving the adapter crate does NOT reimplement any
 //! [`spoke_operations`] lifecycle invariant. It reads the adapter source text
@@ -36,18 +37,18 @@
 //!    it naturally. This test pins the allowlisted form by name so that drift
 //!    (rename, removal, or silent widening) is caught.
 
-/// Source text of `src/ops.rs`, embedded at compile time for static checks.
+/// note: Source text of `src/ops.rs`, embedded at compile time for static checks.
 static OPS_SRC: &str = include_str!("../src/ops.rs");
 
-/// Source text of `src/extensions.rs`, embedded at compile time for static
+/// note: Source text of `src/extensions.rs`, embedded at compile time for static
 /// checks.
 static EXTENSIONS_SRC: &str = include_str!("../src/extensions.rs");
 
-/// Needle prefix used by [`count_spoke_operations_calls`]; kept as a constant
+/// note: Needle prefix used by [`count_spoke_operations_calls`]; kept as a constant
 /// so the matcher and any future audit share one source of truth.
 const SPOKE_OPERATIONS_PREFIX: &str = "spoke_operations::";
 
-/// Count matches of the regex `spoke_operations::[a-z_][a-z0-9_]*\s*\(` in
+/// note: Count matches of the regex `spoke_operations::[a-z_][a-z0-9_]*\s*\(` in
 /// `text`.
 ///
 /// This matches a `spoke_operations` function CALL — the identifier must
@@ -74,7 +75,7 @@ fn count_spoke_operations_calls(text: &str) -> usize {
     let mut from = 0usize;
     while let Some(relative) = text[from..].find(SPOKE_OPERATIONS_PREFIX) {
         let after_prefix = from + relative + SPOKE_OPERATIONS_PREFIX.len();
-        // Advance the search cursor past this occurrence regardless of
+        // note: Advance the search cursor past this occurrence regardless of
         // whether the tail matches — the prefix cannot overlap itself, so
         // there is no risk of double-counting or looping forever.
         from = after_prefix;
@@ -82,7 +83,7 @@ fn count_spoke_operations_calls(text: &str) -> usize {
         let tail = &text[after_prefix..];
         let tail_bytes = tail.as_bytes();
 
-        // First char of the identifier must be [a-z_].
+        // note: First char of the identifier must be [a-z_].
         let Some(&first) = tail_bytes.first() else {
             continue;
         };
@@ -90,7 +91,7 @@ fn count_spoke_operations_calls(text: &str) -> usize {
             continue;
         }
 
-        // Consume the rest of the identifier: [a-z0-9_]*.
+        // note: Consume the rest of the identifier: [a-z0-9_]*.
         let mut cursor = 1usize;
         while cursor < tail_bytes.len() {
             let c = tail_bytes[cursor];
@@ -101,14 +102,14 @@ fn count_spoke_operations_calls(text: &str) -> usize {
             }
         }
 
-        // Consume optional ASCII whitespace (\s* restricted to ASCII, which
+        // note: Consume optional ASCII whitespace (\s* restricted to ASCII, which
         // is all Rust source whitespace here).
         let mut after_ws = cursor;
         while after_ws < tail_bytes.len() && tail_bytes[after_ws].is_ascii_whitespace() {
             after_ws += 1;
         }
 
-        // A trailing `(` makes this a call site.
+        // note: A trailing `(` makes this a call site.
         if after_ws < tail_bytes.len() && tail_bytes[after_ws] == b'(' {
             count += 1;
         }
@@ -116,7 +117,7 @@ fn count_spoke_operations_calls(text: &str) -> usize {
     count
 }
 
-/// Return `true` when `line` contains a Rust control-flow keyword
+/// why: Return `true` when `line` contains a Rust control-flow keyword
 /// (`match`, `if`, `for`, `while`, `loop`) anywhere on the line, provided
 /// the keyword sits at an identifier word boundary on BOTH sides.
 ///
@@ -156,7 +157,7 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
     const KEYWORDS: [&str; 5] = ["match", "if", "for", "while", "loop"];
     let bytes = line.as_bytes();
 
-    // Identifier byte test: ASCII alphanumeric or `_`. Inlined (rather than
+    // note: Identifier byte test: ASCII alphanumeric or `_`. Inlined (rather than
     // extracted to a shared helper) to match the existing style in
     // [`count_spoke_operations_calls`] and keep the matcher self-contained.
     let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
@@ -166,7 +167,7 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
         while let Some(relative) = line[from..].find(keyword) {
             let start = from + relative;
             let end = start + keyword.len();
-            // Advance the search cursor past this occurrence so progress is
+            // note: Advance the search cursor past this occurrence so progress is
             // guaranteed (each keyword is non-empty) and overlapping
             // matches are not double-counted.
             from = end;
@@ -182,7 +183,7 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
     false
 }
 
-/// Direct exercise of [`contains_control_flow_keyword_at_boundary`] to pin
+/// note: Direct exercise of [`contains_control_flow_keyword_at_boundary`] to pin
 /// its both-side word-boundary semantics. The static-check regression guard
 /// is only useful if the matcher itself is correct, so this proves the
 /// positive cases (keyword anywhere on the line, including mid-statement)
@@ -191,7 +192,7 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
 /// or that drops the left/right boundary test, fails here loudly.
 #[test]
 fn helper_contains_control_flow_keyword_at_boundary_semantics() {
-    // Positive: keyword at the start of the line.
+    // note: Positive: keyword at the start of the line.
     assert!(contains_control_flow_keyword_at_boundary(
         "match x { _ => () }"
     ));
@@ -218,7 +219,7 @@ fn helper_contains_control_flow_keyword_at_boundary_semantics() {
         "let x = f(); match x { _ => () }"
     ));
 
-    // Negative: keyword glued to identifier bytes on one side.
+    // note: Negative: keyword glued to identifier bytes on one side.
     assert!(!contains_control_flow_keyword_at_boundary(
         "let matcher = build();"
     ));
@@ -231,18 +232,18 @@ fn helper_contains_control_flow_keyword_at_boundary_semantics() {
     assert!(!contains_control_flow_keyword_at_boundary(
         "items.for_each(|i| take(i));"
     ));
-    // `for_each`: the `.` before `for` passes the left boundary, but the
+    // note: `for_each`: the `.` before `for` passes the left boundary, but the
     // `_` after `for` is an identifier byte, so the right boundary fails
     // and the helper correctly does NOT trigger.
 
-    // Negative: keyword absent entirely.
+    // note: Negative: keyword absent entirely.
     assert!(!contains_control_flow_keyword_at_boundary("let x = 1 + 2;"));
     assert!(!contains_control_flow_keyword_at_boundary(
         "fn wrapper() { validate(x) }"
     ));
 }
 
-/// Assert invariant 1: `src/ops.rs` performs no control-flow branching.
+/// invariant: Assert invariant 1: `src/ops.rs` performs no control-flow branching.
 ///
 /// Each public wrapper must be a single-expression pass-through; branching on
 /// spoke lifecycle states (e.g. `match reject.code { SpokeRejectCode::… => … }`)
@@ -267,7 +268,7 @@ fn assertion_1_ops_rs_has_no_control_flow_branching() {
     );
 }
 
-/// Assert invariant 2: `src/extensions.rs` calls no `spoke_operations`
+/// invariant: Assert invariant 2: `src/extensions.rs` calls no `spoke_operations`
 /// lifecycle function.
 ///
 /// Wire-type imports (`use spoke_operations::ExtensionMap;`) are explicitly
@@ -289,7 +290,7 @@ fn assertion_2_extensions_rs_calls_no_spoke_operations_lifecycle() {
     );
 }
 
-/// Assert invariant 3: neither `src/ops.rs` nor `src/extensions.rs` ever
+/// invariant: Assert invariant 3: neither `src/ops.rs` nor `src/extensions.rs` ever
 /// constructs a `SpokeReject` struct literal.
 ///
 /// Wrappers return `SpokeResult` verbatim; reject construction is a
@@ -311,7 +312,7 @@ fn assertion_3_src_never_constructs_spoke_reject() {
     );
 }
 
-/// Assert invariant 4: the `build_assemble_packet` allowlist.
+/// invariant: Assert invariant 4: the `build_assemble_packet` allowlist.
 ///
 /// `build_assemble_packet` is the only wrapper permitted to do more than
 /// pass operands through, because spec §7.2 exposes `&[KnowledgeEntry]`

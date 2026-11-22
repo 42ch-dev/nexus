@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! v1.184 P4 Task 1 — atomic carrier CAS + derivative `MindState` seam tests.
 
 #![allow(clippy::unwrap_used)]
@@ -63,7 +64,7 @@ async fn seed_character_carrier(pool: &sqlx::SqlitePool) -> String {
 }
 
 fn mind_state_for_carrier(carrier_id: &str, mind_state_id: &str) -> Value {
-    // The historical fixture pins the pre-0.16.0 bare delta path; the 0.16.0
+    // note: The historical fixture pins the pre-0.16.0 bare delta path; the 0.16.0
     // gate requires RFC 6901 pointers rooted at /modules/mental/<field> (see
     // mind_state_gate.rs), so gate-facing wires built from it rewrite the
     // delta path while the fixture bytes stay untouched in nexus-local-db.
@@ -95,7 +96,7 @@ async fn revision(pool: &sqlx::SqlitePool, carrier_id: &str) -> i64 {
 
 #[tokio::test]
 async fn legacy_mind_state_fixture_derived_wire_validates_through_gate() {
-    // The fixture itself keeps the pre-0.16.0 bare delta path as a storage
+    // note: The fixture itself keeps the pre-0.16.0 bare delta path as a storage
     // pin; the gate-facing wire built from it (RFC 6901 delta path) must
     // still validate and round-trip through the gate into storage.
     let (pool, _dir) = setup_db().await;
@@ -237,7 +238,7 @@ async fn rejects_chr_subject_on_mind_state_holder_entry_id() {
 
 #[tokio::test]
 async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
-    // QC fix round 1 (F-004): soft-delete flips status without bumping
+    // note: QC fix round 1 (F-004): soft-delete flips status without bumping
     // revision; the in-transaction CAS predicate must revalidate non-deleted
     // status so the write cannot commit onto a deleted carrier.
     let (pool, _dir) = setup_db().await;
@@ -278,7 +279,7 @@ async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
 
 #[tokio::test]
 async fn atomic_write_rejects_concurrent_owner_drift() {
-    // QC fix round 1 (F-004): ownership drift to another Character between
+    // note: QC fix round 1 (F-004): ownership drift to another Character between
     // admission and commit must miss the CAS predicate inside the transaction.
     let (pool, _dir) = setup_db().await;
     let carrier = seed_character_carrier(&pool).await;

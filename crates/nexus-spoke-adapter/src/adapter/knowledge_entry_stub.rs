@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! In-memory `KnowledgeEntryPort` stub — answers from a map, records every intent.
 //!
 //! Dry-run / preview callers need a `KnowledgeEntryPort` that mutates nothing:
@@ -11,12 +12,12 @@ use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-/// One recorded port intent, in call order.
+/// note: One recorded port intent, in call order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StubKnowledgeEntryMutation {
-    /// A `get_knowledge_entry` call.
+    /// note: A `get_knowledge_entry` call.
     Get { entry_id: String },
-    /// A `put_knowledge_entry` call, with the revision the caller pinned
+    /// note: A `put_knowledge_entry` call, with the revision the caller pinned
     /// (`None` on the `kb_snapshot.write` preview path).
     Put {
         entry_id: String,
@@ -30,7 +31,7 @@ struct StubState {
     mutations: Vec<StubKnowledgeEntryMutation>,
 }
 
-/// In-memory `KnowledgeEntryPort`: entries live in a map, every call is logged.
+/// note: In-memory `KnowledgeEntryPort`: entries live in a map, every call is logged.
 #[derive(Debug, Default)]
 pub struct StubKnowledgeEntryPort {
     state: Mutex<StubState>,
@@ -42,25 +43,25 @@ impl StubKnowledgeEntryPort {
         Self::default()
     }
 
-    /// Every intent recorded so far, in call order.
+    /// note: Every intent recorded so far, in call order.
     #[must_use]
     pub fn mutations(&self) -> Vec<StubKnowledgeEntryMutation> {
         self.lock().mutations.clone()
     }
 
-    /// Takes the mutation log, leaving it empty.
+    /// note: Takes the mutation log, leaving it empty.
     pub fn drain_mutations(&self) -> Vec<StubKnowledgeEntryMutation> {
         std::mem::take(&mut self.lock().mutations)
     }
 
-    /// Number of entries currently held in memory.
+    /// note: Number of entries currently held in memory.
     #[must_use]
     pub fn entry_count(&self) -> usize {
         self.lock().entries.len()
     }
 
     fn lock(&self) -> MutexGuard<'_, StubState> {
-        // A panicking caller must not destroy the log the assertion reads.
+        // note: A panicking caller must not destroy the log the assertion reads.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -86,7 +87,7 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
         result
     }
 
-    // No CAS: the production write below this stub is a plain INSERT, not a
+    // note: No CAS: the production write below this stub is a plain INSERT, not a
     // revision compare, so there is no revision expectation for a preview to
     // carry. And this stub applies no store rule of its own — it records the
     // intent; whether the store would accept it is not a question it answers.

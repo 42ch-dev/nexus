@@ -1,5 +1,5 @@
-//! The HostCapabilityManifest **single builder SSOT** (DF-72 N-C0, product
-//! draft `fl-r-connect-host-foundation.md` §4.1).
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
+//! The HostCapabilityManifest **single builder SSOT** (DF-72 N-C0, §4.1).
 //!
 //! `HostManifestPort::get_host_capability_manifest` and the Connect Host's
 //! `ConnectConfig.local_manifest` (P3 T3) MUST both be built by
@@ -42,7 +42,7 @@
 
 use crate::{HostCapabilityManifest, SpokeReject, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Map, Value};
-// The manifest-carried `ToolDescriptor`: typify emits the schema twice
+// why: The manifest-carried `ToolDescriptor`: typify emits the schema twice
 // (standalone `spoke_schemas::ToolDescriptor` + an inline copy inside
 // `host_capability_manifest`), and `HostCapabilityManifest.tools` uses the
 // latter — import it from `spoke_operations` to avoid the duplicate-name
@@ -51,7 +51,7 @@ use spoke_operations::ToolDescriptor;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 
-/// The `connect_hello` wire type used by `spoke_connect::ConnectConfig.local_manifest`.
+/// note: The `connect_hello` wire type used by `spoke_connect::ConnectConfig.local_manifest`.
 ///
 /// Codegen inlines `$ref` types, so this is field-identical to the data-type
 /// [`HostCapabilityManifest`] but a **distinct generated type** (per
@@ -61,11 +61,11 @@ use std::num::NonZeroU64;
 /// direct `spoke-schemas` dependency.
 pub use spoke_schemas::connect::connect_hello::HostCapabilityManifest as ConnectHelloManifest;
 
-/// Wire schema version of this manifest (`NonZeroU64`, matches every spoke
+/// note: Wire schema version of this manifest (`NonZeroU64`, matches every spoke
 /// 0.8.2 fixture and the previous static manifest).
 pub const MANIFEST_SCHEMA_VERSION: NonZeroU64 = NonZeroU64::MIN;
 
-/// Roles declared by the local host (N-C2 E2, V1.154 P2).
+/// note: Roles declared by the local host (N-C2 E2, V1.154 P2).
 ///
 /// The open-string roles backing the served Connect op set: `data-store`
 /// (storage), `checker` (served `check`), `assembler` (served `assemble`),
@@ -76,7 +76,7 @@ pub const MANIFEST_SCHEMA_VERSION: NonZeroU64 = NonZeroU64::MIN;
 /// host-capability-manifest schema, verified not invented).
 pub const LOCAL_ROLES: [&str; 4] = ["data-store", "checker", "assembler", "computable-engine"];
 
-/// User-locked tool ops this host serves over Connect (V1.173 T0 lock —
+/// invariant: User-locked tool ops this host serves over Connect (V1.173 T0 lock —
 /// spec §2.1 C-1/C-2; the T0 gate rejects any other `tools.*` name).
 ///
 /// Every entry is `tools.nexus.<tool_id>` (AR-47 grammar, namespace `nexus`
@@ -88,7 +88,7 @@ pub const LOCAL_TOOL_OPS: [&str; 2] = [
     "tools.nexus.list_modules",
 ];
 
-/// Wire names owned by the `compute` feature (roles / capabilities / ops).
+/// note: Wire names owned by the `compute` feature (roles / capabilities / ops).
 ///
 /// The `compute` feature (default on) owns the WASM engine, the module cache
 /// and `ComputablePort`. With the feature off this crate is genuinely
@@ -97,7 +97,7 @@ pub const LOCAL_TOOL_OPS: [&str; 2] = [
 /// engine that claims them lies to its peers.
 const COMPUTE_OWNED_NAMES: [&str; 3] = ["l2-computable", "computable-engine", "compute"];
 
-/// Whether `name` is advertised by this build.
+/// note: Whether `name` is advertised by this build.
 ///
 /// A compute-owned name is advertised **exactly when** the `compute` feature
 /// is compiled in: the gate is a property of the build, so it is evaluated
@@ -108,7 +108,7 @@ fn advertised(name: &str) -> bool {
     cfg!(feature = "compute") || !COMPUTE_OWNED_NAMES.contains(&name)
 }
 
-/// Whether `name` must be withheld from this build's manifest because it
+/// why: Whether `name` must be withheld from this build's manifest because it
 /// needs the `compute` feature (the inverse lens of [`advertised`], for
 /// callers that keep the unfiltered locked list).
 #[must_use]
@@ -116,7 +116,7 @@ pub fn compute_owned_name(name: &str) -> bool {
     !advertised(name)
 }
 
-/// The locked `ToolDescriptor` set ([`LOCAL_TOOL_OPS`] in declaration
+/// why: The locked `ToolDescriptor` set ([`LOCAL_TOOL_OPS`] in declaration
 /// order) — the `tools[]` member of the local manifest.
 ///
 /// Deserialized from the spec §2.1 C-1/C-2 locked JSON (same
@@ -195,7 +195,7 @@ pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
     .collect()
 }
 
-/// Capabilities the six KE operation families require (v1.191 P1 T14,
+/// note: Capabilities the six KE operation families require (v1.191 P1 T14,
 /// durable `holder-governance.md` §9).
 ///
 /// `ke-ownership` is a **capability, not an op**: it declares that this host
@@ -214,7 +214,7 @@ pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
 /// tools-only composition cannot inherit this list.
 pub const CAPABILITY_KE_OWNERSHIP: &str = "ke-ownership";
 
-/// The extraction capability — **never advertised by this host**.
+/// invariant: The extraction capability — **never advertised by this host**.
 ///
 /// Remote extraction is not served in this target (durable §8/§9): the
 /// extract path is a local adapter-wrapper call with caller-supplied
@@ -222,7 +222,7 @@ pub const CAPABILITY_KE_OWNERSHIP: &str = "ke-ownership";
 /// `extract` op stays outside [`LOCAL_SERVED_OPS`].
 pub const CAPABILITY_KE_EXTRACTION: &str = "ke-extraction";
 
-/// The three baseline capabilities (N-C0 → N-C2, unchanged) — the head
+/// note: The three baseline capabilities (N-C0 → N-C2, unchanged) — the head
 /// of [`LOCAL_CAPABILITIES`].
 ///
 /// Each maps to a production adapter port (the honesty test asserts the
@@ -230,7 +230,7 @@ pub const CAPABILITY_KE_EXTRACTION: &str = "ke-extraction";
 /// only through the [`LOCAL_TOOL_OPS`] composition below.
 pub const BASELINE_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l5-fork"];
 
-/// Capabilities advertised by the local host: the baseline 3, then
+/// invariant: Capabilities advertised by the local host: the baseline 3, then
 /// [`CAPABILITY_KE_OWNERSHIP`] (durable §9 — the guards are wired), then
 /// each user-locked tool id ([`LOCAL_TOOL_OPS`] order, AR-48).
 ///
@@ -257,16 +257,16 @@ pub const LOCAL_CAPABILITIES: [&str; BASELINE_CAPABILITIES.len() + 1 + LOCAL_TOO
     caps
 };
 
-/// Namespaces owned by the local host.
+/// note: Namespaces owned by the local host.
 pub const LOCAL_NAMESPACES: [&str; 1] = ["nexus"];
 
-/// The six core Connect ops (N-C1 writes → N-C2 read half → P2 compute).
+/// invariant: The six core Connect ops (N-C1 writes → N-C2 read half → P2 compute).
 /// Core ops are NOT tools (AR-56): they never gain `tools.nexus.*` aliases.
 pub const CORE_OPS: [&str; 6] = [
     "upsert", "promote", "relate", "check", "assemble", "compute",
 ];
 
-/// The manifest's advertised op set (`extensions.nexus.served_ops`):
+/// invariant: The manifest's advertised op set (`extensions.nexus.served_ops`):
 /// [`CORE_OPS`] then [`LOCAL_TOOL_OPS`] (declaration order).
 ///
 /// The connect-host dispatch gate owns the same set as its served-op table
@@ -291,7 +291,7 @@ pub const LOCAL_SERVED_OPS: [&str; CORE_OPS.len() + LOCAL_TOOL_OPS.len()] = {
     ops
 };
 
-/// Build the N-C0 `HostCapabilityManifest` from the given `host_id`.
+/// why: Build the N-C0 `HostCapabilityManifest` from the given `host_id`.
 ///
 /// The `host_id` is the installation-scoped device-id UUID (`~/.nexus42/device-id`
 /// via `nexus_home_layout::device_id::get_or_create_device_id`) — NOT the
@@ -322,7 +322,7 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             .parse()
             .expect("locked extension key is schema-valid"),
         json!({
-            // Slice marker (P1 QC fix wave FW-6): "n-c2" tracks the
+            // note: Slice marker (P1 QC fix wave FW-6): "n-c2" tracks the
             // delivered N-C2 read-half surface — the served set is
             // authoritative (`served_ops`); the marker is the ladder
             // position, not a capability list.
@@ -353,7 +353,7 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             .collect(),
         namespaces,
         authority: None,
-        // V1.173 (DF-84, T1): the user-locked tool set `S` is served — the
+        // note: V1.173 (DF-84, T1): the user-locked tool set `S` is served — the
         // non-empty `tools` member is now serialized on the wire (the
         // generated serde `skip_serializing_if = Vec::is_empty` rule still
         // omits an empty `tools`, which this iteration does not ship).
@@ -370,7 +370,7 @@ fn reject_invalid_host_id(e: impl std::fmt::Display) -> SpokeReject {
     }
 }
 
-/// Convert the data-type manifest into the field-identical `connect_hello`
+/// note: Convert the data-type manifest into the field-identical `connect_hello`
 /// wire type via a JSON round-trip (the connect variant has no `PartialEq`,
 /// so equality is asserted at the JSON level).
 ///
@@ -400,7 +400,7 @@ pub fn to_connect_hello(manifest: &HostCapabilityManifest) -> SpokeResult<Connec
     }
 }
 
-/// Convert the `connect_hello` wire manifest back into the data-type
+/// note: Convert the `connect_hello` wire manifest back into the data-type
 /// [`HostCapabilityManifest`] via a JSON round-trip — the companion of
 /// [`to_connect_hello`].
 ///
@@ -437,7 +437,7 @@ pub fn from_connect_hello(wire: &ConnectHelloManifest) -> SpokeResult<HostCapabi
     }
 }
 
-/// One-call N-C0 builder for the Connect Host's `ConnectConfig.local_manifest`.
+/// note: One-call N-C0 builder for the Connect Host's `ConnectConfig.local_manifest`.
 ///
 /// Same single-builder SSOT as [`build_local_host_manifest`]; the connect
 /// wire type is the JSON round-trip of the data type.
@@ -458,7 +458,7 @@ mod tests {
     use super::*;
     use crate::NexusAdapter;
 
-    /// Compile-time production-orchestrator proof for one advertised write op.
+    /// invariant: Compile-time production-orchestrator proof for one advertised write op.
     ///
     /// The `orchestrate_*` entrypoints are re-exported from `spoke_operations`
     /// (Surface B, spec §7.3) and generic over the ports bound. Each closure
@@ -493,7 +493,7 @@ mod tests {
                 let _ = || {
                     let request: crate::CheckRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    // Typecheck-only: the production check path is the AR-1
+                    // note: Typecheck-only: the production check path is the AR-1
                     // world-scoped wrapper (auto-include of the world's
                     // `status=active` rules + fail-closed foreign/embedded
                     // reject); the baseline no-op checker is the production
@@ -520,7 +520,7 @@ mod tests {
                     drop(crate::orchestrate_compute(adapter, request));
                 };
             }
-            // V1.173 tool ops — no spoke orchestrator (host-level reads the
+            // note: V1.173 tool ops — no spoke orchestrator (host-level reads the
             // Task 2 handlers serve directly through the adapter): the
             // typecheck-only closures prove the adapter reach exists.
             "tools.nexus.list_observed_peers" => {
@@ -530,7 +530,7 @@ mod tests {
             }
             "tools.nexus.list_modules" => {
                 let _ = || {
-                    // Typecheck-only: `user_modules_dir` is a Copy accessor —
+                    // note: Typecheck-only: `user_modules_dir` is a Copy accessor —
                     // binding it (not dropping it) is the compile-time proof
                     // the Task 2 handler's module-store scan is reachable.
                     let _ = adapter.user_modules_dir();
@@ -540,14 +540,14 @@ mod tests {
         }
     }
 
-    /// Compile-time production-port proof for one advertised capability.
+    /// note: Compile-time production-port proof for one advertised capability.
     ///
     /// The trait upcasts only compile while the corresponding `impl
     /// <PortFamily> for NexusAdapter` exists (spec §7.4 production matrix);
     /// a capability whose port regressed to a stub stops compiling here.
     fn assert_capability_maps_to_production_port(adapter: &NexusAdapter<'_>, capability: &str) {
         match capability {
-            // spoke-baseline — the seven baseline ports (T1/T2-era) are production.
+            // note: spoke-baseline — the seven baseline ports (T1/T2-era) are production.
             "spoke-baseline" => {
                 let _: &dyn crate::BaselinePorts = adapter;
                 let _: &dyn crate::KnowledgeEntryPort = adapter;
@@ -557,7 +557,7 @@ mod tests {
                 let _: &dyn crate::ScopeQueryPort = adapter;
                 let _: &dyn crate::RuleQueryPort = adapter;
             }
-            // l2-computable — production ComputablePort (V1.146). Only
+            // note: l2-computable — production ComputablePort (V1.146). Only
             // advertised when the `compute` feature (which owns the WASM
             // engine and the module cache) is on.
             #[cfg(feature = "compute")]
@@ -566,12 +566,12 @@ mod tests {
             }
             #[cfg(not(feature = "compute"))]
             "l2-computable" => {}
-            // l5-fork — production ForkTimelineQueryPort (V1.146).
+            // note: l5-fork — production ForkTimelineQueryPort (V1.146).
             "l5-fork" => {
                 let _: &dyn crate::ForkPorts = adapter;
                 let _: &dyn crate::ForkTimelineQueryPort = adapter;
             }
-            // v1.191 P1 T14 (durable §9): `ke-ownership` is advertised only
+            // why: v1.191 P1 T14 (durable §9): `ke-ownership` is advertised only
             // because every KE-bearing port is production AND scope-bound —
             // the upcasts prove the port families exist, and the adapter's
             // request-bound selection is what enforces the governance axis.
@@ -585,7 +585,7 @@ mod tests {
                 let _: &dyn crate::ComputablePorts = adapter;
                 let _: &dyn crate::BaselinePorts = adapter;
             }
-            // V1.173 tool capabilities — backed by the adapter reads the
+            // note: V1.173 tool capabilities — backed by the adapter reads the
             // Task 2 tool handlers serve (no new port types): observed
             // peers via HostManifestPort (the production N-C3 read) and
             // the host-local module store via the adapter accessor.
@@ -600,22 +600,22 @@ mod tests {
         }
     }
 
-    /// AC-I4.3 / product draft §4.3 + P1 spec § Manifest honesty — the
+    /// note: AC-I4.3 / product draft §4.3 + P1 spec § Manifest honesty — the
     /// manifest honesty test (machine-checkable). Renamed for the delivered
     /// slice: it now machine-checks the N-C1 → N-C2 read-half manifest
     /// (roles + served ops) while keeping the full N-C0 baseline
     /// (capabilities / namespaces / no `"reasoning-complete"`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[allow(clippy::too_many_lines)] // one machine-checked honesty sweep; keep the steps linear
+#[allow(clippy::too_many_lines)] // note: one machine-checked honesty sweep; keep the steps linear
     async fn n_c1_manifest_is_honest() {
-        // The builder is host_id-injectable so the test is hermetic (no
+        // note: The builder is host_id-injectable so the test is hermetic (no
         // writes to the real `~/.nexus42`).
         let manifest = match build_local_host_manifest("test-device-uuid-0000") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
         };
 
-        // 1. Every capability is in the locked allowlist AND maps to a
+        // note: 1. Every capability is in the locked allowlist AND maps to a
         //    production adapter port (compile-time proof, §4.3 items 2).
         //    V1.173: the lockstep is additionally machine-checked on the
         //    manifest — `spoke_operations::validate_manifest_tools`
@@ -639,7 +639,7 @@ mod tests {
             "capabilities must be exactly the advertised locked list \
              (baseline ++ ke-ownership ++ LOCAL_TOOL_OPS, compute names only with the feature)"
         );
-        // 0.15.1 lockstep: the upstream `spoke-memory` capability family is
+        // invariant: 0.15.1 lockstep: the upstream `spoke-memory` capability family is
         // additive and UNCONSUMED — the manifest must never fabricate it
         // (no capability without a production port behind it).
         for capability in [
@@ -660,7 +660,7 @@ mod tests {
             "validate_manifest_tools must pass on the served manifest (AR-48)"
         );
 
-        // 3. roles == the locked list exactly — data-store (storage) +
+        // note: 3. roles == the locked list exactly — data-store (storage) +
         //    checker + assembler + computable-engine (the N-C2 E2
         //    open-string roles, spec §4/§6.6; computable-engine is the
         //    semantic reasoning-complete wire form — no literal string).
@@ -676,7 +676,7 @@ mod tests {
             "roles must be exactly the advertised locked list (compute role only with the feature)"
         );
         let has_role = |role: &str| manifest.roles.iter().any(|r| r == role);
-        // The advertised op set (feature-filtered) — the pairing below must
+        // note: The advertised op set (feature-filtered) — the pairing below must
         // compare like with like in both build configurations.
         let advertised_op = |op: &str| {
             LOCAL_SERVED_OPS
@@ -699,17 +699,17 @@ mod tests {
             "role computable-engine ⇔ served op compute must hold in both directions"
         );
 
-        // 4. namespaces == ["nexus"].
+        // note: 4. namespaces == ["nexus"].
         assert_eq!(manifest.namespaces.len(), 1);
         assert_eq!(manifest.namespaces[0].as_str(), "nexus");
 
-        // 5. authority is None (absent).
+        // note: 5. authority is None (absent).
         assert!(
             manifest.authority.is_none(),
             "N-C0 must not declare authority"
         );
 
-        // 6. No "reasoning-complete" anywhere in the manifest JSON (the
+        // invariant: 6. No "reasoning-complete" anywhere in the manifest JSON (the
         //    semantic milestone is expressed as `computable-engine` role +
         //    `l2-computable` capability, never a literal string — spec
         //    §4/§6.6).
@@ -720,7 +720,7 @@ mod tests {
              computable-engine + l2-computable)"
         );
 
-        // 7. Round-trips through the spoke generated serde type without
+        // note: 7. Round-trips through the spoke generated serde type without
         //    unknown fields (`deny_unknown_fields` on the generated struct;
         //    the generated type has no PartialEq, so equality is JSON-level).
         let round_tripped: HostCapabilityManifest =
@@ -731,10 +731,10 @@ mod tests {
             "round-trip must be lossless"
         );
 
-        // 8. schema_version == 1.
+        // note: 8. schema_version == 1.
         assert_eq!(manifest.schema_version.get(), 1);
 
-        // 9. extensions["nexus"] carries the N-C2 read-half marker block.
+        // note: 9. extensions["nexus"] carries the N-C2 read-half marker block.
         let nexus_key = "nexus".parse().expect("locked extension key parses");
         let nexus_ext = manifest
             .extensions
@@ -751,7 +751,7 @@ mod tests {
             Some(true)
         );
 
-        // 10. N-C1 served-op advertisement (P1 spec § Manifest honesty,
+        // note: 10. N-C1 served-op advertisement (P1 spec § Manifest honesty,
         //     machine-checkable): extensions.nexus.served_ops is EXACTLY
         //     LOCAL_SERVED_OPS — no more, no fewer — and every advertised op
         //     maps to a production orchestrator (compile-time proof).
@@ -778,13 +778,13 @@ mod tests {
         {
             assert_op_maps_to_production_orchestrator(&adapter, op);
         }
-        // Direction (b) — every dispatch-served op is advertised — is
+        // note: Direction (b) — every dispatch-served op is advertised — is
         // machine-checked against the real dispatch table in the
         // connect-host interop suite (apps/nexus42
         // `n_c1_manifest_served_ops_match_dispatch_both_directions`), where
         // both the manifest builder and the dispatch gate are visible.
 
-        // 11. V1.173 tools lockstep (AR-48/AR-51, machine-checked):
+        // note: 11. V1.173 tools lockstep (AR-48/AR-51, machine-checked):
         //     `tools[]` ⇔ `LOCAL_TOOL_OPS` in order, `op == capability_id`
         //     per descriptor, every tool id in `capabilities[]` and in the
         //     advertised `served_ops`, and no `tools.` string beyond
@@ -815,13 +815,13 @@ mod tests {
                 "every tool id must be in extensions.nexus.served_ops (AR-51)"
             );
         }
-        // The wire carries `tools` (non-empty member is serialized — the
+        // note: The wire carries `tools` (non-empty member is serialized — the
         // V1.169 omit-empty pin flipped for S).
         assert!(
             manifest_json.get("tools").is_some(),
             "the served manifest must serialize a non-empty tools member"
         );
-        // No tools.-prefixed CORE-op entries and no tool ids beyond S.
+        // note: No tools.-prefixed CORE-op entries and no tool ids beyond S.
         for op in served_ops
             .iter()
             .map(|op| op.as_str().expect("served op is a string"))
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     fn connect_hello_manifest_round_trips_through_the_wire_type() {
-        // The Connect Host's `ConnectConfig.local_manifest` must carry the
+        // note: The Connect Host's `ConnectConfig.local_manifest` must carry the
         // `connect_hello::HostCapabilityManifest` wire type. The conversion
         // is a JSON round-trip of the data type (both generated from the
         // same schema; equality is asserted at the JSON level).
@@ -887,7 +887,7 @@ mod tests {
                 .collect::<Vec<_>>())
         );
 
-        // The round-tripped value deserializes back into the data type
+        // note: The round-tripped value deserializes back into the data type
         // without loss (both directions are lossless).
         let back: HostCapabilityManifest =
             serde_json::from_value(hello_json).expect("wire type deserializes as data type");
@@ -896,7 +896,7 @@ mod tests {
             data_json
         );
 
-        // Rejected host_id propagates through the connect builder unchanged.
+        // note: Rejected host_id propagates through the connect builder unchanged.
         assert!(
             matches!(
                 build_connect_hello_manifest(""),
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn from_connect_hello_round_trips_the_wire_type_back_to_data() {
-        // N-C3 (V1.155 P0): the outbound `connect()` return exposes the
+        // note: N-C3 (V1.155 P0): the outbound `connect()` return exposes the
         // peer's manifest as the `connect_hello` wire type
         // (`PeerSession::remote_manifest()`); the adapter's recording
         // boundary consumes the data type. The reverse conversion must be
@@ -936,7 +936,7 @@ mod tests {
         assert_eq!(back.roles, data.roles);
     }
 
-    /// V1.173 T1 (flips the V1.169 AR-1/AR-4 pins for the user-locked set S
+    /// note: V1.173 T1 (flips the V1.169 AR-1/AR-4 pins for the user-locked set S
     /// — AR-51/AR-55): the served manifest now CARRIES the two `S` tool
     /// descriptors on the wire (non-empty `tools` serializes; the
     /// omit-empty serde rule is preserved and pinned for the CORE-only
@@ -958,7 +958,7 @@ mod tests {
             SpokeResult::Reject(r) => panic!("connect hello builder rejected: {r:?}"),
         };
 
-        // Served in memory on both generated types, in LOCAL_TOOL_OPS order.
+        // note: Served in memory on both generated types, in LOCAL_TOOL_OPS order.
         assert_eq!(data.tools.len(), LOCAL_TOOL_OPS.len());
         assert_eq!(hello.tools.len(), LOCAL_TOOL_OPS.len());
         for (descriptor, op) in data.tools.iter().zip(LOCAL_TOOL_OPS) {
@@ -967,7 +967,7 @@ mod tests {
             assert_eq!(descriptor.schema_version.get(), 1);
         }
 
-        // Wire form: the `tools` member is PRESENT (non-empty) on both the
+        // note: Wire form: the `tools` member is PRESENT (non-empty) on both the
         // data type and the connect_hello wire type.
         let data_json = serde_json::to_value(&data).expect("data manifest serializes");
         let hello_json = serde_json::to_value(&hello).expect("hello manifest serializes");
@@ -985,7 +985,7 @@ mod tests {
             );
         }
 
-        // Round-trip: the wire form deserializes back with tools intact.
+        // note: Round-trip: the wire form deserializes back with tools intact.
         let round_tripped: HostCapabilityManifest =
             serde_json::from_value(data_json).expect("wire form deserializes");
         assert_eq!(
@@ -994,7 +994,7 @@ mod tests {
             "wire round-trip must keep the tools descriptors"
         );
 
-        // validate_manifest_tools passes on the served manifest (the
+        // note: validate_manifest_tools passes on the served manifest (the
         // machine-checked lockstep — AR-48).
         assert!(
             matches!(
@@ -1005,7 +1005,7 @@ mod tests {
              nexus namespace owned, unique)"
         );
 
-        // Narrowed AR-4 pin: every `tools.` string in capabilities /
+        // note: Narrowed AR-4 pin: every `tools.` string in capabilities /
         // served_ops is exactly LOCAL_TOOL_OPS — nothing else.
         let tools_caps = LOCAL_CAPABILITIES
             .iter()
@@ -1027,7 +1027,7 @@ mod tests {
         );
     }
 
-    /// v1.191 P1 T14 (durable §9) — truthful KE capability declaration: the
+    /// invariant: v1.191 P1 T14 (durable §9) — truthful KE capability declaration: the
     /// host that serves the six guarded KE families declares
     /// `ke-ownership`, never `ke-extraction` (remote extraction is not
     /// served), and advertises no `extract` op in `served_ops`.

@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! MCA (Moment Context Assembly) `WorldKB` read path (V1.145 P2 Option 2).
 //!
 //! [`SpokeBackedKbStore`] is the [`KbStore`] implementation injected at the
@@ -45,25 +46,24 @@ use serde_json::Value;
 use spoke_schemas::ExtensionKey;
 use sqlx::SqlitePool;
 
-// ── Adapter scoped-read method ──────────────────────────────────────────
 
-/// Result of [`NexusAdapter::list_knowledge_entries_scoped`] — the
+/// note: Result of [`NexusAdapter::list_knowledge_entries_scoped`] — the
 /// spoke-wire analogue of [`KbQueryResult`] (items are spoke
 /// [`KnowledgeEntry`] instead of [`KnowledgeEntryRecord`]).
 #[derive(Debug, Clone)]
 pub struct ScopedKbRead {
-    /// Matching spoke `KnowledgeEntry`s (after pagination).
+    /// note: Matching spoke `KnowledgeEntry`s (after pagination).
     pub items: Vec<KnowledgeEntry>,
-    /// Total matching count (ignoring limit/offset) — mirrors
+    /// note: Total matching count (ignoring limit/offset) — mirrors
     /// [`KbQueryResult::total_count`].
     pub total_count: usize,
-    /// Whether more results exist beyond the current page — mirrors
+    /// note: Whether more results exist beyond the current page — mirrors
     /// [`KbQueryResult::has_more`].
     pub has_more: bool,
 }
 
 impl NexusAdapter<'_> {
-    /// MCA `WorldKB` read: list active knowledge entries for a world as spoke
+    /// invariant: MCA `WorldKB` read: list active knowledge entries for a world as spoke
     /// wire types, applying the spoke `Scope`'s native `entry_types` plus the
     /// nexus-specific filters carried under `scope.extensions["nexus"]`
     /// (V1.145 P2 — scope-pushdown via extensions, spoke-native since 0.6.0).
@@ -117,7 +117,7 @@ impl NexusAdapter<'_> {
             return Err(KbStoreError::Storage(reject.message));
         }
         let mut query = kb_query_from_scope(scope);
-        // Preserve the pre-T8 MCA window: a wire scope that carries no explicit
+        // invariant: Preserve the pre-T8 MCA window: a wire scope that carries no explicit
         // `limit` reads at most `LIST_BY_WORLD_LIMIT` matching rows and never
         // rejects on overflow (the MCA contract — distinct from the orchestrator
         // KnowledgeQueryPort reject). The window is applied AFTER the admitted
@@ -130,7 +130,7 @@ impl NexusAdapter<'_> {
         }
 
         let store = SqliteKbStore::new(self.pool.clone());
-        // `query_with_scope` (v1.191 P1 T6 selection) applies the authorized
+        // invariant: `query_with_scope` (v1.191 P1 T6 selection) applies the authorized
         // container AND disclosure predicate before the listing window, so a
         // hidden row is never counted, ranked or truncated into the page.
         let result = store.query_with_scope(&query, selection).await?;
@@ -140,7 +140,7 @@ impl NexusAdapter<'_> {
             .iter()
             .map(|entry| {
                 let mut spoke = knowledge_record_to_spoke(entry);
-                // Stash the lossless body carrier so `spoke_to_knowledge_record` in
+                // invariant: Stash the lossless body carrier so `spoke_to_knowledge_record` in
                 // `SpokeBackedKbStore` recovers the exact body (attributes,
                 // computable, etc.) instead of the spoke-truncated fallback.
                 // Only the MCA read path sets this; the spoke orchestrator
@@ -162,9 +162,8 @@ impl NexusAdapter<'_> {
     }
 }
 
-// ── SpokeBackedKbStore — KbStore impl for the MCA read path ─────────────
 
-/// `KbStore` implementation backed by [`NexusAdapter`], used at the
+/// note: `KbStore` implementation backed by [`NexusAdapter`], used at the
 /// `assemble_moment` wiring site so the MCA `WorldKB` read crosses the
 /// spoke-adapter boundary (V1.145 P2 Option 2).
 ///
@@ -181,14 +180,14 @@ impl NexusAdapter<'_> {
 /// return [`KbStoreError::Storage`]: this store is read-only for MCA; writes go
 /// through the daemon CRUD / spoke orchestrator paths.
 pub struct SpokeBackedKbStore {
-    /// The adapter the `query` path routes through (storage → spoke conversion).
+    /// note: The adapter the `query` path routes through (storage → spoke conversion).
     adapter: NexusAdapter<'static>,
-    /// Pool for delegating the non-MCA read methods to `SqliteKbStore`.
+    /// note: Pool for delegating the non-MCA read methods to `SqliteKbStore`.
     pool: SqlitePool,
 }
 
 impl SpokeBackedKbStore {
-    /// Construct from a [`SqlitePool`] and the caller's validated
+    /// note: Construct from a [`SqlitePool`] and the caller's validated
     /// request-bound read selection (v1.191 P1 T8 — the MCA `WorldKB` read is
     /// a KE read and is served only inside that selection). The adapter's port
     /// methods are natively `async fn` (spoke-operations 0.9.1 surface) and
@@ -201,7 +200,7 @@ impl SpokeBackedKbStore {
         Self { adapter, pool }
     }
 
-    /// The bound admitted read selection (v1.191 P1 T8).
+    /// note: The bound admitted read selection (v1.191 P1 T8).
     ///
     /// # Panics
     ///
@@ -215,7 +214,7 @@ impl SpokeBackedKbStore {
     }
 }
 
-/// Map an inbound [`KbQuery::block_type`] to the spoke `Scope.entry_types`
+/// note: Map an inbound [`KbQuery::block_type`] to the spoke `Scope.entry_types`
 /// wire string (`snake_case`). MCA sends at most one; `None` → empty.
 ///
 /// Delegates to the conversion seam's [`block_type_to_entry_type`] so the
@@ -228,7 +227,7 @@ fn block_type_to_entry_types(block_type: Option<nexus_contracts::BlockType>) -> 
         .collect()
 }
 
-/// Reverse map: spoke `Scope.entry_types` (`snake_case` wire string) →
+/// invariant: Reverse map: spoke `Scope.entry_types` (`snake_case` wire string) →
 /// [`KbQuery::block_type`]. MCA sends at most one element, so only the first
 /// is consulted. serde round-trips the `snake_case` string emitted by
 /// [`block_type_to_entry_types`] exactly; the legacy `PascalCase` fallback in
@@ -243,22 +242,22 @@ fn entry_type_to_block_type(s: &str) -> Option<nexus_contracts::BlockType> {
 // single-threaded SQLite usage within our tokio runtime (mirrors the
 // `SqliteKbStore` impl).
 #[allow(clippy::future_not_send)]
-// `unused_async_trait_impl` (new in clippy 1.98): the read-only write stubs
+// note: `unused_async_trait_impl` (new in clippy 1.98): the read-only write stubs
 // (insert/attach/update/delete) return `Err` without awaiting; `async` is by
 // `KbStore` trait contract — toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl KbStore for SpokeBackedKbStore {
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError> {
-        // Build the spoke Scope: native `entry_types` (from block_type) + the
+        // note: Build the spoke Scope: native `entry_types` (from block_type) + the
         // nexus-specific filters under `scope.extensions["nexus"]` (spoke-native
         // since 0.6.0). The Scope crosses the spoke boundary carrying every
         // filter MCA needs — no separate typed carrier.
         let scope = scope_from_kb_query(query);
 
-        // Cross the spoke-adapter boundary: storage → spoke KnowledgeEntry,
+        // note: Cross the spoke-adapter boundary: storage → spoke KnowledgeEntry,
         // then convert back to the domain type via the sole conversion seam.
         let read = self.adapter.list_knowledge_entries_scoped(&scope).await?;
-        // v1.184 P1: the reverse seam is fallible (fails closed on missing
+        // note: v1.184 P1: the reverse seam is fallible (fails closed on missing
         // owner metadata). Rows originate from storage (always owned), so an
         // error here is a malformed-row signal — surface it as a storage error
         // rather than fabricating a World owner.
@@ -287,7 +286,7 @@ impl KbStore for SpokeBackedKbStore {
         &self,
         entry_id: &str,
     ) -> Result<KnowledgeEntryRecord, KbStoreError> {
-        // v1.191 P1 T8: the delegated read goes through the adapter's bound
+        // note: v1.191 P1 T8: the delegated read goes through the adapter's bound
         // selection, so a row outside it (or hidden from it) is not found —
         // this store has no unscoped hole next to its scoped `query`.
         self.adapter
@@ -300,7 +299,7 @@ impl KbStore for SpokeBackedKbStore {
         &self,
         world_id: &str,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
-        // Admitted selection only; a world outside it contributes nothing.
+        // note: Admitted selection only; a world outside it contributes nothing.
         SqliteKbStore::new(self.pool.clone())
             .list_by_owner_complete(&KnowledgeOwnerRef::world(world_id), self.read_scope())
             .await
@@ -315,7 +314,7 @@ impl KbStore for SpokeBackedKbStore {
     }
 
     async fn get_anchors(&self, entry_id: &str) -> Result<Vec<SourceAnchor>, KbStoreError> {
-        // Anchors are provenance for one entry, so they are only readable for
+        // note: Anchors are provenance for one entry, so they are only readable for
         // an entry the bound selection admits (an unreadable entry's anchors
         // are indistinguishable from an absent entry's).
         if self.adapter.load_admitted_entry(entry_id).await?.is_none() {
@@ -335,7 +334,7 @@ impl KbStore for SpokeBackedKbStore {
     }
 }
 
-/// Construct the canonical "read-only MCA store" error for a write method.
+/// note: Construct the canonical "read-only MCA store" error for a write method.
 fn read_only_error(method: &str) -> KbStoreError {
     KbStoreError::Storage(format!(
         "SpokeBackedKbStore is read-only (MCA `WorldKB` read path); \
@@ -343,9 +342,8 @@ fn read_only_error(method: &str) -> KbStoreError {
     ))
 }
 
-// ── Scope ↔ KbQuery bridge (spoke-native scope.extensions, ≥ 0.6.0) ──────
 
-/// Build the typed `ExtensionKey` for the `"nexus"` namespace.
+/// note: Build the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
 /// namespace regex, so construction is infallible at runtime. The newtype does
@@ -356,7 +354,7 @@ fn nexus_scope_key() -> ExtensionKey {
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
-/// Build a spoke [`Scope`] from an inbound [`KbQuery`] so the `WorldKB` read
+/// note: Build a spoke [`Scope`] from an inbound [`KbQuery`] so the `WorldKB` read
 /// crosses the spoke boundary carrying every MCA filter — native `entry_types`
 /// (from `block_type`) + the 5 nexus-specific filters under
 /// `scope.extensions["nexus"]` (V1.145 P2 scope-pushdown, spoke-native ≥ 0.6.0).
@@ -378,7 +376,7 @@ fn scope_from_kb_query(query: &KbQuery) -> Scope {
     if let Some(computable) = query.computable {
         nexus_ns.insert("computable".into(), Value::Bool(computable));
     }
-    // `usize` → JSON number; read back via `as_u64` on the reverse path
+    // note: `usize` → JSON number; read back via `as_u64` on the reverse path
     // (lossless on 64-bit; saturates to u64::MAX on absurd values).
     if let Some(limit) = query.limit {
         nexus_ns.insert(
@@ -414,7 +412,7 @@ fn scope_from_kb_query(query: &KbQuery) -> Scope {
         .expect("KbQuery → Scope wire shape is schema-valid (mirrors scope_extensions_round_trip)")
 }
 
-/// Reverse of [`scope_from_kb_query`]: reconstruct the [`KbQuery`] from a spoke
+/// note: Reverse of [`scope_from_kb_query`]: reconstruct the [`KbQuery`] from a spoke
 /// [`Scope`] so the adapter's MCA read can delegate to [`SqliteKbStore::query`]
 /// (the canonical silent-truncate path). Called by
 /// [`NexusAdapter::list_knowledge_entries_scoped`].
@@ -425,7 +423,7 @@ fn scope_from_kb_query(query: &KbQuery) -> Scope {
 fn kb_query_from_scope(scope: &Scope) -> KbQuery {
     let world_id = scope.scope_id.clone();
 
-    // MCA sends at most one entry_type; multiple would be silently dropped by
+    // note: MCA sends at most one entry_type; multiple would be silently dropped by
     // the KbQuery.block_type single-value mapping. debug_assert surfaces a
     // future caller before shipping a silent truncation.
     debug_assert!(
@@ -440,7 +438,7 @@ fn kb_query_from_scope(scope: &Scope) -> KbQuery {
         .next()
         .and_then(|s| entry_type_to_block_type(s));
 
-    // Extract the 5 nexus-specific filters from scope.extensions["nexus"]; an
+    // note: Extract the 5 nexus-specific filters from scope.extensions["nexus"]; an
     // absent namespace or absent key recovers `None` (the None ↔ absent round
     // trip from scope_from_kb_query).
     let (text_search, canonical_name, computable, limit, offset) = scope
@@ -479,7 +477,6 @@ fn kb_query_from_scope(scope: &Scope) -> KbQuery {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -489,7 +486,7 @@ mod tests {
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 
-    /// The admitted selection the MCA fixtures read inside (v1.191 P1 T8):
+    /// note: The admitted selection the MCA fixtures read inside (v1.191 P1 T8):
     /// Creator management over `wld_mca`, the world they seed.
     fn mca_scope() -> KnowledgeReadScope {
         KnowledgeReadScope::creator_management(
@@ -498,7 +495,7 @@ mod tests {
         )
     }
 
-    /// A scoped MCA store over `wld_mca`.
+    /// note: A scoped MCA store over `wld_mca`.
     fn scoped(pool: sqlx::SqlitePool) -> SpokeBackedKbStore {
         SpokeBackedKbStore::new(pool, mca_scope())
     }
@@ -553,7 +550,7 @@ mod tests {
         ("wld_mca".to_string(), seeded)
     }
 
-    /// C1: `SpokeBackedKbStore::query` returns the same items as
+    /// note: C1: `SpokeBackedKbStore::query` returns the same items as
     /// `SqliteKbStore::query` for the same data + filters (the core P2 value:
     /// the MCA read crosses the spoke boundary yet stays behavior-equivalent).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -564,14 +561,14 @@ mod tests {
         let sqlite = SqliteKbStore::new(pool.clone());
         let spoke_backed = scoped(pool);
 
-        // Unfiltered
+        // note: Unfiltered
         let q = KbQuery::new(&world_id);
         let sqlite_res = sqlite.query(&q).await.unwrap();
         let spoke_res = spoke_backed.query(&q).await.unwrap();
         assert_eq!(sqlite_res.total_count, spoke_res.total_count);
         assert_eq!(sqlite_res.has_more, spoke_res.has_more);
         assert_eq!(sqlite_res.items.len(), spoke_res.items.len());
-        // canonical_name + summary + block_type are the fields MCA renders;
+        // note: canonical_name + summary + block_type are the fields MCA renders;
         // they must match verbatim after the spoke round-trip.
         for (a, b) in sqlite_res.items.iter().zip(spoke_res.items.iter()) {
             assert_eq!(a.canonical_name, b.canonical_name);
@@ -582,7 +579,7 @@ mod tests {
             );
         }
 
-        // block_type filter
+        // note: block_type filter
         let q = KbQuery::new(&world_id).with_block_type(BlockType::Character);
         let sqlite_res = sqlite.query(&q).await.unwrap();
         let spoke_res = spoke_backed.query(&q).await.unwrap();
@@ -590,14 +587,14 @@ mod tests {
         assert_eq!(spoke_res.items.len(), 1);
         assert_eq!(spoke_res.items[0].canonical_name, "Alice");
 
-        // text_search filter
+        // note: text_search filter
         let q = KbQuery::new(&world_id).with_text_search("atl");
         let sqlite_res = sqlite.query(&q).await.unwrap();
         let spoke_res = spoke_backed.query(&q).await.unwrap();
         assert_eq!(sqlite_res.items.len(), spoke_res.items.len());
         assert_eq!(spoke_res.items[0].canonical_name, "Atlantis");
 
-        // limit
+        // note: limit
         let q = KbQuery::new(&world_id).with_limit(2);
         let sqlite_res = sqlite.query(&q).await.unwrap();
         let spoke_res = spoke_backed.query(&q).await.unwrap();
@@ -606,7 +603,7 @@ mod tests {
         assert!(sqlite_res.has_more && spoke_res.has_more);
     }
 
-    /// C2: `SpokeBackedKbStore::query` applies the lossless body carrier, so a
+    /// note: C2: `SpokeBackedKbStore::query` applies the lossless body carrier, so a
     /// body with an integer attribute round-trips byte-identical (no int→float
     /// drift). Proves the carrier stashed on the read path is recovered.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -614,7 +611,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _seeded) = seed_world_with_entries(&pool).await;
 
-        // Re-seed one entry with an integer attribute that the spoke typed body
+        // note: Re-seed one entry with an integer attribute that the spoke typed body
         // alone would round-trip as a float.
         let mut entry = KnowledgeEntryRecord::new(&world_id, BlockType::Character, "Numeric");
         entry.entry_id = "kb_mca_num".to_string();
@@ -631,11 +628,11 @@ mod tests {
         let res = spoke_backed.query(&q).await.unwrap();
         let body = res.items[0].body.as_ref().unwrap();
         let attrs = body.attributes.as_ref().unwrap().as_object().unwrap();
-        // Carrier recovery: the integer survives as an integer (not 28.0).
+        // note: Carrier recovery: the integer survives as an integer (not 28.0).
         assert_eq!(attrs["age"].as_i64(), Some(28));
     }
 
-    /// C3: write methods return a read-only error (MCA store is read-only).
+    /// note: C3: write methods return a read-only error (MCA store is read-only).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn write_methods_return_read_only_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -645,7 +642,7 @@ mod tests {
         assert!(matches!(err, KbStoreError::Storage(ref s) if s.contains("read-only")));
     }
 
-    /// C4 (>500-row edge): `SpokeBackedKbStore::query` matches
+    /// note: C4 (>500-row edge): `SpokeBackedKbStore::query` matches
     /// `SqliteKbStore::query`'s silent 500-row window — NO reject-on-overflow.
     /// The P2 HARD rule forbids introducing the spoke port's reject here.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -668,7 +665,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Seed beyond the 500-row window.
+        // note: Seed beyond the 500-row window.
         let sqlite = SqliteKbStore::new(pool.clone());
         for i in 0..(nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT + 50) {
             let mut entry =
@@ -677,7 +674,7 @@ mod tests {
             sqlite.insert_knowledge_entry(entry).await.unwrap();
         }
 
-        // The scoped MCA read for this world (the fixture helper binds
+        // note: The scoped MCA read for this world (the fixture helper binds
         // `wld_mca`; this test seeds its own world).
         let spoke_backed = SpokeBackedKbStore::new(
             pool,
@@ -687,7 +684,7 @@ mod tests {
             ),
         );
 
-        // Unfiltered query: neither store rejects, and both return the same
+        // note: Unfiltered query: neither store rejects, and both return the same
         // silently-truncated window (LIST_BY_WORLD_LIMIT rows) in the same
         // order. v1.191 P1 T8: the MCA read is scoped, so its `total_count` /
         // `has_more` describe the COMPLETE admitted matching set (the T6
@@ -725,7 +722,7 @@ mod tests {
             sqlite_res.has_more, spoke_res.has_more,
             "both stores agree on whether the window was exhausted"
         );
-        // The actual rows match (same ordering, same canonical_names).
+        // note: The actual rows match (same ordering, same canonical_names).
         let sqlite_names: Vec<&str> = sqlite_res
             .items
             .iter()
@@ -739,7 +736,7 @@ mod tests {
         assert_eq!(sqlite_names, spoke_names);
     }
 
-    /// v1.191 P1 T11 (consumer side): the novel-writing run's chapter KB block
+    /// note: v1.191 P1 T11 (consumer side): the novel-writing run's chapter KB block
     /// reads its rows through [`SpokeBackedKbStore::list_by_world`] — the
     /// complete admitted listing the MCA `WorldKB` snapshot is composed from.
     /// The exact admitted holder's private row is in; another holder's private
@@ -752,7 +749,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, seeded) = seed_world_with_entries(&pool).await;
 
-        // Two stored creators with one registered holder each.
+        // note: Two stored creators with one registered holder each.
         nexus_local_db::ensure_creator_row(&pool, "ctr_other", "Other")
             .await
             .unwrap();

@@ -49,23 +49,22 @@ use serde_json::{Map, Value};
 use spoke_schemas::{KnowledgeEntry, Relation, SourceAnchor};
 pub mod st_lorebook;
 
-// ── Error type ────────────────────────────────────────────────────────────────
 
-/// Errors that can occur during pack build/parse operations.
+/// note: Errors that can occur during pack build/parse operations.
 ///
 /// This is a library-level error type — not a spoke [`SpokeReject`]. The CLI
 /// (T2/T3) maps these variants to appropriate exit codes / user messages.
 #[derive(Debug)]
 pub enum PackError {
-    /// `modules.pack` key is absent or the `modules` object is missing.
+    /// note: `modules.pack` key is absent or the `modules` object is missing.
     MissingModulesPack,
-    /// A required field inside `modules.pack` is missing.
+    /// note: A required field inside `modules.pack` is missing.
     MissingPackField { field: &'static str },
-    /// The top-level `entries` array is missing or not an array.
+    /// note: The top-level `entries` array is missing or not an array.
     MissingEntries,
-    /// The top-level `relations` array is missing or not an array.
+    /// note: The top-level `relations` array is missing or not an array.
     MissingRelations,
-    /// The input JSON failed to parse as a valid `serde_json` value.
+    /// note: The input JSON failed to parse as a valid `serde_json` value.
     Json(serde_json::Error),
 }
 
@@ -102,9 +101,8 @@ impl From<serde_json::Error> for PackError {
     }
 }
 
-// ── Structured types ──────────────────────────────────────────────────────────
 
-/// Pack-level metadata from `modules.pack`.
+/// note: Pack-level metadata from `modules.pack`.
 ///
 /// Fields map to the handbook-defined field table:
 ///
@@ -122,7 +120,7 @@ pub struct PackMetadata {
     pub description: Option<String>,
 }
 
-/// The structured result of [`parse_pack`] — validated, typed, and ready for the
+/// note: The structured result of [`parse_pack`] — validated, typed, and ready for the
 /// CLI to consume.
 ///
 /// ## Round-trip preservation
@@ -132,27 +130,26 @@ pub struct PackMetadata {
 /// [`build_pack`] so a parse → build cycle preserves unknown dialect keys.
 #[derive(Debug, Clone)]
 pub struct ParsedPack {
-    /// Parsed `modules.pack` metadata.
+    /// note: Parsed `modules.pack` metadata.
     pub pack_metadata: PackMetadata,
-    /// Ordered `KnowledgeEntries` from the pack.
+    /// note: Ordered `KnowledgeEntries` from the pack.
     pub entries: Vec<KnowledgeEntry>,
-    /// Relations from the pack.
+    /// note: Relations from the pack.
     pub relations: Vec<Relation>,
-    /// Optional `SourceAnchors` (absent when the key is missing or null).
+    /// note: Optional `SourceAnchors` (absent when the key is missing or null).
     pub source_anchors: Option<Vec<SourceAnchor>>,
-    /// Unknown `modules.*` keys preserved for round-trip (always includes at
+    /// note: Unknown `modules.*` keys preserved for round-trip (always includes at
     /// least "pack" for re-emission, plus any extra discovered keys).
     pub extra_modules: Map<String, Value>,
-    /// The pack document exactly as it was handed to [`parse_pack`], before any
+    /// note: The pack document exactly as it was handed to [`parse_pack`], before any
     /// typed conversion. Callers that must not re-serialize a parsed atom (the
     /// import boundary records a quarantined atom's original JSON verbatim from
     /// here) read the raw value instead of the typed [`KnowledgeEntry`].
     pub source: Value,
 }
 
-// ── build_pack ────────────────────────────────────────────────────────────────
 
-/// Build a handbook-conformant Narrative Knowledge Pack as a JSON [`Value`].
+/// why: Build a handbook-conformant Narrative Knowledge Pack as a JSON [`Value`].
 ///
 /// # Parameters
 ///
@@ -195,7 +192,7 @@ pub fn build_pack(
 ) -> Value {
     let mut modules = extra_modules.cloned().unwrap_or_default();
 
-    // Authoritatively write modules.pack (overwrites any prior pack key).
+    // note: Authoritatively write modules.pack (overwrites any prior pack key).
     let mut pack_obj = Map::new();
     pack_obj.insert("title".into(), Value::String(title.to_owned()));
     pack_obj.insert("version".into(), Value::String(version.to_owned()));
@@ -225,9 +222,8 @@ pub fn build_pack(
     Value::Object(root)
 }
 
-// ── parse_pack ────────────────────────────────────────────────────────────────
 
-/// Parse and validate a pack JSON value into a structured [`ParsedPack`].
+/// note: Parse and validate a pack JSON value into a structured [`ParsedPack`].
 ///
 /// # Validation (locked minimum)
 ///
@@ -257,7 +253,6 @@ pub fn build_pack(
 pub fn parse_pack(json: &Value) -> Result<ParsedPack, PackError> {
     let obj = json.as_object().ok_or(PackError::MissingModulesPack)?;
 
-    // ── modules.pack validation ─────────────────────────────────────────
     let modules = obj
         .get("modules")
         .and_then(Value::as_object)
@@ -275,22 +270,18 @@ pub fn parse_pack(json: &Value) -> Result<ParsedPack, PackError> {
         .and_then(Value::as_str)
         .map(String::from);
 
-    // ── entries (required, but may be empty) ────────────────────────────
     let entries_raw = obj.get("entries").ok_or(PackError::MissingEntries)?;
     let entries: Vec<KnowledgeEntry> = serde_json::from_value(entries_raw.clone())?;
 
-    // ── relations (required, but may be empty) ──────────────────────────
     let relations_raw = obj.get("relations").ok_or(PackError::MissingRelations)?;
     let relations: Vec<Relation> = serde_json::from_value(relations_raw.clone())?;
 
-    // ── source_anchors (optional) ───────────────────────────────────────
     let source_anchors = match obj.get("source_anchors") {
         Some(a) if !a.is_null() => Some(serde_json::from_value(a.clone())?),
         _ => None,
     };
 
-    // ── Preserve unknown modules.* keys for round-trip ──────────────────
-    // Clone the full modules map; "pack" is already accounted for, but any
+    // note: Clone the full modules map; "pack" is already accounted for, but any
     // extra keys (e.g. future dialects) survive here.
     let extra_modules = modules.clone();
 
@@ -309,7 +300,7 @@ pub fn parse_pack(json: &Value) -> Result<ParsedPack, PackError> {
     })
 }
 
-/// Extract a required string field from a JSON object, returning
+/// note: Extract a required string field from a JSON object, returning
 /// [`PackError::MissingPackField`] if absent or not a string.
 fn required_string(obj: &Map<String, Value>, key: &'static str) -> Result<String, PackError> {
     obj.get(key)
@@ -318,9 +309,8 @@ fn required_string(obj: &Map<String, Value>, key: &'static str) -> Result<String
         .ok_or(PackError::MissingPackField { field: key })
 }
 
-// ── str → Value convenience (used primarily by tests) ─────────────────────────
 
-/// Parse a JSON string into a [`Value`], for convenience at the call boundary.
+/// note: Parse a JSON string into a [`Value`], for convenience at the call boundary.
 ///
 /// This is a thin wrapper around [`serde_json::from_str`] that delegates to
 /// [`parse_pack`] for validation.
@@ -334,14 +324,12 @@ pub fn parse_pack_str(s: &str) -> Result<ParsedPack, PackError> {
     parse_pack(&value)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    // ── Helpers ────────────────────────────────────────────────────────────
 
     fn sample_entry(id: &str, name: &str) -> KnowledgeEntry {
         serde_json::from_value(json!({
@@ -377,7 +365,6 @@ mod tests {
         .expect("sample_anchor is valid SourceAnchor JSON")
     }
 
-    // ── Round-trip: build → parse → build → parse ─────────────────────────
 
     #[test]
     fn round_trip_build_parse_build() {
@@ -412,7 +399,7 @@ mod tests {
         assert!(parsed.source_anchors.is_some());
         assert_eq!(parsed.source_anchors.as_ref().unwrap().len(), 1);
 
-        // Rebuild from parsed data (full round-trip)
+        // note: Rebuild from parsed data (full round-trip)
         let pack2 = build_pack(
             &parsed.entries,
             &parsed.relations,
@@ -430,7 +417,6 @@ mod tests {
         assert_eq!(parsed2.relations.len(), 1);
     }
 
-    // ── Missing modules.pack ──────────────────────────────────────────────
 
     #[test]
     fn error_missing_modules_pack() {
@@ -442,7 +428,6 @@ mod tests {
         assert!(matches!(err, PackError::MissingModulesPack));
     }
 
-    // ── Missing required pack fields ──────────────────────────────────────
 
     #[test]
     fn error_missing_title() {
@@ -472,7 +457,6 @@ mod tests {
         ));
     }
 
-    // ── Type-mismatch validation paths ───────────────────────────────────
 
     #[test]
     fn error_modules_pack_not_object() {
@@ -510,7 +494,6 @@ mod tests {
         assert!(matches!(err, PackError::Json(_)));
     }
 
-    // ── Missing entries / relations ───────────────────────────────────────
 
     #[test]
     fn error_missing_entries() {
@@ -532,7 +515,6 @@ mod tests {
         assert!(matches!(err, PackError::MissingRelations));
     }
 
-    // ── Empty entries / relations are valid ───────────────────────────────
 
     #[test]
     fn empty_entries_valid() {
@@ -546,7 +528,6 @@ mod tests {
         assert!(parsed.relations.is_empty());
     }
 
-    // ── Anchors optional ──────────────────────────────────────────────────
 
     #[test]
     fn anchors_optional() {
@@ -559,7 +540,6 @@ mod tests {
         assert!(parsed.source_anchors.is_none());
     }
 
-    // ── Round-trip with unknown modules.* keys ────────────────────────────
 
     #[test]
     fn round_trip_preserves_unknown_modules() {
@@ -575,7 +555,7 @@ mod tests {
         let parsed = parse_pack(&pack).expect("pack with extra modules must parse");
         assert!(parsed.extra_modules.contains_key("future_dialect"));
 
-        // Rebuild and verify the extra key survives
+        // note: Rebuild and verify the extra key survives
         let rebuilt = build_pack(
             &[],
             &[],
@@ -593,13 +573,12 @@ mod tests {
             .expect("rebuilt pack must have modules");
         assert!(modules_obj.contains_key("future_dialect"));
 
-        // Verify the extra value is intact
+        // note: Verify the extra value is intact
         let future = &modules_obj["future_dialect"];
         assert_eq!(future["color"], json!("blue"));
         assert_eq!(future["priority"], json!(42));
     }
 
-    // ── Description optional ──────────────────────────────────────────────
 
     #[test]
     fn description_optional_in_parse() {
@@ -612,7 +591,6 @@ mod tests {
         assert!(parsed.pack_metadata.description.is_none());
     }
 
-    // ── build_pack omits source_anchors when None ──────────────────────────
 
     #[test]
     fn build_pack_omits_anchors_when_none() {
@@ -638,7 +616,6 @@ mod tests {
         assert_eq!(anchors.as_slice(), &[] as &[serde_json::Value]);
     }
 
-    // ── parse_pack_str convenience ────────────────────────────────────────
 
     #[test]
     fn parse_pack_str_round_trip() {

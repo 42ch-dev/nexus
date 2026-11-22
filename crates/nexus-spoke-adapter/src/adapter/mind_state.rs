@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `MindState` write-path gate — the spec-conformant home of the spoke
 //! `validate_mind_state` wire-shape check (V1.164 P2 layering fix).
 //!
@@ -22,7 +23,7 @@ use serde_json::Value;
 use spoke_operations::{validate_mind_state, SpokeResult};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-/// Validate a `MindState` wire envelope against spoke `validate_mind_state`
+/// note: Validate a `MindState` wire envelope against spoke `validate_mind_state`
 /// and persist it when accepted.
 ///
 /// # Flow
@@ -66,7 +67,7 @@ pub async fn validate_and_store_mind_state(
     .await
 }
 
-/// Transaction-aware variant of [`validate_and_store_mind_state`].
+/// note: Transaction-aware variant of [`validate_and_store_mind_state`].
 ///
 /// # Errors
 ///
@@ -92,7 +93,7 @@ pub async fn validate_and_store_mind_state_in_tx(
     .await
 }
 
-/// Atomic Character `ToM` carrier write: CAS-patch `modules_json` on the
+/// invariant: Atomic Character `ToM` carrier write: CAS-patch `modules_json` on the
 /// carrier `KnowledgeEntry`, then insert a spoke-validated derivative
 /// `MindState` whose `holder_entry_id` equals the carrier id.
 ///
@@ -187,7 +188,7 @@ fn validated_mind_state_columns(value: &Value) -> Result<MindStateColumnValues<'
         ));
     };
 
-    // Checked conversion: `schema_version` must be a JSON integer within the
+    // note: Checked conversion: `schema_version` must be a JSON integer within the
     // i64 domain (fail-closed) — a fractional, NaN, or huge value is rejected
     // rather than truncated or wrapped into a schema version.
     let schema_version = match state.get("schema_version") {

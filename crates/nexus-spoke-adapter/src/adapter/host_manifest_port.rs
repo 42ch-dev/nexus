@@ -40,7 +40,7 @@ use nexus_home_layout::device_id::get_or_create_device_id;
 #[async_trait]
 impl HostManifestPort for NexusAdapter<'_> {
     async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        // Single builder SSOT (product draft §4.1): the Connect Host's
+        // note: Single builder SSOT (product draft §4.1): the Connect Host's
         // `local_manifest` (P3 T3) calls the same function with the same
         // device-id host_id — one capability list, one extensions.nexus block.
         let host_id = match &self.host_id {
@@ -55,7 +55,7 @@ impl HostManifestPort for NexusAdapter<'_> {
         crate::manifest::build_local_host_manifest(&host_id)
     }
 
-    /// Production query (V1.155 P0 / N-C3 multi-host production) — the last
+    /// invariant: Production query (V1.155 P0 / N-C3 multi-host production) — the last
     /// adapter stub is gone (spec §7.3 stub matrix).
     ///
     /// Returns the persisted `HostCapabilityManifest`s of observed peer
@@ -82,7 +82,7 @@ impl HostManifestPort for NexusAdapter<'_> {
     }
 }
 
-/// A peer host observed over Connect (V1.155 P0 / N-C3) — the dialed
+/// note: A peer host observed over Connect (V1.155 P0 / N-C3) — the dialed
 /// peer's manifest plus the nexus-local `last_seen` observation metadata.
 ///
 /// `last_seen` is NOT part of the spoke `HostCapabilityManifest` wire type —
@@ -91,13 +91,13 @@ impl HostManifestPort for NexusAdapter<'_> {
 /// manifest-only ([`HostManifestPort::list_peer_host_capability_manifests`]).
 #[derive(Debug, Clone)]
 pub struct ObservedPeerHost {
-    /// The dialed peer's `HostCapabilityManifest` (typed round-trip from the
+    /// note: The dialed peer's `HostCapabilityManifest` (typed round-trip from the
     /// stored `manifest_json`).
     pub manifest: HostCapabilityManifest,
-    /// RFC 3339 UTC timestamp of the observation (the `peer_hosts`
+    /// note: RFC 3339 UTC timestamp of the observation (the `peer_hosts`
     /// `last_seen` column).
     pub last_seen: String,
-    /// The dialed peer's libp2p `PeerId` at the observation (V1.158 P2 /
+    /// note: The dialed peer's libp2p `PeerId` at the observation (V1.158 P2 /
     /// R-V1155P0-001 — the `peer_hosts` `last_peer_id` column). Nexus-local
     /// diagnostics (the spoof/collision signal); `None` for rows recorded
     /// before the column existed.
@@ -105,7 +105,7 @@ pub struct ObservedPeerHost {
 }
 
 impl NexusAdapter<'_> {
-    /// List observed peer hosts (V1.155 P0 / N-C3 multi-host production) —
+    /// invariant: List observed peer hosts (V1.155 P0 / N-C3 multi-host production) —
     /// the adapter-level read for operator/CLI surfaces that need the
     /// nexus-local observation metadata (`last_seen`) alongside the peer's
     /// manifest.
@@ -136,7 +136,7 @@ impl NexusAdapter<'_> {
     }
 }
 
-/// Shared rows → typed-observed parse (the single corrupt-row contract:
+/// invariant: Shared rows → typed-observed parse (the single corrupt-row contract:
 /// a stored row that fails to re-parse as a `HostCapabilityManifest` is
 /// storage corruption → `InternalError`, never skipped, never replaced).
 fn observed_from_rows(
@@ -162,7 +162,7 @@ fn observed_from_rows(
     SpokeResult::Ok(observed)
 }
 
-/// Resolve the installation device id from the standard nexus home
+/// note: Resolve the installation device id from the standard nexus home
 /// (`$HOME/.nexus42` — matches `apps/nexus42` `config::nexus_home()`), so an
 /// adapter without an injected host id still advertises the honest identity.
 fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
@@ -171,7 +171,7 @@ fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
             "cannot resolve home directory for device-id".into(),
         ));
     };
-    // `get_or_create_device_id` takes the RAW home and joins `.nexus42`
+    // note: `get_or_create_device_id` takes the RAW home and joins `.nexus42`
     // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
     match get_or_create_device_id(&home) {
         Ok(id) => SpokeResult::Ok(id),
@@ -274,19 +274,18 @@ const fn reject_internal(message: String) -> crate::SpokeReject {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::HostManifestPort;
 
-    /// libp2p-style base58 `PeerId` fixture (R-V1155P0-001 diagnostics).
+    /// note: libp2p-style base58 `PeerId` fixture (R-V1155P0-001 diagnostics).
     const TEST_PEER_ID: &str = "12D3KooWTestPeerId0000000000000000000000000000000";
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn self_manifest_reports_injected_host_id_and_n_c1_contract() {
-        // HostManifestPort is storage-free; the pool is only needed to
+        // note: HostManifestPort is storage-free; the pool is only needed to
         // satisfy the adapter struct shape. Use an in-memory pool with
         // migrations so the adapter construction path mirrors the other
         // ports. The host id is injected so the test stays hermetic — no
@@ -303,7 +302,7 @@ mod tests {
         };
 
         assert_eq!(manifest.host_id.as_str(), "test-host-uuid-0000");
-        // v1.191 P1 T14: the same feature filter the shared builder applies —
+        // note: v1.191 P1 T14: the same feature filter the shared builder applies —
         // the compute role is advertised only when the `compute` feature owns
         // the engine (the honesty rule the builder enforces).
         assert_eq!(
@@ -314,7 +313,7 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
-        // V1.173 T1: the shared builder now serves the user-locked tool set
+        // note: V1.173 T1: the shared builder now serves the user-locked tool set
         // S — capabilities = baseline 3 ++ LOCAL_TOOL_OPS (the serving
         // host negotiates the tool ids; AR-48).
         assert_eq!(
@@ -333,7 +332,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        // Same builder as the Connect Host → the extensions.nexus N-C2
+        // note: Same builder as the Connect Host → the extensions.nexus N-C2
         // read-half block is present on the port surface too (product draft
         // §4.3 item 9).
         let nexus_ext = manifest
@@ -386,7 +385,7 @@ mod tests {
         assert!(peers.is_empty(), "empty store has no peers");
     }
 
-    /// The N-C3 recording contract (V1.155 P0): record a peer manifest at
+    /// note: The N-C3 recording contract (V1.155 P0): record a peer manifest at
     /// the outbound observation point → the port returns exactly it.
     /// Also pins the production path: the manifest is re-serialized through
     /// the typed wire (a recorded `HostCapabilityManifest` round-trips field
@@ -430,7 +429,7 @@ mod tests {
         assert_eq!(peers[0].schema_version, manifest.schema_version);
     }
 
-    /// V1.169 P0 (spoke 0.11.1 lockstep, locks AR-3): a peer manifest that
+    /// note: V1.169 P0 (spoke 0.11.1 lockstep, locks AR-3): a peer manifest that
     /// CARRIES a `ToolDescriptor` round-trips through the store/re-read path
     /// with `tools` intact — nexus tolerates tools-carrying peers while
     /// declaring none itself. Fixture shape mirrors the spoke-connect test
@@ -496,7 +495,7 @@ mod tests {
         );
     }
 
-    /// Duplicate `host_id` → one row: a second observation of the same peer
+    /// note: Duplicate `host_id` → one row: a second observation of the same peer
     /// upserts (fresh manifest, fresh capabilities) instead of duplicating.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn duplicate_host_id_recording_upserts_single_peer_row() {
@@ -532,7 +531,7 @@ mod tests {
         );
     }
 
-    /// Fail-closed: a peer manifest whose `host_id` exceeds the storage cap
+    /// invariant: Fail-closed: a peer manifest whose `host_id` exceeds the storage cap
     /// is rejected before insert (never stored, never listed).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn oversized_peer_host_id_is_rejected_before_insert() {
@@ -542,7 +541,7 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new_host(pool);
-        // `HostCapabilityManifestHostId` only enforces minLength 1 at parse —
+        // note: `HostCapabilityManifestHostId` only enforces minLength 1 at parse —
         // an oversized id is constructible, so the adapter's own gate is the
         // fail-closed boundary (mirrors the storage cap).
         let huge = "h".repeat(nexus_local_db::MAX_HOST_ID_CHARS + 1);
@@ -566,7 +565,7 @@ mod tests {
         );
     }
 
-    /// The T3 adapter-level read (CLI surface): empty store → empty
+    /// note: The T3 adapter-level read (CLI surface): empty store → empty
     /// `ObservedPeerHost` list (the stub contract preserved).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn observed_peer_hosts_is_empty_for_local_first_nexus() {
@@ -583,7 +582,7 @@ mod tests {
         assert!(observed.is_empty(), "empty store has no observed peers");
     }
 
-    /// The T3 adapter-level read attaches the nexus-local `last_seen`
+    /// note: The T3 adapter-level read attaches the nexus-local `last_seen`
     /// observation timestamp to the typed manifest — the one non-manifest
     /// field the CLI surfaces (the trait surface stays manifest-only).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -624,14 +623,14 @@ mod tests {
             Some(TEST_PEER_ID),
             "last_peer_id round-trips through the adapter read (R-V1155P0-001)"
         );
-        // `last_seen` is the RFC 3339 UTC observation timestamp the adapter
+        // note: `last_seen` is the RFC 3339 UTC observation timestamp the adapter
         // recorded (chrono::Utc::now().to_rfc3339() — repo convention).
         assert!(
             chrono::DateTime::parse_from_rfc3339(&observed[0].last_seen).is_ok(),
             "last_seen is an RFC 3339 timestamp: {}",
             observed[0].last_seen
         );
-        // Ordering contract preserved: the observed list is last_seen DESC.
+        // note: Ordering contract preserved: the observed list is last_seen DESC.
         let rows = nexus_local_db::list_peer_manifests(&pool)
             .await
             .expect("storage list is Ok");
@@ -639,7 +638,7 @@ mod tests {
         assert_eq!(rows[0].last_seen, observed[0].last_seen);
     }
 
-    /// The corrupt-row contract is shared: a stored row whose
+    /// invariant: The corrupt-row contract is shared: a stored row whose
     /// `manifest_json` cannot re-parse as a `HostCapabilityManifest` is
     /// storage corruption → `InternalError` from BOTH the trait port method
     /// and the T3 adapter read (never skipped, never replaced).
@@ -650,7 +649,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        // Corrupt a row directly at the storage layer (the storage
+        // note: Corrupt a row directly at the storage layer (the storage
         // primitives validate JSON on insert, so only raw SQL can plant a
         // corrupt row — exactly the storage-corruption scenario the
         // InternalError contract exists for).
@@ -676,7 +675,7 @@ mod tests {
             SpokeResult::Ok(_) => panic!("corrupt row must reject, never silently skip"),
         }
     }
-    /// v1.191 P1 T14 (durable §9) — the port surface composes the SAME
+    /// invariant: v1.191 P1 T14 (durable §9) — the port surface composes the SAME
     /// manifest as the Connect host (single builder SSOT): `ke-ownership` is
     /// declared from the shared capability list, and `ke-extraction` never
     /// appears (remote extraction is not served).

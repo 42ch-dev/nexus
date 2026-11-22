@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Production `RuleQueryPort::list_rules` integration test (V1.148 P1) —
 //! end-to-end through `NexusAdapter` against REAL `SQLite` storage.
 //!
@@ -39,9 +40,8 @@ use nexus_local_db::spoke_rules::{insert_spoke_rule_for_test, SpokeRuleRow};
 use nexus_local_db::{open_pool, run_migrations};
 use nexus_spoke_adapter::{NexusAdapter, Rule, RuleQueryPort, SpokeResult};
 
-// ── Pool + fixture helpers ───────────────────────────────────────────────
 
-/// Fresh temp pool: `tempfile::tempdir` + `open_pool` + `run_migrations`.
+/// note: Fresh temp pool: `tempfile::tempdir` + `open_pool` + `run_migrations`.
 ///
 /// Returns the pool AND the `TempDir` guard so the temp DB stays alive for
 /// the test body (mirrors `spoke_orchestrator_integration.rs::fresh_pool`).
@@ -68,7 +68,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Seed a `spoke_rules` row through the local-db test helper.
+/// note: Seed a `spoke_rules` row through the local-db test helper.
 async fn seed_rule(pool: &sqlx::SqlitePool, rule_id: &str, world_id: &str) {
     let row = SpokeRuleRow {
         rule_id: rule_id.to_string(),
@@ -89,7 +89,7 @@ async fn seed_rule(pool: &sqlx::SqlitePool, rule_id: &str, world_id: &str) {
     insert_spoke_rule_for_test(pool, &row).await.unwrap();
 }
 
-/// Seed a `narrative_worlds` row carrying Work-side rule bait
+/// invariant: Seed a `narrative_worlds` row carrying Work-side rule bait
 /// (`world_rules_json`) — the legacy World-side rule store `list_rules` MUST
 /// NOT read. Needs the `creators` FK parent (`owner_creator_id`), same as
 /// `spoke_orchestrator_integration.rs::seed_world`.
@@ -121,7 +121,7 @@ async fn seed_world_with_rules_bait(
     .unwrap();
 }
 
-/// Test helper: unwrap a `SpokeResult::Ok(Vec<Rule>)` or panic with the
+/// note: Test helper: unwrap a `SpokeResult::Ok(Vec<Rule>)` or panic with the
 /// reject payload.
 fn unwrap_ok(result: SpokeResult<Vec<Rule>>, label: &str) -> Vec<Rule> {
     match result {
@@ -130,22 +130,21 @@ fn unwrap_ok(result: SpokeResult<Vec<Rule>>, label: &str) -> Vec<Rule> {
     }
 }
 
-/// Sort rule ids for order-independent comparison.
+/// note: Sort rule ids for order-independent comparison.
 fn sorted_ids(rules: &[Rule]) -> Vec<&str> {
     let mut ids: Vec<&str> = rules.iter().map(|r| r.rule_id.as_str()).collect();
     ids.sort_unstable();
     ids
 }
 
-// ── 1. Cross-world + missing refs (plan T3 core scenario) ────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_returns_exactly_requested_rules_across_worlds() {
     let (pool, _dir) = fresh_pool().await;
-    // World A: two rules with distinct ids.
+    // note: World A: two rules with distinct ids.
     seed_rule(&pool, "rule_a1", "wld_a").await;
     seed_rule(&pool, "rule_a2", "wld_a").await;
-    // World B: a third rule that must NOT leak into the result unasked.
+    // note: World B: a third rule that must NOT leak into the result unasked.
     seed_rule(&pool, "rule_b1", "wld_b").await;
 
     let adapter = scoped(pool);
@@ -160,7 +159,7 @@ async fn list_rules_returns_exactly_requested_rules_across_worlds() {
         "list_rules",
     );
 
-    // Missing ref omitted (empty subset, NOT an error — spoke semantics).
+    // note: Missing ref omitted (empty subset, NOT an error — spoke semantics).
     assert_eq!(rules.len(), 2, "missing ref must be omitted");
     assert_eq!(
         sorted_ids(&rules),
@@ -172,14 +171,13 @@ async fn list_rules_returns_exactly_requested_rules_across_worlds() {
         "world B rule must not be returned when not requested"
     );
 
-    // Spot-check the production row → spoke `Rule` projection on one row
+    // note: Spot-check the production row → spoke `Rule` projection on one row
     // (full field map is covered by the unit tests).
     let rule_a1 = rules.iter().find(|r| r.rule_id == "rule_a1").unwrap();
     assert_eq!(rule_a1.canonical_name.to_string(), "Rule rule_a1");
     assert_eq!(rule_a1.schema_version.get(), 1);
 }
 
-// ── 2. Empty ref-set ─────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_empty_refs_returns_empty_vec() {
@@ -194,14 +192,13 @@ async fn list_rules_empty_refs_returns_empty_vec() {
     );
 }
 
-// ── 3. No Work-side fabrication ──────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     let (pool, dir) = fresh_pool().await;
     seed_rule(&pool, "rule_a1", "wld_a").await;
 
-    // Bait 1 — legacy World-side rule store: a `narrative_worlds` row whose
+    // note: Bait 1 — legacy World-side rule store: a `narrative_worlds` row whose
     // `world_rules_json` contains a rule-shaped object carrying the SAME
     // requested id (`rule_phantom`). If `list_rules` consulted this store,
     // the phantom would come back.
@@ -212,7 +209,7 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     )
     .await;
 
-    // Bait 2 — Work quality-loop store: `Works/<work_ref>/AGENTS.md` (V1.48
+    // note: Bait 2 — Work quality-loop store: `Works/<work_ref>/AGENTS.md` (V1.48
     // P2 Layer 2 location) carrying an accepted rule suggestion for the same
     // phantom id. `NexusAdapter` holds only a `SqlitePool` — it has no
     // filesystem path — so this documents that the boundary cannot observe
@@ -231,7 +228,7 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
 
     let adapter = scoped(pool);
 
-    // Phantom id requested alongside a real id: only the `spoke_rules` row
+    // note: Phantom id requested alongside a real id: only the `spoke_rules` row
     // comes back.
     let rules = unwrap_ok(
         adapter
@@ -245,7 +242,7 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
         "world_rules_json / AGENTS.md bait must not produce phantom rows"
     );
 
-    // Phantom id requested alone: resolves to the empty subset.
+    // note: Phantom id requested alone: resolves to the empty subset.
     let rules = unwrap_ok(
         adapter.list_rules(&["rule_phantom".to_string()]).await,
         "list_rules phantom only",
@@ -256,7 +253,6 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     );
 }
 
-// ── 4. Duplicate refs (documented contract) ──────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_duplicate_refs_are_deduplicated() {
@@ -265,7 +261,7 @@ async fn list_rules_duplicate_refs_are_deduplicated() {
     seed_rule(&pool, "rule_a2", "wld_a").await;
 
     let adapter = scoped(pool);
-    // SQLite `IN (subquery)` membership semantics dedup: the
+    // note: SQLite `IN (subquery)` membership semantics dedup: the
     // `get_spoke_rules_by_ids` doc contract ("duplicate ids in the input are
     // deduplicated; one row per distinct `rule_id`") holds end-to-end through
     // the production port.

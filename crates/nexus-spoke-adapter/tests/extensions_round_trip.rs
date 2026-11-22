@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Round-trip preservation tests for the `extensions.nexus` typed accessors.
 //!
 //! Covers tracked spec §2.2:
@@ -22,14 +23,14 @@ use spoke_schemas::knowledge_entry::{
 };
 use spoke_schemas::KnowledgeEntry;
 
-/// Construct a [`KnowledgeEntry`] with empty extensions and a minimal valid body.
+/// note: Construct a [`KnowledgeEntry`] with empty extensions and a minimal valid body.
 fn make_entry() -> KnowledgeEntry {
     KnowledgeEntry {
         body: KnowledgeEntryBody::default(),
         canonical_name: KnowledgeEntryCanonicalName::try_from("Mira Vale".to_owned())
             .expect("non-empty canonical name"),
         created_at: None,
-        // v1.191 P1 T1 (spoke 0.13.0): optional holder governance is genuinely
+        // note: v1.191 P1 T1 (spoke 0.13.0): optional holder governance is genuinely
         // absent for these fixtures; the native↔wire mapping lands with T2/T8.
         disclosure: None,
         entry_id: "kb_test".into(),
@@ -78,7 +79,7 @@ fn optional_fields_default_to_none_when_namespace_absent() {
 #[test]
 fn optional_fields_read_none_when_not_set_but_namespace_present() {
     let mut entry = make_entry();
-    // Setting only world_id creates the nexus namespace, but the optional
+    // note: Setting only world_id creates the nexus namespace, but the optional
     // provenance/command fields should still read None.
     set_world_id(&mut entry, "wld_only".into());
 
@@ -99,7 +100,7 @@ fn setting_optional_to_none_removes_the_key() {
     );
     assert_eq!(get_created_from_command_id(&entry), Some("cmd_1"));
 
-    // Clear them again.
+    // note: Clear them again.
     set_created_from_command_id(&mut entry, None);
     set_provenance(&mut entry, None, None, None);
 
@@ -111,7 +112,7 @@ fn setting_optional_to_none_removes_the_key() {
 fn preserves_unknown_keys_inside_extensions_nexus() {
     let mut entry = make_entry();
 
-    // First, populate the typed fields.
+    // note: First, populate the typed fields.
     set_world_id(&mut entry, "wld_abc".into());
     set_provenance(
         &mut entry,
@@ -120,16 +121,16 @@ fn preserves_unknown_keys_inside_extensions_nexus() {
         Some("manual".into()),
     );
 
-    // Inject an unknown key directly into the nexus namespace — simulates a
+    // note: Inject an unknown key directly into the nexus namespace — simulates a
     // future/forward-compatible field that nexus does not yet know about.
     let nexus_key = ExtensionKey::try_from("nexus").expect("nexus matches namespace regex");
     let ns = entry.extensions.entry(nexus_key).or_default();
     ns.insert("future_field".into(), json!("keep-me"));
 
-    // Touch the typed fields again.
+    // note: Touch the typed fields again.
     set_world_id(&mut entry, "wld_updated".into());
 
-    // Unknown key is preserved verbatim; typed fields are updated.
+    // note: Unknown key is preserved verbatim; typed fields are updated.
     let ns = entry
         .extensions
         .get(&ExtensionKey::try_from("nexus").unwrap())
@@ -147,17 +148,17 @@ fn preserves_unknown_namespaces_alongside_nexus() {
     let mut entry = make_entry();
     set_world_id(&mut entry, "wld_abc".into());
 
-    // Inject a sibling namespace that nexus must never touch.
+    // invariant: Inject a sibling namespace that nexus must never touch.
     let other_key =
         ExtensionKey::try_from("other_product").expect("other_product matches namespace regex");
     let mut other_ns = Map::new();
     other_ns.insert("book_id".into(), json!("bk_1"));
     entry.extensions.insert(other_key, other_ns);
 
-    // Round-trip through a nexus accessor.
+    // note: Round-trip through a nexus accessor.
     set_world_id(&mut entry, "wld_updated".into());
 
-    // Sibling namespace survives untouched.
+    // note: Sibling namespace survives untouched.
     let other = entry
         .extensions
         .get(&ExtensionKey::try_from("other_product").unwrap())
@@ -172,11 +173,11 @@ fn empty_extensions_nexus_is_valid_after_set_then_clear() {
     set_world_id(&mut entry, "wld_temp".into());
     set_created_from_command_id(&mut entry, Some("cmd_temp".into()));
 
-    // Clear all optional fields; world_id stays (required, no setter takes None).
+    // note: Clear all optional fields; world_id stays (required, no setter takes None).
     set_created_from_command_id(&mut entry, None);
     set_provenance(&mut entry, None, None, None);
 
-    // The nexus namespace is still present and non-null (world_id remains).
+    // note: The nexus namespace is still present and non-null (world_id remains).
     let nexus_key = ExtensionKey::try_from("nexus").unwrap();
     let ns = entry.extensions.get(&nexus_key);
     assert!(
@@ -188,7 +189,6 @@ fn empty_extensions_nexus_is_valid_after_set_then_clear() {
     assert_eq!(ns.get("world_id"), Some(&json!("wld_temp")));
 }
 
-// ── build_extensions_nexus ─────────────────────────────────────────────
 
 fn ext_map(from: &Value) -> ExtensionMap {
     from.as_object()
@@ -208,7 +208,7 @@ fn ext_map(from: &Value) -> ExtensionMap {
 
 #[test]
 fn build_extensions_nexus_writes_typed_fields_and_preserves_unknown_keys() {
-    // existing_extensions carries an unknown key in the nexus namespace and
+    // note: existing_extensions carries an unknown key in the nexus namespace and
     // a sibling namespace that must be carried through untouched by callers.
     let existing = ext_map(&json!({
         "nexus": { "future_field": "keep-me", "world_id": "STALE" },

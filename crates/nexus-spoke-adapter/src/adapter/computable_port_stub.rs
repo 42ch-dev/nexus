@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! No-compute stub: rejects without WASM dependencies.
 
 use super::NexusAdapter;

@@ -1,6 +1,7 @@
-//! ── v1.191 P1 T8: request-bound construction at the port surface ─────────
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
+//! v1.191 P1 T8: request-bound construction at the port surface
 
-/// `v1191_holder_ports`: the KE-bearing families are served by a *scoped*
+/// invariant: `v1191_holder_ports`: the KE-bearing families are served by a *scoped*
 /// adapter ([`NexusAdapter::new`]) and cannot be reached through the host
 /// metadata/tools construction ([`NexusAdapter::new_host`]), whose KE ports
 /// fail closed with the `read_scope_missing` marker.
@@ -32,7 +33,7 @@ async fn v1191_holder_ports_scoped_and_host_constructions_are_distinct() {
         "the host construction binds no knowledge scope"
     );
 
-    // The host surface reads no knowledge: the KE port fails closed rather
+    // note: The host surface reads no knowledge: the KE port fails closed rather
     // than widening to an unscoped read.
     match host.get_knowledge_entry("kb_any").await {
         SpokeResult::Reject(r) => {

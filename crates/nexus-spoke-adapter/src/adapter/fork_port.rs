@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `ForkTimelineQueryPort` impl — production fork-scoped timeline events
 //! (spec §7.4, plan Decision 3).
 //!
@@ -33,7 +34,6 @@ use serde_json::{json, Map, Value};
 #[async_trait]
 impl ForkTimelineQueryPort for NexusAdapter<'_> {
     async fn list_fork_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
-        // ── fork_id is required for fork-scoped queries ─────────────────
         let fork_id: String = match &scope.fork_id {
             Some(fid) => fid.to_string(),
             None => {
@@ -81,8 +81,7 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
             );
         }
 
-        // ── Query timeline events with fork_id as branch filter ─────
-        // Decision 3 mapping: scope.fork_id → branch_id in
+        // note: Decision 3 mapping: scope.fork_id → branch_id in
         // narrative_timeline_events. Pass fork_id as branch_id to the
         // same production read primitive used by ScopeQueryPort.
         let rows = match list_timeline_events_scoped(
@@ -103,24 +102,21 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
             }
         };
 
-        // ── Convert via V1.143 seam (same as ScopeQueryPort) ────────
-        // The `From<nexus_narrative::TimelineEvent>` impl packs the 7
+        // note: The `From<nexus_narrative::TimelineEvent>` impl packs the 7
         // typed nexus fields into extensions.nexus (spec §7.1).
         let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
         SpokeResult::Ok(wire)
     }
 }
 
-// ── ForkPorts blanket impl ──────────────────────────────────────────────
 //
-// NexusAdapter implements ForkTimelineQueryPort above. The blanket
+// note: NexusAdapter implements ForkTimelineQueryPort above. The blanket
 // `impl<T: BaselinePorts + ForkTimelineQueryPort> ForkPorts for T`
 // (spoke-operations src/adapter/ports.rs:135-142) auto-satisfies
 // ForkPorts → as_fork_timeline → Some(self).
 
-// ── Helpers ─────────────────────────────────────────────────────────────
 
-/// Construct a `SpokeResult::Reject` (mirrors the helper in
+/// note: Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `scope_query_port.rs` and `knowledge_entry_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
     let details_map = match details {
@@ -138,7 +134,6 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
     })
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -157,7 +152,7 @@ mod tests {
         (pool, dir)
     }
 
-    /// Seed a world with timeline events across two branches:
+    /// note: Seed a world with timeline events across two branches:
     /// `evt_fk_0`/`evt_fk_1` on `fbk_main`, `evt_fk_2` on `fbk_alt`.
     async fn seed_fork_world(pool: &sqlx::SqlitePool) -> (String, [String; 3]) {
         seed::world(
@@ -205,7 +200,7 @@ mod tests {
         ("wld_fork".to_string(), event_ids)
     }
 
-    /// Build a spoke `Scope` with `fork_id` set (the fork port's required field)
+    /// note: Build a spoke `Scope` with `fork_id` set (the fork port's required field)
     /// plus optional `event_ids` filter.
     fn fork_scope(world_id: &str, fork_id: &str, event_ids: &[&str]) -> Scope {
         let mut wire = serde_json::Map::new();
@@ -225,7 +220,6 @@ mod tests {
         serde_json::from_value(Value::Object(wire)).expect("fork scope wire shape is schema-valid")
     }
 
-    // ── Branch isolation: fork_id filter returns only that branch's events ──
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_isolates_by_fork_id() {
@@ -234,7 +228,7 @@ mod tests {
 
         let adapter = NexusAdapter::new_host(pool);
 
-        // Query fbk_main branch — should return 2 events (evt_fk_0, evt_fk_1)
+        // note: Query fbk_main branch — should return 2 events (evt_fk_0, evt_fk_1)
         let scope = fork_scope(&world_id, "fbk_main", &[]);
         let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
@@ -246,7 +240,7 @@ mod tests {
             "fbk_main fork returns its 2 events, not the alt-branch event"
         );
 
-        // Query fbk_alt branch — should return 1 event (evt_fk_2)
+        // note: Query fbk_alt branch — should return 1 event (evt_fk_2)
         let scope_alt = fork_scope(&world_id, "fbk_alt", &[]);
         let events_alt = match adapter.list_fork_timeline_events(&scope_alt).await {
             SpokeResult::Ok(v) => v,
@@ -259,7 +253,6 @@ mod tests {
         );
     }
 
-    // ── Empty fork: known world + branch but no events → Ok(vec![]) ─────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_empty_branch_returns_ok_empty() {
@@ -268,7 +261,7 @@ mod tests {
 
         let adapter = NexusAdapter::new_host(pool);
 
-        // fbk_empty does not exist as a branch in the timeline events table,
+        // note: fbk_empty does not exist as a branch in the timeline events table,
         // but the world does exist. Per Decision 3: an empty event list
         // for a real world IS Ok(vec![]).
         let scope = fork_scope(&world_id, "fbk_empty", &[]);
@@ -279,7 +272,6 @@ mod tests {
         assert!(events.is_empty(), "empty fork returns Ok(vec![])");
     }
 
-    // ── Unknown world → reject (not empty) ─────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_unknown_world_rejects() {
@@ -304,7 +296,6 @@ mod tests {
         }
     }
 
-    // ── Missing fork_id → reject ───────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_missing_fork_id_rejects() {
@@ -313,7 +304,7 @@ mod tests {
 
         let adapter = NexusAdapter::new_host(pool);
 
-        // Scope without fork_id
+        // note: Scope without fork_id
         let scope: Scope = serde_json::from_value(json!({
             "scope_id": world_id,
         }))
@@ -336,7 +327,6 @@ mod tests {
         }
     }
 
-    // ── timeline_event_ids filter narrows ──────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_filters_by_timeline_event_ids() {
@@ -357,7 +347,6 @@ mod tests {
         assert_eq!(events[0].timeline_event_id, event_ids[0]);
     }
 
-    // ── V1.143 conversion seam: nexus fields in extensions.nexus ────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_carries_nexus_extensions() {
@@ -389,7 +378,7 @@ mod tests {
                 Some("fbk_main"),
                 "branch_id matches fork filter"
             );
-            // event_type + timeline_status + sequence_no are always present
+            // note: event_type + timeline_status + sequence_no are always present
             // in the V1.143 conversion (spec §7.1 field table).
             assert!(
                 ns.get("event_type").and_then(Value::as_str).is_some(),
@@ -406,7 +395,6 @@ mod tests {
         }
     }
 
-    // ── DB failure → InternalError ─────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_on_dropped_table_surfaces_internal_error() {
@@ -431,7 +419,6 @@ mod tests {
         }
     }
 
-    // ── DB failure on world-existence check → InternalError ───────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_dropped_worlds_table_surfaces_internal_error() {
@@ -456,9 +443,8 @@ mod tests {
         }
     }
 
-    // ── Compile-time trait satisfaction ────────────────────────────────
 
-    /// Compile-time proof: `NexusAdapter` satisfies `ForkTimelineQueryPort`
+    /// note: Compile-time proof: `NexusAdapter` satisfies `ForkTimelineQueryPort`
     /// and the `ForkPorts` blanket.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn nexus_adapter_satisfies_fork_ports() {

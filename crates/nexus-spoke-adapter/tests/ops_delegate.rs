@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Delegation wrapper tests.
 //!
 //! Each wrapper is invoked with a spoke-standard operand and the result is
@@ -26,7 +27,6 @@ use spoke_operations::{
 use spoke_schemas::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryCanonicalName};
 use spoke_schemas::{Finding, KnowledgeEntry, PromoteRequest};
 
-// ── fixtures ───────────────────────────────────────────────────────────
 
 fn make_knowledge_entry() -> KnowledgeEntry {
     KnowledgeEntry {
@@ -34,7 +34,7 @@ fn make_knowledge_entry() -> KnowledgeEntry {
         canonical_name: KnowledgeEntryCanonicalName::try_from("Mira Vale".to_owned())
             .expect("non-empty canonical name"),
         created_at: None,
-        // v1.191 P1 T1 (spoke 0.13.0): optional holder governance is genuinely
+        // note: v1.191 P1 T1 (spoke 0.13.0): optional holder governance is genuinely
         // absent for these fixtures; the native↔wire mapping lands with T2/T8.
         disclosure: None,
         entry_id: "kb_1".into(),
@@ -82,7 +82,6 @@ fn make_promote_request() -> PromoteRequest {
 
 use std::collections::HashMap;
 
-// ── pure pass-through wrappers: wrapper == underlying spoke function ────
 
 #[test]
 fn validate_promote_matches_spoke_result() {
@@ -99,7 +98,7 @@ fn validate_promote_matches_spoke_result() {
 
 #[test]
 fn validate_promote_propagates_reject_unchanged() {
-    // Build a request that fails validation: non-provisional candidate.
+    // note: Build a request that fails validation: non-provisional candidate.
     let request: PromoteRequest = serde_json::from_value(json!({
         "candidate": {
             "schema_version": 1,
@@ -127,7 +126,7 @@ fn apply_promote_matches_spoke_result() {
     let request = make_promote_request();
     let via_wrapper = apply_promote(&request);
     let direct = apply_promote_acceptance(&request);
-    // KnowledgeEntry (typify-generated) does not derive PartialEq, so compare
+    // note: KnowledgeEntry (typify-generated) does not derive PartialEq, so compare
     // the observable promotion result: both Ok, and the promoted entry has the
     // same status / revision / entry_id in both paths.
     assert_eq!(result_kind(&via_wrapper), result_kind(&direct));
@@ -149,14 +148,14 @@ fn transition_status_matches_spoke_result() {
     let entry = make_knowledge_entry();
     let via_wrapper = transition_status(&entry, "confirmed");
     let direct = transition_knowledge_entry_status(&entry, "confirmed");
-    // Compare observable fields (KnowledgeEntry is not PartialEq).
+    // note: Compare observable fields (KnowledgeEntry is not PartialEq).
     assert_eq!(result_kind(&via_wrapper), result_kind(&direct));
     match (via_wrapper, direct) {
         (SpokeResult::Ok(w), SpokeResult::Ok(d)) => {
             assert_eq!(w.status, d.status);
             assert_eq!(w.entry_id, d.entry_id);
             assert_eq!(w.status, "confirmed");
-            // Input not mutated by either path.
+            // note: Input not mutated by either path.
             assert_eq!(entry.status, "provisional");
         }
         (w, d) => panic!("expected both Ok; wrapper={w:?} direct={d:?}"),
@@ -168,7 +167,7 @@ fn transition_finding_status_matches_spoke_result() {
     let finding = make_finding();
     let via_wrapper = transition_finding_status(&finding, "resolved");
     let direct = spoke_transition_finding_status(&finding, "resolved");
-    // updated_at is set to Utc::now() inside spoke; compare status only to
+    // note: updated_at is set to Utc::now() inside spoke; compare status only to
     // avoid a flaky timestamp equality check.
     assert_eq!(result_kind(&via_wrapper), result_kind(&direct));
     assert!(via_wrapper.is_ok());
@@ -206,20 +205,19 @@ fn merge_extensions_matches_spoke_result() {
 
 #[test]
 fn assert_revision_matches_spoke_result() {
-    // Equal case → Ok.
+    // note: Equal case → Ok.
     assert_eq!(assert_revision(3, 3), assert_revision_match(3, 3));
     assert!(assert_revision(3, 3).is_ok());
 
-    // Stale case → StoredRevisionStale reject.
+    // note: Stale case → StoredRevisionStale reject.
     assert_eq!(assert_revision(2, 5), assert_revision_match(2, 5));
     assert!(assert_revision(2, 5).is_reject());
 
-    // Conflict case → RevisionConflict reject.
+    // note: Conflict case → RevisionConflict reject.
     assert_eq!(assert_revision(5, 2), assert_revision_match(5, 2));
     assert!(assert_revision(5, 2).is_reject());
 }
 
-// ── build_assemble_packet: behavior parity with the equivalent direct call ──
 
 #[test]
 fn build_assemble_packet_produces_equivalent_packet() {
@@ -241,11 +239,11 @@ fn build_assemble_packet_produces_equivalent_packet() {
         },
     ];
 
-    // Wrapper: §7.2 signature.
+    // note: Wrapper: §7.2 signature.
     let via_wrapper = build_assemble_packet("pkt_wrap", &entries, Some(2));
     assert!(via_wrapper.is_ok(), "wrapper should build a packet");
 
-    // Equivalent direct call: same entries wrapped, same truncation.
+    // note: Equivalent direct call: same entries wrapped, same truncation.
     let wrapped: Vec<_> = entries
         .iter()
         .cloned()
@@ -293,9 +291,8 @@ fn build_assemble_packet_rejects_empty_packet_id() {
     assert!(via_wrapper.is_reject());
 }
 
-// ── helpers ────────────────────────────────────────────────────────────
 
-/// Reduce a `SpokeResult` to a comparable ok/reject tag without requiring `T:
+/// note: Reduce a `SpokeResult` to a comparable ok/reject tag without requiring `T:
 /// PartialEq` (used where timestamp fields make full equality flaky).
 const fn result_kind<T>(result: &SpokeResult<T>) -> &'static str {
     match result {

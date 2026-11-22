@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Round-trip proofs for the in-memory `KnowledgeEntryPort` stub and the
 //! `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam it is driven
 //! through (K2 §5.1 P0).
@@ -23,7 +24,7 @@ use nexus_spoke_adapter::{
 };
 use serde_json::json;
 
-/// A record carrying every field the executable path reads back, so a field
+/// note: A record carrying every field the executable path reads back, so a field
 /// the seam drops fails an assertion instead of hiding behind a default.
 fn executable_record() -> KnowledgeEntryRecord {
     let mut record =

@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! V1.145 — spoke 0.6.0 `Scope.extensions` round-trip smoke test.
 //!
 //! Proves the spoke-native `Scope.extensions` mechanism (added in spoke 0.6.0)
@@ -19,7 +20,7 @@ use spoke_schemas::ExtensionKey;
 
 #[test]
 fn scope_extensions_nexus_namespace_round_trips() {
-    // Wire construction — mirrors how the daemon serializes a scope for the
+    // note: Wire construction — mirrors how the daemon serializes a scope for the
     // spoke orchestrator. Populate the `"nexus"` namespace with the P2
     // typed-carrier fields.
     let wire = json!({
@@ -38,7 +39,7 @@ fn scope_extensions_nexus_namespace_round_trips() {
     let scope: Scope =
         serde_json::from_value(wire).expect("Scope with extensions.nexus deserializes");
 
-    // The typed-key path: the typify `ExtensionKey` newtype is the only
+    // note: The typed-key path: the typify `ExtensionKey` newtype is the only
     // way to look up the namespace (it does not impl `Borrow<str>`, mirroring
     // `ExtensionKey`). Constructing it via `try_from` proves the
     // 0.6.0 newtype name + the "nexus" key the P2 redo depends on.
@@ -58,7 +59,7 @@ fn scope_extensions_nexus_namespace_round_trips() {
     );
     assert_eq!(nexus_ns.get("computable"), Some(&Value::from(true)));
 
-    // Serde round-trip preserves the namespace verbatim.
+    // note: Serde round-trip preserves the namespace verbatim.
     let back = serde_json::to_value(&scope).expect("Scope serializes");
     let round_tripped: Scope = serde_json::from_value(back.clone()).expect("Scope re-deserializes");
     assert_eq!(
@@ -72,7 +73,7 @@ fn scope_extensions_nexus_namespace_round_trips() {
             .and_then(|ext| ext.get(&nexus_key)),
         "extensions.nexus survives serialize -> deserialize"
     );
-    // The wire still names the nexus namespace.
+    // note: The wire still names the nexus namespace.
     assert_eq!(
         back["extensions"]["nexus"]["text_search"],
         Value::from("harbor")
@@ -81,7 +82,7 @@ fn scope_extensions_nexus_namespace_round_trips() {
 
 #[test]
 fn minimal_scope_without_extensions_still_deserializes() {
-    // `extensions` is optional at 0.15.1 — pre-0.6.0 minimal scopes
+    // note: `extensions` is optional at 0.15.1 — pre-0.6.0 minimal scopes
     // (`scope_id` only, like `scope_query_port::scope_for`) stay valid and
     // deserialize to `None`. This guards the property the existing
     // serde-based construction relies on.

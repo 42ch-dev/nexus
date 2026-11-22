@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam + lifecycle delegation.
 //!
 //! This is the **sole conversion seam** between the nexus domain aggregate
@@ -66,16 +67,15 @@ use crate::extensions::{
     refuse_legacy_creator_only, set_created_from_command_id, set_nexus_extras, set_owner,
     set_provenance, take_nexus_body,
 };
-// Test-only: simulates the persist-path carrier stash in `build_spoke_upsert_
+// note: Test-only: simulates the persist-path carrier stash in `build_spoke_upsert_
 // request` (production code sets the carrier in nexus-daemon-runtime, not here).
 #[cfg(test)]
 use crate::extensions::set_nexus_body;
 use crate::ops::{assert_revision, transition_status};
 use crate::{SpokeReject, SpokeResult};
 
-// ── Free-function conversion seam (orphan-rule compliant) ────────────────
 
-/// Forward: nexus domain [`KnowledgeEntryRecord`] → spoke standard
+/// invariant: Forward: nexus domain [`KnowledgeEntryRecord`] → spoke standard
 /// [`SpokeKnowledgeEntry`] (spec §7.1 sole conversion seam).
 ///
 /// Borrows the domain entry (callers no longer need to `.clone()` the whole
@@ -92,7 +92,7 @@ use crate::{SpokeReject, SpokeResult};
 /// drift, not a runtime input error.
 #[must_use]
 pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledgeEntry {
-    // Body: map all 5 typed body fields (spoke 0.4.0 closed body). Each nexus
+    // note: Body: map all 5 typed body fields (spoke 0.4.0 closed body). Each nexus
     // field maps onto its spoke counterpart; computable bool→map and attributes
     // object→Vec<BodyAttribute> are shape conversions (see module doc).
     // spoke-operations does not consume body content, but the round-trip now
@@ -105,7 +105,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
             _ => None,
         })
         .unwrap_or_default();
-    // computable: nexus Option<bool> → spoke Map<String, Value>.
+    // note: computable: nexus Option<bool> → spoke Map<String, Value>.
     // Some(true) → marker {"_computable": true}; None/Some(false) → empty.
     let computable_map = match body.and_then(|b| b.computable) {
         Some(true) => {
@@ -117,7 +117,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
     };
     let summary = body.and_then(|b| b.summary.clone());
     let tags = body.and_then(|b| b.tags.clone()).unwrap_or_default();
-    // attributes: nexus flat JSON object {trait_type: value, ...} → ERC721
+    // note: attributes: nexus flat JSON object {trait_type: value, ...} → ERC721
     // Vec<BodyAttribute>. Null/array/object values have no spoke slot and are
     // dropped; the trait_type newtype is regex-validated by spoke.
     let attributes = body
@@ -130,7 +130,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         });
     let spoke_body = SpokeKnowledgeEntryBody {
         attributes,
-        // 0.15.1 wire parity: upstream omits `computable` only when it is
+        // note: 0.15.1 wire parity: upstream omits `computable` only when it is
         // `None`, while 0.14.1 omitted an *empty* map — so the empty case
         // must map to `None` rather than emitting `"computable": {}`.
         computable: (!computable_map.is_empty()).then(|| computable_map.into()),
@@ -146,7 +146,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         created_at: chrono::DateTime::parse_from_rfc3339(&entry.created_at)
             .ok()
             .map(|dt| dt.with_timezone(&chrono::Utc)),
-        // Native `disclosure` → wire `KnowledgeEntry.disclosure` (durable §1).
+        // note: Native `disclosure` → wire `KnowledgeEntry.disclosure` (durable §1).
         // The mapping is exact and one-way per field: "shared" is the absence
         // of both columns, and an adopted foreign row keeps whatever stored
         // value it has. The newtype requires a non-empty string; the domain
@@ -159,7 +159,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         entry_type: block_type_to_entry_type(entry.block_type),
         extensions: HashMap::new(),
         modules: nexus_modules_to_spoke(entry.modules.as_ref()),
-        // Native `holder_entry_id` → wire `KnowledgeEntry.owner` (durable §1).
+        // invariant: Native `holder_entry_id` → wire `KnowledgeEntry.owner` (durable §1).
         // This is the holder axis only — the narrative container owner
         // (`KnowledgeOwnerRef`) keeps riding `extensions.nexus`, because wire
         // `owner` is a holder KnowledgeEntry `entry_id`, never a World /
@@ -183,7 +183,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
             .map(Into::into),
     };
 
-    // Canonical container owner → extensions.nexus (v1.184 P1). World owners
+    // invariant: Canonical container owner → extensions.nexus (v1.184 P1). World owners
     // emit `world_id`; Character/binding owners emit their typed key and never
     // a fabricated `world_id`. Preserves unknown keys per spec §2.2.
     set_owner(&mut spoke, &entry.owner);
@@ -194,14 +194,14 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         entry.source_chapter,
         entry.source_provenance_kind.clone(),
     );
-    // Unknown extensions.nexus keys → carried verbatim onto the spoke type.
+    // note: Unknown extensions.nexus keys → carried verbatim onto the spoke type.
     if let Some(Value::Object(extras)) = &entry.extensions_nexus_extras {
         set_nexus_extras(&mut spoke, extras);
     }
     spoke
 }
 
-/// Reverse: spoke standard [`SpokeKnowledgeEntry`] → nexus domain
+/// note: Reverse: spoke standard [`SpokeKnowledgeEntry`] → nexus domain
 /// [`KnowledgeEntryRecord`] (spec §7.1 sole conversion seam).
 ///
 /// Consumes the spoke entry: the reverse conversion must [`take_nexus_body`]
@@ -219,7 +219,7 @@ pub fn spoke_to_knowledge_record(
     entry: SpokeKnowledgeEntry,
 ) -> Result<KnowledgeEntryRecord, KbError> {
     let mut s = entry;
-    // Extract the lossless body carrier FIRST — a reserved nexus key — so it
+    // invariant: Extract the lossless body carrier FIRST — a reserved nexus key — so it
     // never leaks into product-local extras ([`get_nexus_extras`]) or the
     // persisted `extensions` column. Spoke's typed BodyAttributeValue drops
     // null/array/object attribute values; this carrier (stashed on the
@@ -227,19 +227,19 @@ pub fn spoke_to_knowledge_record(
     // authoritative, lossless nexus body that the persist writes (V1.143
     // Greptile P1 — body fidelity).
     let lossless_body_value = take_nexus_body(&mut s);
-    // Retired legacy key gate (durable §5, v1.191 P1 T8): a wire entry that
+    // note: Retired legacy key gate (durable §5, v1.191 P1 T8): a wire entry that
     // still carries `extensions.nexus.creator_only` — `false` included — is
     // refused with the stable reason before anything reads it. It is neither
     // interpreted as governance nor carried as an unknown extra.
     refuse_legacy_creator_only(&s)?;
-    // Canonical container owner from the typed extension keys (v1.184 P1).
+    // invariant: Canonical container owner from the typed extension keys (v1.184 P1).
     // Fail closed when absent, ambiguous, or malformed (non-string/null owner
     // key) — a spoke entry with anything other than exactly one valid owner
     // claim is rejected, never resolved by precedence. This stays the
     // *narrative container* axis; the wire-level holder governance below is a
     // separate axis (durable §1).
     let owner = get_owner(&s)?;
-    // Wire ↔ native holder governance (durable §1, v1.191 P1 T8): the exact
+    // invariant: Wire ↔ native holder governance (durable §1, v1.191 P1 T8): the exact
     // one-to-one mapping of `KnowledgeEntry.owner` / `.disclosure` onto the
     // native `holder_entry_id` / `disclosure` columns. No normalization: an
     // absent wire field is an absent native column (shared), an `owner-private`
@@ -251,23 +251,23 @@ pub fn spoke_to_knowledge_record(
         .disclosure
         .as_ref()
         .map(|value| value.as_str().to_string());
-    // Extract borrowed accessor data into owned values FIRST, so subsequent
+    // note: Extract borrowed accessor data into owned values FIRST, so subsequent
     // field moves out of `s` are not blocked by outstanding borrows.
     let created_from_command_id = get_created_from_command_id(&s).map(String::from);
     let (source_work_id, source_chapter, source_provenance_kind) = get_provenance(&s);
     let source_work_id = source_work_id.map(String::from);
     let source_provenance_kind = source_provenance_kind.map(String::from);
-    // Unknown extensions.nexus keys → carried verbatim onto the domain type
+    // note: Unknown extensions.nexus keys → carried verbatim onto the domain type
     // (owned Map; borrow ends before `s.body` is moved).
     let extensions_nexus_extras = get_nexus_extras(&s).map(Value::Object);
     let entry_type = s.entry_type.clone();
     let canonical_name = s.canonical_name.to_string();
-    // Lossless reverse conversion (v1.184 P1 fix): a wire schema_version that
+    // invariant: Lossless reverse conversion (v1.184 P1 fix): a wire schema_version that
     // exceeds the domain u32 range is rejected, never silently normalized to 1.
     let schema_version = u32::try_from(s.schema_version.get())
         .map_err(|_| KbError::UnsupportedSchemaVersion(s.schema_version.get()))?;
 
-    // Reverse body (fallback): spoke closed body → nexus body. All 5 fields
+    // note: Reverse body (fallback): spoke closed body → nexus body. All 5 fields
     // map back; body is `None` only when every field is empty/None. Used only
     // when no lossless carrier is present (e.g. spoke entries that did not
     // originate from a `KnowledgeEntryRecord` forward conversion).
@@ -298,7 +298,7 @@ pub fn spoke_to_knowledge_record(
             computable: has_computable.then_some(true),
         })
     };
-    // Prefer the lossless carrier; fall back to the spoke-typed-body
+    // note: Prefer the lossless carrier; fall back to the spoke-typed-body
     // reconstruction when no carrier was stashed.
     let body = lossless_body_value
         .and_then(|v| serde_json::from_value::<KnowledgeEntryBody>(v).ok())
@@ -308,7 +308,7 @@ pub fn spoke_to_knowledge_record(
         schema_version,
         entry_id: s.entry_id,
         owner,
-        // Exact wire → native holder governance mapping (v1.191 P1 T8): the
+        // invariant: Exact wire → native holder governance mapping (v1.191 P1 T8): the
         // value is read straight from `KnowledgeEntry.owner` / `.disclosure`
         // and never synthesized, so a wire entry with no governance stays
         // shared.
@@ -333,9 +333,8 @@ pub fn spoke_to_knowledge_record(
     })
 }
 
-// ── Private attribute / anchor shape helpers ─────────────────────────────
 
-/// Convert a nexus `BlockType` to spoke's open-string `entry_type`
+/// why: Convert a nexus `BlockType` to spoke's open-string `entry_type`
 /// (`snake_case`).
 ///
 /// `pub(crate)` because the adapter's scoped filters compare the same wire
@@ -348,7 +347,7 @@ pub(crate) fn block_type_to_entry_type(bt: BlockType) -> String {
         .unwrap_or_else(|| "character".to_string())
 }
 
-/// Parse spoke `entry_type` back to nexus `BlockType` (v1.184 P1 fix).
+/// invariant: Parse spoke `entry_type` back to nexus `BlockType` (v1.184 P1 fix).
 ///
 /// The wire contract leaves `entry_type` an open string while the domain
 /// `BlockType` is closed; an unrecognized value is a conversion error, never
@@ -358,7 +357,7 @@ fn entry_type_to_block_type(s: &str) -> Result<BlockType, KbError> {
         .map_err(|_| KbError::UnknownEntryType(s.to_string()))
 }
 
-/// Forward attribute shape: nexus JSON object member → spoke `BodyAttribute`.
+/// note: Forward attribute shape: nexus JSON object member → spoke `BodyAttribute`.
 ///
 /// Maps `Value::String`/`Number`/`Bool` to the corresponding
 /// `KnowledgeEntryBodyAttributesItemValue` variant; `Null`/array/object values
@@ -373,7 +372,7 @@ fn nexus_attr_to_spoke(
         Value::String(s) => KnowledgeEntryBodyAttributesItemValue::String(s.clone()),
         Value::Number(n) => KnowledgeEntryBodyAttributesItemValue::Number(n.as_f64()?),
         Value::Bool(b) => KnowledgeEntryBodyAttributesItemValue::Boolean(*b),
-        // Null / array / object — no spoke BodyAttributeValue slot.
+        // note: Null / array / object — no spoke BodyAttributeValue slot.
         _ => return None,
     };
     let trait_type = KnowledgeEntryBodyAttributesItemTraitType::try_from(trait_type).ok()?;
@@ -385,7 +384,7 @@ fn nexus_attr_to_spoke(
     })
 }
 
-/// Reverse attribute shape: spoke `Vec<BodyAttribute>` → nexus JSON object.
+/// note: Reverse attribute shape: spoke `Vec<BodyAttribute>` → nexus JSON object.
 ///
 /// Each item's `trait_type` becomes a key; `value` maps back to the matching
 /// JSON variant. `display_type`/`max_value` are dropped (no nexus slot). Returns
@@ -410,7 +409,7 @@ fn spoke_attrs_to_nexus(attrs: &[KnowledgeEntryBodyAttributesItem]) -> Option<Va
     (!map.is_empty()).then_some(Value::Object(map))
 }
 
-/// Forward: encode the nexus `SourceAnchor` as JSON inside the spoke anchor's
+/// note: Forward: encode the nexus `SourceAnchor` as JSON inside the spoke anchor's
 /// `source_id`. Round-trippable placeholder mapping — refines when the spoke
 /// anchor model aligns with nexus provenance (T3).
 fn nexus_anchor_to_spoke(a: &SourceAnchor) -> SpokeSourceAnchor {
@@ -424,7 +423,7 @@ fn nexus_anchor_to_spoke(a: &SourceAnchor) -> SpokeSourceAnchor {
     }
 }
 
-/// Reverse of [`nexus_anchor_to_spoke`].
+/// note: Reverse of [`nexus_anchor_to_spoke`].
 fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
     serde_json::from_str(&a.source_id).unwrap_or(SourceAnchor {
         story_summary_refs: None,
@@ -433,15 +432,14 @@ fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
     })
 }
 
-// ── Modules conversion helpers ────────────────────────────────────────────
 //
-// V1.146 P4 T1: `KnowledgeEntryRecord.modules` ↔ spoke `KnowledgeEntry.modules`
+// note: V1.146 P4 T1: `KnowledgeEntryRecord.modules` ↔ spoke `KnowledgeEntry.modules`
 // round-trip. The nexus domain carries modules as a JSON object
 // (`Option<Value>`); the spoke wire type uses `HashMap<ModulesKey,
 // ModulesValue>`. These helpers convert between the two representations,
 // preserving unknown namespaces verbatim.
 
-/// Forward: nexus `modules` JSON → spoke `HashMap<ModulesKey, ModulesValue>`.
+/// note: Forward: nexus `modules` JSON → spoke `HashMap<ModulesKey, ModulesValue>`.
 ///
 /// Each key in the JSON object is converted to a `KnowledgeEntryModulesKey`
 /// (regex-validated `^[a-z][a-z0-9_-]*$`). Values that are JSON objects map to
@@ -461,7 +459,7 @@ fn nexus_modules_to_spoke(
         let ns_val = match val {
             Value::Object(obj) => KnowledgeEntryModulesValue::Object(obj.clone()),
             Value::Array(arr) => KnowledgeEntryModulesValue::Array(arr.clone()),
-            // Scalar values / null — no spoke slot.
+            // note: Scalar values / null — no spoke slot.
             _ => continue,
         };
         result.insert(ns_key, ns_val);
@@ -469,7 +467,7 @@ fn nexus_modules_to_spoke(
     result
 }
 
-/// Reverse: spoke `HashMap<ModulesKey, ModulesValue>` → nexus `modules` JSON.
+/// note: Reverse: spoke `HashMap<ModulesKey, ModulesValue>` → nexus `modules` JSON.
 ///
 /// Each key is converted back to a `String`; `Variant0` becomes a JSON object,
 /// `Variant1` becomes a JSON array. Returns `None` when the spoke map is empty.
@@ -490,9 +488,8 @@ fn spoke_modules_to_nexus(
     Some(Value::Object(map))
 }
 
-// ── Lifecycle delegation (local trait on a foreign type) ─────────────────
 
-/// Nexus lifecycle methods on [`KnowledgeEntryRecord`] that delegate status-transition
+/// why: Nexus lifecycle methods on [`KnowledgeEntryRecord`] that delegate status-transition
 /// validity to spoke-operations.
 ///
 /// This trait lives in the spoke adapter (not `nexus-knowledge`) because every
@@ -507,9 +504,9 @@ fn spoke_modules_to_nexus(
 /// to invoke these methods (Rust method-resolution requires the trait in
 /// scope).
 pub trait KnowledgeEntryRecordSpokeExt {
-    /// Transition provisional → confirmed.
+    /// note: Transition provisional → confirmed.
     ///
-    /// Gate requirements (consistency-rules-v1.md §3.2):
+/// note: Gate requirements:
     /// 1. Initiator must have `can_confirm_canon` permission on the world
     /// 2. `base_revision` / revision must match server current (no version mismatch)
     /// 3. All required fields present and schema-valid
@@ -526,19 +523,19 @@ pub trait KnowledgeEntryRecordSpokeExt {
         visible_manifests: &[&str],
     ) -> Result<(), KbError>;
 
-    /// Deprecate this `KnowledgeEntryRecord` (mark as superseded).
+    /// note: Deprecate this `KnowledgeEntryRecord` (mark as superseded).
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
     fn deprecate(&mut self, replacement_kb_id: Option<&str>) -> Result<(), KbError>;
 
-    /// Merge this `KnowledgeEntryRecord` into another.
+    /// note: Merge this `KnowledgeEntryRecord` into another.
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
     fn merge_into(&mut self, target_kb_id: &str) -> Result<(), KbError>;
 
-    /// Soft-delete this `KnowledgeEntryRecord`.
+    /// note: Soft-delete this `KnowledgeEntryRecord`.
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
@@ -553,14 +550,14 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
         conflict_check: &ConflictCheckResult,
         visible_manifests: &[&str],
     ) -> Result<(), KbError> {
-        // Gate 1: Permission check
+        // note: Gate 1: Permission check
         if !membership.can_confirm_canon {
             return Err(KbError::PermissionDenied(
                 "can_confirm_canon permission required".to_string(),
             ));
         }
 
-        // Gate 2: Version match — delegate the standard revision invariant to
+        // invariant: Gate 2: Version match — delegate the standard revision invariant to
         // spoke-operations. Map the reject back to nexus's `RevisionMismatch`
         // to preserve observable behavior.
         let current_rev = self.revision.unwrap_or(0);
@@ -574,14 +571,14 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
             });
         }
 
-        // Gate 3: Required fields present (canonical_name must be non-empty)
+        // note: Gate 3: Required fields present (canonical_name must be non-empty)
         if self.canonical_name.trim().is_empty() {
             return Err(KbError::ValidationError(
                 "canonical_name is required".to_string(),
             ));
         }
 
-        // Gate 4: Source anchor traceability (consistency-rules-v1.md §3.2).
+// note: Gate 4: Source anchor traceability.
         // When a source_anchor is present, all its story_summary_refs must
         // point to visible manifests in the same world. The lifecycle lane is
         // World-owned only (v1.184 P1), so `world_id()` is `Some` for any row
@@ -593,7 +590,7 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
                 .map_err(|e| KbError::ValidationError(format!("{e}")))?;
         }
 
-        // Gate 5: No unresolved conflicts
+        // note: Gate 5: No unresolved conflicts
         if conflict_check.has_hard_conflicts {
             return Err(KbError::UnresolvedConflict(
                 conflict_check
@@ -603,7 +600,7 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
             ));
         }
 
-        // Transition: route the provisional→confirmed transition through
+        // why: Transition: route the provisional→confirmed transition through
         // spoke-operations. `transition_status` enforces the cross-product
         // transition table (spec §1.5). The revision bump follows the nexus
         // convention (transition_status does not bump revision; that is the
@@ -637,7 +634,7 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
     }
 }
 
-/// Route a status transition through spoke-operations. Converts the entry to
+/// note: Route a status transition through spoke-operations. Converts the entry to
 /// the spoke type, delegates the transition validity check + canonical status
 /// to `transition_status`, then applies only the status back (body / identity
 /// are preserved on the domain type; the spoke round-trip is body-faithful as
@@ -656,7 +653,7 @@ fn apply_spoke_status_transition(
     Ok(())
 }
 
-/// Map a spoke-operations `SpokeResult` into a nexus `Result`, folding a
+/// note: Map a spoke-operations `SpokeResult` into a nexus `Result`, folding a
 /// [`SpokeReject`] into `KbError::ValidationError` carrying the spoke code +
 /// message. Used by the lifecycle routing (`confirm` / status transitions).
 fn map_spoke_reject<T>(r: SpokeResult<T>) -> Result<T, KbError> {
@@ -690,7 +687,6 @@ mod tests {
         ConflictCheckResult::no_conflicts()
     }
 
-    // ── Lifecycle routing (delegates to spoke-operations) ────────────────
 
     #[test]
     fn test_confirm_with_permission() {
@@ -720,7 +716,7 @@ mod tests {
     fn test_confirm_with_revision_mismatch() {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Event, "Battle");
         kb.revision = Some(3);
-        // base_revision 5 against stored revision 3.
+        // note: base_revision 5 against stored revision 3.
         let result = kb.confirm(&owner_membership(), 5, &no_conflicts(), &[]);
         assert!(
             matches!(
@@ -772,7 +768,7 @@ mod tests {
         kb.delete().unwrap();
         assert_eq!(kb.status, "deleted");
 
-        // Shared (confirmed) row: delete reaches the terminal status.
+        // note: Shared (confirmed) row: delete reaches the terminal status.
         let mut confirmed = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Temp");
         confirmed
             .confirm(&owner_membership(), 0, &no_conflicts(), &[])
@@ -780,7 +776,7 @@ mod tests {
         confirmed.delete().unwrap();
         assert_eq!(confirmed.status, "deleted");
 
-        // Deprecated row: delete also reaches the terminal status.
+        // note: Deprecated row: delete also reaches the terminal status.
         let mut deprecated = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Temp");
         deprecated
             .confirm(&owner_membership(), 0, &no_conflicts(), &[])
@@ -797,12 +793,12 @@ mod tests {
             .unwrap();
         kb.deprecate(Some("kb_hero_v2")).unwrap();
 
-        // spoke's cross-product table excludes deprecated → merged.
+        // note: spoke's cross-product table excludes deprecated → merged.
         let result = kb.merge_into("kb_hero_v2");
         let KbError::ValidationError(message) = result.unwrap_err() else {
             panic!("expected ValidationError from a rejected transition");
         };
-        // The caller receives the folded "<spoke code>: <spoke message>" text.
+        // note: The caller receives the folded "<spoke code>: <spoke message>" text.
         assert!(
             message.starts_with("INVALID_KNOWLEDGE_ENTRY_STATUS_TRANSITION: "),
             "unexpected error shape: {message}"
@@ -811,7 +807,7 @@ mod tests {
             message.contains("Disallowed knowledge entry status transition: deprecated -> merged",),
             "unexpected error detail: {message}"
         );
-        // A reject must not mutate the record before returning.
+        // note: A reject must not mutate the record before returning.
         assert_eq!(kb.status, "deprecated");
     }
 
@@ -823,7 +819,7 @@ mod tests {
         kb.deprecate(Some("kb_hero_v2")).unwrap();
         let spoke = knowledge_record_to_spoke(&kb);
 
-        // deprecated → merged is rejected by spoke's transition table.
+        // note: deprecated → merged is rejected by spoke's transition table.
         let rejected = transition_status(&spoke, "merged");
         assert!(
             matches!(rejected, SpokeResult::Reject(_)),
@@ -854,7 +850,7 @@ mod tests {
             .unwrap();
         kb.merge_into("kb_hero_v2").unwrap();
 
-        // `merged` is terminal: only self-transitions are allowed.
+        // note: `merged` is terminal: only self-transitions are allowed.
         let result = kb.delete();
         assert!(
             matches!(result, Err(KbError::ValidationError(_))),
@@ -872,23 +868,23 @@ mod tests {
         assert!(kb.is_confirmed());
     }
 
-    /// C-1: `confirm()` must enforce Gate 4 — `source_anchor` traceability.
+    /// note: C-1: `confirm()` must enforce Gate 4 — `source_anchor` traceability.
     /// When `source_anchor` references a non-visible manifest, `confirm()` should fail.
     #[test]
     fn test_confirm_without_valid_source_anchor_fails() {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
-        // Set source_anchor pointing to a non-visible manifest
+        // note: Set source_anchor pointing to a non-visible manifest
         let anchor = SourceAnchor::new("stm_hidden", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
 
-        // visible_manifests does NOT include stm_hidden → should fail Gate 4
+        // note: visible_manifests does NOT include stm_hidden → should fail Gate 4
         let visible_manifests: &[&str] = &["stm_visible1"];
         let result = kb.confirm(&owner_membership(), 0, &no_conflicts(), visible_manifests);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), KbError::ValidationError(_)));
     }
 
-    /// C-1: `confirm()` succeeds when `source_anchor` references visible manifests.
+    /// note: C-1: `confirm()` succeeds when `source_anchor` references visible manifests.
     #[test]
     fn test_confirm_with_valid_source_anchor_succeeds() {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
@@ -900,9 +896,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ── V1.139 spoke 0.4.0 full body alignment (conversion seam round-trip) ─
     //
-    // Proves the conversion seam (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`)
+    // note: Proves the conversion seam (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`)
     // round-trips ALL 5 typed body fields plus unknown `extensions.nexus`
     // extras in both directions. Each field that previously dropped
     // (summary / attributes / tags / computable) now survives.
@@ -922,7 +917,7 @@ mod tests {
             computable: Some(true),
         });
 
-        // Forward → spoke, reverse → nexus.
+        // note: Forward → spoke, reverse → nexus.
         let spoke = knowledge_record_to_spoke(&kb);
         let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         let body = roundtripped
@@ -930,21 +925,21 @@ mod tests {
             .as_ref()
             .expect("body survives the spoke round-trip");
 
-        // summary: 1:1
+        // note: summary: 1:1
         assert_eq!(
             body.summary.as_deref(),
             Some("Protagonist; reluctant cartographer.")
         );
-        // tags: non-empty Vec → Some
+        // note: tags: non-empty Vec → Some
         assert_eq!(
             body.tags.as_deref(),
             Some(["pov".to_string(), "combat".to_string()].as_slice())
         );
-        // state: JSON object ↔ Map<String, Value>
+        // note: state: JSON object ↔ Map<String, Value>
         assert_eq!(body.state.as_ref().unwrap()["character"]["current_hp"], 80);
-        // computable: Some(true) → marker map → Some(true)
+        // note: computable: Some(true) → marker map → Some(true)
         assert_eq!(body.computable, Some(true));
-        // attributes: {k:v} → Vec<BodyAttribute> → {k:v}. Numbers are modeled
+        // note: attributes: {k:v} → Vec<BodyAttribute> → {k:v}. Numbers are modeled
         // as f64 in spoke's BodyAttributeValue, so an integer nexus value
         // round-trips as a float (28 → 28.0); the numeric value is preserved.
         let attrs = body
@@ -959,7 +954,7 @@ mod tests {
 
     #[test]
     fn spoke_seam_drops_null_array_object_attribute_values() {
-        // nexus attributes is a free-form JSON object; spoke's BodyAttributeValue
+        // note: nexus attributes is a free-form JSON object; spoke's BodyAttributeValue
         // only models string/number/boolean. Null/array/object members have no
         // spoke slot and are dropped on the general forward conversion
         // (documented loss of the spoke typed body). The persist path
@@ -985,14 +980,14 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        // General seam (no carrier): only the number survived; null/array dropped.
+        // note: General seam (no carrier): only the number survived; null/array dropped.
         assert_eq!(attrs.len(), 1);
         assert_eq!(attrs["weight"].as_f64(), Some(5.0));
     }
 
     #[test]
     fn spoke_seam_carrier_preserves_full_body_on_reverse() {
-        // The persist path stashes the full nexus body in a reserved
+        // note: The persist path stashes the full nexus body in a reserved
         // `extensions.nexus._nexus_body` carrier (set in `build_spoke_upsert_
         // request`) so `put_update`'s reverse conversion recovers it losslessly
         // instead of the spoke-truncated body (V1.143 Greptile P1 — body
@@ -1015,7 +1010,7 @@ mod tests {
             BlockType::Item,
             "Backpack",
         ));
-        // Simulate the persist-path carrier stash (build_spoke_upsert_request).
+        // note: Simulate the persist-path carrier stash (build_spoke_upsert_request).
         let body_value = serde_json::to_value(&full_body).unwrap_or_default();
         set_nexus_body(&mut spoke, Some(&body_value));
 
@@ -1037,14 +1032,14 @@ mod tests {
 
     #[test]
     fn spoke_seam_body_none_when_all_fields_empty() {
-        // An entry with no body content round-trips to body = None.
+        // note: An entry with no body content round-trips to body = None.
         let kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Empty");
         let spoke = knowledge_record_to_spoke(&kb);
         let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         assert!(roundtripped.body.is_none(), "no body fields → body is None");
     }
 
-    /// 0.15.1 wire parity for the one body field whose generated shape moved
+    /// note: 0.15.1 wire parity for the one body field whose generated shape moved
     /// from `Map` (`skip_serializing_if = Map::is_empty`) to `Option<Map>`
     /// (`skip_serializing_if = Option::is_none`): a falsy nexus `computable`
     /// must stay absent from the JSON, exactly as 0.14.1 emitted it, and only
@@ -1081,7 +1076,7 @@ mod tests {
 
     #[test]
     fn spoke_seam_summary_only_roundtrips_without_state_or_computable() {
-        // Previously the reverse direction set body=None unless state/computable
+        // note: Previously the reverse direction set body=None unless state/computable
         // were non-empty, dropping a summary-only body. Now summary alone survives.
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Forest");
         kb.body = Some(KnowledgeEntryBody {
@@ -1098,7 +1093,7 @@ mod tests {
 
     #[test]
     fn spoke_seam_extensions_nexus_extras_roundtrip() {
-        // Unknown extensions.nexus keys (outside the 5 typed fields) ride on
+        // note: Unknown extensions.nexus keys (outside the 5 typed fields) ride on
         // KnowledgeEntryRecord.extensions_nexus_extras and survive the spoke seam both
         // ways (spec §2.2 round-trip rule 2).
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
@@ -1106,7 +1101,7 @@ mod tests {
             Some(serde_json::json!({"custom_label": "villain-arc", "priority": 7}));
 
         let spoke = knowledge_record_to_spoke(&kb);
-        // The unknown keys land under extensions.nexus on the spoke type.
+        // note: The unknown keys land under extensions.nexus on the spoke type.
         let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         let extras = roundtripped
             .extensions_nexus_extras

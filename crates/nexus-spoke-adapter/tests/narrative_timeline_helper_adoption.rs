@@ -1,4 +1,6 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! # Spoke 0.4.1 timeline helper adoption (test-adoption, compass AC-I2)
+//! adoption test only — no runtime behavior changes.
 //!
 //! This is a **test-adoption**: it proves the spoke 0.4.1 timeline beat-assist
 //! helpers are re-exported through the `nexus-spoke-adapter` boundary and that
@@ -22,7 +24,7 @@ use nexus_spoke_adapter::{
 };
 use serde_json::json;
 
-/// Build a spoke `TimelineEvent` from fixture-style JSON, mirroring the shape of
+/// note: Build a spoke `TimelineEvent` from fixture-style JSON, mirroring the shape of
 /// spoke's `toy-world` event fixtures (`evt_tw_harbor_*.json`) and the
 /// `make_timeline_event` helper in spoke's `timeline.rs` tests.
 ///
@@ -43,7 +45,7 @@ fn event(id: &str, scale: Option<&str>) -> TimelineEvent {
         .unwrap_or_else(|error| panic!("failed to deserialize fixture TimelineEvent {id}: {error}"))
 }
 
-/// Mirrors spoke's `order_by_ids_orders_explicit_list_and_appends_stable_tail`:
+/// note: Mirrors spoke's `order_by_ids_orders_explicit_list_and_appends_stable_tail`:
 /// events listed in `ordered_ids` come first (in that order); the remaining
 /// events are appended in input order.
 #[test]
@@ -67,7 +69,7 @@ fn order_by_ids_orders_explicit_list_and_appends_stable_tail() {
     );
 }
 
-/// Mirrors spoke's `order_by_ids_rejects_unknown_timeline_event_ids`: an
+/// note: Mirrors spoke's `order_by_ids_rejects_unknown_timeline_event_ids`: an
 /// `ordered_ids` entry absent from the events is rejected with
 /// `InvalidInput` and the unknown ids surfaced in `details`.
 #[test]
@@ -90,7 +92,7 @@ fn order_by_ids_rejects_unknown_timeline_event_ids() {
     );
 }
 
-/// Mirrors spoke's `filter_keeps_only_moment_scale_events_in_input_order`:
+/// note: Mirrors spoke's `filter_keeps_only_moment_scale_events_in_input_order`:
 /// only events whose `timeline_scale` is exactly `"moment"` are kept, in input
 /// order; `None` and other scales are dropped.
 #[test]
@@ -112,7 +114,7 @@ fn filter_keeps_only_moment_scale_events_in_input_order() {
     );
 }
 
-/// Mirrors spoke's `filter_returns_empty_for_empty_input`.
+/// note: Mirrors spoke's `filter_returns_empty_for_empty_input`.
 #[test]
 fn filter_returns_empty_for_empty_input() {
     assert!(filter_timeline_events_by_moment_scale(&[]).is_empty());

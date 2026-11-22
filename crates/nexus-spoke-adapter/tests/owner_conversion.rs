@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! v1.184 P1 Task 2 — owner-aware conversion seam proofs.
 //!
 //! Covers the typed Nexus extension projection at the sole SPOKE conversion
@@ -43,7 +44,7 @@ fn record_for(owner: &KnowledgeOwnerRef, name: &str) -> KnowledgeEntryRecord {
     rec
 }
 
-/// World golden: a World-owned record emits `world_id` and round-trips
+/// note: World golden: a World-owned record emits `world_id` and round-trips
 /// byte-identically through the seam (legacy behavior preserved).
 #[test]
 fn world_owner_emits_world_id_and_round_trips() {
@@ -69,7 +70,7 @@ fn world_owner_emits_world_id_and_round_trips() {
     assert_eq!(back.body, rec.body);
 }
 
-/// Character owner: emits `character_id`, never a fabricated `world_id`.
+/// invariant: Character owner: emits `character_id`, never a fabricated `world_id`.
 #[test]
 fn character_owner_emits_character_id_never_world_id() {
     let rec = record_for(&KnowledgeOwnerRef::character("chr_abc"), "Shared lore");
@@ -90,7 +91,7 @@ fn character_owner_emits_character_id_never_world_id() {
     assert_eq!(back.world_id(), None);
 }
 
-/// Binding owner: emits `actor_world_binding_id`, never a fabricated
+/// invariant: Binding owner: emits `actor_world_binding_id`, never a fabricated
 /// `world_id`.
 #[test]
 fn binding_owner_emits_binding_id_never_world_id() {
@@ -117,14 +118,14 @@ fn binding_owner_emits_binding_id_never_world_id() {
     );
 }
 
-/// Fail closed: a spoke entry with NO canonical owner key must not gain a
+/// note: Fail closed: a spoke entry with NO canonical owner key must not gain a
 /// fabricated World owner — the reverse conversion errors instead of
 /// defaulting `world_id` to an empty string (the pre-v1.184 behavior).
 #[test]
 fn reverse_conversion_without_owner_fails_closed() {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Orphan");
     let mut spoke = knowledge_record_to_spoke(&rec);
-    // Strip every owner key, simulating a malformed/foreign spoke entry.
+    // note: Strip every owner key, simulating a malformed/foreign spoke entry.
     let key = ExtensionKey::try_from("nexus").unwrap();
     if let Some(ns) = spoke.extensions.get_mut(&key) {
         ns.remove("world_id");
@@ -134,7 +135,7 @@ fn reverse_conversion_without_owner_fails_closed() {
     assert!(spoke_to_knowledge_record(spoke).is_err());
 }
 
-/// v1.191 P1 T8: the native governance pair maps exactly onto the wire
+/// invariant: v1.191 P1 T8: the native governance pair maps exactly onto the wire
 /// `owner` / `disclosure` fields in both directions, and the holder axis is
 /// never confused with the narrative container (`extensions.nexus.world_id`).
 #[test]
@@ -168,7 +169,7 @@ fn holder_and_disclosure_map_exactly_onto_the_wire_fields() {
     assert_eq!(back.owner, KnowledgeOwnerRef::world("wld_x"));
 }
 
-/// v1.191 P1 T8: an unknown (open-domain) disclosure value is carried verbatim
+/// note: v1.191 P1 T8: an unknown (open-domain) disclosure value is carried verbatim
 /// by the seam — normalization to "shared" is a storage-boundary decision, not
 /// a conversion one, so an adopted foreign row keeps its vocabulary.
 #[test]
@@ -182,7 +183,7 @@ fn unknown_disclosure_vocabulary_round_trips_verbatim() {
     assert_eq!(back.disclosure.as_deref(), Some("party-only"));
 }
 
-/// v1.191 P1 T8: holder-only rows (an adopted foreign owner without a
+/// note: v1.191 P1 T8: holder-only rows (an adopted foreign owner without a
 /// disclosure) keep their holder and stay shared.
 #[test]
 fn holder_without_disclosure_round_trips_as_shared() {
@@ -196,14 +197,14 @@ fn holder_without_disclosure_round_trips_as_shared() {
     assert_eq!(back.disclosure, None);
 }
 
-/// Build a spoke entry whose `extensions.nexus` JSON is exactly the supplied
+/// invariant: Build a spoke entry whose `extensions.nexus` JSON is exactly the supplied
 /// map (bypassing the typed setters) — used to synthesize malformed wire
 /// payloads the typed setter would never emit.
 fn spoke_with_nexus(json_map: &serde_json::Value) -> spoke_schemas::KnowledgeEntry {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Wire");
     let mut spoke = knowledge_record_to_spoke(&rec);
     let key = ExtensionKey::try_from("nexus").unwrap();
-    // The `extensions` map holds the namespace as a JSON object (the same
+    // note: The `extensions` map holds the namespace as a JSON object (the same
     // shape `nexus_namespace` reads back), not a wrapped `Value`.
     let obj = json_map
         .as_object()
@@ -213,7 +214,7 @@ fn spoke_with_nexus(json_map: &serde_json::Value) -> spoke_schemas::KnowledgeEnt
     spoke
 }
 
-/// Ambiguous owner metadata must fail closed (v1.184 P1 fix): every pair (and
+/// invariant: Ambiguous owner metadata must fail closed (v1.184 P1 fix): every pair (and
 /// the triple) of typed owner keys present at once is rejected — precedence is
 /// not an ambiguity check.
 #[test]
@@ -240,7 +241,7 @@ fn ambiguous_owner_keys_reject_both_pairs_and_triple() {
     }
 }
 
-/// A present owner key carrying a non-string value (or `null`) must fail
+/// invariant: A present owner key carrying a non-string value (or `null`) must fail
 /// closed, never be silently ignored (v1.184 P1 fix).
 #[test]
 fn wrong_typed_or_null_owner_key_rejects() {
@@ -262,7 +263,7 @@ fn wrong_typed_or_null_owner_key_rejects() {
     }
 }
 
-/// v1.191 P1 T8: the retired legacy `extensions.nexus.creator_only` key is
+/// invariant: v1.191 P1 T8: the retired legacy `extensions.nexus.creator_only` key is
 /// refused at the conversion seam with the stable reason — `false` included —
 /// and never carried as an unknown extra. The native governance pair is the
 /// only governance channel.
@@ -284,7 +285,7 @@ fn legacy_creator_only_key_is_refused_not_carried() {
     }
 }
 
-/// A wire `schema_version` exceeding `u32::MAX` must not be silently
+/// note: A wire `schema_version` exceeding `u32::MAX` must not be silently
 /// normalized to `1` (v1.184 P1 fix).
 #[test]
 fn schema_version_overflow_rejects_not_normalizes() {
@@ -301,7 +302,7 @@ fn schema_version_overflow_rejects_not_normalizes() {
     );
 }
 
-/// An unknown spoke `entry_type` must not silently normalize to the default
+/// note: An unknown spoke `entry_type` must not silently normalize to the default
 /// block type (v1.184 P1 fix).
 #[test]
 fn unknown_entry_type_rejects_not_normalizes() {
@@ -318,7 +319,7 @@ fn unknown_entry_type_rejects_not_normalizes() {
     );
 }
 
-/// Unknown `extensions.nexus` keys survive the round-trip verbatim for every
+/// invariant: Unknown `extensions.nexus` keys survive the round-trip verbatim for every
 /// owner kind; the typed owner keys never leak into the extras bag.
 #[test]
 fn unknown_nexus_keys_round_trip_for_every_owner() {

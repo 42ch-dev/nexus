@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Production `RelationPort` impl — OCC-aware routing of `kb_relationships`
 //! storage through spoke's port surface (spec §7.4).
 //!
@@ -97,7 +98,7 @@ use spoke_schemas::relation::ExtensionKey;
 #[async_trait]
 impl RelationPort for NexusAdapter<'_> {
     async fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
-        // Request-bound scope (durable §4.1, v1.191 P1 T8).
+        // note: Request-bound scope (durable §4.1, v1.191 P1 T8).
         if let Err(reject) = self.require_read_scope("get_relation") {
             return SpokeResult::Reject(reject);
         }
@@ -116,7 +117,7 @@ impl RelationPort for NexusAdapter<'_> {
                 );
             }
         };
-        // Durable §4.2: a relation is only served when both of its endpoints
+        // why: Durable §4.2: a relation is only served when both of its endpoints
         // are visible in the bound selection; otherwise the relation is
         // indistinguishable from an absent one (no hidden endpoint id — or
         // the fact that it is related — leaves this call).
@@ -133,7 +134,7 @@ impl RelationPort for NexusAdapter<'_> {
         relation: Relation,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<Relation> {
-        // Request-bound scope (durable §4.1, v1.191 P1 T8): a relation write
+        // note: Request-bound scope (durable §4.1, v1.191 P1 T8): a relation write
         // carries endpoint ids, so it validates them inside the same admitted
         // selection a read would use.
         if let Err(reject) = self.require_read_scope("put_relation") {
@@ -147,7 +148,7 @@ impl RelationPort for NexusAdapter<'_> {
 }
 
 impl NexusAdapter<'_> {
-    /// Whether both endpoints of a stored relation row are admitted by the
+    /// note: Whether both endpoints of a stored relation row are admitted by the
     /// bound selection (durable §4.2).
     ///
     /// `Ok(false)` means hidden or absent — the caller must report the same
@@ -179,7 +180,7 @@ impl NexusAdapter<'_> {
     }
 }
 
-/// The single not-found shape for a relation that is absent **or** hidden
+/// note: The single not-found shape for a relation that is absent **or** hidden
 /// (durable §4.2).
 fn relation_not_found<T>(relation_id: &str) -> SpokeResult<T> {
     reject(
@@ -189,7 +190,7 @@ fn relation_not_found<T>(relation_id: &str) -> SpokeResult<T> {
     )
 }
 
-/// Default page size for one hop-edge load — confirmed relation rows per
+/// note: Default page size for one hop-edge load — confirmed relation rows per
 /// world (V1.149 P1, spec §5; V1.158 P2 T3 R-V1149P1-001).
 ///
 /// Generous but finite: a world whose confirmed graph exceeds this limit is
@@ -201,7 +202,7 @@ fn relation_not_found<T>(relation_id: &str) -> SpokeResult<T> {
 /// behavior (the `cap + 1` probe row is dropped).
 pub const HOP_EDGE_LIST_LIMIT: i64 = 10_000;
 
-/// One page of hop edges plus the keyset cursor for the next page
+/// note: One page of hop edges plus the keyset cursor for the next page
 /// (V1.158 P2 T3, R-V1149P1-001).
 ///
 /// [`HopEdgePage::next_cursor`] is `Some` when the world's confirmed graph
@@ -217,7 +218,7 @@ pub struct HopEdgePage {
 }
 
 impl NexusAdapter<'_> {
-    /// Load the confirmed relation edges of a world for relation-hop
+    /// invariant: Load the confirmed relation edges of a world for relation-hop
     /// expansion (V1.149 P1, spec §5).
     ///
     /// # `RelationPort` gap
@@ -254,7 +255,7 @@ impl NexusAdapter<'_> {
         &self,
         world_id: &str,
     ) -> Result<Vec<HopEdge>, LocalDbError> {
-        // Auto-paginate: collect ALL confirmed hop edges for the world by
+        // note: Auto-paginate: collect ALL confirmed hop edges for the world by
         // walking the keyset until exhausted. This replaces the pre-V1.158
         // silent truncation at 10 000 edges (R-V1149P1-001). The page size
         // stays HOP_EDGE_LIST_LIMIT for query efficiency, but no edges are
@@ -274,7 +275,7 @@ impl NexusAdapter<'_> {
         Ok(all_edges)
     }
 
-    /// Load one page of a world's confirmed hop edges, resuming after
+    /// invariant: Load one page of a world's confirmed hop edges, resuming after
     /// `cursor` (V1.158 P2 T3, R-V1149P1-001).
     ///
     /// Keyset pagination on `(updated_at, relationship_id)`: rows are ordered
@@ -319,11 +320,11 @@ impl NexusAdapter<'_> {
         }
         let pool = self.pool.clone();
         let world_id = world_id.to_string();
-        // Degenerate page sizes make no sense for keyset walking — clamp so
+        // invariant: Degenerate page sizes make no sense for keyset walking — clamp so
         // the probe/cursor math below stays sound (a 0-row page could never
         // advance, and `take - 1` must not underflow).
         let limit = limit.max(1);
-        // `limit + 1` probe per the `list_relationships_for_world` caller
+        // note: `limit + 1` probe per the `list_relationships_for_world` caller
         // convention: a page of `limit + 1` rows signals overflow and yields
         // a `next_cursor`; the probe row is dropped below. `saturating_add`
         // guards the `i64::MAX` degenerate case (defensive only — no SQLite
@@ -341,7 +342,7 @@ impl NexusAdapter<'_> {
             .await?;
             let has_more = rows.len() > take;
             let mut edges = Vec::with_capacity(take);
-            // L2 F2: the next cursor is built from the last KEPT row, never from a
+            // invariant: L2 F2: the next cursor is built from the last KEPT row, never from a
             // dropped (hidden) row — the cursor is handed back to the caller, so a
             // hidden relation id must not ride in it.
             let mut last_kept: Option<RelationshipCursor> = None;
@@ -362,7 +363,7 @@ impl NexusAdapter<'_> {
                             relation_type: row.relation_type.clone(),
                         });
                     }
-                    // An edge with a hidden endpoint is not an edge in this
+                    // invariant: An edge with a hidden endpoint is not an edge in this
                     // selection: drop it silently (the caller sees a smaller
                     // graph, never a hidden id).
                     Ok(false) => {}
@@ -372,7 +373,7 @@ impl NexusAdapter<'_> {
                 }
             }
             if edges.is_empty() && has_more {
-                // The whole page is hidden from this caller. Advance on the raw
+                // invariant: The whole page is hidden from this caller. Advance on the raw
                 // page position — never exposed, because the walk continues inside
                 // this call — so a later visible page is still reachable without
                 // the caller learning a hidden relation id.
@@ -390,9 +391,8 @@ impl NexusAdapter<'_> {
 }
 
 impl NexusAdapter<'_> {
-    // ── put_relation: create path ─────────────────────────────────────────
 
-    /// Create path: `expected_base_revision = None`. Reject if the row already
+    /// why: Create path: `expected_base_revision = None`. Reject if the row already
     /// exists; otherwise INSERT with `revision = 1` (spoke convention) and return
     /// the resulting spoke `Relation`.
     ///
@@ -403,7 +403,7 @@ impl NexusAdapter<'_> {
         let relation_id = relation.relation_id.clone();
         let locals = extract_nexus_locals(&relation);
 
-        // Pre-check existence. The PK is the true race guard; a collision at
+        // note: Pre-check existence. The PK is the true race guard; a collision at
         // INSERT is rendered as the absent-id success shape (R9, V1.206) —
         // see the insert handling below.
         // L2 F2: the existence pre-check is scoped — a stored relation whose
@@ -420,10 +420,10 @@ impl NexusAdapter<'_> {
                         json!({ "relation_id": relation_id }),
                     );
                 }
-                Ok(false) => {} // hidden endpoints ⇒ absent for this caller
+Ok(false) => {} // note: hidden endpoints ⇒ absent for this caller
                 Err(reject) => return SpokeResult::Reject(reject),
             },
-            Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // proceed to insert
+Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // note: proceed to insert
             Err(e) => {
                 return reject(
                     SpokeRejectCode::InternalError,
@@ -433,13 +433,13 @@ impl NexusAdapter<'_> {
             }
         }
 
-        // V1.146 P5 T2: serialize the full extensions.nexus namespace before
+        // note: V1.146 P5 T2: serialize the full extensions.nexus namespace before
         // prepare_create_fields consumes `relation` (the locals extraction borrows
         // relation, so we compute the JSON string before prepare_create_fields
         // which also borrows relation).
         let extensions_nexus_json = serialize_extensions_nexus_json(&relation);
 
-        // Compute the create column values before moving `locals.world_id` below.
+        // note: Compute the create column values before moving `locals.world_id` below.
         let f = prepare_create_fields(&relation, &locals, extensions_nexus_json);
 
         let Some(world_id) = locals.world_id else {
@@ -453,7 +453,7 @@ impl NexusAdapter<'_> {
             );
         };
 
-        // v1.184 P1: relationships remain World-owned in this iteration. Every
+        // invariant: v1.184 P1: relationships remain World-owned in this iteration. Every
         // create must have BOTH endpoints owned by the same World (owner_kind =
         // 'world' + matching stored `world_id`) and non-deleted — a Character or
         // binding-owned row, a foreign-world row, or a deleted row is rejected
@@ -516,7 +516,7 @@ impl NexusAdapter<'_> {
 
         let extensions_nexus_ref = f.extensions_nexus_json.as_deref();
 
-        // Seed revision = 1 directly (spoke convention). The legacy
+        // note: Seed revision = 1 directly (spoke convention). The legacy
         // `insert_relationship_in_tx` seeds 0 for the daemon's add-relationship
         // route and is deliberately NOT reused here — the port owns the spoke
         // revision-seed so the legacy fn + daemon route stay untouched (V1.144).
@@ -546,7 +546,7 @@ impl NexusAdapter<'_> {
         .execute(&mut *tx)
         .await;
 
-        // R9 (V1.206): a primary-key collision here means the id already
+        // why: R9 (V1.206): a primary-key collision here means the id already
         // exists but is invisible to this caller (the scoped pre-check routed
         // it down the "absent" path) — or a concurrent writer beat us to the
         // id. The absent-id SUCCESS shape is returned instead of a storage
@@ -571,7 +571,7 @@ impl NexusAdapter<'_> {
         };
 
         if phantom_success {
-            // Roll the failed INSERT back explicitly; the projection below is
+            // note: Roll the failed INSERT back explicitly; the projection below is
             // built from the request and nothing persists.
             let _ = tx.rollback().await;
         } else if let Err(e) = tx.commit().await {
@@ -582,7 +582,7 @@ impl NexusAdapter<'_> {
             );
         }
 
-        // Project the returned spoke Relation (revision = 1) from the request
+        // note: Project the returned spoke Relation (revision = 1) from the request
         // fields — the same projection on both paths: a real create mirrors
         // what was persisted, and the R9 phantom-success path mirrors what a
         // successful create would have persisted.
@@ -607,9 +607,8 @@ impl NexusAdapter<'_> {
         SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
     }
 
-    // ── put_relation: CAS update path ─────────────────────────────────────
 
-    /// Update path: `expected_base_revision = Some(expected)`. Pre-read the
+    /// why: Update path: `expected_base_revision = Some(expected)`. Pre-read the
     /// stored row, reuse [`update_relationship_in_tx`] (CAS `WHERE revision = ?`)
     /// and map any [`LocalDbError::VersionMismatch`] to `STORED_REVISION_STALE`.
     /// Optional nexus-locals not carried on the spoke `Relation` are CLEARED
@@ -618,7 +617,7 @@ impl NexusAdapter<'_> {
     ///
     /// A method (v1.191 P1 T8) because endpoint validation runs inside the
     /// adapter's request-bound selection.
-    #[allow(clippy::too_many_lines)] // one linear domain operation
+    #[allow(clippy::too_many_lines)] // note: one linear domain operation
     async fn put_relation_update(
         &self,
         relation: Relation,
@@ -630,7 +629,7 @@ impl NexusAdapter<'_> {
             match get_relationship(&self.pool, &relation_id).await {
                 Ok(row) => row,
                 Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {
-                    // Absent + Some(expected): the store has no revision at all. The
+                    // note: Absent + Some(expected): the store has no revision at all. The
                     // relation-port CAS mapping collapses this to STORED_REVISION_STALE
                     // (storeRevision=null signals absence); the orchestrator pre-routes
                     // create vs update, so this branch is a guard, not a hot path.
@@ -653,7 +652,7 @@ impl NexusAdapter<'_> {
                 }
             };
 
-        // Durable §4.2 (v1.191 P1 T8): a relation hidden from the caller is not
+        // note: Durable §4.2 (v1.191 P1 T8): a relation hidden from the caller is not
         // updatable — the same absent shape as the pre-read miss above, so an
         // endpoint the caller cannot see leaves no trace of having existed.
         match self
@@ -679,7 +678,7 @@ impl NexusAdapter<'_> {
 
         let locals = extract_nexus_locals(&relation);
 
-        // V1.154 P2 (R3 closure, spec §3.1): the world bind is the stored-world
+        // invariant: V1.154 P2 (R3 closure, spec §3.1): the world bind is the stored-world
         // expected by the request — the relation's claimed
         // `extensions.nexus.world_id`, which the invoke gate verified against the
         // stored row. It is NOT taken from `existing` (a fresh pre-read would
@@ -699,7 +698,7 @@ impl NexusAdapter<'_> {
             );
         };
 
-        // nexus-locals on update follow clear-on-omit semantics: an optional local
+        // invariant: nexus-locals on update follow clear-on-omit semantics: an optional local
         // the spoke `Relation` does NOT carry is cleared (symmetric→0,
         // confidence→SQL NULL, source_anchor_ids→'[]', needs_review→0). This is
         // behavior-equivalent to the pre-cutover `update_relationship_in_tx`,
@@ -723,7 +722,7 @@ impl NexusAdapter<'_> {
         let source_anchor_ids = locals.source_anchor_ids.unwrap_or_default();
         let needs_review = locals.needs_review.unwrap_or(false);
 
-        // V1.146 P5 T2: serialize the full extensions.nexus namespace for
+        // note: V1.146 P5 T2: serialize the full extensions.nexus namespace for
         // round-trip preservation. Unknown keys survive the update cycle.
         let extensions_nexus_json = serialize_extensions_nexus_json(&relation);
 
@@ -745,7 +744,7 @@ impl NexusAdapter<'_> {
             extensions_nexus_json,
         };
 
-        // `update_relationship_in_tx` compares `revision = expected_revision` (CAS).
+        // note: `update_relationship_in_tx` compares `revision = expected_revision` (CAS).
         // u64 → i64: revisions start at 1 and increment, so any realistic value
         // fits; clamp defensively (a clamped value just fails the CAS → stale).
         let expected_i64 = i64::try_from(expected).unwrap_or(i64::MAX);
@@ -771,7 +770,7 @@ impl NexusAdapter<'_> {
         )
         .await;
 
-        // Map the CAS outcome (rejects before the commit below; success
+        // note: Map the CAS outcome (rejects before the commit below; success
         // projects the updated row AFTER the commit).
         let updated_row = match map_relation_cas_result(result, &relation_id, expected) {
             SpokeResult::Ok(row) => row,
@@ -786,7 +785,7 @@ impl NexusAdapter<'_> {
             );
         }
 
-        // `updated_row` already carries revision = expected + 1 and the persisted
+        // note: `updated_row` already carries revision = expected + 1 and the persisted
         // mutable fields; project it through the single reverse-mapping seam.
         SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(
             &updated_row,
@@ -794,7 +793,7 @@ impl NexusAdapter<'_> {
     }
 }
 
-/// Map the CAS update outcome for [`put_relation_update`], keeping that
+/// invariant: Map the CAS update outcome for [`put_relation_update`], keeping that
 /// function under the `too_many_lines` budget (same extraction pattern as
 /// [`CreateFields`] for the create path):
 ///
@@ -817,7 +816,7 @@ fn map_relation_cas_result(
     let updated_row = match result {
         Ok(row) => row,
         Err(LocalDbError::VersionMismatch { actual, .. }) => {
-            // CAS fail. Per the V1.144 brief the relation-port collapses
+            // note: CAS fail. Per the V1.144 brief the relation-port collapses
             // every VersionMismatch shape to STORED_REVISION_STALE (simpler
             // than the KnowledgeEntryPort 3-way split — the orchestrator
             // pre-routes create vs update, so the only reachable failure
@@ -871,9 +870,8 @@ fn map_relation_cas_result(
     SpokeResult::Ok(updated_row)
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
 
-/// Resolved column values for the create INSERT, derived from the spoke
+/// note: Resolved column values for the create INSERT, derived from the spoke
 /// `Relation` + its nexus-locals. Extracted from [`put_relation_create`] to
 /// keep that function under the `too_many_lines` budget.
 struct CreateFields {
@@ -886,11 +884,11 @@ struct CreateFields {
     source: String,
     metadata_json: Option<String>,
     custom_label: Option<String>,
-    /// V1.146 P5 T2: serialized `extensions.nexus` for round-trip preservation.
+    /// note: V1.146 P5 T2: serialized `extensions.nexus` for round-trip preservation.
     extensions_nexus_json: Option<String>,
 }
 
-/// Compute the [`CreateFields`] for a create: adapter-assigned timestamps
+/// note: Compute the [`CreateFields`] for a create: adapter-assigned timestamps
 /// (falling back to `now` when the spoke `Relation` omits them) and the
 /// nexus-locals defaulted to the V1.76 manual-author add shape when the
 /// spoke `Relation` does not carry them (`symmetric=false`, `confidence=NULL`,
@@ -937,7 +935,7 @@ fn prepare_create_fields(
     }
 }
 
-/// nexus-locals carried under `extensions.nexus` on a spoke `Relation`.
+/// note: nexus-locals carried under `extensions.nexus` on a spoke `Relation`.
 /// Every field is optional — the create path defaults missing fields to the
 /// V1.76 manual-author shape; the update path clears-on-omit (an absent
 /// optional local is cleared, matching pre-cutover `update_relationship_in_tx`).
@@ -951,7 +949,7 @@ struct NexusLocals {
     source: Option<String>,
 }
 
-/// Borrow the nexus-locals from a spoke `Relation`'s `extensions.nexus`
+/// note: Borrow the nexus-locals from a spoke `Relation`'s `extensions.nexus`
 /// namespace, or [`NexusLocals::default`] when the namespace is absent.
 fn extract_nexus_locals(relation: &Relation) -> NexusLocals {
     let Ok(key) = ExtensionKey::try_from("nexus") else {
@@ -970,14 +968,14 @@ fn extract_nexus_locals(relation: &Relation) -> NexusLocals {
     }
 }
 
-/// Parse a JSON array of strings from a [`Value`]; `None` if the value is not
+/// note: Parse a JSON array of strings from a [`Value`]; `None` if the value is not
 /// an array or any element is not a string.
 fn value_as_string_array(v: &Value) -> Option<Vec<String>> {
     let arr = v.as_array()?;
     arr.iter().map(|i| i.as_str().map(String::from)).collect()
 }
 
-/// Whether a database error is a SQLite primary-key uniqueness violation
+/// note: Whether a database error is a SQLite primary-key uniqueness violation
 /// (`1555` = `SQLITE_CONSTRAINT_PRIMARYKEY`) on `kb_relationships`.
 ///
 /// Used by [`NexusAdapter::put_relation_create`] to recognise an INSERT that
@@ -986,7 +984,7 @@ fn is_pk_unique_violation(e: &sqlx::Error) -> bool {
     matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("1555"))
 }
 
-/// Construct a `SpokeResult::Reject` (mirrors the helper in
+/// note: Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `knowledge_entry_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
     let details_map = match details {
@@ -1004,7 +1002,7 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
     })
 }
 
-/// Serialize the full `extensions.nexus` namespace into the
+/// note: Serialize the full `extensions.nexus` namespace into the
 /// `extensions_nexus_json` column value (`None` when absent or empty).
 ///
 /// V1.146 P5 T2: the full namespace (known + unknown keys) is serialized so
@@ -1022,7 +1020,6 @@ fn serialize_extensions_nexus_json(relation: &Relation) -> Option<String> {
     serde_json::to_string(ns).ok()
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1037,7 +1034,7 @@ mod tests {
     use nexus_local_db::{open_pool, run_migrations};
     use serde_json::json;
 
-    /// Register the fixture creator's holder so a governed row can be stored
+    /// note: Register the fixture creator's holder so a governed row can be stored
     /// (the native `holder_entry_id` column is FK-bound to the registry, and
     /// these selections authorize no holder — so the row is private to them).
     async fn register_creator_holder(pool: &sqlx::SqlitePool) -> String {
@@ -1049,7 +1046,7 @@ mod tests {
         holder
     }
 
-    /// A KE-capable relation adapter whose selection authorizes `wld_rel` —
+    /// note: A KE-capable relation adapter whose selection authorizes `wld_rel` —
     /// the world every relation fixture owns.
     fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
         NexusAdapter::new(
@@ -1102,7 +1099,7 @@ mod tests {
         }
     }
 
-    /// Build a spoke `Relation` fixture with `extensions.nexus.world_id`
+    /// note: Build a spoke `Relation` fixture with `extensions.nexus.world_id`
     /// set, so the adapter can persist it (`world_id` is a required FK).
     fn spoke_relation(relation_id: &str, from_id: &str, to_id: &str) -> Relation {
         serde_json::from_value(json!({
@@ -1122,7 +1119,7 @@ mod tests {
         .expect("valid spoke Relation fixture")
     }
 
-    /// Normalize a created `Relation` for equality (R9 pin, QC2-F-002): the
+    /// note: Normalize a created `Relation` for equality (R9 pin, QC2-F-002): the
     /// per-call fields — the caller-supplied id and the `now`-derived
     /// timestamps — are dropped so two create projections can be compared.
     fn normalized_relation(r: &Relation) -> Value {
@@ -1134,7 +1131,7 @@ mod tests {
         v
     }
 
-    /// Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.
+    /// note: Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.
     fn unwrap_ok<T>(result: SpokeResult<T>, label: &str) -> T {
         match result {
             SpokeResult::Ok(v) => v,
@@ -1142,7 +1139,6 @@ mod tests {
         }
     }
 
-    // ── get_relation ──────────────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_relation_returns_not_found_for_missing() {
@@ -1188,7 +1184,7 @@ mod tests {
                 assert_eq!(r.relation_type, "allied_with");
                 assert_eq!(r.label.as_deref(), Some("Alice ↔ Bob"));
                 assert_eq!(r.revision, Some(1), "get must reflect the seeded revision");
-                // nexus-locals round-trip through extensions.nexus.
+                // note: nexus-locals round-trip through extensions.nexus.
                 let key = ExtensionKey::try_from("nexus").unwrap();
                 let ns = r.extensions.get(&key).expect("nexus namespace present");
                 assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
@@ -1200,7 +1196,7 @@ mod tests {
         }
     }
 
-    /// Round-trip a relation carrying the FULL set of nexus-locals
+    /// note: Round-trip a relation carrying the FULL set of nexus-locals
     /// (`extensions.nexus`: `world_id` + `symmetric` + `confidence` +
     /// `source_anchor_ids` + `needs_review` + `source`) through put → get
     /// and confirm every known key survives.
@@ -1211,7 +1207,7 @@ mod tests {
 
         let adapter = scoped(pool);
 
-        // Build a relation with every nexus-local set explicitly (the
+        // note: Build a relation with every nexus-local set explicitly (the
         // sibling `get_relation_round_trips_persisted_row` only proves the
         // default-seed shape; this one proves explicit values survive).
         let relation: Relation = serde_json::from_value(json!({
@@ -1238,7 +1234,7 @@ mod tests {
         let created = unwrap_ok(adapter.put_relation(relation, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Re-read through the port and confirm every nexus-local survived.
+        // note: Re-read through the port and confirm every nexus-local survived.
         //
         // V1.146 P5 T2: the `extensions_nexus_json` column now preserves
         // unknown `extensions.nexus` keys across the SQLite round-trip.
@@ -1262,7 +1258,7 @@ mod tests {
                     Some(&json!(true)),
                     "explicit symmetric=true survives"
                 );
-                // confidence is an f64 → JSON number; compare numerically.
+                // note: confidence is an f64 → JSON number; compare numerically.
                 let confidence = ns
                     .get("confidence")
                     .and_then(Value::as_f64)
@@ -1291,7 +1287,6 @@ mod tests {
         }
     }
 
-    // ── put_relation create path ──────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_happy_path_persists_row() {
@@ -1312,7 +1307,7 @@ mod tests {
             "create must seed revision = 1 (spoke convention)"
         );
 
-        // Verify the row landed with the expected nexus column mapping.
+        // note: Verify the row landed with the expected nexus column mapping.
         let row = get_relationship(&pool, "rel_happy")
             .await
             .expect("row persisted");
@@ -1370,7 +1365,7 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
 
         let adapter = scoped(pool);
-        // Build a relation without extensions.nexus.world_id.
+        // note: Build a relation without extensions.nexus.world_id.
         let relation: Relation = serde_json::from_value(json!({
             "schema_version": 1,
             "relation_id": "rel_no_world",
@@ -1405,7 +1400,7 @@ mod tests {
         let adapter = scoped(pool.clone());
         let relation = spoke_relation("rel_bad_endpoint", "kb_src", "kb_nonexistent");
 
-        // v1.184 P1 (Task 2, world-only endpoints): the World-owned endpoint
+        // invariant: v1.184 P1 (Task 2, world-only endpoints): the World-owned endpoint
         // pre-check now rejects a missing/foreign endpoint as INVALID_INPUT
         // *before* any INSERT is attempted, so the target FK constraint never
         // fires for this case. The caller error is invalid input, not a
@@ -1422,14 +1417,13 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected INVALID_INPUT reject"),
         }
 
-        // The transaction must have rolled back: no row exists.
+        // note: The transaction must have rolled back: no row exists.
         let rows = list_relationships_for_world(&pool, "wld_rel", true, 100)
             .await
             .unwrap();
         assert!(rows.is_empty(), "tx rolled back on rejected endpoint");
     }
 
-    // ── put_relation CAS update path ──────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_update_happy_path_bumps_revision() {
@@ -1438,7 +1432,7 @@ mod tests {
 
         let adapter = scoped(pool);
 
-        // Create → revision 1.
+        // note: Create → revision 1.
         let created = unwrap_ok(
             adapter
                 .put_relation(spoke_relation("rel_upd", "kb_src", "kb_dst"), None)
@@ -1447,7 +1441,7 @@ mod tests {
         );
         assert_eq!(created.revision, Some(1));
 
-        // First update: expected_base_revision = Some(1). CAS accepts;
+        // note: First update: expected_base_revision = Some(1). CAS accepts;
         // revision bumps 1 → 2. label + relation_type round-trip.
         let mut updated = created;
         updated.label = Some("Alice ↔ Bob (revised)".to_string());
@@ -1458,7 +1452,7 @@ mod tests {
         assert_eq!(rev2.revision, Some(2), "CAS update must bump revision");
         assert_eq!(rev2.relation_type, "opposes");
         assert_eq!(rev2.label.as_deref(), Some("Alice ↔ Bob (revised)"));
-        // nexus-locals preserved (world_id still present after update).
+        // note: nexus-locals preserved (world_id still present after update).
         let key = ExtensionKey::try_from("nexus").unwrap();
         assert_eq!(
             rev2.extensions.get(&key).and_then(|ns| ns.get("world_id")),
@@ -1466,7 +1460,7 @@ mod tests {
             "world_id is preserved across update"
         );
 
-        // Second update: expected_base_revision = Some(2). CAS accepts;
+        // note: Second update: expected_base_revision = Some(2). CAS accepts;
         // revision bumps 2 → 3 — proves the revision-bump chain repeats,
         // not a one-shot. Mutate the label again to distinguish the writes.
         let mut rev2_mut = rev2;
@@ -1482,7 +1476,7 @@ mod tests {
         );
         assert_eq!(rev3.label.as_deref(), Some("Alice ↔ Bob (v3)"));
 
-        // Re-read: persisted row has revision 3 + the latest label/type.
+        // note: Re-read: persisted row has revision 3 + the latest label/type.
         match adapter.get_relation("rel_upd").await {
             SpokeResult::Ok(r) => {
                 assert_eq!(r.revision, Some(3));
@@ -1500,7 +1494,7 @@ mod tests {
 
         let adapter = scoped(pool);
 
-        // Create → revision 1. Bump to 2. Then attempt another update with
+        // note: Create → revision 1. Bump to 2. Then attempt another update with
         // expected = 1 (caller read a stale base before the second writer
         // bumped). Store (2) > expected (1) → STORED_REVISION_STALE.
         let created = unwrap_ok(
@@ -1535,7 +1529,7 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
 
         let adapter = scoped(pool);
-        // No prior create — relation is absent. Caller passes expected = Some(3);
+        // note: No prior create — relation is absent. Caller passes expected = Some(3);
         // the relation-port CAS mapping collapses this to STORED_REVISION_STALE
         // with storeRevision = null (V1.144 brief).
         match adapter
@@ -1556,9 +1550,8 @@ mod tests {
         }
     }
 
-    // ── V1.144 Phase 5 fix: clear-on-omit + round-trip safety ──────────
 
-    /// Regression (V1.144 Phase 5 fix): an update that OMITS the optional
+    /// note: Regression (V1.144 Phase 5 fix): an update that OMITS the optional
     /// nexus-locals must CLEAR them, matching the pre-cutover
     /// `update_relationship_in_tx` (which wrote every bound local —
     /// None→SQL NULL). The P2 cutover accidentally switched these to
@@ -1571,7 +1564,7 @@ mod tests {
 
         let adapter = scoped(pool);
 
-        // Create with the full set of optional locals set explicitly.
+        // note: Create with the full set of optional locals set explicitly.
         let seed: Relation = serde_json::from_value(json!({
             "schema_version": 1,
             "relation_id": "rel_clr",
@@ -1592,7 +1585,7 @@ mod tests {
         let created = unwrap_ok(adapter.put_relation(seed, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Update with a Relation that carries ONLY the required world_id and
+        // note: Update with a Relation that carries ONLY the required world_id and
         // omits every optional local (plus a label change so the CAS write is
         // observable). Clear-on-omit must clear confidence/symmetric/etc.
         let update: Relation = serde_json::from_value(json!({
@@ -1612,7 +1605,7 @@ mod tests {
         let updated = unwrap_ok(adapter.put_relation(update, Some(1)).await, "update");
         assert_eq!(updated.revision, Some(2));
 
-        // Re-read through the port and confirm every omitted local is cleared.
+        // note: Re-read through the port and confirm every omitted local is cleared.
         let r = unwrap_ok(adapter.get_relation("rel_clr").await, "re-read");
         let key = ExtensionKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
@@ -1639,9 +1632,8 @@ mod tests {
         assert_eq!(r.label.as_deref(), Some("cleared locals"));
     }
 
-    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
 
-    /// DB failure (dropped table) on get surfaces `InternalError`.
+    /// note: DB failure (dropped table) on get surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_relation_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -1664,7 +1656,7 @@ mod tests {
         }
     }
 
-    /// DB failure on `put_relation` create path surfaces `InternalError`.
+    /// note: DB failure on `put_relation` create path surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_create_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -1688,7 +1680,7 @@ mod tests {
         }
     }
 
-    /// DB failure on `put_relation` update path surfaces `InternalError`.
+    /// note: DB failure on `put_relation` update path surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_update_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -1703,7 +1695,7 @@ mod tests {
         );
         assert_eq!(created.revision, Some(1));
 
-        // Drop the table to simulate DB failure on update.
+        // note: Drop the table to simulate DB failure on update.
         sqlx::query("DROP TABLE kb_relationships")
             .execute(&pool)
             .await
@@ -1721,9 +1713,8 @@ mod tests {
         }
     }
 
-    // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
 
-    /// Validation failure (missing required extension field) still surfaces
+    /// note: Validation failure (missing required extension field) still surfaces
     /// `InvalidInput` — no DB I/O is performed before the guard.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn relation_validation_still_rejects_invalid_input() {
@@ -1731,7 +1722,7 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
 
         let adapter = scoped(pool);
-        // Create-success-then-recreate → RelationAlreadyExists (domain signal, not storage)
+        // note: Create-success-then-recreate → RelationAlreadyExists (domain signal, not storage)
         let first = spoke_relation("rel_val_ae", "kb_src", "kb_dst");
         let _ = unwrap_ok(
             adapter.put_relation(first.clone(), None).await,
@@ -1749,7 +1740,7 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected AlreadyExists reject"),
         }
 
-        // get on non-existent → RelationNotFound
+        // note: get on non-existent → RelationNotFound
         match adapter.get_relation("rel_never_created").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -1762,13 +1753,12 @@ mod tests {
         }
     }
 
-    // ── V1.146 P0: OCC rejects unchanged ───────────────────────────────
-    // put_relation_update_stale_rejects_stored_revision_stale and
+    // note: put_relation_update_stale_rejects_stored_revision_stale and
     // put_relation_update_on_absent_rejects_stored_revision_stale above
     // already cover STORED_REVISION_STALE — they pass unchanged (confirmed
     // by the red-green run). No additional OCC test needed.
 
-    /// Safety check (V1.144 Phase 5 fix): a full get→put round-trip (read the
+    /// invariant: Safety check (V1.144 Phase 5 fix): a full get→put round-trip (read the
     /// relation via `get_relation`, mutate a non-local field, write it back via
     /// `put_relation`) must PRESERVE every nexus-local. This proves
     /// clear-on-omit is safe: `get_relation` (`kb_relationship_row_to_spoke`) fully
@@ -1781,7 +1771,7 @@ mod tests {
 
         let adapter = scoped(pool);
 
-        // Create with the full set of locals set explicitly.
+        // note: Create with the full set of locals set explicitly.
         let seed: Relation = serde_json::from_value(json!({
             "schema_version": 1,
             "relation_id": "rel_rt2",
@@ -1803,7 +1793,7 @@ mod tests {
         let created = unwrap_ok(adapter.put_relation(seed, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Read-modify-write: get the fully-populated Relation, mutate a
+        // note: Read-modify-write: get the fully-populated Relation, mutate a
         // non-local field (label), write it back with the get-result's
         // revision as the CAS base.
         let read = unwrap_ok(adapter.get_relation("rel_rt2").await, "get");
@@ -1816,7 +1806,7 @@ mod tests {
         );
         assert_eq!(written.revision, Some(2));
 
-        // Re-read: every local survived the get→put round-trip (clear-on-omit
+        // why: Re-read: every local survived the get→put round-trip (clear-on-omit
         // did NOT fire because get populated them all).
         let r = unwrap_ok(adapter.get_relation("rel_rt2").await, "final get");
         assert_eq!(r.label.as_deref(), Some("round-tripped"));
@@ -1837,14 +1827,13 @@ mod tests {
             Some(&json!(["anc_a", "anc_b"]))
         );
         assert_eq!(ns.get("needs_review"), Some(&json!(true)));
-        // `source` is immutable on the update path (not in
+        // note: `source` is immutable on the update path (not in
         // UpdateRelationshipParams) — preserved from the stored row.
         assert_eq!(ns.get("source"), Some(&json!("extraction")));
     }
 
-    // ── V1.146 P5 T2: unknown extensions.nexus key round-trip ──────────
 
-    /// Create a Relation with an unknown `extensions.nexus` key, then re-read
+    /// note: Create a Relation with an unknown `extensions.nexus` key, then re-read
     /// it and confirm the unknown key survives the `SQLite` round-trip.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_round_trips_unknown_nexus_key() {
@@ -1853,7 +1842,7 @@ mod tests {
 
         let adapter = scoped(pool);
 
-        // Create with a known nexus-local (world_id) plus an unknown key.
+        // note: Create with a known nexus-local (world_id) plus an unknown key.
         let relation: Relation = serde_json::from_value(json!({
             "schema_version": 1,
             "relation_id": "rel_unknown_key",
@@ -1874,15 +1863,15 @@ mod tests {
         let created = unwrap_ok(adapter.put_relation(relation, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Re-read and confirm the unknown keys survived alongside the known ones.
+        // note: Re-read and confirm the unknown keys survived alongside the known ones.
         let r = unwrap_ok(adapter.get_relation("rel_unknown_key").await, "get");
         let key = ExtensionKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
 
-        // Known key: always present from the typed column.
+        // note: Known key: always present from the typed column.
         assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
 
-        // Unknown keys: survived the round-trip via extensions_nexus_json.
+        // note: Unknown keys: survived the round-trip via extensions_nexus_json.
         assert_eq!(
             ns.get("custom_flag"),
             Some(&json!("experimental")),
@@ -1900,7 +1889,7 @@ mod tests {
         );
     }
 
-    /// V1.146 P5 T2: the unknown-key round-trip also holds across updates.
+    /// note: V1.146 P5 T2: the unknown-key round-trip also holds across updates.
     /// Create with unknown keys, update (mutating only the label), re-read —
     /// unknown keys must still be present.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1929,7 +1918,7 @@ mod tests {
         let created = unwrap_ok(adapter.put_relation(seed, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Update: change only the label. The unknown keys must survive.
+        // note: Update: change only the label. The unknown keys must survive.
         let mut update = created;
         update.label = Some("updated label".to_string());
         let updated = unwrap_ok(adapter.put_relation(update, Some(1)).await, "update");
@@ -1956,9 +1945,8 @@ mod tests {
         );
     }
 
-    // ── V1.149 P1: list_hop_edges_for_world (inherent hop-edge loader) ──
 
-    /// Seed a confirmed + a suggested relation through the port, then load
+    /// note: Seed a confirmed + a suggested relation through the port, then load
     /// hop edges: the loader must return only the confirmed graph, mapped to
     /// engine-local `HopEdge`s (the `RelationPort` gap — get/put only — is
     /// bridged by the storage list primitive, spec §5).
@@ -1968,7 +1956,7 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
 
         let adapter = scoped(pool);
-        // Two confirmed edges (different types) + one extraction suggestion
+        // note: Two confirmed edges (different types) + one extraction suggestion
         // (needs_review = true — must be excluded from lore hops).
         unwrap_ok(
             adapter
@@ -2024,9 +2012,8 @@ mod tests {
         );
     }
 
-    // ── V1.158 P2 T3: hop-edge pagination (R-V1149P1-001) ──────────────
 
-    /// Seed a confirmed relation row with an explicit `updated_at` (RFC3339
+    /// note: Seed a confirmed relation row with an explicit `updated_at` (RFC3339
     /// text) so pagination ordering assertions are deterministic.
     async fn seed_relation_row(pool: &sqlx::SqlitePool, id: &str, updated_at: &str) {
         let mut tx = pool.begin().await.unwrap();
@@ -2055,7 +2042,7 @@ mod tests {
         tx.commit().await.unwrap();
     }
 
-    /// Walk a graph page by page with `list_hop_edges_for_world_paginated`,
+    /// note: Walk a graph page by page with `list_hop_edges_for_world_paginated`,
     /// returning `(pages, ids)` in traversal order.
     async fn walk_hop_pages(adapter: &NexusAdapter<'_>, page_size: i64) -> (usize, Vec<String>) {
         let mut seen = Vec::new();
@@ -2084,7 +2071,7 @@ mod tests {
     async fn hop_edge_pagination_traverses_multi_page_graph() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
-        // Oldest → newest: t0 < t1 < ... < t4; page ordering is newest-first.
+        // note: Oldest → newest: t0 < t1 < ... < t4; page ordering is newest-first.
         for (i, t) in [
             "2026-08-01T00:00:00+00:00",
             "2026-08-02T00:00:00+00:00",
@@ -2114,7 +2101,7 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
         let adapter = scoped(pool.clone());
 
-        // Empty graph: empty first page, no next cursor.
+        // note: Empty graph: empty first page, no next cursor.
         let page = adapter
             .list_hop_edges_for_world_paginated("wld_rel", 2, None)
             .await
@@ -2122,7 +2109,7 @@ mod tests {
         assert!(page.edges.is_empty(), "empty graph → empty page");
         assert!(page.next_cursor.is_none(), "empty graph → no next cursor");
 
-        // Exactly at limit: 2 rows, page size 2 → full page, NO next cursor
+        // note: Exactly at limit: 2 rows, page size 2 → full page, NO next cursor
         // (the overflow probe sees exactly `limit` rows, so the graph is
         // exhausted — no phantom trailing page).
         seed_relation_row(&pool, "rel_exact1", "2026-08-01T00:00:00+00:00").await;
@@ -2137,7 +2124,7 @@ mod tests {
             "exactly at limit → graph exhausted"
         );
 
-        // Overflow probe: add a third row → the full first page now yields a
+        // note: Overflow probe: add a third row → the full first page now yields a
         // cursor; the second page drains the remainder and terminates.
         seed_relation_row(&pool, "rel_extra", "2026-08-03T00:00:00+00:00").await;
         let page1 = adapter
@@ -2158,7 +2145,7 @@ mod tests {
     async fn hop_edge_pagination_tiebreaks_on_relationship_id() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
-        // Identical `updated_at` — ordering must fall back to the
+        // note: Identical `updated_at` — ordering must fall back to the
         // `relationship_id` tiebreaker (the total order that makes the
         // keyset walk deterministic and gap-free).
         seed_relation_row(&pool, "rel_tie_a", "2026-08-01T00:00:00+00:00").await;
@@ -2227,12 +2214,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn hop_edge_default_auto_paginates_beyond_limit() {
-        // Verify the default method auto-paginates: with a small page limit
+        // note: Verify the default method auto-paginates: with a small page limit
         // (simulated via direct paginated calls), the default method should
         // return ALL edges, not just the first page.
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
-        // Seed 5 rows — then verify default returns all 5 even when the
+        // note: Seed 5 rows — then verify default returns all 5 even when the
         // internal page size would split them.
         for (i, t) in [
             "2026-08-01T00:00:00+00:00",
@@ -2247,7 +2234,7 @@ mod tests {
             seed_relation_row(&pool, &format!("rel_auto{i}"), t).await;
         }
         let adapter = scoped(pool);
-        // Use page size 2 to force multi-page traversal.
+        // note: Use page size 2 to force multi-page traversal.
         let mut all_paginated = Vec::new();
         let mut cursor: Option<RelationshipCursor> = None;
         loop {
@@ -2261,7 +2248,7 @@ mod tests {
                 break;
             }
         }
-        // The default method should return the same set as manual pagination.
+        // note: The default method should return the same set as manual pagination.
         let default_edges = adapter
             .list_hop_edges_for_world("wld_rel")
             .await
@@ -2277,9 +2264,8 @@ mod tests {
             "all 5 edges returned — no truncation"
         );
     }
-    // ── v1.184 P1 T2: World-only same-world endpoint enforcement ──────
 
-    /// Seed a Character-owned KB row (`owner_kind='character'`, NULL
+    /// note: Seed a Character-owned KB row (`owner_kind='character'`, NULL
     /// `world_id`) plus its `characters` FK parent.
     async fn seed_character_owned_endpoint(pool: &sqlx::SqlitePool, key_block_id: &str) {
         // SAFETY: test-only static INSERTs with bind params.
@@ -2305,7 +2291,7 @@ mod tests {
         .unwrap();
     }
 
-    /// Assert a create rejects with `INVALID_INPUT` and persists nothing.
+    /// note: Assert a create rejects with `INVALID_INPUT` and persists nothing.
     async fn assert_create_rejected_invalid_input(pool: &sqlx::SqlitePool, relation: Relation) {
         let adapter = scoped(pool.clone());
         match adapter.put_relation(relation, None).await {
@@ -2386,7 +2372,7 @@ mod tests {
         .await;
     }
 
-    /// R9 (V1.206, strengthened per QC2-F-002 / QC3-003): the hidden-id create
+    /// note: R9 (V1.206, strengthened per QC2-F-002 / QC3-003): the hidden-id create
     /// must answer the FULL absent-id projection shape (nothing persisted), and
     /// the stored hidden row must be untouched by the rolled-back create.
     async fn assert_hidden_create_answers_absent_shape(pool: &sqlx::SqlitePool) {
@@ -2429,7 +2415,7 @@ mod tests {
         );
     }
 
-    /// v1.191 P1 T8 (durable §4.2): an endpoint hidden from the caller is not
+    /// note: v1.191 P1 T8 (durable §4.2): an endpoint hidden from the caller is not
     /// an endpoint. A same-world `owner-private` row of another holder is
     /// rejected by the create path with exactly the shape an absent id
     /// produces, and a stored relation whose endpoint is hidden reads as
@@ -2446,7 +2432,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        // A private row of a foreign holder inside the same world.
+        // note: A private row of a foreign holder inside the same world.
         let mut hidden =
             KnowledgeEntryRecord::new("wld_rel", nexus_contracts::BlockType::Character, "Hidden");
         hidden.entry_id = "kb_hidden_rel".to_string();
@@ -2457,14 +2443,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Create with a hidden endpoint → the absent-endpoint reject shape.
+        // note: Create with a hidden endpoint → the absent-endpoint reject shape.
         assert_create_rejected_invalid_input(
             &pool,
             spoke_relation("rel_hidden_ep", "kb_src", "kb_hidden_rel"),
         )
         .await;
 
-        // A relation already stored between visible endpoints still reads and
+        // note: A relation already stored between visible endpoints still reads and
         // updates; hiding one endpoint afterwards makes both read and update
         // answer "not found".
         let adapter = scoped(pool.clone());
@@ -2482,7 +2468,7 @@ mod tests {
             "visible update",
         );
 
-        // Re-point the relation at a hidden endpoint directly (a stored row
+        // note: Re-point the relation at a hidden endpoint directly (a stored row
         // the caller's selection cannot see).
         sqlx::query("UPDATE kb_relationships SET target_entity_id = ? WHERE relationship_id = ?")
             .bind("kb_hidden_rel")
@@ -2499,7 +2485,7 @@ mod tests {
             ),
             SpokeResult::Ok(_) => panic!("a relation with a hidden endpoint must not be served"),
         }
-        // R9 (V1.206): the create pre-check is scoped, so the stored-but-hidden
+        // note: R9 (V1.206): the create pre-check is scoped, so the stored-but-hidden
         // relation is not an existence oracle. The PK collision at INSERT is
         // rendered as the absent-id SUCCESS shape (phantom success — nothing is
         // written), so neither the reject code nor the write result discloses
@@ -2513,7 +2499,7 @@ mod tests {
         // preserved by the rolled-back create.
         assert_hidden_create_answers_absent_shape(&pool).await;
 
-        // The update path answers the same absent shape as a missing relation
+        // invariant: The update path answers the same absent shape as a missing relation
         // (a hidden endpoint must never leak through the reject's shape).
         match adapter
             .put_relation(
@@ -2538,7 +2524,7 @@ mod tests {
         }
     }
 
-    /// v1.191 P1 T8: the hop-edge loader is a KE-id channel, so it refuses to
+    /// note: v1.191 P1 T8: the hop-edge loader is a KE-id channel, so it refuses to
     /// run without a bound scope and drops edges whose endpoints the selection
     /// does not admit.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2572,7 +2558,7 @@ mod tests {
                 .await,
             "visible edge",
         );
-        // Stored directly: the port refuses to create an edge on a hidden
+        // note: Stored directly: the port refuses to create an edge on a hidden
         // endpoint, which is exactly why a legacy/foreign row is the risk.
         sqlx::query(
             "INSERT INTO kb_relationships \
@@ -2602,7 +2588,7 @@ mod tests {
             "no hidden endpoint id may be emitted: {edges:?}"
         );
 
-        // The host-only construction refuses the loader entirely.
+        // note: The host-only construction refuses the loader entirely.
         let host = NexusAdapter::new_host(pool);
         let err = host
             .list_hop_edges_for_world("wld_rel")

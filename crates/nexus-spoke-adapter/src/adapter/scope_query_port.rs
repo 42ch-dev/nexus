@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Knowledge/timeline query ports — production for both knowledge entries
 //! (via `KnowledgeQueryPort`) and timeline events (via `ScopeQueryPort`);
 //! spec §7.4 production-vs-stub matrix.
@@ -50,7 +51,7 @@ use serde_json::{json, Map, Value};
 use spoke_schemas::ExtensionKey;
 #[async_trait]
 impl KnowledgeQueryPort for NexusAdapter<'_> {
-    /// List the active knowledge entries for the scope's world.
+    /// note: List the active knowledge entries for the scope's world.
     ///
     /// v1.191 P1 T8 (durable §4.1/§4.2): the listing is served from the
     /// adapter's **request-bound selection**, so the §4.2 visibility conjunct
@@ -79,18 +80,18 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
         let world_id = scope.scope_id.clone();
         let world_owner = KnowledgeOwnerRef::world(world_id.as_str());
         if !selection.containers().contains(&world_owner) {
-            // Fail closed the way the storage selection does: a world the
+            // invariant: Fail closed the way the storage selection does: a world the
             // caller's selection never authorized yields no rows at all.
             return SpokeResult::Ok(Vec::new());
         }
-        // spoke-schemas 0.16.0 presence fix: optional members are Option<...>
+        // note: spoke-schemas 0.16.0 presence fix: optional members are Option<...>
         // (absent → None); the pre-0.16 semantics treated absent as empty.
         let entry_ids: Vec<String> = scope.entry_ids.clone().unwrap_or_default();
         let entry_types: Vec<String> = scope.entry_types.clone().unwrap_or_default();
 
         let store = SqliteKbStore::new(self.pool.clone());
         let entries = if entry_ids.is_empty() && entry_types.is_empty() {
-            // Unfiltered: one keyset page of `LIMIT + 1` so the safety cap is
+            // note: Unfiltered: one keyset page of `LIMIT + 1` so the safety cap is
             // measured over eligible rows only. The keyset order
             // (`created_at`, `key_block_id`) is the ordering the pre-T8 read
             // produced.
@@ -126,7 +127,7 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
             }
             rows
         } else {
-            // Filtered: the complete admitted set for the container, narrowed
+            // invariant: Filtered: the complete admitted set for the container, narrowed
             // by the client filters (which can only shrink an already-eligible
             // set — visibility is decided in SQL, never here).
             let rows = match store.list_by_owner_complete(&world_owner, selection).await {
@@ -150,13 +151,13 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
 
         let wire: Vec<KnowledgeEntry> = entries
             .iter()
-            // Reuse the V1.139 conversion seam — sole boundary between
+            // note: Reuse the V1.139 conversion seam — sole boundary between
             // KnowledgeEntryRecord rows and the spoke wire type (spec §7.1); free
             // function in nexus-spoke-adapter since V1.145 P1a.
             .map(knowledge_record_to_spoke)
             .collect();
 
-        // Carrier-boundary guard (QC2-W003): the reserved `_nexus_body`
+        // invariant: Carrier-boundary guard (QC2-W003): the reserved `_nexus_body`
         // carrier is MCA-read-path + persist-path only. This orchestrator
         // read path hands spoke entries straight back to the orchestrator,
         // so a leaked carrier would persist into the `extensions` DB
@@ -174,7 +175,7 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
 
 #[async_trait]
 impl ScopeQueryPort for NexusAdapter<'_> {
-    /// List the timeline events matching the scope (production — V1.145 P3).
+    /// note: List the timeline events matching the scope (production — V1.145 P3).
     ///
     /// Queries `narrative_timeline_events` via [`list_timeline_events_scoped`]
     /// (the local-db read primitive). Filters: `scope.scope_id` → `world_id`;
@@ -185,7 +186,7 @@ impl ScopeQueryPort for NexusAdapter<'_> {
     async fn list_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
-        // branch_id rides scope.extensions["nexus"] (spoke-native since 0.6.0),
+        // note: branch_id rides scope.extensions["nexus"] (spoke-native since 0.6.0),
         // looked up via the typify ExtensionKey newtype — mirrors the
         // MCA `kb_query_from_scope` extraction (spec §7.5 scope-pushdown).
         let branch_id = scope
@@ -215,7 +216,7 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             }
         };
 
-        // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
+        // invariant: Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
         // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
         // defined in nexus-narrative packs the 7 typed nexus fields into
         // extensions.nexus). Sole boundary between the nexus domain row and
@@ -229,9 +230,8 @@ impl ScopeQueryPort for NexusAdapter<'_> {
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
 
-/// Construct the typed `ExtensionKey` for the `"nexus"` namespace.
+/// note: Construct the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
 /// namespace regex, so construction is infallible at runtime. The newtype does
@@ -243,7 +243,7 @@ fn nexus_scope_key() -> ExtensionKey {
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
-/// Construct a `SpokeResult::Reject` (mirrors the helper in
+/// note: Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `knowledge_entry_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
     let details_map = match details {
@@ -261,7 +261,6 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
     })
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -276,7 +275,7 @@ mod tests {
     use nexus_local_db::{open_pool, run_migrations};
     use spoke_schemas::timeline_event::ExtensionKey;
 
-    /// Register the fixture creator's holder so a governed row can be stored
+    /// note: Register the fixture creator's holder so a governed row can be stored
     /// (the native `holder_entry_id` column is FK-bound to the registry, and
     /// these selections authorize no holder — so the row is private to them).
     async fn register_creator_holder(pool: &sqlx::SqlitePool) -> String {
@@ -288,7 +287,7 @@ mod tests {
         holder
     }
 
-    /// A KE-capable adapter whose selection authorizes exactly `world_id`
+    /// note: A KE-capable adapter whose selection authorizes exactly `world_id`
     /// (`CreatorManagement` over one World container, no known-governance
     /// holders), so these tests exercise the request-bound listing.
     fn scoped(pool: sqlx::SqlitePool, world_id: &str) -> NexusAdapter<'static> {
@@ -340,7 +339,7 @@ mod tests {
         .enumerate()
         {
             let mut entry = KnowledgeEntryRecord::new("wld_scope", block_type, name);
-            // Distinct entry ids so the `entry_ids` filter test has signal.
+            // note: Distinct entry ids so the `entry_ids` filter test has signal.
             entry.entry_id = format!("kb_scope_{idx}");
             entry.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
@@ -353,7 +352,7 @@ mod tests {
     }
 
     fn scope_for(world_id: &str) -> Scope {
-        // Round-trip-safe construction: spoke's `Scope` carries the world
+        // note: Round-trip-safe construction: spoke's `Scope` carries the world
         // id in `scope_id` (the protocol-neutral opaque selector). The
         // minimal scope has just `scope_id`; other filters default empty.
         serde_json::from_value(json!({
@@ -398,7 +397,7 @@ mod tests {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
-        // The world does not exist, but list_by_world treats it as an
+        // note: The world does not exist, but list_by_world treats it as an
         // empty result (no rows match the WHERE clause). The port
         // surfaces that as an empty success rather than a reject — the
         // spoke scope query is "what entries exist in this scope?" and
@@ -441,7 +440,7 @@ mod tests {
         assert_eq!(entries[0].canonical_name.to_string(), "Alice");
     }
 
-    /// v1.191 P1 T8: the listing is served from the bound selection, so a
+    /// invariant: v1.191 P1 T8: the listing is served from the bound selection, so a
     /// private row of another holder never appears — and a world outside the
     /// selection yields nothing at all (the wire scope cannot widen it).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -449,7 +448,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _seeded) = seed_world_with_entries(&pool).await;
 
-        // A foreign-holder private row in the same world.
+        // note: A foreign-holder private row in the same world.
         let mut private = KnowledgeEntryRecord::new(&world_id, BlockType::Character, "HiddenNote");
         private.entry_id = "kb_hidden_scope".to_string();
         private.holder_entry_id = Some(register_creator_holder(&pool).await);
@@ -469,7 +468,7 @@ mod tests {
             "a foreign-holder private row must not be listed: {entries:?}"
         );
 
-        // A world the selection never authorized yields no rows at all.
+        // invariant: A world the selection never authorized yields no rows at all.
         let foreign = match adapter
             .list_knowledge_entries(&scope_for("wld_foreign"))
             .await
@@ -480,7 +479,7 @@ mod tests {
         assert!(foreign.is_empty(), "foreign world must contribute nothing");
     }
 
-    /// v1.191 P1 T8 (durable §4.1/§9): a wire `Scope.viewpoint` is a client
+    /// note: v1.191 P1 T8 (durable §4.1/§9): a wire `Scope.viewpoint` is a client
     /// value — it must equal the bound resolved holder, and a management
     /// selection carries none, so any supplied viewpoint is refused.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -511,7 +510,7 @@ mod tests {
             SpokeResult::Ok(_) => panic!("a foreign viewpoint must reject"),
         }
 
-        // And the host-only construction cannot serve the listing at all.
+        // note: And the host-only construction cannot serve the listing at all.
         let host = NexusAdapter::new_host(pool.clone());
         match host.list_knowledge_entries(&scope_for("wld_any")).await {
             SpokeResult::Reject(r) => assert_eq!(
@@ -528,14 +527,14 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, seeded) = seed_world_with_entries(&pool).await;
 
-        // Fill the unfiltered list window with filler rows so the seeded
+        // note: Fill the unfiltered list window with filler rows so the seeded
         // entries would be omitted by the old list_by_world + in-memory filter.
         let store = SqliteKbStore::new(pool.clone());
         for i in 0..LIST_BY_WORLD_LIMIT {
             let mut filler =
                 KnowledgeEntryRecord::new(&world_id, BlockType::Item, &format!("Filler_{i:03}"));
             filler.entry_id = format!("kb_fill_{i:03}");
-            // Deterministic keyset order: these sort before the target by
+            // note: Deterministic keyset order: these sort before the target by
             // `created_at` regardless of insert timing.
             filler.created_at = "2000-01-01T00:00:00Z".to_string();
             store.insert_knowledge_entry(filler).await.unwrap();
@@ -551,7 +550,7 @@ mod tests {
         .await
         .unwrap();
 
-        // The regression claim is that the target lies *beyond* the first
+        // why: The regression claim is that the target lies *beyond* the first
         // unfiltered window — a filtered hit proves nothing otherwise. Read the
         // same keyset window the unfiltered port serves and pin that here.
         let window = store
@@ -641,7 +640,7 @@ mod tests {
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
 
-        // Unfiltered scope returns every event in the world (3 seeded across
+        // note: Unfiltered scope returns every event in the world (3 seeded across
         // 2 branches). The port converts each nexus row to spoke via the
         // V1.143 seam; the spoke type carries world_id + branch_id in
         // extensions.nexus (spec §7.1 conversion contract).
@@ -666,7 +665,7 @@ mod tests {
             "spoke events carry branch_id in extensions.nexus"
         );
         assert!(has_fork_branch, "events from both branches are present");
-        // world_id survives the conversion seam (extensions.nexus.world_id).
+        // note: world_id survives the conversion seam (extensions.nexus.world_id).
         assert!(events.iter().all(|e| {
             e.extensions
                 .get(&key)
@@ -682,14 +681,14 @@ mod tests {
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
         let adapter = NexusAdapter::new_host(pool);
-        // branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0).
+        // note: branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0).
         let scope = timeline_scope(&world_id, Some("fbk_root"), &[]);
         let events = match adapter.list_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
 
-        // Only the two events on fbk_root match; the fbk_fork event is excluded.
+        // note: Only the two events on fbk_root match; the fbk_fork event is excluded.
         assert_eq!(events.len(), 2, "branch_id filter narrows to one branch");
         let key = nexus_te_key();
         assert!(events.iter().all(|e| {
@@ -707,7 +706,7 @@ mod tests {
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
         let adapter = NexusAdapter::new_host(pool);
-        // timeline_event_ids is a native Scope field (not under extensions).
+        // note: timeline_event_ids is a native Scope field (not under extensions).
         let scope = timeline_scope(&world_id, None, &["evt_tl_1"]);
         let events = match adapter.list_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
@@ -731,14 +730,13 @@ mod tests {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
-        // No persisted events for the world → empty success (matches
+        // note: No persisted events for the world → empty success (matches
         // list_knowledge_entries' empty-world behavior; an empty answer is valid).
         assert!(events.is_empty());
     }
 
-    // ── timeline test helpers ──────────────────────────────────────────
 
-    /// Seed a world with timeline events across two branches for scope-filter
+    /// note: Seed a world with timeline events across two branches for scope-filter
     /// tests: `evt_tl_0`/`evt_tl_1` on `fbk_root`, `evt_tl_2` on `fbk_fork`.
     async fn seed_world_with_timeline_events(pool: &sqlx::SqlitePool) -> (String, [String; 3]) {
         seed::world(
@@ -756,7 +754,7 @@ mod tests {
             "evt_tl_1".to_string(),
             "evt_tl_2".to_string(),
         ];
-        // Root branch: sequence 0 and 1.
+        // note: Root branch: sequence 0 and 1.
         seed::event(
             pool,
             &event_ids[0],
@@ -775,7 +773,7 @@ mod tests {
             1,
         )
         .await;
-        // Fork branch: sequence 0.
+        // note: Fork branch: sequence 0.
         seed::event(
             pool,
             &event_ids[2],
@@ -788,7 +786,7 @@ mod tests {
         ("wld_tl".to_string(), event_ids)
     }
 
-    /// Build a spoke `Scope` for timeline queries: `scope_id` = world, optional
+    /// note: Build a spoke `Scope` for timeline queries: `scope_id` = world, optional
     /// `extensions["nexus"]["branch_id"]`, optional `timeline_event_ids`.
     fn timeline_scope(world_id: &str, branch_id: Option<&str>, event_ids: &[&str]) -> Scope {
         let mut wire = serde_json::Map::new();
@@ -826,7 +824,7 @@ mod tests {
             .expect("timeline scope wire shape is schema-valid")
     }
 
-    /// Typed `ExtensionKey` for the `"nexus"` namespace — the only
+    /// note: Typed `ExtensionKey` for the `"nexus"` namespace — the only
     /// way to read `extensions.nexus` on a spoke `TimelineEvent` (the typify
     /// newtype does not impl `Borrow<str>`).
     fn nexus_te_key() -> ExtensionKey {
@@ -834,9 +832,8 @@ mod tests {
             .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
 
-    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
 
-    /// DB failure (dropped table) on `list_knowledge_entries` surfaces `InternalError`.
+    /// note: DB failure (dropped table) on `list_knowledge_entries` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_knowledge_entries_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -859,7 +856,7 @@ mod tests {
         }
     }
 
-    /// DB failure (dropped table) on `list_timeline_events` surfaces `InternalError`.
+    /// note: DB failure (dropped table) on `list_timeline_events` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;

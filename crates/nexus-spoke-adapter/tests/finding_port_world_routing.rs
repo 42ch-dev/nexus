@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `FindingPort.put_findings` AR-2 routing tests (V1.165 P1 T2 / DR-68) —
 //! per-finding `extensions.nexus` discriminator.
 //!
@@ -18,7 +19,7 @@ use nexus_local_db::{open_pool, run_migrations};
 use nexus_spoke_adapter::{Finding, FindingPort, NexusAdapter, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Value};
 
-/// A KE-capable adapter whose selection authorizes the worlds these
+/// note: A KE-capable adapter whose selection authorizes the worlds these
 /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
 fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
     NexusAdapter::new(
@@ -38,7 +39,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Seed creator + work (FK target for the legacy `findings` table).
+/// note: Seed creator + work (FK target for the legacy `findings` table).
 async fn seed_work(pool: &sqlx::SqlitePool) {
     // SAFETY: test-only fixture scaffolding — inserts match the creators /
     // works DDL (same chain the in-crate finding_port tests seed).
@@ -61,7 +62,7 @@ async fn seed_work(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
-/// Seed creator + world (FK target for the `world_findings` table).
+/// note: Seed creator + world (FK target for the `world_findings` table).
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
     // SAFETY: test-only fixture scaffolding — inserts match the creators /
     // narrative_worlds DDL (mirrors nexus-local-db world_findings tests).
@@ -85,7 +86,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
     .unwrap();
 }
 
-/// A spoke `Finding` fixture carrying exactly one routing key in
+/// note: A spoke `Finding` fixture carrying exactly one routing key in
 /// `extensions.nexus` (`work_id` xor `world_id`, or both, or neither).
 fn spoke_finding(finding_id: &str, routing: &Value) -> Finding {
     serde_json::from_value(json!({
@@ -100,7 +101,7 @@ fn spoke_finding(finding_id: &str, routing: &Value) -> Finding {
     .expect("valid spoke Finding fixture")
 }
 
-/// A work-scoped finding: `extensions.nexus.work_id` only.
+/// note: A work-scoped finding: `extensions.nexus.work_id` only.
 fn work_finding(finding_id: &str) -> Finding {
     spoke_finding(
         finding_id,
@@ -108,7 +109,7 @@ fn work_finding(finding_id: &str) -> Finding {
     )
 }
 
-/// A world-scoped finding: `extensions.nexus.world_id` only (creator id
+/// note: A world-scoped finding: `extensions.nexus.world_id` only (creator id
 /// rides along as provenance — optional on the world path).
 fn world_finding(finding_id: &str) -> Finding {
     spoke_finding(
@@ -117,7 +118,7 @@ fn world_finding(finding_id: &str) -> Finding {
     )
 }
 
-/// Fetch the persisted legacy `findings` row (11-tuple projection; test-only).
+/// note: Fetch the persisted legacy `findings` row (11-tuple projection; test-only).
 #[allow(clippy::type_complexity)]
 type FindingRow = (
     String,
@@ -157,7 +158,6 @@ async fn assert_legacy_finding_absent(pool: &sqlx::SqlitePool, finding_id: &str)
     );
 }
 
-// ── AR-2: work path (byte-identical regression) ────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn work_scoped_finding_routes_to_legacy_findings_table() {
@@ -173,14 +173,14 @@ async fn work_scoped_finding_routes_to_legacy_findings_table() {
     assert_eq!(returned.len(), 1);
     assert_eq!(returned[0].finding_id, "fnd_wrk");
 
-    // Legacy row: vocabulary MAPPED (info → info here), work FK present.
+    // note: Legacy row: vocabulary MAPPED (info → info here), work FK present.
     let row = fetch_legacy_finding(&pool, "fnd_wrk").await;
     assert_eq!(row.1, "wrk_test", "work_id FK");
     assert_eq!(row.3, "info", "spoke `info` → nexus `info`");
     assert_eq!(row.8, "ctr_test", "creator_id");
     assert_eq!(row.9, "craft", "default kind");
 
-    // No world row must exist for a work-scoped finding.
+    // note: No world row must exist for a work-scoped finding.
     assert!(get_world_finding(&pool, "fnd_wrk").await.unwrap().is_none());
 }
 
@@ -190,7 +190,7 @@ async fn work_path_vocabulary_mapping_unchanged() {
     seed_work(&pool).await;
 
     let adapter = scoped(pool.clone());
-    // `warning` severity + `dismissed` status to assert the mapping still applies.
+    // note: `warning` severity + `dismissed` status to assert the mapping still applies.
     let finding: Finding = serde_json::from_value(json!({
         "schema_version": 1,
         "finding_id": "fnd_voc_wrk",
@@ -218,14 +218,13 @@ async fn work_path_vocabulary_mapping_unchanged() {
     );
 }
 
-// ── AR-2: world path ──────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn world_scoped_finding_routes_to_world_findings_table() {
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    // The cited target is a knowledge entry of the routed world, so the v1.191
+    // note: The cited target is a knowledge entry of the routed world, so the v1.191
     // P1 T8 target gate admits it (L2 F4 + T8 CI fix: the entry must live in the
     // routed world and be visible to the caller).
     let mut cited = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
@@ -243,7 +242,7 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
     .unwrap();
 
     let adapter = scoped(pool.clone());
-    // Full AC-V165-3 shape: kind, spoke severity verbatim, target_entry_id,
+    // note: Full AC-V165-3 shape: kind, spoke severity verbatim, target_entry_id,
     // description + text_position/source_anchor for verbatim JSON asserts.
     let finding: Finding = serde_json::from_value(json!({
         "schema_version": 1,
@@ -281,7 +280,7 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
         .expect("world row persisted");
     assert_eq!(row.world_id, "wld_test");
     assert_eq!(row.schema_version, 1);
-    // AC-V165-3: spoke vocabulary verbatim — no nexus mapping on the world path.
+    // note: AC-V165-3: spoke vocabulary verbatim — no nexus mapping on the world path.
     assert_eq!(
         row.severity, "warning",
         "spoke severity verbatim (NOT `minor`)"
@@ -295,7 +294,7 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
         "description names actor + informing event: {}",
         row.description
     );
-    // Verbatim JSON columns.
+    // note: Verbatim JSON columns.
     let anchor: Value = serde_json::from_str(row.source_anchor_json.as_deref().unwrap_or(""))
         .expect("anchor parses");
     assert_eq!(anchor["source_id"], "evt_transfer");
@@ -311,18 +310,17 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
         ext["nexus"]["creator_id"], "ctr_test",
         "extensions_json carries creator_id provenance verbatim"
     );
-    // Epoch conversion (RFC 3339 → Unix epoch, mirroring the work path).
+    // note: Epoch conversion (RFC 3339 → Unix epoch, mirroring the work path).
     let expected_epoch = chrono::DateTime::parse_from_rfc3339("2026-08-14T10:00:00Z")
         .unwrap()
         .timestamp();
     assert_eq!(row.created_at, expected_epoch);
     assert_eq!(row.updated_at, expected_epoch);
 
-    // No legacy row must exist for a world-scoped finding.
+    // note: No legacy row must exist for a world-scoped finding.
     assert_legacy_finding_absent(&pool, "fnd_wld").await;
 }
 
-// ── AR-2: discriminator rejects ───────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn both_routing_keys_reject_invalid_input() {
@@ -346,7 +344,7 @@ async fn both_routing_keys_reject_invalid_input() {
         }
         SpokeResult::Ok(_) => panic!("expected reject on both routing keys"),
     }
-    // Nothing persisted to either table.
+    // note: Nothing persisted to either table.
     assert_legacy_finding_absent(&pool, "fnd_both").await;
     assert!(get_world_finding(&pool, "fnd_both")
         .await
@@ -380,7 +378,6 @@ async fn neither_routing_key_rejects_invalid_input() {
         .is_none());
 }
 
-// ── AR-2: batch atomicity across both tables ──────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mixed_batch_commits_both_tables_atomically() {
@@ -400,7 +397,7 @@ async fn mixed_batch_commits_both_tables_atomically() {
         SpokeResult::Reject(r) => panic!("expected ok on mixed batch: {r:?}"),
     }
 
-    // Both rows landed in their respective tables.
+    // note: Both rows landed in their respective tables.
     assert!(get_world_finding(&pool, "fnd_mix_wld")
         .await
         .unwrap()
@@ -418,7 +415,7 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
     seed_world(&pool, "wld_test").await;
 
     let adapter = scoped(pool.clone());
-    // Batch: [world row, work row, world row with the FIRST world finding's
+    // note: Batch: [world row, work row, world row with the FIRST world finding's
     // id]. The third item collides on the `world_findings` PK mid-batch →
     // UNIQUE violation. The W-1 transaction must roll back the work row
     // (inserted second) AND the first world row together (AR-2 atomicity).
@@ -449,9 +446,8 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
     assert_legacy_finding_absent(&pool, "fnd_rb_wrk").await;
 }
 
-// ── v1.191 P1 T8: findings are written inside the bound selection ────────
 
-/// `v1191_holder_ports`: a world-scoped finding must cite a world the caller's
+/// note: `v1191_holder_ports`: a world-scoped finding must cite a world the caller's
 /// selection authorizes, and its target entry must be one the caller can read.
 /// A target the caller cannot see takes the same unknown-target branch as an
 /// absent id, so findings cannot probe for hidden rows.
@@ -463,7 +459,7 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
 
     let adapter = scoped(pool.clone());
 
-    // (a) A world outside the bound selection is refused outright.
+    // note: (a) A world outside the bound selection is refused outright.
     let mut foreign = world_finding("fnd_foreign_world");
     if let Some(ext) = foreign.extensions.get_mut(
         &spoke_schemas::finding::ExtensionKey::try_from("nexus").expect("nexus namespace key"),
@@ -491,7 +487,7 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
         "a refused world finding must persist nothing"
     );
 
-    // (b) A target entry the caller cannot read (here: absent) is refused with
+    // note: (b) A target entry the caller cannot read (here: absent) is refused with
     // the unknown-target shape, and nothing is written for that finding.
     let mut unknown_target = world_finding("fnd_unknown_target");
     unknown_target.target_entry_id = Some("kb_not_visible".to_string());
@@ -514,7 +510,7 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
     );
 }
 
-/// `v1191_holder_ports` (L2 F4): a multi-world selection admits entries from
+/// note: `v1191_holder_ports` (L2 F4): a multi-world selection admits entries from
 /// several containers, so the world route must additionally require the target
 /// entry to live in the *routed* world — a cross-world target is refused with
 /// the same unknown-target shape.
@@ -529,7 +525,7 @@ async fn v1191_holder_ports_cross_world_target_is_refused() {
     seed_world(&pool, "wld_test").await;
     seed_world(&pool, "wld_foreign").await;
 
-    // An entry that IS visible to the caller (both worlds authorized) but
+    // note: An entry that IS visible to the caller (both worlds authorized) but
     // lives in another world than the finding's route.
     let mut foreign = KnowledgeEntryRecord::new("wld_foreign", BlockType::Character, "ForeignNote");
     foreign.entry_id = "kb_foreign_note".to_string();
@@ -570,7 +566,7 @@ async fn v1191_holder_ports_cross_world_target_is_refused() {
     );
 }
 
-/// `v1191_holder_ports` (T8 CI product-scope fix, option a): a rule finding may
+/// note: `v1191_holder_ports` (T8 CI product-scope fix, option a): a rule finding may
 /// target one of the routed world's TIMELINE EVENTS (`rules_eval.rs`
 /// `observer_cardinality`), while a knowledge-entry target still has to be an
 /// admitted entry of that world.
@@ -602,7 +598,7 @@ async fn v1191_holder_ports_same_world_timeline_target_accepted_cross_world_refu
 
     let adapter = scoped(pool.clone());
 
-    // (a) Same-world timeline target: accepted and visible on the stored row.
+    // note: (a) Same-world timeline target: accepted and visible on the stored row.
     let mut same_world = world_finding("fnd_evt_home");
     same_world.target_entry_id = Some("evt_home".to_string());
     match adapter.put_findings(vec![same_world]).await {
@@ -619,7 +615,7 @@ async fn v1191_holder_ports_same_world_timeline_target_accepted_cross_world_refu
         "the rule target round-trips onto the row"
     );
 
-    // (b) Cross-world timeline target: refused, nothing persisted.
+    // note: (b) Cross-world timeline target: refused, nothing persisted.
     let mut cross = world_finding("fnd_evt_abroad");
     cross.target_entry_id = Some("evt_abroad".to_string());
     match adapter.put_findings(vec![cross]).await {

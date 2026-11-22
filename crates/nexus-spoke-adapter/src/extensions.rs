@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Typed accessors over the `extensions.nexus` namespace on a spoke
 //! [`KnowledgeEntry`].
 //!
@@ -52,11 +53,11 @@ use spoke_operations::ExtensionMap;
 use spoke_schemas::knowledge_entry::{ExtensionKey, KnowledgeEntryOwner as SpokeKnowledgeOwner};
 use spoke_schemas::KnowledgeEntry;
 
-/// The `extensions.nexus` namespace key (lowercase, matches the
+/// note: The `extensions.nexus` namespace key (lowercase, matches the
 /// `^[a-z][a-z0-9_-]*$` namespace convention).
 const NAMESPACE: &str = "nexus";
 
-/// Construct the typed namespace lookup key for the `"nexus"` namespace.
+/// note: Construct the typed namespace lookup key for the `"nexus"` namespace.
 ///
 /// `KnowledgeEntry.extensions` is keyed by the newtype
 /// `ExtensionKey` (typify-generated, regex-validated). The
@@ -69,13 +70,13 @@ fn nexus_key() -> ExtensionKey {
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
-/// Borrow the `extensions.nexus` namespace object from a [`KnowledgeEntry`],
+/// note: Borrow the `extensions.nexus` namespace object from a [`KnowledgeEntry`],
 /// or `None` if the namespace is absent.
 fn nexus_namespace(entry: &KnowledgeEntry) -> Option<&Map<String, Value>> {
     entry.extensions.get(&nexus_key())
 }
 
-/// The 7 typed identity/owner field names managed by the accessors in this
+/// note: The 7 typed identity/owner field names managed by the accessors in this
 /// module (v1.184 P1 adds the canonical owner keys).
 const KNOWN_NEXUS_KEYS: [&str; 7] = [
     "world_id",
@@ -87,7 +88,7 @@ const KNOWN_NEXUS_KEYS: [&str; 7] = [
     "source_provenance_kind",
 ];
 
-/// Returns `true` if `key` belongs to the `extensions.nexus` namespace rather
+/// invariant: Returns `true` if `key` belongs to the `extensions.nexus` namespace rather
 /// than to product-local extras.
 ///
 /// This is the single source of truth for the typed/unknown key boundary
@@ -104,7 +105,7 @@ pub fn is_known_nexus_key(key: &str) -> bool {
     key == LEGACY_CREATOR_ONLY_KEY || KNOWN_NEXUS_KEYS.contains(&key)
 }
 
-/// Refuse the retired `extensions.nexus.creator_only` key on a wire entry
+/// invariant: Refuse the retired `extensions.nexus.creator_only` key on a wire entry
 /// (durable §5, v1.191 P1 T8).
 ///
 /// The reverse conversion runs this before any of the key is interpreted: a
@@ -126,7 +127,7 @@ pub fn refuse_legacy_creator_only(entry: &KnowledgeEntry) -> Result<(), KbError>
     Ok(())
 }
 
-/// Adopt one parsed wire entry's holder reference into a permitted local
+/// note: Adopt one parsed wire entry's holder reference into a permitted local
 /// identity (durable §6, v1.191 P1 T10).
 ///
 /// The import boundary calls this **only** for an atom an explicit
@@ -149,7 +150,7 @@ pub fn adopt_wire_holder(entry: &mut KnowledgeEntry, local_holder_id: &str) -> R
     Ok(())
 }
 
-/// Read the *unknown* keys under `extensions.nexus` — everything outside the
+/// note: Read the *unknown* keys under `extensions.nexus` — everything outside the
 /// typed identity/owner fields (see [`is_known_nexus_key`]).
 ///
 /// Returns an owned map; `None` when no unknown keys are present (or the
@@ -168,7 +169,7 @@ pub fn get_nexus_extras(entry: &KnowledgeEntry) -> Option<Map<String, Value>> {
     (!extras.is_empty()).then_some(extras)
 }
 
-/// Insert unknown keys into `extensions.nexus`, preserving typed keys.
+/// note: Insert unknown keys into `extensions.nexus`, preserving typed keys.
 ///
 /// The typed keys (already set authoritatively by [`set_owner`] /
 /// [`set_provenance`] / [`set_created_from_command_id`]) and any unknown key
@@ -188,7 +189,7 @@ pub fn set_nexus_extras(entry: &mut KnowledgeEntry, extras: &Map<String, Value>)
     }
 }
 
-/// Read `extensions.nexus.world_id` from a [`KnowledgeEntry`].
+/// note: Read `extensions.nexus.world_id` from a [`KnowledgeEntry`].
 #[must_use]
 pub fn get_world_id(entry: &KnowledgeEntry) -> Option<&str> {
     nexus_namespace(entry)
@@ -196,7 +197,7 @@ pub fn get_world_id(entry: &KnowledgeEntry) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// Set `extensions.nexus.world_id` on a [`KnowledgeEntry`].
+/// note: Set `extensions.nexus.world_id` on a [`KnowledgeEntry`].
 ///
 /// Mutates the entry in place. Preserves unknown keys already present in
 /// `extensions.nexus` and any sibling namespaces under `extensions`.
@@ -205,7 +206,7 @@ pub fn set_world_id(entry: &mut KnowledgeEntry, world_id: String) {
     ns.insert("world_id".into(), Value::String(world_id));
 }
 
-/// Read `extensions.nexus.created_from_command_id`.
+/// note: Read `extensions.nexus.created_from_command_id`.
 #[must_use]
 pub fn get_created_from_command_id(entry: &KnowledgeEntry) -> Option<&str> {
     nexus_namespace(entry)
@@ -213,7 +214,7 @@ pub fn get_created_from_command_id(entry: &KnowledgeEntry) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// Set `extensions.nexus.created_from_command_id`.
+/// note: Set `extensions.nexus.created_from_command_id`.
 ///
 /// Mutates the entry in place. Pass `None` to remove the key. Preserves
 /// unknown keys already present in `extensions.nexus`.
@@ -225,7 +226,7 @@ pub fn set_created_from_command_id(entry: &mut KnowledgeEntry, command_id: Optio
     };
 }
 
-/// Read provenance fields as `(source_work_id, source_chapter, source_provenance_kind)`.
+/// note: Read provenance fields as `(source_work_id, source_chapter, source_provenance_kind)`.
 #[must_use]
 pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Option<&str>) {
     let ns = nexus_namespace(entry);
@@ -239,7 +240,7 @@ pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Opt
     )
 }
 
-/// Read the canonical owner from `extensions.nexus` (v1.184 P1).
+/// note: Read the canonical owner from `extensions.nexus` (v1.184 P1).
 ///
 /// The owner representation is closed: exactly **one** typed owner key
 /// (`world_id` / `character_id` / `actor_world_binding_id`) must be present
@@ -259,7 +260,7 @@ pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Opt
 /// `claims.len() == 1` match arm.
 pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
     let ns = nexus_namespace(entry).ok_or(KbError::MissingOwner)?;
-    // Collect the present, string-typed owner claims as `(key, value)`,
+    // note: Collect the present, string-typed owner claims as `(key, value)`,
     // rejecting a present-but-non-string/null owner key outright.
     let mut claims: Vec<(&str, &str)> = Vec::with_capacity(3);
     for key in ["world_id", "character_id", "actor_world_binding_id"] {
@@ -298,7 +299,7 @@ pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
     }
 }
 
-/// Set the canonical owner on `extensions.nexus`, removing the other two
+/// invariant: Set the canonical owner on `extensions.nexus`, removing the other two
 /// owner keys so the projection is unambiguous (v1.184 P1).
 ///
 /// World owners emit `world_id`; Character owners emit `character_id`;
@@ -325,7 +326,7 @@ pub fn set_owner(entry: &mut KnowledgeEntry, owner: &KnowledgeOwnerRef) {
     ns.remove(LEGACY_CREATOR_ONLY_KEY);
 }
 
-/// Set the three provenance fields together.
+/// note: Set the three provenance fields together.
 ///
 /// Mutates the entry in place. Each `None` removes the corresponding key.
 /// Preserves unknown keys already present in `extensions.nexus`.
@@ -350,7 +351,7 @@ pub fn set_provenance(
     };
 }
 
-/// Build the `extensions.nexus` namespace object from typed nexus fields.
+/// invariant: Build the `extensions.nexus` namespace object from typed nexus fields.
 ///
 /// Returns the namespace value as a [`serde_json::Value`] (always an object
 /// when serialized). The owner is written authoritatively from
@@ -412,7 +413,7 @@ pub fn build_extensions_nexus(
     Value::Object(nexus)
 }
 
-/// Insert a string field when `Some(value)`, remove it when `None`.
+/// note: Insert a string field when `Some(value)`, remove it when `None`.
 fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&str>) {
     match value {
         Some(v) => nexus.insert(key.into(), Value::String(v.to_owned())),
@@ -420,7 +421,7 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
     };
 }
 
-/// Reserved `extensions.nexus` key carrying the full nexus `KnowledgeEntryBody`
+/// invariant: Reserved `extensions.nexus` key carrying the full nexus `KnowledgeEntryBody`
 /// losslessly across the spoke boundary.
 ///
 /// Spoke's typed `BodyAttributeValue` only models string/number/bool
@@ -446,7 +447,7 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
 /// column. [`has_nexus_body`] backs the `debug_assert!` guard at that boundary.
 const NEXUS_BODY_KEY: &str = "_nexus_body";
 
-/// Stash the full nexus body (as JSON) under `extensions.nexus._nexus_body`.
+/// note: Stash the full nexus body (as JSON) under `extensions.nexus._nexus_body`.
 ///
 /// Pass `None` to clear a previously-stashed carrier. Preserves the 5 typed
 /// identity keys and any sibling unknown keys already present.
@@ -461,7 +462,7 @@ pub fn set_nexus_body(entry: &mut KnowledgeEntry, body: Option<&Value>) {
     };
 }
 
-/// Read-only check: does `entry` carry the reserved `_nexus_body` carrier?
+/// note: Read-only check: does `entry` carry the reserved `_nexus_body` carrier?
 ///
 /// Backs the carrier-boundary guard (see [`NEXUS_BODY_KEY`]): the spoke
 /// orchestrator read path (`KnowledgeQueryPort::list_knowledge_entries`) asserts
@@ -476,7 +477,7 @@ pub fn has_nexus_body(entry: &KnowledgeEntry) -> bool {
         .is_some_and(|ns| ns.contains_key(NEXUS_BODY_KEY))
 }
 
-/// Remove and return the reserved `_nexus_body` carrier from
+/// note: Remove and return the reserved `_nexus_body` carrier from
 /// `extensions.nexus`, if present.
 ///
 /// Used by the conversion seam reverse direction to recover the full nexus
@@ -490,7 +491,7 @@ pub fn take_nexus_body(entry: &mut KnowledgeEntry) -> Option<Value> {
         .remove(NEXUS_BODY_KEY)
 }
 
-/// Insert an integer field when `Some(value)`, remove it when `None`.
+/// note: Insert an integer field when `Some(value)`, remove it when `None`.
 fn insert_opt_i64(nexus: &mut Map<String, Value>, key: &str, value: Option<i64>) {
     match value {
         Some(v) => nexus.insert(key.into(), Value::Number(v.into())),

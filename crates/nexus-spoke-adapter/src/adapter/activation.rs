@@ -110,13 +110,13 @@ use std::collections::{HashMap, HashSet};
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use serde::{Deserialize, Serialize};
 
-/// Maximum regex key length (architect lock Q6) — chars.
+/// note: Maximum regex key length (architect lock Q6) — chars.
 const MAX_REGEX_KEY_CHARS: usize = 256;
-/// Scan-text cap for the `regex` match path (architect lock Q6) — chars,
+/// note: Scan-text cap for the `regex` match path (architect lock Q6) — chars,
 /// consistent with the chars/4 token heuristic used across MCA.
 const MAX_REGEX_SCAN_CHARS: usize = 64 * 1024;
 
-/// Token-budget accounting of an activation pass (V1.151 P0, DF-76 spec §2 H3).
+/// note: Token-budget accounting of an activation pass (V1.151 P0, DF-76 spec §2 H3).
 ///
 /// Chars/4 estimates computed by the engine, exposed additively for the
 /// inspector packet. No wire change: the values were already computed
@@ -124,61 +124,61 @@ const MAX_REGEX_SCAN_CHARS: usize = 64 * 1024;
 /// only exposure is new.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivationBudget {
-    /// Sum of chars/4 estimates over primary-matched entries.
+    /// note: Sum of chars/4 estimates over primary-matched entries.
     pub primary_tokens_est: usize,
-    /// Sum of chars/4 estimates over hop-pulled entries (0 without hops).
+    /// note: Sum of chars/4 estimates over hop-pulled entries (0 without hops).
     pub hop_tokens_est: usize,
-    /// The caller-provided hop cap (`HopConfig::max_hop_tokens`); `None` ⇒
+    /// note: The caller-provided hop cap (`HopConfig::max_hop_tokens`); `None` ⇒
     /// depth + cycle only (no token stop).
     pub cap: Option<usize>,
-    /// `cap` minus the primary + hop estimates (what the hop budget has
+    /// note: `cap` minus the primary + hop estimates (what the hop budget has
     /// left); `None` when no cap was set.
     pub remaining: Option<usize>,
 }
 
-/// Result of an activation pass over a set of `WorldKB` entries.
+/// note: Result of an activation pass over a set of `WorldKB` entries.
 #[derive(Debug, Clone)]
 pub struct ActivationResult {
-    /// Entries that passed activation (or are `constant` seeds, or have no
+    /// note: Entries that passed activation (or are `constant` seeds, or have no
     /// activation module — neutral entries are included as matched).
     pub matched: Vec<KnowledgeEntryRecord>,
-    /// Entries that did not pass activation and are not constant seeds.
+    /// note: Entries that did not pass activation and are not constant seeds.
     pub unmatched: Vec<KnowledgeEntryRecord>,
-    /// Per-entry fire/miss trace for diagnostics.
+    /// note: Per-entry fire/miss trace for diagnostics.
     pub trace: Vec<ActivationTraceEntry>,
-    /// Token-budget accounting (spec §2 H3): `Some` whenever activation ran
+    /// note: Token-budget accounting (spec §2 H3): `Some` whenever activation ran
     /// — primary estimate always; hop estimate + cap/remaining only on the
     /// with-hops path.
     pub budget: Option<ActivationBudget>,
 }
 
-/// Per-entry activation trace record.
+/// note: Per-entry activation trace record.
 #[derive(Debug, Clone, Serialize)]
 pub struct ActivationTraceEntry {
     pub entry_id: String,
     pub canonical_name: String,
-    /// Why this entry was matched or not.
+    /// note: Why this entry was matched or not.
     pub reason: String,
-    /// Whether the entry ended up in `matched`.
+    /// note: Whether the entry ended up in `matched`.
     pub accepted: bool,
-    /// V1.149 P1 (spec §5): entry the hop originated from — set only on
+    /// note: V1.149 P1 (spec §5): entry the hop originated from — set only on
     /// hop-pulled rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hop_origin_entry_id: Option<String>,
-    /// V1.149 P1: hop depth (1..=`max_hops`) — set only on hop-pulled rows.
+    /// note: V1.149 P1: hop depth (1..=`max_hops`) — set only on hop-pulled rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hop_depth: Option<u32>,
-    /// V1.149 P1: stored `relation_type` of the edge that first reached the
+    /// note: V1.149 P1: stored `relation_type` of the edge that first reached the
     /// entry — set only on hop-pulled rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_relation_type: Option<String>,
-    /// V1.149 P1: stored `relation_id` of the edge that first reached the
+    /// note: V1.149 P1: stored `relation_id` of the edge that first reached the
     /// entry — set only on hop-pulled rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_relation_id: Option<String>,
 }
 
-/// Engine-local relation edge for hop expansion (spec §5) — **not** a spoke
+/// note: Engine-local relation edge for hop expansion (spec §5) — **not** a spoke
 /// wire type.
 ///
 /// Produced by the adapter inherent loader
@@ -192,12 +192,12 @@ pub struct HopEdge {
     pub relation_type: String,
 }
 
-/// Hop-expansion knobs (spec Q1).
+/// note: Hop-expansion knobs (spec Q1).
 #[derive(Debug, Clone, Copy)]
 pub struct HopConfig {
-    /// Maximum BFS depth from each seed entry — architect lock: **2**.
+    /// note: Maximum BFS depth from each seed entry — architect lock: **2**.
     pub max_hops: u32,
-    /// Hop token budget (chars/4) **after** the caller's personality +
+    /// note: Hop token budget (chars/4) **after** the caller's personality +
     /// `world_state`/`timeline` reservations; the engine further subtracts
     /// the primary-matched KB estimate before the hop pass. `None` ⇒ depth +
     /// cycle only (no token stop).
@@ -213,21 +213,21 @@ impl Default for HopConfig {
     }
 }
 
-/// Result of [`expand_relation_hops`] — the BFS pull set + its trace rows.
+/// note: Result of [`expand_relation_hops`] — the BFS pull set + its trace rows.
 #[derive(Debug, Clone)]
 pub struct HopExpandResult {
-    /// Entries pulled by the hop BFS, in discovery order (BFS level order).
+    /// note: Entries pulled by the hop BFS, in discovery order (BFS level order).
     pub pulled: Vec<KnowledgeEntryRecord>,
-    /// One accepted trace row per pulled entry, carrying the hop fields
+    /// note: One accepted trace row per pulled entry, carrying the hop fields
     /// (`hop_origin_entry_id`, `hop_depth`, `source_relation_type`,
     /// `source_relation_id`).
     pub hop_trace: Vec<ActivationTraceEntry>,
-    /// Sum of chars/4 estimates over pulled entries (V1.151 P0 — the hop
+    /// note: Sum of chars/4 estimates over pulled entries (V1.151 P0 — the hop
     /// spend, surfaced for the inspector budget section, spec §2 H3).
     pub tokens_consumed: usize,
 }
 
-/// Emit-order inputs captured during classify (V1.149 P0 T3 — spec §4).
+/// invariant: Emit-order inputs captured during classify (V1.149 P0 T3 — spec §4).
 ///
 /// Built once per entry from the parsed [`ActivationConfig`]; the sort never
 /// re-parses config. Neutral entries (no activation module) get the default:
@@ -235,11 +235,11 @@ pub struct HopExpandResult {
 /// original entry order (byte-equivalence ship guarantee).
 #[derive(Debug, Clone, Copy, Default)]
 struct ActivationSortKey {
-    /// Constant band flag — same seed predicate as [`evaluate_entry`].
+    /// note: Constant band flag — same seed predicate as [`evaluate_entry`].
     constant: bool,
-    /// Primary sort key — higher wins (descending), missing ⇒ 0.
+    /// note: Primary sort key — higher wins (descending), missing ⇒ 0.
     priority: f64,
-    /// Secondary sort key — lower first (ascending), missing ⇒ 0.
+    /// note: Secondary sort key — lower first (ascending), missing ⇒ 0.
     order: f64,
 }
 
@@ -257,7 +257,7 @@ impl ActivationSortKey {
     }
 }
 
-/// Seed predicate shared by classify + ordering: handbook `constant: true`,
+/// note: Seed predicate shared by classify + ordering: handbook `constant: true`,
 /// V1.146 spike `constant_seeds` self-id, or caller-supplied seed id
 /// (spec §2.2 — the spike alias "treats as `constant: true`").
 fn is_constant_seed(cfg: &ActivationConfig, entry_id: &str, caller_seed_ids: &[String]) -> bool {
@@ -266,7 +266,7 @@ fn is_constant_seed(cfg: &ActivationConfig, entry_id: &str, caller_seed_ids: &[S
         || caller_seed_ids.iter().any(|s| s == entry_id)
 }
 
-/// The parsed `modules.activation` data from a single entry (handbook shape).
+/// note: The parsed `modules.activation` data from a single entry (handbook shape).
 ///
 /// Deserialization goes through [`ActivationConfigRaw`], which applies the
 /// V1.146 spike aliases (`key` → `keys`, `constant_seeds` self-id → `constant`)
@@ -274,35 +274,35 @@ fn is_constant_seed(cfg: &ActivationConfig, entry_id: &str, caller_seed_ids: &[S
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(from = "ActivationConfigRaw")]
 struct ActivationConfig {
-    /// Primary activation triggers (handbook `keys`).
+    /// note: Primary activation triggers (handbook `keys`).
     keys: Vec<String>,
-    /// Secondary / selective triggers evaluated with `logic` (handbook).
+    /// note: Secondary / selective triggers evaluated with `logic` (handbook).
     secondary_keys: Vec<String>,
-    /// How primary + secondary combine; only meaningful when
+    /// note: How primary + secondary combine; only meaningful when
     /// `secondary_keys` is non-empty (handbook §2.1).
     logic: String,
-    /// Always-on **seed** candidate when `true` (handbook).
+    /// note: Always-on **seed** candidate when `true` (handbook).
     constant: bool,
-    /// Insertion / scan order hint — lower first (handbook; sorted by caller).
+    /// note: Insertion / scan order hint — lower first (handbook; sorted by caller).
     order: f64,
-    /// Tie-break / budget preference — higher wins (handbook; sorted by caller).
+    /// note: Tie-break / budget preference — higher wins (handbook; sorted by caller).
     priority: f64,
-    /// Preferred placement (`before_defs`/`after_defs`/`depth`/`outlet`).
+    /// note: Preferred placement (`before_defs`/`after_defs`/`depth`/`outlet`).
     /// Parsed + preserved; not actioned until DF-75.
     position_hint: Option<String>,
-    /// Named injection outlet id paired with `position_hint: "outlet"`.
+    /// note: Named injection outlet id paired with `position_hint: "outlet"`.
     /// Parsed + preserved; not actioned until DF-75.
     outlet: Option<String>,
-    /// How key strings match scanned context (handbook `match`; default `literal`).
+    /// note: How key strings match scanned context (handbook `match`; default `literal`).
     #[serde(rename = "match")]
     match_mode: String,
-    /// V1.146 spike alias carrier: `constant_seeds` self-id membership derives
+    /// note: V1.146 spike alias carrier: `constant_seeds` self-id membership derives
     /// `constant` at evaluation time (spec §2.2). Never exported to the wire.
     #[serde(skip_serializing)]
     constant_seeds: Vec<String>,
 }
 
-/// Serde intermediate for `modules.activation` — handbook fields plus the
+/// note: Serde intermediate for `modules.activation` — handbook fields plus the
 /// one-minor V1.146 spike aliases (`key`, `constant_seeds`). Unknown fields
 /// are ignored (no `deny_unknown_fields`), so portable packs round-trip.
 #[derive(Debug, Clone, Deserialize)]
@@ -310,7 +310,7 @@ struct ActivationConfig {
 struct ActivationConfigRaw {
     #[serde(default)]
     keys: Option<Vec<String>>,
-    /// Spike alias for `keys` — used only when `keys` is absent (spec §2.2).
+    /// note: Spike alias for `keys` — used only when `keys` is absent (spec §2.2).
     #[serde(default)]
     key: Option<Vec<String>>,
     #[serde(default)]
@@ -319,7 +319,7 @@ struct ActivationConfigRaw {
     logic: String,
     #[serde(default)]
     constant: bool,
-    /// Spike alias carrier — per-entry self-id membership → `constant: true`.
+    /// note: Spike alias carrier — per-entry self-id membership → `constant: true`.
     #[serde(default)]
     constant_seeds: Vec<String>,
     #[serde(default)]
@@ -336,7 +336,7 @@ struct ActivationConfigRaw {
 
 impl From<ActivationConfigRaw> for ActivationConfig {
     fn from(raw: ActivationConfigRaw) -> Self {
-        // Spike alias: prefer `keys` when both are present, else fall back to
+        // note: Spike alias: prefer `keys` when both are present, else fall back to
         // `key` (spec §2.2 "Prefer `keys` when both present").
         let keys = raw.keys.or(raw.key).unwrap_or_default();
         Self {
@@ -362,16 +362,16 @@ fn default_match_mode() -> String {
     "literal".to_string()
 }
 
-/// Why a single key could not be evaluated.
+/// note: Why a single key could not be evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MatchKeyError {
-    /// Regex key exceeds the length cap (architect lock Q6) — skipped.
+    /// note: Regex key exceeds the length cap (architect lock Q6) — skipped.
     OverlongKey,
-    /// Pattern failed to compile — treated as a non-match.
+    /// note: Pattern failed to compile — treated as a non-match.
     InvalidRegex,
 }
 
-/// Evaluate one activation key against the scan text under `mode`.
+/// note: Evaluate one activation key against the scan text under `mode`.
 ///
 /// `scan_raw` is the unconverted scan text (regex path); `scan_lower` is the
 /// lowercased form used by `literal` / `whole_word` (spec §3 match casing —
@@ -395,7 +395,7 @@ fn match_key(
                 return Err(MatchKeyError::OverlongKey);
             }
             let re = regex::Regex::new(key).map_err(|_| MatchKeyError::InvalidRegex)?;
-            // Truncate with a stable prefix (architect lock Q6; kept as
+            // note: Truncate with a stable prefix (architect lock Q6; kept as
             // defense-in-depth — the engine is linear-time regardless).
             let capped = truncate_chars(scan_raw, MAX_REGEX_SCAN_CHARS);
             Ok(re.is_match(capped))
@@ -409,7 +409,7 @@ fn literal_match(key: &str, scan_lower: &str) -> bool {
     scan_lower.contains(&key.to_lowercase())
 }
 
-/// Case-insensitive word-boundary match (Unicode-aware: boundary = not
+/// note: Case-insensitive word-boundary match (Unicode-aware: boundary = not
 /// alphanumeric and not `_`).
 fn whole_word_match(key: &str, scan_lower: &str) -> bool {
     let key_lower = key.to_lowercase();
@@ -425,7 +425,7 @@ fn whole_word_match(key: &str, scan_lower: &str) -> bool {
         if before_ok && after_ok {
             return true;
         }
-        // Advance past this occurrence by one full char (not one byte):
+        // note: Advance past this occurrence by one full char (not one byte):
         // `start + 1` sliced mid-char for multi-byte keys and panicked
         // ("byte index is not a char boundary") — e.g. CJK keys. `start` is
         // always a char boundary and `key_lower` is non-empty, so this is
@@ -439,14 +439,14 @@ fn is_word_char(c: Option<char>) -> bool {
     c.is_some_and(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// First `max_chars` characters of `text` (stable prefix).
+/// note: First `max_chars` characters of `text` (stable prefix).
 fn truncate_chars(text: &str, max_chars: usize) -> &str {
     text.char_indices()
         .nth(max_chars)
         .map_or(text, |(idx, _)| &text[..idx])
 }
 
-/// Evaluate a key list: returns `(matched keys, skip/error notes)`.
+/// note: Evaluate a key list: returns `(matched keys, skip/error notes)`.
 fn eval_keys<'a>(
     keys: &'a [String],
     mode: &str,
@@ -470,7 +470,7 @@ fn eval_keys<'a>(
     (hits, notes)
 }
 
-/// Keys in `keys` that are not present in `hits`.
+/// note: Keys in `keys` that are not present in `hits`.
 fn missing_keys<'a>(keys: &'a [String], hits: &[&'a str]) -> Vec<&'a str> {
     keys.iter()
         .filter(|k| !hits.contains(&k.as_str()))
@@ -516,7 +516,7 @@ pub fn apply_activation(
 ) -> ActivationResult {
     let mut pass = run_primary_pass(entries, scan_text, constant_seed_ids);
     sort_matched(&mut pass.matched);
-    // V1.151 P0 (spec §2 H3): no-hops path — primary estimate only,
+    // note: V1.151 P0 (spec §2 H3): no-hops path — primary estimate only,
     // `cap`/`remaining` = `None` (no hop budget active).
     let primary_tokens_est: usize = pass
         .matched
@@ -536,7 +536,7 @@ pub fn apply_activation(
     }
 }
 
-/// Apply lore activation **and** relation-hop expansion (V1.149 P1, spec §5).
+/// invariant: Apply lore activation **and** relation-hop expansion (V1.149 P1, spec §5).
 ///
 /// Runs the same primary classification pass as [`apply_activation`], then —
 /// when `edges` is non-empty and `hop.max_hops > 0` — BFS-expands up to
@@ -581,7 +581,7 @@ pub fn apply_activation_with_hops(
     hop: &HopConfig,
 ) -> ActivationResult {
     let mut primary = run_primary_pass(entries, scan_text, constant_seed_ids);
-    // V1.151 P0 (spec §2 H3): record the already-computed primary estimate
+    // note: V1.151 P0 (spec §2 H3): record the already-computed primary estimate
     // for the inspector budget section.
     let primary_tokens_est: usize = primary
         .matched
@@ -591,7 +591,7 @@ pub fn apply_activation_with_hops(
     let mut hop_tokens_est: usize = 0;
 
     if !edges.is_empty() && hop.max_hops > 0 {
-        // Spec Q1: the caller already reserved personality/world_state/
+        // note: Spec Q1: the caller already reserved personality/world_state/
         // timeline; the engine reserves the primary-matched KB estimate.
         let budget = hop
             .max_hop_tokens
@@ -604,7 +604,7 @@ pub fn apply_activation_with_hops(
             .iter()
             .map(|entry| (entry.entry_id.clone(), entry.clone()))
             .collect();
-        // QC C-001: every primary-matched entry (neutral ones included) is
+        // invariant: QC C-001: every primary-matched entry (neutral ones included) is
         // pre-marked visited, so hop expansion never re-pulls an entry that
         // is already in `matched` — and never traverses through it.
         let pre_visited: Vec<String> = primary
@@ -615,7 +615,7 @@ pub fn apply_activation_with_hops(
         let expanded = expand_relation_hops(&primary.seed_ids, &pre_visited, &pool, edges, &config);
         hop_tokens_est = expanded.tokens_consumed;
 
-        // QC2 F-001: a primary-missed entry that the hop pass pulled must not
+        // note: QC2 F-001: a primary-missed entry that the hop pass pulled must not
         // also stay in `unmatched` — matched ∩ unmatched = ∅ after this.
         let pulled_ids: HashSet<String> = expanded
             .pulled
@@ -648,7 +648,7 @@ pub fn apply_activation_with_hops(
             .collect(),
         unmatched: primary.unmatched,
         trace: primary.trace,
-        // V1.151 P0 (spec §2 H3): `cap` is the caller's hop cap; `remaining`
+        // note: V1.151 P0 (spec §2 H3): `cap` is the caller's hop cap; `remaining`
         // is what the hop budget has left after primary + hop spends.
         budget: Some(ActivationBudget {
             primary_tokens_est,
@@ -662,7 +662,7 @@ pub fn apply_activation_with_hops(
     }
 }
 
-/// BFS/level hop expansion (V1.149 P1 — spec §5).
+/// invariant: BFS/level hop expansion (V1.149 P1 — spec §5).
 ///
 /// From `seeds` (primary-fired/`constant` entry ids), walks the **undirected**
 /// adjacency of `edges` level by level, up to `config.max_hops`, pulling
@@ -702,7 +702,7 @@ pub fn expand_relation_hops(
     edges: &[HopEdge],
     config: &HopConfig,
 ) -> HopExpandResult {
-    // Undirected adjacency index: every edge connects both endpoints (spec
+    // note: Undirected adjacency index: every edge connects both endpoints (spec
     // §5 adjacency rule), so both endpoints carry the edge.
     let mut adjacency: HashMap<&str, Vec<&HopEdge>> = HashMap::new();
     for edge in edges {
@@ -717,7 +717,7 @@ pub fn expand_relation_hops(
     let mut pulled: Vec<KnowledgeEntryRecord> = Vec::new();
     let mut hop_trace: Vec<ActivationTraceEntry> = Vec::new();
     let mut remaining = config.max_hop_tokens.unwrap_or(usize::MAX);
-    // V1.151 P0 (spec §2 H3): hop spend = sum of estimates over pulled
+    // note: V1.151 P0 (spec §2 H3): hop spend = sum of estimates over pulled
     // entries — surfaced on the result for the inspector budget section.
     let mut tokens_consumed: usize = 0;
 
@@ -773,7 +773,7 @@ pub fn expand_relation_hops(
     }
 }
 
-/// Token estimate for one entry: `chars/4` of summary-or-name (plan T1; the
+/// note: Token estimate for one entry: `chars/4` of summary-or-name (plan T1; the
 /// same estimator reserves the primary-matched KB cost and gates each hop).
 fn estimate_tokens(entry: &KnowledgeEntryRecord) -> usize {
     let text = entry
@@ -784,7 +784,7 @@ fn estimate_tokens(entry: &KnowledgeEntryRecord) -> usize {
     text.chars().count() / 4
 }
 
-/// The primary classification pass shared by [`apply_activation`] and
+/// invariant: The primary classification pass shared by [`apply_activation`] and
 /// [`apply_activation_with_hops`].
 ///
 /// In addition to the P0 output (`matched` with sort keys, `unmatched`,
@@ -813,7 +813,7 @@ fn run_primary_pass(
         let entry_id = entry.entry_id.clone();
         let canonical_name = entry.canonical_name.clone();
 
-        // Per-entry self-match text (V1.146 behavior, spec §3 source 4):
+        // note: Per-entry self-match text (V1.146 behavior, spec §3 source 4):
         // canonical_name + body.summary appended to the external scan.
         let mut entry_raw = canonical_name.clone();
         if let Some(ref body) = entry.body {
@@ -829,7 +829,7 @@ fn run_primary_pass(
 
         let (accepted, reason) = activation.as_ref().map_or_else(
             || {
-                // No activation module → neutral, always included.
+                // note: No activation module → neutral, always included.
                 (true, "no activation module".to_string())
             },
             |cfg| evaluate_entry(cfg, &entry_id, &scan_raw, &scan_lower, constant_seed_ids),
@@ -846,7 +846,7 @@ fn run_primary_pass(
             source_relation_id: None,
         });
 
-        // V1.149 P1: hop seeds = accepted entries that primary-fired or are
+        // note: V1.149 P1: hop seeds = accepted entries that primary-fired or are
         // `constant` — NOT neutral entries (spec §5 seed rule).
         if accepted
             && activation.as_ref().is_some_and(|cfg| {
@@ -878,7 +878,7 @@ fn run_primary_pass(
     }
 }
 
-/// Parse the `modules.activation` config of an entry (`None` when absent or
+/// note: Parse the `modules.activation` config of an entry (`None` when absent or
 /// malformed — malformed configs classify as neutral).
 fn parse_activation(entry: &KnowledgeEntryRecord) -> Option<ActivationConfig> {
     entry
@@ -888,7 +888,7 @@ fn parse_activation(entry: &KnowledgeEntryRecord) -> Option<ActivationConfig> {
         .and_then(|value| serde_json::from_value::<ActivationConfig>(value.clone()).ok())
 }
 
-/// Spec §4 emit ordering comparator: constant band first, `priority`
+/// note: Spec §4 emit ordering comparator: constant band first, `priority`
 /// descending (higher wins), `order` ascending (lower first).
 fn compare_sort_keys(a: &ActivationSortKey, b: &ActivationSortKey) -> Ordering {
     b.constant
@@ -897,18 +897,18 @@ fn compare_sort_keys(a: &ActivationSortKey, b: &ActivationSortKey) -> Ordering {
         .then_with(|| a.order.total_cmp(&b.order))
 }
 
-/// Sort the matched pairs in place (spec §4). `sort_by` is stable, so equal
+/// note: Sort the matched pairs in place (spec §4). `sort_by` is stable, so equal
 /// sort keys keep their original entry order — an all-neutral set sorts to
 /// its original order and stays byte-identical to V1.146 flag-off.
 fn sort_matched(matched: &mut [(KnowledgeEntryRecord, ActivationSortKey)]) {
     matched.sort_by(|(_, a), (_, b)| compare_sort_keys(a, b));
 }
 
-/// Evaluate one entry against the handbook logic truth table (spec §2.1).
+/// note: Evaluate one entry against the handbook logic truth table (spec §2.1).
 ///
 /// Returns `(accepted, reason)`. The exhaustive table keeps this over the
 /// pedantic line budget; splitting would obscure the truth-table shape.
-#[allow(clippy::too_many_lines)] // exhaustive handbook logic truth table
+#[allow(clippy::too_many_lines)] // note: exhaustive handbook logic truth table
 fn evaluate_entry(
     cfg: &ActivationConfig,
     entry_id: &str,
@@ -916,7 +916,7 @@ fn evaluate_entry(
     scan_lower: &str,
     caller_seed_ids: &[String],
 ) -> (bool, String) {
-    // Always-on seeds: handbook `constant: true`, V1.146 spike
+    // note: Always-on seeds: handbook `constant: true`, V1.146 spike
     // `constant_seeds` self-id, or caller-supplied seed ids.
     if is_constant_seed(cfg, entry_id, caller_seed_ids) {
         let seed_source = if cfg.constant {
@@ -929,7 +929,7 @@ fn evaluate_entry(
         return (true, format!("constant seed ({seed_source})"));
     }
 
-    // Empty primary keys + no constant → neutral (spec §1 neutral-only:
+    // note: Empty primary keys + no constant → neutral (spec §1 neutral-only:
     // "activation with empty keys and no constant").
     if cfg.keys.is_empty() {
         return (true, "no activation keys (neutral)".to_string());
@@ -939,7 +939,7 @@ fn evaluate_entry(
     let primary = eval_keys(&cfg.keys, mode, scan_raw, scan_lower);
     let primary_hit = !primary.0.is_empty();
 
-    // Handbook §2.1: secondary absent/empty → primary-only, logic ignored.
+    // note: Handbook §2.1: secondary absent/empty → primary-only, logic ignored.
     if cfg.secondary_keys.is_empty() {
         return if primary_hit {
             (
@@ -1055,7 +1055,7 @@ fn evaluate_entry(
             }
         }
         other => {
-            // Unknown logic → handbook default `and_any`; recorded in trace (spec §2.1).
+            // note: Unknown logic → handbook default `and_any`; recorded in trace (spec §2.1).
             if primary_hit && secondary_hit {
                 (
                     true,
@@ -1086,7 +1086,7 @@ mod tests {
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
     use serde_json::json;
 
-    /// Helper: build a `KnowledgeEntryRecord` with modules.activation.
+    /// note: Helper: build a `KnowledgeEntryRecord` with modules.activation.
     fn entry_with_activation(
         id: &str,
         name: &str,
@@ -1094,7 +1094,7 @@ mod tests {
         modules_val: Option<serde_json::Value>,
     ) -> KnowledgeEntryRecord {
         let mut entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, name);
-        // Override the random entry_id with a predictable one for tests
+        // note: Override the random entry_id with a predictable one for tests
         entry.entry_id = id.to_string();
         entry.body = Some(KnowledgeEntryBody {
             summary: Some(summary.to_string()),
@@ -1104,7 +1104,7 @@ mod tests {
         entry
     }
 
-    /// Helper: build activation JSON with handbook `keys` (+ optional secondary).
+    /// note: Helper: build activation JSON with handbook `keys` (+ optional secondary).
     fn activation_json(keys: &[&str], secondary_keys: &[&str], logic: &str) -> serde_json::Value {
         json!({
             "activation": {
@@ -1115,7 +1115,7 @@ mod tests {
         })
     }
 
-    /// Shortcut for the common no-secondary case.
+    /// note: Shortcut for the common no-secondary case.
     fn activation_primary(keys: &[&str], logic: &str) -> serde_json::Value {
         activation_json(keys, &[], logic)
     }
@@ -1124,7 +1124,6 @@ mod tests {
         apply_activation(entries, scan, &[])
     }
 
-    // ── primary-only (secondary absent) — logic IGNORED ──────────────
 
     #[test]
     fn test_secondary_absent_and_any_fires_on_any_primary() {
@@ -1144,7 +1143,7 @@ mod tests {
 
     #[test]
     fn test_secondary_absent_ignores_logic_and_all_any_hit_fires() {
-        // CRITICAL truth-table check: with no secondary_keys, `logic: and_all`
+        // note: CRITICAL truth-table check: with no secondary_keys, `logic: and_all`
         // must NOT require all primary keys — any primary hit fires.
         let entries = vec![entry_with_activation(
             "kb_2",
@@ -1163,7 +1162,7 @@ mod tests {
 
     #[test]
     fn test_secondary_absent_ignores_logic_not_any_any_hit_fires() {
-        // `not_any` with no secondary is NOT an exclusion list anymore —
+        // note: `not_any` with no secondary is NOT an exclusion list anymore —
         // primary-any fires (handbook: logic ignored).
         let entries = vec![entry_with_activation(
             "kb_3",
@@ -1195,7 +1194,6 @@ mod tests {
         assert!(result.trace[0].reason.contains("primary-any"));
     }
 
-    // ── and_any + secondary ─────────────────────────────────────────
 
     #[test]
     fn test_and_any_with_secondary_requires_both() {
@@ -1225,11 +1223,10 @@ mod tests {
             .contains("primary [harbor] + secondary [chapter 1]"));
     }
 
-    // ── and_all + secondary ──────────────────────────────────────────
 
     #[test]
     fn test_and_all_with_secondary_requires_all_primary_and_all_secondary() {
-        // Secondary keys chosen to avoid the entry's own self-match text
+        // why: Secondary keys chosen to avoid the entry's own self-match text
         // ("Royal Guard" / "Protector of the throne").
         let entries = vec![entry_with_activation(
             "kb_6",
@@ -1276,7 +1273,6 @@ mod tests {
         assert!(result.trace[0].reason.contains("missing keys [dragon]"));
     }
 
-    // ── not_any + secondary ──────────────────────────────────────────
 
     #[test]
     fn test_not_any_with_secondary_excludes_when_secondary_hits() {
@@ -1313,7 +1309,6 @@ mod tests {
         assert!(result.trace[0].reason.contains("no key matched"));
     }
 
-    // ── not_all + secondary ──────────────────────────────────────────
 
     #[test]
     fn test_not_all_with_secondary_fires_when_not_every_secondary_matches() {
@@ -1343,7 +1338,6 @@ mod tests {
         assert!(result2.trace[0].reason.contains("all secondary matched"));
     }
 
-    // ── match modes ──────────────────────────────────────────────────
 
     #[test]
     fn test_literal_is_case_insensitive_substring() {
@@ -1360,7 +1354,7 @@ mod tests {
 
     #[test]
     fn test_whole_word_requires_boundary() {
-        // Entry self-text must NOT contain the key, so matches come from the
+        // note: Entry self-text must NOT contain the key, so matches come from the
         // scan text alone (self-match would defeat the boundary check).
         let entries = vec![entry_with_activation(
             "kb_12",
@@ -1368,7 +1362,7 @@ mod tests {
             "Ruler of the realm",
             Some(json!({"activation": {"keys": ["king"], "match": "whole_word"}})),
         )];
-        // "king" inside "kings" must NOT match; standalone "king" must.
+        // note: "king" inside "kings" must NOT match; standalone "king" must.
         let result = run(&entries, "Two kings ruled.");
         assert_eq!(
             result.matched.len(),
@@ -1382,18 +1376,18 @@ mod tests {
 
     #[test]
     fn test_whole_word_cjk_char_boundary_safe_advance() {
-        // Regression (QC F1): the advance after a failed boundary check used
+        // note: Regression (QC F1): the advance after a failed boundary check used
         // `start + 1` bytes, slicing mid-char for multi-byte keys — this
         // panicked with "byte index 1 is not a char boundary" for
         // `whole_word_match("王", "王宫")`. "王" inside the CJK word "王宫" is
         // not a whole word → must not match, and must not panic.
         assert!(!whole_word_match("王", "王宫"));
 
-        // A CJK key at a true boundary still matches; the scan must continue
+        // note: A CJK key at a true boundary still matches; the scan must continue
         // past the failed boundary and find the later standalone occurrence.
         assert!(whole_word_match("王", "王宫。王"));
 
-        // A CJK key inside a longer CJK word must not match mid-word.
+        // note: A CJK key inside a longer CJK word must not match mid-word.
         assert!(!whole_word_match("宫", "王宫"));
         assert!(!whole_word_match("王宫", "大秦王宫"));
     }
@@ -1442,7 +1436,7 @@ mod tests {
 
     #[test]
     fn test_regex_scan_text_truncated_to_64k() {
-        // A key beyond the 64 KiB cap must still match when present near the
+        // note: A key beyond the 64 KiB cap must still match when present near the
         // head (stable prefix) — and must not panic on huge scan text.
         let scan = format!("harbor {}", "y".repeat(70 * 1024));
         let entries = vec![entry_with_activation(
@@ -1457,7 +1451,7 @@ mod tests {
 
     #[test]
     fn test_regex_catastrophic_pattern_completes_in_bounded_time() {
-        // F-001 ReDoS regression (qc2 F-001, Critical): `(a+)+b` against a
+        // note: F-001 ReDoS regression (qc2 F-001, Critical): `(a+)+b` against a
         // non-matching run of 'a's drives a backtracking engine to
         // exponential worst-case time — qc2 measured >1.5s on 28 chars. The
         // `regex` crate is linear-time by construction, so this must return
@@ -1495,7 +1489,6 @@ mod tests {
         );
     }
 
-    // ── constant seeds ───────────────────────────────────────────────
 
     #[test]
     fn test_constant_true_is_always_matched() {
@@ -1531,7 +1524,7 @@ mod tests {
 
     #[test]
     fn test_self_declared_constant_seeds_spike_alias() {
-        // V1.146 spike alias: constant_seeds self-id → constant.
+        // note: V1.146 spike alias: constant_seeds self-id → constant.
         let mut activation = activation_primary(&["nonexistent"], "and_all");
         activation["activation"]["constant_seeds"] = json!(["kb_self_1"]);
         let entries = vec![entry_with_activation(
@@ -1615,7 +1608,7 @@ mod tests {
 
     #[test]
     fn test_ordering_constant_band_first_even_at_lower_priority() {
-        // Constant seed (priority 0) must precede a non-constant priority 100.
+        // note: Constant seed (priority 0) must precede a non-constant priority 100.
         let entries = vec![
             entry_with_activation(
                 "kb_o21",
@@ -1640,7 +1633,7 @@ mod tests {
 
     #[test]
     fn test_ordering_constant_band_internal_priority() {
-        // Within the constant band, priority still applies (spec §4).
+        // note: Within the constant band, priority still applies (spec §4).
         let entries = vec![
             entry_with_activation(
                 "kb_o31",
@@ -1661,7 +1654,7 @@ mod tests {
 
     #[test]
     fn test_ordering_stable_tiebreak_keeps_original_order() {
-        // Equal priority + order + band → original entry order (stable sort).
+        // note: Equal priority + order + band → original entry order (stable sort).
         let entries = vec![
             entry_with_activation(
                 "kb_o41",
@@ -1692,7 +1685,7 @@ mod tests {
 
     #[test]
     fn test_ordering_missing_priority_order_default_to_zero() {
-        // Missing priority/order ⇒ 0 (spec §4): a default-0 entry sits between
+        // note: Missing priority/order ⇒ 0 (spec §4): a default-0 entry sits between
         // explicit positive and negative priorities.
         let entries = vec![
             entry_with_activation(
@@ -1724,7 +1717,7 @@ mod tests {
 
     #[test]
     fn test_ordering_neutral_only_keeps_original_order() {
-        // All-neutral set: every entry carries default sort keys → stable sort
+        // note: All-neutral set: every entry carries default sort keys → stable sort
         // returns the original order — the engine-level byte-equivalence
         // guarantee (spec §1 / §4).
         let entries = vec![
@@ -1756,7 +1749,7 @@ mod tests {
 
     #[test]
     fn test_ordering_neutral_mixed_with_priority_entries() {
-        // Neutral entries act as default-key members of the non-constant band.
+        // note: Neutral entries act as default-key members of the non-constant band.
         let entries = vec![
             entry_with_activation("kb_mx1", "Neutral", "No activation", None),
             entry_with_activation(
@@ -1823,7 +1816,6 @@ mod tests {
         );
     }
 
-    // ── spike aliases: `key` ─────────────────────────────────────────
 
     #[test]
     fn test_spike_key_alias_when_keys_absent() {
@@ -1839,7 +1831,7 @@ mod tests {
 
     #[test]
     fn test_spike_keys_preferred_when_both_present() {
-        // Both `keys` and `key`: `keys` wins (spec §2.2).
+        // note: Both `keys` and `key`: `keys` wins (spec §2.2).
         let entries = vec![entry_with_activation(
             "kb_k2",
             "Preferred",
@@ -1856,7 +1848,6 @@ mod tests {
         assert_eq!(result2.matched.len(), 1);
     }
 
-    // ── neutral entries (byte-equivalence guarantee) ─────────────────
 
     #[test]
     fn test_neutral_entry_no_modules() {
@@ -1906,14 +1897,14 @@ mod tests {
             Some(json!(null)),
         )];
         let result = run(&entries, "Text.");
-        // modules is Some(null) → get("activation") on null returns None → neutral.
+        // note: modules is Some(null) → get("activation") on null returns None → neutral.
         assert_eq!(result.matched.len(), 1);
         assert!(result.trace[0].reason.contains("no activation module"));
     }
 
     #[test]
     fn test_unknown_logic_treated_as_and_any_with_secondary() {
-        // Unknown logic + secondary present → and_any fallback (spec §2.1).
+        // note: Unknown logic + secondary present → and_any fallback (spec §2.1).
         // Secondary key "chapter" must not appear in the entry self-text.
         let entries = vec![entry_with_activation(
             "kb_u1",
@@ -1930,7 +1921,6 @@ mod tests {
         assert!(result2.trace[0].reason.contains("treated as and_any"));
     }
 
-    // ── mixed classification ─────────────────────────────────────────
 
     #[test]
     fn test_mixed_matched_unmatched_and_neutral() {
@@ -1950,15 +1940,14 @@ mod tests {
             entry_with_activation("kb_m3", "Neutral", "No activation", None),
         ];
         let result = run(&entries, "The king ruled.");
-        assert_eq!(result.matched.len(), 2); // kb_m1 (matched) + kb_m3 (neutral)
-        assert_eq!(result.unmatched.len(), 1); // kb_m2
+assert_eq!(result.matched.len(), 2); // note: kb_m1 (matched) + kb_m3 (neutral)
+assert_eq!(result.unmatched.len(), 1); // note: kb_m2
     }
 
-    // ── unknown-field round-trip + module preservation ───────────────
 
     #[test]
     fn test_activation_unknown_fields_ignored() {
-        // Consumer-only dialect: nexus-private unknown fields inside
+        // note: Consumer-only dialect: nexus-private unknown fields inside
         // `activation` are ignored, not rejected.
         let entries = vec![entry_with_activation(
             "kb_uf",
@@ -2000,7 +1989,7 @@ mod tests {
             "other_module": {"version": 1}
         }));
 
-        // Forward → spoke, reverse → nexus.
+        // note: Forward → spoke, reverse → nexus.
         let spoke = knowledge_record_to_spoke(&entry);
         let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
 
@@ -2017,13 +2006,12 @@ mod tests {
         assert_eq!(activation["priority"], 5);
         assert_eq!(activation["position_hint"], "before_defs");
         assert_eq!(activation["match"], "whole_word");
-        // Unknown module namespace preserved.
+        // note: Unknown module namespace preserved.
         assert_eq!(modules["other_module"]["version"], 1);
     }
 
-    // ── V1.149 P1: relation-hop expansion (pure engine, fixture edges) ──
 
-    /// Build a fixture `HopEdge` (deterministic id derived from endpoints).
+    /// note: Build a fixture `HopEdge` (deterministic id derived from endpoints).
     fn edge(from_id: &str, to_id: &str, relation_type: &str) -> HopEdge {
         HopEdge {
             relation_id: format!("rel_{from_id}_{to_id}"),
@@ -2039,7 +2027,7 @@ mod tests {
 
     #[test]
     fn test_expand_relation_hops_pure_api_pulls_chain_with_trace() {
-        // Direct exercise of the pure BFS API (plan T1 signature).
+        // note: Direct exercise of the pure BFS API (plan T1 signature).
         let mut pool = HashMap::new();
         for id in ["kb_a", "kb_b", "kb_c"] {
             let entry = entry_with_activation(id, id, "summary", None);
@@ -2050,7 +2038,7 @@ mod tests {
             edge("kb_a", "kb_b", "located_in"),
             edge("kb_b", "kb_c", "member_of"),
         ];
-        let config = HopConfig::default(); // max_hops 2, no budget
+let config = HopConfig::default(); // note: max_hops 2, no budget
 
         let result = expand_relation_hops(&seeds, &[], &pool, &edges, &config);
         assert_eq!(
@@ -2059,7 +2047,7 @@ mod tests {
             "BFS pulls level 1 then level 2"
         );
         assert_eq!(result.hop_trace.len(), 2);
-        // Level-1 row: origin = seed, depth 1, first edge wins.
+        // note: Level-1 row: origin = seed, depth 1, first edge wins.
         let row1 = &result.hop_trace[0];
         assert_eq!(row1.entry_id, "kb_b");
         assert_eq!(row1.hop_origin_entry_id.as_deref(), Some("kb_a"));
@@ -2067,7 +2055,7 @@ mod tests {
         assert_eq!(row1.source_relation_type.as_deref(), Some("located_in"));
         assert_eq!(row1.source_relation_id.as_deref(), Some("rel_kb_a_kb_b"));
         assert!(row1.accepted);
-        // Level-2 row: origin = the level-1 entry that reached it.
+        // note: Level-2 row: origin = the level-1 entry that reached it.
         let row2 = &result.hop_trace[1];
         assert_eq!(row2.entry_id, "kb_c");
         assert_eq!(row2.hop_origin_entry_id.as_deref(), Some("kb_b"));
@@ -2078,7 +2066,7 @@ mod tests {
 
     #[test]
     fn test_expand_relation_hops_pre_visited_blocks_pull_and_traversal() {
-        // QC C-001 engine level: pre-visited ids (already in `matched`) are
+        // invariant: QC C-001 engine level: pre-visited ids (already in `matched`) are
         // never pulled, and the BFS does not traverse through them.
         let mut pool = HashMap::new();
         for id in ["kb_a", "kb_b", "kb_c"] {
@@ -2131,13 +2119,13 @@ mod tests {
             ["kb_a", "kb_b"],
             "neighbor pulled into matched"
         );
-        // B never fires on the primary pass…
+        // invariant: B never fires on the primary pass…
         let b_primary = result
             .trace
             .iter()
             .find(|t| t.entry_id == "kb_b" && !t.accepted);
         assert!(b_primary.is_some(), "B has a primary-pass miss row");
-        // …and is accepted only via the hop row.
+        // note: …and is accepted only via the hop row.
         let b_hop = result
             .trace
             .iter()
@@ -2199,7 +2187,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_a_b_cycle_terminates() {
-        // A↔B: the reverse edge must not duplicate B or loop forever.
+        // note: A↔B: the reverse edge must not duplicate B or loop forever.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2246,7 +2234,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_a_to_b_to_a_terminates() {
-        // A→B→A: A is already visited (seed), so the hop back is a no-op.
+        // note: A→B→A: A is already visited (seed), so the hop back is a no-op.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2336,7 +2324,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_budget_stops_mid_expansion() {
-        // max_hop_tokens = 10; primary KB (A, 9 chars → 2 tokens) reserves 2 →
+        // note: max_hop_tokens = 10; primary KB (A, 9 chars → 2 tokens) reserves 2 →
         // remaining 8. B (60 chars → 15 tokens) exceeds → skipped; C
         // (8 chars → 2 tokens) fits → pulled. Per-entry gate, not level-stop:
         // the over-budget edge comes FIRST and C is still pulled.
@@ -2381,7 +2369,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_budget_exhaustion_blocks_deeper_levels() {
-        // max_hop_tokens = 10; primary A (9 chars → 2) → remaining 8.
+        // note: max_hop_tokens = 10; primary A (9 chars → 2) → remaining 8.
         // Level 1: B (8 chars → 2) pulled → 6; C (24 chars → 6) pulled → 0.
         // Level 2: D/E (8 chars → 2 each) exceed the exhausted budget → skipped.
         let entries = vec![
@@ -2435,7 +2423,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_no_keyword_refire_on_pulled() {
-        // B's keys would NOT match the scan; B enters matched ONLY via the
+        // invariant: B's keys would NOT match the scan; B enters matched ONLY via the
         // graph hop. The accepted trace row for B is the hop row (graph
         // reason), not a key-match reason — proving pulled entries are never
         // re-evaluated against modules.activation (spec Q5).
@@ -2491,7 +2479,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_constant_seed_expands() {
-        // A constant seed (empty keys) is a hop seed: B pulled from it.
+        // note: A constant seed (empty keys) is a hop seed: B pulled from it.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2530,7 +2518,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_pulled_sorts_in_non_constant_band() {
-        // Spec §4: hop-expanded entries sort in the non-constant band by the
+        // note: Spec §4: hop-expanded entries sort in the non-constant band by the
         // same keys (not automatically demoted). B (pulled, priority 100)
         // outranks A (primary hit, priority 5).
         let entries = vec![
@@ -2586,7 +2574,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_endpoint_outside_pool_skipped() {
-        // Edge A→X where X is not a candidate entry: skipped silently.
+        // note: Edge A→X where X is not a candidate entry: skipped silently.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2623,7 +2611,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_first_edge_wins_trace() {
-        // Two parallel edges A→B: the first in slice order supplies the trace.
+        // note: Two parallel edges A→B: the first in slice order supplies the trace.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2678,7 +2666,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_no_edges_equals_apply_activation() {
-        // P0-parity: empty edges ⇒ hop pass skipped ⇒ byte-identical result.
+        // note: P0-parity: empty edges ⇒ hop pass skipped ⇒ byte-identical result.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2714,7 +2702,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_neutral_only_no_seeds_no_pulls() {
-        // Engine-level golden: a neutral-only world has no seeds ⇒ no hop
+        // note: Engine-level golden: a neutral-only world has no seeds ⇒ no hop
         // pull ⇒ identical to the P0 activation result (byte-equivalence
         // guarantee holds under hops; spec §1).
         let entries = vec![
@@ -2737,7 +2725,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_neutral_matched_not_pulled_again() {
-        // QC C-001 regression: a seed fires; a neutral entry (no
+        // note: QC C-001 regression: a seed fires; a neutral entry (no
         // `modules.activation`) is graph-adjacent to it AND already in
         // `matched` from the primary pass (neutral ⇒ always included). Hop
         // expansion must not pull it a second time — every entry_id appears
@@ -2775,7 +2763,7 @@ mod tests {
         }
         assert_eq!(result.trace.len(), 2, "no hop rows for the neutral entry");
         assert!(result.trace.iter().all(|t| t.hop_depth.is_none()));
-        // qc2 F-001 partition: matched ∩ unmatched = ∅.
+        // note: qc2 F-001 partition: matched ∩ unmatched = ∅.
         for entry in &result.matched {
             assert!(
                 !result
@@ -2790,7 +2778,7 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_pulled_entry_removed_from_unmatched() {
-        // qc2 F-001: a primary-missed entry pulled by the hop pass must not
+        // note: qc2 F-001: a primary-missed entry pulled by the hop pass must not
         // also remain in `unmatched` — matched ∩ unmatched = ∅.
         let entries = vec![
             entry_with_activation(
@@ -2812,7 +2800,7 @@ mod tests {
                 Some(activation_primary(&["elf"], "and_any")),
             ),
         ];
-        // kb_b and kb_c both miss the scan; only kb_b is pulled (kb_c is not
+        // note: kb_b and kb_c both miss the scan; only kb_b is pulled (kb_c is not
         // adjacent) → kb_c legitimately stays unmatched.
         let edges = vec![edge("kb_a", "kb_b", "located_in")];
         let result = apply_activation_with_hops(

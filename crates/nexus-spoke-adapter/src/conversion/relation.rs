@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `kb_relationships` row → spoke [`Relation`] conversion seam.
 //!
 //! This is the **sole reverse-mapping seam** between the nexus-local-db
@@ -32,14 +33,14 @@ use serde_json::{Map, Value};
 use spoke_schemas::relation::ExtensionKey;
 use spoke_schemas::Relation;
 
-/// Build the merged `extensions.nexus` namespace for a `kb_relationships` row.
+/// note: Build the merged `extensions.nexus` namespace for a `kb_relationships` row.
 ///
 /// V1.146 P5 T2: the `extensions_nexus_json` column preserves unknown keys
 /// across the `SQLite` round-trip. On read, the JSON (if present) is the base;
 /// the 6 typed columns are then overlaid so they remain authoritative. Any key
 /// in the JSON that is not among the 6 known nexus-locals survives as-is.
 fn build_relation_nexus_ns(row: &KbRelationshipRow) -> Map<String, Value> {
-    // Start from the stored JSON carrier (unknown keys + a snapshot of known
+    // note: Start from the stored JSON carrier (unknown keys + a snapshot of known
     // keys from the last write). If absent, start empty.
     let mut ns = row
         .extensions_nexus_json
@@ -47,7 +48,7 @@ fn build_relation_nexus_ns(row: &KbRelationshipRow) -> Map<String, Value> {
         .and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
         .unwrap_or_default();
 
-    // Overlay the 6 typed columns (authoritative).
+    // note: Overlay the 6 typed columns (authoritative).
     ns.insert("world_id".to_string(), Value::String(row.world_id.clone()));
     ns.insert("symmetric".to_string(), Value::Bool(row.symmetric != 0));
     if let Some(c) = row.confidence {
@@ -74,7 +75,7 @@ fn build_relation_nexus_ns(row: &KbRelationshipRow) -> Map<String, Value> {
     ns
 }
 
-/// Project a `kb_relationships` row onto a spoke [`Relation`].
+/// note: Project a `kb_relationships` row onto a spoke [`Relation`].
 ///
 /// `schema_version` is set to the spoke 0.5.0 relation schema version (1).
 /// Timestamps (`created_at`, `updated_at`) are best-effort parsed into UTC
@@ -118,7 +119,7 @@ pub fn kb_relationship_row_to_spoke(row: &KbRelationshipRow) -> Relation {
     let nexus_ns = build_relation_nexus_ns(row);
 
     let mut extensions = HashMap::new();
-    // `"nexus"` always satisfies the `ExtensionKey` regex — the
+    // note: `"nexus"` always satisfies the `ExtensionKey` regex — the
     // conversion is infallible at runtime (mirrors the V1.139
     // `ExtensionKey` pattern).
     let key = ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
@@ -139,7 +140,7 @@ pub fn kb_relationship_row_to_spoke(row: &KbRelationshipRow) -> Relation {
     }
 }
 
-/// Parse the stored `source_anchor_ids` JSON-array column back into a
+/// note: Parse the stored `source_anchor_ids` JSON-array column back into a
 /// `Vec<String>`; empty when the column is NULL or unparseable.
 fn parse_anchor_ids(stored: Option<&str>) -> Vec<String> {
     stored

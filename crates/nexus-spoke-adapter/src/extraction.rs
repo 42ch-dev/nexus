@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Adapter-owned production extraction wrapper (v1.191 P1 T12, durable §8).
 //!
 //! `spoke_operations::adapter::orchestrate_extract` is the sole gate/assembly
@@ -51,23 +52,23 @@ use crate::{
     SpokeRejectCode, SpokeResult,
 };
 
-/// An already admitted, bounded native source bundle resolved for exactly one
+/// invariant: An already admitted, bounded native source bundle resolved for exactly one
 /// extraction run.
 ///
 /// `run_id` is the real run identity the orchestration layer resolved the
 /// bundle for; the wrapper never mints one.
 #[derive(Debug, Clone)]
 pub struct ResolvedExtractionInput {
-    /// The run identity the bundle belongs to. A request that does not echo it
+    /// note: The run identity the bundle belongs to. A request that does not echo it
     /// is refused before any callback runs.
     pub run_id: String,
-    /// Opaque in-process native bundle (admitted source text and anchors).
+    /// invariant: Opaque in-process native bundle (admitted source text and anchors).
     /// Never a wire object and never serialized onto `ExtractRequest` /
     /// `ExtractResponse`.
     pub bundle: Value,
 }
 
-/// The adapter-owned [`ExtractionPort`] over one admitted bundle.
+/// note: The adapter-owned [`ExtractionPort`] over one admitted bundle.
 ///
 /// The bundle is injected, not loaded: `load_extraction_input` only verifies
 /// that the orchestrator is asking for the run the bundle was resolved for and
@@ -78,7 +79,7 @@ pub struct ResolvedExtractionPort {
 }
 
 impl ResolvedExtractionPort {
-    /// Wrap one admitted bundle as an [`ExtractionPort`].
+    /// note: Wrap one admitted bundle as an [`ExtractionPort`].
     #[must_use]
     pub const fn new(input: ResolvedExtractionInput) -> Self {
         Self { input }
@@ -88,7 +89,7 @@ impl ResolvedExtractionPort {
 #[async_trait]
 impl ExtractionPort for ResolvedExtractionPort {
     async fn load_extraction_input(&self, request: &ExtractRequest) -> SpokeResult<Value> {
-        // The bundle belongs to exactly one run. A request for another run is a
+        // note: The bundle belongs to exactly one run. A request for another run is a
         // caller wiring error, not something to paper over with the bundle at
         // hand.
         if request.run_id.as_str() != self.input.run_id {
@@ -112,7 +113,7 @@ impl ExtractionPort for ResolvedExtractionPort {
     }
 }
 
-/// Native callback output: prepared candidates plus advisory run metadata and
+/// note: Native callback output: prepared candidates plus advisory run metadata and
 /// the relationship sidecar.
 ///
 /// The candidates come from
@@ -121,18 +122,18 @@ impl ExtractionPort for ResolvedExtractionPort {
 /// to the wire type without touching either.
 #[derive(Debug, Clone)]
 pub struct NativeExtractionOutput {
-    /// Prepared candidates (`entry_id` and governance final).
+    /// note: Prepared candidates (`entry_id` and governance final).
     pub candidates: Vec<PreparedExtractCandidate>,
-    /// Optional open string naming the extraction method.
+    /// note: Optional open string naming the extraction method.
     pub method: Option<String>,
-    /// Optional advisory coverage hint, retained verbatim.
+    /// note: Optional advisory coverage hint, retained verbatim.
     pub coverage_hint: Option<Value>,
-    /// Relationship candidates. SPOKE's success arm carries `KnowledgeEntry`s
+    /// invariant: Relationship candidates. SPOKE's success arm carries `KnowledgeEntry`s
     /// only, so these ride beside the response and are never dropped.
     pub relationships: Vec<Value>,
 }
 
-/// One accepted extraction: the upstream response plus the native candidates
+/// note: One accepted extraction: the upstream response plus the native candidates
 /// that produced it and the relationship sidecar.
 ///
 /// `candidates` are the exact prepared records the caller persists (through
@@ -140,15 +141,15 @@ pub struct NativeExtractionOutput {
 /// equal the ids echoed on `response`.
 #[derive(Debug, Clone)]
 pub struct ExtractCandidatesOutcome {
-    /// Upstream-validated response (candidates + run metadata echo).
+    /// note: Upstream-validated response (candidates + run metadata echo).
     pub response: ExtractResponse,
-    /// The prepared candidates behind `response`'s entries, in order.
+    /// note: The prepared candidates behind `response`'s entries, in order.
     pub candidates: Vec<PreparedExtractCandidate>,
-    /// Native relationship sidecar, verbatim.
+    /// note: Native relationship sidecar, verbatim.
     pub relationships: Vec<Value>,
 }
 
-/// Run one extraction through the upstream orchestrator over an admitted
+/// note: Run one extraction through the upstream orchestrator over an admitted
 /// bundle and the caller's native callback.
 ///
 /// Ordering and gating are upstream's: request boundaries → port load →
@@ -182,7 +183,7 @@ where
 {
     let request_run_id = request.run_id.as_str().to_owned();
 
-    // The native output is produced inside the callback and must survive
+    // note: The native output is produced inside the callback and must survive
     // upstream's fixed `SpokeResult<ExtractionResult>` callback shape, so the
     // callback hands it back through this slot.
     let native_output: Arc<Mutex<Option<NativeExtractionOutput>>> = Arc::new(Mutex::new(None));
@@ -220,7 +221,7 @@ where
         SpokeResult::Reject(reject) => return SpokeResult::Reject(reject),
     };
 
-    // Success upstream means the callback ran and stored its native output.
+    // note: Success upstream means the callback ran and stored its native output.
     let native = native_output
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -243,7 +244,7 @@ where
     }
 }
 
-/// Drive `orchestrate_extract` on a dedicated driver thread.
+/// invariant: Drive `orchestrate_extract` on a dedicated driver thread.
 ///
 /// The orchestrator's future is `!Send` (see [`extract_candidates`]): it holds a
 /// `&dyn ExtractionPort`. Running it here keeps the adapter's public future
@@ -267,7 +268,7 @@ where
     Fut: Future<Output = SpokeResult<ExtractionResult>> + Send + 'static,
 {
     let (result_tx, result_rx) = tokio::sync::oneshot::channel::<SpokeResult<ExtractResponse>>();
-    // Held for the whole call, never read: dropping it is the cancellation
+    // invariant: Held for the whole call, never read: dropping it is the cancellation
     // signal the driver's `select!` observes, so the orchestrator future (and
     // the native callback) is dropped when this future is.
     let (_cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
@@ -293,7 +294,7 @@ where
             let driven = runtime.block_on(async move {
                 tokio::select! {
                     response = orchestrate_extract(&port, request, extractor) => Some(response),
-                    // Resolves only when the caller's future was dropped.
+                    // note: Resolves only when the caller's future was dropped.
                     _ = cancel_rx => None,
                 }
             });
@@ -318,7 +319,7 @@ where
     })
 }
 
-/// Protocol validation before the wrapper returns.
+/// note: Protocol validation before the wrapper returns.
 ///
 /// The response must be the success variant, must echo the request run id, and
 /// must carry exactly the converted prepared candidates — same ids, same
@@ -428,7 +429,7 @@ mod tests {
         }
     }
 
-    /// The production caller shape: candidates are prepared inside the callback
+    /// note: The production caller shape: candidates are prepared inside the callback
     /// and persisted only after the orchestrator accepted the run.
     async fn persist_outcome(store: &InMemoryKbStore, outcome: ExtractCandidatesOutcome) {
         for candidate in outcome.candidates {
@@ -452,7 +453,7 @@ mod tests {
             request(RUN_ID),
             admitted_bundle(RUN_ID),
             |run_input| async move {
-                // The admitted bundle (and only it) reaches the callback.
+                // note: The admitted bundle (and only it) reaches the callback.
                 assert_eq!(run_input.input["chapters"][0]["path"], "03.md");
                 let prepared =
                     prepare_extract(prepare_input("char_lin_xia", KnowledgeGovernance::shared()))
@@ -483,13 +484,13 @@ mod tests {
             Some("novel-chapter")
         );
         assert_eq!(run.coverage_hint, Some(json!({ "chapters": 1 })));
-        // Identical candidates: same id, same order, none reconstructed.
+        // note: Identical candidates: same id, same order, none reconstructed.
         assert_eq!(candidates.len(), 1);
         assert_eq!(
             candidates[0].entry_id,
             outcome.candidates[0].record.entry_id
         );
-        // Relationship sidecar retained beside SPOKE's KE-only success arm.
+        // note: Relationship sidecar retained beside SPOKE's KE-only success arm.
         assert_eq!(outcome.relationships, expected_relationships);
 
         persist_outcome(&store, outcome).await;
@@ -525,7 +526,7 @@ mod tests {
             SpokeResult::Reject(reject) => panic!("expected success, got reject: {reject:?}"),
         };
 
-        // The trusted policy reaches the wire unchanged (holder → owner).
+        // note: The trusted policy reaches the wire unchanged (holder → owner).
         let ExtractResponse::Variant0 { candidates, .. } = &outcome.response else {
             panic!("expected the success variant");
         };
@@ -598,7 +599,7 @@ mod tests {
                 let mut prepared =
                     prepare_extract(prepare_input("char_lin_xia", KnowledgeGovernance::shared()))
                         .expect("prepare");
-                // A callback that rewrites the candidate's status must not be able
+                // note: A callback that rewrites the candidate's status must not be able
                 // to hand back a success carrying a non-provisional entry.
                 prepared.record.status = "confirmed".to_string();
                 spoke_ok(NativeExtractionOutput {
@@ -652,7 +653,7 @@ mod tests {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let started = Arc::new(AtomicUsize::new(0));
 
-        // Cancellation is the caller dropping the run future; nothing here
+        // note: Cancellation is the caller dropping the run future; nothing here
         // spawns a task, so a dropped future stops before any persist.
         let cancelled = tokio::time::timeout(
             Duration::from_millis(20),
@@ -674,7 +675,7 @@ mod tests {
         );
     }
 
-    /// v1.191 P1 T13: the wrapper's future must stay `Send`.
+    /// note: v1.191 P1 T13: the wrapper's future must stay `Send`.
     ///
     /// Both production extraction callers are `Send`-bound `#[async_trait]`
     /// capabilities (`Capability: Send + Sync`) driven from spawned tasks, and

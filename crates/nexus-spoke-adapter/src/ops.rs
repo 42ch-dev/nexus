@@ -1,3 +1,4 @@
+// note: contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Surface A delegation wrappers over [`spoke_operations`] lifecycle helpers.
 //!
 //! Each wrapper enforces the call-boundary invariant (tracked spec §7):
@@ -17,7 +18,7 @@ use spoke_operations::{
 };
 use spoke_schemas::{AssemblePacket, Finding, KnowledgeEntry, PromoteRequest};
 
-/// Delegate to [`spoke_operations::validate_promote_request`].
+/// note: Delegate to [`spoke_operations::validate_promote_request`].
 ///
 /// Operand: spoke [`PromoteRequest`] only. Validates promote shape and
 /// lifecycle rules (candidate is `provisional`, not terminal, target ≠ self,
@@ -27,7 +28,7 @@ pub fn validate_promote(request: &PromoteRequest) -> SpokeResult<()> {
     validate_promote_request(request)
 }
 
-/// Delegate to [`spoke_operations::apply_promote_acceptance`].
+/// note: Delegate to [`spoke_operations::apply_promote_acceptance`].
 ///
 /// Operand: spoke [`PromoteRequest`] only. Returns the promoted
 /// [`KnowledgeEntry`] (`status: confirmed`, revision bumped). Does not
@@ -37,7 +38,7 @@ pub fn apply_promote(request: &PromoteRequest) -> SpokeResult<KnowledgeEntry> {
     apply_promote_acceptance(request)
 }
 
-/// Delegate to [`spoke_operations::transition_knowledge_entry_status`].
+/// note: Delegate to [`spoke_operations::transition_knowledge_entry_status`].
 ///
 /// Operand: spoke [`KnowledgeEntry`] only. Returns a new `KnowledgeEntry`
 /// with the updated status; input is not mutated.
@@ -46,7 +47,7 @@ pub fn transition_status(entry: &KnowledgeEntry, to: &str) -> SpokeResult<Knowle
     transition_knowledge_entry_status(entry, to)
 }
 
-/// Delegate to [`spoke_operations::transition_finding_status`].
+/// note: Delegate to [`spoke_operations::transition_finding_status`].
 ///
 /// Operand: spoke [`Finding`] only. Returns a new `Finding` with the updated
 /// status and `updated_at` set; input is not mutated.
@@ -55,7 +56,7 @@ pub fn transition_finding_status(finding: &Finding, to: &str) -> SpokeResult<Fin
     spoke_operations::transition_finding_status(finding, to)
 }
 
-/// Delegate to [`spoke_operations::build_assemble_packet`].
+/// invariant: Delegate to [`spoke_operations::build_assemble_packet`].
 ///
 /// Operands: spoke [`KnowledgeEntry`] slice only. Builds a wire-valid
 /// [`AssemblePacket`] from the entries (order-preserving truncate only when
@@ -90,14 +91,14 @@ pub fn build_assemble_packet(
         knowledge_entries: &wrapped,
         extensions: None,
         max_entries,
-        // Cognition family stays UNCONSUMED (baseline rule): no selection is
+        // note: Cognition family stays UNCONSUMED (baseline rule): no selection is
         // ever projected and no view policy is installed.
         cognition_selection: None,
         current_view_policy: None,
     })
 }
 
-/// Delegate to [`spoke_operations::merge_extension_maps`].
+/// note: Delegate to [`spoke_operations::merge_extension_maps`].
 ///
 /// Operands: spoke [`ExtensionMap`] only. Deep-merges two extension maps;
 /// overlay wins on scalar conflicts. Returned map is independent of both
@@ -107,7 +108,7 @@ pub fn merge_extensions(base: &ExtensionMap, overlay: &ExtensionMap) -> Extensio
     merge_extension_maps(base, overlay)
 }
 
-/// Delegate to [`spoke_operations::assert_revision_match`].
+/// why: Delegate to [`spoke_operations::assert_revision_match`].
 ///
 /// Compares caller-supplied revisions before persist; the library performs
 /// no storage I/O. Returns `Ok(())` when equal, otherwise a reject with
