@@ -5,6 +5,7 @@
 //! modules/extensions row mapping, and the overview projection contract
 //! (counts, `last_event_at`, pagination, cursor validation) migrated from
 //! the retired daemon handler tests.
+// note: the timeline projection contract above is asserted below.
 
 use nexus_contracts::daemon_api::timeline::ListTimelineEventsResponse;
 use nexus_core::{
@@ -172,7 +173,7 @@ async fn overview(
         .expect("timeline_overview")
 }
 
-/// Port of the retired daemon timeline-events fixture's keyset-cursor case:
+/// note: Port of the retired daemon timeline-events fixture's keyset-cursor case:
 /// cursor pages on (`branch_id`, `sequence_no`) come back in deterministic
 /// ascending order with no overlap, and re-requesting a cursor reproduces the
 /// same page.
@@ -228,7 +229,7 @@ async fn cursor_pagination() {
     assert!(!page3.has_more);
     assert!(page3.next_cursor.is_none());
 
-    // Deterministic: the same cursor reproduces the same page.
+    // note: Deterministic: the same cursor reproduces the same page.
     let again = list(
         &f.core,
         &f.principal,
@@ -242,8 +243,8 @@ async fn cursor_pagination() {
     f.pool.close().await;
 }
 
-#[allow(clippy::too_many_lines)] // one end-to-end timeline scenario
-/// Cursor pages preserve the `status` / `event_type` filters: each page is a
+#[allow(clippy::too_many_lines)] // why: one end-to-end timeline scenario
+/// note: Cursor pages preserve the `status` / `event_type` filters: each page is a
 /// filtered keyset continuation, never a re-scan of unfiltered rows.
 #[tokio::test]
 async fn cursor_pages_preserve_filters() {
@@ -305,7 +306,7 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
 
-    // Default status filter is `canon`.
+    // note: Default status filter is `canon`.
     let canon = list(
         &f.core,
         &f.principal,
@@ -314,7 +315,7 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
     assert_eq!(sequences(&canon), vec![0, 2, 3]);
-    // Explicit provisional filter selects only provisional rows.
+    // why: Explicit provisional filter selects only provisional rows.
     let provisional = list(
         &f.core,
         &f.principal,
@@ -323,7 +324,7 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
     assert_eq!(sequences(&provisional), vec![1, 4]);
-    // `event_type` exact match (with the default canon status).
+    // note: `event_type` exact match (with the default canon status).
     let compute = list(
         &f.core,
         &f.principal,
@@ -332,7 +333,7 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
     assert_eq!(sequences(&compute), vec![2]);
-    // Unknown event type → empty page, not an error.
+    // note: Unknown event type → empty page, not an error.
     let none = list(
         &f.core,
         &f.principal,
@@ -343,7 +344,7 @@ async fn cursor_pages_preserve_filters() {
     assert!(none.items.is_empty());
     assert!(!none.has_more);
 
-    // Filtered paging: canon pages of two walk 0,2 then 3 — no overlap, no
+    // note: Filtered paging: canon pages of two walk 0,2 then 3 — no overlap, no
     // unfiltered rows leaking in.
     let page1 = list(
         &f.core,
@@ -370,7 +371,7 @@ async fn cursor_pages_preserve_filters() {
     assert!(!page2.has_more);
     assert!(page2.next_cursor.is_none());
 
-    // Invalid status filter is rejected.
+    // note: Invalid status filter is rejected.
     let err = f
         .core
         .list_timeline_events(
@@ -386,7 +387,7 @@ async fn cursor_pages_preserve_filters() {
     f.pool.close().await;
 }
 
-/// Malformed cursors stay `invalid_input` sibling regressions (garbage,
+/// note: Malformed cursors stay `invalid_input` sibling regressions (garbage,
 /// missing separator, empty branch, non-numeric/negative sequence, overlong).
 #[tokio::test]
 async fn malformed_cursors_are_invalid_input() {
@@ -433,7 +434,7 @@ async fn malformed_cursors_are_invalid_input() {
     f.pool.close().await;
 }
 
-/// Foreign-world and missing-world reads keep their distinctions
+/// note: Foreign-world and missing-world reads keep their distinctions
 /// (`Forbidden` / `NotFound`).
 #[tokio::test]
 async fn foreign_world_forbidden_and_missing_world_not_found() {
@@ -467,7 +468,7 @@ async fn foreign_world_forbidden_and_missing_world_not_found() {
     f.pool.close().await;
 }
 
-/// W-1 (QC): `limit=0` must not report `has_more` — a `has_more=true,
+/// note: W-1 (QC): `limit=0` must not report `has_more` — a `has_more=true,
 /// next_cursor=null` response would growth-loop a keyset client.
 #[tokio::test]
 async fn limit_zero_returns_no_more_pages() {
@@ -502,7 +503,7 @@ async fn limit_zero_returns_no_more_pages() {
     f.pool.close().await;
 }
 
-/// The branch filter defaults to the World's current branch
+/// note: The branch filter defaults to the World's current branch
 /// (`root_fork_branch_id`), an explicit `branch_id` narrows to that branch,
 /// and an unset root falls back to `fbk_root`.
 #[tokio::test]
@@ -552,7 +553,7 @@ async fn branch_filter_narrows_and_defaults_to_world_current_branch() {
     assert_eq!(sequences(&other), vec![0]);
     assert_eq!(other.items[0].branch_id, OTHER_BRANCH);
 
-    // A world with no recorded root branch falls back to `fbk_root`.
+    // note: A world with no recorded root branch falls back to `fbk_root`.
     seed_world(&f.pool, "wld_tl_noroot", CREATOR, None).await;
     seed_event(
         &f.pool,
@@ -579,7 +580,7 @@ async fn branch_filter_narrows_and_defaults_to_world_current_branch() {
     f.pool.close().await;
 }
 
-/// `modules_json` / `extensions_nexus_json` are carried verbatim; unrecorded
+/// note: `modules_json` / `extensions_nexus_json` are carried verbatim; unrecorded
 /// columns degrade to empty map / `None` instead of failing the page.
 #[tokio::test]
 async fn modules_and_extensions_are_carried_verbatim() {
@@ -654,7 +655,7 @@ async fn modules_and_extensions_are_carried_verbatim() {
     f.pool.close().await;
 }
 
-/// Overview: worlds are ordered by `world_id`, pages are bounded at 20, the
+/// note: Overview: worlds are ordered by `world_id`, pages are bounded at 20, the
 /// keyset cursor continues deterministically, and `total_worlds` counts all
 /// worlds regardless of paging.
 #[tokio::test]
@@ -684,7 +685,7 @@ async fn overview_pages_worlds_deterministically() {
     assert!(page2.cursor.is_none(), "page 2 must be final");
     assert_eq!(page2.total_worlds, 26);
 
-    // Deterministic: page 1 repeats identically.
+    // note: Deterministic: page 1 repeats identically.
     let again = overview(&f.core, &f.principal, None).await;
     assert_eq!(again.cursor, page1.cursor);
     assert_eq!(again.worlds[0].world_id, "wld_000");
@@ -693,7 +694,7 @@ async fn overview_pages_worlds_deterministically() {
     f.pool.close().await;
 }
 
-/// Overview wire contract: `cursor` is a *required* but nullable field. A
+/// note: Overview wire contract: `cursor` is a *required* but nullable field. A
 /// terminal page must therefore serialize an explicit `"cursor": null`
 /// (never an omitted key), while a non-terminal page still carries a usable
 /// string cursor.
@@ -701,7 +702,7 @@ async fn overview_pages_worlds_deterministically() {
 async fn overview_cursor_serializes_required_nullable() {
     let f = fixture().await;
 
-    // Terminal page (no Worlds at all) — the required field must appear as null.
+    // why: Terminal page (no Worlds at all) — the required field must appear as null.
     let empty = overview(&f.core, &f.principal, None).await;
     let empty_json = serde_json::to_value(&empty).expect("serialize empty overview");
     assert_eq!(
@@ -714,7 +715,7 @@ async fn overview_cursor_serializes_required_nullable() {
         seed_world(&f.pool, &format!("wld_{i:03}"), CREATOR, Some(ROOT)).await;
     }
 
-    // Non-terminal page — the same required field carries a usable string.
+    // note: Non-terminal page — the same required field carries a usable string.
     let page1 = overview(&f.core, &f.principal, None).await;
     let page1_json = serde_json::to_value(&page1).expect("serialize page 1");
     let cursor = page1_json
@@ -723,7 +724,7 @@ async fn overview_cursor_serializes_required_nullable() {
         .expect("non-terminal page must serialize a string cursor");
     assert_eq!(page1.cursor.as_deref(), Some(cursor));
 
-    // Continuation page — terminal again, so the cursor is null once more.
+    // why: Continuation page — terminal again, so the cursor is null once more.
     let page2 = overview(&f.core, &f.principal, page1.cursor.clone()).await;
     let page2_json = serde_json::to_value(&page2).expect("serialize page 2");
     assert_eq!(
@@ -736,7 +737,7 @@ async fn overview_cursor_serializes_required_nullable() {
     f.pool.close().await;
 }
 
-/// Overview counts aggregate only live key blocks (`deleted` / `merged` /
+/// note: Overview counts aggregate only live key blocks (`deleted` / `merged` /
 /// `deprecated` excluded) and `last_event_at` parses the latest event
 /// timestamp.
 #[tokio::test]
@@ -831,7 +832,7 @@ async fn overview_counts_exclude_retired_blocks_and_parse_last_event() {
     f.pool.close().await;
 }
 
-/// Overview cursor validation: overlong, prefix-only and foreign-format
+/// note: Overview cursor validation: overlong, prefix-only and foreign-format
 /// cursors are `invalid_input`.
 #[tokio::test]
 async fn overview_cursor_errors_are_invalid_input() {

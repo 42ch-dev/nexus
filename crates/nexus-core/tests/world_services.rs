@@ -3,7 +3,8 @@
 //! change sequence untouched, successful canonical mutations are visible to a
 //! second guarded reader, and the World lifecycle keeps its create/delete
 //! contracts.
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
+// note: the world and canonical KB contract above is asserted below.
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per test
 
 use nexus_contracts::{
     CreateForkRequest, CreateWorldRequest, WorldKbPatchRelationshipRequest,
@@ -29,16 +30,16 @@ const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
 const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";
-/// Controlled stored `updated_at` for the archive-replay regression: far from
+/// note: Controlled stored `updated_at` for the archive-replay regression: far from
 /// `now`, so a replay that reached the shared update statement (which always
 /// writes a fresh `updated_at`) cannot hide inside the same wall-clock second.
 const REPEAT_UPDATED_AT: i64 = 1_700_000_200;
-/// Failure detector for the archive/edit race handshake — NOT an ordering
+/// note: Failure detector for the archive/edit race handshake — NOT an ordering
 /// assumption: the edit reaches the `test-hooks` write-lock rendezvous
 /// promptly, and only a request that never gets there hits this bound.
 const RACE_HANG_GUARD: Duration = Duration::from_secs(30);
 
-/// Serializes the two scenarios that own the process-global rule-write gate.
+/// note: Serializes the two scenarios that own the process-global rule-write gate.
 ///
 /// The gate slot holds exactly one gate; installing replaces it and clearing
 /// removes whatever currently occupies it. Under the default parallel test
@@ -48,7 +49,7 @@ const RACE_HANG_GUARD: Duration = Duration::from_secs(30);
 /// before installing and holds it until its gate is no longer observable.
 static GATE_OWNER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Disarms the process-global rule-write gate when it leaves scope.
+/// note: Disarms the process-global rule-write gate when it leaves scope.
 ///
 /// The archive/edit race fixture arms [`set_rule_write_gate`]; an armed gate
 /// parks every later same-rule write at its write-lock boundary, so it MUST be
@@ -78,7 +79,7 @@ struct Fixture {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    // v1.191 P1: a stored Creator always carries its holder registry row, and
+    // note: v1.191 P1: a stored Creator always carries its holder registry row, and
     // the World-KB management admission resolves it — the fixture must seed a
     // complete subject, not a bare `creators` row (same repair as the
     // `world_kb_contract` / `world_pack_services` fixtures).
@@ -92,7 +93,7 @@ async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
     .await;
 }
 
-#[allow(clippy::too_many_arguments)] // the fixture seeds every column in one call
+#[allow(clippy::too_many_arguments)] // why: the fixture seeds every column in one call
 async fn seed_kb(
     pool: &SqlitePool,
     id: &str,
@@ -125,7 +126,7 @@ async fn seed_pending(
     name: &str,
     created_at: &str,
 ) {
-    // kb_extract_jobs is engine-writer-only (writer protocol §4).
+    // why: kb_extract_jobs is engine-writer-only (writer protocol §4).
     sqlx::query(
         "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id, status, promotion_status, proposed_payload, block_type_guess, canonical_name_guess, work_id, version, created_at) VALUES (?, ?, 'ws', ?, ?, 'done', 'pending', ?, 'character', ?, 'work_1', 0, ?)",
     )
@@ -223,7 +224,7 @@ async fn setup() -> Fixture {
     }
 }
 
-/// A second guarded writer over the live engine pool, for test-only seeds that
+/// note: A second guarded writer over the live engine pool, for test-only seeds that
 /// must land after the core opened (same writer id → no fencing). The returned
 /// handle owns the registration for the test's lifetime.
 async fn live_write_pool(
@@ -285,7 +286,7 @@ async fn change_sequence_head(pool: &SqlitePool) -> i64 {
         .unwrap()
 }
 
-/// The P0-T1 acceptance selector: foreign World cannot be mutated; stale
+/// note: The P0-T1 acceptance selector: foreign World cannot be mutated; stale
 /// promote/relationship update leaves rows and change sequence untouched;
 /// successful canonical mutations are visible to a second guarded reader.
 #[tokio::test]
@@ -293,7 +294,7 @@ async fn promote_relate_preserves_owner_and_cas() {
     let fx = setup().await;
     let reader_pool = read_only_pool(fx.tmp.path()).await;
 
-    // ── Foreign World cannot be mutated ────────────────────────────────────
+    // why: ── Foreign World cannot be mutated ────────────────────────────────────
     let before = change_sequence_head(&reader_pool).await;
     let err = fx
         .core
@@ -317,7 +318,7 @@ async fn promote_relate_preserves_owner_and_cas() {
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
     assert_eq!(change_sequence_head(&reader_pool).await, before);
 
-    // ── Stale promote leaves the candidate row and outbox untouched ────────
+    // note: ── Stale promote leaves the candidate row and outbox untouched ────────
     let err = fx
         .core
         .promote_world_kb_candidate(
@@ -340,7 +341,7 @@ async fn promote_relate_preserves_owner_and_cas() {
     assert_eq!(job_version, 0);
     assert_eq!(change_sequence_head(&reader_pool).await, before);
 
-    // ── Successful canonical mutations are visible to a second reader ──────
+    // note: ── Successful canonical mutations are visible to a second reader ──────
     let adopted = fx
         .core
         .promote_world_kb_candidate(
@@ -376,7 +377,7 @@ async fn promote_relate_preserves_owner_and_cas() {
         .relationship_id
         .clone();
 
-    // Second guarded reader (fresh read-only core) sees both canonical rows.
+    // why: Second guarded reader (fresh read-only core) sees both canonical rows.
     let second = CoreService::open(CoreOpenOptions {
         user_home: fx.tmp.path().to_path_buf(),
         access: CoreAccess::ReadOnly,
@@ -404,7 +405,7 @@ async fn promote_relate_preserves_owner_and_cas() {
         "related row visible to the second reader"
     );
 
-    // The adopt produced a durable core_changes row (same-transaction outbox).
+    // note: The adopt produced a durable core_changes row (same-transaction outbox).
     let outbox: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM core_changes WHERE resource_id = ?")
         .bind(&adopted_id)
         .fetch_one(&reader_pool)
@@ -412,7 +413,7 @@ async fn promote_relate_preserves_owner_and_cas() {
         .unwrap();
     assert!(outbox >= 1, "adopt emitted a core_changes row");
 
-    // ── Stale relationship update leaves rows and sequence untouched ───────
+    // note: ── Stale relationship update leaves rows and sequence untouched ───────
     let after_mutations = change_sequence_head(&reader_pool).await;
     let err = fx
         .core
@@ -440,14 +441,14 @@ async fn promote_relate_preserves_owner_and_cas() {
     let () = reader_pool.close().await;
 }
 
-/// Reject/merge outcomes keep their CAS + fold contracts, and a replayed
+/// note: Reject/merge outcomes keep their CAS + fold contracts, and a replayed
 /// adopt after durable success returns the confirmed entry idempotently.
 #[tokio::test]
 async fn promote_reject_merge_and_idempotent_readopt() {
     let fx = setup().await;
     let pool = read_only_pool(fx.tmp.path()).await;
 
-    // Reject: stale version conflicts, then the guarded flip succeeds.
+    // note: Reject: stale version conflicts, then the guarded flip succeeds.
     let err = fx
         .core
         .promote_world_kb_candidate(
@@ -471,7 +472,7 @@ async fn promote_reject_merge_and_idempotent_readopt() {
     assert_eq!(rejected.version, 1);
     assert!(rejected.entity.is_none());
 
-    // Merge: folds the candidate summary into the confirmed target and
+    // note: Merge: folds the candidate summary into the confirmed target and
     // dismisses the candidate atomically.
     let merged = fx
         .core
@@ -484,7 +485,7 @@ async fn promote_reject_merge_and_idempotent_readopt() {
         .unwrap();
     let entity = merged.entity.as_ref().expect("merged target");
     assert_eq!(entity.key_block_id, "kb_tgt");
-    // Idempotent re-adopt: a replayed adopt on a confirmed job returns the
+    // note: Idempotent re-adopt: a replayed adopt on a confirmed job returns the
     // attributed entry instead of erroring.
     let first = fx
         .core
@@ -512,20 +513,20 @@ async fn promote_reject_merge_and_idempotent_readopt() {
     let () = pool.close().await;
 }
 
-/// World lifecycle: title validation, create visibility, and the hard-delete
+/// note: World lifecycle: title validation, create visibility, and the hard-delete
 /// contract (binding guard marker, foreign denial, works preserved).
 #[tokio::test]
 async fn world_lifecycle_create_delete_and_binding_guard() {
     let fx = setup().await;
     let pool = read_only_pool(fx.tmp.path()).await;
-    // Raw seed writes need the guarded writer function registered; join the
+    // note: Raw seed writes need the guarded writer function registered; join the
     // live engine pool held by `fx.core` (same writer id, so no fencing).
     let (_engine, write_pool) = common::live_write_pool(
         &nexus_home_layout::workspace_state_db_path(fx.tmp.path(), CREATOR, SLUG),
     )
     .await;
 
-    // Title validation: empty after trim is rejected with the retained reason.
+    // note: Title validation: empty after trim is rejected with the retained reason.
     let bad: CreateWorldRequest =
         serde_json::from_value(serde_json::json!({"title": "   "})).unwrap();
     let err = fx.core.create_world(&fx.principal, bad).await.unwrap_err();
@@ -535,7 +536,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     assert_eq!(field, "title");
     assert!(reason.contains("1-200 characters"));
 
-    // Foreign worlds are not deletable by the caller.
+    // note: Foreign worlds are not deletable by the caller.
     let err = fx
         .core
         .delete_world(&fx.principal, FOREIGN_WORLD.to_string())
@@ -543,7 +544,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
 
-    // Create is visible to a second guarded reader.
+    // note: Create is visible to a second guarded reader.
     let req: CreateWorldRequest =
         serde_json::from_value(serde_json::json!({"title": "Starfall Isle"})).unwrap();
     let created = fx.core.create_world(&fx.principal, req).await.unwrap();
@@ -564,7 +565,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     assert_eq!(world.title, "Starfall Isle");
     assert_eq!(world.slug, "starfall-isle");
 
-    // A Character binding blocks the hard delete with the retained marker.
+    // note: A Character binding blocks the hard delete with the retained marker.
     sqlx::query(
         "INSERT INTO characters (character_id, owner_creator_id, display_name, status, created_at, updated_at) VALUES (?, ?, 'Hero', 'active', datetime('now'), datetime('now'))",
     )
@@ -593,7 +594,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     };
     assert_eq!(resource, nexus_core::DELETE_WORLD_BLOCKED_BY_BINDINGS);
 
-    // Works owned by the caller survive with world_id cleared.
+    // note: Works owned by the caller survive with world_id cleared.
     sqlx::query(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal, initial_idea, intake_status, world_id, created_at, updated_at) VALUES ('work_keep', ?, ?, 'draft', 'Keep', 'g', 'i', 'pending', ?, datetime('now'), datetime('now'))",
     )
@@ -626,7 +627,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
 
-    // The hard delete is reflected in the workspace-wide lifecycle read
+    // note: The hard delete is reflected in the workspace-wide lifecycle read
     // (coverage migrated from the retired daemon gateway-only handler tests).
     let worlds = fx.core.list_worlds(&fx.principal).await.unwrap();
     assert!(
@@ -639,7 +640,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     let () = pool.close().await;
 }
 
-/// Key-block state read: computable projection, non-computable null, and the
+/// note: Key-block state read: computable projection, non-computable null, and the
 /// foreign/missing distinctions.
 #[tokio::test]
 async fn key_block_state_read_guards() {
@@ -703,7 +704,7 @@ async fn key_block_state_read_guards() {
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
 
-    // A key block of another owned World is unreadable through this World's
+    // note: A key block of another owned World is unreadable through this World's
     // path: the guard passes, the entity lookup does not (migrated from the
     // retired `world_kb_patch.rs::get_key_block_state_cross_world_returns_404`).
     seed_world(&pool, "wld_other_owned", CREATOR).await;
@@ -730,7 +731,7 @@ async fn key_block_state_read_guards() {
     assert!(matches!(err, CoreError::NotFound { .. }));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// note: ═══════════════════════════════════════════════════════════════════════════
 // MIGRATED (daemon World/KB HTTP fixture retirement, v1.193 P2-T3)
 //
 // The cases below carry the surviving domain assertions of the retired
@@ -783,7 +784,7 @@ async fn seed_timeline_event(
     .unwrap();
 }
 
-/// Fork create (migrated from `fork_api.rs`): ownership is decided before the
+/// note: Fork create (migrated from `fork_api.rs`): ownership is decided before the
 /// fork point is read, fork points are branch-scoped, the retained request DTO
 /// bounds the label, and the canon `fork_created` lineage marker is readable
 /// through the timeline-events owner.
@@ -794,7 +795,7 @@ async fn retained_fork_create_guards_and_lineage() {
     let fork_point = "evt_fork_point";
     seed_timeline_event(&pool, fork_point, OWNED_WORLD, "fbk_root", 1).await;
 
-    // A World the caller does not own is refused before the fork point is
+    // note: A World the caller does not own is refused before the fork point is
     // read — the request quotes REAL ids from the caller's own World, so a
     // reordered guard would reach the capability instead.
     let denied = fx
@@ -815,7 +816,7 @@ async fn retained_fork_create_guards_and_lineage() {
     .unwrap();
     assert_eq!(markers, 0, "a denied fork writes no marker");
 
-    // An unknown event, and a real event quoted against the wrong branch, are
+    // note: An unknown event, and a real event quoted against the wrong branch, are
     // both input rejection (never a silent fork).
     let err = fx
         .core
@@ -849,7 +850,7 @@ async fn retained_fork_create_guards_and_lineage() {
         "the fork point must sit on the stated branch"
     );
 
-    // Happy path: a fresh branch id, the echoed parent + fork point, and the
+    // note: Happy path: a fresh branch id, the echoed parent + fork point, and the
     // label carried into the lineage marker.
     let created = fx
         .core
@@ -864,7 +865,7 @@ async fn retained_fork_create_guards_and_lineage() {
     assert_eq!(created.parent_branch_id, "fbk_root");
     assert_eq!(created.forked_from_event_id, fork_point);
 
-    // Exactly one canon `fork_created` marker on the new branch, and its
+    // note: Exactly one canon `fork_created` marker on the new branch, and its
     // lineage block is stored verbatim.
     let query = CoreTimelineEventsQuery {
         branch_id: Some(created.branch_id.clone()),
@@ -896,7 +897,7 @@ async fn retained_fork_create_guards_and_lineage() {
     assert_eq!(lineage["fork_lineage"]["forked_from_event_id"], fork_point);
     assert_eq!(lineage["fork_lineage"]["label"], "alt-ending");
 
-    // The retained request DTO bounds the label (1-200 chars when present):
+    // note: The retained request DTO bounds the label (1-200 chars when present):
     // an empty or over-long label never reaches the domain.
     for label in ["", &"x".repeat(201)] {
         assert!(
@@ -938,7 +939,7 @@ async fn seed_finding(pool: &SqlitePool, finding_id: &str, world_id: &str, creat
     tx.commit().await.unwrap();
 }
 
-/// World findings read surface (migrated from `world_findings_api.rs`): the
+/// note: World findings read surface (migrated from `world_findings_api.rs`): the
 /// owned/unknown/foreign guards, the stored-to-wire projection (spoke
 /// vocabulary verbatim, epoch → RFC 3339, the routing stamp rehydrated), and
 /// the honest 500-row cap. The retired check-composition half of that fixture
@@ -997,7 +998,7 @@ async fn retained_world_findings_read_projection_and_cap() {
         "epoch → RFC 3339: {wire}"
     );
 
-    // 502 stored rows: exactly the newest 500, honestly flagged.
+    // note: 502 stored rows: exactly the newest 500, honestly flagged.
     for i in 0..501 {
         seed_finding(&pool, &format!("fnd_bulk_{i:03}"), world, 1_700_001_000 + i).await;
     }
@@ -1031,7 +1032,7 @@ fn rule_update(body: Value) -> WorldRuleUpdateRequest {
     serde_json::from_value(body).unwrap()
 }
 
-/// The supplied-member set of a raw PATCH body — what a transport hands the
+/// note: The supplied-member set of a raw PATCH body — what a transport hands the
 /// core beside the typed request (`RulePatchPresence`; the generated DTO
 /// erases `{}` vs. absent and null vs. absent).
 fn rule_presence(body: &Value) -> RulePatchPresence {
@@ -1041,7 +1042,7 @@ fn rule_presence(body: &Value) -> RulePatchPresence {
     RulePatchPresence::from_supplied_keys(&supplied)
 }
 
-#[allow(clippy::too_many_arguments)] // seed helper: the row's columns are the fixture surface
+#[allow(clippy::too_many_arguments)] // why: seed helper: the row's columns are the fixture surface
 async fn seed_world_rule(
     pool: &SqlitePool,
     rule_id: &str,
@@ -1075,7 +1076,7 @@ async fn seed_world_rule(
     .unwrap();
 }
 
-/// Every `spoke_rules` column (`20260804_000001_spoke_rules.sql`), in DDL order —
+/// note: Every `spoke_rules` column (`20260804_000001_spoke_rules.sql`), in DDL order —
 /// the complete at-rest row, so a "no write" assertion cannot miss a body field
 /// or a refreshed timestamp. (A 14-tuple would not work: std stops deriving
 /// `Debug`/`PartialEq` at 12 elements.)
@@ -1097,7 +1098,7 @@ struct StoredRuleRow {
     updated_at: Option<i64>,
 }
 
-/// Read one stored row in full (all 14 columns, `NULL`s included), bypassing the
+/// note: Read one stored row in full (all 14 columns, `NULL`s included), bypassing the
 /// wire projection: the storage-level byte-identity surface of the no-write
 /// guarantees.
 async fn stored_rule_row(pool: &SqlitePool, rule_id: &str) -> StoredRuleRow {
@@ -1112,7 +1113,7 @@ async fn stored_rule_row(pool: &SqlitePool, rule_id: &str) -> StoredRuleRow {
     .unwrap()
 }
 
-/// The stored row as the archived-inclusive list route projects it — the
+/// note: The stored row as the archived-inclusive list route projects it — the
 /// caller-visible item the write response is nominally converted from.
 async fn listed_rule(fx: &Fixture, world: &str, rule_id: &str) -> WorldRulesListResponseRulesItem {
     fx.core
@@ -1125,7 +1126,7 @@ async fn listed_rule(fx: &Fixture, world: &str, rule_id: &str) -> WorldRulesList
         .unwrap_or_else(|| panic!("{rule_id} must be listed when archived rows are included"))
 }
 
-/// World structured rules (migrated from `world_rules_api.rs`): the write
+/// note: World structured rules (migrated from `world_rules_api.rs`): the write
 /// surface's carrier grammar and field-level rejections, the per-field PATCH
 /// semantics with whole-carrier replacement, and the read guards/projection.
 /// The retired fixture's check-composition cases
@@ -1141,7 +1142,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     let world = "wld_rules";
     seed_world(&pool, world, CREATOR).await;
 
-    // Read guards and the empty list (`false` = the default read, archived
+    // why: Read guards and the empty list (`false` = the default read, archived
     // rows omitted — V1.198 §13).
     let empty = fx
         .core
@@ -1177,7 +1178,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
-    // Create: defaults, the server-minted id shape, and the carrier surfaced
+    // note: Create: defaults, the server-minted id shape, and the carrier surfaced
     // first-class.
     let created = fx
         .core
@@ -1216,7 +1217,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     assert_eq!(hex.len(), 32, "uuid v4 simple: {rule_id}");
     assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
 
-    // The create defaults are real at rest, not just on the wire.
+    // note: The create defaults are real at rest, not just on the wire.
     let stored: (i64, String, Option<String>, String, String, String) = sqlx::query_as(
         "SELECT schema_version, kind, severity_hint, status, target_entry_types_json, extensions_json FROM spoke_rules WHERE rule_id = ?",
     )
@@ -1236,7 +1237,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         "the nexus namespace is written fresh at create"
     );
 
-    // Carrier grammar + meta-field rejections carry the AR-2 field vocabulary.
+    // note: Carrier grammar + meta-field rejections carry the AR-2 field vocabulary.
     let rejections: Vec<(Value, &str)> = vec![
         (
             json!({ "canonical_name": "X", "statement": "Y", "constraint": { "family": "module_presence", "module_key": "m", "bogus": true } }),
@@ -1303,7 +1304,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         assert_eq!(field, expected_field, "for {body}");
     }
 
-    // Every carrier family creates: the member-aware grammar accepts the same
+    // note: Every carrier family creates: the member-aware grammar accepts the same
     // four families it rejects elsewhere.
     for carrier in [
         json!({ "family": "module_presence", "module_key": "characters" }),
@@ -1332,7 +1333,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         );
     }
 
-    // PATCH replaces every mutable member and never touches description or
+    // why: PATCH replaces every mutable member and never touches description or
     // created_at.
     let updated = fx
         .core
@@ -1377,7 +1378,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         "created_at never moves"
     );
 
-    // Whole-carrier replacement: only `extensions.nexus.constraint` is
+    // why: Whole-carrier replacement: only `extensions.nexus.constraint` is
     // overwritten — sibling nexus keys and every other namespace survive.
     let bagged = json!({
         "nexus": {
@@ -1418,7 +1419,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     assert_eq!(stored["nexus"]["other_nexus_key"], "keep-me");
     assert_eq!(stored["other_namespace"], json!({ "k": [1, 2] }));
 
-    // Addressing precedes payload: an empty PATCH, an unknown id and a
+    // note: Addressing precedes payload: an empty PATCH, an unknown id and a
     // cross-world id each fail without writing.
     let err = fx
         .core
@@ -1489,7 +1490,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     .unwrap();
     assert_eq!(untouched, "SecretOtherWorldRule");
 
-    // The pair rule judges the effective pair, and an explicit empty target
+    // note: The pair rule judges the effective pair, and an explicit empty target
     // axis clears while an absent one leaves the stored axis alone.
     seed_world_rule(
         &pool,
@@ -1563,7 +1564,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         "an absent axis is not a clear"
     );
 
-    // Every rejected PATCH returned before any write: the stored row of the
+    // note: Every rejected PATCH returned before any write: the stored row of the
     // last untouched seed still carries its original timestamp.
     let frozen: i64 =
         sqlx::query_scalar("SELECT updated_at FROM spoke_rules WHERE rule_id = 'rul_other_world'")
@@ -1572,7 +1573,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             .unwrap();
     assert_eq!(frozen, 1_700_000_100);
 
-    // Read projection: store order (canonical_name ASC, rule_id ASC) with the
+    // note: Read projection: store order (canonical_name ASC, rule_id ASC) with the
     // carrier first-class.
     let rules = fx
         .core
@@ -1601,7 +1602,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     assert!(bag_wire.get("extensions").is_none());
 }
 
-/// The 500-rule read cap (migrated from
+/// note: The 500-rule read cap (migrated from
 /// `world_rules_api.rs::read_route_caps_and_flags_truncation`): the response
 /// carries the first 500 of `canonical_name ASC, rule_id ASC` and flags the
 /// overflow, and an under-cap World returns every row unflagged.
@@ -1625,7 +1626,7 @@ async fn retained_world_rules_read_cap_and_store_order() {
         )
         .await;
     }
-    // Three rows share the 500th canonical name — the rule_id ASC tie-break
+    // note: Three rows share the 500th canonical name — the rule_id ASC tie-break
     // decides which one survives the cap.
     for rule_id in ["rul_aaa_499", "rul_bulk_499", "rul_zzz_499"] {
         seed_world_rule(
@@ -1685,7 +1686,7 @@ async fn retained_world_rules_read_cap_and_store_order() {
     );
 }
 
-/// Rule PATCH failure modes and axis semantics (migrated from
+/// note: Rule PATCH failure modes and axis semantics (migrated from
 /// `world_rules_api.rs` `patch_malformed_extensions_json_500_internal_no_write`,
 /// `patch_meta_field_value_checks`, `patch_empty_body_rejects_field_patch_no_write`,
 /// `patch_invalid_payload_404_precedes_payload_validation`,
@@ -1700,7 +1701,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
     let world = "wld_rules_patch";
     seed_world(&pool, world, CREATOR).await;
 
-    // A corrupted stored extensions bag fails the carrier-replacing patch
+    // note: A corrupted stored extensions bag fails the carrier-replacing patch
     // closed: no silent clobber, no write at all.
     sqlx::query("INSERT INTO spoke_rules (rule_id, world_id, schema_version, canonical_name, kind, statement, target_entry_types_json, status, extensions_json, created_at, updated_at) VALUES ('rul_corrupt', ?, 1, 'Corrupt', 'rule', 'S', '[]', 'active', '{not valid json', 1700000000, 1700000100)")
         .bind(world)
@@ -1739,7 +1740,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         "a failed patch never refreshes the row"
     );
 
-    // Meta-field value checks mirror create and leave the row untouched.
+    // note: Meta-field value checks mirror create and leave the row untouched.
     seed_world_rule(
         &pool,
         "rul_meta",
@@ -1791,7 +1792,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         ("Meta", "active", 1_700_000_100)
     );
 
-    // An empty PATCH is refused and never refreshes the row.
+    // why: An empty PATCH is refused and never refreshes the row.
     let err = fx
         .core
         .update_world_rule(
@@ -1814,7 +1815,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             .unwrap();
     assert_eq!(stamp, 1_700_000_100, "an empty PATCH writes nothing");
 
-    // Addressing precedes payload: an unknown id and a foreign-World id stay
+    // note: Addressing precedes payload: an unknown id and a foreign-World id stay
     // 404 even when the payload itself would be rejected.
     seed_world_rule(
         &pool,
@@ -1849,7 +1850,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         );
     }
 
-    // The write guards cover PATCH as well as create.
+    // why: The write guards cover PATCH as well as create.
     let err = fx
         .core
         .update_world_rule(
@@ -1863,7 +1864,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
-    // `status: deprecated` is the deactivation path; an omitted target axis on
+    // note: `status: deprecated` is the deactivation path; an omitted target axis on
     // a later edit leaves the stored axis alone, and a `null` axis is the same
     // absence on the wire.
     let deactivated = fx
@@ -1907,7 +1908,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         "null ≡ absent, so the stored axis survives"
     );
 
-    // A matched patch refreshes `updated_at` and never touches `created_at`.
+    // why: A matched patch refreshes `updated_at` and never touches `created_at`.
     let (created_at, updated_at): (i64, i64) =
         sqlx::query_as("SELECT created_at, updated_at FROM spoke_rules WHERE rule_id = 'rul_meta'")
             .fetch_one(&pool)
@@ -1920,7 +1921,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
     );
 }
 
-/// V1.198 §13 archive lifecycle (AC-1..4/10/11): the create refusal, the
+/// note: V1.198 §13 archive lifecycle (AC-1..4/10/11): the create refusal, the
 /// transition from each prior status with every other field retained, the
 /// idempotent repeat, and the read-only tombstone — mixed PATCH, status exits,
 /// and the supplied-but-empty/`null` members that the generated DTO collapses.
@@ -1936,7 +1937,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
     let world = "wld_rules_archive";
     seed_world(&pool, world, CREATOR).await;
 
-    // AC-1: `archived` is never an authoring state — create refuses it through
+    // why: AC-1: `archived` is never an authoring state — create refuses it through
     // the field-level envelope naming `status`, and writes no row.
     let err = fx
         .core
@@ -1967,7 +1968,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         .unwrap();
     assert_eq!(rows, 0, "a refused create writes no row");
 
-    // AC-2: archiving succeeds from every prior status and retains the row.
+    // note: AC-2: archiving succeeds from every prior status and retains the row.
     let mut archived_ids = Vec::new();
     for (index, prior) in ["active", "draft", "deprecated"].iter().enumerate() {
         let rule_id = format!("rul_archive_{index}");
@@ -2015,7 +2016,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
             "the carrier is retained"
         );
 
-        // At rest: ownership, created_at and the whole extensions bag survive;
+        // note: At rest: ownership, created_at and the whole extensions bag survive;
         // only updated_at moves.
         let (owner, created_at, updated_at, bag): (String, i64, i64, String) = sqlx::query_as(
             "SELECT world_id, created_at, updated_at, extensions_json FROM spoke_rules \
@@ -2040,7 +2041,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         archived_ids.push(rule_id);
     }
 
-    // AC-3: the repeat is idempotent — and (V1.198 §13) a **strict no-write
+    // note: AC-3: the repeat is idempotent — and (V1.198 §13) a **strict no-write
     // success**, `updated_at` included. The stored timestamp is pinned to a
     // controlled non-`now` epoch first: the archive above wrote `now`, so a
     // replay that still reached the shared update statement would refresh
@@ -2075,7 +2076,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
     assert_eq!(repeated.status.as_deref(), Some("archived"));
     assert_eq!(repeated.canonical_name, "Archive 0");
     assert_eq!(repeated.target_entry_types, vec!["character".to_string()]);
-    // The caller-visible response is the pre-replay row verbatim (same
+    // note: The caller-visible response is the pre-replay row verbatim (same
     // projection, `updated_at` included), and the complete at-rest row is
     // unchanged — the replay wrote nothing at all.
     assert_eq!(
@@ -2089,12 +2090,12 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         "the replay persisted no change: every column, `updated_at` included"
     );
 
-    // AC-4: the tombstone accepts exactly `{ "status": "archived" }`.
+    // note: AC-4: the tombstone accepts exactly `{ "status": "archived" }`.
     // The row that enters the refusal loop is snapshotted in full so the loop's
     // no-write evidence covers every column, not just the visible trio.
     let pre_refusal_row = stored_rule_row(&pool, &repeat_id).await;
     let refusals: Vec<(Value, &str, &str)> = vec![
-        // (body, expected field, expectation label)
+        // note: (body, expected field, expectation label)
         (
             json!({ "canonical_name": "Resurrected" }),
             "canonical_name",
@@ -2199,7 +2200,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         assert_eq!(field, expected_field, "{label}: {body}");
     }
 
-    // AC-11/guard order: addressing still precedes the payload, and the World
+    // why: AC-11/guard order: addressing still precedes the payload, and the World
     // guard still precedes addressing — the tombstone changes nothing.
     let err = fx
         .core
@@ -2238,7 +2239,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
-    // Every refusal above returned before any write: the complete at-rest row
+    // note: Every refusal above returned before any write: the complete at-rest row
     // is byte-identical to the row that entered the refusal loop (status,
     // content, extensions, `created_at` and the pinned `updated_at` all
     // included) and the row count is unchanged — no purge, no removal, no
@@ -2256,7 +2257,7 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
     assert_eq!(stored, 3, "archived rows are retained, never purged");
 }
 
-/// V1.198 §13 default visibility and cap honesty (AC-6): the caller-selected
+/// note: V1.198 §13 default visibility and cap honesty (AC-6): the caller-selected
 /// status omission is applied in SQL **before** the 501-row probe, so archived
 /// rows can neither occupy a default slot (no displacement of visible rows)
 /// nor flip `truncated`; 501 visible rows still truncate, and inclusion returns
@@ -2268,7 +2269,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
     let world = "wld_rules_archive_cap";
     seed_world(&pool, world, CREATOR).await;
 
-    // Names are chosen so the archived rows sort FIRST: an implementation that
+    // why: Names are chosen so the archived rows sort FIRST: an implementation that
     // filtered after the cap (or in Rust after the SQL probe) would let them
     // displace visible rows and inflate `truncated`.
     for i in 0..500 {
@@ -2298,7 +2299,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
         .await;
     }
 
-    // 500 visible + 30 archived: the default read returns exactly the 500
+    // note: 500 visible + 30 archived: the default read returns exactly the 500
     // visible rows and does not claim truncation.
     let listed = fx
         .core
@@ -2323,7 +2324,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
     );
     assert_eq!(listed.rules[499].rule_id, "rul_vis_499");
 
-    // 501 visible rows: the cap is honest about the selected set.
+    // note: 501 visible rows: the cap is honest about the selected set.
     seed_world_rule(
         &pool,
         "rul_vis_500",
@@ -2343,7 +2344,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
     assert!(capped.truncated, "501 selected rows exceed the cap");
     assert_eq!(capped.rules.len(), 500);
 
-    // Explicit inclusion selects the archived rows too, in the same store
+    // note: Explicit inclusion selects the archived rows too, in the same store
     // order (archived names sort first here).
     let included = fx
         .core
@@ -2371,7 +2372,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
         "every archived row inside the window is returned: {included_ids:?}"
     );
 
-    // Draft/deprecated/NULL/unknown statuses stay visible in both reads.
+    // note: Draft/deprecated/NULL/unknown statuses stay visible in both reads.
     let mixed = "wld_rules_archive_mixed";
     seed_world(&pool, mixed, CREATOR).await;
     for (rule_id, status) in [
@@ -2424,7 +2425,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
     );
 }
 
-/// V1.198 §13 concurrent archive/edit (the race regression): a competing
+/// note: V1.198 §13 concurrent archive/edit (the race regression): a competing
 /// archive and an edit must not both act on the same preimage.
 ///
 /// Deterministic interleaving, no sleeps: another writer holds an UNCOMMITTED
@@ -2437,7 +2438,7 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
 /// preimage tests red here: it would rename the tombstone instead of refusing.
 #[tokio::test]
 async fn retained_world_rules_archive_concurrent_tombstone_guard() {
-    // Exclusive gate ownership for this scenario's whole gate lifetime, so no
+    // note: Exclusive gate ownership for this scenario's whole gate lifetime, so no
     // other scenario can replace the armed gate before this race resolves.
     let _gate_owner = GATE_OWNER_LOCK.lock().await;
     let fx = setup().await;
@@ -2456,7 +2457,7 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     )
     .await;
 
-    // The competing archive, held open (uncommitted) by a second writer.
+    // note: The competing archive, held open (uncommitted) by a second writer.
     let mut concurrent_archive = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query(
         "UPDATE spoke_rules SET status = 'archived', updated_at = 1700000200 \
@@ -2466,7 +2467,7 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     .await
     .unwrap();
 
-    // Arm the write-lock rendezvous for THIS rule (the gate names its rule, so
+    // note: Arm the write-lock rendezvous for THIS rule (the gate names its rule, so
     // a gate armed here never parks another test's write). The guard disarms
     // the process-global gate on every exit, including this test's failure
     // panics — a leaked armed gate would park the next same-rule write forever.
@@ -2484,7 +2485,7 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     let boundary = gate.boundary.notified();
     tokio::pin!(boundary);
     let boundary_reached = tokio::select! {
-        // `Ok` = the edit signalled the boundary; `Err` = it never got there
+        // why: `Ok` = the edit signalled the boundary; `Err` = it never got there
         // within the blind (hang-guard) bound. Neither is an ordering
         // assumption: the wait below is what orders the two writers.
         boundary = tokio::time::timeout(RACE_HANG_GUARD, &mut boundary) => boundary.is_ok(),
@@ -2498,13 +2499,13 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
         "the competing edit never reached its write-lock boundary"
     );
 
-    // The edit is provably parked between its pre-lock work and the lock
+    // note: The edit is provably parked between its pre-lock work and the lock
     // acquisition, so the archive commit lands inside that window by
     // construction; release the edit only afterwards.
     concurrent_archive.commit().await.unwrap();
     gate.proceed.notify_one();
 
-    // The edit's transaction started after the archive committed, so it sees
+    // note: The edit's transaction started after the archive committed, so it sees
     // the tombstone and refuses the content member it supplied first.
     let err = edit.await.unwrap_err();
     let CoreError::InvalidInput { field, .. } = err else {
@@ -2528,7 +2529,7 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     );
 }
 
-/// The process-global rule-write gate MUST be disarmed on the failure exits of
+/// note: The process-global rule-write gate MUST be disarmed on the failure exits of
 /// the archive/edit race fixture — an armed gate parks the next same-rule write
 /// at its write-lock boundary forever. This proves the guard's `Drop`, not the
 /// fixture's happy path: it arms the gate, exits through a controlled panic
@@ -2536,7 +2537,7 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
 /// completes instead of parking.
 #[tokio::test]
 async fn retained_world_rules_race_gate_disarms_on_failure_exit() {
-    // Exclusive gate ownership from the armed install through the post-unwind
+    // note: Exclusive gate ownership from the armed install through the post-unwind
     // probe: the probe must observe the proof's own disarm, not a gate another
     // scenario installed over the leaked one.
     let _gate_owner = GATE_OWNER_LOCK.lock().await;
@@ -2569,7 +2570,7 @@ async fn retained_world_rules_race_gate_disarms_on_failure_exit() {
         rule_update(json!({ "canonical_name": "Disarmed" })),
         RulePatchPresence::from_supplied_keys(&["canonical_name"]),
     );
-    // A gate left armed for `rul_race_proof` would park this write at its
+    // note: A gate left armed for `rul_race_proof` would park this write at its
     // write-lock boundary and hit the hang guard; the guard's `Drop` fires on
     // the panic above, so the write proceeds to its result.
     let disarmed = tokio::time::timeout(RACE_HANG_GUARD, probe)
@@ -2607,7 +2608,7 @@ fn relate_input(source: &str, target: &str, relation_type: &str) -> Value {
     })
 }
 
-#[allow(clippy::too_many_arguments)] // seed helper: the row's columns are the fixture surface
+#[allow(clippy::too_many_arguments)] // why: seed helper: the row's columns are the fixture surface
 async fn seed_relationship(
     pool: &SqlitePool,
     relationship_id: &str,
@@ -2634,7 +2635,7 @@ async fn seed_relationship(
     .unwrap();
 }
 
-/// Relationship patch (migrated from `world_kb_relationships.rs`): the
+/// note: Relationship patch (migrated from `world_kb_relationships.rs`): the
 /// validation refusals, the anchor round-trip, the symmetric reverse
 /// projection, the CAS conflict and the cross-world scope refusal. The
 /// `Axum` handler-level 422/403 envelopes and the `error_code()` vocabulary
@@ -2681,7 +2682,7 @@ async fn retained_relationship_patch_validation_and_projection() {
     )
     .await;
 
-    // Refusals: self-loop, custom without a label, an out-of-range confidence,
+    // note: Refusals: self-loop, custom without a label, an out-of-range confidence,
     // an unresolvable anchor and a same-name endpoint in another World.
     let refusals: Vec<Value> = vec![
         relate_input("kb_rel_a", "kb_rel_a", "allied_with"),
@@ -2714,7 +2715,7 @@ async fn retained_relationship_patch_validation_and_projection() {
         );
     }
 
-    // A resolved anchor round-trips on the created row.
+    // note: A resolved anchor round-trips on the created row.
     let mut anchored = relate_input("kb_rel_source", "kb_rel_b", "allied_with");
     anchored["source_anchor_ids"] = json!(["sa_kb_rel_source"]);
     let created = fx
@@ -2730,7 +2731,7 @@ async fn retained_relationship_patch_validation_and_projection() {
     let anchored_row = created.relationship.clone().expect("created row");
     assert_eq!(anchored_row.source_anchor_ids, vec!["sa_kb_rel_source"]);
 
-    // Remove drops the row (null projection); a stale update conflicts with
+    // note: Remove drops the row (null projection); a stale update conflicts with
     // the committed revision.
     let removed = fx
         .core
@@ -2788,7 +2789,7 @@ async fn retained_relationship_patch_validation_and_projection() {
     assert_eq!(details.current_version, 1);
     assert_eq!(details.conflicting_path, "version");
 
-    // A relationship owned by another World of the same creator is refused as
+    // note: A relationship owned by another World of the same creator is refused as
     // cross-world access.
     seed_kb(
         &pool,
@@ -2849,7 +2850,7 @@ async fn retained_relationship_patch_validation_and_projection() {
         );
     }
 
-    // A symmetric relation emits both the stored and the mirrored projection;
+    // note: A symmetric relation emits both the stored and the mirrored projection;
     // the stored row keeps the swapped endpoints of its reverse.
     let symmetric = fx
         .core
@@ -2898,7 +2899,7 @@ async fn retained_relationship_patch_validation_and_projection() {
     assert_eq!(stored["target_entity_id"], reverse["source_entity_id"]);
 }
 
-/// Relationship review gate, graph cap and stored-extension preservation
+/// note: Relationship review gate, graph cap and stored-extension preservation
 /// (migrated from `world_kb_relationships.rs`): extraction suggestions stay
 /// hidden unless explicitly requested, promotion clears the gate, a routine
 /// edit preserves it, the graph bounds its relationship page, and unknown
@@ -2943,7 +2944,7 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
     )
     .await;
 
-    // One confirmed manual row plus one extraction suggestion.
+    // note: One confirmed manual row plus one extraction suggestion.
     let confirmed = fx
         .core
         .patch_world_kb_relationship(
@@ -3002,7 +3003,7 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
     assert_eq!(suggestion["needs_review"], true);
     assert_eq!(suggestion["source"], "extraction");
 
-    // A routine edit that omits `needs_review` must not silently confirm the
+    // why: A routine edit that omits `needs_review` must not silently confirm the
     // suggestion; an explicit `false` promotes it.
     let edited = fx
         .core
@@ -3061,7 +3062,7 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
         "the promoted suggestion joins the default graph"
     );
 
-    // Unknown stored extension keys survive a routine update. This arm runs in
+    // note: Unknown stored extension keys survive a routine update. This arm runs in
     // its own World so the port's endpoint-resolution has exactly one row to
     // write through.
     let ext_world = "wld_rel_ext";
@@ -3157,7 +3158,7 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
             .unwrap();
     assert_eq!(relation_type, "opposes", "the update really landed");
 
-    // The relationship page is bounded: 1002 stored rows project at most the
+    // note: The relationship page is bounded: 1002 stored rows project at most the
     // cap, dropping the oldest.
     let capped_world = "wld_rel_cap";
     seed_world(&pool, capped_world, CREATOR).await;
@@ -3221,7 +3222,7 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
     assert!(ids.contains(&"rel_cap_1001"), "the newest row survives");
 }
 
-/// A merge whose target revision moved between the merge's read and its CAS
+/// note: A merge whose target revision moved between the merge's read and its CAS
 /// reports the TARGET as the conflict (migrated from `world_kb_patch.rs`
 /// `promote_merge_target_cas_miss_marks_target_conflict`). The retired fixture
 /// forced the miss with a held RESERVED write lock; here the concurrent writer
@@ -3287,7 +3288,7 @@ async fn retained_promote_merge_target_cas_miss_marks_the_target() {
         "the conflict reports the moved target revision"
     );
 
-    // Nothing was folded: the candidate is still pending and the target body
+    // note: Nothing was folded: the candidate is still pending and the target body
     // is untouched.
     let (status, body): (String, String) = sqlx::query_as(
         "SELECT promotion_status, proposed_payload FROM kb_extract_jobs WHERE job_id = 'xj_merge_c1'",
@@ -3329,7 +3330,7 @@ async fn seed_attributed_key_block(
     .unwrap();
 }
 
-/// Promote rollback and collision recovery (migrated from `world_kb_patch.rs`
+/// note: Promote rollback and collision recovery (migrated from `world_kb_patch.rs`
 /// `promote_adopt_rollbacks_entry_*`, `promote_adopt_*collision*` and
 /// `promote_adopt_retry_recovers_*`): a failed job flip rolls the in-flight
 /// entry back, a collision never auto-deletes a live entry, and a replayed
@@ -3342,7 +3343,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
     seed_world(&pool, world, CREATOR).await;
     let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
 
-    // (a) The job flip rejects the adopt after the entry insert — the entry
+    // note: (a) The job flip rejects the adopt after the entry insert — the entry
     //     must not survive, and the candidate must stay adoptable.
     seed_pending(
         &pool,
@@ -3394,7 +3395,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
         .expect("the rolled-back candidate is still adoptable");
     assert_eq!(retried.job.status, "confirmed");
 
-    // (b) A storage fault during the flip also rolls the entry back.
+    // note: (b) A storage fault during the flip also rolls the entry back.
     seed_pending(
         &pool,
         "xj_cas_fault",
@@ -3435,7 +3436,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
         "a failed flip never leaves a half-adopted entry"
     );
 
-    // (c) A live entry stamped with the same job while it is still pending is
+    // note: (c) A live entry stamped with the same job while it is still pending is
     //     never deleted by a retry.
     seed_attributed_key_block(
         &pool,
@@ -3480,7 +3481,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
         .expect("the attributed entry survives the retry");
     assert_eq!(survivor.entry_id, "kb_orphan_prior");
 
-    // (d) An independent (unattributed) collision is reported, never removed.
+    // why: (d) An independent (unattributed) collision is reported, never removed.
     sqlx::query("UPDATE kb_extract_jobs SET promotion_status = 'pending', version = 0, created_at = '2020-01-01T00:00:04Z' WHERE job_id = 'xj_orphan_retry'")
         .execute(&pool)
         .await
@@ -3526,7 +3527,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
         "the independent entry is untouched"
     );
 
-    // (e) A confirmed job whose entry is attributed recovers idempotently.
+    // note: (e) A confirmed job whose entry is attributed recovers idempotently.
     seed_attributed_key_block(&pool, "kb_recovered", world, "RetryRecover", "xj_recovered").await;
     seed_pending(
         &pool,
@@ -3559,7 +3560,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
         .expect("single active entry");
     assert_eq!(attributed.entry_id, "kb_recovered");
 
-    // (f) The adopt refinement set is closed: `patch.modules` is refused
+    // note: (f) The adopt refinement set is closed: `patch.modules` is refused
     //     rather than silently dropped.
     let mut refinement: WorldKbPromoteCandidateRequest =
         promote_req("xj_recovered", "adopt", 1, None);
@@ -3577,7 +3578,7 @@ async fn retained_promote_rollback_and_collision_recovery() {
     assert_eq!(field, "patch.modules");
 }
 
-/// Promote CAS details and the candidate walk (migrated from
+/// note: Promote CAS details and the candidate walk (migrated from
 /// `world_kb_patch.rs` `promote_reject_cas_miss_conflict_carries_bumped_version`,
 /// `get_candidates_multi_page_cursor_reaches_all_rows` and
 /// `get_candidates_distinct_candidate_id_for_same_canonical_name`): a CAS miss
@@ -3600,7 +3601,7 @@ async fn retained_promote_cas_details_and_candidate_walk() {
         )
         .await;
     }
-    // A concurrent write bumps the version while the candidate stays pending:
+    // note: A concurrent write bumps the version while the candidate stays pending:
     // the losing transition must report the re-read version, not the stale
     // expectation.
     seed_pending_candidate(&pool, "xj_cas_miss", "we_cas", world, "Racea").await;
@@ -3626,7 +3627,7 @@ async fn retained_promote_cas_details_and_candidate_walk() {
     );
     assert_eq!(details.entity_id, "xj_cas_miss");
 
-    // Two candidates that guess the same canonical name stay addressable: the
+    // note: Two candidates that guess the same canonical name stay addressable: the
     // candidate id is the row key, not the guessed display name.
     seed_pending_candidate(&pool, "xj_twin_a", "we_twin_a", world, "Duplicate Name").await;
     seed_pending_candidate(&pool, "xj_twin_b", "we_twin_b", world, "Duplicate Name").await;

@@ -12,6 +12,7 @@
 //! until the guard drops: the scaffolds must resolve their `Works/` tree from
 //! the executor, so a cwd-relative read, write or rollback shows up as a
 //! leaked tree without the expected canonical bytes.
+// note: the production-shape claims above are proven below against the real port.
 
 #![cfg(feature = "execution")]
 #![allow(clippy::unwrap_used)]
@@ -38,7 +39,7 @@ use sqlx::SqlitePool;
 const CREATOR: &str = "ctr_prod_shape";
 const WORKSPACE: &str = "default";
 
-/// Restores the process cwd on drop, so a panicking assertion cannot leak the
+/// note: Restores the process cwd on drop, so a panicking assertion cannot leak the
 /// temp directory (deleted on drop) into the other tests.
 struct CwdGuard {
     previous: PathBuf,
@@ -60,7 +61,7 @@ impl Drop for CwdGuard {
     }
 }
 
-/// The real executor, refusing one named artifact after the earlier ones
+/// note: The real executor, refusing one named artifact after the earlier ones
 /// landed — the failure a later port commit produces.
 struct FailOnChild {
     inner: Arc<dyn WorkspaceExecutor>,
@@ -101,12 +102,12 @@ impl WorkspaceExecutor for FailOnChild {
     }
 }
 
-/// The pieces one production-shaped run needs: the CLI home the port resolves
+/// note: The pieces one production-shaped run needs: the CLI home the port resolves
 /// the active creator/workspace from, the canonical workspace root the executor
 /// was built for, the unrelated cwd, and the engine pool both halves share.
 struct Fixture {
     pool: Arc<SqlitePool>,
-    // Held so the config the port resolves its active creator from outlives the run.
+    // why: Held so the config the port resolves its active creator from outlives the run.
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
     root: tempfile::TempDir,
@@ -133,7 +134,7 @@ async fn fixture() -> Fixture {
     }
 }
 
-/// The CLI home with the active creator/workspace selection, plus the engine
+/// note: The CLI home with the active creator/workspace selection, plus the engine
 /// pool holding the creator row the scaffold's World creation is FK-bound to.
 async fn home_and_pool() -> (tempfile::TempDir, Arc<SqlitePool>) {
     let home = tempfile::tempdir().expect("temp home");
@@ -154,7 +155,7 @@ async fn home_and_pool() -> (tempfile::TempDir, Arc<SqlitePool>) {
     (home, pool)
 }
 
-/// The same fixture with the executor a dry run uses: recording Work writes
+/// note: The same fixture with the executor a dry run uses: recording Work writes
 /// instead of landing them, with a home attached (a simulated executor must
 /// stay recording even then).
 struct SimFixture {
@@ -206,7 +207,7 @@ fn work_record(work_id: &str) -> WorkRecord {
         current_stage: "intake".to_string(),
         stage_status: "pending".to_string(),
         work_profile: None,
-        // A work row is created without a ref; the scaffold claims it.
+        // note: A work row is created without a ref; the scaffold claims it.
         work_ref: None,
         total_planned_chapters: None,
         current_chapter: 0,
@@ -237,7 +238,7 @@ async fn stored_work_ref(pool: &SqlitePool, work_id: &str) -> Option<String> {
         .expect("read works row")
 }
 
-/// Land one first scaffold and prove the bytes went through the port.
+/// note: Land one first scaffold and prove the bytes went through the port.
 async fn assert_first_scaffold_lands(
     fixture: &Fixture,
     cap: &dyn Capability,
@@ -254,7 +255,7 @@ async fn assert_first_scaffold_lands(
 
     cap.run(input).await.expect("scaffold runs on a first Work");
 
-    // The port's target: `<canonical root>/Works/<work_ref>/<child>`.
+    // note: The port's target: `<canonical root>/Works/<work_ref>/<child>`.
     let landed = fixture
         .root
         .path()
@@ -266,7 +267,7 @@ async fn assert_first_scaffold_lands(
         "bytes must land under the canonical root: {}",
         landed.display()
     );
-    // Nothing landed beside the cwd-relative `Works` tree instead.
+    // note: Nothing landed beside the cwd-relative `Works` tree instead.
     let leaked = fixture
         .cwd
         .path()
@@ -285,7 +286,7 @@ async fn assert_first_scaffold_lands(
     );
 }
 
-/// Every entry under `root`, relative and ordered: `None` for a directory,
+/// note: Every entry under `root`, relative and ordered: `None` for a directory,
 /// `Some(bytes)` for a file.
 ///
 /// A whole-tree snapshot is the only shape that catches an entry the run added
@@ -320,7 +321,7 @@ fn tree_snapshot(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
 #[serial_test::serial]
 async fn first_scaffolds_land_bytes_through_the_real_port() {
     let fx = fixture().await;
-    // The scaffolds resolve their `Works` tree from the executor; keep the
+    // note: The scaffolds resolve their `Works` tree from the executor; keep the
     // cwd elsewhere so a non-port write cannot masquerade as a hit.
     let _cwd = CwdGuard::enter(fx.cwd.path());
 
@@ -334,7 +335,7 @@ async fn first_scaffolds_land_bytes_through_the_real_port() {
             .expect("works row");
     }
 
-    // The default constructor path: `with_pool` ⇒ relative `Works` root, which
+    // note: The default constructor path: `with_pool` ⇒ relative `Works` root, which
     // is exactly what the production registry arms use.
     let essay = EssayProjectScaffold::with_pool((*fx.pool).clone())
         .with_workspace_executor(Some(Arc::clone(&fx.executor)));
@@ -419,7 +420,7 @@ async fn a_reinit_preserves_an_existing_canonical_novel_file() {
         .await
         .expect("works row");
 
-    // A user-authored file already sits at the port's target. The scaffold's
+    // note: A user-authored file already sits at the port's target. The scaffold's
     // idempotency check must see THIS tree, not a cwd-relative one.
     let work_dir = fx.root.path().join("Works").join("prod-novel-keep");
     std::fs::create_dir_all(&work_dir).expect("work dir");
@@ -462,7 +463,7 @@ async fn a_later_port_refusal_restores_the_canonical_tree() {
         .await
         .expect("works row");
 
-    // The README lands first (overwriting this original), then the outline
+    // note: The README lands first (overwriting this original), then the outline
     // commit refuses: rollback must restore/remove the same canonical tree.
     let work_dir = fx.root.path().join("Works").join("prod-essay-rollback");
     std::fs::create_dir_all(&work_dir).expect("work dir");
@@ -524,7 +525,7 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
         .await
         .expect("works row with a stored ref");
 
-    // The selection excludes `work_ref`, so the requested ref must not become
+    // why: The selection excludes `work_ref`, so the requested ref must not become
     // the port's lookup key: only the stored ref resolves this Work's row.
     let novel = NovelProjectScaffold::with_pool((*fx.pool).clone())
         .with_workspace_executor(Some(Arc::clone(&fx.executor)));
@@ -563,14 +564,14 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
     );
 }
 
-/// The produce-side dry run: the REAL `NovelProjectScaffold` driven through the
+/// note: The produce-side dry run: the REAL `NovelProjectScaffold` driven through the
 /// `WorkspaceExecutor` capability surface over a Work that already holds real
 /// chapter bytes. Every Work write it intends is recorded; nothing lands.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 async fn simulated_scaffold_records_without_touching_work_tree() {
     let fx = simulated_fixture().await;
-    // The scaffold resolves its `Works` tree from the executor; keep the cwd
+    // note: The scaffold resolves its `Works` tree from the executor; keep the cwd
     // elsewhere so a cwd-relative write cannot masquerade as a hit.
     let _cwd = CwdGuard::enter(fx.cwd.path());
 
@@ -579,7 +580,7 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         .await
         .expect("works row with a stored ref");
 
-    // Existing project tree: the Work directory plus a real chapter file.
+    // note: Existing project tree: the Work directory plus a real chapter file.
     let work_dir = fx.root.path().join("Works").join("sim-novel");
     let chapter = work_dir.join("Stories/chapter-01.md");
     std::fs::create_dir_all(chapter.parent().expect("chapter dir")).expect("chapter dir");
@@ -602,7 +603,7 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         .await
         .expect("the simulated scaffold runs on a real workspace");
 
-    // The whole tree — every directory, every file, every byte — is unchanged.
+    // note: The whole tree — every directory, every file, every byte — is unchanged.
     assert_eq!(
         tree_snapshot(fx.root.path()),
         before,
@@ -614,7 +615,7 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         "the existing chapter bytes are untouched"
     );
 
-    // The run was not a no-op: every Work write it intended is in the log, in
+    // note: The run was not a no-op: every Work write it intended is in the log, in
     // commit order.
     let recorded = fx
         .executor
@@ -650,7 +651,7 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
     );
 }
 
-/// The recording executor of a dry run that loses the engine database after
+/// note: The recording executor of a dry run that loses the engine database after
 /// its last Work write, so the seed/patch step behind those writes fails.
 struct RecordingThenDbLoss {
     inner: Arc<WorkspaceCommitExecutor>,
@@ -685,7 +686,7 @@ impl WorkspaceExecutor for RecordingThenDbLoss {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        // `AGENTS.md` is the scaffold's last Work write; the database steps
+        // note: `AGENTS.md` is the scaffold's last Work write; the database steps
         // follow it.
         let last = input.rel_child == "AGENTS.md";
         let recorded = self.inner.commit_work_artifact(input).await?;
@@ -696,7 +697,7 @@ impl WorkspaceExecutor for RecordingThenDbLoss {
     }
 }
 
-/// A dry run that fails after it registered Work paths must not roll them
+/// note: A dry run that fails after it registered Work paths must not roll them
 /// back: `Path::exists` is false for a dangling symlink, so the scaffold reads
 /// the name as free and registers it — but the entry belongs to the user, and
 /// unlinking it would make an error path of a simulation mutate the tree.

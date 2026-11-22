@@ -8,6 +8,7 @@
 //! surfaces: the read-only home, the malformed-table and explicit-override
 //! refusals, the publication boundary of both converted writers, and the
 //! release of a failed writer admission.
+// note: the read-only open contract above is what the targets below drive.
 #![cfg(unix)]
 
 use std::fs;
@@ -26,7 +27,7 @@ const CREATOR: &str = "ctr_readonly0000000000000000000000";
 const OTHER_CREATOR: &str = "ctr_readonly0000000000000000000001";
 const SLUG: &str = "default";
 
-/// Seed profile membership: `use_creator` accepts a creator present in the
+/// note: Seed profile membership: `use_creator` accepts a creator present in the
 /// identity cache or the auth store.
 fn seed_creator(nexus_home: &Path, creator_id: &str) {
     let cache = serde_json::json!({
@@ -41,7 +42,7 @@ fn seed_creator(nexus_home: &Path, creator_id: &str) {
     .expect("seed identity cache");
 }
 
-/// A `[memory_provider]` table that does not match the typed layout: the
+/// note: A `[memory_provider]` table that does not match the typed layout: the
 /// provider snapshot must fail closed on it instead of reading "no table".
 fn malformed_provider_table() -> String {
     "\n[memory_provider]\n\
@@ -61,7 +62,7 @@ fn remote_selection() -> MemoryProviderSelection {
     })
 }
 
-/// The refusal a stored remote selection produces in the mode this build
+/// note: The refusal a stored remote selection produces in the mode this build
 /// selects. Its presence proves the open read the *remote* table: the implicit
 /// local default would have opened successfully instead.
 ///
@@ -137,7 +138,7 @@ impl Home {
         }
     }
 
-    /// Materialize the workspace DB (and its provider tables) through the real
+    /// note: Materialize the workspace DB (and its provider tables) through the real
     /// writer open, then close it again so this home is fully provisioned.
     async fn provision(&self) {
         let core = CoreService::open(self.options(CoreAccess::EngineOwner))
@@ -146,7 +147,7 @@ impl Home {
         core.close().await.expect("provisioning close");
     }
 
-    /// Turn the provisioned home into a legacy-format one: the two-field
+    /// note: Turn the provisioned home into a legacy-format one: the two-field
     /// `config.json` snapshot replaces `config.toml`, which is removed.
     fn use_legacy_json(&self) {
         let nexus_home = self.nexus_home();
@@ -162,7 +163,7 @@ impl Home {
         fs::remove_file(nexus_home.join("config.toml")).expect("drop the TOML document");
     }
 
-    /// Make `.nexus42` itself readable but not writable — the exact directory
+    /// note: Make `.nexus42` itself readable but not writable — the exact directory
     /// the config lock is created in — and restore it on drop so the temp
     /// directory can be reclaimed.
     fn seal_nexus_home(&self) -> SealedHome {
@@ -183,7 +184,7 @@ impl Drop for SealedHome {
     }
 }
 
-/// The directory's own entries (not recursive), sorted: an exact, order-free
+/// note: The directory's own entries (not recursive), sorted: an exact, order-free
 /// record of what a call added or removed.
 fn directory_entries(directory: &Path) -> Vec<String> {
     let mut entries: Vec<String> = fs::read_dir(directory)
@@ -195,7 +196,7 @@ fn directory_entries(directory: &Path) -> Vec<String> {
     entries
 }
 
-/// A provisioned, readable-but-unwritable `.nexus42` still serves a no-override
+/// note: A provisioned, readable-but-unwritable `.nexus42` still serves a no-override
 /// read-only open (I-000291). Before the compatibility repair the open failed
 /// while creating `config.toml.lock` in that directory.
 #[tokio::test]
@@ -218,7 +219,7 @@ async fn a_local_readonly_open_does_not_require_a_writable_home() {
     core.close().await.expect("close");
 }
 
-/// The same read-only home with a malformed provider table still fails closed:
+/// note: The same read-only home with a malformed provider table still fails closed:
 /// the snapshot is really read, and a malformed table never degrades to local.
 #[tokio::test]
 async fn a_readonly_open_still_refuses_a_malformed_provider_table() {
@@ -242,7 +243,7 @@ async fn a_readonly_open_still_refuses_a_malformed_provider_table() {
     );
 }
 
-/// `memory: Some(..)` never reads the provider table, so a read-only home with
+/// note: `memory: Some(..)` never reads the provider table, so a read-only home with
 /// a malformed table still serves the explicit override — and the override
 /// needs no home write either.
 #[tokio::test]
@@ -271,7 +272,7 @@ async fn an_explicit_override_never_reads_the_provider_table_on_a_read_only_home
     core.close().await.expect("close");
 }
 
-/// The publication boundary: a reader snapshot opened before a provider
+/// note: The publication boundary: a reader snapshot opened before a provider
 /// selection publish reads one whole document, the published path reads the
 /// other, and real opens on each side pin the authority that document selects.
 #[tokio::test]
@@ -284,7 +285,7 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
         .expect("seed the remote selection");
     let path = home.nexus_home().join("config.toml");
 
-    // Authority before: a real open pins the stored remote selection.
+    // why: Authority before: a real open pins the stored remote selection.
     assert_remote_open_refusal(
         &CoreService::open(home.options(CoreAccess::ReadOnly))
             .await
@@ -292,7 +293,7 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
             .expect("the stored remote selection is pinned"),
     );
 
-    // This reader opened the document before the publish.
+    // note: This reader opened the document before the publish.
     let mut before = fs::File::open(&path).expect("pre-publication reader");
 
     service
@@ -320,7 +321,7 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
         .parse::<toml::Table>()
         .expect("the published document is complete TOML");
 
-    // Authority after: the same real open now pins the published local default.
+    // why: Authority after: the same real open now pins the published local default.
     let core = CoreService::open(home.options(CoreAccess::ReadOnly))
         .await
         .expect("the published local default opens");
@@ -334,7 +335,7 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
     core.close().await.expect("close");
 }
 
-/// BUG-01: the real creator writer (`use_creator`) publishes whole documents
+/// note: BUG-01: the real creator writer (`use_creator`) publishes whole documents
 /// too. A reader snapshot opened before the switch keeps the old selection, the
 /// path holds the new one, and a key another writer owns survives.
 #[test]
@@ -383,7 +384,7 @@ fn a_creator_switch_never_exposes_a_partial_document() {
     );
 }
 
-/// TEST-01: a failed writer open releases the guarded writer admission it took,
+/// note: TEST-01: a failed writer open releases the guarded writer admission it took,
 /// so a legitimate writer open can acquire it afterwards.
 #[tokio::test]
 async fn a_failed_writer_open_releases_its_admission() {
@@ -401,7 +402,7 @@ async fn a_failed_writer_open_releases_its_admission() {
             .expect("the stored remote selection refuses the writer open"),
     );
 
-    // The refused open took a guarded writer admission before the pin failed;
+    // why: The refused open took a guarded writer admission before the pin failed;
     // a real writer open now proves that admission was released.
     service
         .clear_memory_provider_selection()
@@ -412,7 +413,7 @@ async fn a_failed_writer_open_releases_its_admission() {
     writer.close().await.expect("close");
 }
 
-/// A legacy home (no `config.toml`, a `config.json` snapshot) serves a sealed
+/// note: A legacy home (no `config.toml`, a `config.json` snapshot) serves a sealed
 /// read-only open without writing anything: no lock, no published TOML, no
 /// legacy rename and no new directory entry.
 #[tokio::test]
@@ -428,7 +429,7 @@ async fn a_sealed_readonly_open_loads_a_legacy_snapshot_without_migrating() {
     let opened = CoreService::open(home.options(CoreAccess::ReadOnly)).await;
     drop(sealed);
 
-    // The snapshot really loaded: without its active creator and workspace the
+    // note: The snapshot really loaded: without its active creator and workspace the
     // read-only open refuses as `auth_required`/`uninitialized`.
     let core = opened.expect("a read-only open must load the legacy snapshot");
     core.close().await.expect("close");
@@ -452,7 +453,7 @@ async fn a_sealed_readonly_open_loads_a_legacy_snapshot_without_migrating() {
     );
 }
 
-/// The writer path still migrates: with the same legacy home, a writer open
+/// note: The writer path still migrates: with the same legacy home, a writer open
 /// takes the lock, publishes `config.toml` atomically and renames the legacy
 /// document, leaving no lock behind.
 #[tokio::test]

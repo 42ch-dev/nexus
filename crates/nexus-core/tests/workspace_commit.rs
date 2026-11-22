@@ -9,6 +9,7 @@
 //! Every test is `#[serial]`: the crash/rendezvous seams are process-global
 //! (`execution::test_hooks`), so parallel execution would let one test's armed
 //! crash point fire inside another's commit.
+// note: the workspace-commit authority claims above are proven below.
 
 #![cfg(feature = "execution")]
 #![allow(clippy::unwrap_used)]
@@ -34,7 +35,7 @@ use serde_json::json;
 use serial_test::serial;
 use std::sync::Arc;
 
-/// An engine-admitted pool over a fresh temp DB.
+/// note: An engine-admitted pool over a fresh temp DB.
 ///
 /// The commit protocol's statements call the `nexus_writer_protocol` SQL
 /// function, which only `init_engine_pool` installs — a bare
@@ -97,7 +98,7 @@ async fn intent_state(pool: &sqlx::SqlitePool, revision: &str) -> String {
         .expect("intent row")
 }
 
-/// Interrupt one durable commit through the manager's OWN entrance.
+/// note: Interrupt one durable commit through the manager's OWN entrance.
 ///
 /// `commit_session_durable` runs on the RETAINED owner task, which clears an
 /// inherited crash seam at spawn — so arming the seam before the call would
@@ -135,7 +136,7 @@ async fn interrupted_direct_commit(
     err
 }
 
-/// ACCEPTANCE ANCHOR (ported from `workspace_commit_l2_proof.rs`).
+/// note: ACCEPTANCE ANCHOR (ported from `workspace_commit_l2_proof.rs`).
 ///
 /// A crash after the file apply leaves the applied bytes in place; startup
 /// recovery must complete the intent — the durable file application finalizes
@@ -165,7 +166,7 @@ async fn simulated_crash_after_file_apply_then_recovery_completes() {
     );
 }
 
-/// A crash before the apply leaves no file, and recovery rolls the intent back
+/// note: A crash before the apply leaves no file, and recovery rolls the intent back
 /// rather than inventing the missing bytes.
 #[tokio::test]
 #[serial]
@@ -197,7 +198,7 @@ async fn simulated_crash_after_entries_then_startup_recovery() {
     assert_eq!(state, "rolled_back");
 }
 
-/// A different digest on an already-committed session must conflict and must
+/// note: A different digest on an already-committed session must conflict and must
 /// NOT disturb the durable committed intent.
 #[tokio::test]
 #[serial]
@@ -223,7 +224,7 @@ async fn different_digest_rejected_after_success() {
     );
 }
 
-/// A recovery conflict on the intent log must block a subsequent write rather
+/// note: A recovery conflict on the intent log must block a subsequent write rather
 /// than silently committing past the unresolved intent.
 #[tokio::test]
 #[serial]
@@ -233,7 +234,7 @@ async fn recovery_conflict_blocks_subsequent_write() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    // A corrupt (unparsable) intent row is an unresolvable recovery state.
+    // note: A corrupt (unparsable) intent row is an unresolvable recovery state.
     sqlx::query(
         "INSERT INTO workspace_commit_intents (session_id, workspace_root, revision, request_digest, state, entries_json) \
          VALUES (?, ?, 'rev_bad', 'dig', 'applying', 'not-json')",
@@ -245,7 +246,7 @@ async fn recovery_conflict_blocks_subsequent_write() {
     .unwrap();
     let err = mgr.startup_recovery().await.unwrap_err();
     assert!(matches!(err, SessionError::RecoveryConflict(_)));
-    // The next write is fenced by the unresolved intent, not committed.
+    // note: The next write is fenced by the unresolved intent, not committed.
     let err = mgr
         .commit_session_durable(&session, &[create_change("blocked.txt", b"x")], &root)
         .await
@@ -254,7 +255,7 @@ async fn recovery_conflict_blocks_subsequent_write() {
     assert!(!ws.path().join("blocked.txt").exists());
 }
 
-/// The retained commit owner finishes the commit even when the awaiting caller
+/// note: The retained commit owner finishes the commit even when the awaiting caller
 /// is dropped mid-flight (client disconnect / shutdown).
 #[tokio::test]
 #[serial]
@@ -266,7 +267,7 @@ async fn retained_owner_survives_caller_drop() {
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // Deterministic rendezvous at the owner's admission boundary — no sleeps.
+    // note: Deterministic rendezvous at the owner's admission boundary — no sleeps.
     let gate = Arc::new(OwnerGate::for_session(session.to_string()));
     set_owner_gate(Some(Arc::clone(&gate)));
 
@@ -279,12 +280,12 @@ async fn retained_owner_survives_caller_drop() {
             .await
     });
 
-    // The owner task has been admitted (claim held) and is parked.
+    // note: The owner task has been admitted (claim held) and is parked.
     gate.admitted.notified().await;
-    // Cancel the awaiting caller, then release the owner.
+    // note: Cancel the awaiting caller, then release the owner.
     caller.abort();
     gate.proceed.notify_one();
-    // The retained owner settles on its own: no polling window.
+    // note: The retained owner settles on its own: no polling window.
     gate.settled.notified().await;
     set_owner_gate(None);
 
@@ -302,7 +303,7 @@ async fn retained_owner_survives_caller_drop() {
     assert_eq!(state, "committed");
 }
 
-/// The OCC pre-image check rejects a modify whose expected hash no longer
+/// note: The OCC pre-image check rejects a modify whose expected hash no longer
 /// matches the on-disk content.
 #[tokio::test]
 #[serial]
@@ -331,7 +332,7 @@ async fn occ_hash_conflict_on_stale_preimage() {
     assert_eq!(std::fs::read(ws.path().join("occ.txt")).unwrap(), b"v1");
 }
 
-/// A target re-created by an external writer between the delete's capture and
+/// note: A target re-created by an external writer between the delete's capture and
 /// its finalize must never finalize the delete; the writer's bytes survive.
 #[tokio::test]
 #[serial]
@@ -344,7 +345,7 @@ async fn delete_detects_target_recreated_after_capture() {
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // Deterministic injection EXACTLY in the capture/finalize window: the hook
+    // note: Deterministic injection EXACTLY in the capture/finalize window: the hook
     // fires after the delete captured the original and before it finalizes.
     let target = ws.path().join("d.txt");
     set_after_delete_capture_hook(Some(Arc::new(move || {
@@ -370,14 +371,14 @@ async fn delete_detects_target_recreated_after_capture() {
         matches!(err, SessionError::Internal(_) | SessionError::Io(_)),
         "a re-created target after capture must never finalize a delete, got {err:?}"
     );
-    // The external writer's bytes survive untouched.
+    // note: The external writer's bytes survive untouched.
     assert_eq!(
         std::fs::read(ws.path().join("d.txt")).unwrap(),
         b"recreated-by-external-writer"
     );
 }
 
-/// The orchestration `WorkspaceExecutor` adapter commits through the SAME
+/// note: The orchestration `WorkspaceExecutor` adapter commits through the SAME
 /// manager authority the direct commit path uses.
 #[tokio::test]
 #[serial]
@@ -423,7 +424,7 @@ async fn executor_matches_manager_authority() {
     );
 }
 
-/// An empty manifest is a manifest validation refusal, not a silent no-op
+/// note: An empty manifest is a manifest validation refusal, not a silent no-op
 /// commit.
 #[tokio::test]
 #[serial]
@@ -440,7 +441,7 @@ async fn empty_manifest_rejected() {
     assert!(matches!(err, SessionError::ManifestInvalid(_)));
 }
 
-/// A session opened under a foreign workspace root cannot commit through this
+/// note: A session opened under a foreign workspace root cannot commit through this
 /// authority.
 #[tokio::test]
 #[serial]
@@ -460,7 +461,7 @@ async fn foreign_workspace_root_is_refused() {
     assert!(!ws_b.path().join("x.txt").exists());
 }
 
-/// `SessionId` round-trips through its display form (the wire cursor).
+/// note: `SessionId` round-trips through its display form (the wire cursor).
 #[test]
 fn session_id_display_round_trips() {
     let id = SessionId("sess-123".to_string());
@@ -480,18 +481,18 @@ async fn malformed_manifest_base64_bodies_are_refused() {
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // Malformed bodies: truncated quad, wrong/embedded padding, non-canonical
+    // note: Malformed bodies: truncated quad, wrong/embedded padding, non-canonical
     // trailing bits, interior whitespace, and URL-safe symbols that the
     // standard alphabet does not accept. None may create a file.
     for malformed in [
-        "A",    // truncated quad
-        "AB=",  // wrong padding count
-        "AA=A", // padding inside the quad
-        "AB==", // non-canonical trailing bits in the last symbol
-        "AB C", // interior whitespace is not a symbol
-        "AB*",  // non-alphabet character
-        "AA--", // URL-safe symbol in the standard alphabet
-        "AB_",  // URL-safe symbol in the standard alphabet
+        "A",    // note: truncated quad
+        "AB=",  // note: wrong padding count
+        "AA=A", // note: padding inside the quad
+        "AB==", // note: non-canonical trailing bits in the last symbol
+        "AB C", // note: interior whitespace is not a symbol
+        "AB*",  // note: non-alphabet character
+        "AA--", // note: URL-safe symbol in the standard alphabet
+        "AB_",  // note: URL-safe symbol in the standard alphabet
     ] {
         let path = format!("malformed_{}.txt", malformed.replace(['/', ' '], "_"));
         let change = ChangeEntry {
@@ -517,7 +518,7 @@ async fn malformed_manifest_base64_bodies_are_refused() {
         );
     }
 
-    // Control on the same session: the identical call path accepts a
+    // note: Control on the same session: the identical call path accepts a
     // well-formed body, so the refusals above are the decode boundary.
     let content = b"v1.191 base64 boundary";
     mgr.commit_session_durable(&session, &[create_change("accepted.txt", content)], &root)
@@ -529,11 +530,11 @@ async fn malformed_manifest_base64_bodies_are_refused() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Concurrent session consumption
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
 /// `concurrent_consume_single_winner` and `consume_after_commit_is_stale`.
 ///
 /// The workspace session is single-consumer: two concurrent consumers of one
@@ -596,7 +597,7 @@ async fn concurrent_consume_has_one_winner_and_a_stale_reentry() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
 /// `concurrent_commit_session_single_winner`.
 ///
 /// The combined validate + consume `commit_session` path keeps the same
@@ -650,11 +651,11 @@ async fn concurrent_commit_session_has_one_winner() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Manifest validation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
 /// `validate_changes_manifest_rejects_symlink_in_modify_path`.
 ///
 /// A symlink swapped in at a `Modify` path must be refused BEFORE the OCC hash
@@ -682,7 +683,7 @@ async fn manifest_validation_rejects_a_symlink_in_a_modify_path() {
         .expect("content hashes");
     let stored_hash = stored.hashes.get("real.txt").cloned().expect("tracked");
 
-    // Swap the tracked file for a symlink pointing OUTSIDE the workspace root.
+    // note: Swap the tracked file for a symlink pointing OUTSIDE the workspace root.
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("secret.txt"), b"secret-outside").unwrap();
     std::fs::remove_file(ws_dir.path().join("real.txt")).unwrap();
@@ -708,7 +709,7 @@ async fn manifest_validation_rejects_a_symlink_in_a_modify_path() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs`
 /// `recoverable_create_modify_delete_and_idempotent_retry`.
 ///
 /// The durable commit authority applies the full create/modify/delete
@@ -794,11 +795,11 @@ async fn recoverable_create_modify_delete_and_idempotent_retry() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Preset workflow over live workspace state
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A preset whose `check` state branches on live workspace state
+/// note: A preset whose `check` state branches on live workspace state
 /// (MIGRATED from
 /// `crates/nexus-daemon-runtime/tests/workspace_preset_workflow.rs`).
 const WORKSPACE_BRANCH_PRESET: &str = r#"
@@ -842,7 +843,7 @@ states:
     terminal: true
 "#;
 
-/// Drive the preset until the branch target is reached, returning it.
+/// note: Drive the preset until the branch target is reached, returning it.
 async fn routed_state(
     engine: &GraphFlowEngine,
     registry: &Arc<CapabilityRegistry>,
@@ -873,7 +874,7 @@ async fn routed_state(
     panic!("{label}: preset never reached a branch target");
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_preset_workflow.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workspace_preset_workflow.rs`
 /// `production_preset_workflow_branches_on_live_workspace_state`.
 ///
 /// The production wiring is exercised end to end: `workspace.open` /
@@ -917,14 +918,14 @@ async fn preset_graph_branches_on_live_committed_workspace_state() {
         root.clone(),
     )));
 
-    // Phase 1: nothing committed for this workspace -> the branch must resolve
+    // why: Phase 1: nothing committed for this workspace -> the branch must resolve
     // to `pending_state`, proving the state is not a constant.
     assert_eq!(
         routed_state(&engine, &registry, "pre-commit").await,
         "pending_state"
     );
 
-    // Phase 2: commit through the production capability path (registry ->
+    // note: Phase 2: commit through the production capability path (registry ->
     // WorkspaceCommitExecutor -> shared manager -> DB + files).
     let opened = registry
         .get("workspace.open")
@@ -965,7 +966,7 @@ async fn preset_graph_branches_on_live_committed_workspace_state() {
     assert_eq!(intent.revision, revision);
     assert_eq!(intent.state, nexus_local_db::IntentState::Committed);
 
-    // Phase 3: the same preset now observes the committed state and branches
+    // note: Phase 3: the same preset now observes the committed state and branches
     // the other way — resolved live from the shared manager, not a fixture.
     assert_eq!(
         routed_state(&engine, &registry, "post-commit").await,

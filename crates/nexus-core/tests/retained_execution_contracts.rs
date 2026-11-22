@@ -113,19 +113,19 @@ use tempfile::TempDir;
 
 const CREATOR: &str = "retained_creator";
 const SLUG: &str = "default";
-/// An embedded preset that declares a prompt role, so the frozen descriptor
+/// note: An embedded preset that declares a prompt role, so the frozen descriptor
 /// needs an explicit binding and the drive reaches the prompt port.
 const PROMPT_PRESET: &str = "memory-augmented";
 const PROVIDER: &str = "retained-provider";
-/// The user preset the hosted composition (v1.195 P0-T2) drives: workspace
+/// note: The user preset the hosted composition (v1.195 P0-T2) drives: workspace
 /// capability chain + prompt.
 const HOSTED_PRESET: &str = "hosted-schedule-drive";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fixtures
+// note: Fixtures
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Deterministic provider port that never performs an effect. The prompt port
+/// note: Deterministic provider port that never performs an effect. The prompt port
 /// is `HostPromptExecutor`; this port only satisfies `start_execution`.
 struct NullProvider;
 
@@ -155,7 +155,7 @@ impl ProviderPort for NullProvider {
     }
 }
 
-/// Deterministic parked Host fixture.
+/// note: Deterministic parked Host fixture.
 ///
 /// MIGRATED from the retired `workflow_execution_cli.rs`
 /// `BlockingHost::non_cooperative`: the first prompt parks until the test
@@ -168,18 +168,18 @@ struct ParkedHost {
     released: AtomicBool,
     prompts: AtomicUsize,
     creates: AtomicUsize,
-    /// When set, a parked prompt finishes with a NON-`EndTurn` stop so the
+    /// note: When set, a parked prompt finishes with a NON-`EndTurn` stop so the
     /// executor's typed-failure path (never partial-output success) is
     /// exercised deterministically.
     non_end_turn: AtomicBool,
-    /// When set, every session launch (`create_session`) fails with the typed
+    /// note: When set, every session launch (`create_session`) fails with the typed
     /// launch error an agent process that exits right after the `initialize`
     /// handshake produces.
     launch_fails: AtomicBool,
-    /// When set, a prompt's event stream closes (EOF) after its deltas
+    /// note: When set, a prompt's event stream closes (EOF) after its deltas
     /// without ever emitting a terminal event.
     stream_eof: AtomicBool,
-    /// When set, every owned session shutdown FAILS: the exact owned process
+    /// note: When set, every owned session shutdown FAILS: the exact owned process
     /// cleanup cannot be confirmed, so a cancel must settle `interrupted` —
     /// never a false successful `cancelled`.
     shutdown_unconfirmed: AtomicBool,
@@ -200,19 +200,19 @@ impl ParkedHost {
         })
     }
 
-    /// Make every subsequent prompt finish with a non-`EndTurn` stop.
+    /// note: Make every subsequent prompt finish with a non-`EndTurn` stop.
     fn stop_without_end_turn(&self) {
         self.non_end_turn.store(true, Ordering::SeqCst);
     }
 
-    /// Make every subsequent session launch fail: the agent process exits
+    /// note: Make every subsequent session launch fail: the agent process exits
     /// right after the `initialize` handshake, so no session is ever handed
     /// out.
     fn fail_launch_after_initialize(&self) {
         self.launch_fails.store(true, Ordering::SeqCst);
     }
 
-    /// Make every subsequent prompt stream close after its deltas without a
+    /// note: Make every subsequent prompt stream close after its deltas without a
     /// terminal event.
     fn close_stream_after_deltas(&self) {
         self.stream_eof.store(true, Ordering::SeqCst);
@@ -226,7 +226,7 @@ impl ParkedHost {
         self.creates.load(Ordering::SeqCst)
     }
 
-    /// Release every parked prompt so the drive loop can finish and `close()`
+    /// note: Release every parked prompt so the drive loop can finish and `close()`
     /// can join it.
     fn release_all(&self) {
         self.released.store(true, Ordering::SeqCst);
@@ -235,7 +235,7 @@ impl ParkedHost {
         }
     }
 
-    /// Release the prompts parked RIGHT NOW, WITHOUT arming the permanent
+    /// note: Release the prompts parked RIGHT NOW, WITHOUT arming the permanent
     /// [`Self::release_all`] flag: a later prompt parks again, so a test can
     /// unblock one owned operation and still keep the next one in flight.
     ///
@@ -248,12 +248,12 @@ impl ParkedHost {
         }
     }
 
-    /// Make every owned-session shutdown unconfirmable (see the field doc).
+    /// note: Make every owned-session shutdown unconfirmable (see the field doc).
     fn fail_session_shutdown(&self) {
         self.shutdown_unconfirmed.store(true, Ordering::SeqCst);
     }
 
-    /// Restore a confirmable owned-session shutdown — the retry that must
+    /// note: Restore a confirmable owned-session shutdown — the retry that must
     /// confirm the unconfirmed cancellation.
     fn confirm_session_shutdown(&self) {
         self.shutdown_unconfirmed.store(false, Ordering::SeqCst);
@@ -316,7 +316,7 @@ impl HostFacade for ParkedHost {
             op_id: op_id.clone(),
             text: "transformed:parked-output".to_string(),
         });
-        // EOF after the deltas: the stream closes without any terminal event
+        // note: EOF after the deltas: the stream closes without any terminal event
         // (the "the process stopped talking" analogue of the launch EOF).
         if self.stream_eof.load(Ordering::SeqCst) {
             return Ok(Box::pin(futures_util::stream::iter(vec![
@@ -373,7 +373,7 @@ impl HostFacade for ParkedHost {
     }
 
     async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
-        // Unconfirmed cleanup: the session is deliberately LEFT in the map so
+        // note: Unconfirmed cleanup: the session is deliberately LEFT in the map so
         // the run stays visibly interrupted and a retry can still reap it.
         if self.shutdown_unconfirmed.load(Ordering::SeqCst) {
             return Err(HostError::internal(
@@ -395,7 +395,7 @@ impl HostFacade for ParkedHost {
     }
 
     async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
-        // The production catalog truth the hosted factory validates frozen
+        // note: The production catalog truth the hosted factory validates frozen
         // role bindings against: the parked provider is CONFIGURED, so a
         // binding that names it is accepted. An empty catalog here would make
         // every admission refuse with "unknown provider" instead.
@@ -431,7 +431,7 @@ impl HostFacade for ParkedHost {
     }
 }
 
-/// An engine-owner core over a fresh guarded workspace, with the production
+/// note: An engine-owner core over a fresh guarded workspace, with the production
 /// prompt executor bound to the deterministic parked Host.
 struct OwnerFixture {
     tmp: TempDir,
@@ -472,7 +472,7 @@ async fn owner_fixture() -> OwnerFixture {
     .unwrap();
 
     let db_path = nexus_home_layout::workspace_state_db_path(home, CREATOR, SLUG);
-    // Seed through a temporary engine pool and RELEASE the exclusive writer
+    // note: Seed through a temporary engine pool and RELEASE the exclusive writer
     // before the engine owner opens (the owner takes an OS lock, not a
     // stealable lease — the seeder must be gone).
     {
@@ -534,7 +534,7 @@ async fn owner_fixture() -> OwnerFixture {
     }
 }
 
-/// `memory-augmented` declares a prompt role, so the freeze requires an
+/// note: `memory-augmented` declares a prompt role, so the freeze requires an
 /// explicit binding for the `default` role.
 fn default_bindings() -> HashMap<String, AgentBindingDto> {
     let mut bindings = HashMap::new();
@@ -548,7 +548,7 @@ fn default_bindings() -> HashMap<String, AgentBindingDto> {
     bindings
 }
 
-/// A pending, serial, `driven_v1` schedule for the admitted creator, created
+/// note: A pending, serial, `driven_v1` schedule for the admitted creator, created
 /// through the real core insert path (frozen descriptor + version-0 seed).
 async fn add_pending_schedule(fixture: &OwnerFixture, label: &str) -> String {
     let principal = fixture.core.active_principal().await.unwrap();
@@ -560,7 +560,7 @@ async fn add_pending_schedule(fixture: &OwnerFixture, label: &str) -> String {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
-        // `memory-augmented` renders `preset.input.*` in its first states, so
+        // note: `memory-augmented` renders `preset.input.*` in its first states, so
         // the frozen input must carry the keys its graph reads.
         input: Some(json!({ "keyword": "retained", "topic": "retained-topic" })),
         force_gates: false,
@@ -575,13 +575,13 @@ async fn add_pending_schedule(fixture: &OwnerFixture, label: &str) -> String {
         .schedule_id
 }
 
-/// Wait (bounded) until the parked Host has recorded at least one prompt —
+/// note: Wait (bounded) until the parked Host has recorded at least one prompt —
 /// the drive runs in a spawned task, so the first prompt is asynchronous.
 async fn wait_for_prompt(host: &ParkedHost) {
     wait_for_prompt_count(host, 1).await;
 }
 
-/// Wait (bounded) until the parked Host has recorded at least `min` prompts —
+/// note: Wait (bounded) until the parked Host has recorded at least `min` prompts —
 /// `exec` bumps the counter and registers its release sender in the same
 /// synchronous step, so a caller returning from here owns a parked prompt.
 async fn wait_for_prompt_count(host: &ParkedHost, min: usize) {
@@ -595,7 +595,7 @@ async fn wait_for_prompt_count(host: &ParkedHost, min: usize) {
     }
 }
 
-/// Wait (bounded) until the owned clock has claimed `schedule_id`'s run and
+/// note: Wait (bounded) until the owned clock has claimed `schedule_id`'s run and
 /// return that run id.
 async fn wait_for_schedule_run(pool: &sqlx::SqlitePool, schedule_id: &str) -> String {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -622,7 +622,7 @@ async fn schedule_row(pool: &sqlx::SqlitePool, schedule_id: &str) -> (String, Op
     .expect("schedule row")
 }
 
-/// Insert one `driven_v1` pending schedule for `preset_id` through the PUBLIC
+/// note: Insert one `driven_v1` pending schedule for `preset_id` through the PUBLIC
 /// add path (frozen descriptor + version-0 seed), as every admission-ready
 /// row is created.
 async fn add_schedule_preset(
@@ -651,7 +651,7 @@ async fn add_schedule_preset(
         .schedule_id
 }
 
-/// Write a directory preset bundle into the fixture's nexus home (the same
+/// note: Write a directory preset bundle into the fixture's nexus home (the same
 /// place `hosted_fixture` freezes `hosted-schedule-drive`), so the public add
 /// path and admission resolve it from disk.
 fn write_preset_bundle(nexus_home: &Path, preset_id: &str, yaml: &str, prompt_body: &str) {
@@ -661,7 +661,7 @@ fn write_preset_bundle(nexus_home: &Path, preset_id: &str, yaml: &str, prompt_bo
     std::fs::write(bundle.join("prompts/generate.md"), prompt_body).expect("prompt template");
 }
 
-/// Freeze an applied document for `preset_id` so its user bundle runs.
+/// note: Freeze an applied document for `preset_id` so its user bundle runs.
 ///
 /// These cases pin the YAML transport contracts — cancel, uncertain effect,
 /// workspace-commit projection, resume, restart — not the intake policy. The
@@ -679,7 +679,7 @@ async fn apply_bundle_candidate(
     pool: &sqlx::SqlitePool,
     preset_id: &str,
 ) {
-    // An apply needs the strategy to own a schedule. This inert row is that
+    // note: An apply needs the strategy to own a schedule. This inert row is that
     // precondition only: admission fails closed on a pre-seed row (it carries
     // no version-0 core-context record, so no clock tick can admit it), and the
     // rows that actually run are added through the public path AFTER the apply.
@@ -720,7 +720,7 @@ fn signal(name: &str) -> nexus_contracts::local::schedule::http::SignalScheduleR
     }
 }
 
-/// Count the creator's ROOT runs (`parent_session_id IS NULL`) — one run per
+/// note: Count the creator's ROOT runs (`parent_session_id IS NULL`) — one run per
 /// schedule, ever: inner-graph child rows are descendants of that one root.
 async fn root_run_count(pool: &sqlx::SqlitePool) -> i64 {
     sqlx::query_scalar(
@@ -731,7 +731,7 @@ async fn root_run_count(pool: &sqlx::SqlitePool) -> i64 {
     .expect("root run count")
 }
 
-/// The durable v1 record of one run (status + durable state).
+/// note: The durable v1 record of one run (status + durable state).
 async fn durable_record(
     pool: &sqlx::SqlitePool,
     run_id: &str,
@@ -743,7 +743,7 @@ async fn durable_record(
         .expect("the admitted run row exists")
 }
 
-/// Wait (bounded) until the run is parked at its manual human wait, and
+/// note: Wait (bounded) until the run is parked at its manual human wait, and
 /// return that run's exact durable wait token.
 async fn wait_for_human_wait(pool: &sqlx::SqlitePool, run_id: &str) -> String {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -761,7 +761,7 @@ async fn wait_for_human_wait(pool: &sqlx::SqlitePool, run_id: &str) -> String {
     }
 }
 
-/// Wait (bounded) until the run reaches a durable status.
+/// note: Wait (bounded) until the run reaches a durable status.
 async fn wait_for_run_status(pool: &sqlx::SqlitePool, run_id: &str, status: &str) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
@@ -776,11 +776,11 @@ async fn wait_for_run_status(pool: &sqlx::SqlitePool, run_id: &str, status: &str
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Schedule admission
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// MIGRATED from `apps/nexus42/tests/workflow_execution_cli.rs`
+/// note: MIGRATED from `apps/nexus42/tests/workflow_execution_cli.rs`
 /// `admission_distinct_serial_rows_race_one_owned`.
 ///
 /// Two DISTINCT serial schedules of one creator race for immediate admission:
@@ -869,7 +869,7 @@ async fn admission_distinct_serial_rows_race_one_owned() {
             .await
             .unwrap();
     assert_eq!(sessions, 1, "the winner must own exactly one session row");
-    // The winner's drive must reach the REAL prompt port (the parked Host),
+    // why: The winner's drive must reach the REAL prompt port (the parked Host),
     // which is what keeps it in flight for the duration of the race.
     wait_for_prompt(&fixture.host).await;
     assert!(
@@ -882,11 +882,11 @@ async fn admission_distinct_serial_rows_race_one_owned() {
     fixture.core.close().await.unwrap();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Workflow recovery
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Converge-join reroute preset (MIGRATED from
+/// note: Converge-join reroute preset (MIGRATED from
 /// `apps/nexus42/tests/ops_e2e_converge_timeout.rs::TIMEOUT_REROUTE_YAML`):
 /// `branch_b` is the hanging upstream edge, so the join never reaches 2/2
 /// arrivals and its deadline reroutes to `fallback`.
@@ -920,11 +920,11 @@ states:
       terminal: true
 "#;
 
-/// Join deadline (ms) + how long the test parks past it before re-driving.
+/// note: Join deadline (ms) + how long the test parks past it before re-driving.
 const JOIN_TIMEOUT_MS: u64 = 120;
 const PAST_DEADLINE_SLEEP: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Extract the `elapsed_ms=` payload from a `_join_timeout_note`.
+/// note: Extract the `elapsed_ms=` payload from a `_join_timeout_note`.
 fn elapsed_ms_from_note(note: &str) -> u64 {
     note.split("elapsed_ms=")
         .nth(1)
@@ -939,7 +939,7 @@ fn elapsed_ms_from_note(note: &str) -> u64 {
         .unwrap_or_else(|| panic!("note must carry a numeric elapsed_ms: {note}"))
 }
 
-/// Load a raw-YAML preset for a no-store engine.
+/// note: Load a raw-YAML preset for a no-store engine.
 ///
 /// Such an engine never freezes a v1 descriptor, so the fixture needs no source
 /// identity and stays a manifest-executing preset — the very class these join /
@@ -951,7 +951,7 @@ fn load_manifest_preset(yaml: &str, caps: &Arc<CapabilityRegistry>) -> nexus_pre
         .unwrap_or_else(|e| panic!("test preset must load: {e}"))
 }
 
-/// MIGRATED from `apps/nexus42/tests/ops_e2e_converge_timeout.rs`
+/// note: MIGRATED from `apps/nexus42/tests/ops_e2e_converge_timeout.rs`
 /// `hanging_upstream_with_timeout_reroutes_via_on_timeout`.
 ///
 /// A hanging upstream parks the converge join at 1/2 arrivals; once the
@@ -1049,7 +1049,7 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
     );
 }
 
-/// Converge chain with instrumented `host_tool` edges on `start` and
+/// note: Converge chain with instrumented `host_tool` edges on `start` and
 /// `branch_a` (MIGRATED from
 /// `apps/nexus42/tests/ops_e2e_resume_restart.rs::RESUME_REROUTE_YAML`): the
 /// edge counter proves completed edges are never re-executed across a restart.
@@ -1091,11 +1091,11 @@ states:
       terminal: true
 "#;
 
-/// How long the “downtime” parks past the join deadline.
+/// note: How long the “downtime” parks past the join deadline.
 const DOWNTIME_MS: u64 = 500;
 const DOWNTIME: std::time::Duration = std::time::Duration::from_millis(DOWNTIME_MS);
 
-/// Counting tool dispatch: every `dispatch_tool` call increments a shared
+/// note: Counting tool dispatch: every `dispatch_tool` call increments a shared
 /// counter — the "completed edges must not re-fire" instrumentation.
 #[derive(Clone)]
 struct CountingDispatch {
@@ -1115,7 +1115,7 @@ impl DaemonToolDispatch for CountingDispatch {
     }
 }
 
-/// MIGRATED from `apps/nexus42/tests/ops_e2e_resume_restart.rs`
+/// note: MIGRATED from `apps/nexus42/tests/ops_e2e_resume_restart.rs`
 /// `restart_mid_chain_resumes_without_re_executing_completed_edges`.
 ///
 /// Kill/restart mid-chain: the resume re-drive continues from the persisted
@@ -1139,7 +1139,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     });
     let loaded = load_manifest_preset(RESUME_REROUTE_YAML, &caps);
 
-    // Phase 1: drive the converge chain to the parked join, then kill the
+    // note: Phase 1: drive the converge chain to the parked join, then kill the
     // in-memory engine (the sqlite checkpoint persists).
     let (engine1, session) = {
         let mut engine = GraphFlowEngine::new_with_storage(
@@ -1176,7 +1176,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
 
     tokio::time::sleep(DOWNTIME).await;
 
-    // Phase 2: a fresh engine over the SAME storage; reconstruct the runner
+    // note: Phase 2: a fresh engine over the SAME storage; reconstruct the runner
     // for the existing session (mirrors boot `recover_sessions` →
     // `reconstruct_runner` for a non-embedded preset).
     let (engine2, _storage2) = {
@@ -1269,11 +1269,11 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Cron / chronology background ticks
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// An engine-admitted pool over a fresh temp DB plus a seeded Work.
+/// note: An engine-admitted pool over a fresh temp DB plus a seeded Work.
 async fn work_pool() -> (TempDir, Arc<sqlx::SqlitePool>) {
     let dir = tempfile::tempdir().unwrap();
     let pool = nexus_local_db::init_engine_pool(&dir.path().join("state.db"))
@@ -1325,7 +1325,7 @@ fn work_record(
     }
 }
 
-/// A per-Work cron blob whose `brainstorm` role fires every minute.
+/// note: A per-Work cron blob whose `brainstorm` role fires every minute.
 fn every_minute_cron() -> String {
     json!({
         "tz": "UTC",
@@ -1337,7 +1337,7 @@ fn every_minute_cron() -> String {
     .to_string()
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/cron_supervisor_task.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/cron_supervisor_task.rs`
 /// `run_one_tick_enqueues_and_admits`.
 ///
 /// One cron tick enqueues the matching role fire AND admits it to `running` —
@@ -1383,7 +1383,7 @@ async fn cron_tick_enqueues_and_admits_a_due_role() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/cron_supervisor_task.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/cron_supervisor_task.rs`
 /// `run_one_tick_no_match_is_noop`.
 ///
 /// A tick whose cron expressions can never match the current minute enqueues
@@ -1402,7 +1402,7 @@ async fn cron_tick_with_no_due_role_is_a_no_op() {
     nexus_local_db::works::create_work(pool.as_ref(), &work)
         .await
         .unwrap();
-    // Seven-field expressions pinned to year 2000 can never match a current tick.
+    // why: Seven-field expressions pinned to year 2000 can never match a current tick.
     let idle = json!({
         "tz": "UTC",
         "roles": {
@@ -1434,7 +1434,7 @@ async fn cron_tick_with_no_due_role_is_a_no_op() {
     assert_eq!(count, 0, "a non-matching cron must not enqueue");
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/cron_lock_integration.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/cron_lock_integration.rs`
 /// `file_lock_blocks_cron_fire_when_held` and
 /// `cron_fires_without_workspace_dir_gracefully_skips_file_lock`.
 ///
@@ -1448,7 +1448,7 @@ async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
     use chrono::TimeZone;
 
     let (_dir, pool) = work_pool().await;
-    // Two distinct Works: each role fires at most once per active schedule
+    // note: Two distinct Works: each role fires at most once per active schedule
     // (the idempotency guard), so the lock case needs its own Work.
     for (work_id, work_ref) in [
         ("wrk_cron_open", "cron-open"),
@@ -1474,7 +1474,7 @@ async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
         .single()
         .expect("valid fixed UTC minute");
 
-    // `wrk_cron_held` owns a Works/<ref> directory with a live file-lock
+    // note: `wrk_cron_held` owns a Works/<ref> directory with a live file-lock
     // holder; `wrk_cron_open` has none. One evaluation must then firewall the
     // held Work and still fire the open one.
     let work_dir = workspace.path().join("Works").join("cron-held");
@@ -1512,7 +1512,7 @@ async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
     .unwrap();
     assert_eq!(opened, 1, "the ungated Work must be enqueued exactly once");
 
-    // Releasing the holder restores the fire: the gate is the lock, not the
+    // note: Releasing the holder restores the fire: the gate is the lock, not the
     // Work's cron shape.
     drop(guard);
     let released = nexus_orchestration::schedule::cron_supervisor::evaluate_cron_fires(
@@ -1532,7 +1532,7 @@ async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/auto_chronology_task.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/auto_chronology_task.rs`
 /// `daemon_run_one_tick_advances_eligible_work`.
 ///
 /// One auto-chronology tick advances an opted-in Work whose volume-1 chapters
@@ -1604,7 +1604,7 @@ async fn auto_chronology_tick_advances_an_opted_in_work() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/auto_chronology_task.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/auto_chronology_task.rs`
 /// `parse_interval_secs_handles_env_values` and `from_env_uses_default_when_unset`.
 ///
 /// The interval parser is a total function over the optional override (no
@@ -1629,7 +1629,7 @@ fn auto_chronology_interval_parsing_is_total() {
         "a zero interval (busy loop) falls back to the default"
     );
 
-    // The constructor stays wired to the pure parser: whatever the ambient
+    // note: The constructor stays wired to the pure parser: whatever the ambient
     // override is (unset, valid, or invalid), `from_env` must agree with
     // `parse_interval_secs` applied to that SAME value — an invalid ambient
     // setting therefore resolves to the default instead of being accepted
@@ -1645,7 +1645,7 @@ fn auto_chronology_interval_parsing_is_total() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Master-decision timeout sweep
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1679,7 +1679,7 @@ async fn review_master_schedule_count(pool: &sqlx::SqlitePool, work_id: &str) ->
     .unwrap()
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
 /// `sweep_with_no_findings_is_a_no_op`.
 #[tokio::test]
 #[serial_test::serial]
@@ -1694,7 +1694,7 @@ async fn stale_finding_sweep_is_a_no_op_without_findings() {
     assert_eq!(total, 0, "an empty findings table enqueues nothing");
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
 /// `stale_finding_without_optin_does_not_enqueue`,
 /// `stale_finding_with_optin_enqueues_review_master` and
 /// `mixed_optin_only_enqueues_for_opted_in_work`.
@@ -1769,7 +1769,7 @@ async fn stale_finding_sweep_enqueues_only_for_an_opted_in_work() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
 /// `fresh_finding_does_not_enqueue_even_when_opted_in` and
 /// `resolved_finding_is_not_stale`.
 ///
@@ -1791,7 +1791,7 @@ async fn stale_finding_sweep_ignores_fresh_and_resolved_findings() {
         .await
         .unwrap();
 
-    // Fresh (5s against a 60s threshold).
+    // note: Fresh (5s against a 60s threshold).
     create_finding(
         pool.as_ref(),
         &finding("fnd_sweep_fresh", "wrk_sweep_filter", 5),
@@ -1805,7 +1805,7 @@ async fn stale_finding_sweep_ignores_fresh_and_resolved_findings() {
         "a fresh finding must not enqueue"
     );
 
-    // Stale but resolved.
+    // note: Stale but resolved.
     create_finding(
         pool.as_ref(),
         &finding("fnd_sweep_resolved", "wrk_sweep_filter", 7200),
@@ -1825,7 +1825,7 @@ async fn stale_finding_sweep_ignores_fresh_and_resolved_findings() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs`
 /// `repeated_sweeps_remain_stable`.
 ///
 /// The sweep is best-effort and stable: it never panics on a second pass, and
@@ -1862,7 +1862,7 @@ async fn stale_finding_sweep_repeats_without_panicking() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Writer-lock window (reconcile)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1874,7 +1874,7 @@ fn select_creator(home: &Path) {
     .unwrap();
 }
 
-/// A direct-writer core over a fresh guarded workspace, plus a Work whose
+/// note: A direct-writer core over a fresh guarded workspace, plus a Work whose
 /// `story_ref` resolves to a creative root the reconcile walk can read.
 struct ReconcileFixture {
     _tmp: TempDir,
@@ -1950,7 +1950,7 @@ async fn reconcile_fixture(work_ref: &str) -> ReconcileFixture {
 
     let creative_root = home.join("creative");
     std::fs::create_dir_all(creative_root.join("Works").join(work_ref)).unwrap();
-    // The core authority resolves the workspace from the operational meta.json.
+    // note: The core authority resolves the workspace from the operational meta.json.
     std::fs::write(
         nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
         serde_json::to_vec(&json!({"local_root": creative_root})).unwrap(),
@@ -2002,7 +2002,7 @@ fn set_mode(path: &Path, mode: u32) {
     }
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/runtime_lock.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/runtime_lock.rs`
 /// `test_reconcile_chapters_releases_lock_on_error`.
 ///
 /// The reconcile write phase holds the runtime lock, so an apply-phase failure
@@ -2017,7 +2017,7 @@ async fn reconcile_apply_error_releases_the_runtime_lock() {
         &stories.join("ch01-intro.md"),
         "---\nchapter: 1\nstatus: finalized\n---\nBody",
     );
-    // A DB row whose status conflicts with the frontmatter forces a
+    // note: A DB row whose status conflicts with the frontmatter forces a
     // `ResyncFileStatus` op, so the write phase really rewrites the file.
     nexus_local_db::insert_chapter(
         fixture.core.pool(),
@@ -2035,7 +2035,7 @@ async fn reconcile_apply_error_releases_the_runtime_lock() {
     .await
     .unwrap();
 
-    // Read-only Stories/ lets the read phase succeed and the atomic frontmatter
+    // why: Read-only Stories/ lets the read phase succeed and the atomic frontmatter
     // rewrite fail (Unix-only hermetic trigger).
     set_mode(&stories, 0o555);
     let result = fixture
@@ -2061,7 +2061,7 @@ async fn reconcile_apply_error_releases_the_runtime_lock() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/runtime_lock.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/runtime_lock.rs`
 /// `test_reconcile_chapters_read_phase_runs_unlocked`.
 ///
 /// The read phase (the slow filesystem walk) runs BEFORE the lock is acquired,
@@ -2101,7 +2101,7 @@ async fn reconcile_read_phase_failure_never_acquires_the_runtime_lock() {
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/runtime_lock.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/runtime_lock.rs`
 /// `test_reconcile_chapters_dry_run_makes_zero_mutations`.
 ///
 /// A dry-run reconcile reports what the mutating path would do while making
@@ -2179,11 +2179,11 @@ async fn reconcile_dry_run_mutates_nothing_and_takes_no_lock() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Production prompt executor over the Host plane
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Seed an authoritative v1 run over `store` for the production prompt
+/// note: Seed an authoritative v1 run over `store` for the production prompt
 /// executor, with the real content-addressed source identity of an embedded
 /// preset (a fabricated hash would refuse reconstruction instead of
 /// exercising the executor).
@@ -2233,7 +2233,7 @@ async fn seed_prompt_run(
         .expect("seed the v1 run");
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
 /// `concurrent_same_key_second_prompt_reuses_session_not_spawn` and
 /// `missing_binding_refuses_before_effect`.
 ///
@@ -2241,7 +2241,7 @@ async fn seed_prompt_run(
 /// owned Host session per `(run, role)`: a second prompt for the same key
 /// reuses it (never a second subprocess), and a prompt whose frozen run has no
 /// binding for the role is refused BEFORE any Host effect.
-#[allow(clippy::too_many_lines)] // one prompt-executor journey asserted end to end
+#[allow(clippy::too_many_lines)] // why: one prompt-executor journey asserted end to end
 #[tokio::test]
 async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() {
     use nexus_capability::{PromptExecutor, PromptRequest, ToolPolicy};
@@ -2280,7 +2280,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
         cancellation: tokio_util::sync::CancellationToken::new(),
     };
 
-    // First prompt parks inside the Host; the second is submitted while it is
+    // note: First prompt parks inside the Host; the second is submitted while it is
     // in flight (the executor serializes same-run operations).
     let first = {
         let executor = Arc::clone(&executor);
@@ -2315,7 +2315,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
     );
     assert_eq!(host.prompt_count(), 2, "both prompts must reach the Host");
 
-    // MIGRATED from the same source case's durable cleanup assertion: a
+    // note: MIGRATED from the same source case's durable cleanup assertion: a
     // successfully completed prompt must not leave its durable `in_flight`
     // attempt marker behind.
     let state = store
@@ -2332,7 +2332,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
         "a successfully completed prompt must not leave a durable in_flight marker"
     );
 
-    // A frozen run without a binding for the role refuses before any effect.
+    // note: A frozen run without a binding for the role refuses before any effect.
     let refused = executor
         .execute(request("retained:unbound", "three"))
         .await
@@ -2352,7 +2352,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
         "a refused prompt must launch no Host session"
     );
 
-    // A pre-cancelled request is fenced before any Host effect.
+    // note: A pre-cancelled request is fenced before any Host effect.
     let cancelled = request("retained:single-flight", "four");
     cancelled.cancellation.cancel();
     let fenced = executor
@@ -2369,7 +2369,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
         "a fenced prompt must produce no Host effect"
     );
 
-    // A non-`EndTurn` stop is a typed failure, never partial-output success.
+    // why: A non-`EndTurn` stop is a typed failure, never partial-output success.
     host.stop_without_end_turn();
     let stopped = executor
         .execute(request("retained:single-flight", "five"))
@@ -2386,7 +2386,7 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
     );
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
 /// `eof_after_initialize_is_typed_failure`.
 ///
 /// A Host whose agent process exits right after the `initialize` handshake
@@ -2425,7 +2425,7 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
         cancellation: tokio_util::sync::CancellationToken::new(),
     };
 
-    // The launch itself fails (the process EOFs right after initialize).
+    // note: The launch itself fails (the process EOFs right after initialize).
     let host = ParkedHost::new();
     host.fail_launch_after_initialize();
     let executor = HostPromptExecutor::new(host.clone(), store.clone(), TimeoutConfig::default());
@@ -2467,7 +2467,7 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
         "a refused launch must drop its durable attempt ownership"
     );
 
-    // The deltas arrive but the stream then EOFs with no terminal event.
+    // note: The deltas arrive but the stream then EOFs with no terminal event.
     let host = ParkedHost::new();
     host.release_all();
     host.close_stream_after_deltas();
@@ -2486,7 +2486,7 @@ async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
     assert_eq!(host.prompt_count(), 1, "the EOF prompt did reach the Host");
 }
 
-/// MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
+/// note: MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
 /// `all_five_consumers_observe_non_echo_agent_output` (its durable
 /// post-prompt assertions).
 ///
@@ -2553,7 +2553,7 @@ async fn graph_prompt_context_serializes_output_without_host_handles() {
         "the node must store the agent output in the graph context"
     );
 
-    // Durable cleanup: the completed prompt owns no `in_flight` attempt.
+    // note: Durable cleanup: the completed prompt owns no `in_flight` attempt.
     let state = store
         .load_run(&nexus_session_storage::SessionId(run_id.to_string()))
         .await
@@ -2566,7 +2566,7 @@ async fn graph_prompt_context_serializes_output_without_host_handles() {
         "a successfully completed prompt must not leave a durable in_flight marker"
     );
 
-    // Serialization: the context carries text only — no live Host/ACP handle.
+    // why: Serialization: the context carries text only — no live Host/ACP handle.
     let serialized = serde_json::to_string(&ctx).expect("context serializes");
     assert!(
         serialized.contains("transformed:parked-output"),
@@ -2582,17 +2582,17 @@ async fn graph_prompt_context_serializes_output_without_host_handles() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Hosted production composition (v1.195 P0-T2)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The payload the driven run commits through `workspace.commit`, base64 (the
+/// note: The payload the driven run commits through `workspace.commit`, base64 (the
 /// capability's wire shape) with the plaintext kept beside it for the
 /// on-disk assertion.
 const HOSTED_PAYLOAD: &[u8] = b"hosted workspace payload\n";
 const HOSTED_PAYLOAD_B64: &str = "aG9zdGVkIHdvcmtzcGFjZSBwYXlsb2FkCg==";
 
-/// The user preset the hosted composition drives: an AUTHORIZED workspace
+/// note: The user preset the hosted composition drives: an AUTHORIZED workspace
 /// capability chain (`workspace.open` into the frozen root, then one declared
 /// create through the bound commit authority), then a prompt. Both halves of
 /// the hosted wiring are therefore load-bearing for the run to reach the
@@ -2650,7 +2650,7 @@ states:
     )
 }
 
-/// An engine-owner core over a REAL selected creative root, plus the owner the
+/// note: An engine-owner core over a REAL selected creative root, plus the owner the
 /// public `start_hosted_execution` factory composed for it.
 ///
 /// Unlike [`owner_fixture`], nothing is attached by hand: the supervisor, its
@@ -2662,7 +2662,7 @@ struct HostedFixture {
     core: CoreService,
     host: Arc<ParkedHost>,
     handle: Arc<ExecutionHandle>,
-    /// Canonical root the factory resolved (`meta.json` `local_root`).
+    /// note: Canonical root the factory resolved (`meta.json` `local_root`).
     root: PathBuf,
 }
 
@@ -2679,7 +2679,7 @@ async fn hosted_fixture() -> HostedFixture {
     }
 }
 
-/// Prepare a home that [`open_hosted_owner`] can open: the nexus config
+/// note: Prepare a home that [`open_hosted_owner`] can open: the nexus config
 /// selecting the fixture Creator/workspace, a registered creative root, the
 /// seeded admitted Creator row and the hosted preset bundle.
 ///
@@ -2704,7 +2704,7 @@ async fn prepare_hosted_home(home: &Path) -> PathBuf {
     )
     .expect("meta");
 
-    // The user preset bundle the shared resolver reads at add AND admission
+    // note: The user preset bundle the shared resolver reads at add AND admission
     // time (its content-addressed source identity is frozen into the row).
     let bundle = nexus_home.join("presets").join(HOSTED_PRESET);
     std::fs::create_dir_all(bundle.join("prompts")).expect("preset bundle");
@@ -2716,7 +2716,7 @@ async fn prepare_hosted_home(home: &Path) -> PathBuf {
     .expect("prompt template");
 
     let db_path = nexus_home_layout::workspace_state_db_path(home, CREATOR, SLUG);
-    // Seed through a temporary admitted pool and RELEASE the writer guard
+    // why: Seed through a temporary admitted pool and RELEASE the writer guard
     // before the engine owner opens (the owner takes an OS lock).
     {
         let guarded = nexus_local_db::init_engine_pool(&db_path)
@@ -2737,7 +2737,7 @@ async fn prepare_hosted_home(home: &Path) -> PathBuf {
     std::fs::canonicalize(&creative_root).expect("canonical creative root")
 }
 
-/// Open ONE hosted owner over a home prepared by [`prepare_hosted_home`].
+/// note: Open ONE hosted owner over a home prepared by [`prepare_hosted_home`].
 ///
 /// Separate from [`hosted_fixture`] so a test can open a SECOND owner over the
 /// same home after the first one closed.
@@ -2761,7 +2761,7 @@ async fn open_hosted_owner(home: &Path) -> (CoreService, Arc<ParkedHost>, Arc<Ex
     (core, host, handle)
 }
 
-/// A `driven_v1` pending schedule for the hosted preset, created through the
+/// note: A `driven_v1` pending schedule for the hosted preset, created through the
 /// PUBLIC add path on the factory-composed owner.
 async fn add_hosted_schedule(fixture: &HostedFixture) -> String {
     let principal = fixture.core.active_principal().await.unwrap();
@@ -2786,7 +2786,7 @@ async fn add_hosted_schedule(fixture: &HostedFixture) -> String {
         .schedule_id
 }
 
-/// The hosted owner drives exactly one durable pending schedule end to end —
+/// note: The hosted owner drives exactly one durable pending schedule end to end —
 /// through the production supervisor, starter and clock task the factory
 /// installed — and joins that clock task on close.
 ///
@@ -2805,14 +2805,14 @@ async fn hosted_schedule_drives_once_and_closes() {
     let principal = fixture.core.active_principal().await.unwrap();
     apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), HOSTED_PRESET).await;
 
-    // ── The factory installed ONE live background task (the supervisor
+    // note: ── The factory installed ONE live background task (the supervisor
     //    wake/clock) before any row exists. ──
     assert!(
         !fixture.handle.owned_tasks_finished(),
         "the hosted owner must install its scheduler task"
     );
 
-    // ── Public add is PENDING: durable, frozen, and owning no run. ──
+    // note: ── Public add is PENDING: durable, frozen, and owning no run. ──
     let schedule_id = add_hosted_schedule(&fixture).await;
     let (status, owned) = schedule_row(pool.as_ref(), &schedule_id).await;
     assert_eq!(
@@ -2837,7 +2837,7 @@ async fn hosted_schedule_drives_once_and_closes() {
         "no workspace effect may exist before admission"
     );
 
-    // ── The OWNED clock drives it: exactly one run, executing the workspace
+    // note: ── The OWNED clock drives it: exactly one run, executing the workspace
     //    capability chain inside the canonical root and then the prompt. ──
     wait_for_prompt(&fixture.host).await;
     assert_eq!(
@@ -2868,7 +2868,7 @@ async fn hosted_schedule_drives_once_and_closes() {
             .expect("run row count");
     assert_eq!(run_rows, 1, "the schedule's owned run exists exactly once");
 
-    // ── Repeated tick + repeated admission yield the SAME run. ──
+    // note: ── Repeated tick + repeated admission yield the SAME run. ──
     let supervisor = fixture
         .handle
         .coordinator()
@@ -2897,7 +2897,7 @@ async fn hosted_schedule_drives_once_and_closes() {
     assert_eq!(status_after, "running");
     assert_eq!(owned_after.as_deref(), Some(run_id.as_str()));
 
-    // ── Close JOINS the owned scheduler task. ──
+    // note: ── Close JOINS the owned scheduler task. ──
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
     assert!(
@@ -2912,7 +2912,7 @@ async fn hosted_schedule_drives_once_and_closes() {
     fixture.core.close().await.expect("core close");
 }
 
-/// A `running` row that owns NO run is REFUSED — never admitted, and never
+/// note: A `running` row that owns NO run is REFUSED — never admitted, and never
 /// turned into a fresh run (v1.195 P0-T2 fix, L2 C1).
 ///
 /// The stale shape is staged directly in storage. The durable product contract
@@ -2933,7 +2933,7 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
     let caps = fixture.handle.capability_holder();
     let home = fixture.tmp.path().join(".nexus42");
 
-    // The row is created through the PUBLIC add (so it carries a frozen
+    // note: The row is created through the PUBLIC add (so it carries a frozen
     // descriptor + version-0 seed exactly as a real driven row does) and is
     // then staged into the stale shape: `running` with NO owned run. The
     // staging UPDATE lands within the same millisecond as the insert, while the
@@ -2953,7 +2953,7 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
         "the owned clock is live while this case asserts"
     );
 
-    // ── 1. The direct admission gate (what an explicit start reaches). ──
+    // note: ── 1. The direct admission gate (what an explicit start reaches). ──
     match coordinator
         .admit_schedule(&schedule_id, pool.as_ref(), &home, &caps, None, None)
         .await
@@ -2972,7 +2972,7 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
         other => panic!("a non-owned running row must be refused as not eligible, got {other:?}"),
     }
 
-    // ── 2. The coordinator-backed starter — the owned clock's own path — and a
+    // note: ── 2. The coordinator-backed starter — the owned clock's own path — and a
     //       real clock tick (a no-op for a row that owns no run). ──
     let supervisor = coordinator
         .schedule_supervisor()
@@ -2994,7 +2994,7 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
         .await
         .expect("a clock tick is a no-op for a non-owned running row");
 
-    // ── 3. Nothing was minted by any of the three attempts. ──
+    // note: ── 3. Nothing was minted by any of the three attempts. ──
     let (status, owned) = schedule_row(pool.as_ref(), &schedule_id).await;
     assert_eq!(status, "running", "the staged row keeps its durable state");
     assert!(owned.is_none(), "no run may be claimed for a non-owned row");
@@ -3020,11 +3020,11 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
     fixture.core.close().await.expect("core close");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Public durable reads and core-context append (v1.195 P0-T3)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The public durable read/context surface (S0-2/S0-3/S0-5).
+/// note: The public durable read/context surface (S0-2/S0-3/S0-5).
 ///
 /// One admitted Creator and one durable schedule: the public lists and inspect
 /// report the STORED identity/status/version, an unknown id and a FOREIGN row
@@ -3033,7 +3033,7 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
 /// and the pointer advance as one transaction — concurrent appends leave every
 /// body in the version chain with the pointer on the winner, and the NEXT
 /// execution boundary freezes that committed version into the run.
-#[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
+#[allow(clippy::too_many_lines)] // why: one linear public journey; splitting hides the ordering evidence
 #[tokio::test]
 #[serial_test::serial]
 async fn public_schedule_reads_and_context_are_owned() {
@@ -3042,7 +3042,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     use nexus_contracts::generated::daemon_api::schedule::list_schedules_query::ListSchedulesQuery;
     use nexus_contracts::local::schedule::{CoreContextPayload, CoreContextVersion, ScheduleId};
 
-    /// The generated PATCH body for one append.
+    /// note: The generated PATCH body for one append.
     fn append(body: &str) -> EditCoreContextRequest {
         EditCoreContextRequest {
             op: "append".to_string(),
@@ -3060,7 +3060,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     let home = fixture.nexus_home();
     let executor = fixture.executor.clone() as Arc<dyn nexus_capability::PromptExecutor>;
 
-    // ── 1. A durable pending row created through the PUBLIC add appears in the
+    // note: ── 1. A durable pending row created through the PUBLIC add appears in the
     //       schedule list with its stored identity/status/policy and NO run. ──
     let schedule_id = add_pending_schedule(&fixture, "retained-reads").await;
 
@@ -3089,7 +3089,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         "one row must fit the default page"
     );
 
-    // Nothing has been admitted, so the DURABLE session list is empty (this is
+    // why: Nothing has been admitted, so the DURABLE session list is empty (this is
     // the store, not an in-memory engine map or a Host session list).
     let sessions = fixture
         .handle
@@ -3114,7 +3114,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     assert_eq!(inspected.concurrency_kind, "serial");
     assert_eq!(inspected.depends_on, [] as [std::string::String; 0]);
 
-    // ── 2. Foreign and unknown ids close IDENTICALLY, and an explicit foreign
+    // note: ── 2. Foreign and unknown ids close IDENTICALLY, and an explicit foreign
     //       creator filter refuses before any query runs. ──
     // The foreign row is staged directly: the public add path can only mint
     // rows for the admitted Creator, so the foreign owner must come from
@@ -3177,7 +3177,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         "another creator's row must never be listed"
     );
 
-    // ── 3. A Steer append is ONE durable version plus the pointer advance. ──
+    // note: ── 3. A Steer append is ONE durable version plus the pointer advance. ──
     let appended = fixture
         .handle
         .edit_core_context(&principal, schedule_id.clone(), append("idea-one"))
@@ -3228,7 +3228,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         "a refused append to another creator's schedule must write nothing"
     );
 
-    // ── 4. CONCURRENT appends: every body is durable exactly once, the versions
+    // note: ── 4. CONCURRENT appends: every body is durable exactly once, the versions
     //       are monotonic, and the pointer names the last one (no lost body). ──
     let bodies = ["idea-two", "idea-three", "idea-four", "idea-five"];
     let results = futures_util::future::join_all(bodies.iter().map(|body| {
@@ -3237,7 +3237,7 @@ async fn public_schedule_reads_and_context_are_owned() {
             .edit_core_context(&principal, schedule_id.clone(), append(body))
     }))
     .await;
-    // Pair every append with the version it committed. The COMMIT order is the
+    // note: Pair every append with the version it committed. The COMMIT order is the
     // winner of the writer race, not the call order, so the version numbers
     // (never the call indices) are what the chain must be read in.
     let mut committed: Vec<(i64, &str)> = vec![(1, "idea-one")];
@@ -3269,7 +3269,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         5,
         "the pointer is the version authority and names the last committed append"
     );
-    // Version 0 is the durable seed, so the chain starts from an empty body.
+    // why: Version 0 is the durable seed, so the chain starts from an empty body.
     let seed = manager
         .read(&sid, CoreContextVersion(0))
         .await
@@ -3278,7 +3278,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         CoreContextPayload::Text { body } => assert!(body.is_empty(), "empty seed, got: {body}"),
         CoreContextPayload::Struct { .. } => panic!("the seed is text"),
     }
-    // Every version must be the previous version PLUS exactly its own body: a
+    // why: Every version must be the previous version PLUS exactly its own body: a
     // lost body shortens the chain, a duplicated body extends it, and a version
     // derived from a stale base would reorder it.
     let mut expected = String::new();
@@ -3300,7 +3300,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         );
     }
 
-    // ── 5. The NEXT EXECUTION BOUNDARY consumes the winning committed version:
+    // note: ── 5. The NEXT EXECUTION BOUNDARY consumes the winning committed version:
     //       admission freezes the pointer's payload into the run, and the public
     //       reads report that same run and version. ──
     let run_id = coordinator
@@ -3376,7 +3376,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     assert_eq!(detail.session.creator_id, CREATOR);
     assert_eq!(detail.session.status, "running");
 
-    // A foreign run, a child run and an unknown id are all equally closed: a
+    // note: A foreign run, a child run and an unknown id are all equally closed: a
     // child is never independently authorized by naming it.
     sqlx::query(
         "INSERT INTO orchestration_sessions
@@ -3441,7 +3441,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     );
     assert_eq!(sessions.items[0].session_id, run_id);
 
-    // ── 6. The declared `status` filter narrows the PAGE and its COUNT
+    // note: ── 6. The declared `status` filter narrows the PAGE and its COUNT
     //       identically: a filtered page is never paginated against an
     //       unfiltered total. ──
     // A second durable row of the SAME creator, left `pending` (the fixture
@@ -3470,7 +3470,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     );
     assert!(!running_only.pagination.has_more);
 
-    // The decisive page/count agreement check: exactly ONE row matches
+    // note: The decisive page/count agreement check: exactly ONE row matches
     // `pending`, so `limit = 1` exhausts the filter. A COUNT that ignored
     // `status` (two creator rows) would answer `has_more = true` here.
     let pending_page = fixture
@@ -3513,7 +3513,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     );
     assert!(!no_matches.pagination.has_more);
 
-    // ── 7. Each list's DEFAULT order is its OWN schema's declared default:
+    // note: ── 7. Each list's DEFAULT order is its OWN schema's declared default:
     //       schedules `created_at` (newest first), sessions `session_id`
     //       ascending. ──
     // Ordering anchors that CONTRADICT the other list's default: a schedule far
@@ -3649,7 +3649,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         vec!["run-zzz", "run-aaa", run_id.as_str()],
         "`-session_id` reverses the order, so the default above is the ASCENDING one"
     );
-    // The staged anchors deliberately reverse under a `created_at` sort (their
+    // note: The staged anchors deliberately reverse under a `created_at` sort (their
     // `created_at` order is the reverse of their id order), so the ordering the
     // schedule default would have produced here is visibly different.
     assert_ne!(
@@ -3664,7 +3664,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         "the default order must still exclude foreign and child runs"
     );
 
-    // ── 8. Cleanup: release the parked prompt, then close the owner. ──
+    // note: ── 8. Cleanup: release the parked prompt, then close the owner. ──
     wait_for_prompt(&fixture.host).await;
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
@@ -3675,11 +3675,11 @@ async fn public_schedule_reads_and_context_are_owned() {
     fixture.core.close().await.expect("core close");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Public cancel/resume closure (v1.195 P0-T4)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The commit-last fixtures: prompt, workspace open, then the declared commit
+/// note: The commit-last fixtures: prompt, workspace open, then the declared commit
 /// LAST.
 ///
 /// The detail projection reports the run's LATEST capability output, so a
@@ -3756,7 +3756,7 @@ states:
     )
 }
 
-/// Owner-fixture preset for the cancel/resume seam: one prompt (so an
+/// note: Owner-fixture preset for the cancel/resume seam: one prompt (so an
 /// admission can be parked mid-step) followed by a MANUAL human wait (so the
 /// run can never reach `Completed` on its own, and a plain resume has a real
 /// wait it must refuse to continue).
@@ -3795,12 +3795,12 @@ states:
     )
 }
 
-/// Hosted preset for the effect race: the prompt comes FIRST and the
+/// note: Hosted preset for the effect race: the prompt comes FIRST and the
 /// authorized workspace commit LAST, so a cancel that lands while the prompt
 /// is in flight must leave the commit unexecuted — the exact "late commit is
 /// refused" ordering.
 const CANCEL_EFFECT_PRESET: &str = "cancel-effect-guard";
-/// The committed file, relative to the canonical creative root (the preset's
+/// note: The committed file, relative to the canonical creative root (the preset's
 /// `workspace.open` scope is `notes`).
 const CANCEL_EFFECT_FILE: &str = "notes/cancel-effect.txt";
 const CANCEL_EFFECT_B64: &str = "Y2FuY2VsLWVmZmVjdCBwYXlsb2FkCg==";
@@ -3858,7 +3858,7 @@ states:
     )
 }
 
-/// The public cancel/resume closure (S0-3/S0-4/S0-6).
+/// note: The public cancel/resume closure (S0-3/S0-4/S0-6).
 ///
 /// A cancel on a schedule that owns NO run is ONE CAS on the SAME fence the
 /// admission claim writes on — so a later admission is refused and nothing is
@@ -3871,11 +3871,11 @@ states:
 /// the run is cancelled. A completed winner stays completed, and an
 /// unconfirmed cleanup settles `interrupted` with the schedule row left
 /// non-terminal until a retry confirms it.
-#[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
+#[allow(clippy::too_many_lines)] // why: one linear public journey; splitting hides the ordering evidence
 #[tokio::test]
 #[serial_test::serial]
 async fn public_cancel_fences_late_workspace_commit() {
-    // ═══ Part 1 — the admission fence, on an owner with NO owned clock, so
+    // note: ═══ Part 1 — the admission fence, on an owner with NO owned clock, so
     //         every claim below is explicit and no tick can race the CAS. ═══
     let fixture = owner_fixture().await;
     let principal = fixture.core.active_principal().await.unwrap();
@@ -3892,7 +3892,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     );
     apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), CANCEL_WAIT_PRESET).await;
 
-    // ── 1. A pending row that owns NO run: the cancel is the fence, the row is
+    // note: ── 1. A pending row that owns NO run: the cancel is the fence, the row is
     //       durably cancelled with nothing behind it, and the LATER admission
     //       (the late commit) is refused without minting a run. ──
     let unowned = add_schedule_preset(
@@ -3920,7 +3920,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "a cancelled unowned row must mint no run at all"
     );
 
-    // The late commit: a cancelled row is no longer claimable, so the
+    // why: The late commit: a cancelled row is no longer claimable, so the
     // admission that arrives after the cancel is refused — and minted nothing.
     let late_admission = coordinator
         .admit_schedule(
@@ -3953,7 +3953,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "no refused admission may reach the prompt port"
     );
 
-    // ── 2. An ADMITTED schedule: the signal goes to the SAME owned run. A
+    // note: ── 2. An ADMITTED schedule: the signal goes to the SAME owned run. A
     //       plain resume must NOT continue its manual human wait; the cancel
     //       settles it durably and the schedule never gains a second run. ──
     let admitted = add_schedule_preset(
@@ -3982,7 +3982,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     assert_eq!(status, "running", "the admitted row owns its live run");
     assert_eq!(owned.as_deref(), Some(run_id.as_str()));
 
-    // 2a. Manual waits are not implicitly continued: a plain resume refuses
+    // note: 2a. Manual waits are not implicitly continued: a plain resume refuses
     //     with the exact state conflict and the wait token SURVIVES.
     let refused = fixture
         .handle
@@ -4015,7 +4015,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     );
     assert_eq!(root_run_count(pool.as_ref()).await, 1, "no second run");
 
-    // 2b. The cancel reaches the SAME run and returns the durable winner.
+    // note: 2b. The cancel reaches the SAME run and returns the durable winner.
     let cancelled = fixture
         .handle
         .signal_schedule(&principal, admitted.clone(), signal("cancel"))
@@ -4046,7 +4046,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "cancel must not open a second workflow"
     );
 
-    // ── 3. Cancel and admission contend for ONE unowned row. The CAS and the
+    // note: ── 3. Cancel and admission contend for ONE unowned row. The CAS and the
     //       store's claim write on the SAME `current_session_id IS NULL`
     //       fence, so exactly one of them wins the row; whichever does, the
     //       cancel converges on a durable `cancelled` and the run behind a
@@ -4058,7 +4058,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "cancel-race",
     )
     .await;
-    // The winner's run parks at the preset's prompt, and the cancel's bounded
+    // note: The winner's run parks at the preset's prompt, and the cancel's bounded
     // teardown waits on that parked operation: release everything (permanently
     // armed) once the racing writers have started, so neither outcome can hang.
     let host = fixture.host.clone();
@@ -4079,7 +4079,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         .signal_schedule(&principal, racing.clone(), signal("cancel"));
     let (admitted_result, cancelled_result) = tokio::join!(admission, cancellation);
     let _ = releaser.await;
-    // Whichever writer wins the `current_session_id IS NULL` fence mints AT
+    // note: Whichever writer wins the `current_session_id IS NULL` fence mints AT
     // MOST this one run: the admission winning claims exactly one new run (the
     // pre-race count was 1, asserted above), while the cancel winning leaves
     // the row cancelled owning NO run at all — that is the supervisor's fence
@@ -4090,12 +4090,12 @@ async fn public_cancel_fences_late_workspace_commit() {
         "the race minted at most ONE further run, got {runs_after_race}"
     );
     match (&admitted_result, &cancelled_result) {
-        // The cancel won the fence: the admission legitimately lost.
+        // note: The cancel won the fence: the admission legitimately lost.
         (Err(RunControlError::NotEligible(id, _)), Ok(cancelled)) => {
             assert_eq!(id, &racing);
             assert_eq!(cancelled.status, "cancelled");
         }
-        // The admission won the claim: the cancel reaches THAT claimed run.
+        // note: The admission won the claim: the cancel reaches THAT claimed run.
         (Ok(_), Ok(cancelled)) => {
             assert_eq!(
                 cancelled.status, "cancelled",
@@ -4122,7 +4122,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         );
     }
 
-    // Cleanup: release anything still parked, then close the owner.
+    // note: Cleanup: release anything still parked, then close the owner.
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
     assert!(
@@ -4131,7 +4131,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     );
     fixture.core.close().await.expect("core close");
 
-    // ═══ Part 2 — the effect race, on the production hosted owner whose
+    // note: ═══ Part 2 — the effect race, on the production hosted owner whose
     //         authorized commit runs AFTER the prompt. ═══
     let hosted = hosted_fixture().await;
     let principal = hosted.core.active_principal().await.unwrap();
@@ -4151,7 +4151,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     )
     .await;
 
-    // ── 4. Cancel/effect race: the cancel lands while the prompt is in flight,
+    // note: ── 4. Cancel/effect race: the cancel lands while the prompt is in flight,
     //       so the LAST step — the authorized workspace commit — never runs. ──
     let prompts_before = hosted.host.prompt_count();
     let fenced = add_schedule_preset(
@@ -4173,7 +4173,7 @@ async fn public_cancel_fences_late_workspace_commit() {
                 .await
         }
     });
-    // The engine persists the durable cancel intent BEFORE it fires the run
+    // note: The engine persists the durable cancel intent BEFORE it fires the run
     // token: once that fence is durable the cancel is already the durable
     // control winner, and the parked prompt is only unwinding.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -4197,7 +4197,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         cancelled.status, "cancelled",
         "the in-flight prompt's teardown confirms the stop"
     );
-    // The late commit: the cancelled run never reaches the commit state, the
+    // why: The late commit: the cancelled run never reaches the commit state, the
     // run is durably cancelled, and the schedule projects the same winner.
     assert!(
         !hosted.root.join(CANCEL_EFFECT_FILE).exists(),
@@ -4210,7 +4210,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "the schedule row projects the durable cancel"
     );
 
-    // ── 5. Unconfirmed cleanup is NOT a cancel success: the run settles
+    // note: ── 5. Unconfirmed cleanup is NOT a cancel success: the run settles
     //       `interrupted`, the schedule row stays non-terminal, and a retry
     //       cancel (with the owned shutdown confirmable again) settles it. ──
     let prompts_before = hosted.host.prompt_count();
@@ -4259,7 +4259,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "the schedule row stays non-terminal while cleanup is unconfirmed"
     );
 
-    // The retry: the same signal confirms the owned teardown and settles.
+    // note: The retry: the same signal confirms the owned teardown and settles.
     hosted.host.confirm_session_shutdown();
     let confirmed = hosted
         .handle
@@ -4276,7 +4276,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "the schedule row settles only on the confirmed cancel"
     );
 
-    // ── 6. A completed winner stays completed: the cancel of a settled run is
+    // note: ── 6. A completed winner stays completed: the cancel of a settled run is
     //       a typed conflict and relabels nothing. ──
     let prompts_before = hosted.host.prompt_count();
     let completed = add_schedule_preset(
@@ -4290,7 +4290,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     wait_for_prompt_count(&hosted.host, prompts_before + 1).await;
     hosted.host.release_parked();
     wait_for_run_status(pool.as_ref(), &completed_run, "completed").await;
-    // The effect that linearized BEFORE the cancel stays committed.
+    // note: The effect that linearized BEFORE the cancel stays committed.
     let committed = hosted.root.join(CANCEL_EFFECT_FILE);
     assert_eq!(
         std::fs::read(&committed).expect("the committed bytes"),
@@ -4308,7 +4308,7 @@ async fn public_cancel_fences_late_workspace_commit() {
                 code, "workflow_state_conflict",
                 "a raced completion is never relabelled cancelled, got {late_cancel:?}"
             );
-            let _ = message; // the durable detail is asserted on the row below
+            let _ = message; // why: the durable detail is asserted on the row below
         }
         other => panic!("a completed winner must refuse the cancel, got {other:?}"),
     }
@@ -4325,7 +4325,7 @@ async fn public_cancel_fences_late_workspace_commit() {
         "completed"
     );
 
-    // Cleanup: release anything parked, then close the hosted owner.
+    // note: Cleanup: release anything parked, then close the hosted owner.
     hosted.host.release_all();
     let report = hosted.handle.close().await.expect("owner close");
     assert!(
@@ -4335,11 +4335,11 @@ async fn public_cancel_fences_late_workspace_commit() {
     hosted.core.close().await.expect("core close");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Paused-row reconciliation on a successful same-run resume (v1.195 P0-T4 C1)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The C1 fixture: an unreachable second branch parks the converge join at
+/// note: The C1 fixture: an unreachable second branch parks the converge join at
 /// 1/2 arrivals with NO deadline, so the run settles durably `paused`
 /// (tokenless, no human wait, no in-flight marker) and no driver survives it —
 /// the one durable shape on which a plain `resume` may legally move the run
@@ -4376,7 +4376,7 @@ states:
     )
 }
 
-/// Add one `driven_v1` pending schedule for `preset_id` that may run
+/// note: Add one `driven_v1` pending schedule for `preset_id` that may run
 /// CONCURRENTLY with the creator's other rows (`parallel_any`), so the race
 /// below is not gated by the serial capacity an earlier live row still holds.
 async fn add_parallel_any_schedule(
@@ -4409,7 +4409,7 @@ async fn add_parallel_any_schedule(
         .schedule_id
 }
 
-/// Wait (bounded) until the run sits in a SIGNALABLE converge-gate park.
+/// note: Wait (bounded) until the run sits in a SIGNALABLE converge-gate park.
 ///
 /// The durable `paused` status alone is not enough: a mid-drive inter-task
 /// boundary pause is also stored as `paused`, and there the NEXT step is
@@ -4458,7 +4458,7 @@ async fn wait_for_signalable_gate_park(pool: &sqlx::SqlitePool, run_id: &str) {
     }
 }
 
-/// C1 regression: a successful same-run resume reconciles the owning schedule
+/// note: C1 regression: a successful same-run resume reconciles the owning schedule
 /// row (S0-4/W6).
 ///
 /// `pause` flips the durable row to `paused` without touching the run it owns,
@@ -4472,7 +4472,7 @@ async fn wait_for_signalable_gate_park(pool: &sqlx::SqlitePool, run_id: &str) {
 /// resume also re-drives that same root (P0-T6), so the case additionally pins
 /// the re-drive: the parked run is stepped again and re-parks, instead of
 /// sitting at `running` with nobody driving it.
-#[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
+#[allow(clippy::too_many_lines)] // why: one linear public journey; splitting hides the ordering evidence
 #[tokio::test]
 #[serial_test::serial]
 async fn public_resume_reconciles_the_paused_schedule_row() {
@@ -4493,7 +4493,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     );
     apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), RESUME_PARK_PRESET).await;
 
-    // ── 1. Stage the C1 state through PUBLIC paths: an admitted schedule that
+    // note: ── 1. Stage the C1 state through PUBLIC paths: an admitted schedule that
     //       owns its parked run, then `pause` — the row reads `paused` while
     //       the run it owns is still live. ──
     let paused_schedule = add_schedule_preset(
@@ -4532,7 +4532,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         "the row is durably paused before the resume"
     );
 
-    // ── 2. Resume the SAME run: the durable row must follow the run it owns —
+    // why: ── 2. Resume the SAME run: the durable row must follow the run it owns —
     //       never the other way round (no fabricated `running`). The resume
     //       also RE-DRIVES that same root (P0-T6): the status mutation alone
     //       would leave the parked run's driver unrestarted, so `running`
@@ -4546,7 +4546,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         resumed.status, "running",
         "the response carries the durable RUN status"
     );
-    // The re-drive is the difference between a status flip and a driven run:
+    // note: The re-drive is the difference between a status flip and a driven run:
     // this gate can never be satisfied, so the honest post-resume outcome is
     // the SAME run parking again — which only a driver that really stepped it
     // can produce (without the re-drive the run would sit at `running` with no
@@ -4576,7 +4576,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         "a resume must never mint a second workflow"
     );
 
-    // ── 3. Both public projections read the reconciled durable row. ──
+    // note: ── 3. Both public projections read the reconciled durable row. ──
     let listed = fixture
         .handle
         .list_schedules(&principal, ListSchedulesQuery::default())
@@ -4606,7 +4606,7 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         Some(run_id.as_str())
     );
 
-    // ── 4. The reconciliation is fenced: a cancel racing the resume wins the
+    // note: ── 4. The reconciliation is fenced: a cancel racing the resume wins the
     //       row, and the terminal winner is never overwritten. ──
     let raced = add_parallel_any_schedule(
         &fixture.handle,
@@ -4644,13 +4644,13 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
             .signal_schedule(&principal, raced.clone(), signal("cancel")),
     );
     match &resumed_race {
-        // The resume won the run first: its response still carries a durable
+        // note: The resume won the run first: its response still carries a durable
         // run status (the cancel may already have moved the run on).
         Ok(r) => assert!(
             matches!(r.status.as_str(), "running" | "cancelled"),
             "a resume response carries a durable run status, got {r:?}"
         ),
-        // The cancel landed first: the resume is a typed conflict, never a
+        // why: The cancel landed first: the resume is a typed conflict, never a
         // fabricated success.
         Err(e) => assert!(
             matches!(e, nexus_core::CoreError::Coded { .. }),
@@ -4686,25 +4686,25 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     fixture.core.close().await.expect("core close");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Close vs. admitted durable commit (v1.195 P0-T5 close findings)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The file the close-vs-commit regressions commit into the selected root.
+/// note: The file the close-vs-commit regressions commit into the selected root.
 ///
 /// Scope-relative: the session is opened on `notes`, so the manifest path is
 /// `drained.txt` and the file lands at `notes/drained.txt` (the same shape the
 /// hosted preset's own `workspace.commit` uses).
 const DRAINED_PATH: &str = "drained.txt";
 
-/// How long a caller's cleanup budget is simulated to last.
+/// note: How long a caller's cleanup budget is simulated to last.
 ///
 /// The native close wrapper wraps `cleanup_owners -> CoreService::close` in a
 /// 5s budget; the regressions below use a shorter one because the property
 /// under test is cancellation safety, not the exact duration.
 const CALLER_CLEANUP_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// The observation window for "this close must NOT have finished yet".
+/// note: The observation window for "this close must NOT have finished yet".
 ///
 /// NOT the race fence — the armed [`test_hooks::OwnerGate`] is: it parks the
 /// retained commit owner at its admission boundary, so a correct close
@@ -4712,7 +4712,7 @@ const CALLER_CLEANUP_BUDGET: std::time::Duration = std::time::Duration::from_mil
 /// INCORRECT close the time to prove it by finishing during the hold.
 const CLOSE_OBSERVATION_WINDOW: std::time::Duration = std::time::Duration::from_millis(750);
 
-/// Whether `task` finished within `window` (checked without consuming it).
+/// note: Whether `task` finished within `window` (checked without consuming it).
 #[cfg(feature = "test-hooks")]
 async fn finished_within<T>(
     task: &tokio::task::JoinHandle<T>,
@@ -4730,7 +4730,7 @@ async fn finished_within<T>(
     .is_ok()
 }
 
-/// Admit ONE durable workspace commit through the PUBLIC handle op, park the
+/// note: Admit ONE durable workspace commit through the PUBLIC handle op, park the
 /// retained owner at its admission boundary with the test gate, and drop the
 /// awaiting client.
 ///
@@ -4771,7 +4771,7 @@ async fn admit_commit_and_drop_the_client(
         let handle = Arc::clone(&fixture.handle);
         tokio::spawn(async move { handle.commit_workspace(&principal, request).await })
     };
-    // Deterministic: the owner holds its durable claim (nothing applied yet).
+    // note: Deterministic: the owner holds its durable claim (nothing applied yet).
     // A refusal instead of the rendezvous is a TEST failure, never a hang.
     tokio::select! {
         () = gate.admitted.notified() => {}
@@ -4780,13 +4780,13 @@ async fn admit_commit_and_drop_the_client(
             refused
         ),
     }
-    // Drop the awaiting client; the retained owner keeps applying.
+    // note: Drop the awaiting client; the retained owner keeps applying.
     committer.abort();
     let _ = committer.await;
     (gate, session_id)
 }
 
-/// The durable revision of the commit `session_id` settled, read through a
+/// note: The durable revision of the commit `session_id` settled, read through a
 /// LATER owner's admitted pool.
 #[cfg(feature = "test-hooks")]
 async fn settled_revision(core: &CoreService, session_id: &str) -> String {
@@ -4802,7 +4802,7 @@ async fn settled_revision(core: &CoreService, session_id: &str) -> String {
         .revision
 }
 
-/// The next owner over the same home must be a NEW admission that reads the
+/// note: The next owner over the same home must be a NEW admission that reads the
 /// revision the drained work settled.
 ///
 /// The shared tail of the close-vs-commit regressions: call it AFTER the close
@@ -4830,7 +4830,7 @@ async fn assert_a_new_admission_reads_the_settled_revision(
     core_b.close().await.expect("close the next core");
 }
 
-/// A confirmed close WAITS for every already-admitted durable workspace commit.
+/// note: A confirmed close WAITS for every already-admitted durable workspace commit.
 ///
 /// `handle.commit_workspace` runs on a RETAINED owner task that outlives its
 /// awaiting caller (client disconnect, shutdown), so the drive drain alone
@@ -4848,7 +4848,7 @@ async fn close_drains_an_admitted_durable_commit_before_releasing_the_authority(
     let epoch_a = fixture.handle.engine_epoch();
     let (gate, session_id) = admit_commit_and_drop_the_client(&fixture).await;
 
-    // Close now. While the admitted commit is still applying, NO confirmed
+    // note: Close now. While the admitted commit is still applying, NO confirmed
     // close, NO released lease and NO replacement owner may appear.
     let closer = {
         let core = fixture.core.clone();
@@ -4867,7 +4867,7 @@ async fn close_drains_an_admitted_durable_commit_before_releasing_the_authority(
         "the workspace authority was released before the admitted commit settled"
     );
 
-    // Release the gate: the commit applies, and only THEN does close confirm.
+    // why: Release the gate: the commit applies, and only THEN does close confirm.
     gate.proceed.notify_one();
     gate.settled.notified().await;
     let report = closer
@@ -4881,19 +4881,19 @@ async fn close_drains_an_admitted_durable_commit_before_releasing_the_authority(
     );
     test_hooks::set_owner_gate(None);
 
-    // The commit the disconnect left behind is durably applied ...
+    // note: The commit the disconnect left behind is durably applied ...
     assert_eq!(
         std::fs::read(fixture.root.join("notes").join(DRAINED_PATH))
             .expect("the committed bytes are durable"),
         HOSTED_PAYLOAD
     );
 
-    // ... and the NEXT owner over the same home is a NEW admission (advanced
+    // note: ... and the NEXT owner over the same home is a NEW admission (advanced
     // engine epoch) that reads that commit's durable revision.
     assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
-/// An INTERRUPTED close neither confirms nor releases anything, and the retry
+/// note: An INTERRUPTED close neither confirms nor releases anything, and the retry
 /// waits for the REAL drain instead of fabricating a confirmation.
 ///
 /// The native cleanup budget cancels `CoreService::close()`'s future. The
@@ -4910,7 +4910,7 @@ async fn an_interrupted_close_is_retried_honestly() {
     let epoch_a = fixture.handle.engine_epoch();
     let (gate, session_id) = admit_commit_and_drop_the_client(&fixture).await;
 
-    // The caller's cleanup budget expires with the commit still applying: the
+    // note: The caller's cleanup budget expires with the commit still applying: the
     // close future is DROPPED, exactly as the native close wrapper drops it.
     let interrupted = tokio::time::timeout(CALLER_CLEANUP_BUDGET, fixture.core.close()).await;
     assert!(
@@ -4918,7 +4918,7 @@ async fn an_interrupted_close_is_retried_honestly() {
         "close must not settle while an admitted durable commit is still applying"
     );
 
-    // Nothing was confirmed and nothing was released.
+    // note: Nothing was confirmed and nothing was released.
     assert!(
         !fixture.handle.is_settled(),
         "an interrupted close must retain the owner it did not settle"
@@ -4928,7 +4928,7 @@ async fn an_interrupted_close_is_retried_honestly() {
         "an interrupted close must retain the workspace authority"
     );
 
-    // The RETRY must not fabricate a confirmation either.
+    // why: The RETRY must not fabricate a confirmation either.
     let retried = tokio::time::timeout(CALLER_CLEANUP_BUDGET, fixture.core.close()).await;
     assert!(
         retried.is_err(),
@@ -4943,7 +4943,7 @@ async fn an_interrupted_close_is_retried_honestly() {
         "a retried close must not release the authority before the commit settled"
     );
 
-    // Release the gate: the retained drain finishes, and the retry confirms
+    // note: Release the gate: the retained drain finishes, and the retry confirms
     // the REAL settlement.
     gate.proceed.notify_one();
     gate.settled.notified().await;
@@ -4960,15 +4960,15 @@ async fn an_interrupted_close_is_retried_honestly() {
         HOSTED_PAYLOAD
     );
 
-    // The home is free again: a fresh owner takes a NEW admission.
+    // note: The home is free again: a fresh owner takes a NEW admission.
     assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Close vs. the manager's OWN recoverable entrances (v1.195 P0-T5)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// One create entry in the manager's own manifest shape.
+/// note: One create entry in the manager's own manifest shape.
 #[cfg(feature = "test-hooks")]
 fn direct_change(path: &str, content_base64: &str) -> WorkspaceChangeEntry {
     WorkspaceChangeEntry {
@@ -4979,7 +4979,7 @@ fn direct_change(path: &str, content_base64: &str) -> WorkspaceChangeEntry {
     }
 }
 
-/// The retained manager of the fixture's hosted owner, as a caller that keeps
+/// note: The retained manager of the fixture's hosted owner, as a caller that keeps
 /// it past the owner's close would hold it.
 #[cfg(feature = "test-hooks")]
 fn retained_manager(fixture: &HostedFixture) -> Arc<WorkspaceSessionManager> {
@@ -4992,7 +4992,7 @@ fn retained_manager(fixture: &HostedFixture) -> Arc<WorkspaceSessionManager> {
     )
 }
 
-/// Every FILE under the selected root, sorted: `(relative path, bytes)`.
+/// note: Every FILE under the selected root, sorted: `(relative path, bytes)`.
 ///
 /// The byte-level half of "nothing was mutated": a refused entrance that still
 /// applied a change would show up here even if the durable rows were ignored.
@@ -5022,7 +5022,7 @@ fn root_files(root: &Path) -> Vec<(String, Vec<u8>)> {
     out
 }
 
-/// The durable workspace-commit state over `pool`: session consumption and
+/// note: The durable workspace-commit state over `pool`: session consumption and
 /// intent rows, as one comparable value.
 #[cfg(feature = "test-hooks")]
 async fn commit_state(pool: &sqlx::SqlitePool) -> Vec<String> {
@@ -5047,7 +5047,7 @@ async fn commit_state(pool: &sqlx::SqlitePool) -> Vec<String> {
     out
 }
 
-/// The manager's OWN durable commit entrance is covered by the owner close.
+/// note: The manager's OWN durable commit entrance is covered by the owner close.
 ///
 /// `ExecutionHandle::workspace_commit_authority()` hands out the shared
 /// `WorkspaceSessionManager`, so a caller that keeps it can start a recoverable
@@ -5074,7 +5074,7 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
     let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.clone()));
     test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
 
-    // The manager's OWN entrance, NOT the handle's `commit_workspace`.
+    // note: The manager's OWN entrance, NOT the handle's `commit_workspace`.
     let mut direct = {
         let manager = Arc::clone(&manager);
         let session = session.clone();
@@ -5096,7 +5096,7 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
         ),
     }
 
-    // Close while the direct commit is parked mid-apply: no settled close, no
+    // note: Close while the direct commit is parked mid-apply: no settled close, no
     // released lease and no replacement authority may appear.
     let closer = {
         let core = fixture.core.clone();
@@ -5115,7 +5115,7 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
         "the workspace authority was released before the direct commit settled"
     );
 
-    // Release the gate: the admitted direct commit reaches its durable
+    // note: Release the gate: the admitted direct commit reaches its durable
     // conclusion, and only THEN does the close confirm.
     gate.proceed.notify_one();
     let outcome = direct
@@ -5142,23 +5142,23 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
         HOSTED_PAYLOAD
     );
 
-    // The next owner over the same home is a NEW admission that reads the
+    // note: The next owner over the same home is a NEW admission that reads the
     // revision the direct commit settled.
     assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
-/// Which direct recoverable entrance a caller-cancellation regression drives.
+/// note: Which direct recoverable entrance a caller-cancellation regression drives.
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Copy)]
 enum DirectEntrance {
-    /// `WorkspaceSessionManager::commit_session_durable`.
+    /// note: `WorkspaceSessionManager::commit_session_durable`.
     Durable,
-    /// The recoverable branch of `WorkspaceSessionManager::commit_session`.
+    /// note: The recoverable branch of `WorkspaceSessionManager::commit_session`.
     Plain,
 }
 
 impl DirectEntrance {
-    /// Run this entrance from a caller task; the result is discarded because
+    /// note: Run this entrance from a caller task; the result is discarded because
     /// these regressions CANCEL the caller before it can observe it.
     async fn call(
         self,
@@ -5183,7 +5183,7 @@ impl DirectEntrance {
     }
 }
 
-/// A CANCELLED caller of the manager's OWN recoverable entrance must not take
+/// note: A CANCELLED caller of the manager's OWN recoverable entrance must not take
 /// its admitted commit out of the owner's close drain.
 ///
 /// The direct entrances are reachable through `WorkspaceCommitAuthority::manager()`
@@ -5212,7 +5212,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
     let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.clone()));
     test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
 
-    // The manager's OWN entrance, NOT the handle's `commit_workspace`.
+    // note: The manager's OWN entrance, NOT the handle's `commit_workspace`.
     let mut direct = {
         let manager = Arc::clone(&manager);
         let session = session.clone();
@@ -5226,7 +5226,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
         ),
     }
 
-    // The barrier is POST-INTENT / PRE-FILE: the claim is held and no byte of
+    // note: The barrier is POST-INTENT / PRE-FILE: the claim is held and no byte of
     // the workspace has changed yet.
     let parked = commit_state(fixture.core.pool()).await;
     assert!(
@@ -5240,7 +5240,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
         "the barrier must be reached before any file is applied"
     );
 
-    // CANCEL the awaiting caller, exactly as a dropped client or a shutdown
+    // note: CANCEL the awaiting caller, exactly as a dropped client or a shutdown
     // that abandons the future does.
     direct.abort();
     assert!(
@@ -5251,7 +5251,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
         "the caller task must have been cancelled at the barrier"
     );
 
-    // Close the OWNER now (the service stays open, so the durable rows can be
+    // why: Close the OWNER now (the service stays open, so the durable rows can be
     // re-read after the confirmation). While the commit the cancelled caller
     // left behind is still applying, NO confirmed close, NO released lease and
     // NO replacement owner may appear.
@@ -5272,7 +5272,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
         "the workspace authority was released before the cancelled caller's commit settled"
     );
 
-    // Release the gate: the retained commit reaches its durable conclusion, and
+    // note: Release the gate: the retained commit reaches its durable conclusion, and
     // only THEN does the close confirm. The bytes are already durable when the
     // close reports, so nothing can land after it.
     gate.proceed.notify_one();
@@ -5299,7 +5299,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
     );
     test_hooks::set_owner_gate(None);
 
-    // NO LATE WRITE after the confirmed close: the workspace bytes and the
+    // note: NO LATE WRITE after the confirmed close: the workspace bytes and the
     // durable rows the drained commit produced are unchanged across the close.
     assert_eq!(
         root_files(&fixture.root),
@@ -5312,14 +5312,14 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
         "a durable write landed after the confirmed close"
     );
 
-    // The service close seals the same boundary the owner close settled, then
+    // note: The service close seals the same boundary the owner close settled, then
     // the next owner over the same home is a NEW admission that reads the
     // revision the drained commit settled.
     fixture.core.close().await.expect("the core close");
     assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
-/// `commit_session_durable` through the manager: a cancelled caller keeps the
+/// note: `commit_session_durable` through the manager: a cancelled caller keeps the
 /// commit inside the owner's drain (see the scenario above).
 #[cfg(feature = "test-hooks")]
 #[tokio::test]
@@ -5328,7 +5328,7 @@ async fn a_cancelled_direct_durable_caller_is_drained_before_the_close_releases(
     cancelled_direct_caller_is_drained_by_the_close(DirectEntrance::Durable).await;
 }
 
-/// `commit_session`'s recoverable branch through the manager: a cancelled
+/// note: `commit_session`'s recoverable branch through the manager: a cancelled
 /// caller keeps the commit inside the owner's drain (see the scenario above).
 #[cfg(feature = "test-hooks")]
 #[tokio::test]
@@ -5337,19 +5337,19 @@ async fn a_cancelled_direct_plain_caller_is_drained_before_the_close_releases() 
     cancelled_direct_caller_is_drained_by_the_close(DirectEntrance::Plain).await;
 }
 
-/// Which retained recovery entrance a caller-cancellation regression drives.
+/// note: Which retained recovery entrance a caller-cancellation regression drives.
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Copy)]
 enum RecoveryEntrance {
-    /// `WorkspaceSessionManager::startup_recovery` (whole DB).
+    /// note: `WorkspaceSessionManager::startup_recovery` (whole DB).
     All,
-    /// `WorkspaceSessionManager::startup_recovery_for_root` (the production
+    /// note: `WorkspaceSessionManager::startup_recovery_for_root` (the production
     /// bundle's entry).
     Root,
 }
 
 impl RecoveryEntrance {
-    /// Run this entrance from a caller task; the result is discarded because
+    /// note: Run this entrance from a caller task; the result is discarded because
     /// these regressions CANCEL the caller before it can observe it.
     async fn call(self, manager: &Arc<WorkspaceSessionManager>, root: &str) -> Result<(), String> {
         match self {
@@ -5365,7 +5365,7 @@ impl RecoveryEntrance {
     }
 }
 
-/// Leave ONE crash-consistent unsettled intent behind, the way a process death
+/// note: Leave ONE crash-consistent unsettled intent behind, the way a process death
 /// mid-apply does: claim held, workspace bytes applied, no committed transition.
 ///
 /// Driven through the manager's own durable entrance, whose RETAINED owner
@@ -5397,7 +5397,7 @@ async fn leave_unsettled_after_apply(manager: &Arc<WorkspaceSessionManager>, roo
     gate.admitted.notified().await;
     test_hooks::set_crash_point(Some("after_file_apply"));
     gate.proceed.notify_one();
-    // Await the caller's own result, not a settle signal: the crash ends the
+    // note: Await the caller's own result, not a settle signal: the crash ends the
     // commit either way, and the interrupted state is fully durable by then.
     let crashed = caller.await.expect("the retained commit owner joins");
     test_hooks::set_owner_gate(None);
@@ -5409,7 +5409,7 @@ async fn leave_unsettled_after_apply(manager: &Arc<WorkspaceSessionManager>, roo
     session_id
 }
 
-/// A CANCELLED caller of a recoverable RECOVERY entrance must not take its
+/// note: A CANCELLED caller of a recoverable RECOVERY entrance must not take its
 /// admitted pass out of the owner's close drain.
 ///
 /// A recovery pass applies or rolls back workspace bytes exactly like a commit,
@@ -5429,7 +5429,7 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
     let root = fixture.root.to_string_lossy().into_owned();
     let session_id = leave_unsettled_after_apply(&manager, &root).await;
 
-    // The crash-consistent state the pass is about to settle.
+    // note: The crash-consistent state the pass is about to settle.
     let unsettled = commit_state(fixture.core.pool()).await;
     assert!(
         unsettled
@@ -5458,7 +5458,7 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
         ),
     }
 
-    // CANCEL the awaiting caller, exactly as a dropped client or a shutdown
+    // note: CANCEL the awaiting caller, exactly as a dropped client or a shutdown
     // that abandons the future does.
     recovery.abort();
     assert!(
@@ -5469,7 +5469,7 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
         "the caller task must have been cancelled at the settlement boundary"
     );
 
-    // Close the OWNER now (the service stays open, so the durable rows can be
+    // why: Close the OWNER now (the service stays open, so the durable rows can be
     // re-read after the confirmation). While the pass the cancelled caller left
     // behind is still running, NO confirmed close, NO released lease and NO
     // replacement owner may appear.
@@ -5490,7 +5490,7 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
         "the workspace authority was released before the cancelled caller's recovery pass settled"
     );
 
-    // Release the gate: the retained pass settles the intent, and only THEN
+    // why: Release the gate: the retained pass settles the intent, and only THEN
     // does the close confirm.
     gate.proceed.notify_one();
     gate.settled.notified().await;
@@ -5517,7 +5517,7 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
     );
     test_hooks::set_recovery_gate(None);
 
-    // NO LATE WRITE after the confirmed close: the workspace bytes and the
+    // note: NO LATE WRITE after the confirmed close: the workspace bytes and the
     // durable rows the drained pass produced are unchanged across the close.
     assert_eq!(
         root_files(&fixture.root),
@@ -5530,14 +5530,14 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
         "a durable write landed after the confirmed close"
     );
 
-    // The service close seals the same boundary the owner close settled, then
+    // note: The service close seals the same boundary the owner close settled, then
     // the next owner over the same home is a NEW admission that reads the
     // revision the recovered commit settled.
     fixture.core.close().await.expect("the core close");
     assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
-/// Whole-DB `startup_recovery` through the manager: a cancelled caller keeps
+/// note: Whole-DB `startup_recovery` through the manager: a cancelled caller keeps
 /// the pass inside the owner's drain (see the scenario above).
 #[cfg(feature = "test-hooks")]
 #[tokio::test]
@@ -5546,7 +5546,7 @@ async fn a_cancelled_recovery_caller_is_drained_before_the_close_releases() {
     cancelled_recovery_caller_is_drained_by_the_close(RecoveryEntrance::All).await;
 }
 
-/// Root-scoped `startup_recovery_for_root` (the production bundle's entry): a
+/// note: Root-scoped `startup_recovery_for_root` (the production bundle's entry): a
 /// cancelled caller keeps the pass inside the owner's drain (see above).
 #[cfg(feature = "test-hooks")]
 #[tokio::test]
@@ -5555,7 +5555,7 @@ async fn a_cancelled_root_scoped_recovery_caller_is_drained_before_the_close_rel
     cancelled_recovery_caller_is_drained_by_the_close(RecoveryEntrance::Root).await;
 }
 
-/// After a CONFIRMED close, EVERY direct recoverable entrance on the retained
+/// note: After a CONFIRMED close, EVERY direct recoverable entrance on the retained
 /// manager fails closed with a typed refusal and mutates nothing.
 ///
 /// The handle route (`commit_workspace`) is only one way in; `commit_session`,
@@ -5575,7 +5575,7 @@ async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
     let manager = retained_manager(&fixture);
     let root = fixture.root.to_string_lossy().into_owned();
 
-    // CONTROL: the same entrances work while the owner is live, so a refusal
+    // why: CONTROL: the same entrances work while the owner is live, so a refusal
     // below is the close boundary and not a broken call.
     let live = manager
         .open_session(&root, "notes", true)
@@ -5594,7 +5594,7 @@ async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
         "the live control commit is durable before the close"
     );
 
-    // Sessions prepared for the post-close attempts, plus the durable state the
+    // note: Sessions prepared for the post-close attempts, plus the durable state the
     // refusals must leave byte-identical (real rows: the control commit's
     // session and its settled intent are in it).
     let durable_session = manager
@@ -5608,7 +5608,7 @@ async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
     let before_files = root_files(&fixture.root);
     let before_state = commit_state(fixture.core.pool()).await;
 
-    // The OWNER close: confirmed, drain complete, and the workspace authority
+    // note: The OWNER close: confirmed, drain complete, and the workspace authority
     // released — while the service keeps its pool open.
     let report = fixture.handle.close().await.expect("the owner close");
     assert!(
@@ -5633,7 +5633,7 @@ async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
         "a refused direct entrance consumed a session or claimed an intent"
     );
 
-    // The SERVICE close seals the same boundary once more, this time over a
+    // note: The SERVICE close seals the same boundary once more, this time over a
     // closed pool: the refusal stays the typed one instead of borrowing the
     // pool's own failure.
     let core_report = fixture.core.close().await.expect("the core close");
@@ -5649,11 +5649,11 @@ async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Authorized bounded workflow event subscription (v1.195 P1-T1)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Root runs the subscription cases use. The authorization source is the
+/// note: Root runs the subscription cases use. The authorization source is the
 /// durable `orchestration_sessions` row, so each case stages exactly the
 /// ownership it asserts on.
 const SUBSCRIBE_RUN: &str = "run-subscribed";
@@ -5663,7 +5663,7 @@ const UNKNOWN_RUN: &str = "run-absent";
 const SLOW_RUN: &str = "run-slow-consumer";
 const BLOCK_RUN: &str = "run-blocked-pull";
 
-/// Stage one durable `orchestration_sessions` row (the subscription's
+/// note: Stage one durable `orchestration_sessions` row (the subscription's
 /// authorization source). A `parent_session_id` makes it a CHILD row.
 async fn stage_run_row(
     pool: &sqlx::SqlitePool,
@@ -5685,7 +5685,7 @@ async fn stage_run_row(
     .expect("stage a durable workflow run row");
 }
 
-/// One durable run record, with a `state_revision` that identifies the frame it
+/// note: One durable run record, with a `state_revision` that identifies the frame it
 /// becomes on the wire.
 fn run_record(run_id: &str, state_revision: u64) -> RunRecord {
     RunRecord {
@@ -5699,7 +5699,7 @@ fn run_record(run_id: &str, state_revision: u64) -> RunRecord {
     }
 }
 
-/// Publish one `run_state` frame through the owner's own run-event port (the
+/// note: Publish one `run_state` frame through the owner's own run-event port (the
 /// same call the coordinator makes at every durable revision).
 fn publish_run_state(port: &Arc<dyn RunEventPort>, run_id: &str, state_revision: u64) {
     port.publish_run_state(run_id, &run_record(run_id, state_revision));
@@ -5714,12 +5714,12 @@ fn subscribe_request(run_id: &str, last_event_id: Option<&str>) -> CoreWorkflowS
     }
 }
 
-/// The opaque token as the transport would pass it back.
+/// note: The opaque token as the transport would pass it back.
 fn subscription_token(subscription: &CoreWorkflowSubscription) -> String {
     subscription.subscription_id.as_str().to_string()
 }
 
-/// The numeric sequence a frame id carries (`<epoch>:<sequence>`).
+/// note: The numeric sequence a frame id carries (`<epoch>:<sequence>`).
 fn frame_sequence(id: &str) -> u64 {
     id.rsplit_once(':')
         .expect("frame id carries an epoch and a sequence")
@@ -5728,7 +5728,7 @@ fn frame_sequence(id: &str) -> u64 {
         .expect("numeric sequence")
 }
 
-/// The epoch a frame id carries.
+/// note: The epoch a frame id carries.
 fn frame_epoch(id: &str) -> String {
     id.rsplit_once(':')
         .expect("frame id carries an epoch and a sequence")
@@ -5740,7 +5740,7 @@ fn frame_json(item: &CoreWorkflowEventBatchEventsItem) -> Value {
     serde_json::from_str(&item.data).expect("frame payload is JSON")
 }
 
-/// The `state_revision` a published `run_state` frame carries.
+/// note: The `state_revision` a published `run_state` frame carries.
 fn frame_revision(item: &CoreWorkflowEventBatchEventsItem) -> u64 {
     frame_json(item)["state_revision"]
         .as_u64()
@@ -5757,7 +5757,7 @@ fn frame_revision(item: &CoreWorkflowEventBatchEventsItem) -> u64 {
 /// instead of an error, a retention-trimmed tail and a lagging subscriber both
 /// surface as EXPLICIT gaps, and a released or closed owner wakes a blocked
 /// pull with `closed` and withdraws every token.
-#[allow(clippy::too_many_lines)] // one linear contract; splitting hides the ordering evidence
+#[allow(clippy::too_many_lines)] // why: one linear contract; splitting hides the ordering evidence
 #[tokio::test]
 #[serial_test::serial]
 async fn authorized_subscription_preserves_epoch_and_gap() {
@@ -5774,7 +5774,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         .run_event_port()
         .expect("the hosted factory attaches the run-event registry");
 
-    // ── 1. Staged durable ownership + the live rings the refusals must not
+    // why: ── 1. Staged durable ownership + the live rings the refusals must not
     //       reach. ──
     stage_run_row(pool.as_ref(), SUBSCRIBE_RUN, CREATOR, None).await;
     stage_run_row(pool.as_ref(), FOREIGN_RUN, "other_creator", None).await;
@@ -5787,7 +5787,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         publish_run_state(&port, run_id, 1);
     }
 
-    // ── 2. Unknown, foreign and child runs close BEFORE any ring lookup. ──
+    // note: ── 2. Unknown, foreign and child runs close BEFORE any ring lookup. ──
     for run_id in [UNKNOWN_RUN, FOREIGN_RUN, CHILD_RUN] {
         let refusal = handle
             .subscribe_workflow_events(&principal, subscribe_request(run_id, None))
@@ -5803,7 +5803,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         }
     }
 
-    // The numeric page method is gated by the SAME rule — the legacy read is
+    // note: The numeric page method is gated by the SAME rule — the legacy read is
     // not a bypass around the subscription's authorization.
     let page_request = nexus_contracts::CoreRunEventsRequest {
         after_sequence: None,
@@ -5820,7 +5820,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "the bounded page read must refuse a foreign run before its ring: {page_refusal:?}"
     );
 
-    // ── 3. Authorized subscription: retained replay, then the live tail, with
+    // note: ── 3. Authorized subscription: retained replay, then the live tail, with
     //       an exclusive cursor and no duplicate handoff. ──
     for revision in 2..=3 {
         publish_run_state(&port, SUBSCRIBE_RUN, revision);
@@ -5913,7 +5913,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "a released token refuses"
     );
 
-    // ── 4. Cursor validation is typed; an unresumable history is a control
+    // note: ── 4. Cursor validation is typed; an unresumable history is a control
     //       frame, not an error. ──
     let malformed = handle
         .subscribe_workflow_events(
@@ -5939,7 +5939,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "a future cursor must be a typed invalid-input refusal: {future:?}"
     );
 
-    // A different epoch is a PREVIOUS core generation: the run is still owned
+    // note: A different epoch is a PREVIOUS core generation: the run is still owned
     // and retained, but its history cannot be resumed.
     let stale_cursor = format!("{}:3", uuid::Uuid::nil());
     let stale = handle
@@ -5984,7 +5984,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "a closed stream's token is withdrawn"
     );
 
-    // ── 5. Retention trimming is an EXPLICIT gap over the dropped range, never
+    // why: ── 5. Retention trimming is an EXPLICIT gap over the dropped range, never
     //       fabricated content. ──
     let published = MAX_RECORDS_PER_RUN as u64 + 50;
     for revision in 100..(100 + published) {
@@ -6046,7 +6046,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         .release_workflow_events(&principal, &trimmed_id)
         .expect("release");
 
-    // ── 6. A lagging subscriber is EVICTED with an explicit terminal gap on
+    // note: ── 6. A lagging subscriber is EVICTED with an explicit terminal gap on
     //       its own run, where every sequence is known. ──
     stage_run_row(pool.as_ref(), SLOW_RUN, CREATOR, None).await;
     assert!(port.try_register_live(SLOW_RUN).await, "slow-run ring");
@@ -6075,7 +6075,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         .await
         .expect("slow subscription");
     let slow_id = subscription_token(&slow);
-    // 20 frames, none pulled: the 17th exceeds the subscriber's data-frame cap
+    // note: 20 frames, none pulled: the 17th exceeds the subscriber's data-frame cap
     // (16) and evicts it into the reserved control slot.
     for revision in 2..=21 {
         publish_run_state(&port, SLOW_RUN, revision);
@@ -6126,7 +6126,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "the lagging subscription's token is withdrawn after its gap"
     );
 
-    // ── 7. The per-run subscriber cap refuses typed, and a release frees the
+    // note: ── 7. The per-run subscriber cap refuses typed, and a release frees the
     //       permit again (the ring's own accounting, never a fabricated token).
     stage_run_row(pool.as_ref(), BLOCK_RUN, CREATOR, None).await;
     assert!(port.try_register_live(BLOCK_RUN).await, "blocking ring");
@@ -6161,7 +6161,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
             .expect("release");
     }
 
-    // ── 8. Release WAKES a pull blocked on a silent ring. ──
+    // note: ── 8. Release WAKES a pull blocked on a silent ring. ──
     let blocked = handle
         .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
         .await
@@ -6178,7 +6178,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         !puller.is_finished(),
         "an empty live ring must BLOCK the pull, not answer an empty batch"
     );
-    // Exactly ONE pull may be outstanding per subscription.
+    // note: Exactly ONE pull may be outstanding per subscription.
     let concurrent = handle
         .next_workflow_events(&principal, blocked_id.clone())
         .await
@@ -6211,7 +6211,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "the released token refuses"
     );
 
-    // ── 9. Owner close wakes a blocked pull and withdraws every token. ──
+    // note: ── 9. Owner close wakes a blocked pull and withdraws every token. ──
     let closing = handle
         .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
         .await
@@ -6258,7 +6258,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     fixture.core.close().await.expect("core close");
 }
 
-/// Holds a subscribe exactly between its durable-owner check and its ring
+/// note: Holds a subscribe exactly between its durable-owner check and its ring
 /// attachment, so an owner close can be forced into that window deterministically.
 #[derive(Default)]
 struct SubscribeRaceGate {
@@ -6276,7 +6276,7 @@ impl nexus_core::owner::ExecutionSubscriptionObserver for SubscribeRaceGate {
     }
 }
 
-/// A subscribe that INTERSECTS an owner close must neither publish a token nor
+/// note: A subscribe that INTERSECTS an owner close must neither publish a token nor
 /// keep the ring subscriber permit it had already attached (P1-T1 race).
 ///
 /// The seam is the exact window the defect needs: the run's durable ROOT
@@ -6306,7 +6306,7 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
     .await
     .expect("engine-owner core open");
 
-    // The REAL production port over a REAL registry, so the permit this case
+    // why: The REAL production port over a REAL registry, so the permit this case
     // counts is the one a subscription actually takes.
     let registry = Arc::new(RunEventRegistry::new());
     let sinks: nexus_execution::run_events::RunEventSinkMap =
@@ -6343,7 +6343,7 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
         "the race needs a live ring to attach to"
     );
 
-    // ── The subscribe stops inside the window: ownership resolved, ring not
+    // note: ── The subscribe stops inside the window: ownership resolved, ring not
     //    yet attached. ──
     let racer = tokio::spawn({
         let handle = Arc::clone(&handle);
@@ -6369,7 +6369,7 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
         "the ring is not attached yet at the seam"
     );
 
-    // ── The owner closes COMPLETELY while the subscribe sits in the window. ──
+    // note: ── The owner closes COMPLETELY while the subscribe sits in the window. ──
     let report = handle.close().await.expect("owner close");
     assert!(report.cleanup_confirmed, "close must be confirmed");
     gate.release.store(true, Ordering::SeqCst);
@@ -6399,7 +6399,7 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
     core.close().await.expect("core close");
 }
 
-/// Every direct recoverable entrance on a CLOSED manager refuses, typed.
+/// note: Every direct recoverable entrance on a CLOSED manager refuses, typed.
 #[cfg(feature = "test-hooks")]
 async fn assert_direct_entrances_refused(
     manager: &Arc<WorkspaceSessionManager>,
@@ -6441,12 +6441,12 @@ async fn assert_direct_entrances_refused(
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Hosted factory restart: recovery truth + the §4 `workspace_commit`
 // projection (v1.195 P1-T2)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A declared `workspace.commit` that CANNOT be applied: `workspace.open`
+/// note: A declared `workspace.commit` that CANNOT be applied: `workspace.open`
 /// succeeds, the commit names a session that does not exist, so the capability
 /// records `_capability_error` and never writes an output — the durable
 /// "failed" shape the detail projection must never turn into a revision.
@@ -6494,7 +6494,7 @@ states:
     )
 }
 
-/// The SUCCESS→FAILURE sequence on ONE capability name: `workspace.open`, a
+/// note: The SUCCESS→FAILURE sequence on ONE capability name: `workspace.open`, a
 /// first `workspace.commit` that applies, then a SECOND `workspace.commit`
 /// that cannot apply. The second invocation fails while `_capability_name`
 /// still reads `workspace.commit`, so a projection that does not require the
@@ -6557,7 +6557,7 @@ states:
     )
 }
 
-/// The durable `workspace.commit` checkpoint of one run, read straight out of
+/// note: The durable `workspace.commit` checkpoint of one run, read straight out of
 /// the persisted graph context: `(output revision, capability error)`.
 ///
 /// This is the fixture's own oracle for "the capability really completed /
@@ -6579,7 +6579,7 @@ async fn durable_commit_checkpoint(
     .expect("the run's durable graph context is readable")
 }
 
-/// The revisions the durable commit intents settled — the commit authority's
+/// note: The revisions the durable commit intents settled — the commit authority's
 /// own record, never the graph context the projection reads.
 async fn committed_intent_revisions(pool: &sqlx::SqlitePool) -> Vec<String> {
     sqlx::query_scalar(
@@ -6590,7 +6590,7 @@ async fn committed_intent_revisions(pool: &sqlx::SqlitePool) -> Vec<String> {
     .expect("the durable commit intents are readable")
 }
 
-/// Stage one durable root run row with an explicit graph-context blob: the
+/// note: Stage one durable root run row with an explicit graph-context blob: the
 /// detail projection's authorization source AND its durable checkpoint, so a
 /// caller can discriminate the shapes the real owner cannot produce on demand.
 async fn stage_context_run_row(
@@ -6613,7 +6613,7 @@ async fn stage_context_run_row(
     .expect("stage a durable run row with an explicit graph context");
 }
 
-/// Wait (bounded) until a run reaches a terminal durable status and return it.
+/// note: Wait (bounded) until a run reaches a terminal durable status and return it.
 ///
 /// A run whose declared capability failed still finishes its graph (the failure
 /// is a step status, not a drive abort), so the terminal status is read rather
@@ -6637,7 +6637,7 @@ async fn wait_for_terminal_run(pool: &sqlx::SqlitePool, run_id: &str) -> String 
     }
 }
 
-/// Wait (bounded) until the run's durable cancel intent is written — the fence
+/// note: Wait (bounded) until the run's durable cancel intent is written — the fence
 /// that makes the cancel the durable control winner before the parked prompt
 /// unwinds.
 async fn wait_for_cancel_intent(pool: &sqlx::SqlitePool, run_id: &str) {
@@ -6659,7 +6659,7 @@ async fn wait_for_cancel_intent(pool: &sqlx::SqlitePool, run_id: &str) {
     }
 }
 
-/// Actual-factory restart truth (S1-3 + the durable half of S1-4).
+/// note: Actual-factory restart truth (S1-3 + the durable half of S1-4).
 ///
 /// ONE real `start_hosted_execution` owner drives four schedules to four
 /// different durable outcomes, is closed, and a SECOND factory owner is opened
@@ -6673,7 +6673,7 @@ async fn wait_for_cancel_intent(pool: &sqlx::SqlitePool, run_id: &str) {
 /// refusal (cancel-only, no fresh schedule), and the run's ring — gone with the
 /// old process — is reported as ONE explicit `history_unavailable` control
 /// frame while the W4 detail stays readable.
-#[allow(clippy::too_many_lines)] // one linear restart journey; splitting hides the ordering evidence
+#[allow(clippy::too_many_lines)] // why: one linear restart journey; splitting hides the ordering evidence
 #[tokio::test]
 #[serial_test::serial]
 async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
@@ -6711,7 +6711,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     .await;
     apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), CANCEL_WAIT_PRESET).await;
 
-    // ── 1. The COMPLETED run: its one declared commit is applied inside the
+    // note: ── 1. The COMPLETED run: its one declared commit is applied inside the
     //       factory-resolved root, then the prompt releases and the run
     //       settles terminal with the commit as its LAST capability output. ──
     let completed_schedule = add_parallel_any_schedule(
@@ -6739,7 +6739,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     let committed_revision = settled[0].clone();
     let completed_before = durable_record(pool.as_ref(), &completed_run).await;
 
-    // ── 2. The CANCELLED run: the cancel lands while the prompt is in flight,
+    // note: ── 2. The CANCELLED run: the cancel lands while the prompt is in flight,
     //       so the authorized commit AFTER it never runs. ──
     let cancelled_schedule = add_parallel_any_schedule(
         &fixture.handle,
@@ -6781,7 +6781,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "the schedule row projects the confirmed cancel"
     );
 
-    // ── 3. The UNCERTAIN stop: the owned teardown cannot be confirmed, so the
+    // why: ── 3. The UNCERTAIN stop: the owned teardown cannot be confirmed, so the
     //       run settles `interrupted` and the row stays non-terminal. ──
     let interrupted_schedule = add_parallel_any_schedule(
         &fixture.handle,
@@ -6839,7 +6839,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "an uncertain stop must stay actionable through its durable failure record"
     );
 
-    // ── 4. The HUMAN WAIT whose frozen source is removed before the restart. ──
+    // note: ── 4. The HUMAN WAIT whose frozen source is removed before the restart. ──
     let wait_schedule = add_parallel_any_schedule(
         &fixture.handle,
         &principal,
@@ -6852,7 +6852,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     fixture.host.release_parked();
     let wait_id = wait_for_human_wait(pool.as_ref(), &wait_run).await;
 
-    // ── The process boundary. A frozen source that no longer verifies is
+    // note: ── The process boundary. A frozen source that no longer verifies is
     //    reconstruction unavailability for the waited run, never a fresh
     //    schedule: the run executes its applied document, so the approval row
     //    that document came from is what recovery re-verifies — and it no
@@ -6874,7 +6874,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     );
     fixture.core.close().await.expect("core close");
 
-    // ── A SECOND factory owner over the same home: a NEW admission. ──
+    // note: ── A SECOND factory owner over the same home: a NEW admission. ──
     let (core_b, host_b, handle_b) = open_hosted_owner(&home).await;
     assert!(
         handle_b.engine_epoch() > epoch_a,
@@ -6884,7 +6884,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     let principal_b = core_b.active_principal().await.unwrap();
     let pool_b = handle_b.coordinator().pool();
 
-    // (a) The completed effect stays committed EXACTLY ONCE: same bytes, same
+    // note: (a) The completed effect stays committed EXACTLY ONCE: same bytes, same
     //     settled revision, and NO re-drive (a re-stepped run would move its
     //     durable revision).
     let completed_after = durable_record(pool_b.as_ref(), &completed_run).await;
@@ -6930,7 +6930,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "the completed schedule keeps the same single run"
     );
 
-    // (b) The confirmed cancel stays cancelled.
+    // note: (b) The confirmed cancel stays cancelled.
     let cancelled_after = durable_record(pool_b.as_ref(), &cancelled_run).await;
     assert_eq!(
         cancelled_after.status.as_db_str(),
@@ -6952,7 +6952,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "the cancelled row keeps its own run across the restart"
     );
 
-    // (c) The uncertain stop stays `interrupted` — never normalized to
+    // why: (c) The uncertain stop stays `interrupted` — never normalized to
     //     `cancelled` — and is not redispatched.
     let interrupted_after = durable_record(pool_b.as_ref(), &interrupted_run).await;
     assert_eq!(
@@ -6982,7 +6982,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "the retryable row stays non-terminal until a confirmed cleanup"
     );
 
-    // (d) The human wait survives its missing frozen source, and an authorized
+    // note: (d) The human wait survives its missing frozen source, and an authorized
     //     continuation is a TYPED refusal — never a fresh schedule. (`resume`
     //     is the core continuation seam for an owned run: `continue` itself is
     //     served by the transport, and the reconstruction gate is evaluated
@@ -7055,7 +7055,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "the waited row keeps its owned run; no fresh schedule is minted"
     );
 
-    // (e) The ring is gone with the old process, and that loss is EXPLICIT —
+    // note: (e) The ring is gone with the old process, and that loss is EXPLICIT —
     //     one control frame naming the run's inspect route — while W4 keeps
     //     answering for the same run.
     let subscription = handle_b
@@ -7096,7 +7096,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         "the durable detail outlives the in-memory ring"
     );
 
-    // The whole restart performed no work of its own.
+    // note: The whole restart performed no work of its own.
     assert_eq!(
         host_b.prompt_count(),
         0,
@@ -7116,7 +7116,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     core_b.close().await.expect("core close");
 }
 
-/// The §4 `workspace_commit` projection: a narrowly scoped read of ONE durable
+/// note: The §4 `workspace_commit` projection: a narrowly scoped read of ONE durable
 /// checkpoint, exposed once and unchanged across a restart.
 ///
 /// Discriminations: a completed `workspace.commit` is exposed (with the exact
@@ -7126,7 +7126,7 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
 /// checkpoint under another Creator is not readable at all, and the malformed
 /// matrix (wrong type, empty revision, `committed` not true, missing member,
 /// extra member, another capability's pair, corrupt blob) exposes nothing.
-#[allow(clippy::too_many_lines)] // one contract; splitting hides the shape matrix
+#[allow(clippy::too_many_lines)] // why: one contract; splitting hides the shape matrix
 #[tokio::test]
 #[serial_test::serial]
 async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart() {
@@ -7158,7 +7158,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         apply_bundle_candidate(&fixture.core, &principal, pool.as_ref(), preset_id).await;
     }
 
-    // ── A committed run exposes its own settled revision — while it is still
+    // note: ── A committed run exposes its own settled revision — while it is still
     //    parked (non-terminal) at its manual wait. ──
     let committed_schedule = add_parallel_any_schedule(
         &fixture.handle,
@@ -7202,7 +7202,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "the committed run exposes its own durable revision"
     );
 
-    // ── A run with NO commit checkpoint exposes nothing. ──
+    // note: ── A run with NO commit checkpoint exposes nothing. ──
     let wait_schedule = add_parallel_any_schedule(
         &fixture.handle,
         &principal,
@@ -7225,7 +7225,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "a run that never committed exposes no revision"
     );
 
-    // ── A run whose declared commit FAILED: durable failure evidence, no
+    // note: ── A run whose declared commit FAILED: durable failure evidence, no
     //    output, no effect — and nothing projected. ──
     let failed_schedule = add_parallel_any_schedule(
         &fixture.handle,
@@ -7264,7 +7264,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "a failed commit must never yield a revision"
     );
 
-    // ── The SUCCESS→FAILURE sequence on the same capability name: the first
+    // note: ── The SUCCESS→FAILURE sequence on the same capability name: the first
     //    commit applies, the SECOND one fails. The failed invocation owns no
     //    output, so the detail must project NOTHING — the previous attempt's
     //    revision must never be presented as the latest checkpoint. ──
@@ -7337,7 +7337,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "the failed invocation must leave NO output of its own: {double_output:?}"
     );
 
-    // ── The restart: the same revision, once. ──
+    // note: ── The restart: the same revision, once. ──
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
     assert!(
@@ -7404,7 +7404,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "the failed invocation's durable pair survives the restart unchanged"
     );
 
-    // ── The shape matrix on the live owner. A staged context is the
+    // note: ── The shape matrix on the live owner. A staged context is the
     //    authorization source AND the checkpoint, so ownership and shape are
     //    discriminated independently of the real owner's own runs. ──
     let committed_context = r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"rev_staged","committed":true}}}"#;
@@ -7470,7 +7470,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         );
     }
 
-    // The control: the IDENTICAL context under the admitted Creator IS
+    // note: The control: the IDENTICAL context under the admitted Creator IS
     // projected, so the negatives above are about the checkpoint shape and the
     // stored owner — never a vacuous always-absent field.
     let control = handle_b
@@ -7484,7 +7484,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         Some(("rev_staged".to_string(), true)),
         "an exact successful output under the admitted Creator is projected"
     );
-    // The same checkpoint under another Creator is not readable at all: the
+    // note: The same checkpoint under another Creator is not readable at all: the
     // root row and its stored owner are authorized BEFORE the context is read.
     match handle_b
         .get_workflow_session(&principal_b, "proj-foreign".to_string())
@@ -7515,7 +7515,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
 // refusal, pinned at both coordinator and trait entries.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The user preset T5 applies over. Capability-only: a user document has no
+/// note: The user preset T5 applies over. Capability-only: a user document has no
 /// bundle root, so an applied document that names an instruction template is
 /// refused at load (`ir_unresolved_template`), never resolved from an embedded
 /// bundle whose id it may collide with. The applied path is proven here with a
@@ -7523,7 +7523,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
 /// scope.
 const APPLIED_PRESET: &str = "intake-applied";
 
-/// The marker each side commits, and its bytes (base64 is the commit wire
+/// note: The marker each side commits, and its bytes (base64 is the commit wire
 /// encoding).
 const PRESET_MARKER: &str = "preset-side.txt";
 const PRESET_MARKER_B64: &str = "cHJlc2V0LXNpZGUK";
@@ -7531,7 +7531,7 @@ const APPLIED_MARKER: &str = "applied-side.txt";
 const APPLIED_MARKER_B64: &str = "YXBwbGllZC1zaWRlCg==";
 const APPLIED_BYTES: &[u8] = b"applied-side\n";
 
-/// A user preset bundle's YAML: open the fixture's `notes` scope and commit one
+/// note: A user preset bundle's YAML: open the fixture's `notes` scope and commit one
 /// marker file.
 fn intake_preset_yaml(preset_id: &str, marker: &str, marker_b64: &str) -> String {
     format!(
@@ -7573,7 +7573,7 @@ states:
     )
 }
 
-/// The approved snapshot these tests freeze: the preset's own import candidate
+/// note: The approved snapshot these tests freeze: the preset's own import candidate
 /// with its single commit redirected to the applied marker, so which graph ran
 /// is visible on disk instead of only inside the branch.
 fn applied_side_document(
@@ -7599,7 +7599,7 @@ fn applied_side_document(
     document
 }
 
-/// Freeze one approval row exactly as the approve path writes it (the same
+/// note: Freeze one approval row exactly as the approve path writes it (the same
 /// shape `apply_write.rs` seeds), keyed by the document's recomputed hash.
 async fn seed_intake_approval(
     core: &CoreService,
@@ -7627,7 +7627,7 @@ async fn seed_intake_approval(
     hash
 }
 
-/// A `driven_v1` pending schedule for `preset_id` through the PUBLIC add path.
+/// note: A `driven_v1` pending schedule for `preset_id` through the PUBLIC add path.
 async fn add_intake_schedule(
     fixture: &HostedFixture,
     preset_id: &str,
@@ -7655,14 +7655,14 @@ async fn add_intake_schedule(
         .schedule_id
 }
 
-/// The marker file a run committed inside the fixture's `notes` scope.
+/// note: The marker file a run committed inside the fixture's `notes` scope.
 fn read_marker(root: &Path, marker: &str) -> Option<Vec<u8>> {
     let path = root.join("notes").join(marker);
     path.exists()
         .then(|| std::fs::read(path).expect("marker bytes"))
 }
 
-/// T5: an existing schedule runs from its strategy's applied identity.
+/// note: T5: an existing schedule runs from its strategy's applied identity.
 ///
 /// The preset commits `preset-side.txt`; the applied document commits
 /// `applied-side.txt`. After the run exactly the applied marker exists, so the
@@ -7682,7 +7682,7 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
 
-    // An apply needs the strategy to own a schedule. This inert row is that
+    // note: An apply needs the strategy to own a schedule. This inert row is that
     // precondition only: admission fails closed on a pre-seed row (it carries
     // no version-0 core-context record, so no clock tick can admit it), and the
     // row that actually runs is added through the public path AFTER the apply,
@@ -7700,7 +7700,7 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
     .await
     .expect("the apply precondition row");
 
-    // ── Approve (frozen row) and apply it: the approved snapshot differs from
+    // note: ── Approve (frozen row) and apply it: the approved snapshot differs from
     //    the preset on disk in exactly the observable it commits. ──
     let candidate = fixture
         .core
@@ -7717,7 +7717,7 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
         .expect("the approved snapshot applies");
     assert_eq!(applied.content_hash, hash);
 
-    // ── The schedule runs from the apply, not from `preset_id`. ──
+    // note: ── The schedule runs from the apply, not from `preset_id`. ──
     let schedule_id = add_intake_schedule(&fixture, APPLIED_PRESET, None).await;
     let run_id = wait_for_schedule_run(pool.as_ref(), &schedule_id).await;
     wait_for_run_status(pool.as_ref(), &run_id, "completed").await;
@@ -7735,10 +7735,10 @@ async fn an_applied_identity_runs_instead_of_the_preset() {
     fixture.core.close().await.expect("core close");
 }
 
-/// The embedded preset id the shadowing fixture overrides with a user bundle.
+/// note: The embedded preset id the shadowing fixture overrides with a user bundle.
 const SHADOWED_EMBEDDED_PRESET: &str = "novel-writing";
 
-/// T6: a user bundle that SHADOWS an embedded id keeps its apply.
+/// note: T6: a user bundle that SHADOWS an embedded id keeps its apply.
 ///
 /// `resolve_preset` (user → system → embedded) loads the user bundle for this
 /// id, so the schedule's strategy IS that bundle and its current apply must win.
@@ -7766,7 +7766,7 @@ async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
 
-    // The apply precondition row only: admission fails closed on a pre-seed row
+    // why: The apply precondition row only: admission fails closed on a pre-seed row
     // (no version-0 core-context record), and the row that actually runs is
     // added through the public path AFTER the apply.
     sqlx::query(
@@ -7784,7 +7784,7 @@ async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
     .await
     .expect("the apply precondition row");
 
-    // The candidate comes from the USER bundle (the id is the strategy id), and
+    // note: The candidate comes from the USER bundle (the id is the strategy id), and
     // the applied snapshot differs from it in exactly what it commits.
     let candidate = fixture
         .core
@@ -7829,15 +7829,15 @@ async fn a_user_bundle_shadowing_an_embedded_id_keeps_its_apply() {
 // (`.mstar/plans/p4a-applied-identity.md` Task 1)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The user preset whose YAML descriptor declares NO role and whose graph issues
+/// note: The user preset whose YAML descriptor declares NO role and whose graph issues
 /// one prompt through an inline `acp.prompt` capability (an applied document
 /// cannot name a bundle template: `IrTemplateSource::OwnSource` resolves none).
 const APPLIED_ROLE_PRESET: &str = "intake-applied-role";
 
-/// The role ONLY the applied document declares.
+/// note: The role ONLY the applied document declares.
 const APPLIED_ONLY_ROLE: &str = "applied-reviewer";
 
-/// [`APPLIED_ROLE_PRESET`]'s bundle YAML: open the `notes` scope, commit the
+/// note: [`APPLIED_ROLE_PRESET`]'s bundle YAML: open the `notes` scope, commit the
 /// preset-side marker, then prompt. `roles:` is absent on purpose — admission
 /// must read the role set from the applied document.
 fn applied_role_preset_yaml(preset_id: &str) -> String {
@@ -7889,7 +7889,7 @@ states:
     )
 }
 
-/// The approved snapshot: the import candidate with the applied-side commit and
+/// note: The approved snapshot: the import candidate with the applied-side commit and
 /// the role only this document declares.
 fn applied_role_document(
     base: &nexus_workflow_ir::WorkflowDocument,
@@ -7906,7 +7906,7 @@ fn applied_role_document(
     document
 }
 
-/// The role set admission validates comes from the document that RUNS.
+/// note: The role set admission validates comes from the document that RUNS.
 ///
 /// The YAML descriptor declares no role; the applied document declares
 /// `applied-reviewer` and its graph issues a prompt. The schedule carries a
@@ -7931,7 +7931,7 @@ async fn an_applied_document_role_the_descriptor_does_not_declare_reaches_the_pr
     let principal = fixture.core.active_principal().await.unwrap();
     let pool = fixture.handle.coordinator().pool();
 
-    // The apply precondition row only: admission fails closed on a pre-seed row
+    // why: The apply precondition row only: admission fails closed on a pre-seed row
     // (no version-0 core-context record), and the row that actually runs is
     // added through the public path AFTER the apply.
     sqlx::query(
@@ -7971,7 +7971,7 @@ async fn an_applied_document_role_the_descriptor_does_not_declare_reaches_the_pr
         .await
         .expect("the approved snapshot applies");
 
-    // The applied document declares `applied-reviewer`; the descriptor declares
+    // note: The applied document declares `applied-reviewer`; the descriptor declares
     // nothing. This binding is the admission-side proof: the descriptor path
     // refuses it as an unknown role, the applied path accepts it. A capability
     // prompt resolves the `default` role at prompt time, so that binding lets

@@ -1,5 +1,6 @@
 //! The Simulate route's own gates, executed through a real `CoreService`: the path-id check,
 //! the candidate check and the wire→IR bridge the daemon route depends on.
+// note: the route gates above are what the cases below exercise.
 #![cfg(feature = "strategy-authoring")]
 
 use nexus_contracts::{
@@ -10,7 +11,7 @@ use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, PresetErro
 use nexus_workflow_ir::{content_hash, WorkflowDocument};
 use tempfile::TempDir;
 
-/// Minimal linear candidate: `start -> done`, no waits and no judges.
+/// note: Minimal linear candidate: `start -> done`, no waits and no judges.
 const CANDIDATE: &str = r#"{
     "ir_version": 0,
     "id": "sim-route",
@@ -60,7 +61,7 @@ async fn setup() -> (TempDir, CoreService, Principal) {
     (tmp, core, principal)
 }
 
-/// The same candidate in another lifecycle state.
+/// note: The same candidate in another lifecycle state.
 fn request(state: &str) -> StrategySimulationRequest {
     let text = CANDIDATE.replacen("\"candidate\"", &format!("\"{state}\""), 1);
     StrategySimulationRequest {
@@ -114,7 +115,7 @@ async fn simulate_returns_the_trajectory_for_a_candidate_document() {
     );
     assert_eq!(trajectory.simulation_level, "reachability");
 
-    // The hash proves the bridge: the wire document became the IR the walk hashed.
+    // why: The hash proves the bridge: the wire document became the IR the walk hashed.
     let ir: WorkflowDocument = serde_json::from_str(CANDIDATE).expect("fixture is a valid IR");
     assert_eq!(
         trajectory.ir_content_hash,
@@ -135,7 +136,7 @@ async fn workflow_ir_reads_the_installed_strategy_as_a_candidate_document() {
     assert_eq!(document.state.to_string(), "candidate");
     assert!(!document.nodes.is_empty());
 
-    // The response IS the schema-owned DTO: a decode of its own serialization proves
+    // why: The response IS the schema-owned DTO: a decode of its own serialization proves
     // the document the route serves round-trips through the wire shape.
     let wire = serde_json::to_value(&document).expect("document is serializable");
     let decoded: WireWorkflowDocument =

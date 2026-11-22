@@ -1,5 +1,6 @@
 //! Work selection, authoring and selected-context isolation on guarded storage.
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
+// note: the work selection and isolation contract above is asserted below.
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per test
 use nexus_contracts::{CreateWorkRequest, CreateWorldRequest, ListWorksQuery};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_local_db::writer_protocol::init_guarded_pool;
@@ -107,7 +108,7 @@ async fn work_selection_invalidates_foreign_context() {
         "queued"
     );
 
-    // A foreign Creator's row in the same database must not become selectable.
+    // why: A foreign Creator's row in the same database must not become selectable.
     let guarded = init_guarded_pool(&db, "author").await.unwrap();
     let pool = guarded.clone_pool();
     nexus_local_db::creators::ensure_creator_row(&pool, "other", "Other")
@@ -144,7 +145,7 @@ async fn work_selection_invalidates_foreign_context() {
         vec![&second]
     );
 
-    // Core-owned nullable patch keeps absence / clear / set distinct.
+    // note: Core-owned nullable patch keeps absence / clear / set distinct.
     core.patch_work(
         &principal,
         second.clone(),
@@ -459,7 +460,7 @@ async fn work_selection_invalidates_foreign_context() {
     ));
     switched.close().await.unwrap();
 
-    // A stored workspace switch invalidates every operation on the old opened pool.
+    // note: A stored workspace switch invalidates every operation on the old opened pool.
     select_creator(home, "other", "default");
     assert!(matches!(
         core.list_works(&principal, query(serde_json::json!({})))
@@ -494,7 +495,7 @@ async fn work_selection_invalidates_foreign_context() {
     core.close().await.unwrap();
 }
 
-/// Equivalence with the pre-extraction daemon `api::pagination` / `api::sort` grammar,
+/// note: Equivalence with the pre-extraction daemon `api::pagination` / `api::sort` grammar,
 /// exercised through the public Work list path. Mirrors the daemon helpers' own unit
 /// tables (`pagination.rs`, `sort.rs`): absent cursor → offset 0, `v1:`-prefixed
 /// non-negative u32 accepted, anything else rejected with the verbatim `invalid_input`
@@ -528,7 +529,7 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
     .unwrap();
     let principal = core.active_principal().await.unwrap();
 
-    // Cursor parity: absent and `v1:0` decode to offset 0.
+    // note: Cursor parity: absent and `v1:0` decode to offset 0.
     assert_eq!(
         core.list_works(&principal, query(serde_json::json!({})))
             .await
@@ -559,7 +560,7 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
         );
     }
 
-    // Sort parity: unknown keys carry the resource-specific code and verbatim message.
+    // note: Sort parity: unknown keys carry the resource-specific code and verbatim message.
     let Err(CoreError::InvalidInput { field, reason }) = core
         .list_works(&principal, query(serde_json::json!({"sort": "bad"})))
         .await
@@ -586,7 +587,7 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
             "unsupported sort key ''; allowed: updated_at, title, status, intake_status"
         )
     );
-    // Empty, whitespace-only, and well-formed multi-key inputs fall back to the
+    // why: Empty, whitespace-only, and well-formed multi-key inputs fall back to the
     // default ordering instead of erroring.
     for sort in ["", "   ", ",,status,,-title,,"] {
         assert!(
@@ -599,7 +600,7 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
     core.close().await.unwrap();
 }
 
-/// The legacy `DATABASE_ERROR` classification must survive the core error carrier
+/// note: The legacy `DATABASE_ERROR` classification must survive the core error carrier
 /// instead of collapsing into an uncoded internal error (fix-round 1, finding 3).
 #[tokio::test]
 async fn internal_database_fault_carries_legacy_code() {
@@ -634,7 +635,7 @@ async fn internal_database_fault_carries_legacy_code() {
         .unwrap()
         .world_id;
     pool.close().await;
-    // Idempotent migrations only create missing versions — a dropped table stays gone.
+    // why: Idempotent migrations only create missing versions — a dropped table stays gone.
     // Drop only `works` while the core is open so the world check passes and the
     // INSERT is what fails, surfacing the legacy DATABASE_ERROR classification.
     let dropper = init_guarded_pool(&db, "author").await.unwrap();
@@ -659,7 +660,7 @@ async fn internal_database_fault_carries_legacy_code() {
     core.close().await.unwrap();
 }
 
-/// Wording-independent lock-conflict assertion (fix-round 1, finding 1): a
+/// note: Wording-independent lock-conflict assertion (fix-round 1, finding 1): a
 /// refused mutation must report the `work_locked` class for this Work and name
 /// the holder that actually holds it. No holder spelling is a contract.
 fn assert_lock_conflict(resource: &str, work_id: &str, holder: &str) {
@@ -677,7 +678,7 @@ fn assert_lock_conflict(resource: &str, work_id: &str, holder: &str) {
     );
 }
 
-/// Fix-round regression (fix 1, finding 1): a Work held by a runtime lock
+/// note: Fix-round regression (fix 1, finding 1): a Work held by a runtime lock
 /// refuses every lifecycle mutator as a lock conflict — whatever holder label
 /// the holder and the contender carry — and leaves the durable Work row
 /// untouched; releasing the holder restores writability.
@@ -718,7 +719,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         .unwrap()
         .world_id;
     let work_id = create(&core, &principal, &world, "Locked Work").await;
-    // Reconcile resolves story_ref and the creative root BEFORE its lock
+    // note: Reconcile resolves story_ref and the creative root BEFORE its lock
     // phase — seed both so the mutator actually reaches lock acquire.
     core.patch_work(
         &principal,
@@ -737,7 +738,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         serde_json::to_vec(&serde_json::json!({"local_root": home.join("creative")})).unwrap(),
     )
     .unwrap();
-    // First lock attempt wins; a later attempt under a different holder label
+    // note: First lock attempt wins; a later attempt under a different holder label
     // is refused as a lock conflict naming the holder that already owns the
     // Work. Neither label is asserted — only the conflict class is.
     let lock_seed = init_guarded_pool(&db, "author").await.unwrap();
@@ -821,7 +822,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
     };
     assert_lock_conflict(&resource, &work_id, &holder);
 
-    // Refusals must leave the durable row consistent: the seeded fields
+    // why: Refusals must leave the durable row consistent: the seeded fields
     // survive and the holder is still the one that acquired the lock.
     let unchanged = core.get_work(&principal, work_id.clone()).await.unwrap();
     assert_eq!(unchanged.title, "Locked Work");
@@ -832,7 +833,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         Some(holder.as_str())
     );
 
-    // Releasing the holder restores writability, and the mutator's own holder
+    // note: Releasing the holder restores writability, and the mutator's own holder
     // is gone once it returns.
     assert!(nexus_local_db::release_runtime_lock(
         &lock_pool,
@@ -869,7 +870,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
     core.close().await.unwrap();
 }
 
-/// Every Work lifecycle mutation the retained host-tool executors delegate to
+/// note: Every Work lifecycle mutation the retained host-tool executors delegate to
 /// carries the work-write gate: read-only core access is rejected with the
 /// shared `work: read-only core access` Forbidden resource (QC1-F-001
 /// read-only denial, verified at the authority the executors now call).
@@ -960,7 +961,7 @@ async fn work_lifecycle_mutators_reject_read_only_core() {
     core.close().await.unwrap();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// note: ─────────────────────────────────────────────────────────────────────────────
 // Migrated from the retired daemon HTTP fixtures (P2-T4): `works_api.rs`,
 // `findings_api.rs`, `selection_pool.rs`, `delete_routes_api.rs`,
 // `multi_work_switch.rs`, `pagination_info_parity.rs`. Only nonduplicated
@@ -969,7 +970,7 @@ async fn work_lifecycle_mutators_reject_read_only_core() {
 // boot-only expectations retire with the host and are not reproduced here.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Open a direct-writer core over a fresh guarded workspace for `creator`.
+/// note: Open a direct-writer core over a fresh guarded workspace for `creator`.
 async fn open_work_core(home: &std::path::Path, creator: &str) -> CoreService {
     std::fs::create_dir_all(home.join(".nexus42")).unwrap();
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
@@ -993,7 +994,7 @@ async fn open_work_core(home: &std::path::Path, creator: &str) -> CoreService {
     .unwrap()
 }
 
-/// Open an engine-owned core over a fresh guarded workspace for `creator`.
+/// note: Open an engine-owned core over a fresh guarded workspace for `creator`.
 ///
 /// The `works_idempotency` writer guard admits only `migration`/`engine`
 /// writers, so the `client_request_id` replay contract is exercised through the
@@ -1076,7 +1077,7 @@ fn status_set(status: &str) -> nexus_contracts::FindingsApi {
     }
 }
 
-/// Bulk PATCH body, built through the generated contract type (the wire shape
+/// note: Bulk PATCH body, built through the generated contract type (the wire shape
 /// the retired daemon route accepted).
 fn batch_request(
     finding_ids: &[String],
@@ -1089,7 +1090,7 @@ fn batch_request(
     .unwrap()
 }
 
-/// `client_request_id` replay is idempotent and lineage references are validated
+/// note: `client_request_id` replay is idempotent and lineage references are validated
 /// before insert (`works_api.rs::create_work_idempotent_replay_returns_200`,
 /// `create_work_with_valid_lineage_succeeds`,
 /// `create_work_with_nonexistent_lineage_returns_400`,
@@ -1161,7 +1162,7 @@ async fn retained_work_create_replay_and_lineage_validation() {
     core.close().await.unwrap();
 }
 
-/// Stage advance gate and the runtime-lock release on the stage branch
+/// note: Stage advance gate and the runtime-lock release on the stage branch
 /// (`works_api.rs::patch_work_intake_status_independent_of_stage_status`,
 /// `patch_work_stage_path_releases_runtime_lock`,
 /// `patch_work_invalid_stage_value_returns_400`,
@@ -1183,7 +1184,7 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
     assert_eq!(details.inspiration_log, [] as [serde_json::Value; 0]);
     assert_eq!(details.schedule_ids, [] as [std::string::String; 0]);
 
-    // A terminal stage_status without an explicit advance is refused.
+    // note: A terminal stage_status without an explicit advance is refused.
     let error = core
         .patch_work(
             &principal,
@@ -1201,7 +1202,7 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
         "got {error:?}"
     );
 
-    // `force` overrides the terminal gate.
+    // note: `force` overrides the terminal gate.
     let forced = core
         .patch_work(
             &principal,
@@ -1217,7 +1218,7 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
         .unwrap();
     assert_eq!(forced.stage_status, "complete");
 
-    // The stage branch releases its runtime lock, so the next advance lands.
+    // why: The stage branch releases its runtime lock, so the next advance lands.
     // The intake gate stays independent of the stage status: it survives a
     // stage advance unchanged.
     let intake = core
@@ -1263,7 +1264,7 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
         "stage PATCH must release the runtime lock"
     );
 
-    // An unknown stage value is refused and leaves the row untouched.
+    // note: An unknown stage value is refused and leaves the row untouched.
     let error = core
         .patch_work(
             &principal,
@@ -1288,7 +1289,7 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
     core.close().await.unwrap();
 }
 
-/// Lazy completion promotion on read is idempotent and writer-only
+/// note: Lazy completion promotion on read is idempotent and writer-only
 /// (`works_api.rs::handler_get_work_lazy_promotes_completed_then_is_idempotent`).
 #[tokio::test]
 async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only() {
@@ -1341,7 +1342,7 @@ async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only()
     };
     let (db, work_id) = db;
 
-    // Read-only access must not promote: the guard is writer-only.
+    // why: Read-only access must not promote: the guard is writer-only.
     let reader = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::ReadOnly,
@@ -1392,7 +1393,7 @@ async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only()
     assert_eq!(status, "completed");
 }
 
-/// Creator-scoped Work addressing: a Work owned by another creator in the same
+/// note: Creator-scoped Work addressing: a Work owned by another creator in the same
 /// database is invisible to every read and mutation
 /// (`works_api.rs::creator_isolation_get_work_returns_404_for_other_creator`,
 /// `creator_isolation_patch_work_returns_404_for_other_creator`).
@@ -1465,13 +1466,13 @@ async fn retained_work_foreign_creator_mutations_are_not_found() {
         .unwrap();
     assert_eq!(foreign_title, "Foreign", "foreign row must be untouched");
 
-    // Positive control: the owning creator still mutates its own Work.
+    // note: Positive control: the owning creator still mutates its own Work.
     assert!(core.get_work(&principal, own).await.is_ok());
     pool.close().await;
     core.close().await.unwrap();
 }
 
-/// Work delete cascade plus the failure path that must not strand a runtime
+/// note: Work delete cascade plus the failure path that must not strand a runtime
 /// lock (`delete_routes_api.rs::delete_work_cascades_pool_entries_via_fk`,
 /// `delete_work_returns_404_for_unknown_id`,
 /// `works_api.rs::handler_append_inspiration_404_does_not_acquire_lock`).
@@ -1571,7 +1572,7 @@ async fn retained_work_delete_cascades_pool_entries_and_failure_keeps_no_lock() 
     core.close().await.unwrap();
 }
 
-/// Pool promotion is exclusive and idempotent; archive is a status transition
+/// note: Pool promotion is exclusive and idempotent; archive is a status transition
 /// (`selection_pool.rs::test_pool_list_returns_all_statuses`,
 /// `test_pool_promote_demotes_prior_active`,
 /// `test_pool_promote_idempotent_on_same_target`,
@@ -1622,7 +1623,7 @@ async fn retained_pool_promotion_exclusivity_idempotence_and_archive() {
         "queued"
     );
 
-    // Promoting the same target again is idempotent — no duplicate row.
+    // note: Promoting the same target again is idempotent — no duplicate row.
     let again = promoted(beta.clone()).await;
     assert_eq!(again.status, "active");
     let listed = core.list_work_pool(&principal, pool_query()).await.unwrap();
@@ -1650,7 +1651,7 @@ async fn retained_pool_promotion_exclusivity_idempotence_and_archive() {
     core.close().await.unwrap();
 }
 
-/// Inspiration adds never clobber an existing file, and promotion writes Work,
+/// note: Inspiration adds never clobber an existing file, and promotion writes Work,
 /// pool entry and inspiration status together
 /// (`selection_pool.rs::test_inspiration_add_creates_md_and_db_row_atomically`,
 /// `test_inspiration_add_auto_suffixes_on_collision`,
@@ -1747,7 +1748,7 @@ async fn retained_inspiration_collision_suffixes_and_promote_atomicity() {
     core.close().await.unwrap();
 }
 
-/// Completion marks the pool row and leaves no active entry
+/// note: Completion marks the pool row and leaves no active entry
 /// (`selection_pool.rs::test_completion_updates_pool_row`,
 /// `test_completion_demotes_active_pool_row_when_completed`).
 #[tokio::test]
@@ -1798,7 +1799,7 @@ async fn retained_completion_demotes_active_pool_entry() {
     core.close().await.unwrap();
 }
 
-/// Creator-scoped pool addressing and the `set_pool_active` body-creator guard
+/// note: Creator-scoped pool addressing and the `set_pool_active` body-creator guard
 /// (`selection_pool.rs::test_archive_pool_rejects_cross_creator`,
 /// `test_archive_inspiration_rejects_cross_creator`,
 /// `test_promote_inspiration_rejects_cross_creator`,
@@ -1823,7 +1824,7 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
     .await
     .unwrap();
 
-    // A forged body creator_id is refused and the pool is unchanged.
+    // note: A forged body creator_id is refused and the pool is unchanged.
     let error = core
         .set_work_pool_active(
             &principal,
@@ -1852,7 +1853,7 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
         Some(work_id.as_str())
     );
 
-    // Matching and omitted creator_id are the legitimate callers.
+    // note: Matching and omitted creator_id are the legitimate callers.
     for creator_id in [Some(principal.creator_id().to_string()), None] {
         let entry = core
             .set_work_pool_active(
@@ -1868,7 +1869,7 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
         assert_eq!(entry.status, "active");
     }
 
-    // Rows owned by another creator are unreachable by ID. `archive_*` surfaces
+    // note: Rows owned by another creator are unreachable by ID. `archive_*` surfaces
     // the creator-scoped no-row case through the storage carrier (the daemon
     // mapped the same DAO fault onto its 404 envelope); the security-relevant
     // half is that the foreign row is never mutated.
@@ -1942,7 +1943,7 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
     core.close().await.unwrap();
 }
 
-/// Findings CRUD, list filters and creator scope
+/// note: Findings CRUD, list filters and creator scope
 /// (`findings_api.rs::findings_crud_create_and_get`,
 /// `findings_list_filter_by_work_id`,
 /// `findings_list_filter_by_comma_separated_status`,
@@ -1988,7 +1989,7 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         )
         .await
         .unwrap();
-    // The review-stage entry point persists chapter, kind and rule suggestion.
+    // note: The review-stage entry point persists chapter, kind and rule suggestion.
     let from_review = core
         .create_finding_from_review(
             &principal,
@@ -2050,7 +2051,7 @@ async fn retained_findings_crud_filters_and_creator_scope() {
     assert_eq!(blockers.items.len(), 1);
     assert_eq!(blockers.items[0].finding_id, blocker.finding_id);
 
-    // Comma-separated status set: every open row plus the triaged one.
+    // note: Comma-separated status set: every open row plus the triaged one.
     core.update_finding(&principal, minor.finding_id.clone(), status_set("triaged"))
         .await
         .unwrap();
@@ -2110,7 +2111,7 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         "got {error:?}"
     );
 
-    // Cross-creator scope: another creator's Work is NotFound for list and get.
+    // note: Cross-creator scope: another creator's Work is NotFound for list and get.
     let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
     let seed = init_guarded_pool(&db, "author").await.unwrap();
     let pool = seed.clone_pool();
@@ -2142,7 +2143,7 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         .await
         .unwrap();
 
-    // Creator-scoped row ownership: a finding row belonging to another creator
+    // note: Creator-scoped row ownership: a finding row belonging to another creator
     // is unreachable by ID, and the author's own row still updates.
     let foreign_row = core
         .create_finding(
@@ -2184,7 +2185,7 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         .unwrap();
     pool.close().await;
 
-    // Delete removes the row (no soft delete).
+    // note: Delete removes the row (no soft delete).
     core.delete_finding(&principal, minor.finding_id.clone())
         .await
         .unwrap();
@@ -2195,7 +2196,7 @@ async fn retained_findings_crud_filters_and_creator_scope() {
     core.close().await.unwrap();
 }
 
-/// Findings lifecycle transitions, rejection codes and batch-update contracts
+/// note: Findings lifecycle transitions, rejection codes and batch-update contracts
 /// (`findings_api.rs::findings_lifecycle_*`, `findings_batch_*`).
 #[tokio::test]
 async fn retained_findings_lifecycle_and_batch_update_contracts() {
@@ -2239,7 +2240,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         );
     }
 
-    // Terminal → open and self-loops are illegal transitions, not enum errors.
+    // note: Terminal → open and self-loops are illegal transitions, not enum errors.
     for (finding_id, target) in [(&walk.finding_id, "open"), (&walk.finding_id, "resolved")] {
         let error = core
             .update_finding(&principal, finding_id.clone(), status_set(target))
@@ -2259,7 +2260,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "a refused transition must not mutate the row"
     );
 
-    // Unknown status words are membership failures carrying the allowed set.
+    // note: Unknown status words are membership failures carrying the allowed set.
     let unknown = core
         .create_finding(
             &principal,
@@ -2292,7 +2293,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "open"
     );
 
-    // Batch: partial success collects unknown IDs, illegal transitions conflict.
+    // note: Batch: partial success collects unknown IDs, illegal transitions conflict.
     let second = core
         .create_finding(
             &principal,
@@ -2330,7 +2331,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "triaged"
     );
 
-    // Unknown IDs are reported, not silently skipped.
+    // note: Unknown IDs are reported, not silently skipped.
     let missing = "fnd_00000000000000000000000000".to_string();
     let collected = batch(
         vec![second.finding_id.clone(), missing.clone()],
@@ -2341,7 +2342,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
     assert_eq!(collected.updated, 1);
     assert_eq!(collected.not_found, vec![missing]);
 
-    // Target-executor assignment rides the same batch surface.
+    // note: Target-executor assignment rides the same batch surface.
     let assigned = batch(
         vec![second.finding_id.clone()],
         serde_json::json!({"target_executor": "write"}),
@@ -2357,7 +2358,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "write"
     );
 
-    // Empty patch is a no-op, not an error.
+    // note: Empty patch is a no-op, not an error.
     let noop = batch(vec![second.finding_id.clone()], serde_json::json!({}))
         .await
         .unwrap();
@@ -2370,7 +2371,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "in_review"
     );
 
-    // Cap, emptiness and duplicates are refused before any write.
+    // note: Cap, emptiness and duplicates are refused before any write.
     let oversized: Vec<String> = (0..101).map(|i| format!("fnd_{i:024}")).collect();
     for (ids, expected_field) in [
         (oversized, "too_many_findings"),
@@ -2391,7 +2392,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
     core.close().await.unwrap();
 }
 
-/// A DAO failure mid-batch fails the request while the already-applied rows stay
+/// note: A DAO failure mid-batch fails the request while the already-applied rows stay
 /// written (`findings_api.rs::findings_batch_update_mid_batch_dao_error_preserves_prior_updates`).
 #[tokio::test]
 async fn retained_findings_batch_dao_failure_preserves_prior_updates() {
@@ -2437,7 +2438,7 @@ async fn retained_findings_batch_dao_failure_preserves_prior_updates() {
         "got {error:?}"
     );
 
-    // The handler short-circuits on the first internal fault: the first row was
+    // note: The handler short-circuits on the first internal fault: the first row was
     // already committed, the third was never reached.
     assert_eq!(
         core.get_finding(&principal, ids[0].clone())
@@ -2458,7 +2459,7 @@ async fn retained_findings_batch_dao_failure_preserves_prior_updates() {
     core.close().await.unwrap();
 }
 
-/// Retention prune previews without deleting, then deletes only the aged
+/// note: Retention prune previews without deleting, then deletes only the aged
 /// resolved rows (`findings_api.rs::findings_prune_endpoint_dry_run_and_delete`).
 #[tokio::test]
 async fn retained_findings_prune_dry_run_and_delete() {
@@ -2526,7 +2527,7 @@ async fn retained_findings_prune_dry_run_and_delete() {
     core.close().await.unwrap();
 }
 
-/// Work list ordering, cursor walk and the `PaginationInfo` wire shape
+/// note: Work list ordering, cursor walk and the `PaginationInfo` wire shape
 /// (`works_api.rs::list_works_sort_by_title_ascending`,
 /// `list_works_sort_descending_and_pagination`,
 /// `pagination_info_parity.rs::*`).
@@ -2594,7 +2595,7 @@ async fn retained_work_list_ordering_cursor_walk_and_pagination_shape() {
     assert!(!second_page.pagination.has_more);
     assert!(second_page.pagination.next_cursor.is_none());
 
-    // Wire shape consumed by non-Rust clients: `next_cursor` is absent unless
+    // note: Wire shape consumed by non-Rust clients: `next_cursor` is absent unless
     // there is another page.
     let truncated = nexus_contracts::PaginationInfo {
         limit: 50,

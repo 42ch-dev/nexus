@@ -1,6 +1,7 @@
 //! P0-T2 service-layer migration of the retained cross-world skip/reimport
 //! regression. Also proves dry-run and the transitional bridge's admission.
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
+// note: the skip/reimport and dry-run contract above is asserted below.
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per test
 
 use nexus_contracts::daemon_api::kb::{PackExportRequest, PackImportRequest};
 use nexus_contracts::BlockType;
@@ -24,7 +25,7 @@ const FOREIGN: &str = "wld_pack_foreign";
 
 async fn seed(pool: &SqlitePool) {
     for owner in [CREATOR, "other_creator"] {
-        // Production materialization: a stored Creator always has its holder
+        // note: Production materialization: a stored Creator always has its holder
         // registry row, which the admitted read selections resolve.
         nexus_local_db::ensure_creator_row(pool, owner, "Test")
             .await
@@ -124,7 +125,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         .unwrap();
     let mut pack = serde_json::to_value(exported).unwrap();
 
-    // Foreign-world PKs are not silently stolen or overwritten.
+    // note: Foreign-world PKs are not silently stolen or overwritten.
     let foreign_ids = core
         .import_world_pack(
             &principal,
@@ -152,7 +153,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     assert_eq!(preview.relations.created, 1);
     assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
 
-    // The service denies a foreign World before parsing or writing the pack.
+    // note: The service denies a foreign World before parsing or writing the pack.
     let denied = core
         .import_world_pack(
             &principal,
@@ -163,7 +164,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
-    // Bridge admission is verified against core stored state: an unknown
+    // note: Bridge admission is verified against core stored state: an unknown
     // (forged) creator is rejected on identity before ownership is even
     // consulted, and a known creator on a foreign World is rejected by the
     // ownership guard.
@@ -192,7 +193,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     assert_eq!(atom_counts(&pool, FOREIGN).await, (0, 0));
 
     let reader = nexus_local_db::open_pool_read_only(&db_path).await.unwrap();
-    // A read-only connection must fail before any atom write: the query-only
+    // why: A read-only connection must fail before any atom write: the query-only
     // pool is refused by the bridge's admission, and SQLite mode=ro pools by
     // the writer-protocol fencing.
     assert!(CoreService::import_legacy_world_pack(
@@ -282,7 +283,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     pool.close().await;
 }
 
-/// qc1-F-001 regression (v1.190 P0 fix wave): the retained CLI open path
+/// note: qc1-F-001 regression (v1.190 P0 fix wave): the retained CLI open path
 /// (`nexus_local_db::init_pool`) registers its pool as the `bootstrap`
 /// writer while the configured active creator is a real non-bootstrap
 /// owner. The bridge must admit that owner through verified stored-state
@@ -303,7 +304,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     let cli_pool = nexus_local_db::init_pool(&db_path).await.unwrap();
     seed(&cli_pool).await;
 
-    // The retained CLI pool's registered writer identity is `bootstrap`,
+    // note: The retained CLI pool's registered writer identity is `bootstrap`,
     // not the configured active creator.
     let identities: Vec<String> =
         sqlx::query_scalar("SELECT DISTINCT creator_id FROM core_writer_registration")
@@ -316,7 +317,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         "retained CLI pool must be bootstrap-registered: {identities:?}"
     );
 
-    // Export through the read-only service (export is a read path) so the
+    // why: Export through the read-only service (export is a read path) so the
     // pack bytes come from the real export owner; the bridge then imports
     // on the bootstrap pool only — no second writer registration.
     let reader_core = CoreService::open(CoreOpenOptions {
@@ -333,7 +334,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         .await
         .unwrap();
     let mut pack = serde_json::to_value(exported).unwrap();
-    // Atom ids are globally unique PKs; the SOURCE originals would collide
+    // note: Atom ids are globally unique PKs; the SOURCE originals would collide
     // (skip policy) against the same DB's SOURCE rows. Mint fresh target ids.
     fresh_entry_ids_in_pack(&mut pack);
     let plan = CoreService::import_legacy_world_pack(
@@ -350,7 +351,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     assert_eq!(plan.relations.created, 1);
     assert_eq!(atom_counts(&cli_pool, TARGET).await, (0, 0));
 
-    // The real non-bootstrap active creator import succeeds.
+    // note: The real non-bootstrap active creator import succeeds.
     let summary = CoreService::import_legacy_world_pack(
         &cli_pool,
         CREATOR,
@@ -365,7 +366,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     assert_eq!(summary.relations.created, 1);
     assert_eq!(atom_counts(&cli_pool, TARGET).await, (3, 1));
 
-    // Forged/unknown creators are still rejected, before any write.
+    // note: Forged/unknown creators are still rejected, before any write.
     let denied = CoreService::import_legacy_world_pack(
         &cli_pool,
         "ctr_forged",
@@ -379,7 +380,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     assert!(matches!(denied, CoreError::AuthRequired));
     assert_eq!(atom_counts(&cli_pool, TARGET).await, (3, 1));
 
-    // A known creator on a foreign World is still rejected by ownership.
+    // note: A known creator on a foreign World is still rejected by ownership.
     let denied = CoreService::import_legacy_world_pack(
         &cli_pool,
         CREATOR,
@@ -396,9 +397,9 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     cli_pool.close().await;
 }
 
-// ── v1.191 P1 T10: pack import/export identity (durable §6) ───────────────
+// note: ── v1.191 P1 T10: pack import/export identity (durable §6) ───────────────
 
-/// One governed pack entry: `owner` is the wire holder id, `disclosure` the
+/// note: One governed pack entry: `owner` is the wire holder id, `disclosure` the
 /// wire governance value, both carried exactly as the pack states them.
 fn governed_pack(entries: &[(&str, &str, Option<&str>, Option<&str>)]) -> Value {
     let entries: Vec<Value> = entries
@@ -448,7 +449,7 @@ async fn stored_governance(pool: &SqlitePool, entry_id: &str) -> (Option<String>
         .unwrap()
 }
 
-/// Boots an `EngineOwner` core over a seeded workspace.
+/// note: Boots an `EngineOwner` core over a seeded workspace.
 async fn pack_test_core() -> (tempfile::TempDir, sqlx::SqlitePool, CoreService) {
     let common::TestHome {
         _tmp: tmp,
@@ -467,7 +468,7 @@ async fn pack_test_core() -> (tempfile::TempDir, sqlx::SqlitePool, CoreService) 
     (tmp, pool, core)
 }
 
-/// A foreign holder id is never adopted by equality, and an unmapped one is
+/// note: A foreign holder id is never adopted by equality, and an unmapped one is
 /// held outside the KB stores — the exact string of the local Creator holder
 /// included.
 #[tokio::test]
@@ -531,7 +532,7 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
             ),
         ]
     );
-    // The colliding atom did NOT claim the local identity: nothing was
+    // note: The colliding atom did NOT claim the local identity: nothing was
     // stored for it at all (neither the local holder nor any other).
     let colliding_rows: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
@@ -544,7 +545,7 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
     let (shared_holder, shared_disclosure) = stored_governance(&pool, "kb_gov_shared").await;
     assert_eq!((shared_holder, shared_disclosure), (None, None));
 
-    // The bounded review arm reads the batch back, owner-only, with the
+    // why: The bounded review arm reads the batch back, owner-only, with the
     // immutable original JSON and never a knowledge view.
     let batch_id = summary.quarantined[0].import_batch_id.clone();
     let review = core
@@ -567,7 +568,7 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
         colliding.original_disclosure.as_deref(),
         Some(DISCLOSURE_OWNER_PRIVATE)
     );
-    // The reviewed original is the **pack document's** atom JSON verbatim, not
+    // note: The reviewed original is the **pack document's** atom JSON verbatim, not
     // a re-serialization of the typed entry.
     let document_atom = pack["entries"][1].to_string();
     assert_eq!(
@@ -575,7 +576,7 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
         Some(document_atom.as_str()),
         "review returns the document's atom JSON byte-for-byte"
     );
-    // A foreign World's batch is not reviewable by this Creator.
+    // note: A foreign World's batch is not reviewable by this Creator.
     let denied = core
         .review_world_pack_import(&principal, FOREIGN.to_string(), batch_id)
         .await
@@ -585,7 +586,7 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
     pool.close().await;
 }
 
-/// An explicit mapping adopts the atom natively in one transaction with its
+/// note: An explicit mapping adopts the atom natively in one transaction with its
 /// quarantine removal; a repeat import re-adopts nothing and adds nothing.
 #[tokio::test]
 async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
@@ -612,7 +613,7 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     assert_eq!(quarantine_rows(&pool).await.len(), 1);
     assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
 
-    // Inadmissible mapping: a Character selector for a non-existent Character
+    // note: Inadmissible mapping: a Character selector for a non-existent Character
     // refuses the whole import with zero writes.
     let refused = CoreService::import_legacy_world_pack(
         &pool,
@@ -634,7 +635,7 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
         "refusal keeps the row"
     );
 
-    // The admitted mapping adopts the atom and drops its quarantine row.
+    // note: The admitted mapping adopts the atom and drops its quarantine row.
     let adopted = CoreService::import_legacy_world_pack(
         &pool,
         CREATOR,
@@ -666,7 +667,7 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
         "adopted atom carries the mapped local holder and its original disclosure"
     );
 
-    // Repeat import: nothing re-created, nothing re-quarantined.
+    // note: Repeat import: nothing re-created, nothing re-quarantined.
     let repeat = CoreService::import_legacy_world_pack(
         &pool,
         CREATOR,
@@ -699,7 +700,7 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     pool.close().await;
 }
 
-/// Unknown disclosure vocabulary is not native and stays quarantined even when
+/// note: Unknown disclosure vocabulary is not native and stays quarantined even when
 /// its holder is mapped.
 #[tokio::test]
 async fn v1191_holder_pack_unknown_disclosure_stays_quarantined_when_mapped() {
@@ -747,7 +748,7 @@ async fn v1191_holder_pack_unknown_disclosure_stays_quarantined_when_mapped() {
     pool.close().await;
 }
 
-// ── MIGRATED (daemon `world_kb_pack.rs` retirement, v1.193 P2-T3) ─────────
+// note: ── MIGRATED (daemon `world_kb_pack.rs` retirement, v1.193 P2-T3) ─────────
 //
 // The retired HTTP fixture drove these through `POST .../kb/pack/{export,import}`.
 // The domain cases below are the ones `pack_import_skip_cross_world_and_reimport_is_idempotent`
@@ -757,7 +758,7 @@ async fn v1191_holder_pack_unknown_disclosure_stays_quarantined_when_mapped() {
 // The route-level 200/403 envelopes, `Axum` extractor rejections and
 // `holder_map`/`review_import` wire parsing stay retired with the host.
 
-/// A pack of `count` foreign-governed atoms — every one of them is held, so
+/// note: A pack of `count` foreign-governed atoms — every one of them is held, so
 /// no KB row is written and the run yields one review batch.
 fn foreign_atoms_pack(count: usize) -> Value {
     let entries: Vec<Value> = (0..count)
@@ -794,7 +795,7 @@ async fn provenance_of(pool: &SqlitePool, world_id: &str, name: &str) -> Option<
     .flatten()
 }
 
-/// The retained pack-import conflict policies and the bounded owner-only
+/// note: The retained pack-import conflict policies and the bounded owner-only
 /// review. Migrated from `world_kb_pack.rs`
 /// (`pack_import_rename_creates_disambiguated_entry`,
 /// `pack_import_overwrite_replaces_body_preserves_status`,
@@ -807,7 +808,7 @@ async fn retained_pack_conflict_policies_and_review_bound() {
     let (_tmp, pool, core) = pack_test_core().await;
     let principal = core.active_principal().await.unwrap();
 
-    // ── Export envelope: the pack title defaults to the World title ───────
+    // note: ── Export envelope: the pack title defaults to the World title ───────
     let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
     let exported = core
         .export_world_pack(&principal, SOURCE.to_string(), export_request, false)
@@ -818,12 +819,12 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         pack["modules"]["pack"]["title"], "Pack World",
         "a defaulted pack title is the World title: {pack}"
     );
-    // The pristine envelope keeps the source World's own atom ids for the
+    // note: The pristine envelope keeps the source World's own atom ids for the
     // same-world re-import arm below.
     let same_world_pack = pack.clone();
     fresh_entry_ids_in_pack(&mut pack);
 
-    // ── rename: a canonical-name collision creates a disambiguated row and
+    // note: ── rename: a canonical-name collision creates a disambiguated row and
     //    the imported relation endpoints follow the renamed id ─────────────
     sqlx::query("INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, created_at, updated_at) VALUES ('kb_target_kael', ?, 'character', 'Kael', 'confirmed', 0, ?, datetime('now'), datetime('now'))")
         .bind(TARGET)
@@ -900,7 +901,7 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         "the pre-existing collision row is never stamped"
     );
 
-    // ── overwrite: the pack body replaces the target body but the target's
+    // note: ── overwrite: the pack body replaces the target body but the target's
     //    own status survives ───────────────────────────────────────────────
     sqlx::query(
         "UPDATE kb_key_blocks SET status = 'provisional' WHERE key_block_id = 'kb_target_kael'",
@@ -933,7 +934,7 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         "target body replaced by the pack content, got {body}"
     );
 
-    // ── same-world re-import: overwrite restores the pack body ───────────
+    // note: ── same-world re-import: overwrite restores the pack body ───────────
     sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = 'kb_pack_b'")
         .bind(json!({"summary": "Stale Kael body"}).to_string())
         .execute(&pool)
@@ -963,7 +964,7 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         "overwrite restores the pack body, got {stale}"
     );
 
-    // ── the owner-only review is bounded and carries stable id shapes ─────
+    // why: ── the owner-only review is bounded and carries stable id shapes ─────
     let held = core
         .import_world_pack(
             &principal,
@@ -1009,7 +1010,7 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         "the bounded review returns exactly its cap"
     );
 
-    // ── export never reads through a World the caller does not own ────────
+    // why: ── export never reads through a World the caller does not own ────────
     let denied = core
         .export_world_pack(
             &principal,
@@ -1025,7 +1026,7 @@ async fn retained_pack_conflict_policies_and_review_bound() {
     pool.close().await;
 }
 
-/// The export reads through the exporting Creator's admitted selection:
+/// note: The export reads through the exporting Creator's admitted selection:
 /// owned private material only under explicit author intent, governance
 /// preserved exactly.
 #[tokio::test]

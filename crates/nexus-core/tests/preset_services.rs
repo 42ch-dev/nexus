@@ -1,4 +1,5 @@
 //! P3-T4: stale editors cannot overwrite source; authoring stays engine-free.
+// note: the stale-editor and engine-free authoring contract above is asserted below.
 
 use nexus_contracts::{
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
@@ -119,7 +120,7 @@ async fn stale_source_hash_cannot_overwrite_strategy() {
 #[tokio::test]
 async fn concurrent_editors_have_one_commit_and_one_conflict() {
     let fixture = setup().await;
-    // `tokio::join!` already yields a tuple; collect it directly rather than
+    // note: `tokio::join!` already yields a tuple; collect it directly rather than
     // re-spelling the two results as an array.
     let results = tokio::join!(
         fixture.core.patch_strategy_state(
@@ -343,7 +344,7 @@ async fn new_template_cannot_escape_through_symlink_parent() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Migrated from the retired daemon HTTP fixtures (P2-T4): `strategy_patch.rs`
+// note: Migrated from the retired daemon HTTP fixtures (P2-T4): `strategy_patch.rs`
 // (the route handlers wrapped this core CAS seam directly) and
 // `presets_route_api.rs` (router registration and framework-404 expectations
 // retire; the catalog/scaffold behavior stays core-owned). State rename/stale
@@ -351,7 +352,7 @@ async fn new_template_cannot_escape_through_symlink_parent() {
 // the remaining `strategy_patch.rs` assertions.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A bundle whose `start` state has no outgoing transition.
+/// note: A bundle whose `start` state has no outgoing transition.
 const LINEAR_BUNDLE: &str = r#"revision: 1
 preset:
   id: test-strategy
@@ -368,7 +369,7 @@ states:
     terminal: true
 "#;
 
-/// A bundle whose `start` state already carries a conditional next map.
+/// note: A bundle whose `start` state already carries a conditional next map.
 const CONDITIONAL_BUNDLE: &str = r#"revision: 1
 preset:
   id: test-strategy
@@ -393,7 +394,7 @@ states:
     terminal: true
 "#;
 
-/// A linear bundle that already declares the rewire target state.
+/// note: A linear bundle that already declares the rewire target state.
 const REWIRE_BUNDLE: &str = r#"revision: 1
 preset:
   id: test-strategy
@@ -442,7 +443,7 @@ fn transition_request(
     .unwrap()
 }
 
-/// Transition create/update semantics on the real bundle bytes
+/// note: Transition create/update semantics on the real bundle bytes
 /// (`strategy_patch.rs::patch_transition_create_sets_linear_next_when_absent`,
 /// `patch_transition_create_appends_rule_when_next_is_map`,
 /// `patch_transition_create_honors_transition_kind_default`,
@@ -452,7 +453,7 @@ fn transition_request(
 async fn retained_strategy_transition_create_and_rewire_semantics() {
     let fixture = setup().await;
 
-    // (a) Absent `next` → the create writes the linear edge.
+    // note: (a) Absent `next` → the create writes the linear edge.
     write_bundle(&fixture, LINEAR_BUNDLE);
     let created = fixture
         .core
@@ -466,7 +467,7 @@ async fn retained_strategy_transition_create_and_rewire_semantics() {
     assert_eq!(created.new_revision.get(), 2);
     assert_eq!(bundle_yaml(&fixture)["states"][0]["next"], "end");
 
-    // (b) An existing conditional map gains a rule and keeps its default.
+    // note: (b) An existing conditional map gains a rule and keeps its default.
     write_bundle(&fixture, CONDITIONAL_BUNDLE);
     fixture
         .core
@@ -491,7 +492,7 @@ async fn retained_strategy_transition_create_and_rewire_semantics() {
     assert_eq!(rules[1]["when"], "_context.branch_b");
     assert_eq!(next["default"], "end");
 
-    // (c) `transition_kind: default` rewrites the map default instead of a rule.
+    // note: (c) `transition_kind: default` rewrites the map default instead of a rule.
     write_bundle(&fixture, CONDITIONAL_BUNDLE);
     fixture
         .core
@@ -506,7 +507,7 @@ async fn retained_strategy_transition_create_and_rewire_semantics() {
     assert_eq!(next["default"], "alt");
     assert_eq!(next["rules"].as_sequence().unwrap().len(), 1);
 
-    // (d) `transition_kind: branch` seeds a conditional map on a linear state.
+    // note: (d) `transition_kind: branch` seeds a conditional map on a linear state.
     write_bundle(&fixture, LINEAR_BUNDLE);
     fixture
         .core
@@ -529,7 +530,7 @@ async fn retained_strategy_transition_create_and_rewire_semantics() {
     assert_eq!(next["rules"][0]["to"], "end");
     assert_eq!(next["rules"][0]["when"], "_context.ready");
 
-    // (e) The default `update` op rewires an existing edge.
+    // note: (e) The default `update` op rewires an existing edge.
     write_bundle(&fixture, REWIRE_BUNDLE);
     fixture
         .core
@@ -544,7 +545,7 @@ async fn retained_strategy_transition_create_and_rewire_semantics() {
     fixture.core.close().await.unwrap();
 }
 
-/// Transition validation rejections leave the bundle bytes untouched
+/// note: Transition validation rejections leave the bundle bytes untouched
 /// (`strategy_patch.rs::patch_transition_create_rejects_duplicate_rule`,
 /// `patch_transition_create_rejects_self_loop`,
 /// `patch_transition_create_rejects_explicit_next_on_conditional_map`,
@@ -614,7 +615,7 @@ async fn retained_strategy_transition_validation_rejections() {
     fixture.core.close().await.unwrap();
 }
 
-/// Catalog reads, unknown lookup and the scaffold round trip
+/// note: Catalog reads, unknown lookup and the scaffold round trip
 /// (`presets_route_api.rs::get_preset_by_id_hits_handler_not_framework_404`,
 /// `get_preset_unknown_returns_handler_json_404_not_empty_body`,
 /// `scaffold_then_get_user_preset_round_trip`).
@@ -682,13 +683,13 @@ async fn retained_preset_catalog_scaffold_and_unknown_lookup() {
     fixture.core.close().await.unwrap();
 }
 
-/// The validate endpoint names a host file, so it must be an in-home path and
+/// note: The validate endpoint names a host file, so it must be an in-home path and
 /// must never answer with a host path or OS error text (I-000076).
 #[tokio::test]
 async fn preset_validation_is_confined_to_the_daemon_home() {
     let fixture = setup().await;
 
-    // A manifest inside the daemon home still validates.
+    // note: A manifest inside the daemon home still validates.
     let inside = nexus_contracts::ValidatePresetRequest {
         path: fixture.bundle.join("preset.yaml").display().to_string(),
     };
@@ -699,7 +700,7 @@ async fn preset_validation_is_confined_to_the_daemon_home() {
         .unwrap();
     assert!(valid.valid, "unexpected errors: {:?}", valid.errors);
 
-    // A host path outside the daemon home is one uniform invalid_input, and the
+    // note: A host path outside the daemon home is one uniform invalid_input, and the
     // refusal does not echo the path it was given.
     for outside in ["/etc/passwd", "/tmp", "/"] {
         let error = fixture
@@ -723,7 +724,7 @@ async fn preset_validation_is_confined_to_the_daemon_home() {
         );
     }
 
-    // A relative path never reaches the filesystem.
+    // why: A relative path never reaches the filesystem.
     let relative = fixture
         .core
         .validate_preset(
@@ -743,7 +744,7 @@ async fn preset_validation_is_confined_to_the_daemon_home() {
         "unexpected: {relative:?}"
     );
 
-    // A missing manifest inside the home is not_found WITHOUT the host path.
+    // note: A missing manifest inside the home is not_found WITHOUT the host path.
     let missing = fixture.bundle.join("missing.yaml");
     let error = fixture
         .core

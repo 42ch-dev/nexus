@@ -8,7 +8,8 @@
 //! legacy 0→1 revision sequence, an already-shared fragment keeps its stable
 //! conflict, and the legacy `*_pending_review` tables stay write-idle
 //! (compass D6).
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
+// note: the review-pipeline contract above is what the drain cases below assert.
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per test
 
 use nexus_contracts::daemon_api::characters::create_character_request::CreateCharacterRequest;
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
@@ -27,13 +28,13 @@ mod common;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WORLD: &str = "wld_worldA";
-/// A second owned world: the cross-Character regression gives another Character
+/// note: A second owned world: the cross-Character regression gives another Character
 /// its own binding here.
 const OTHER_CHARACTER_WORLD: &str = "wld_worldOther";
-/// A third owned world: the second binding of the primary Character, an
+/// note: A third owned world: the second binding of the primary Character, an
 /// unrelated SOUL-narrative cache scope.
 const UNRELATED_WORLD: &str = "wld_worldUnrelated";
-/// A fourth owned world: the context a fragment's provenance names while the
+/// note: A fourth owned world: the context a fragment's provenance names while the
 /// fragment itself is placed in the primary binding (the two are independent).
 const PROVENANCE_WORLD: &str = "wld_worldProvenance";
 
@@ -44,7 +45,7 @@ async fn seed_world_row(pool: &SqlitePool, world_id: &str) {
     )
     .await;
 }
-/// Classifies as `PromoteToLongTerm` for a `brainstorm` task (high-signal,
+/// note: Classifies as `PromoteToLongTerm` for a `brainstorm` task (high-signal,
 /// above the creative minimum length).
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
@@ -124,7 +125,7 @@ async fn count_rows(pool: &SqlitePool, sql: &str) -> i64 {
     count
 }
 
-/// One provider candidate row as the store holds it: `(status, capture
+/// note: One provider candidate row as the store holds it: `(status, capture
 /// context)`.
 async fn provider_candidate(
     pool: &SqlitePool,
@@ -139,7 +140,7 @@ async fn provider_candidate(
     .unwrap()
 }
 
-/// `(kind, content)` of one provider record.
+/// note: `(kind, content)` of one provider record.
 async fn provider_record(
     pool: &SqlitePool,
     record_id: &str,
@@ -168,7 +169,7 @@ fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
     serde_json::from_value(value).expect("wire-valid request DTO")
 }
 
-/// The E11 coercion: a binding-local Character candidate classified
+/// note: The E11 coercion: a binding-local Character candidate classified
 /// `PromoteToLongTerm` is consumed as one `fact` fragment, never as a record in
 /// shared scope — the capture's placement decides, the decision cannot.
 #[tokio::test]
@@ -203,7 +204,7 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // The candidate was written by the capture under the bridge's deterministic
+    // note: The candidate was written by the capture under the bridge's deterministic
     // id and then consumed by the drain: the legacy queue is never written at
     // all (fix round 5, B1 — the capture is one provider write).
     let pool = db_pool(&env).await;
@@ -229,7 +230,7 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     );
     pool.close().await;
 
-    // The fragment is the retained `fact` DTO: binding scope, legacy 0→1
+    // note: The fragment is the retained `fact` DTO: binding scope, legacy 0→1
     // numbering, existing summary/keywords/TTL/session/pending provenance.
     let scoped = core
         .list_character_memory_fragments(
@@ -269,7 +270,7 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
         .expect("list shared fragments");
     assert!(shared.fragments.is_empty(), "nothing was shared implicitly");
 
-    // The record carries the pending provenance the reroute names.
+    // note: The record carries the pending provenance the reroute names.
     let pool = db_pool(&env).await;
     let (kind, content) = provider_record(&pool, fragment.fragment_id.as_str())
         .await
@@ -283,7 +284,7 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     pool.close().await;
 }
 
-/// Explicit promotion is `memory.records.promote` with `target_scope: shared`:
+/// note: Explicit promotion is `memory.records.promote` with `target_scope: shared`:
 /// the DTO's `expected_revision` is the provider CAS value minus one, a stale
 /// revision writes nothing, and an already-shared fragment keeps its stable
 /// conflict.
@@ -324,7 +325,7 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
         .as_str()
         .to_string();
 
-    // Stale DTO revision → the retained `version_mismatch`, zero mutation.
+    // note: Stale DTO revision → the retained `version_mismatch`, zero mutation.
     let stale = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id.clone(), 7)
         .await
@@ -348,7 +349,7 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
         "no mutation on conflict"
     );
 
-    // DTO 0 → provider revision 1 → promote → provider revision 2 → DTO 1.
+    // note: DTO 0 → provider revision 1 → promote → provider revision 2 → DTO 1.
     let promoted = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id.clone(), 0)
         .await
@@ -370,7 +371,7 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
     );
     pool.close().await;
 
-    // Already shared → the retained stable conflict.
+    // note: Already shared → the retained stable conflict.
     let again = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id, 1)
         .await
@@ -380,7 +381,7 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
         "got {again:?}"
     );
 
-    // The fragment now lives in the shared scope only.
+    // why: The fragment now lives in the shared scope only.
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
         .await
@@ -394,7 +395,7 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
     assert!(scoped.fragments.is_empty());
 }
 
-/// The shared/whole-bearer Promote path stays a promotion: a Creator candidate
+/// note: The shared/whole-bearer Promote path stays a promotion: a Creator candidate
 /// classified `PromoteToLongTerm` becomes a provider record under the
 /// task-kind-derived `nexus.<MemoryKind>`, while the legacy pending table keeps
 /// its row.
@@ -463,7 +464,7 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
             .is_some_and(|text| text.starts_with("# UNTRUSTED:")),
         "the promoted body keeps the passthrough UNTRUSTED header: {content}"
     );
-    // The promoted record keeps the authored identity the CLI addresses it by:
+    // note: The promoted record keeps the authored identity the CLI addresses it by:
     // the slug it derives from the pending row, so list/show/edit/delete reach
     // it instead of a blank-slug row (fix round 1, Greptile
     // `memory_pipeline.rs:441`).
@@ -491,7 +492,7 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
         "the promoted memory is addressable by its slug"
     );
 
-    // The promoted record is not listed as a fragment (same retained split).
+    // note: The promoted record is not listed as a fragment (same retained split).
     let fragments = core
         .list_memory_fragments(&principal, None, None, 50)
         .await
@@ -499,7 +500,7 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
     assert!(fragments.fragments.is_empty());
 }
 
-// ═══ Fix round 1: R4-F1, R4-F2, R4-F3 ════════════════════════════════════
+// note: ═══ Fix round 1: R4-F1, R4-F2, R4-F3 ════════════════════════════════════
 //
 // The explicit promotion is addressed by the id the fragment DTO served, so it
 // resolves a legacy-projected id through the bridge and adopts the projection
@@ -507,7 +508,7 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
 // Character's own `fact` fragment (R4-F2); and its retained cache invalidation
 // survives a retry after a failed attempt (R4-F3).
 
-/// One unmigrated legacy Character fragment: the row the bridge projects and the
+/// note: One unmigrated legacy Character fragment: the row the bridge projects and the
 /// review reroute may never write (D6).
 async fn seed_legacy_fragment(
     pool: &SqlitePool,
@@ -551,7 +552,7 @@ fn soul_narrative_cache_record(
     }
 }
 
-/// The Character's cached SOUL narrative scopes, ordered so one assertion can
+/// note: The Character's cached SOUL narrative scopes, ordered so one assertion can
 /// name the whole set.
 async fn soul_narrative_scopes(env: &Env, character_id: &str) -> Vec<Option<String>> {
     let pool = db_pool(env).await;
@@ -570,7 +571,7 @@ async fn soul_narrative_scopes(env: &Env, character_id: &str) -> Vec<Option<Stri
     scopes
 }
 
-/// `(kind, scope_visibility, scope_context_id)` of one provider record.
+/// note: `(kind, scope_visibility, scope_context_id)` of one provider record.
 async fn record_placement(
     pool: &SqlitePool,
     record_id: &str,
@@ -584,7 +585,7 @@ async fn record_placement(
     .unwrap()
 }
 
-/// One `fact` Character fragment of the Character, placed in a binding context,
+/// note: One `fact` Character fragment of the Character, placed in a binding context,
 /// carrying the provenance the caller chose.
 ///
 /// The provider records `source_context_ids` verbatim and independently of the
@@ -633,7 +634,7 @@ async fn seed_fragment_record(
     pool.close().await;
 }
 
-/// The promote transaction's recovery row for one record: the placement whose
+/// note: The promote transaction's recovery row for one record: the placement whose
 /// SOUL-narrative cache is still owed (R4-F3 round 2).
 async fn soul_invalidation_marker(env: &Env, record_id: &str) -> Option<String> {
     let pool = db_pool(env).await;
@@ -646,7 +647,7 @@ async fn soul_invalidation_marker(env: &Env, record_id: &str) -> Option<String> 
     value
 }
 
-/// R4-F1: a fragment the list served promotes. The DTO serves the legacy
+/// note: R4-F1: a fragment the list served promotes. The DTO serves the legacy
 /// `fragment_id` while the bridge names that row by its deterministic external
 /// id, so the promotion resolves the listed id through the bridge and adopts
 /// the projection inside its own transaction — and the legacy row stays
@@ -719,7 +720,7 @@ async fn a_listed_legacy_fragment_promotes_through_its_bridge_id() {
     );
     pool.close().await;
 
-    // The shared scope serves it once; the binding scope no longer does (the
+    // note: The shared scope serves it once; the binding scope no longer does (the
     // adopted record wins over the projection).
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
@@ -735,7 +736,7 @@ async fn a_listed_legacy_fragment_promotes_through_its_bridge_id() {
     assert!(scoped.fragments.is_empty());
 }
 
-/// R4-F2: the promotion names one Character's lease, so it mutates only that
+/// note: R4-F2: the promotion names one Character's lease, so it mutates only that
 /// Character's own `fact` fragment. Another Character's binding-local record
 /// and a non-fragment record are each refused before any write, and an
 /// owner-exact promotion still succeeds.
@@ -746,7 +747,7 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
 
-    // Character B owns a binding-local fragment of its own.
+    // note: Character B owns a binding-local fragment of its own.
     let other = core
         .create_character(
             &principal,
@@ -786,7 +787,7 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
         .as_str()
         .to_string();
 
-    // A's lease must not reach B's record.
+    // why: A's lease must not reach B's record.
     let crossed = core
         .promote_character_fragment(&principal, character_id.clone(), other_fragment.clone(), 0)
         .await
@@ -806,7 +807,7 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
     );
     pool.close().await;
 
-    // A provider-native non-fragment record under A's own subject is refused by
+    // note: A provider-native non-fragment record under A's own subject is refused by
     // kind, not promoted.
     let pool = db_pool(&env).await;
     sqlx::query(
@@ -843,7 +844,7 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
         "got {wrong_kind:?}"
     );
 
-    // The owner-exact path still promotes what the lease names.
+    // note: The owner-exact path still promotes what the lease names.
     core.capture_character_pending_review(
         &principal,
         character_id.clone(),
@@ -893,7 +894,7 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
     pool.close().await;
 }
 
-/// R4-F3: the promotion commits before the retained cache invalidation runs, so
+/// note: R4-F3: the promotion commits before the retained cache invalidation runs, so
 /// a failure there leaves a shared fragment with a stale cache. The retry must
 /// finish the invalidation instead of exiting early on `already_shared`.
 #[tokio::test]
@@ -903,7 +904,7 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
 
-    // An unrelated real binding of the same Character: a scope the promotion
+    // note: An unrelated real binding of the same Character: a scope the promotion
     // must leave alone.
     let unrelated_binding = core
         .add_binding(
@@ -950,7 +951,7 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         .as_str()
         .to_string();
 
-    // Pre-existing cache rows: the two scopes the promotion invalidates and one
+    // note: Pre-existing cache rows: the two scopes the promotion invalidates and one
     // it must leave alone.
     let pool = db_pool(&env).await;
     for binding in [
@@ -975,7 +976,7 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
     stale.sort();
     assert_eq!(soul_narrative_scopes(&env, &character_id).await, stale);
 
-    // The invalidation fails after the promotion already committed.
+    // note: The invalidation fails after the promotion already committed.
     core.fail_next_soul_narrative_invalidation();
     let failed = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id.clone(), 0)
@@ -986,7 +987,7 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         "got {failed:?}"
     );
 
-    // The promotion itself committed; only the cache is stale.
+    // why: The promotion itself committed; only the cache is stale.
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
         .await
@@ -1003,7 +1004,7 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         "the failed invalidation left the cache stale"
     );
 
-    // The retry reaches the retained conflict AND finishes the invalidation.
+    // note: The retry reaches the retained conflict AND finishes the invalidation.
     let retried = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id, 1)
         .await
@@ -1028,7 +1029,7 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
     );
 }
 
-/// R4-F3 round 2 (R2-C1): the pre-promotion placement is recovery state the
+/// note: R4-F3 round 2 (R2-C1): the pre-promotion placement is recovery state the
 /// promote transaction wrote, not something inferred from the record. A valid
 /// `fact` fragment may carry no `source_context_ids` at all, so a retry that
 /// reconstructed the old binding from that list would delete the shared cache
@@ -1126,7 +1127,7 @@ async fn promotion_retry_recovers_a_fragment_without_source_contexts() {
     );
 }
 
-/// R4-F3 round 2 (R2-C1): a fragment's claimed source contexts can start with a
+/// note: R4-F3 round 2 (R2-C1): a fragment's claimed source contexts can start with a
 /// context other than the one it is placed in — the provider records the claims
 /// verbatim and independently of the placement. The retry must invalidate the
 /// binding the record actually left (B), and leave the merely claimed context's

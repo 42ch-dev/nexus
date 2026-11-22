@@ -1,4 +1,5 @@
 //! P1-T2 `world_kb` contract tests (core service semantics).
+// note: the world_kb service contract above is exercised below.
 
 use nexus_contracts::{
     CoreProviderJournalWrite, CoreProviderJournalWriteStatus, CoreProviderOperationStatus,
@@ -28,7 +29,7 @@ struct Fixture {
     principal: nexus_core::Principal,
 }
 
-/// A second guarded writer over the live engine pool, for test-only seeds that
+/// note: A second guarded writer over the live engine pool, for test-only seeds that
 /// must land after the core opened (same writer id → no fencing).
 async fn live_write_pool(
     fx: &Fixture,
@@ -37,7 +38,7 @@ async fn live_write_pool(
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    // v1.191 P1: a stored Creator always carries its holder registry row
+    // note: v1.191 P1: a stored Creator always carries its holder registry row
     // (§2.2), and the management read selection resolves it — the fixture must
     // therefore seed a complete subject, not a bare `creators` row.
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
@@ -80,7 +81,7 @@ async fn seed_pending(
     name: &str,
     created_at: &str,
 ) {
-    // kb_extract_jobs is engine-writer-only (writer protocol §4).
+    // why: kb_extract_jobs is engine-writer-only (writer protocol §4).
     sqlx::query(
         "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id, status, promotion_status, proposed_payload, block_type_guess, canonical_name_guess, version, created_at) VALUES (?, ?, 'ws', ?, ?, 'done', 'pending', '{}', 'character', ?, 0, ?)",
     )
@@ -99,7 +100,7 @@ async fn read_only_pool(user_home: &Path) -> SqlitePool {
     common::read_only_pool(user_home, CREATOR, SLUG).await
 }
 
-/// Seed the contract fixture rows: owned + foreign worlds, KB rows in every
+/// note: Seed the contract fixture rows: owned + foreign worlds, KB rows in every
 /// status under test (deleted/confirmed/merged + NULL modules), and two
 /// pending candidate jobs.
 async fn seed_fixture_rows(pool: &SqlitePool) {
@@ -228,7 +229,7 @@ async fn world_kb_contract() {
     assert_candidates_contract(&fx).await;
 }
 
-/// Patch-path contract: create-on-absent, input validation, terminal-status
+/// note: Patch-path contract: create-on-absent, input validation, terminal-status
 /// rejection, module merge, and OCC conflict/retry behavior.
 async fn assert_patch_contract(fx: &Fixture) {
     let req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
@@ -324,7 +325,7 @@ async fn assert_patch_contract(fx: &Fixture) {
     assert_eq!(resp.version, 3);
 }
 
-/// Candidates contract: keyset pagination, malformed cursor rejection, and
+/// note: Candidates contract: keyset pagination, malformed cursor rejection, and
 /// foreign-world denial.
 async fn assert_candidates_contract(fx: &Fixture) {
     let page1 = fx
@@ -601,8 +602,8 @@ fn journal_write(
     }
 }
 
-#[allow(clippy::too_many_lines)] // one end-to-end KB contract scenario
-/// Provider journal contract (LIFE-3): owned write/read/settle seam on the
+#[allow(clippy::too_many_lines)] // why: one end-to-end KB contract scenario
+/// note: Provider journal contract (LIFE-3): owned write/read/settle seam on the
 /// service — monotonic sequences, settlement that never downgrades a terminal
 /// row, and read-only access that may read but never write the journal.
 #[tokio::test]
@@ -662,7 +663,7 @@ async fn provider_journal_contract_write_read_settle() {
         "unknown ids stay None, never a fabricated record"
     );
 
-    // op_b reaches a terminal state; settlement must not downgrade it.
+    // why: op_b reaches a terminal state; settlement must not downgrade it.
     fx.core
         .journal_provider_operation(
             &fx.principal,
@@ -697,7 +698,7 @@ async fn provider_journal_contract_write_read_settle() {
         "settlement is idempotent"
     );
 
-    // Read-only access may read the journal but never write or settle it.
+    // why: Read-only access may read the journal but never write or settle it.
     let ro = CoreService::open(CoreOpenOptions {
         user_home: fx.tmp.path().to_path_buf(),
         access: CoreAccess::ReadOnly,
@@ -732,7 +733,7 @@ async fn provider_journal_contract_write_read_settle() {
     assert!(matches!(err, CoreError::Forbidden { .. }));
 }
 
-/// Settlement admission contract: a service that stayed open across an
+/// note: Settlement admission contract: a service that stayed open across an
 /// on-disk Creator/workspace selection change must refuse to settle and must
 /// leave the stale workspace's journal untouched.
 #[tokio::test]
@@ -752,7 +753,7 @@ async fn provider_journal_contract_settle_rejects_stale_selection() {
         .await
         .unwrap();
 
-    // Active selection moves to another creator on disk; the service is not
+    // note: Active selection moves to another creator on disk; the service is not
     // reopened, so its bound context is stale for every domain write.
     let nexus_home = fx.tmp.path().join(".nexus42");
     std::fs::write(
@@ -767,7 +768,7 @@ async fn provider_journal_contract_settle_rejects_stale_selection() {
         "settlement after a selection change must be rejected"
     );
 
-    // No side effects: the stale workspace's orphan is still running.
+    // note: No side effects: the stale workspace's orphan is still running.
     let pool = read_only_pool(fx.tmp.path()).await;
     let status: String = sqlx::query_scalar(
         "SELECT status FROM js_provider_operation_journal WHERE operation_id = 'op_stale'",
@@ -778,7 +779,7 @@ async fn provider_journal_contract_settle_rejects_stale_selection() {
     assert_eq!(status, "running", "stale workspace journal is untouched");
 }
 
-// ── v1.191 P1 T7: WorldSheet governance (durable §3) ────────────────────
+// note: ── v1.191 P1 T7: WorldSheet governance (durable §3) ────────────────────
 //
 // A WorldSheet link is a reverse reference: an entry linked as a sheet must
 // stay a live, World-owned, **shared** `character` KE of the same World. Both
@@ -859,7 +860,7 @@ fn private_pair(holder: &str) -> KnowledgeGovernance {
     }
 }
 
-/// A Creator with its holder registry row, two Worlds, a bound Character and a
+/// note: A Creator with its holder registry row, two Worlds, a bound Character and a
 /// second owned Character with no binding to `SHEET_WORLD`.
 async fn setup_sheet_fixture() -> SheetFixture {
     let common::TestHome {
@@ -901,7 +902,7 @@ async fn setup_sheet_fixture() -> SheetFixture {
         )
         .await
         .unwrap();
-        // The linkable sheet: a live, World-owned, shared `character` entry.
+        // note: The linkable sheet: a live, World-owned, shared `character` entry.
         seed_kb(
             &pool,
             SHEET_ID,
@@ -938,14 +939,14 @@ async fn setup_sheet_fixture() -> SheetFixture {
     }
 }
 
-#[allow(clippy::too_many_lines)] // one both-directions journey over the sheet guard
+#[allow(clippy::too_many_lines)] // why: one both-directions journey over the sheet guard
 #[tokio::test]
 async fn v1191_world_sheet_governance_rejects_both_directions() {
     let fx = setup_sheet_fixture().await;
     let pool = sheet_pool(&fx).await;
     let holder = nexus_local_db::character_holder_entry_id(&fx.character_id);
 
-    // Forward: the shared sheet links.
+    // note: Forward: the shared sheet links.
     let binding = nexus_local_db::update_actor_world_binding(
         &pool,
         CREATOR,
@@ -958,7 +959,7 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     .unwrap();
     assert_eq!(binding.world_sheet_entry_id.as_deref(), Some(SHEET_ID));
 
-    // Reverse (governance): privatizing the linked sheet refuses
+    // note: Reverse (governance): privatizing the linked sheet refuses
     // `invalid_world_sheet` with zero mutation — the pair stays null, the
     // World revision stays put and the link is never silently dropped.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
@@ -988,7 +989,7 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
         Some(SHEET_ID)
     );
 
-    // Reverse (status): the soft delete is a status change with the same
+    // note: Reverse (status): the soft delete is a status change with the same
     // refusal on the ordinary store lane.
     let store = SqliteKbStore::new(pool.clone());
     let mut row = store.get_knowledge_entry(SHEET_ID).await.unwrap();
@@ -1010,7 +1011,7 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     ));
     assert_eq!(sheet_status(&pool, SHEET_ID).await, "confirmed");
 
-    // The unlinked sheet can be privatized, and only then does the forward
+    // why: The unlinked sheet can be privatized, and only then does the forward
     // rule refuse a new link: the same predicate in both directions.
     let cleared = nexus_local_db::update_actor_world_binding(
         &pool,
@@ -1066,7 +1067,7 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     pool.close().await;
 }
 
-/// Regression (L2 C2): a patch that merely re-states stored values is a no-op
+/// note: Regression (L2 C2): a patch that merely re-states stored values is a no-op
 /// for **both** revisions. The no-op decision is made on the materialised
 /// post-patch content (not on request-field presence) plus the resolved
 /// governance pair, and it short-circuits before any CAS.
@@ -1075,7 +1076,7 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
     let fx = setup_sheet_fixture().await;
     let pool = sheet_pool(&fx).await;
 
-    // The stored row is `Sheet` (body `{}`, revision 0, shared). Re-stating the
+    // note: The stored row is `Sheet` (body `{}`, revision 0, shared). Re-stating the
     // title and an explicitly `shared` audience changes nothing.
     let restated: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": SHEET_ID,
@@ -1099,7 +1100,7 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
     pool.close().await;
 }
 
-/// D8 ordering pin (v1.214 P1-S2): the authored-dialect seam validation runs
+/// note: D8 ordering pin (v1.214 P1-S2): the authored-dialect seam validation runs
 /// **before** the durable no-op short-circuit, so re-supplying an unchanged
 /// but already-drifted dialect is still refused with the seam's 422
 /// `validation_summary.errors` — never absorbed as a no-op. The row and the
@@ -1107,7 +1108,7 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
 /// dialect first, then re-submit.
 #[tokio::test]
 async fn v1214_p1s2_drifted_dialect_restate_is_still_a_seam_422() {
-    // A stored row whose authored dialects are already non-compliant. The
+    // note: A stored row whose authored dialects are already non-compliant. The
     // request below re-states this value unchanged, so the materialised
     // content is identical — only the seam stands between it and a no-op.
     const DRIFT_ID: &str = "kb_drift";
@@ -1147,7 +1148,7 @@ async fn v1214_p1s2_drifted_dialect_restate_is_still_a_seam_422() {
         CoreError::WorldKbValidation(payload) => payload.validation_summary.errors,
         other => panic!("expected the seam's 422 payload, got {other:?}"),
     };
-    // The patch's `modules` map is a HashMap, so the seam's own error order is
+    // why: The patch's `modules` map is a HashMap, so the seam's own error order is
     // not part of the contract — only the per-dialect message set is.
     errors.sort();
     assert_eq!(
@@ -1211,7 +1212,7 @@ async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
         "the canvas create authored the resolved governance pair"
     );
 
-    // A Character with no binding to this World is not a permitted audience.
+    // note: A Character with no binding to this World is not a permitted audience.
     let unbound: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_4d222222222222222222222222222222",
         "expected_version": 0,
@@ -1230,7 +1231,7 @@ async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
         .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), unbound)
         .await
         .unwrap_err();
-    // The permission refusal comes from the in-transaction resolution, so it
+    // note: The permission refusal comes from the in-transaction resolution, so it
     // keeps the actor-input family (a malformed id would be
     // `InvalidInput { field: "patch.audience" }` from the wire mapping).
     assert!(matches!(err, CoreError::ActorInput(_)), "got {err:?}");
@@ -1244,7 +1245,7 @@ async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
     pool.close().await;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// note: ═══════════════════════════════════════════════════════════════════════════
 // MIGRATED (daemon `world_kb_patch.rs` retirement, v1.193 P2-T3)
 //
 // The retired fixture drove these through the `world_kb` HTTP handlers. The
@@ -1283,13 +1284,13 @@ async fn seed_kb_row(
     .unwrap();
 }
 
-/// Entity create/update conventions (migrated from `world_kb_patch.rs`):
+/// note: Entity create/update conventions (migrated from `world_kb_patch.rs`):
 /// create-on-absent lands at revision 1 with the body round-tripped, an
 /// update shaped against an absent row conflicts at 0, a create shaped against
 /// an existing row conflicts at the stored revision, malformed ids and a
 /// missing required field are validation refusals, and a soft-deleted row is
 /// terminal — never a create.
-#[allow(clippy::too_many_lines)] // one entity create/update convention matrix
+#[allow(clippy::too_many_lines)] // why: one entity create/update convention matrix
 #[tokio::test]
 async fn retained_world_kb_entity_create_update_conventions() {
     let fx = setup().await;
@@ -1297,7 +1298,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
     let pool_ro = read_only_pool(fx.tmp.path()).await;
     let entity_id = "kb_9f8e7d6c5b4a39281726354453627180";
 
-    // Create-on-absent: revision 1, provisional status, era body verbatim.
+    // note: Create-on-absent: revision 1, provisional status, era body verbatim.
     let create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": entity_id,
         "expected_version": 0,
@@ -1334,7 +1335,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(stored.revision, Some(1));
     assert_eq!(stored.status, "provisional");
 
-    // Update-on-absent: client staleness is a conflict at version 0, never a
+    // why: Update-on-absent: client staleness is a conflict at version 0, never a
     // silent create.
     let update_absent: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_ghost",
@@ -1353,7 +1354,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(details.current_version, 0);
     assert_eq!(details.entity_id, "kb_ghost");
 
-    // Create shaped against an existing row: the same conflict, reporting the
+    // note: Create shaped against an existing row: the same conflict, reporting the
     // stored revision.
     let create_existing: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_cas",
@@ -1372,7 +1373,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(details.current_version, 2, "kb_cas is stored at revision 2");
     assert_eq!(details.entity_id, "kb_cas");
 
-    // Malformed client-minted ids never reach storage.
+    // why: Malformed client-minted ids never reach storage.
     for malformed in [
         "entity_123",
         "kb_",
@@ -1402,7 +1403,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
             .unwrap();
     assert_eq!(written, 0, "no malformed id wrote a row");
 
-    // Create required fields: a title and a block type are both mandatory.
+    // note: Create required fields: a title and a block type are both mandatory.
     for patch in [
         serde_json::json!({"block_type": "era"}),
         serde_json::json!({"title": "No Type"}),
@@ -1424,7 +1425,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
         );
     }
 
-    // A foreign World is refused before any entity read, create intent
+    // note: A foreign World is refused before any entity read, create intent
     // included.
     let foreign_create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_other_new",
@@ -1439,7 +1440,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
-    // A soft-deleted row is Found, not absent: a create-shaped request hits
+    // note: A soft-deleted row is Found, not absent: a create-shaped request hits
     // the terminal guard and writes nothing.
     let deleted_create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_dead",
@@ -1458,7 +1459,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(dead.revision, Some(1));
     assert_eq!(dead.canonical_name, "Dead");
 
-    // The authoring audience moves under the same CAS: an author-only patch
+    // why: The authoring audience moves under the same CAS: an author-only patch
     // authors the resolved pair, and an explicit shared patch clears it.
     let holder = nexus_local_db::creator_holder_entry_id(CREATOR);
     let private: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
@@ -1479,7 +1480,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
         authored_wire["disclosure"],
         serde_json::json!("owner-private")
     );
-    // The governance half of the authoring transaction owns its own bump, so
+    // note: The governance half of the authoring transaction owns its own bump, so
     // the next CAS base is the STORED revision, not the response's.
     let stored_version: i64 = sqlx::query_scalar(
         "SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?",
@@ -1513,7 +1514,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
     .unwrap();
     assert_eq!(stored_pair, (None, None), "the clear is durable");
 
-    // Body attributes outside spoke's typed value slot (null / array / object)
+    // note: Body attributes outside spoke's typed value slot (null / array / object)
     // survive a title-only patch exactly.
     seed_kb_row(
         &pool,
@@ -1555,14 +1556,14 @@ async fn retained_world_kb_entity_create_update_conventions() {
     let () = pool_ro.close().await;
 }
 
-/// Module-dialect semantics and the graph projection (migrated from
+/// note: Module-dialect semantics and the graph projection (migrated from
 /// `world_kb_patch.rs` `patch_entity_modules_*`,
 /// `patch_entity_*_round_trip_on_graph_read` and
 /// `get_graph_projects_modules_from_modules_json`): a provided first-level key
 /// replaces its whole value, omission and an empty object both preserve the
 /// stored dialects, unknown keys round-trip verbatim, and the graph carries
 /// the modules — omitting the key entirely for an entity that has none.
-#[allow(clippy::too_many_lines)] // one modules/graph projection journey
+#[allow(clippy::too_many_lines)] // why: one modules/graph projection journey
 #[tokio::test]
 async fn retained_world_kb_modules_semantics_and_graph_projection() {
     let fx = setup().await;
@@ -1581,7 +1582,7 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
     )
     .await;
 
-    // A provided key replaces the WHOLE first-level value; siblings survive.
+    // note: A provided key replaces the WHOLE first-level value; siblings survive.
     let upsert: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_modular",
         "expected_version": 0,
@@ -1604,7 +1605,7 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         "an unspecified sibling key is preserved"
     );
 
-    // Omission and `{}` are both no-ops for the stored dialects.
+    // note: Omission and `{}` are both no-ops for the stored dialects.
     let mut current = patched.version;
     for patch in [
         serde_json::json!({"title": "Aria Stormwind"}),
@@ -1633,7 +1634,7 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         );
     }
 
-    // Unknown keys and array-carried values round-trip verbatim; a
+    // note: Unknown keys and array-carried values round-trip verbatim; a
     // modules-only patch is a valid edit.
     let revision: i64 =
         sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_modular'")
@@ -1665,7 +1666,7 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         Some(&serde_json::json!(["a", "b"]))
     );
 
-    // The graph read carries the same dialects, and an entity without modules
+    // note: The graph read carries the same dialects, and an entity without modules
     // omits the key entirely.
     seed_kb_row(
         &pool,
@@ -1726,7 +1727,7 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         "an entity without modules omits the key on the wire: {plain}"
     );
 
-    // The DTO boundary is closed: malformed module keys and scalar values
+    // note: The DTO boundary is closed: malformed module keys and scalar values
     // never deserialize.
     for bad in [
         serde_json::json!({"modules": {"Bad Key": {}}}),
@@ -1755,7 +1756,7 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
     assert_eq!(conforming.patch.modules.len(), 2);
 }
 
-/// V1.203 P2 T1 (DF-81): the `patch_entity` path validates the three authored
+/// note: V1.203 P2 T1 (DF-81): the `patch_entity` path validates the three authored
 /// module dialects into the frozen 422 field-prefix grammar
 /// (`modules.<dialect>[.<index>].<field>: <reason>`), leaves unknown dialect
 /// and inner keys verbatim (PD-13), and accepts the explicit-empty observers
@@ -1814,7 +1815,7 @@ async fn world_kb_contract_authored_module_dialect_validation() {
         assert_eq!(detail.validation_summary.errors, expected);
     }
 
-    // A conforming write exercises the per-dialect validators together:
+    // note: A conforming write exercises the per-dialect validators together:
     // explicit-empty observers accepted, unknown inner keys verbatim, and an
     // unrelated dialect key never gated.
     let accepted: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({

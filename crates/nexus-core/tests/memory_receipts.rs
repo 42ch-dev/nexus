@@ -12,6 +12,7 @@
 //! target drives the memory consumer only.
 //!
 //! Every scenario runs on a temp nexus home.
+// note: the rules above are the receipt channel uncertainty-resolution contract exercised below.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -65,7 +66,7 @@ fn dto<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid payload")
 }
 
-/// One assertion shape for both port channels: the success payload, or the
+/// note: One assertion shape for both port channels: the success payload, or the
 /// refusal as the wire carries it (§14.1).
 fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
     match result {
@@ -99,7 +100,7 @@ fn retry_class(body: &Value) -> &str {
         .unwrap_or_else(|| panic!("expected details.retry_class, got {body}"))
 }
 
-/// A committed receipt, as the wire sees it (§6.10).
+/// note: A committed receipt, as the wire sees it (§6.10).
 fn receipt(body: &Value) -> &Value {
     assert_eq!(
         body["status"], "committed",
@@ -108,7 +109,7 @@ fn receipt(body: &Value) -> &Value {
     body
 }
 
-/// The receipt payload of `memory.receipts.get`.
+/// note: The receipt payload of `memory.receipts.get`.
 fn read_receipt(body: &Value) -> &Value {
     let receipt = &body["receipt"];
     assert!(
@@ -159,7 +160,7 @@ fn revoke_request(key: &str, grant_id: &str, revision: u64) -> schemas::MemoryGr
     }))
 }
 
-/// A grant that stops authorizing at `expires_at` (RFC 3339, whole seconds).
+/// note: A grant that stops authorizing at `expires_at` (RFC 3339, whole seconds).
 fn grant_request_until(
     key: &str,
     capability: &str,
@@ -175,7 +176,7 @@ fn grant_request_until(
     }))
 }
 
-/// §7.1 `limits` as the provider advertises them: the retention windows the
+/// note: §7.1 `limits` as the provider advertises them: the retention windows the
 /// receipt channel must actually enforce.
 async fn retention_limits(
     provider: &LocalMemoryProvider,
@@ -208,7 +209,7 @@ async fn pending_candidates(provider: &LocalMemoryProvider, admin: &schemas::Pri
         .len()
 }
 
-/// One stored receipt row as retention left it — `(result_json, error_json,
+/// note: One stored receipt row as retention left it — `(result_json, error_json,
 /// status)` straight from `memory_receipts`. A settled row with no payload is the
 /// content-free §6.10 tombstone.
 async fn receipt_payloads(
@@ -224,7 +225,7 @@ async fn receipt_payloads(
     .expect("memory_receipts row")
 }
 
-/// How many rows the namespace still holds for that id: `1` while only the read
+/// note: How many rows the namespace still holds for that id: `1` while only the read
 /// path has looked at it, `0` once a sweep purged an expired tombstone.
 async fn receipt_rows(pool: &SqlitePool, receipt_id: &str) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM memory_receipts WHERE receipt_id = ?")
@@ -234,7 +235,7 @@ async fn receipt_rows(pool: &SqlitePool, receipt_id: &str) -> i64 {
         .expect("memory_receipts row count")
 }
 
-/// The durable §6.10 retention clock floor, as the provider persisted it.
+/// note: The durable §6.10 retention clock floor, as the provider persisted it.
 async fn persisted_clock_floor(pool: &SqlitePool) -> i64 {
     let stored: String = sqlx::query_scalar(
         "SELECT value FROM memory_provider_meta WHERE key = 'clock_floor_micros'",
@@ -245,7 +246,7 @@ async fn persisted_clock_floor(pool: &SqlitePool) -> i64 {
     stored.parse().expect("decimal clock floor")
 }
 
-/// §7.0.5/MEM-R008: a same-key same-payload capture replays the stored receipt
+/// note: §7.0.5/MEM-R008: a same-key same-payload capture replays the stored receipt
 /// verbatim — no `IDEMPOTENCY_CONFLICT`, no second candidate.
 #[tokio::test]
 async fn duplicate_capture_replays_the_identical_receipt() {
@@ -282,7 +283,7 @@ async fn duplicate_capture_replays_the_identical_receipt() {
     );
 }
 
-/// §14.3/MEM-R010: a commit whose response was lost is `OUTCOME_UNCERTAIN`, and
+/// note: §14.3/MEM-R010: a commit whose response was lost is `OUTCOME_UNCERTAIN`, and
 /// the same-key replay plus `memory.receipts.get` resolve it — the effect exists
 /// exactly once, and the receipt is content-free (MEM-R022).
 #[tokio::test]
@@ -296,7 +297,7 @@ async fn uncertain_outcome_resolves_through_the_receipt_channel() {
             .await,
     );
 
-    // The COMMIT succeeded; the response never reached the caller.
+    // why: The COMMIT succeeded; the response never reached the caller.
     provider.inject_commit_fault(true);
     let lost = wire(
         &provider
@@ -306,7 +307,7 @@ async fn uncertain_outcome_resolves_through_the_receipt_channel() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     assert_eq!(retry_class(&lost), "uncertain");
 
-    // Resolution 1 — same-key replay returns the committed receipt (§7.0.5).
+    // note: Resolution 1 — same-key replay returns the committed receipt (§7.0.5).
     let resolved = wire(
         &provider
             .capture(&admin, capture_request("k-receipt-uncertain", TEXT))
@@ -324,7 +325,7 @@ async fn uncertain_outcome_resolves_through_the_receipt_channel() {
         "the uncertain effect committed exactly once"
     );
 
-    // Resolution 2 — the receipt channel serves the same receipt (§7.28).
+    // note: Resolution 2 — the receipt channel serves the same receipt (§7.28).
     let read = wire(
         &provider
             .get_receipt(&admin, receipts_get_request(&receipt_id))
@@ -340,7 +341,7 @@ async fn uncertain_outcome_resolves_through_the_receipt_channel() {
         "receipts are content-free (MEM-R022): {read}"
     );
 
-    // MEM-R011: the read channel mutates nothing — the same read answers the same
+    // note: MEM-R011: the read channel mutates nothing — the same read answers the same
     // bytes and the candidate set is untouched.
     let again = wire(
         &provider
@@ -350,7 +351,7 @@ async fn uncertain_outcome_resolves_through_the_receipt_channel() {
     assert_eq!(read, again);
     assert_eq!(pending_candidates(&provider, &admin).await, 1);
 
-    // §7.28/MEM-R021: disclosure needs *current* authorization.
+    // note: §7.28/MEM-R021: disclosure needs *current* authorization.
     let stranger = wire(
         &provider
             .get_receipt(&principal(OTHER), receipts_get_request(&receipt_id))
@@ -370,7 +371,7 @@ async fn uncertain_outcome_resolves_through_the_receipt_channel() {
     assert_eq!(error_code(&unknown), "NOT_FOUND");
 }
 
-/// §7.28/MEM-R018 + C-104: a requester whose only grant was revoked cannot read
+/// note: §7.28/MEM-R018 + C-104: a requester whose only grant was revoked cannot read
 /// even their own receipt; a space admin still can.
 #[tokio::test]
 async fn revoked_requester_cannot_read_their_receipt() {
@@ -407,7 +408,7 @@ async fn revoked_requester_cannot_read_their_receipt() {
         .expect("receipt id")
         .to_owned();
 
-    // Before revocation the requester reads their own receipt.
+    // note: Before revocation the requester reads their own receipt.
     let before = wire(
         &provider
             .get_receipt(&other, receipts_get_request(&receipt_id))
@@ -433,7 +434,7 @@ async fn revoked_requester_cannot_read_their_receipt() {
     );
     assert_eq!(retry_class(&after), "terminal");
 
-    // The space admin's authorization is unaffected by the revocation.
+    // note: The space admin's authorization is unaffected by the revocation.
     let admin_read = wire(
         &provider
             .get_receipt(&admin, receipts_get_request(&receipt_id))
@@ -442,7 +443,7 @@ async fn revoked_requester_cannot_read_their_receipt() {
     assert_eq!(read_receipt(&admin_read), &captured);
 }
 
-/// §6.10/MEM-R021 + C-028: inside `dedup_retention_seconds` an evicted body is
+/// note: §6.10/MEM-R021 + C-028: inside `dedup_retention_seconds` an evicted body is
 /// terminal `RECEIPT_EXPIRED` (never a silent re-run); past it the key is new.
 #[tokio::test]
 async fn replay_after_receipt_eviction_is_receipt_expired_until_the_dedup_window_closes() {
@@ -471,7 +472,7 @@ async fn replay_after_receipt_eviction_is_receipt_expired_until_the_dedup_window
         .expect("receipt id")
         .to_owned();
 
-    // One second past the receipt window: the body is evicted, the tombstone lives.
+    // note: One second past the receipt window: the body is evicted, the tombstone lives.
     provider.advance_clock(receipt_retention + 1);
     let replay = wire(
         &provider
@@ -494,7 +495,7 @@ async fn replay_after_receipt_eviction_is_receipt_expired_until_the_dedup_window
     assert_eq!(error_code(&read), "RECEIPT_EXPIRED");
     assert_eq!(error_details(&read)["last_known_status"], "committed");
 
-    // Past the dedup window the namespace is new: the same key runs a fresh effect.
+    // note: Past the dedup window the namespace is new: the same key runs a fresh effect.
     provider.advance_clock(dedup_retention - receipt_retention + 1);
     let fresh = wire(
         &provider
@@ -509,7 +510,7 @@ async fn replay_after_receipt_eviction_is_receipt_expired_until_the_dedup_window
     );
     assert_eq!(fresh["op"], "memory.capture");
 
-    // The expired receipt is gone with its tombstone.
+    // note: The expired receipt is gone with its tombstone.
     let gone = wire(
         &provider
             .get_receipt(&admin, receipts_get_request(&receipt_id))
@@ -518,7 +519,7 @@ async fn replay_after_receipt_eviction_is_receipt_expired_until_the_dedup_window
     assert_eq!(error_code(&gone), "NOT_FOUND");
 }
 
-/// §7.0.5: the dedup namespace binds the key to its `payload_digest`, so once the
+/// note: §7.0.5: the dedup namespace binds the key to its `payload_digest`, so once the
 /// body is evicted the same payload is still a terminal replay of the recorded
 /// outcome while a different payload is a conflict — never "expired", and never
 /// the prior operation's status reported for a different request.
@@ -579,7 +580,7 @@ async fn evicted_receipt_separates_a_replay_from_a_different_payload() {
     );
 }
 
-/// §6.10/MEM-R021: retention is physical. A mutating transaction evicts every
+/// note: §6.10/MEM-R021: retention is physical. A mutating transaction evicts every
 /// expired body — keyless `memory.subjects.ensure` receipts included — and later
 /// drops the tombstone rows, without waiting for a probe of the same key. An
 /// evicted body is never restored, even if the provider clock moves backwards.
@@ -613,7 +614,7 @@ async fn receipt_retention_evicts_bodies_and_purges_tombstones() {
         .await
         .unwrap();
 
-    // Inside the receipt window both bodies are stored as committed receipts.
+    // note: Inside the receipt window both bodies are stored as committed receipts.
     for id in [&keyless_id, &receipt_id] {
         let (result, error, status) = receipt_payloads(&pool, id).await;
         assert!(result.is_some(), "a retained receipt serves its body: {id}");
@@ -621,7 +622,7 @@ async fn receipt_retention_evicts_bodies_and_purges_tombstones() {
         assert_eq!(status, "committed");
     }
 
-    // One second past the receipt window, an *unrelated* mutation reclaims both
+    // note: One second past the receipt window, an *unrelated* mutation reclaims both
     // bodies: eviction does not need a probe of the same key, and a keyless
     // ensure receipt is reclaimed like any other. The receipt that mutation
     // writes itself stays intact — the sweep only touches expired rows.
@@ -652,7 +653,7 @@ async fn receipt_retention_evicts_bodies_and_purges_tombstones() {
         "a receipt inside its window keeps its body"
     );
 
-    // The namespace still binds the key, and the evicted body stays evicted when
+    // note: The namespace still binds the key, and the evicted body stays evicted when
     // the clock is moved back to the receipt's own creation time. (The provider
     // clock is monotone, so this move cannot lower the verdict; the read-only
     // path that has no swept tombstone to rely on is
@@ -670,7 +671,7 @@ async fn receipt_retention_evicts_bodies_and_purges_tombstones() {
     );
     assert_eq!(error_details(&read)["last_known_status"], "committed");
 
-    // Past the dedup window the tombstone rows themselves are dropped.
+    // note: Past the dedup window the tombstone rows themselves are dropped.
     provider.advance_clock(dedup_retention + 1);
     wire(
         &provider
@@ -699,7 +700,7 @@ async fn receipt_retention_evicts_bodies_and_purges_tombstones() {
     );
 }
 
-/// §7.28/MEM-R018: the authorization clock is read after the read holds its
+/// note: §7.28/MEM-R018: the authorization clock is read after the read holds its
 /// connection, so a grant that expires while `memory.receipts.get` waits in the
 /// pool queue cannot authorize disclosure.
 #[tokio::test]
@@ -735,7 +736,7 @@ async fn receipt_authorization_is_evaluated_after_the_connection_wait() {
         .expect("receipt id")
         .to_owned();
 
-    // While the grant is live the requester reads their own receipt.
+    // note: While the grant is live the requester reads their own receipt.
     let live = wire(
         &provider
             .get_receipt(&other, receipts_get_request(&receipt_id))
@@ -743,7 +744,7 @@ async fn receipt_authorization_is_evaluated_after_the_connection_wait() {
     );
     assert_eq!(read_receipt(&live), &captured);
 
-    // Park the read once it holds its connection; once it reports that it is
+    // note: Park the read once it holds its connection; once it reports that it is
     // parked, the grant expires while it waits. A clock sampled before the wait
     // would still admit the disclosure.
     let entered = Arc::new(tokio::sync::Notify::new());
@@ -764,7 +765,7 @@ async fn receipt_authorization_is_evaluated_after_the_connection_wait() {
     );
     assert_eq!(retry_class(&refused), "terminal");
 
-    // The body is still inside its retention window: the refusal is current
+    // note: The body is still inside its retention window: the refusal is current
     // authorization, not retention.
     let admin_read = wire(
         &provider
@@ -774,7 +775,7 @@ async fn receipt_authorization_is_evaluated_after_the_connection_wait() {
     assert_eq!(read_receipt(&admin_read), &captured);
 }
 
-/// §7.28/MEM-R018: receipt existence is not enumerable without current space
+/// note: §7.28/MEM-R018: receipt existence is not enumerable without current space
 /// participation — an unrelated or revoked principal gets one refusal shape for
 /// an unknown id and for an existing one.
 #[tokio::test]
@@ -811,7 +812,7 @@ async fn receipt_existence_is_not_enumerable_without_current_participation() {
         .expect("receipt id")
         .to_owned();
 
-    // A principal with no grant in the space.
+    // note: A principal with no grant in the space.
     for id in [existing_id.as_str(), UNKNOWN_RECEIPT_ID] {
         let refused = wire(
             &provider
@@ -826,7 +827,7 @@ async fn receipt_existence_is_not_enumerable_without_current_participation() {
         assert_eq!(retry_class(&refused), "terminal");
     }
 
-    // The requester after their only grant was revoked.
+    // why: The requester after their only grant was revoked.
     wire(
         &provider
             .revoke_grant(
@@ -846,7 +847,7 @@ async fn receipt_existence_is_not_enumerable_without_current_participation() {
     }
 }
 
-/// §6.10/MEM-R021: reclamation is autonomous. The sweep commits in a transaction
+/// note: §6.10/MEM-R021: reclamation is autonomous. The sweep commits in a transaction
 /// of its own *before* the operation runs, so a replay refusal or an
 /// authorization failure — both of which drop the effect transaction — cannot
 /// roll the eviction back and leave an aged body on disk.
@@ -880,7 +881,7 @@ async fn receipt_reclamation_survives_a_refused_operation() {
         "the body starts on disk"
     );
 
-    // Age the body, then refuse the operation that reaches the sweep: the
+    // note: Age the body, then refuse the operation that reaches the sweep: the
     // same-key replay is terminal (`RECEIPT_EXPIRED`), so the effect transaction
     // that produced it never commits.
     provider.advance_clock(receipt_retention + 1);
@@ -900,7 +901,7 @@ async fn receipt_reclamation_survives_a_refused_operation() {
         "the tombstone keeps the terminal status"
     );
 
-    // The same holds when the refusal is authorization: age a fresh body past
+    // note: The same holds when the refusal is authorization: age a fresh body past
     // its window, then have a principal with no grant in the space attempt a
     // mutation.
     let second = wire(
@@ -929,7 +930,7 @@ async fn receipt_reclamation_survives_a_refused_operation() {
     );
 }
 
-/// §6.10/MEM-R021: the read path stays read-only (MEM-R011) and its verdict is
+/// note: §6.10/MEM-R021: the read path stays read-only (MEM-R011) and its verdict is
 /// still one-way. A body past its retention window is reported
 /// `RECEIPT_EXPIRED` even when no sweep has run yet, moving the provider clock
 /// backwards cannot make a later read serve it, and the next mutating entry
@@ -959,7 +960,7 @@ async fn receipt_read_expiry_is_one_way_under_a_backward_clock() {
         .await
         .unwrap();
 
-    // Age the body with reads only: nothing sweeps, so the body is still stored
+    // why: Age the body with reads only: nothing sweeps, so the body is still stored
     // and the verdict below is the read path's own.
     provider.advance_clock(receipt_retention + 1);
     let (result, _, _) = receipt_payloads(&pool, &receipt_id).await;
@@ -979,7 +980,7 @@ async fn receipt_read_expiry_is_one_way_under_a_backward_clock() {
     );
     assert_eq!(error_details(&read)["last_known_status"], "committed");
 
-    // Back to the receipt's creation instant: the expiry already reported stands.
+    // note: Back to the receipt's creation instant: the expiry already reported stands.
     provider.advance_clock(-(receipt_retention + 1));
     let again = wire(
         &provider
@@ -993,7 +994,7 @@ async fn receipt_read_expiry_is_one_way_under_a_backward_clock() {
     );
     assert_eq!(error_details(&again)["last_known_status"], "committed");
 
-    // The next mutating entry point makes the eviction physical.
+    // note: The next mutating entry point makes the eviction physical.
     wire(
         &provider
             .ensure_subject(&admin, ensure_request("sbj_after_expiry"))
@@ -1006,7 +1007,7 @@ async fn receipt_read_expiry_is_one_way_under_a_backward_clock() {
     );
 }
 
-/// §6.10/MEM-R021: the dedup window, not the persisted tombstone, decides the
+/// note: §6.10/MEM-R021: the dedup window, not the persisted tombstone, decides the
 /// answer. A tombstone left by an earlier sweep answers `RECEIPT_EXPIRED` only
 /// inside `dedup_retention_seconds`; past it the key is new again, so a
 /// read-only deployment — no sweep since — gets `NOT_FOUND` (the `RECEIPT_EXPIRED`
@@ -1036,7 +1037,7 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
         .await
         .unwrap();
 
-    // A mutation just past the receipt window evicts the body and leaves the
+    // note: A mutation just past the receipt window evicts the body and leaves the
     // content-free tombstone behind.
     provider.advance_clock(receipt_retention + 1);
     wire(
@@ -1051,7 +1052,7 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
     );
     assert_eq!(status, "committed");
 
-    // Inside the dedup window the tombstone still answers for the evicted body.
+    // note: Inside the dedup window the tombstone still answers for the evicted body.
     let read = wire(
         &provider
             .get_receipt(&admin, receipts_get_request(&receipt_id))
@@ -1060,7 +1061,7 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
     assert_eq!(error_code(&read), "RECEIPT_EXPIRED");
     assert_eq!(error_details(&read)["last_known_status"], "committed");
 
-    // Past the dedup window, reads only: the row is still there (no sweep ran)
+    // why: Past the dedup window, reads only: the row is still there (no sweep ran)
     // and the key is new again.
     provider.advance_clock(dedup_retention + 1);
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_receipts WHERE receipt_id = ?")
@@ -1082,7 +1083,7 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
         "NOT_FOUND",
         "the dedup window, not the tombstone's presence, decides: {gone}"
     );
-    // Both sides of the final read: the row it declined to answer for is still
+    // note: Both sides of the final read: the row it declined to answer for is still
     // there, so the `NOT_FOUND` came from the window, not from a read-path purge.
     assert_eq!(
         receipt_rows(&pool, &receipt_id).await,
@@ -1091,7 +1092,7 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
     );
 }
 
-/// §6.10/MEM-R021: an expiry the provider **committed** is durable. A body
+/// note: §6.10/MEM-R021: an expiry the provider **committed** is durable. A body
 /// observed past its window is evicted by the next mutating entry point; the
 /// eviction and the clock reading that decided it commit together, so a restart
 /// into a wall clock that moved backwards neither restores the body nor
@@ -1131,7 +1132,7 @@ async fn committed_expiry_eviction_survives_a_restart_under_a_backward_clock() {
         "the body starts on disk"
     );
 
-    // Age the body and observe the expiry on the read path only: reads stay
+    // why: Age the body and observe the expiry on the read path only: reads stay
     // read-only (MEM-R011), so nothing has been recorded yet and the aged body
     // is still physically there.
     provider.advance_clock(receipt_retention + 1);
@@ -1151,7 +1152,7 @@ async fn committed_expiry_eviction_survives_a_restart_under_a_backward_clock() {
         "the read path persisted nothing, so no sweep has evicted the body yet"
     );
 
-    // The next mutating entry point commits the eviction in a transaction of its
+    // note: The next mutating entry point commits the eviction in a transaction of its
     // own, so it outlives the operation and the process.
     wire(
         &provider
@@ -1164,7 +1165,7 @@ async fn committed_expiry_eviction_survives_a_restart_under_a_backward_clock() {
         "the sweep evicted the aged body"
     );
 
-    // Restart, with the wall clock back where this process started — i.e. before
+    // note: Restart, with the wall clock back where this process started — i.e. before
     // the observation above.
     drop(provider);
     let reopened = open_provider(&env).await;
@@ -1202,7 +1203,7 @@ async fn committed_expiry_eviction_survives_a_restart_under_a_backward_clock() {
     );
 }
 
-/// §6.10/MEM-R021 / compass D13 residual — **this test documents un-closed
+/// note: §6.10/MEM-R021 / compass D13 residual — **this test documents un-closed
 /// behavior, not a guarantee**. The sequence is read → drop → backward clock →
 /// reopen: the read path observes the expiry without persisting it (MEM-R011
 /// keeps it read-only) and no mutating entry point runs between that observation
@@ -1242,7 +1243,7 @@ async fn read_only_expiry_is_served_again_after_a_restart_under_a_backward_clock
         .await
         .unwrap();
 
-    // Whatever the last committed sweep wrote is all a reopen can seed from.
+    // note: Whatever the last committed sweep wrote is all a reopen can seed from.
     let floor_before = persisted_clock_floor(&pool).await;
 
     provider.advance_clock(receipt_retention + 1);
@@ -1264,7 +1265,7 @@ async fn read_only_expiry_is_served_again_after_a_restart_under_a_backward_clock
     let (result, _, _) = receipt_payloads(&pool, &receipt_id).await;
     assert!(result.is_some(), "the aged body is still on disk");
 
-    // Restart straight from the read: nothing committed the expiry, and the wall
+    // note: Restart straight from the read: nothing committed the expiry, and the wall
     // clock is back where this process started — i.e. before the observation.
     drop(provider);
     let reopened = open_provider(&env).await;
@@ -1282,7 +1283,7 @@ async fn read_only_expiry_is_served_again_after_a_restart_under_a_backward_clock
     );
 }
 
-/// §6.10/MEM-R021: the retention clock is durable. Every sweep commits the
+/// note: §6.10/MEM-R021: the retention clock is durable. Every sweep commits the
 /// reading it judged retention by, and a reopened provider seeds its clock from
 /// that row before it evaluates anything — so a wall clock that moved backwards
 /// across the restart can neither lower the floor nor re-stamp a write earlier
@@ -1297,7 +1298,7 @@ async fn restart_resumes_the_durable_retention_floor() {
         .await
         .unwrap();
 
-    // A sweep just past the receipt window commits the reading it decided at.
+    // note: A sweep just past the receipt window commits the reading it decided at.
     let aged_floor = chrono::Utc::now().timestamp_micros() + (receipt_retention + 1) * 1_000_000;
     provider.advance_clock(receipt_retention + 1);
     wire(
@@ -1317,17 +1318,17 @@ async fn restart_resumes_the_durable_retention_floor() {
             .await
             .unwrap();
 
-    // Restart with the wall clock back where this process started.
+    // note: Restart with the wall clock back where this process started.
     drop(provider);
     let reopened = open_provider(&env).await;
 
-    // The reopen sweep runs seeded: it neither lowers the floor nor rewrites it.
+    // note: The reopen sweep runs seeded: it neither lowers the floor nor rewrites it.
     assert!(
         persisted_clock_floor(&pool).await >= committed,
         "reopening never lowers the durable floor"
     );
 
-    // The reopened store evaluates at that floor instead of the wall clock that
+    // note: The reopened store evaluates at that floor instead of the wall clock that
     // moved backwards, so its write is stamped no earlier than it.
     let written = wire(
         &reopened

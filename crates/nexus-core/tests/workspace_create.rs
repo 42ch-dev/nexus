@@ -4,6 +4,7 @@
 //! derivation, exclusivity against every registered workspace, the writable
 //! probe, and a registration (`meta.json`) that is written last — so a refused
 //! or failed create leaves the home exactly as it was.
+// note: the create transaction invariants above are asserted below.
 
 use nexus_contracts::daemon_api::workspace::create_workspace_request::CreateWorkspaceRequest;
 use nexus_contracts::CoreRegisterCreatorRequest;
@@ -77,7 +78,7 @@ async fn create_derives_root_and_registers_workspace() {
         .is_file());
     assert!(std::path::Path::new(&response.state_db_path).is_file());
 
-    // Discovery sees the registration with its root and display name.
+    // note: Discovery sees the registration with its root and display name.
     let listed = svc.list_workspaces().await.expect("list");
     let item = listed
         .items
@@ -95,7 +96,7 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
-    // An existing empty directory is adopted.
+    // note: An existing empty directory is adopted.
     let adopted = user_home.join("adopted-root");
     std::fs::create_dir_all(&adopted).unwrap();
     let created = svc
@@ -109,7 +110,7 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         .expect("adopt empty dir");
     assert_eq!(created.creative_root, adopted.display().to_string());
 
-    // Finder's `.DS_Store` is not author content: a directory that only holds
+    // why: Finder's `.DS_Store` is not author content: a directory that only holds
     // it is still adopted instead of returning a confusing conflict.
     let finder = user_home.join("finder-root");
     std::fs::create_dir_all(&finder).unwrap();
@@ -128,7 +129,7 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         finder.display().to_string()
     );
 
-    // The Windows equivalents of `.DS_Store` are likewise not author content.
+    // note: The Windows equivalents of `.DS_Store` are likewise not author content.
     let explorer = user_home.join("explorer-root");
     std::fs::create_dir_all(&explorer).unwrap();
     std::fs::write(explorer.join("desktop.ini"), b"[.ShellClassInfo]").unwrap();
@@ -147,7 +148,7 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         explorer.display().to_string()
     );
 
-    // A non-empty directory is never adopted as a workspace root.
+    // why: A non-empty directory is never adopted as a workspace root.
     let foreign = user_home.join("foreign-root");
     std::fs::create_dir_all(&foreign).unwrap();
     std::fs::write(foreign.join("notes.md"), b"user content").unwrap();
@@ -164,7 +165,7 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         matches!(err, CoreError::WorkspaceConflict(_)),
         "unexpected: {err:?}"
     );
-    // No partial state: neither the operational dir nor our manifest existed.
+    // note: No partial state: neither the operational dir nor our manifest existed.
     assert!(!op_dir(&user_home, &creator_id, "foreign").exists());
     assert!(!foreign.join(".nexus42").exists());
 }
@@ -179,7 +180,7 @@ async fn create_refuses_duplicate_slug_and_claimed_root() {
         .await
         .expect("first create");
 
-    // Same slug for the same creator.
+    // note: Same slug for the same creator.
     let duplicate = svc
         .create_workspace(request(&creator_id, "novel", Some("Novel 2"), None))
         .await
@@ -189,7 +190,7 @@ async fn create_refuses_duplicate_slug_and_claimed_root() {
         "unexpected: {duplicate:?}"
     );
 
-    // A different slug cannot claim a root that is already registered.
+    // why: A different slug cannot claim a root that is already registered.
     let claimed_root = user_home.join("Nexus").join("novel");
     let claimed = svc
         .create_workspace(request(
@@ -223,7 +224,7 @@ async fn create_refuses_invalid_slug_name_and_override() {
             "slug {slug:?}: {err:?}"
         );
     }
-    // Control characters are a validation failure, not a path-safety accident.
+    // note: Control characters are a validation failure, not a path-safety accident.
     let control = svc
         .create_workspace(request(&creator_id, "a\nb", Some("Bad"), None))
         .await
@@ -237,7 +238,7 @@ async fn create_refuses_invalid_slug_name_and_override() {
         "unexpected: {control:?}"
     );
 
-    // Windows reserved device names are refused on every platform, and a
+    // note: Windows reserved device names are refused on every platform, and a
     // trailing dot would silently vanish from the directory name on Windows.
     for slug in ["con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt9"] {
         let err = svc
@@ -266,7 +267,7 @@ async fn create_refuses_invalid_slug_name_and_override() {
         "unexpected: {trailing_dot:?}"
     );
 
-    // Windows strips a trailing space from a directory name, so `"novel "`
+    // note: Windows strips a trailing space from a directory name, so `"novel "`
     // would silently name the same directory as `"novel"`.
     let trailing_space = svc
         .create_workspace(request(&creator_id, "novel ", Some("Bad"), None))
@@ -354,7 +355,7 @@ async fn create_refuses_unwritable_root() {
         "unexpected: {err:?}"
     );
     assert!(!op_dir(&user_home, &creator_id, "denied").exists());
-    // The adopted directory (pre-existing) is kept and carries no probe residue.
+    // note: The adopted directory (pre-existing) is kept and carries no probe residue.
     assert!(locked.is_dir());
     let residue = std::fs::read_dir(&locked)
         .expect("locked readable")
@@ -373,7 +374,7 @@ async fn create_probe_failure_leaves_no_directory() {
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
-    // A read-only parent makes `create_dir_all` fail before any artifact.
+    // why: A read-only parent makes `create_dir_all` fail before any artifact.
     let locked_parent = user_home.join("locked-parent");
     std::fs::create_dir_all(&locked_parent).unwrap();
     std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o555)).unwrap();
@@ -428,7 +429,7 @@ async fn create_refuses_unreadable_root() {
         .expect_err("unreadable root");
     std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    // A client-side root problem folds to input validation, never an internal fault.
+    // why: A client-side root problem folds to input validation, never an internal fault.
     assert!(
         matches!(
             err,
@@ -458,7 +459,7 @@ async fn concurrent_same_slug_creates_commit_exactly_one() {
         "unexpected: {loser:?}"
     );
 
-    // One registration, with the committed directory pair intact.
+    // note: One registration, with the committed directory pair intact.
     let listed = svc.list_workspaces().await.expect("list");
     assert_eq!(
         listed
@@ -504,7 +505,7 @@ async fn concurrent_same_root_creates_keep_one_owner() {
     assert_eq!(listed.items.len(), 1);
     let winner = &listed.items[0];
     assert_eq!(winner.creative_root, root);
-    // The loser left no operational directory behind.
+    // note: The loser left no operational directory behind.
     let loser_slug = if winner.workspace_slug == "left" {
         "right"
     } else {
@@ -517,7 +518,7 @@ async fn concurrent_same_root_creates_keep_one_owner() {
 async fn create_requires_active_creator_and_matching_creator_id() {
     let (_tmp, svc) = home();
 
-    // No active creator yet: creation is an uninitialized refusal, not a mint.
+    // note: No active creator yet: creation is an uninitialized refusal, not a mint.
     let uninitialized = svc
         .create_workspace(request(
             "ctr_local000000000000",
@@ -541,7 +542,7 @@ async fn create_requires_active_creator_and_matching_creator_id() {
         matches!(mismatched, CoreError::InvalidInput { ref field, .. } if field == "creator_id"),
         "unexpected: {mismatched:?}"
     );
-    // The active creator itself is accepted (the mismatch above created nothing).
+    // note: The active creator itself is accepted (the mismatch above created nothing).
     svc.create_workspace(request(&creator_id, "novel", Some("Novel"), None))
         .await
         .expect("active creator can create");
