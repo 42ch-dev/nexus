@@ -4,6 +4,7 @@
 //! twin for every preset (so it is the same document the fs route and the twin gate already
 //! agree on), and every identity that is not this preset's own `Embedded` source is refused
 //! instead of executing through the compiled-in tree.
+// note: the two proofs above are the two tests below.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +14,7 @@ use nexus_preset::{
     canonical_twin_json, embedded_workflow_document, load_embedded_preset, WorkflowIrError,
 };
 
-/// Suffix of one twin file: `<id>.workflow.ir.json`, the fixture convention.
+/// note: Suffix of one twin file: `<id>.workflow.ir.json`, the fixture convention.
 const TWIN_SUFFIX: &str = ".workflow.ir.json";
 
 fn preset_root() -> PathBuf {
@@ -24,7 +25,7 @@ fn twin_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("ir-twins")
 }
 
-/// Embedded preset ids (sorted): every directory under `embedded-presets/` holding a
+/// note: Embedded preset ids (sorted): every directory under `embedded-presets/` holding a
 /// `preset.yaml`.
 fn embedded_ids() -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(preset_root())
@@ -37,7 +38,7 @@ fn embedded_ids() -> Vec<String> {
     ids
 }
 
-/// The embedded route's document is the committed twin's document, for every preset.
+/// note: The embedded route's document is the committed twin's document, for every preset.
 ///
 /// Equality here is what lets an embedded run execute the constructed document: the twin
 /// gate proves the fs route and the committed bytes agree, so this proves the compiled-in
@@ -63,7 +64,7 @@ fn every_embedded_preset_constructs_its_committed_twin() {
     }
 }
 
-/// A non-embedded identity is refused: a user or system bundle must not execute through the
+/// note: A non-embedded identity is refused: a user or system bundle must not execute through the
 /// compiled-in tree, and the refusal names what was wrong.
 #[test]
 fn a_bundle_that_is_not_embedded_is_refused() {
@@ -74,7 +75,7 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         .clone()
         .expect("an embedded load carries its identity");
 
-    // A directory bundle — even one whose id collides with this embedded preset.
+    // note: A directory bundle — even one whose id collides with this embedded preset.
     loaded.source_identity = Some(PresetSourceIdentity::Directory {
         root: PathBuf::from("/tmp/not-an-embedded-bundle"),
         content_hash: [0u8; 32],
@@ -86,14 +87,14 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         "the refusal is a projection refusal: {error}"
     );
 
-    // A raw-YAML load carries no identity at all.
+    // note: A raw-YAML load carries no identity at all.
     loaded.source_identity = None;
     assert!(
         embedded_workflow_document(&loaded).is_err(),
         "a load with no source identity is refused"
     );
 
-    // An embedded identity naming a different preset.
+    // note: An embedded identity naming a different preset.
     loaded.source_identity = Some(PresetSourceIdentity::Embedded {
         preset_id: "novel-write".to_string(),
         content_hash: [0u8; 32],
@@ -105,7 +106,7 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         "the refusal names the mismatch: {error}"
     );
 
-    // The unmodified identity still constructs, so the refusals above are about
+    // why: The unmodified identity still constructs, so the refusals above are about
     // the identity and not about the manifest.
     loaded.source_identity = Some(embedded_identity);
     embedded_workflow_document(&loaded).expect("the embedded identity constructs");

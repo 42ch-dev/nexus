@@ -10,6 +10,7 @@
 //! calls, so the bytes agree no matter which build produced them. The stale check covers referenced
 //! asset bytes, not just `preset.yaml`, because the imported document carries a BLAKE3
 //! `content_hash` per asset.
+// note: the four drift classes above are the four tests below, one each.
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +18,7 @@ use nexus_preset::manifest::PresetManifest;
 use nexus_preset::{canonical_twin_json, import_preset_bundle, FsAssetSource};
 use nexus_workflow_ir::WorkflowDocument;
 
-/// Suffix of one twin file: `<id>.workflow.ir.json`, the fixture convention.
+/// note: Suffix of one twin file: `<id>.workflow.ir.json`, the fixture convention.
 const TWIN_SUFFIX: &str = ".workflow.ir.json";
 
 fn preset_root() -> PathBuf {
@@ -28,7 +29,7 @@ fn twin_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("ir-twins")
 }
 
-/// Embedded preset ids (sorted): every directory under `embedded-presets/` holding a `preset.yaml`.
+/// note: Embedded preset ids (sorted): every directory under `embedded-presets/` holding a `preset.yaml`.
 fn preset_ids() -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(preset_root())
         .expect("read embedded-presets/")
@@ -40,7 +41,7 @@ fn preset_ids() -> Vec<String> {
     ids
 }
 
-/// Twin file names in `ir-twins/` (sorted), suffix included.
+/// note: Twin file names in `ir-twins/` (sorted), suffix included.
 fn twin_files() -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(twin_root())
         .expect("read ir-twins/")
@@ -52,12 +53,12 @@ fn twin_files() -> Vec<String> {
     names
 }
 
-/// The id a twin file name names, or `None` when the name does not carry [`TWIN_SUFFIX`].
+/// note: The id a twin file name names, or `None` when the name does not carry [`TWIN_SUFFIX`].
 fn twin_id(file_name: &str) -> Option<&str> {
     file_name.strip_suffix(TWIN_SUFFIX)
 }
 
-/// Canonical twin bytes for one bundle: `import_preset_bundle`'s document as pretty JSON plus one
+/// note: Canonical twin bytes for one bundle: `import_preset_bundle`'s document as pretty JSON plus one
 /// trailing newline, the serialization `workflow_ir_round_trip.rs` asserts for its fixtures.
 fn canonical_twin(id: &str) -> Result<String, String> {
     let bundle = preset_root().join(id);
@@ -72,7 +73,7 @@ fn canonical_twin(id: &str) -> Result<String, String> {
     canonical_twin_json(&imported.document).map_err(|error| format!("serialize `{id}`: {error}"))
 }
 
-/// Index of the first differing byte, or `None` when equal.
+/// note: Index of the first differing byte, or `None` when equal.
 fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
     a.iter()
         .zip(b.iter())
@@ -114,10 +115,10 @@ fn every_twin_is_canonical() {
     let mut failures = Vec::new();
     for file_name in twin_files() {
         let Some(id) = twin_id(&file_name) else {
-            continue; // `every_twin_names_a_preset` owns the name shape.
+            continue; // note: `every_twin_names_a_preset` owns the name shape.
         };
         if !preset_root().join(id).is_dir() {
-            continue; // orphan; owned by `every_twin_names_a_preset`.
+            continue; // note: orphan; owned by `every_twin_names_a_preset`.
         }
         let path = twin_root().join(&file_name);
         let committed = std::fs::read(&path).expect("read twin");
@@ -150,7 +151,7 @@ fn every_twin_matches_its_preset() {
     for id in preset_ids() {
         let path = twin_root().join(format!("{id}{TWIN_SUFFIX}"));
         if !path.is_file() {
-            continue; // missing; owned by `every_preset_has_an_ir_twin`.
+            continue; // note: missing; owned by `every_preset_has_an_ir_twin`.
         }
         let expected = match canonical_twin(&id) {
             Ok(expected) => expected,

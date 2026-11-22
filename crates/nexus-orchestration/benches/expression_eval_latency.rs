@@ -23,6 +23,7 @@
 //! it is a one-shot loader cost, not a steady-state cost).
 //!
 //! Run with: `cargo bench -p nexus-orchestration --bench expression_eval_latency`
+// note: the three regimes above are the three `bench_*` functions below.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -30,7 +31,7 @@ use std::time::Duration;
 use criterion::{criterion_group, criterion_main, Criterion};
 use nexus_preset::expr::{evaluate, parse};
 
-/// V1.58 P0 fix-wave (QC3 F-004) pattern: explicit Criterion config instead
+/// note: V1.58 P0 fix-wave (QC3 F-004) pattern: explicit Criterion config instead
 /// of the default so the bench is CI-friendly (< 15s total) while keeping
 /// the default sample size for statistical confidence.
 fn criterion_config() -> Criterion {
@@ -40,7 +41,7 @@ fn criterion_config() -> Criterion {
         .sample_size(100)
 }
 
-/// Build a representative evaluation context (camelCase + `snake_case` keys,
+/// note: Build a representative evaluation context (camelCase + `snake_case` keys,
 /// nested objects, mixed types — mirrors real `_context` shape after
 /// `build_context_json`).
 fn sample_context() -> serde_json::Value {
@@ -59,7 +60,7 @@ fn sample_context() -> serde_json::Value {
 }
 
 fn bench_simple_field_truthy(c: &mut Criterion) {
-    // Leaf fast-path: field access + truthy coercion.
+    // note: Leaf fast-path: field access + truthy coercion.
     // Target: < 1 µs.
     let expr = parse("_context.user.is_admin").expect("parse simple field");
     let ctx = sample_context();
@@ -72,7 +73,7 @@ fn bench_simple_field_truthy(c: &mut Criterion) {
 }
 
 fn bench_comparison_numeric(c: &mut Criterion) {
-    // Canonical routing condition: numeric comparison.
+    // note: Canonical routing condition: numeric comparison.
     // Target: < 5 µs.
     let expr = parse("_context.score >= 0.8").expect("parse comparison");
     let ctx = sample_context();
@@ -85,7 +86,7 @@ fn bench_comparison_numeric(c: &mut Criterion) {
 }
 
 fn bench_complex_boolean_nested(c: &mut Criterion) {
-    // 4-deep mixed boolean: exercises recursive descent + short-circuit.
+    // note: 4-deep mixed boolean: exercises recursive descent + short-circuit.
     // Target: < 10 µs.
     let expr = parse(
         "(_context.user.is_admin && _context.score >= 0.8) \

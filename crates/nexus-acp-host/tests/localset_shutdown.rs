@@ -1,4 +1,5 @@
 //! P2-T3 `LocalSet` shutdown integration: tracked tasks, bounds, control-channel bypass.
+// note: each test below pins one shutdown obligation of that contract.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -114,7 +115,7 @@ async fn concurrent_shutdowns_share_one_settlement() {
     let (e1, e2) = tokio::join!(b1.shutdown(), b2.shutdown());
     assert!(e1.is_settled(), "{e1:?}");
     assert!(e2.is_settled(), "{e2:?}");
-    // Concurrent shutdown has one settlement: the loser must not invent a
+    // why: Concurrent shutdown has one settlement: the loser must not invent a
     // confirmed one either.
     assert_eq!(e1.is_settled(), e2.is_settled());
 }
@@ -268,7 +269,7 @@ async fn deferred_work_never_exceeds_active_cap() {
 
 #[tokio::test]
 async fn pre_poll_cancel_releases_active_slot_once() {
-    // Cancel after TaskSlot install but before first poll: active slot released once.
+    // note: Cancel after TaskSlot install but before first poll: active slot released once.
     let bridge = LocalSetBridge::new();
     let b = bridge.clone();
     let exec = tokio::spawn(async move {
@@ -291,7 +292,7 @@ async fn pre_poll_cancel_releases_active_slot_once() {
     );
     let evidence = bridge.shutdown().await;
     assert_eq!(evidence.active_tasks, 0, "shutdown evidence: {evidence:?}");
-    // 32 admissions must succeed after the slot is released.
+    // note: 32 admissions must succeed after the slot is released.
     let mut handles = Vec::new();
     for _ in 0..MAX_ACTIVE_TASKS {
         let br = bridge.clone();
@@ -307,7 +308,7 @@ async fn pre_poll_cancel_releases_active_slot_once() {
 
 #[tokio::test]
 async fn control_work_bypasses_saturated_queue() {
-    // Cancellation/teardown work bypasses a saturated work queue, and a
+    // note: Cancellation/teardown work bypasses a saturated work queue, and a
     // draining bridge refuses new work while the close snapshot reports what
     // it drained.
     let bridge = LocalSetBridge::new();
@@ -345,7 +346,7 @@ async fn control_work_bypasses_saturated_queue() {
     }
     assert_eq!(bridge.stats().pending_requests, MAX_PENDING_REQUESTS);
 
-    // The queue is full; control work must still run.
+    // why: The queue is full; control work must still run.
     let control_ran = Arc::new(AtomicUsize::new(0));
     let control_flag = control_ran.clone();
     bridge
@@ -388,7 +389,7 @@ async fn control_work_bypasses_saturated_queue() {
 
 #[tokio::test]
 async fn pending_queue_fills_independently_of_active_cap() {
-    // Active cap is independent of pending queue (pending16 vs active32).
+    // note: Active cap is independent of pending queue (pending16 vs active32).
     let bridge = LocalSetBridge::new();
     let bridge_ref = bridge.clone();
     let mut blockers = Vec::new();
@@ -445,7 +446,7 @@ async fn pending_queue_fills_independently_of_active_cap() {
 
 #[tokio::test]
 async fn bounded_join_retains_handle_for_a_later_join() {
-    // The bounded join MUST NOT drop the runtime thread `JoinHandle`. The
+    // why: The bounded join MUST NOT drop the runtime thread `JoinHandle`. The
     // task below blocks the LocalSet *thread* synchronously, so the join
     // cannot settle inside the budget; the handle is retained and stays
     // joinable, and a later join succeeds once the thread finishes.
@@ -455,7 +456,7 @@ async fn bounded_join_retains_handle_for_a_later_join() {
         let _ = bridge_ref
             .execute(4, || {
                 Box::pin(async {
-                    // Synchronous sleep inside poll: the LocalSet thread
+                    // why: Synchronous sleep inside poll: the LocalSet thread
                     // cannot service the queued shutdown control message.
                     std::thread::sleep(Duration::from_millis(700));
                     1
@@ -466,7 +467,7 @@ async fn bounded_join_retains_handle_for_a_later_join() {
     tokio::time::sleep(Duration::from_millis(120)).await;
     let evidence = tokio::task::spawn_blocking({
         let bridge = bridge.clone();
-        // Exhausted join budget: the deadline is already in the past.
+        // why: Exhausted join budget: the deadline is already in the past.
         move || bridge.shutdown_sync_with_deadline(std::time::Instant::now())
     })
     .await
@@ -483,7 +484,7 @@ async fn bounded_join_retains_handle_for_a_later_join() {
         bridge.has_retained_runtime_thread(),
         "the runtime thread handle must be retained, never detached"
     );
-    // A later read must not mistake "the handle was taken" for "the thread
+    // why: A later read must not mistake "the handle was taken" for "the thread
     // was joined": the retained handle keeps the bridge unsettled.
     assert!(
         !evidence.is_settled(),
@@ -506,7 +507,7 @@ async fn bounded_join_retains_handle_for_a_later_join() {
     );
     blocker.abort();
     let _ = blocker.await;
-    // Later join succeeds: the LocalSet thread finishes its blocking work,
+    // why: Later join succeeds: the LocalSet thread finishes its blocking work,
     // then processes the queued shutdown and exits.
     let joined = tokio::task::spawn_blocking(move || handle.join().is_ok())
         .await

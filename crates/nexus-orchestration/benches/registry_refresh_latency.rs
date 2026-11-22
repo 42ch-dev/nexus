@@ -32,6 +32,7 @@
 //! (QC3 F-004 deferral note).
 //!
 //! Run with: `cargo bench -p nexus-orchestration --bench registry_refresh_latency`
+// note: the three regimes above are the three `bench_*` functions below.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -40,7 +41,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use nexus_capability::builtins::registry::{CdnConfig, RegistryRefresh, DEFAULT_MAX_CDN_BODY_SIZE};
 use nexus_capability::Capability;
 
-/// V1.58 P0 fix-wave (QC3 F-004): explicit Criterion config instead of the
+/// note: V1.58 P0 fix-wave (QC3 F-004): explicit Criterion config instead of the
 /// default. The default Criterion config is 3s warm-up / 5s measurement /
 /// 100 samples; we tighten warm-up and measurement to keep the bench
 /// runnable in CI under 15s total while keeping the default sample size for
@@ -54,7 +55,7 @@ fn criterion_config() -> Criterion {
 }
 
 fn bench_synthetic_cold(c: &mut Criterion) {
-    // Cold path: construct + run. Measures allocation + first-call overhead.
+    // note: Cold path: construct + run. Measures allocation + first-call overhead.
     // Target: < 5 ms (adds capability allocation + LazyLock init).
     c.bench_function("synthetic_cold_construct_and_run", |b| {
         b.iter(|| {
@@ -68,7 +69,7 @@ fn bench_synthetic_cold(c: &mut Criterion) {
 }
 
 fn bench_synthetic_warm(c: &mut Criterion) {
-    // Warm path: reuse a pre-constructed capability. Measures steady-state
+    // note: Warm path: reuse a pre-constructed capability. Measures steady-state
     // run() cost (embedded snapshot + metrics + tracing).
     // Target: < 1 ms (V1.58 spec primary latency target).
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -82,7 +83,7 @@ fn bench_synthetic_warm(c: &mut Criterion) {
 }
 
 fn bench_fallback_warm(c: &mut Criterion) {
-    // Fallback path (V1.58 P0 fix-wave — QC3 F-004): CDN configured with a
+    // note: Fallback path (V1.58 P0 fix-wave — QC3 F-004): CDN configured with a
     // literal blocked IP. `fetch_from_cdn` fails fast at `is_blocked_ip`
     // (the host is a literal loopback address; `tokio::net::lookup_host`
     // returns immediately without DNS; the retry loop is never entered

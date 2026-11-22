@@ -6,6 +6,7 @@
 //! defaults and skipped fields of the source, so a typed comparison cannot say the export
 //! reproduced the author's file. Presence is part of the contract, and only the value
 //! representation keeps it.
+// note: the value comparison above is what this file's two gates assert.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ fn preset_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("embedded-presets")
 }
 
-/// Embedded preset ids (sorted): every directory under `embedded-presets/` holding a `preset.yaml`.
+/// note: Embedded preset ids (sorted): every directory under `embedded-presets/` holding a `preset.yaml`.
 fn preset_ids() -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(preset_root())
         .expect("read embedded-presets/")
@@ -30,7 +31,7 @@ fn preset_ids() -> Vec<String> {
     ids
 }
 
-/// One bundle's source manifest value and its re-exported manifest value.
+/// note: One bundle's source manifest value and its re-exported manifest value.
 fn round_trip(id: &str) -> Result<(Value, Value), String> {
     let bundle = preset_root().join(id);
     let manifest_path = bundle.join("preset.yaml");
@@ -50,7 +51,7 @@ fn round_trip(id: &str) -> Result<(Value, Value), String> {
     Ok((source, exported))
 }
 
-/// The contract's named fields of one manifest value, keyed by YAML path. An absent field has no
+/// note: The contract's named fields of one manifest value, keyed by YAML path. An absent field has no
 /// entry, so an export that drops or invents one shows up as a key-set difference.
 fn named_fields(manifest: &Value) -> BTreeMap<String, Value> {
     let mut fields = BTreeMap::new();
@@ -126,7 +127,7 @@ fn every_embedded_preset_round_trips_the_contract_fields() {
         "embedded preset(s) whose export does not reproduce their source manifest:\n{}",
         failures.join("\n")
     );
-    // A corpus change that dropped both shapes would let this gate pass while comparing nothing
+    // why: A corpus change that dropped both shapes would let this gate pass while comparing nothing
     // that ever failed; the two counts keep each half of the contract exercised.
     assert!(
         world_bound > 0,
@@ -138,7 +139,7 @@ fn every_embedded_preset_round_trips_the_contract_fields() {
     );
 }
 
-/// Asset source for [`payload_shapes_round_trip`]: the shape fixture owns no files, so every
+/// note: Asset source for [`payload_shapes_round_trip`]: the shape fixture owns no files, so every
 /// referenced template reads as empty bytes.
 struct EmptyAssets;
 
@@ -148,7 +149,7 @@ impl AssetSource for EmptyAssets {
     }
 }
 
-/// Payload presence gate: the five `context_update` payload shapes the embedded corpus does not
+/// note: Payload presence gate: the five `context_update` payload shapes the embedded corpus does not
 /// carry — absent body, empty string, non-empty patch, explicit `null` patch, and a `struct_merge`
 /// with no `patch` key at all — reach the export unchanged.
 ///
@@ -208,7 +209,7 @@ states:
         "context_update payload shapes changed through the IR"
     );
 
-    // The equality above only proves as much as the fixture carries; name the four shapes so a
+    // why: The equality above only proves as much as the fixture carries; name the four shapes so a
     // fixture edit cannot quietly drop the one that regressed.
     let op = |state: &str| {
         source[&format!("states.{state}.context_update")]
@@ -230,7 +231,7 @@ states:
         Some(&Value::Null),
         "explicit null patch"
     );
-    // The template-driven form: no `patch` key in the source, so none in the export. An
+    // why: The template-driven form: no `patch` key in the source, so none in the export. An
     // unconditional reverse map would invent `patch: null` here and the equality above would
     // still pass if the fixture echoed that null back.
     assert_eq!(
