@@ -246,7 +246,7 @@ pub struct WorkPatch {
 
 /// note: Create a new Work (simple, non-transactional).
 ///
-/// Prefer [`create_work_tx`] when idempotency is required (single tx
+/// Prefer [`create_work_atomic`] when idempotency is required (single tx
 /// wrapping check + create + idempotency record).
 ///
 /// # Errors
@@ -546,8 +546,8 @@ pub async fn count_works(
 /// note: List and count Works in a shared transaction for consistent pagination metadata.
 ///
 /// Runs both `SELECT ... FROM works` and `SELECT COUNT(*) FROM works` inside a
-/// single `BEGIN IMMEDIATE` / `COMMIT` so that concurrent writes cannot cause the
-/// `total` to diverge from the actual row set.
+/// single transaction (`pool.begin()`, deferred `BEGIN`) so the page and its
+/// `total` come from one snapshot of the table.
 ///
 /// # Errors
 ///
@@ -912,8 +912,9 @@ pub async fn patch_work(
 /// Same logic as [`patch_work`] but uses a caller-provided transaction
 /// so the patch can be atomic with a prior `seed_chapters_tx` call.
 ///
-/// Returns `Ok(true)` if at least one column changed, `Ok(false)` if
-/// the patch was a no-op (all fields matched existing values).
+/// Returns `Ok(false)` only when `patch` carries no field at all; otherwise the
+/// UPDATE runs and the result is `Ok(true)`, whether or not a row matched and
+/// whether or not the bound values differed from the stored ones.
 ///
 /// Note: does NOT return the updated `WorkRecord` because reading back
 /// inside the same transaction is complex; callers can read after commit.
@@ -1291,9 +1292,10 @@ pub async fn has_active_fl_e_schedule(
 
 /// Atomically advance a Work's FL-E stage (V1.34, R-FL-E-07 TOCTOU fix).
 ///
-/// Wraps the read-check-update sequence in a single `BEGIN IMMEDIATE` / `COMMIT`
-/// transaction so that concurrent `stage advance` calls cannot race past each
-/// other (spec §2 invariant #4, spec §3.3).
+/// Wraps the read-check-update sequence in a single transaction
+/// (`pool.begin()` — a deferred `BEGIN`, the write lock is taken by the UPDATE)
+/// so the state read, the active-stage recheck and the UPDATE belong to one
+/// snapshot of the row (spec §2 invariant #4, spec §3.3).
 ///
 /// # Errors
 ///
@@ -1327,8 +1329,8 @@ pub async fn advance_work_stage_atomic(
         key: format!("works/{work_id}"),
     })?;
 
-    // note: step 2 rejects a second active FL-E stage inside the transaction,
-    // which keeps the check TOCTOU-safe.
+    // note: step 2 rejects a second active FL-E stage using the row read inside
+    // this transaction, not a pre-transaction read.
     if current.stage_status == "active" && target_status == "active" {
         return Err(LocalDbError::ConstraintViolation {
             table: "works".to_string(),
