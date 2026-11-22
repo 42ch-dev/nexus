@@ -1,5 +1,5 @@
 /**
- * Actor family HTTP surface (P5-T2): Character identity and bindings (P2-T1
+ * why: Actor family HTTP surface (P5-T2): Character identity and bindings (P2-T1
  * authority), the admitted-actor KnowledgeView, and the Creator home family.
  * Every operation is a thin translation over the native family surface — the
  * stored Principal is minted natively, ownership/CAS/effects stay in the
@@ -157,7 +157,7 @@ export async function removeCharacterBinding(
   );
 }
 
-// ── Actor KnowledgeView ─────────────────────────────────────────────────────
+// note: Actor KnowledgeView
 
 /** `POST /v1/daemon/actor-knowledge/view` — the admitted-actor context read. */
 export function actorKnowledgeView(service: ServiceCore, request: ViewRequest) {
@@ -181,7 +181,7 @@ function assertKnowledgeAudienceKeys(audience: unknown): void {
   const allowed = Object.hasOwn(KNOWLEDGE_AUDIENCE_KEYS, kind)
     ? KNOWLEDGE_AUDIENCE_KEYS[kind]
     : undefined;
-  // An unlisted kind is failed closed rather than skipped: the allowmap is a
+  // safety: An unlisted kind is failed closed rather than skipped — the allowmap is a
   // string-keyed mirror of the generated union, so a silent skip would let a
   // future arm cross this boundary with only the Rust gate behind it.
   if (allowed === undefined) {
@@ -262,7 +262,7 @@ export async function deleteKnowledgeEntry(
   );
 }
 
-// ── Creator identity family (Tier-1: no active-creator requirement) ────────
+// note: Creator identity family (Tier-1: no active-creator requirement)
 
 /** `GET /v1/daemon/creators`. */
 export function listCreators(service: ServiceCore, searchParams: URLSearchParams) {
@@ -320,7 +320,7 @@ export function logoutCreator(service: ServiceCore, segment: string) {
   return service.core.logoutCreator(creatorId);
 }
 
-/** Family list clamp shared with the native surface (1..=100; absent → native default). */
+/** note: Family list clamp shared with the native surface (1..=100; absent → native default). */
 function boundedLimit(searchParams: URLSearchParams): number | undefined {
   return parseOptionalInteger(searchParams, 'limit', { min: 1, max: 100 });
 }

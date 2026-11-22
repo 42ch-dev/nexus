@@ -1,5 +1,5 @@
 /**
- * Work family HTTP surface (P5-T1): Work lifecycle, authoring pool and
+ * note: Work family HTTP surface (P5-T1): Work lifecycle, authoring pool and
  * inspiration, durable selection, completion-lock release and chapter
  * reconcile (P1-T1 authority). Every operation is a thin translation over the
  * native family surface — the stored Principal is minted natively, ownership,
@@ -408,7 +408,7 @@ export const WORK_ROUTES: readonly DomainRoute[] = [
   },
 ];
 
-/** `ListWorksQuery` from query-string parameters (status/sort are opaque). */
+/** note: `ListWorksQuery` from query-string parameters (status/sort are opaque). */
 function worksListQuery(search: URLSearchParams): ListWorksQuery {
   const status = search.get('status');
   const intake_status = search.get('intake_status');

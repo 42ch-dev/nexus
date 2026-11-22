@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
 
 /**
- * v1.210 P2 T2 wire-layer proof (compass D7-A). The three Work patch routes —
+ * note: v1.210 P2 T2 wire-layer proof (compass D7-A). The three Work patch routes —
  * `outline/patch`, `chapters/{n}/patch`, `timeline/patch` — refuse a Work whose
  * `work_ref` and `story_ref` are both NULL with HTTP 400 `invalid_input` and the
  * stable discriminator `error.details.field = "work_ref_missing"`, never a 500.
@@ -77,7 +77,7 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
       stdio: 'inherit',
     });
     assert.equal(build.status, 0);
-    // The patch routes resolve the active workspace root before the ref seam,
+    // why: the patch routes resolve the active workspace root before the ref seam,
     // so register a real creative root (the refusal itself fabricates no path).
     creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-ref-less-creative-'));
     const workspaceDir = join(
@@ -108,13 +108,16 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
     assert.equal(created.status, 201, created.text);
     const workId = created.payload.work_id;
 
-    // The read side still degrades (v1.209 P3): the 400 below is a write-path
+    // note: the read side still degrades (v1.209 P3): the 400 below is a write-path
     // refusal, not a missing/blocked route.
     const read = await jsonFetch(`${baseUrl}/v1/daemon/works/${workId}/outline`);
     assert.equal(read.status, 200, read.text);
     assert.equal(read.payload.outline_revision, 0);
 
-    /** @type {Array<[string, string, object]>} */
+    /**
+     * note: the three patch label/path/body cases below.
+     * @type {Array<[string, string, object]>}
+     */
     const cases = [
       [
         'outline/patch',
@@ -163,7 +166,7 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
     assert.equal(created.status, 201, created.text);
     const workId = created.payload.work_id;
 
-    // Seed the chapter SSOT so `move_chapter` resolves a real chapter — the
+    // why: seed the chapter SSOT so `move_chapter` resolves a real chapter — the
     // control proves the route keeps working once a ref exists.
     const storiesDir = join(creativeRoot, 'Works', workRef, 'Stories');
     mkdirSync(storiesDir, { recursive: true });

@@ -38,7 +38,7 @@ type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
 export interface StoredFrame {
   id: string;
   event: string;
-  /** Serialized once; the socket writes these exact bytes (no UTF-16 slicing). */
+  /** why: Serialized once; the socket writes these exact bytes (no UTF-16 slicing). */
   buffer: Buffer;
   wireBytes: number;
   isControl: boolean;
@@ -73,7 +73,7 @@ export class OperationEventHub {
   }
 
   recordEvent(event: ProviderHostEvent): StoredFrame | null {
-    // Fail closed: once the stream has ended — a terminal retained, a
+    // invariant: once the stream has ended — a terminal retained, a
     // terminal refused, or the hub disposed — every later record is refused,
     // terminal or not. A post-close event must never append a frame or
     // consume a sequence: the resync gap is the stream's final word and
@@ -81,7 +81,7 @@ export class OperationEventHub {
     if (this.closed) return this.terminalSlot;
     const terminal = isTerminalHostEvent(event);
     const data = JSON.stringify(event);
-    // Build against the *candidate* sequence and charge before committing, so a
+    // why: Build against the *candidate* sequence and charge before committing, so a
     // frame that is not retained never consumes a sequence and retained ids stay
     // contiguous. Every *retained* Buffer is charged against the global Node byte
     // pool; a frame that cannot be charged is never retained uncharged — the hub
@@ -91,7 +91,7 @@ export class OperationEventHub {
       if (frame.wireBytes > SSE_RESERVED_CONTROL_BYTES) {
         return this.failClosed();
       }
-      // A terminal is a control frame: it draws on the control pool, never the
+      // why: A terminal is a control frame: it draws on the control pool, never the
       // data pool, so a full data budget cannot block the terminal transition.
       if (!tryReserveControlBytes(frame.wireBytes)) {
         return this.failClosed();
@@ -101,7 +101,7 @@ export class OperationEventHub {
       this.terminalSlot = frame;
       return frame;
     }
-    // Data frames are charged against the global data pool; a frame that cannot
+    // why: Data frames are charged against the global data pool; a frame that cannot
     // be charged is never retained uncharged — the hub fails closed with a
     // bounded interrupted gap so the client resyncs.
     if (!tryReserveEnvironmentBytes(frame.wireBytes)) {
@@ -118,11 +118,11 @@ export class OperationEventHub {
     const data = JSON.stringify(gap);
     const frame = this.buildFrame(this.sequence + 1, 'gap', data, false);
     if (frame.wireBytes > SSE_RESERVED_CONTROL_BYTES) return null;
-    // Control frames draw on the dedicated control pool, never the data pool, so
+    // why: Control frames draw on the dedicated control pool, never the data pool, so
     // a saturated data budget can never block an explicit resync gap.
     if (!tryReserveControlBytes(frame.wireBytes)) return null;
     this.sequence += 1;
-    // A replaced gap releases its charge so the slot never leaks bytes.
+    // invariant: A replaced gap releases its charge so the slot never leaks bytes.
     if (this.gapSlot) releaseControlBytes(this.gapSlot.wireBytes);
     frame.isControl = true;
     this.gapSlot = frame;
@@ -130,7 +130,7 @@ export class OperationEventHub {
   }
 
   /**
-   * Fail closed: stop the stream and expose a bounded, charged interrupted
+   * why: Fail closed — stop the stream and expose a bounded, charged interrupted
    * gap. Used both when a terminal cannot be represented (byte budget) and
    * when a provider terminal is refused by the registry — canonical truth
    * (the first terminal) then lives behind the inspect URL, never in a
@@ -162,7 +162,7 @@ export class OperationEventHub {
   }
 
   private buildFrame(sequence: number, event: string, data: string, isTerminal: boolean): StoredFrame {
-    // A Host terminal is BOTH a control frame (not charged to the data
+    // why: A Host terminal is BOTH a control frame (not charged to the data
     // budget) and the frame that ends its stream; the two flags must travel
     // separately or the replay loop walks past the terminal.
     return wireFrame(`${this.epoch}:${sequence}`, event, data, isTerminal, isTerminal);
@@ -198,7 +198,7 @@ export class OperationEventHub {
       };
     }
     if (parsed.sequence === this.sequence) {
-      // Equal cursor: waiting is meaningful only while the hub is live and
+      // why: Equal cursor: waiting is meaningful only while the hub is live and
       // future events are still possible. A closed hub (terminal retained,
       // terminal refused, or disposed) can never advance — the retry must end
       // promptly instead of holding a subscriber on a stream with no future,
@@ -208,7 +208,7 @@ export class OperationEventHub {
     return { kind: 'frames', frames: this.framesAfter(parsed.sequence) };
   }
 
-  /** Data, gap, and terminal merged and strictly ordered by epoch sequence. */
+  /** note: Data, gap, and terminal merged and strictly ordered by epoch sequence. */
   private collectFrames(): StoredFrame[] {
     const frames = [...this.dataFrames];
     if (this.gapSlot) frames.push(this.gapSlot);
@@ -217,7 +217,7 @@ export class OperationEventHub {
     return frames;
   }
 
-  /** Frames strictly after `sequence`, ordered — a gap between data never reorders. */
+  /** note: Frames strictly after `sequence`, ordered — a gap between data never reorders. */
   framesAfter(sequence: number): StoredFrame[] {
     return this.collectFrames().filter((frame) => frameSequence(frame) > sequence);
   }
@@ -237,7 +237,7 @@ export class OperationEventHub {
     this.closed = true;
   }
 
-  /** The operation's stream has ended: a terminal was retained or rejected. */
+  /** note: The operation's stream has ended: a terminal was retained or rejected. */
   isClosed(): boolean {
     return this.closed;
   }
@@ -246,7 +246,7 @@ export class OperationEventHub {
     return this.terminalSlot !== null;
   }
 
-  /** A resync gap is retained — the stream's closing frame when no terminal is. */
+  /** note: A resync gap is retained — the stream's closing frame when no terminal is. */
   hasGap(): boolean {
     return this.gapSlot !== null;
   }
@@ -264,7 +264,7 @@ export class OperationEventHub {
     this.closed = true;
   }
 
-  /** Data bytes this hub holds against the global data pool. */
+  /** note: Data bytes this hub holds against the global data pool. */
   chargedBytes(): number {
     return this.dataFrameBytes;
   }
@@ -295,7 +295,7 @@ function formatSse(id: string, event: string, data: string): string {
 }
 
 /**
- * One SSE wire frame from an ALREADY-ENCODED producer frame.
+ * note: One SSE wire frame from an ALREADY-ENCODED producer frame.
  *
  * `id`/`event`/`data` are written exactly as the producer encoded them — the
  * run-event ring owns the `<epoch>:<sequence>` cursor, so a transport that
@@ -323,7 +323,7 @@ export function wireFrame(
 }
 
 /**
- * The writer-side stream-end hook: `SseWriter` owns only the socket's
+ * note: The writer-side stream-end hook: `SseWriter` owns only the socket's
  * backpressure, and reports a written TERMINAL frame to whoever owns the
  * stream's state. The Host SSE transport owns an `OperationEventHub`; the
  * workflow observation transport's stream end is the core's own `closed` flag
@@ -333,7 +333,7 @@ export interface SseStreamEnd {
   markClosed(): void;
 }
 
-/** For a producer that owns its stream end itself: the writer marks nothing. */
+/** note: For a producer that owns its stream end itself: the writer marks nothing. */
 export const NO_STREAM_END: SseStreamEnd = { markClosed: () => undefined };
 
 function inspectUrl(operationId: string): string {
@@ -344,7 +344,7 @@ export const sseTestHooks = {
   providerPullCount: 0,
   writeBlockedCount: 0,
   /**
-   * The Actor settlement throttle's clock (ms). Injectable so a scoped test can
+   * why: The Actor settlement throttle's clock (ms). Injectable so a scoped test can
    * freeze and advance the one-second window instead of sleeping through it;
    * production reads the real clock.
    */
@@ -352,7 +352,7 @@ export const sseTestHooks = {
 };
 
 /**
- * Typed stream endings the control reserve could not hold: every place a stream
+ * why: Typed stream endings the control reserve could not hold: every place a stream
  * must end with a resync gap but `OperationEventHub.recordGap` cannot charge one
  * increments this and logs the operation (`noteUnretainedGap`). The ending budget
  * is a shared reserve, so a saturated one still degrades an ending to a bare
@@ -362,7 +362,7 @@ export const sseTestHooks = {
 export const sseUnretainedGapEvents = { count: 0 };
 
 /**
- * Record and log one typed ending the control reserve could not retain. A bare
+ * why: Record and log one typed ending the control reserve could not retain. A bare
  * close is the one ending §5 forbids, so it must never pass unobserved.
  */
 function noteUnretainedGap(operationId: string, site: string): void {
@@ -372,10 +372,10 @@ function noteUnretainedGap(operationId: string, site: string): void {
   );
 }
 
-/** How a writer treats repeated control frames. */
+/** note: How a writer treats repeated control frames. */
 export interface SseWriterOptions {
   /**
-   * Collapse a repeated `gap`/terminal control frame into one write. TRUE is
+   * why: Collapse a repeated `gap`/terminal control frame into one write. TRUE is
    * the Host transport's model: its hub keeps exactly ONE gap slot and ONE
    * terminal slot, so re-presenting a slot is not a new wire fact. A producer
    * that streams frames straight from a run ring can legitimately deliver MORE
@@ -414,7 +414,7 @@ export class SseWriter {
       if (this.pendingDataFrames >= SSE_MAX_PENDING_DATA_FRAMES) return false;
       if (this.pendingDataBytes + frame.wireBytes > SSE_MAX_PENDING_DATA_BYTES) return false;
     }
-    // Retained hub Buffers are already charged globally; the per-socket 64 KiB
+    // why: Retained hub Buffers are already charged globally; the per-socket 64 KiB
     // reservation covers the writable queue, so the writer must not double-charge
     // the same Buffer here.
     if (!frame.isControl) {
@@ -446,7 +446,7 @@ export class SseWriter {
         this.releaseFrame(frame);
         return 'disconnect';
       }
-      // `write()` returning false means the chunk WAS accepted into the socket
+      // note: `write()` returning false means the chunk WAS accepted into the socket
       // buffer and the caller must stop until 'drain' — it never means the chunk
       // was dropped. Re-writing it here would duplicate the frame.
       const accepted = this.res.write(chunk);
@@ -479,7 +479,7 @@ export class SseWriter {
 }
 
 /**
- * Wait for the socket to accept more bytes, the stream to end, or the drain
+ * note: Wait for the socket to accept more bytes, the stream to end, or the drain
  * deadline. Every listener is detached when the wait settles: a long-lived SSE
  * response takes MANY of these waits, and leaving the losing `once` listeners
  * attached would accumulate them on one emitter until Node's listener limit
@@ -543,7 +543,7 @@ export async function gatePullUntilDrain(
   writer: SseWriter,
 ): Promise<boolean> {
   if (!pullGate.initialReleased) {
-    // Defer first pull until pauseImmediately clients have paused the socket.
+    // note: Defer first pull until pauseImmediately clients have paused the socket.
     await sleep(resolveSseFirstPullDelayMs());
     pullGate.initialReleased = true;
   }
@@ -556,7 +556,7 @@ export async function gatePullUntilDrain(
 }
 
 /**
- * Hydrate a session from native truth when the transport cache is cold. The
+ * why: Hydrate a session from native truth when the transport cache is cold. The
  * registry is a cache only: a restart (or a cleared cache) must still resync
  * from `hostQuery` rather than fabricate a 404.
  */
@@ -577,7 +577,7 @@ async function hydrateSessionRecord(
       activeOpId: session.active_op_id ?? null,
       model: session.model,
     };
-    // Preserve the Actor echo in the cold/warm mirror: SSE must decide
+    // why: Preserve the Actor echo in the cold/warm mirror: SSE must decide
     // Actor-versus-provider-only from this row, not from a launch payload.
     if (session.actor_ref !== undefined) record.actorRef = session.actor_ref;
     if (session.viewpoint !== undefined) record.viewpoint = session.viewpoint;
@@ -591,7 +591,7 @@ async function hydrateSessionRecord(
 }
 
 /**
- * The authority's own generic operation row for one id, or `null` when it serves
+ * why: The authority's own generic operation row for one id, or `null` when it serves
  * none. Deliberately not cache-first: an Actor arm must never take the
  * provider-only mirror as its canonical observation, and an expired Actor
  * observation is absent rather than resurrected from a stale row.
@@ -611,7 +611,7 @@ async function authorityOperationRow(
 }
 
 /**
- * Hydrate an operation from native truth, preserving the native status so a
+ * why: Hydrate an operation from native truth, preserving the native status so a
  * terminal operation is never mistaken for a cancellable one.
  */
 async function hydrateOperationRecord(
@@ -631,7 +631,7 @@ async function hydrateOperationRecord(
     terminalEvent: null,
     terminalTranscript: null,
   };
-  // A live row is admitted only while the live population has room. The registry
+  // why: A live row is admitted only while the live population has room. The registry
   // refuses the rest with no effect: materializing one more would retain a hub the
   // control reserve is not sized for, and the mirror would hold more live work
   // than the cap it refuses new dispatches with. `busy` is the same answer that
@@ -643,7 +643,7 @@ async function hydrateOperationRecord(
 }
 
 /**
- * Fresh native truth for one Character operation, or `null` when the core
+ * note: Fresh native truth for one Character operation, or `null` when the core
  * authority does not own the id (an unknown/evicted id, or no attached
  * authority at all). Same hydration shape as the two readers above: the mirror
  * is never the source of an Actor decision.
@@ -676,7 +676,7 @@ async function emitInterruptedGap(
   };
   const frame = hub.recordGap(gap);
   if (!frame) {
-    // The reserve cannot hold even the ending: the stream closes bare, which is
+    // why: The reserve cannot hold even the ending: the stream closes bare, which is
     // the one ending §5 forbids. Count and log it — a silent bare close is the
     // state this makes diagnosable.
     noteUnretainedGap(operationId, 'interrupted-gap');
@@ -686,7 +686,7 @@ async function emitInterruptedGap(
 }
 
 /**
- * End a stream that left its loop without writing a closing frame.
+ * why: End a stream that left its loop without writing a closing frame.
  *
  * A stream must always end with either a terminal or a typed resync gap, so a
  * hub that closed out of band — the mirror retired the record while this loop's
@@ -723,7 +723,7 @@ export function ingestEvents(service: ServiceCore, operationId: string, events: 
         : 'OpFailed' in event
           ? JSON.stringify(event.OpFailed)
           : null;
-    // The registry decides acceptance BEFORE recording: a late terminal that
+    // invariant: The registry decides acceptance BEFORE recording: a late terminal that
     // contradicts the canonical first terminal (e.g. an OpFinished arriving
     // after an accepted cancel) must never enter the hub as the stream's
     // terminal, or replay and the stream would disagree with the status the
@@ -731,7 +731,7 @@ export function ingestEvents(service: ServiceCore, operationId: string, events: 
     if (service.providerRegistry.finishOperation(operationId, event, transcript)) {
       hub.recordEvent(event);
     } else if (!hub.isClosed()) {
-      // Refused terminal with no stream terminal yet: fail closed with a
+      // why: Refused terminal with no stream terminal yet: fail closed with a
       // bounded resync gap so the client re-inspects canonical truth instead
       // of consuming a fabricated terminal. The rest of the batch is dead on
       // arrival: stop immediately so no later event can append or emit after
@@ -743,7 +743,7 @@ export function ingestEvents(service: ServiceCore, operationId: string, events: 
 }
 
 /**
- * The one transport-side source of an operation's frames.
+ * note: The one transport-side source of an operation's frames.
  *
  * Both legal owners of an operation — the provider-only lane and the core Actor
  * authority — deliver the same generated event batches under the same bounded
@@ -753,15 +753,15 @@ export function ingestEvents(service: ServiceCore, operationId: string, events: 
  */
 interface OperationEventSource {
   readonly hub: OperationEventHub;
-  /** Frames the contract says to replay before any pull (or a truthful gap). */
+  /** note: Frames the contract says to replay before any pull (or a truthful gap). */
   initialTruthGap(): StoredFrame | null;
-  /** Canonical truth is terminal while the hub retains no terminal frame. */
+  /** note: Canonical truth is terminal while the hub retains no terminal frame. */
   canonicalGap(): Promise<StoredFrame | null>;
-  /** One bounded batch from the owner authorized to serve this operation. */
+  /** note: One bounded batch from the owner authorized to serve this operation. */
   pull(): Promise<ProviderEventBatch>;
 }
 
-/** The provider-only lane: canonical truth is the mirror record it hydrates. */
+/** note: The provider-only lane: canonical truth is the mirror record it hydrates. */
 function providerEventSource(
   service: ServiceCore,
   operation: ProviderOperationRecord,
@@ -798,7 +798,7 @@ function providerEventSource(
 }
 
 /**
- * The settled-exhaustion check's window. An observation with nothing left to
+ * why: The settled-exhaustion check's window. An observation with nothing left to
  * deliver is the one state that polls: its pulls return an empty batch
  * immediately (the authority retains the outcome even after the observation is
  * consumed) while the run may not be settled yet, and the stream's own cadence
@@ -810,14 +810,14 @@ function providerEventSource(
 const ACTOR_SETTLEMENT_RECHECK_MS = 1000;
 
 /**
- * When this hub last spent the settlement status read. Keyed by the hub — one
+ * why: When this hub last spent the settlement status read. Keyed by the hub — one
  * per operation, shared by all of its readers — so a reconnect inherits the
  * window instead of re-asking immediately, and the entry dies with the hub.
  */
 const actorSettlementCheckedAt = new WeakMap<OperationEventHub, number>();
 
 /**
- * Whether this empty batch may spend the settlement status read. The window is
+ * why: Whether this empty batch may spend the settlement status read. The window is
  * opened BEFORE the read returns, so concurrent readers of one hub cannot both
  * pass inside one window. A batch that carries a frame never reaches this: a
  * delivered terminal or gap stays immediate.
@@ -831,7 +831,7 @@ function actorSettlementDue(hub: OperationEventHub): boolean {
 }
 
 /**
- * The Actor authority arm: fresh native truth re-authorizes the `(session,
+ * note: The Actor authority arm: fresh native truth re-authorizes the `(session,
  * operation)` association — an id the authority does not own as a Character
  * operation is absent, and one owned by another session is forbidden — while the
  * bounded observation of that same operation is pulled with the authority's own
@@ -857,7 +857,7 @@ async function actorEventSource(
   }
   const existingHub = service.providerRegistry.hubForOperation(operationId);
   if (!service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId)) {
-    // The Actor arm is at its bound with every row pinned by a live reader: this
+    // why: The Actor arm is at its bound with every row pinned by a live reader: this
     // stream is admitted with no row, and therefore gets no hub — a hub without
     // its record would hold control slots the reserve proof excludes and would
     // never be released. The client retries; nothing was admitted or charged.
@@ -871,7 +871,7 @@ async function actorEventSource(
     );
   return {
     hub,
-    // No cold/terminal shortcut for the Actor lane: the authority's observation
+    // why: No cold/terminal shortcut for the Actor lane: the authority's observation
     // is retained until it is pulled, so this stream delivers the real frames it
     // still has (including a terminal that already settled) and only reports a
     // resync gap when the observation truly has nothing left — see `pull`.
@@ -887,7 +887,7 @@ async function actorEventSource(
           PROVIDER_PULL_MAX_BYTES,
         ),
       );
-      // Nothing left to deliver: the observation is exhausted, and the
+      // why: Nothing left to deliver: the observation is exhausted, and the
       // authority has already settled the run (an accepted cancel whose
       // provider confirmation never arrived, or a terminal that this stream
       // never saw). End with the bounded resync gap instead of polling a stream
@@ -942,7 +942,7 @@ async function runEventStream(
   }
 
   try {
-    // Cold registry + already-terminal operation: no retained stream to replay.
+    // note: Cold registry + already-terminal operation: no retained stream to replay.
     // A bounded resync gap is the truthful answer, never a fabricated terminal.
     const truthGap = source.initialTruthGap();
     if (truthGap) {
@@ -956,7 +956,7 @@ async function runEventStream(
         const gapResult = await writer.writeFrame(gapFrame);
         if (gapResult !== 'ok') await emitInterruptedGap(writer, hub, operationId);
       } else {
-        // Same saturated-reserve case as `emitInterruptedGap`: the stale-cursor
+        // note: Same saturated-reserve case as `emitInterruptedGap`: the stale-cursor
         // ending cannot be charged either, so the close is counted, not silent.
         noteUnretainedGap(operationId, 'stale-plan-gap');
       }
@@ -964,8 +964,6 @@ async function runEventStream(
     }
 
     if (plan.kind === 'end') {
-      // Equal cursor on a closed hub: nothing can follow. End the retry
-      // promptly — no fabricated gap, no replayed event.
       return;
     }
 
@@ -1019,7 +1017,7 @@ async function creatorActorEventSource(
   sessionId: string,
   operationId: string,
 ): Promise<OperationEventSource> {
-  // The authority's own row is what authorizes this stream: a Creator Actor
+  // why: The authority's own row is what authorizes this stream: a Creator Actor
   // operation the authority no longer serves is absent, exactly like an expired
   // Character observation.
   const operation = await authorityOperationRow(service, operationId);
@@ -1034,7 +1032,7 @@ async function creatorActorEventSource(
     });
   }
   if (!service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId)) {
-    // Same bound as the Character arm: no retained row means no hub, so this
+    // why: Same bound as the Character arm: no retained row means no hub, so this
     // stream ends here instead of retaining slots outside the reserve proof.
     throw new HttpError(503, 'busy', 'too many retained Actor operations');
   }
@@ -1052,7 +1050,7 @@ async function creatorActorEventSource(
         inspect_url: inspectUrl(operationId),
       }),
     canonicalGap: async () => null,
-    // Unreachable while the gap above can be recorded; when the control reserve
+    // why: Unreachable while the gap above can be recorded; when the control reserve
     // cannot hold even that frame the shared loop turns this into the same
     // truthful interrupted resync ending.
     pull: () => Promise.reject(new Error('a Creator Actor operation retains no event stream')),
@@ -1076,7 +1074,7 @@ export async function streamSessionEvents(
     throw new HttpError(400, 'invalid_input', 'operation_id is required for session events');
   }
 
-  // Actor-versus-provider-only is decided by the session's native echo, so an
+  // why: Actor-versus-provider-only is decided by the session's native echo, so an
   // Actor operation is never served by the provider lane even on a cold mirror.
   // The Actor KIND then decides which authority arm serves it: a Character
   // operation has the authority's detailed outcome and its retained observation,
@@ -1105,7 +1103,7 @@ export async function streamSessionEvents(
   }
 }
 
-/** Provider-only admission kept exactly as it was: hydrate, associate, retain. */
+/** note: Provider-only admission kept exactly as it was: hydrate, associate, retain. */
 async function requireProviderOperation(
   service: ServiceCore,
   sessionId: string,
@@ -1126,7 +1124,7 @@ async function requireProviderOperation(
 }
 
 /**
- * A canonical operation that is already terminal (e.g. an accepted cancel)
+ * why: A canonical operation that is already terminal (e.g. an accepted cancel)
  * while the stream still carries no terminal frame: its provider
  * confirmation was refused as a late terminal, or never arrives. End the
  * stream truthfully — one bounded resync gap pointing at the inspect URL —
@@ -1159,7 +1157,7 @@ async function waitForTerminal(
   while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
 
-    // Canonical truth already terminal with no stream terminal: end the
+    // why: Canonical truth already terminal with no stream terminal: end the
     // stream with one truthful resync gap instead of hanging or fabricating.
     const canonicalGap = await source.canonicalGap();
     if (canonicalGap) {
@@ -1187,7 +1185,7 @@ async function waitForTerminal(
 
     ingestEvents(service, operationId, batch.events ?? []);
 
-    // A batch whose ingest closed the hub (an accepted terminal, a refused
+    // why: A batch whose ingest closed the hub (an accepted terminal, a refused
     // late terminal, or a memory fail-close) has already recorded the
     // canonical closing frame. A provider gap from that same batch must
     // never overwrite the fail-closed `interrupted` resync marker — the
@@ -1235,7 +1233,7 @@ async function liveEventLoop(
   while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
 
-    // Canonical truth already terminal with no stream terminal: end the
+    // why: Canonical truth already terminal with no stream terminal: end the
     // stream with one truthful resync gap instead of hanging or fabricating.
     const canonicalGap = await source.canonicalGap();
     if (canonicalGap) {
@@ -1263,7 +1261,7 @@ async function liveEventLoop(
 
     ingestEvents(service, operationId, batch.events ?? []);
 
-    // A batch whose ingest closed the hub (an accepted terminal, a refused
+    // why: A batch whose ingest closed the hub (an accepted terminal, a refused
     // late terminal, or a memory fail-close) has already recorded the
     // canonical closing frame. A provider gap from that same batch must
     // never overwrite the fail-closed `interrupted` resync marker — the

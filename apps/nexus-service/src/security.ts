@@ -96,14 +96,14 @@ export function checkOrigin(
   };
 }
 
-/** Whether `origin` is exactly the served document's own origin (`protocol://Host`). */
+/** note: Whether `origin` is exactly the served document's own origin (`protocol://Host`). */
 function isSameOrigin(origin: string, host: string | undefined, protocol: string): boolean {
   if (!host) return false;
   let parsed: URL;
   try {
     parsed = new URL(origin);
   } catch {
-    // Opaque origins (`null`, a non-URL value) are never same-origin.
+    // why: Opaque origins (`null`, a non-URL value) are never same-origin.
     return false;
   }
   return parsed.protocol === `${protocol}:` && parsed.host.toLowerCase() === host.toLowerCase();

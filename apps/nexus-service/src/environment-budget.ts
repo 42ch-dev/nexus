@@ -49,7 +49,7 @@ export function environmentBudgetProof(): EnvironmentBudgetProof {
   const nativeProviderBytes = NATIVE_PROVIDER_BYTES_PER_OP * ops;
   const acpDeliveryBytes = ACP_DELIVERY_BYTES_PER_OP * ops;
   const socketReservedBytes = SSE_SOCKET_RESERVED_BYTES * SSE_MAX_TOTAL_SUBSCRIBERS;
-  // Data pool: retained hub *data* frames only. Control slots (terminal/gap) are
+  // invariant: Data pool is retained hub *data* frames only. Control slots (terminal/gap) are
   // accounted separately via `nodeControlBytes`, so a saturated data pool still
   // permits a bounded terminal/gap.
   const nodeRetainedBytes = SSE_MAX_AGGREGATE_PENDING_BYTES;
@@ -82,11 +82,11 @@ if (proof.totalBytes > proof.ceilingBytes) {
   );
 }
 
-/** Node-owned serialized data frames retained by operation hubs. */
+/** note: Node-owned serialized data frames retained by operation hubs. */
 let frameBytes = 0;
-/** Control-frame slot bytes (terminal+gap), a pool entirely separate from data. */
+/** note: Control-frame slot bytes (terminal+gap), a pool entirely separate from data. */
 let controlBytes = 0;
-/** Per-socket reservations held for the lifetime of an SSE subscriber. */
+/** note: Per-socket reservations held for the lifetime of an SSE subscriber. */
 let socketReservations = 0;
 
 export function environmentBudgetReserved(): number {

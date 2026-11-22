@@ -39,27 +39,27 @@ import { createStaticFileHandler } from './static-files.js';
 import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
 
 export interface RunningService {
-  /** HTTP(S) base URL; null on the unix transport (use `endpoint.path`). */
+  /** note: HTTP(S) base URL; null on the unix transport (use `endpoint.path`). */
   readonly url: string | null;
-  /** The tagged wire endpoint actually bound after listen. */
+  /** note: The tagged wire endpoint actually bound after listen. */
   readonly endpoint: CoreServiceDiscovery['endpoint'];
-  /** The v1 discovery record published for this instance (§7). */
+  /** note: The v1 discovery record published for this instance (§7). */
   readonly discovery: CoreServiceDiscovery;
   /**
-   * Tokenized `GET /__bootstrap` URL for this boot (access spec §3.1);
+   * note: Tokenized `GET /__bootstrap` URL for this boot (access spec §3.1);
    * null on the unix transport, where there is no HTTP URL to print.
    */
   readonly bootstrapUrl: string | null;
-  /** Same-process observability seam for scoped tests; not part of the wire API. */
+  /** note: Same-process observability seam for scoped tests; not part of the wire API. */
   readonly service: ServiceCore;
   close(): Promise<CoreCloseReport>;
 }
 
-/** Instance-bound operator stop endpoint (architecture §7). */
+/** note: Instance-bound operator stop endpoint (architecture §7). */
 const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
 
 /**
- * Guarded instance-identity anchor (D17, `rust-core-service-boundary.md` §8.1):
+ * why: Guarded instance-identity anchor (D17, `rust-core-service-boundary.md` §8.1):
  * the closed v1 discovery record of *this* service instance, under the same
  * API-key/loopback admission as the operator stop path. A client compares it
  * against the private `<user_home>/.nexus42/run/service.json` record before
@@ -69,31 +69,31 @@ const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
 const RUNTIME_DISCOVERY_PATH = '/v1/daemon/runtime/discovery';
 
 /**
- * Tokenized browser bootstrap (access spec §3.1): service-local, not part of
+ * why: Tokenized browser bootstrap (access spec §3.1): service-local, not part of
  * the wire schema. Handled before `matchRoute` because it answers with a
  * `302` + `Set-Cookie` instead of the JSON-only domain route shape.
  */
 const AUTH_BOOTSTRAP_PATH = '/__bootstrap';
 
-/** §6.2 copy, verbatim: the bootstrap route's own 401 bodies. */
+/** note: §6.2 copy, verbatim: the bootstrap route's own 401 bodies. */
 const BOOTSTRAP_REPLAY_MESSAGE =
   '访问链接已被使用。请回到服务终端复制最新打印的访问链接。';
 const BOOTSTRAP_EXPIRED_MESSAGE =
   '访问链接已过期。请回到服务终端复制最新打印的访问链接。';
 
-/** Port the listener actually serves; 0 resolves to the kernel-assigned port. */
+/** note: Port the listener actually serves; 0 resolves to the kernel-assigned port. */
 function boundPort(server: Server, config: ResolvedServiceConfig): number {
   const address = server.address();
   return address && typeof address === 'object' ? address.port : config.port;
 }
 
-/** Base URL for a bound HTTP listener on this config's host. */
+/** note: Base URL for a bound HTTP listener on this config's host. */
 function httpUrlFor(config: ResolvedServiceConfig, port: number): string {
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   return `${protocol}://${formatHttpAuthority(config.host, port)}`;
 }
 
-/** Tagged wire endpoint of the running listener (the value the record publishes). */
+/** note: Tagged wire endpoint of the running listener (the value the record publishes). */
 function boundEndpoint(server: Server, config: ResolvedServiceConfig): CoreServiceDiscovery['endpoint'] {
   if (config.transport === 'unix') {
     if (!config.socketPath) {
@@ -105,7 +105,7 @@ function boundEndpoint(server: Server, config: ResolvedServiceConfig): CoreServi
 }
 
 /**
- * The published record of this instance, built with the same schema-derived
+ * why: The published record of this instance, built with the same schema-derived
  * constructor `startService` publishes, so the response cannot fork the record
  * shape or leak a secret field.
  */
@@ -127,7 +127,7 @@ function discoveryRecordFor(
 }
 
 /**
- * Closed admission of the generated `CoreServiceStopRequest` shape. Rejected
+ * why: Closed admission of the generated `CoreServiceStopRequest` shape. Rejected
  * here because the stop path never crosses the native wire validator.
  */
 function parseStopRequest(body: unknown): CoreServiceStopRequest {
@@ -157,7 +157,7 @@ function parseStopRequest(body: unknown): CoreServiceStopRequest {
 }
 
 /**
- * A leftover socket file from a crashed owner is removable only when nothing
+ * why: A leftover socket file from a crashed owner is removable only when nothing
  * answers on it; a live listener refuses the bind with `busy` instead of a
  * cryptic EADDRINUSE.
  */
@@ -179,11 +179,11 @@ async function clearStaleUnixSocket(path: string): Promise<void> {
   rmSync(path, { force: true });
 }
 
-/** The socket file itself is locked down to owner-only after a successful bind. */
+/** note: The socket file itself is locked down to owner-only after a successful bind. */
 const SOCKET_MODE = 0o600;
 
 /**
- * The unix transport's only access guard is its parent directory (bind.ts):
+ * safety: The unix transport's only access guard is its parent directory (bind.ts):
  * the socket must live in a real 0700 directory, so a shared parent such as
  * `/tmp` can never host a keyless service socket.
  */
@@ -191,7 +191,7 @@ function assertPrivateSocketParent(socketPath: string): void {
   const parent = dirname(socketPath);
   let stats;
   try {
-    // lstat: a symlinked parent is not a private directory, it is a redirect.
+    // safety: lstat — a symlinked parent is not a private directory, it is a redirect.
     stats = lstatSync(parent);
   } catch {
     throw new HttpError(403, 'forbidden', `unix socket parent directory does not exist: ${parent}`);
@@ -209,7 +209,7 @@ function assertPrivateSocketParent(socketPath: string): void {
 }
 
 /**
- * Raw request-target path, still percent-encoded and NOT dot-normalized:
+ * why: Raw request-target path, still percent-encoded and NOT dot-normalized:
  * `new URL()` collapses `%2e%2e` segments before the static boundary could
  * refuse them, so the static handler receives the undecoded target minus query.
  * An absolute-form target (`GET http://host/path`) has its scheme + authority
@@ -229,7 +229,7 @@ function rawRequestPath(target: string | undefined): string {
 }
 
 /**
- * Textual dot-segment collapse for the static admission view. It splits on `/`
+ * why: Textual dot-segment collapse for the static admission view. It splits on `/`
  * only — the same segmentation the static handler's `path.resolve` applies
  * after its own decode — so a decoded `?`/`#`/space stays a filename character
  * instead of `new URL()` structure. Empty and `.` segments are skipped before
@@ -258,7 +258,7 @@ function requestId(req: IncomingMessage): string {
 function writeCors(res: ServerResponse, origin: string | undefined, allowed: readonly string[]): void {
   if (origin && allowed.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    // The session cookie must flow from the desktop custom-protocol and Vite
+    // why: The session cookie must flow from the desktop custom-protocol and Vite
     // dev origins (access spec §3.1); only explicit allowlisted origins get it.
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
@@ -268,7 +268,7 @@ function writeCors(res: ServerResponse, origin: string | undefined, allowed: rea
 }
 
 /**
- * Body/read deadline only. The header deadline is owned by the server's
+ * why: Body/read deadline only. The header deadline is owned by the server's
  * `headersTimeout` (parsed before this handler runs), never by a timer that
  * can only start once the headers already arrived.
  */
@@ -321,7 +321,7 @@ function sendJson(
   writeCors(res, origin, allowed);
   res.statusCode = status;
   res.setHeader('X-Request-Id', requestIdValue);
-  // Retained 204 handlers carry no body: no JSON Content-Type, no
+  // why: Retained 204 handlers carry no body: no JSON Content-Type, no
   // serialization (the transport would drop it anyway).
   if (status === 204) {
     res.end();
@@ -347,7 +347,7 @@ export function createServiceServer(
   closeFn: () => Promise<CoreCloseReport>,
   authSessions: AuthSessionStore = new AuthSessionStore(),
 ): { server: Server } {
-  // URL base for relative request-URL parsing only; the wire endpoint is
+  // why: URL base for relative request-URL parsing only; the wire endpoint is
   // reported from the bound listener, never from this placeholder.
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
@@ -378,11 +378,11 @@ export function createServiceServer(
         return;
       }
 
-      // Tokenized browser bootstrap (access spec §3.1): must precede the route
+      // why: Tokenized browser bootstrap (access spec §3.1): must precede the route
       // matcher — it answers `302` + `Set-Cookie`, and an unmatched non-`/v1`
       // path would otherwise fall into the SPA static fallback.
       if (method === 'GET' && urlObj.pathname === AUTH_BOOTSTRAP_PATH) {
-        // Non-loopback still needs --allow-remote; the token is the
+        // why: Non-loopback still needs --allow-remote; the token is the
         // authentication, so the TLS requirement does not apply here.
         const bindFailure = validateBindPolicy(config, remoteAddress, true);
         if (bindFailure) {
@@ -416,7 +416,7 @@ export function createServiceServer(
         return;
       }
 
-      // Instance-bound operator stop (architecture §7): same guarded-tier
+      // why: Instance-bound operator stop (architecture §7): same guarded-tier
       // admission as domain routes, handled before the domain route matcher
       // because it controls the transport itself rather than a family.
       if (method === 'POST' && urlObj.pathname === RUNTIME_STOP_PATH) {
@@ -437,7 +437,7 @@ export function createServiceServer(
           stopRequest.expected_instance_id === service.instanceId &&
           stopRequest.expected_engine_epoch === service.engineEpoch;
         if (!matches) {
-          // Mismatch returns conflict and performs no stop: a stale record
+          // why: Mismatch returns conflict and performs no stop: a stale record
           // never stops its replacement, and a read-only attach never kills
           // an unowned service.
           throw new HttpError(
@@ -452,7 +452,7 @@ export function createServiceServer(
             },
           );
         }
-        // Respond BEFORE the close runs: the close owner force-destroys
+        // invariant: Respond BEFORE the close runs — the close owner force-destroys
         // sockets, including the one carrying this response, so the close is
         // deferred until the response is flushed ('finish') and its result is
         // observed by polling the health route (§7 semantics).
@@ -463,7 +463,7 @@ export function createServiceServer(
         return;
       }
 
-      // Guarded instance-identity anchor (D17): same admission as the operator
+      // why: Guarded instance-identity anchor (D17): same admission as the operator
       // stop path, answered from this instance's own identity.
       if (method === 'GET' && urlObj.pathname === RUNTIME_DISCOVERY_PATH) {
         const auth = checkApiKey(req, config, remoteAddress, authSessions);
@@ -483,10 +483,10 @@ export function createServiceServer(
 
       const route = matchRoute(method, urlObj.pathname);
       if (!route) {
-        // UI serving sits after the origin gate and is exempt from the API-key
+        // why: UI serving sits after the origin gate and is exempt from the API-key
         // gate only; every `/v1/*` admission is unchanged.
         const staticTarget = rawRequestPath(req.url);
-        // The `/v1/` exclusion covers both path domains. The normalized
+        // why: The `/v1/` exclusion covers both path domains. The normalized
         // `pathname` is the same view `matchRoute` uses, so a dot-segment form
         // (`/foo/../v1/x`) collapses into the API domain and cannot slip into
         // the SPA fallback. `pathname` keeps percent-escapes (`/v1/` ≠
@@ -505,7 +505,7 @@ export function createServiceServer(
         try {
           decodedTarget = decodeURIComponent(staticTarget);
         } catch {
-          // Malformed escape: the static handler refuses it 404 (§5 step 1).
+          // note: Malformed escape: the static handler refuses it 404 (§5 step 1).
         }
         const normalizedTarget = decodedTarget?.startsWith('/')
           ? collapseDotSegments(decodedTarget)
@@ -539,7 +539,7 @@ export function createServiceServer(
 
       const bodyBuffer = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
       const body = parseJsonBody(bodyBuffer, method);
-      // The retained SSE resume cursor crosses verbatim: this transport does
+      // why: The retained SSE resume cursor crosses verbatim: this transport does
       // not judge it — the core's subscription authority is the one that
       // decides whether `<epoch>:<sequence>` is resumable, malformed or
       // future, and a bad cursor must become ITS typed refusal, not a guess.
@@ -565,7 +565,7 @@ export function createServiceServer(
             released = true;
             releaseSessionSubscriber(subscriberSessionId);
           };
-          // Safety net for a stream that outlives this handler. Remove it on
+          // why: Safety net for a stream that outlives this handler. Remove it on
           // normal completion so repeated SSE requests over one keep-alive
           // socket do not accumulate dead listeners.
           const subscriberSocket = req.socket;
@@ -575,7 +575,7 @@ export function createServiceServer(
             writeCors(res, origin, config.allowedOrigins);
             await result.run(res);
           } finally {
-            // Primary release: HTTP keep-alive holds the TCP socket open long
+            // why: Primary release — HTTP keep-alive holds the TCP socket open long
             // after an SSE response completed, so a completed or thrown stream
             // must free its admission here, not at socket close.
             subscriberSocket?.off('close', release);
@@ -601,6 +601,7 @@ export function createServiceServer(
 
   class BoundedSseHttpResponse extends HttpServerResponse {
     constructor(req: IncomingMessage) {
+      // why: the bundled @types/node does not declare the highWaterMark option.
       // @ts-expect-error Node >=18 supports OutgoingMessage highWaterMark options.
       super(req, { highWaterMark: resolveSseSocketHighWaterMark() });
     }
@@ -614,11 +615,11 @@ export function createServiceServer(
         )
       : createHttpServer({ ServerResponse: BoundedSseHttpResponse }, handler);
 
-  // Frozen ordinary HTTP bounds: headers 5s (parser-owned, before the handler)
+  // note: Frozen ordinary HTTP bounds — headers 5s (parser-owned, before the handler)
   // and request read 10s (`requestTimeout` >= `headersTimeout`).
   server.headersTimeout = HEADER_READ_TIMEOUT_MS;
   server.requestTimeout = REQUEST_READ_TIMEOUT_MS;
-  // Node only *checks* those deadlines on this interval; without it the frozen
+  // why: Node only *checks* those deadlines on this interval; without it the frozen
   // 5s header bound would not be enforced until the 30s default sweep.
   // `connectionsCheckingInterval` is a runtime server property (Node >= 18.7);
   // the bundled @types/node does not declare it on `Server`.
@@ -661,7 +662,7 @@ export async function listenServer(
   });
   const port = boundPort(server, config);
   if (port !== config.port) {
-    // The allowlist was frozen from the *requested* port; with port 0 the
+    // why: The allowlist was frozen from the *requested* port; with port 0 the
     // kernel picked the real one. Extend it with the actually-served origin
     // before the first request can run: the listening callback resolves into
     // this synchronous continuation ahead of any connection event, and the

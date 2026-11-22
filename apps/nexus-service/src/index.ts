@@ -21,7 +21,7 @@ import { createServiceServer, listenServer, type RunningService } from './server
 
 export type { ServiceOptions, RunningService };
 
-/** A confirmed close is final: nothing is retained, so later calls are idempotent. */
+/** invariant: A confirmed close is final: nothing is retained, so later calls are idempotent. */
 function isConfirmedClosed(report: CoreCloseReport): boolean {
   return report.state === 'closed' && report.cleanup_confirmed;
 }
@@ -29,14 +29,14 @@ function isConfirmedClosed(report: CoreCloseReport): boolean {
 export interface CloseOwnerOptions {
   getServer: () => Server | undefined;
   closeCore: () => Promise<CoreCloseReport>;
-  /** Total wall-clock budget for one close attempt. */
+  /** note: Total wall-clock budget for one close attempt. */
   budgetMs?: number;
-  /** Listener teardown strategy (defaults to {@link stopListening}). */
+  /** note: Listener teardown strategy (defaults to {@link stopListening}). */
   teardownListener?: (server: Server, deadlineMs: number) => Promise<void>;
-  /** Runs once the listener is down (e.g. removing a unix socket file). */
+  /** note: Runs once the listener is down (e.g. removing a unix socket file). */
   afterListenerStopped?: () => void;
   /**
-   * §7 discovery ownership: awaited after a *confirmed* close only. An
+   * note: §7 discovery ownership: awaited after a *confirmed* close only. An
    * unconfirmed close retains the published record so diagnostics survive.
    */
   removeDiscovery?: () => Promise<unknown>;
@@ -66,7 +66,7 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
       const attempt = (async (): Promise<CoreCloseReport> => {
         const deadline = Date.now() + budgetMs;
         const server = options.getServer();
-        // Ordering matters: stop accepts synchronously, then start the native
+        // why: Ordering matters: stop accepts synchronously, then start the native
         // close in the same turn. Awaiting the listener first would spend the
         // budget twice.
         const listener = server?.listening
@@ -78,7 +78,7 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
           try {
             await options.removeDiscovery();
           } catch (error) {
-            // The close itself is confirmed; a failed record removal leaves a
+            // why: The close itself is confirmed; a failed record removal leaves a
             // stale-but-replaced-on-next-start record, which must not turn a
             // confirmed close into a reported failure.
             console.error('[nexus-service] discovery removal failed:', error);
@@ -129,7 +129,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
       closeCore: () => closeServiceCore(serviceCore.core),
       afterListenerStopped: () => {
         if (config.transport === 'unix' && config.socketPath) {
-          // The listener is down, so the socket file is a stale leaf now.
+          // why: The listener is down, so the socket file is a stale leaf now.
           rmSync(config.socketPath, { force: true });
         }
       },

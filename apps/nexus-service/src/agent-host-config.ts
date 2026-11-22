@@ -1,5 +1,5 @@
 /**
- * Agent-host config family (I-000124 follow-up): the provider document behind
+ * note: Agent-host config family (I-000124 follow-up): the provider document behind
  * the engine repair page.
  *
  * `{home}/agent-host/config.toml` is owned by the native core
@@ -62,7 +62,7 @@ function requireRecord(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Schema `additionalProperties: false` semantics at every object level. */
+/** note: Schema `additionalProperties: false` semantics at every object level. */
 function rejectUnknownKeys(
   value: Record<string, unknown>,
   allowed: readonly string[],
@@ -80,7 +80,7 @@ function requirePositiveInteger(value: unknown, path: string): void {
 }
 
 /**
- * Enforce the generated `AgentHostConfig` wire schema before the native save
+ * why: Enforce the generated `AgentHostConfig` wire schema before the native save
  * path re-validates the same document. Without it a malformed entry would
  * surface as the sanitized `internal` 500 instead of a 400 that names the
  * offending field.
@@ -166,7 +166,7 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
 }
 
 /**
- * An enabled entry without a command would save and then never launch.
+ * why: An enabled entry without a command would save and then never launch.
  *
  * Checked on the document the native save actually writes — i.e. after the
  * replacement transform, which disables the entries it replaced. Validating
@@ -175,7 +175,7 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
  */
 function assertLaunchableProviders(config: AgentHostConfig): void {
   for (const [index, provider] of config.providers.entries()) {
-    // `enabled` defaults to true.
+    // note: `enabled` defaults to true.
     if (
       provider.enabled !== false &&
       (typeof provider.command !== 'string' || provider.command.trim() === '')
@@ -196,7 +196,7 @@ export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHos
 }
 
 /**
- * Replacement upsert: the saved document's LAST enabled entry becomes the ONE
+ * why: Replacement upsert: the saved document's LAST enabled entry becomes the ONE
  * selected provider — readiness reads only enabled entries, so leaving a
  * replaced provider enabled would keep claiming an owner the user retired. A
  * document that already selects exactly that provider is returned untouched, so
@@ -223,7 +223,7 @@ function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
   };
 }
 
-/** The owner facts the restart publishes; the same shape the boot start returns. */
+/** note: The owner facts the restart publishes; the same shape the boot start returns. */
 interface EngineOwnerFacts {
   engine_epoch: number | null;
   provider_ready: boolean;
@@ -234,10 +234,10 @@ export function putAgentHostConfig(
   body: unknown,
 ): Promise<AgentHostConfig> {
   const config = parseAgentHostConfig(body);
-  // The ONE owner-lifecycle lock (shared with selectWorkspace): a provider
+  // invariant: The ONE owner-lifecycle lock (shared with selectWorkspace): a provider
   // save+restart must never interleave with a first-run selection.
   return withSelectionLock(service, async () => {
-    // Upsert after validation, inside the lock: the entry the user just saved
+    // why: Upsert after validation, inside the lock: the entry the user just saved
     // owns readiness and the entries it replaced are disabled.
     const next = withReplacementSelected(config);
     assertLaunchableProviders(next);
@@ -247,7 +247,7 @@ export function putAgentHostConfig(
       throw mapNativeError(error);
     }
 
-    // The saved document is only real once the engine has re-read it: settle and
+    // invariant: The saved document is only real once the engine has re-read it: settle and
     // re-establish the owner, then publish the fresh facts. A failed restart is
     // a typed 503 — the old facts stay untouched, so nothing claims readiness
     // the probe did not produce.

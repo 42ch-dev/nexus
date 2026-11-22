@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * I-000061 — the plain-HTTP LAN entrance gate matrix.
+ * note: I-000061 — the plain-HTTP LAN entrance gate matrix.
  *
  * Both gates are pure functions, so the matrix rows are direct calls and the
  * suite never opens a non-loopback listener. The gate-before-listen claim is
@@ -40,7 +40,7 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { isLoopbackBindHost, validateStartupBind } = await import(join(serviceRoot, 'dist/bind.js'));
 const { isLoopbackAddress, validateBindPolicy } = await import(join(serviceRoot, 'dist/security.js'));
 
-/** A resolved-config stand-in: the gates read only these fields. */
+/** note: a resolved-config stand-in — the gates read only these fields. */
 function config(overrides = {}) {
   return {
     home: '/nonexistent-nexus-home',
@@ -76,7 +76,7 @@ function assertAdmitted(failure) {
   assert.equal(failure, null, 'the gate must admit this row');
 }
 
-/** `--port 0` is refused by the CLI, so reserve a concrete free port first;
+/** why: `--port 0` is refused by the CLI, so reserve a concrete free port first;
  * a free port also keeps a regression that reaches `listen` observable. */
 function freePort() {
   return new Promise((resolvePort, rejectPort) => {
@@ -118,7 +118,7 @@ describe('validateStartupBind — startup gate', () => {
   });
 
   test('non-loopback with --allow-remote still requires an API key (401)', () => {
-    // With TLS material: the key requirement is independent of TLS.
+    // note: with TLS material — the key requirement is independent of TLS.
     assertRefused(
       startupError({ host: '10.0.0.5', allowRemote: true, tlsCert: 'cert', tlsKey: 'key' }),
       401,
@@ -154,7 +154,7 @@ describe('validateStartupBind — startup gate', () => {
 });
 
 /**
- * The pure rows above cannot prove the gate runs *before* the listener; only a
+ * note: the pure rows above cannot prove the gate runs *before* the listener; only a
  * real boot can. A refused bind must exit non-zero and never print the ready
  * line on stdout — wiping the gate call from `startService` turns this red.
  */
@@ -205,7 +205,7 @@ describe('startService wiring — the gate refuses before listen', () => {
         !stdout.includes('NEXUS_SERVICE_READY'),
         `a refused boot must print no ready line: ${JSON.stringify(stdout)}`,
       );
-      // Order pin (6v6rFm): `listening on` is emitted only after the listener
+      // why: order pin (6v6rFm) — `listening on` is emitted only after the listener
       // is up, so a refused boot must never report one. The status/ready line
       // above cannot tell a gate-before-listen refusal from a refusal that
       // bound the non-loopback socket first; this line keeps a boot that
@@ -274,7 +274,7 @@ describe('validateBindPolicy — request gate', () => {
 
   test('plain-HTTP LAN request is admitted once authenticated', () => {
     assertAdmitted(validateBindPolicy(config(remoteConfig), '10.0.0.5', true));
-    // Half TLS material is not TLS material.
+    // why: half TLS material is not TLS material.
     assertAdmitted(validateBindPolicy(config({ ...remoteConfig, tlsCert: 'cert' }), '10.0.0.5', true));
     assertAdmitted(validateBindPolicy(config({ ...remoteConfig, tlsKey: 'key' }), '10.0.0.5', true));
   });
@@ -293,8 +293,8 @@ describe('validateBindPolicy — request gate', () => {
   });
 
   test('/__bootstrap passes authenticated=true, so a tokenized LAN URL needs no TLS', () => {
-    // server.ts:387 — the one-time token is the proof; only --allow-remote can
-    // refuse this request, never TLS.
+    // why: the one-time token is the proof; only --allow-remote can refuse this
+    // request, never TLS.
     assertAdmitted(validateBindPolicy(config(remoteConfig), '10.0.0.5', true));
     assertRefused(validateBindPolicy(config({ apiKey: 'k' }), '10.0.0.5', true), 403, 'forbidden');
   });

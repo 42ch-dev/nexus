@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
 
 /**
- * v1.215 P1 T2 (residual R-V1208-P2-12): a create-work request that omits the
+ * note: v1.215 P1 T2 (residual R-V1208-P2-12) — a create-work request that omits the
  * `world_id` key lands on the curated `world_id_required` refusal, identical to
  * the empty-string shape — one remediation-text owner, never a duplicated one.
  *
@@ -95,7 +95,7 @@ describe('create-work world_id curated refusal (v1.215 P1 T2)', () => {
     assert.equal(missing.payload.error.details?.field, 'world_id_required', missing.text);
     assert.match(missing.payload.error.message, /World binding is required for new Works/);
 
-    // The empty-string shape is rejected by the same core guard with the exact
+    // why: the empty-string shape is rejected by the same core guard with the exact
     // same remediation text — one text owner, not two.
     const empty = await jsonFetch(`${baseUrl}/v1/daemon/works`, {
       method: 'POST',

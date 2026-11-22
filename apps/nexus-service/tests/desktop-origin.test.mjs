@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * P0-T4 — desktop origin admission.
+ * note: P0-T4 — desktop origin admission.
  *
  * The standalone service replaces the obsolete native-host-only origins with exactly
  * the frozen desktop app origin `nexus://app`, keeps loopback/Vite/browser
@@ -98,7 +98,7 @@ test('the allowlist is exactly the desktop origin plus loopback/Vite origins', a
   assert.equal(origins.includes('*'), false);
   assert.equal(origins.includes('null'), false);
 
-  // The explicit env escape hatch stays available for non-listed browser origins.
+  // note: The explicit env escape hatch stays available for non-listed browser origins.
   const previous = process.env.NEXUS_DAEMON_ALLOWED_ORIGINS;
   process.env.NEXUS_DAEMON_ALLOWED_ORIGINS = 'https://studio.example, not-a-url';
   try {
@@ -158,7 +158,7 @@ test('the service-served SPA is admitted same-origin on a LAN-style Host', async
       }),
     },
   });
-  // The browser reached the service at a LAN address the allowlist cannot know:
+  // why: The browser reached the service at a LAN address the allowlist cannot know:
   // its Origin is exactly the Host it connected to.
   const lanHost = '192.168.50.7:8421';
   const body = JSON.stringify({ creator_id: 'ctr_a', workspace_slug: 'default' });
@@ -170,7 +170,7 @@ test('the service-served SPA is admitted same-origin on a LAN-style Host', async
   assert.equal(accepted.status, 200, accepted.text);
   assert.deepEqual(accepted.payload, { creator_id: 'ctr_a', workspace_slug: 'default' });
 
-  // A foreign Origin on the same Host is still refused before the handler.
+  // note: A foreign Origin on the same Host is still refused before the handler.
   const foreign = await request(`${server.url}/v1/daemon/workspace/active`, {
     method: 'POST',
     headers: { Host: lanHost, Origin: 'https://evil.example', 'Content-Type': 'application/json' },
@@ -180,7 +180,7 @@ test('the service-served SPA is admitted same-origin on a LAN-style Host', async
   assert.equal(foreign.payload.error.code, 'forbidden');
   assert.deepEqual(foreign.payload.error.details, { resource: 'origin' });
 
-  // Same-origin also requires the served transport's scheme.
+  // note: Same-origin also requires the served transport's scheme.
   const schemeMismatch = await request(`${server.url}/v1/daemon/workspace/active`, {
     method: 'POST',
     headers: { Host: lanHost, Origin: `https://${lanHost}`, 'Content-Type': 'application/json' },

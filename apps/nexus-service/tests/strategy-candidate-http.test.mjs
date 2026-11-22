@@ -7,7 +7,7 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Candidate read route (`GET /v1/daemon/strategies/{strategy_id}/candidate`): the preset family
+ * why: Candidate read route (`GET /v1/daemon/strategies/{strategy_id}/candidate`) — the preset family
  * mounts it at the Strategy tier and hands the path id to the core authority, which serves the
  * stored compose row when one exists and the revision-0 import projection otherwise. The store
  * semantics are proven in `crates/nexus-core/tests/strategy_candidate_store.rs` and end to end in

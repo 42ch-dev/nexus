@@ -16,7 +16,7 @@ const CONTRACT_ROOT = join(
 );
 
 /**
- * CAP-009 / I-000133 — contract drift guard.
+ * note: CAP-009 / I-000133 — contract drift guard.
  *
  * Enumerates the service route table and diffs the JSON payload each covered
  * handler actually produces against the key-set of the generated contract type
@@ -53,7 +53,7 @@ const CAPABILITY = {
 };
 
 /**
- * Top-level property names of one generated `export interface`, with optional
+ * note: Top-level property names of one generated `export interface`, with optional
  * flags. Nested object literals are tracked by brace depth so only the
  * interface's own fields are collected.
  */
@@ -88,7 +88,7 @@ function contractFields(file, name) {
   return interfaceFields(readFileSync(join(CONTRACT_ROOT, file), 'utf8'), name);
 }
 
-/** Payload keys must be declared; every required contract key must be present. */
+/** invariant: Payload keys must be declared; every required contract key must be present. */
 function assertMatchesContract(label, payload, fields) {
   assert.equal(typeof payload, 'object', `${label}: payload is not an object`);
   const payloadKeys = Object.keys(payload);
@@ -155,7 +155,7 @@ const COVERED = [
   {
     method: 'GET',
     path: '/v1/daemon/orchestration/capabilities',
-    // The capabilities endpoint serves the hand-coded local DTO (camelCase),
+    // why: The capabilities endpoint serves the hand-coded local DTO (camelCase),
     // not the schema-facing generated `ListCapabilitiesResponse` (snake_case).
     localContract: {
       source: join(repoRoot, 'apps', 'web', 'src', 'lib', 'nexus', 'capability-info.ts'),
@@ -168,7 +168,7 @@ const COVERED = [
 ];
 
 const TODO_ROUTES = new Set([
-  // execution family, not yet mechanically bound to a contract
+  // note: execution family, not yet mechanically bound to a contract
   'POST ^\\/v1\\/daemon\\/orchestration\\/schedules$',
   'GET ^\\/v1\\/daemon\\/orchestration\\/schedules$',
   'GET ^\\/v1\\/daemon\\/orchestration\\/schedules\\/([^/]+)$',
@@ -176,7 +176,7 @@ const TODO_ROUTES = new Set([
   'POST ^\\/v1\\/daemon\\/orchestration\\/schedules\\/([^/]+)\\/signal$',
   'GET ^\\/v1\\/daemon\\/orchestration\\/sessions$',
   'GET ^\\/v1\\/daemon\\/orchestration\\/sessions\\/([^/]+)$',
-  // host family, not yet mechanically bound to a contract
+  // note: host family, not yet mechanically bound to a contract
   'GET ^\\/v1\\/daemon\\/agent-host\\/health$',
   'GET ^\\/v1\\/daemon\\/agent-host\\/providers$',
   'GET ^\\/v1\\/daemon\\/agent-host\\/operations\\/([^/]+)$',
@@ -189,7 +189,7 @@ const TODO_ROUTES = new Set([
   'PUT ^\\/v1\\/daemon\\/agent-host\\/profile$',
   'GET ^\\/v1\\/daemon\\/agent-host\\/config$',
   'PUT ^\\/v1\\/daemon\\/agent-host\\/config$',
-  // runtime family
+  // note: runtime family
   'GET ^\\/v1\\/daemon\\/runtime\\/health$',
   'GET ^\\/v1\\/daemon\\/runtime\\/status$',
   'GET ^\\/v1\\/daemon\\/runtime\\/cert-fingerprint$',

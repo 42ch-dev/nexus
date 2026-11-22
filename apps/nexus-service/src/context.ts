@@ -1,5 +1,5 @@
 /**
- * Context family HTTP surface (P5-T2): the moment inspector (read-only
+ * note: context family HTTP surface (P5-T2) — the moment inspector (read-only
  * assembly observation) and the moment directive (thin set/show/clear
  * wrapper) over the P2-T2 context authority. Every operation is a thin
  * translation over the native family surface; ownership of the observed

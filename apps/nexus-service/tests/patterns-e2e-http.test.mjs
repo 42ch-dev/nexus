@@ -1,5 +1,5 @@
 /**
- * v1.239 P3-T6: `GET /v1/daemon/patterns` over the real core path.
+ * note: v1.239 P3-T6: `GET /v1/daemon/patterns` over the real core path.
  *
  * The T4 suite drives the handler over a stubbed `ServiceCore.core` seam, so
  * nothing there proves the native reader is wired to the route. This suite
@@ -18,7 +18,7 @@ import { after, before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The committed fixture registry root the Rust fixture test also reads. */
+/** note: The committed fixture registry root the Rust fixture test also reads. */
 const FIXTURE_PATTERNS = join(
   serviceRoot,
   '..',
@@ -30,7 +30,7 @@ const FIXTURE_PATTERNS = join(
   'patterns',
 );
 
-/** Pins asserted by `crates/nexus-pattern/tests/fixtures.rs`; a silent change fails both. */
+/** invariant: Pins asserted by `crates/nexus-pattern/tests/fixtures.rs`; a silent change fails both. */
 const PROMPT_STEP_HASH = 'b89e9707bf2d39e27bf825f74c8bfac37acbdf1f7109614d0942fb8613212a04';
 const STEP_WITH_JUDGE_HASH = '1d62b2b1bb02390d704ce10864b327b2120aed59ebe0ba482fe824347404324e';
 
@@ -60,7 +60,7 @@ describe('patterns end-to-end (v1.239 P3-T6)', () => {
     service = await startService({
       home,
       host: '127.0.0.1',
-      // Port 0: the OS picks a free port, so parallel suites never collide.
+      // why: Port 0: the OS picks a free port, so parallel suites never collide.
       port: 0,
       allowRemote: false,
       domainOnly: true,
@@ -72,7 +72,7 @@ describe('patterns end-to-end (v1.239 P3-T6)', () => {
     if (home) rmSync(home, { recursive: true, force: true });
   });
 
-  /** One listing page, parsed. */
+  /** note: One listing page, parsed. */
   async function list(search = '') {
     const response = await fetch(`${service.url}${PATH}${search}`);
     const text = await response.text();

@@ -7,7 +7,7 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * I-000124 follow-up: `GET/PUT /v1/daemon/agent-host/config` is the HTTP seam
+ * note: I-000124 follow-up: `GET/PUT /v1/daemon/agent-host/config` is the HTTP seam
  * over the native agent-host config document. The native core is stubbed at
  * the `ServiceCore.core` boundary the handlers read, so the route semantics
  * (defaults on a missing file, forward + return the saved document) are
@@ -48,7 +48,7 @@ const DEFAULT_CONFIG = {
   providers: [],
 };
 
-/** A core stub backed by an in-memory document, mirroring the native save/load pair. */
+/** note: A core stub backed by an in-memory document, mirroring the native save/load pair. */
 function storeService(
   initial,
   restart = async () => ({ engine_epoch: 7, provider_ready: true }),
@@ -127,7 +127,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       command: 'replacement-agent',
       enabled: true,
     };
-    // Only the replacement is installed: readiness is true exactly when the
+    // why: Only the replacement is installed: readiness is true exactly when the
     // document selects it alone, which is the native rule (`enabled` set).
     const available = new Set([replacement.id]);
     let stored = { ...DEFAULT_CONFIG, providers: [oldProvider] };
@@ -151,7 +151,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       },
     };
 
-    // The client replacement: the saved entry is enabled and the entry it
+    // note: The client replacement: the saved entry is enabled and the entry it
     // replaces is still enabled on the way in.
     const response = await handle('PUT', service, {
       ...DEFAULT_CONFIG,
@@ -230,7 +230,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       stored.providers.map((provider) => provider.id),
       ['first-acp', 'second-acp'],
     );
-    // Each restart saw the document its own save had just written.
+    // note: Each restart saw the document its own save had just written.
     assert.deepEqual(restarts, [['first-acp'], ['first-acp', 'second-acp']]);
   });
 
@@ -253,7 +253,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
         return true;
       },
     );
-    // The document was saved, but nothing fabricates readiness.
+    // note: The document was saved, but nothing fabricates readiness.
     assert.equal(saves.length, 1);
     assert.equal(service.providerReady, false);
     assert.equal(service.engineEpoch, 0);
@@ -291,7 +291,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     for (const providers of [
       [{ id: 'claude-acp', protocol: 'acp', command: null, enabled: true }],
       [{ id: 'claude-acp', protocol: 'acp', command: '   ', enabled: true }],
-      // `enabled` defaults to true, so an omitted command is just as unlaunchable.
+      // note: `enabled` defaults to true, so an omitted command is just as unlaunchable.
       [{ id: 'claude-acp', protocol: 'acp' }],
     ]) {
       await assert.rejects(
@@ -308,14 +308,14 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       );
     }
 
-    // Nothing reached the native save path or the engine, and the provider the
+    // why: Nothing reached the native save path or the engine, and the provider the
     // user already had is still enabled afterwards.
     assert.equal(saves.length, 0);
     assert.equal(restarts.length, 0);
     const current = await handle('GET', service);
     assert.deepEqual(current.body.providers, [enabledProvider]);
 
-    // A disabled entry may keep its null command: the schema preserves it so a
+    // why: A disabled entry may keep its null command: the schema preserves it so a
     // known-good provider can be re-enabled later.
     const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
     const accepted = await handle('PUT', service, {
@@ -326,7 +326,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
   });
 
   test('a stored enabled entry without a command is replaceable', async () => {
-    // A saved document that already contains an unlaunchable enabled entry must
+    // why: A saved document that already contains an unlaunchable enabled entry must
     // not lock the user out: the replacement transform disables every entry but
     // the one being saved, so the launchability rule has to read its result.
     const broken = { id: 'broken-acp', protocol: 'acp', command: null, enabled: true };
@@ -338,10 +338,10 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     };
 
     for (const submitted of [
-      // The client re-sends the stored document (the entry still enabled) plus
+      // note: The client re-sends the stored document (the entry still enabled) plus
       // the provider it wants: the transform disables the stored entry.
       [broken, replacement],
-      // The client also disables the stored entry itself.
+      // note: The client also disables the stored entry itself.
       [{ ...broken, enabled: false }, replacement],
     ]) {
       const { service, saves } = storeService({ ...DEFAULT_CONFIG, providers: [broken] });
@@ -495,7 +495,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       }),
     ]);
 
-    // ONE queue: the save+restart completes before the selection starts.
+    // invariant: ONE queue: the save+restart completes before the selection starts.
     assert.deepEqual(log, [
       'save:start',
       'save:end',

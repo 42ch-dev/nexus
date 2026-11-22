@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// P2-T1 binding smoke: opens the native core against a seeded fixture home.
+// note: P2-T1 binding smoke: opens the native core against a seeded fixture home.
 // Not a product entrypoint — see package.json `dev`/`start` for the
 // downstream-owned `src/main.mjs`.
 import { mkdtempSync } from 'node:fs';

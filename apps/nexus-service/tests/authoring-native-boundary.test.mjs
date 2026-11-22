@@ -1,5 +1,5 @@
 /**
- * A3 — the native authoring boundary.
+ * note: A3 — the native authoring boundary.
  *
  * The real TS/native service, the repository's Rust seed and its local protocol fixture
  * carry the whole public authoring chain: generate → simulate → approve. Every observation
@@ -23,7 +23,7 @@ import { after, before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = join(serviceRoot, '..', '..');
 
-/** The repository's scripted SDK-wire runtime — the ONLY provider fixture this target uses. */
+/** note: the repository's scripted SDK-wire runtime — the ONLY provider fixture this target uses. */
 const dshFixture = join(
   repoRoot,
   'crates/nexus-agent-host/tests/fixtures/native_protocol/mock_dsh_agent.py',
@@ -44,7 +44,7 @@ function node(id, kind) {
   return { id, kind, effect_class: 'pure' };
 }
 
-/** A request every lint layer accepts: one outer state wired to its terminal, one run intent. */
+/** note: a request every lint layer accepts — one outer state wired to its terminal, one run intent. */
 function legalRequest() {
   return {
     entry: 'start',
@@ -61,7 +61,7 @@ function legalRequest() {
   };
 }
 
-/** The user bundle the strategy id addresses: the layout the core resolves as a preset. */
+/** note: the user bundle the strategy id addresses — the layout the core resolves as a preset. */
 function writePreset(nexusHome, id) {
   const bundle = join(nexusHome, 'presets', id);
   mkdirSync(bundle, { recursive: true });
@@ -88,7 +88,7 @@ states:
 }
 
 /**
- * Seed one disposable home whose directory the CALLER already allocated.
+ * note: seed one disposable home whose directory the CALLER already allocated.
  *
  * Every step here is fallible, so the name is chosen (and therefore owned) before
  * this runs: `before` assigns the `mkdtempSync` result to the teardown field first,
@@ -103,7 +103,7 @@ states:
  * The developer's own `~/.nexus42` is never read or written.
  */
 function seedHome(home) {
-  // `--locked --offline` forbid lockfile changes and any network access; they do
+  // why: `--locked --offline` forbid lockfile changes and any network access; they do
   // NOT override the caller's Cargo configuration, so the prepared build
   // prerequisites are what make the local cache sufficient. The explicit timeout
   // + SIGKILL keeps a wedged cargo from blocking this synchronous call past the
@@ -159,12 +159,12 @@ describe('native authoring boundary', () => {
   let service;
 
   before(async () => {
-    // Clear inherited service authentication: the service resolves
+    // why: clear inherited service authentication — the service resolves
     // NEXUS42_DAEMON_API_KEY even with `allowRemote: false`, and a nonempty
     // value selects `keyed_all`. Every fetch below is keyless loopback, so a
     // developer/CI key would 401 before authoring was ever reached.
     delete process.env.NEXUS42_DAEMON_API_KEY;
-    // Allocate the name FIRST and hand it to the teardown field before any
+    // invariant: allocate the name FIRST and hand it to the teardown field before any
     // fallible step: ownership starts when the name is chosen, so a seed refusal
     // (or an abort, or a failed write) still leaves `after` with the path to
     // remove. Nothing is pre-deleted and the name is unique, so a run killed
@@ -192,7 +192,7 @@ describe('native authoring boundary', () => {
   }
 
   test('generate → simulate → approve persists revision and hash, and stale evidence writes nothing', async () => {
-    // The native boundary itself: the staged addon opened the core and the hosted owner
+    // why: the native boundary itself — the staged addon opened the core and the hosted owner
     // established an engine epoch. Without this the rest would be a mock-route assertion.
     // A positive epoch is the owner proof: `null` is "not projected yet" and `0` is the
     // no-owner/domain-only sentinel the service publishes, so both would pass a null check
@@ -228,7 +228,7 @@ describe('native authoring boundary', () => {
       'the walk visits the document, so the trajectory is not an empty shell',
     );
 
-    // Stale evidence FIRST, while the candidate hash is UNAPPROVED. Persistence
+    // invariant: stale evidence runs FIRST, while the candidate hash is UNAPPROVED. Persistence
     // keys the approval on the current candidate hash with `ON CONFLICT DO
     // NOTHING`, so a premature freeze replayed after a good approval is a no-op
     // and cannot be observed. Before any approval exists it has nowhere to hide:
@@ -292,7 +292,7 @@ describe('native authoring boundary', () => {
     );
     assert.match(approved.payload.approval_id, /^apr_/, approved.text.slice(0, 600));
 
-    // Re-read what was PERSISTED, not what the write returned.
+    // why: re-read what was PERSISTED, not what the write returned.
     const candidate = await call('GET', candidatePath);
     assert.equal(candidate.status, 200, candidate.text.slice(0, 600));
     assert.equal(candidate.payload.revision, document.revision, 'the candidate row is the CAS revision');

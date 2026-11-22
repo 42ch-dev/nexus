@@ -1,5 +1,5 @@
 /**
- * Knowledge family HTTP surface (P1-T3 authority over the single Rust core):
+ * note: Knowledge family HTTP surface (P1-T3 authority over the single Rust core):
  * Work/creator findings (including the tri-state PATCH, batch triage, stale
  * banner and retention prune) and reading depth (progress + annotations).
  * Scope validation, enum/transition validation, batch semantics and retention
@@ -28,7 +28,7 @@ import { HttpError } from './errors.js';
 import type { DomainRoute } from './routes.js';
 import { parseOptionalInteger, withPrincipal, wirePayload } from './world-kb.js';
 
-// ── Findings ───────────────────────────────────────────────────────────────
+// note: Findings
 
 /** `POST /v1/daemon/works/{work_id}/findings` — 201 created. */
 export function createFinding(
@@ -165,7 +165,7 @@ export function pruneFindings(
   );
 }
 
-// ── Reading depth ──────────────────────────────────────────────────────────
+// note: Reading depth
 
 /** `GET /v1/daemon/reading/progress?work_id=&chapter=&volume=` — `volume` is optional, defaults to 1. */
 export function getReadingProgress(
@@ -425,9 +425,9 @@ export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
   },
 ];
 
-// ── local grammar helpers ──────────────────────────────────────────────────
+// note: local grammar helpers
 
-/** Bounded `limit` (1..100) for the offset/cursor pages this family serves. */
+/** note: Bounded `limit` (1..100) for the offset/cursor pages this family serves. */
 function boundedLimit(searchParams: URLSearchParams): { limit?: number } {
   const raw = searchParams.get('limit');
   if (raw === null) return {};
@@ -442,7 +442,7 @@ function boundedLimit(searchParams: URLSearchParams): { limit?: number } {
   return { limit: parsed };
 }
 
-/** Required non-negative integer query parameter. */
+/** note: Required non-negative integer query parameter. */
 function requireInteger(raw: string, field: string): number {
   if (!/^\d+$/.test(raw)) {
     throw new HttpError(400, 'invalid_input', `${field} must be an integer`);
@@ -458,7 +458,7 @@ function requireInteger(raw: string, field: string): number {
   return parsed;
 }
 
-/** Required integer query parameter that must be at least 1. */
+/** note: Required integer query parameter that must be at least 1. */
 function requirePositiveInteger(raw: string, field: string): number {
   const parsed = requireInteger(raw, field);
   if (parsed < 1) {
@@ -489,7 +489,7 @@ function readingQuery(searchParams: URLSearchParams): ReadingProgressQuery {
   };
 }
 
-/** Retained daemon default for the stale banner (96h in seconds). */
+/** note: Retained daemon default for the stale banner (96h in seconds). */
 const DEFAULT_STALE_THRESHOLD_SECONDS = 96 * 60 * 60;
 
 function staleThresholdSeconds(): number {

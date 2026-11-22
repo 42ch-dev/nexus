@@ -1,5 +1,5 @@
 /**
- * Content family HTTP surface (P5-T1): Work chapter/manuscript content and
+ * note: Content family HTTP surface (P5-T1): Work chapter/manuscript content and
  * outline/timeline structure patches (P1-T2 authority). Path arguments stay
  * explicit route parameters, `ChapterContentQuery` stays a query (never a
  * body), per-Work locks, published/finalized rules, hash/CAS and path/symlink
@@ -33,7 +33,7 @@ export function chapterQuery(searchParams: URLSearchParams): ChapterContentQuery
   return volume === undefined ? {} : { volume };
 }
 
-/** The wire chapter-status vocabulary (`ChapterStatus`). */
+/** note: The wire chapter-status vocabulary (`ChapterStatus`). */
 const CHAPTER_STATUSES: readonly ChapterStatus[] = [
   'not_started',
   'outlined',
@@ -42,7 +42,7 @@ const CHAPTER_STATUSES: readonly ChapterStatus[] = [
   'published',
 ];
 
-/** Validate `?status=` against the wire union (400 on anything else). */
+/** note: Validate `?status=` against the wire union (400 on anything else). */
 function chapterStatus(raw: string): ChapterStatus {
   if ((CHAPTER_STATUSES as readonly string[]).includes(raw)) {
     return raw as ChapterStatus;
@@ -169,7 +169,7 @@ export function patchTimelineEvent(
 export const CONTENT_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
-    // Canonical wire form: the Rust daemon serves (and the browser delegation
+    // why: Canonical wire form: the Rust daemon serves (and the browser delegation
     // has always sent) the list WITHOUT a trailing slash.
     pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters$/,
     tier: 'tier2',

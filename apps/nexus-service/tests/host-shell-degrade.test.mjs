@@ -7,7 +7,7 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * I-000123: the service-only shell (a fresh home opened with
+ * why: I-000123 — the service-only shell (a fresh home opened with
  * `allow_uninitialized`) has no Host authority until a workspace selection
  * promotes the core. The onboarding wizard calls the tier1 Agent-Host routes
  * BEFORE that promotion, so their native `uninitialized` rejection must degrade
@@ -31,14 +31,14 @@ before(async () => {
   routes = await import(join(serviceRoot, 'dist', 'routes.js'));
 });
 
-/** The native lifecycle's wire envelope for the uninitialized shell. */
+/** note: The native lifecycle's wire envelope for the uninitialized shell. */
 const uninitializedEnvelope = {
   code: 'uninitialized',
   message: 'workspace not initialized',
   http_status: 409,
 };
 
-/** A ServiceCore stub carrying only what the tier1 host handlers read. */
+/** note: A ServiceCore stub carrying only what the tier1 host handlers read. */
 function shellService(workspaceInitialized) {
   return {
     workspaceInitialized,

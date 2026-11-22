@@ -39,7 +39,7 @@ import { COMPUTE_ROUTES } from './compute.js';
 import { WORKFLOW_OBSERVATION_ROUTES } from './workflow-observation.js';
 import { CAPABILITY_ROUTES } from './capabilities.js';
 
-/** Read the `version` field of `apps/nexus-service/package.json`. */
+/** note: Read the `version` field of `apps/nexus-service/package.json`. */
 function readServiceVersion(): string {
   const manifest: unknown = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -57,7 +57,7 @@ function readServiceVersion(): string {
 }
 
 /**
- * Version reported by this daemon's runtime surfaces. Derived from the package
+ * why: Version reported by this daemon's runtime surfaces. Derived from the package
  * manifest so it stays in lockstep with the governed release version instead of
  * drifting on a hard-coded literal. The manifest is resolved relative to this
  * module, so the read works identically from `src/` (tsx) and `dist/`
@@ -96,20 +96,20 @@ export type DomainFamily =
  * state the contract never granted it.
  */
 export interface RouteRequestContext {
-  /** Retained `Last-Event-ID` header, forwarded verbatim (SSE resume cursor). */
+  /** note: Retained `Last-Event-ID` header, forwarded verbatim (SSE resume cursor). */
   readonly lastEventId?: string;
 }
 
 /** One retained family identity: exact path pattern, verb, tier and handler. */
 export interface DomainRoute {
   readonly method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
-  /** Anchored pattern; capture groups are positional params. */
+  /** note: Anchored pattern; capture groups are positional params. */
   readonly pattern: RegExp;
   readonly tier: RouteTier;
   readonly family: DomainFamily;
-  /** Non-200 success status the retained surface keeps (201/204). */
+  /** note: Non-200 success status the retained surface keeps (201/204). */
   readonly status?: number;
-  /** Declared capture name: the first pattern group publishes under this key. */
+  /** note: Declared capture name: the first pattern group publishes under this key. */
   readonly capture?: 'sessionId' | 'operationId' | 'worldId';
   readonly handle: (
     service: ServiceCore,
@@ -137,12 +137,12 @@ export interface RouteMatch {
   worldId?: string;
   sessionId?: string;
   operationId?: string;
-  /** Set when the match came from a self-describing family route. */
+  /** note: Set when the match came from a self-describing family route. */
   family?: DomainFamily;
   params?: string[];
-  /** Retained non-200 success status (201/204) for the family handler. */
+  /** note: Retained non-200 success status (201/204) for the family handler. */
   status?: number;
-  /** Provider-stream dispatch (SSE/session control) handled by the family entry. */
+  /** note: Provider-stream dispatch (SSE/session control) handled by the family entry. */
   providerStream?: boolean;
 }
 
@@ -216,17 +216,17 @@ export async function handleRoute(
 
 
 /**
- * The embedded host is optional in the domain-only profile: an absent Host
+ * why: The embedded host is optional in the domain-only profile: an absent Host
  * authority is truthful degraded readiness, not a client error. It is
  * recognized by its typed `details.category`, never by the human message.
  * Every other native rejection (uninitialized, forbidden, not_found, an
  * unrelated invalid_input, ...) propagates.
  */
 
-/** A legacy-branch route's success payload (family entries only). */
+/** note: A legacy-branch route's success payload (family entries only). */
 type LegacyBody = unknown;
 
-/** Truthful unguarded runtime liveness/status surface (no API key). */
+/** note: Truthful unguarded runtime liveness/status surface (no API key). */
 function runtimeUnguarded(service: ServiceCore, pathname: string): LegacyBody {
   if (pathname === '/v1/daemon/runtime/health') {
     return { status: 'ok', version: SERVICE_VERSION };
@@ -345,7 +345,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     handle: async (service) => {
       const response = await tryHostQuery(service, { query: 'catalog', format: 'scan' });
-      // The native catalog arm names its list `entries`; this endpoint's wire
+      // why: The native catalog arm names its list `entries`; this endpoint's wire
       // contract (`ScanResponse`) names it `agents`, so normalize at the seam.
       return { body: { agents: response?.scan?.entries ?? [] } };
     },
@@ -391,7 +391,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     capture: 'operationId',
     handle: async (service, params) => {
-      // A live or retained core-indexed Character operation answers with the
+      // why: A live or retained core-indexed Character operation answers with the
       // authority's own CharacterOperationResult; every other id keeps the
       // generic provider-only / recovered-journal answer. One observation does
       // both, so a GET never spends a second Character read: the arm is decided
@@ -405,7 +405,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
       return { body: observation };
     },
   },
-  // Provider-stream session control: session create/shutdown, operation
+  // note: Provider-stream session control: session create/shutdown, operation
   // execute/cancel and the bounded SSE event pull.
   {
     method: 'POST',
@@ -454,7 +454,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     capture: 'sessionId',
     handle: async (service, params, search, _body, request) => {
       const sessionId = params[0];
-      // The retained `Last-Event-ID` header outranks the query cursor: both are
+      // why: The retained `Last-Event-ID` header outranks the query cursor: both are
       // resume cursors, and this is the one slot the stream reader parses. An
       // empty header carries no usable id, so it yields to the query cursor
       // instead of clobbering it with an empty cursor (full replay).
@@ -469,9 +469,9 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
       };
     },
   },
-  // I-000064 — daemon-global agent profile (GET/PUT); see agent-profile.ts.
+  // note: I-000064 — daemon-global agent profile (GET/PUT); see agent-profile.ts.
   ...AGENT_PROFILE_ROUTES,
-  // I-000124 follow-up — provider config document (GET/PUT); see agent-host-config.ts.
+  // note: I-000124 follow-up — provider config document (GET/PUT); see agent-host-config.ts.
   ...AGENT_HOST_CONFIG_ROUTES,
 ];
 
@@ -559,7 +559,7 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
     if (isAbsentHostError(mapped)) {
       return null;
     }
-    // The service-only shell has no Host authority to publish, so tier1
+    // why: The service-only shell has no Host authority to publish, so tier1
     // readiness degrades exactly like an absent host until promotion. After
     // promotion the core exists and an `uninitialized` rejection still surfaces.
     if (mapped.code === 'uninitialized' && !service.workspaceInitialized) {
@@ -569,7 +569,7 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
   }
 }
 
-/** Truthful runtime mode: uninitialized is reported as such, never as ready. */
+/** note: Truthful runtime mode: uninitialized is reported as such, never as ready. */
 function runtimeMode(service: ServiceCore): string {
   if (!service.workspaceInitialized) return 'uninitialized';
   if (service.domainOnly) return 'domain_only';

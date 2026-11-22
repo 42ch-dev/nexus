@@ -1,5 +1,5 @@
 /**
- * Compute family HTTP surface (v1.195 P2-T3): the retained C1–C8 operations
+ * note: Compute family HTTP surface (v1.195 P2-T3): the retained C1–C8 operations
  * over the ONE hosted execution owner.
  *
  * Every handler is a thin adapter over the native compute facade — the module
@@ -65,7 +65,7 @@ export function listComputeRuns(service: ServiceCore, query: ListRunsQuery) {
 
 /** `POST /v1/daemon/compute/runs/{run_id}/accept` — commit that run once (C6). */
 export function acceptComputeRun(service: ServiceCore, runId: string, body: unknown) {
-  // The retained route's request body is optional: an omitted body (or `{}`)
+  // why: The retained route's request body is optional: an omitted body (or `{}`)
   // means "accept every proposal". Only a body of another shape is a fault.
   const request: RunAcceptRequest = body === undefined ? {} : wirePayload(body, 'request');
   return withPrincipal(service, (principal) =>
@@ -84,7 +84,7 @@ export function clearComputeRuns(service: ServiceCore, query: ClearRunsQuery) {
 }
 
 /**
- * `ListRunsQuery` from the query string.
+ * note: `ListRunsQuery` from the query string.
  *
  * `world_id`/`module_id`/`status`/`cursor` are opaque strings forwarded
  * verbatim: the generated DTO's closed status enum is what refuses an unknown
@@ -111,7 +111,7 @@ function listRunsQuery(search: URLSearchParams): ListRunsQuery {
 }
 
 /**
- * `ClearRunsQuery` from the query string, refusing a malformed Clear with the
+ * note: `ClearRunsQuery` from the query string, refusing a malformed Clear with the
  * retained 422 `invalid_input` envelope.
  *
  * `world_id` is REQUIRED — Clear is World-scoped, and the retired route
@@ -144,7 +144,7 @@ function clearRunsQuery(search: URLSearchParams): ClearRunsQuery {
 }
 
 /**
- * The run-list status filter as the wire enum member it names.
+ * note: The run-list status filter as the wire enum member it names.
  *
  * The generated `list-runs-query` schema owns this vocabulary; this lookup only
  * turns the one string spelling into that member so TypeScript sees the closed

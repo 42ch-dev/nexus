@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Task 1 — browser access bootstrap (access spec §3.1 / §6.2).
+ * note: task 1 — browser access bootstrap (access spec §3.1 / §6.2).
  *
  * Covers the product behaviour of the tokenized `GET /__bootstrap` route:
  * one-time handoff to an `HttpOnly` session cookie, keyed-mode admission by
@@ -19,12 +19,12 @@ import test, { after } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const API_KEY = 'test-api-key';
 
-/** §6.2 copy, verbatim. */
+/** note: §6.2 copy, verbatim. */
 const REPLAY_MESSAGE = '访问链接已被使用。请回到服务终端复制最新打印的访问链接。';
 const EXPIRED_MESSAGE = '访问链接已过期。请回到服务终端复制最新打印的访问链接。';
 
 const tempDirs = [];
-/** Every listener a case opened; `after` closes whatever a failed assertion left running. */
+/** note: every listener a case opened; `after` closes whatever a failed assertion left running. */
 const openServers = new Set();
 
 after(async () => {
@@ -76,7 +76,7 @@ async function startServer({ keyed = false, clock } = {}) {
       port: 0,
       allowRemote: false,
     });
-    // Guarded tier1 route the admission assertions call; the runtime family is
+    // why: guarded tier1 route the admission assertions call; the runtime family is
     // unguarded and would answer 200 with or without credentials.
     const service = {
       startedAt: new Date().toISOString(),
@@ -120,7 +120,7 @@ test('tokens are single-use, replay-detectable and expire after their TTL', asyn
   const store = new AuthSessionStore(() => now);
 
   const token = store.mintToken();
-  // 256 bits base64url: 43 characters, no padding.
+  // note: 256 bits base64url — 43 characters, no padding.
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(store.consumeToken(token), true);
   assert.equal(store.consumeToken(token), false);

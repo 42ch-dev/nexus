@@ -55,7 +55,7 @@ async function startService(options) {
   return mod.startService(options);
 }
 
-/** DER SHA-256 fingerprint in the frozen `SHA256:<colon-hex>` wire format. */
+/** note: DER SHA-256 fingerprint in the frozen `SHA256:<colon-hex>` wire format. */
 function expectedDerFingerprint(pem) {
   const cert = new X509Certificate(pem);
   const digest = createHash('sha256').update(cert.raw).digest();
@@ -371,7 +371,7 @@ describe('world-kb-http provider readiness (P4-T1)', () => {
 
   before(async () => {
     home = seedHome();
-    // Provider-enabled (EngineOwner): the native environment admits one core at
+    // why: Provider-enabled (EngineOwner): the native environment admits one core at
     // a time, so this runs after the domain-only fixture service has closed.
     service = await startService({
       home,
@@ -391,7 +391,7 @@ describe('world-kb-http provider readiness (P4-T1)', () => {
     const status = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
     assert.equal(status.status, 200);
     assert.equal(status.payload.workspace_initialized, true);
-    // Host liveness is not readiness: the fixture has no provider whose bounded
+    // why: Host liveness is not readiness: the fixture has no provider whose bounded
     // availability probe succeeded, so the profile is degraded.
     assert.equal(status.payload.runtime_mode, 'provider_degraded');
     assert.equal(status.payload.acp.tool_execution_enabled, false);
@@ -465,7 +465,7 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
     assert.equal(patch.status, 409);
     assert.equal(patch.payload.error.code, 'uninitialized');
 
-    // I-000123: tier1 host readiness degrades on the uninitialized shell
+    // note: I-000123: tier1 host readiness degrades on the uninitialized shell
     // (same body as an absent host) instead of deadlocking first-run setup.
     const host = await jsonFetch(`${service.url}/v1/daemon/agent-host/health`);
     assert.equal(host.status, 200);
@@ -539,7 +539,7 @@ describe('world-kb-http transport bounds (P4-T1)', () => {
         reject(new Error('slow-header socket never settled'));
       });
       socket.on('connect', () => {
-        // Partial request line + headers, then stall: the handler is never entered.
+        // note: Partial request line + headers, then stall: the handler is never entered.
         socket.write('GET /v1/daemon/runtime/health HTTP/1.1\r\nHost: 127.0.0.1\r\n');
       });
       socket.on('data', (chunk) => {
@@ -558,7 +558,7 @@ describe('world-kb-http transport bounds (P4-T1)', () => {
     assert.ok(elapsed >= 4_000, `expected the 5s header deadline, closed after ${elapsed}ms`);
     assert.ok(elapsed < 10_000, `header deadline must be bounded, took ${elapsed}ms`);
 
-    // The listener is still serving after one timed-out slow client.
+    // note: The listener is still serving after one timed-out slow client.
     const healthy = await jsonFetch(`${service.url}/v1/daemon/runtime/health`);
     assert.equal(healthy.status, 200);
   });
@@ -718,7 +718,7 @@ describe('world-kb-http close owner (P4-T1)', () => {
 
     const report = await close();
     assert.equal(report.state, 'closed');
-    // A sequential implementation would invoke the native close only after the
+    // why: A sequential implementation would invoke the native close only after the
     // 250ms listener teardown; concurrency puts both in the first turn.
     assert.ok(coreStart !== null, 'native close must be invoked');
     assert.ok(coreStart < 100, `native close started ${coreStart}ms in, not immediately`);
@@ -730,7 +730,7 @@ describe('world-kb-http close owner (P4-T1)', () => {
     const fakeServer = {
       listening: true,
       close() {
-        // Never calls back: models a listener whose close event never fires.
+        // note: Never calls back: models a listener whose close event never fires.
       },
       closeIdleConnections() {},
       closeAllConnections() {},
@@ -822,7 +822,7 @@ describe('world-kb-http lifecycle (P4-T1)', () => {
   test('close settles within the deadline while a request is still in flight', async () => {
     const local = await startDomainService(home, 18_451);
     const port = Number(local.url.split(':')[2]);
-    // Admitted request with a declared body that never arrives: the handler is
+    // note: Admitted request with a declared body that never arrives: the handler is
     // parked in the body read, so the socket is genuinely active.
     const socket = net.connect({ host: '127.0.0.1', port });
     socket.on('error', () => undefined);

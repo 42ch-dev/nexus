@@ -12,13 +12,13 @@ import type { IncomingMessage } from 'node:http';
  * restart, and no token or session ever reaches disk.
  */
 export const SESSION_TTL_MS = 28_800_000;
-// Product decision (owner, 2026-10-27): the token is single-use, so the TTL
+// why: Product decision (owner, 2026-10-27): the token is single-use, so the TTL
 // only bounds how long an UNCONSUMED link stays valid — matching the session
 // lifetime means a printed URL never expires while the service runs.
 export const TOKEN_TTL_MS = SESSION_TTL_MS;
 export const SESSION_COOKIE = 'nexus_session';
 
-/** 256-bit base64url identifier (tokens and session ids alike). */
+/** note: 256-bit base64url identifier (tokens and session ids alike). */
 function randomId(): string {
   return randomBytes(32).toString('base64url');
 }
@@ -43,9 +43,9 @@ export function sessionCookie(sessionId: string, secure: boolean): string {
 }
 
 export class AuthSessionStore {
-  /** Unconsumed tokens, mapped to their expiry instant. */
+  /** note: Unconsumed tokens, mapped to their expiry instant. */
   private readonly tokens = new Map<string, number>();
-  /** Consumed tokens, retained until their own expiry so replay is reported as replay. */
+  /** note: Consumed tokens, retained until their own expiry so replay is reported as replay. */
   private readonly consumedTokens = new Map<string, number>();
   private readonly sessions = new Map<string, number>();
 
@@ -58,7 +58,7 @@ export class AuthSessionStore {
     return token;
   }
 
-  /** Validates and deletes the token; a second use of the same token returns false. */
+  /** note: Validates and deletes the token; a second use of the same token returns false. */
   consumeToken(token: string): boolean {
     this.sweep();
     const expiresAt = this.tokens.get(token);
@@ -68,7 +68,7 @@ export class AuthSessionStore {
     return true;
   }
 
-  /** True when the token was already consumed and has not yet expired. */
+  /** note: True when the token was already consumed and has not yet expired. */
   wasConsumed(token: string): boolean {
     const expiresAt = this.consumedTokens.get(token);
     return expiresAt !== undefined && expiresAt > this.now();
@@ -93,7 +93,7 @@ export class AuthSessionStore {
     return true;
   }
 
-  /** Lazy expiry sweep: bounded maps, no timer. */
+  /** why: Lazy expiry sweep: bounded maps, no timer. */
   private sweep(): void {
     const now = this.now();
     for (const [token, expiresAt] of this.tokens) {

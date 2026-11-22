@@ -7,7 +7,7 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Workflow-IR read route (`GET /v1/daemon/strategies/{strategy_id}/workflow-ir`): the preset
+ * note: Workflow-IR read route (`GET /v1/daemon/strategies/{strategy_id}/workflow-ir`): the preset
  * family mounts it at the Strategy tier and hands the path id to the core authority, which
  * projects the installed preset through the existing `nexus-preset` import adapter. The core
  * resolution and the schema round-trip are proven in

@@ -7,7 +7,7 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Apply transport (`POST /v1/daemon/strategies/{strategy_id}/apply`,
+ * note: apply transport (`POST /v1/daemon/strategies/{strategy_id}/apply`,
  * `GET /v1/daemon/strategies/{strategy_id}/applied` and
  * `GET /v1/daemon/strategies/{strategy_id}/approvals`): the preset family mounts all three at
  * the Strategy tier and hands the whole request body to the core authority. The apply write, its
@@ -51,7 +51,7 @@ const NEWEST = {
   approved_at: '2026-11-13T00:00:00Z',
 };
 
-/** The superseded approval: neither the live one nor the newest, so applying it rolls back. */
+/** note: the superseded approval — neither the live one nor the newest, so applying it rolls back. */
 const SUPERSEDED = {
   approval_id: 'apr_00000000-0000-4000-8000-000000000003',
   content_hash: 'b'.repeat(64),
@@ -89,7 +89,7 @@ function serviceWith(calls) {
   };
 }
 
-/** A native rejection: the wire `CoreError` envelope with the refusal inside `details`. */
+/** note: a native rejection — the wire `CoreError` envelope with the refusal inside `details`. */
 function refusal(reason) {
   return new Error(
     JSON.stringify({
@@ -256,7 +256,7 @@ describe('approvals list (GET /v1/daemon/strategies/{id}/approvals)', () => {
       undefined,
     );
 
-    // Passthrough, not a re-sort: the wire order is the core's candidate_revision order.
+    // invariant: passthrough, not a re-sort — the wire order is the core's candidate_revision order.
     assert.deepEqual(response.body, APPROVALS);
     assert.equal(response.body.items[0].approval_id, NEWEST.approval_id);
     assert.equal(response.body.items[1].approval_id, SUPERSEDED.approval_id);

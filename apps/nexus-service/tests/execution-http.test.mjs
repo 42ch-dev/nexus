@@ -13,7 +13,7 @@ const serviceRoot = join(__dirname, '..');
 const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
 
 /**
- * P5-T3 bounded integration target: the execution/preset/strategy families
+ * note: P5-T3 bounded integration target: the execution/preset/strategy families
  * and the provider-family selection over the real in-process service, the
  * real native store, and deterministic no-model ACP fixture peers. No mock
  * forwards anything: selection is observed through the native provider
@@ -32,7 +32,7 @@ function realpathSync(p) {
   }).stdout.trim();
 }
 
-// Four provider families, all backed by the same deterministic no-model ACP
+// why: Four provider families, all backed by the same deterministic no-model ACP
 // fixture: selection must be Rust-admitted across the whole catalog, not a
 // single hard-coded peer.
 const PROVIDER_IDS = ['mock-acp-1', 'mock-acp-2', 'mock-acp-3', 'mock-acp-4'];
@@ -127,7 +127,7 @@ describe('execution-http (P5-T3)', () => {
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
-    // Tier parity: execution/preset/strategy are all creator-tier; the
+    // note: Tier parity: execution/preset/strategy are all creator-tier; the
     // compute run family stays an explicit migration refusal (the WASM edge
     // is a daemon-cohort capability), never a degraded fake.
     for (const route of inventory) {
@@ -138,12 +138,12 @@ describe('execution-http (P5-T3)', () => {
   });
 
   test('provider selection and interrupted execution', async () => {
-    // 1. Four-family selection is Rust-admitted: the native catalog exposes
+    // note: 1. Four-family selection is Rust-admitted: the native catalog exposes
     //    exactly the configured families and a session binds the chosen one.
     const catalog = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/providers`);
     assert.equal(catalog.status, 200, catalog.text);
     const listed = (catalog.payload.providers ?? []).map((entry) => entry.provider_id);
-    // The four configured mock families must all be Rust-admitted, and the
+    // invariant: The four configured mock families must all be Rust-admitted, and the
     // maintained DSH native adapter is a real default catalog member (P4
     // native_cli registration semantics) — asserted present, never deleted
     // to flatter the fixture.
@@ -159,7 +159,7 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(created.status, 200, created.text);
     const sessionId = created.payload.session_id;
     assert.ok(sessionId, created.text);
-    // Legacy sessions have no admitted Character binding for memory capture.
+    // note: Legacy sessions have no admitted Character binding for memory capture.
     const rememberDenied = await jsonFetch(
       `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
       { method: 'POST', body: { kind: 'prompt', content: 'hello', remember: true } },
@@ -167,7 +167,7 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(rememberDenied.status, 422, rememberDenied.text);
     assert.equal(rememberDenied.payload.error.code, 'invalid_input');
 
-    // 2. Graceful close cancels the in-flight operation — `cancelled` is the
+    // note: 2. Graceful close cancels the in-flight operation — `cancelled` is the
     //    true settled semantic for an op orphaned by an orderly shutdown.
     const executed = await jsonFetch(
       `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
@@ -191,13 +191,13 @@ describe('execution-http (P5-T3)', () => {
       `an in-flight op orphaned by an orderly close settles as cancelled: ${settled.text}`,
     );
 
-    // 3. TRUE interruption is a journal orphan that no process ever settled:
+    // note: 3. TRUE interruption is a journal orphan that no process ever settled:
     //    an in-flight journal row is pre-seeded into the workspace state DB
     //    (the T1 `second_owner_and_restart_are_fenced` method — no close in
     //    between), and the next open's settlement classifies it `interrupted`
     //    and keeps it terminal-inspectable.
     const orphanId = crypto.randomUUID();
-    // The journal rides the writer-fenced state DB, so the seed must write as
+    // why: The journal rides the writer-fenced state DB, so the seed must write as
     // the retained engine writer: stub the five `nexus_writer_*` scalars with
     // the gate/registration values the closed engine owner committed.
     const seed = spawnSync(
@@ -224,7 +224,7 @@ describe('execution-http (P5-T3)', () => {
       `an unsettled journal orphan must be classified interrupted: ${afterReopen.text}`,
     );
 
-    // 4. Cancellation semantics stay truthful: a DELETE against an unknown
+    // note: 4. Cancellation semantics stay truthful: a DELETE against an unknown
     //    session id is a real 404 from the host registry — never a fake
     //    success — and DSH cancellation is not offered as a fake success
     //    anywhere on this surface.
@@ -237,7 +237,7 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(missing.payload.error.code, 'not_found', missing.text);
   });
 
-  // v1.206 P1 Task 2: the public prompt POST's 500 exits are all classified
+  // note: v1.206 P1 Task 2: the public prompt POST's 500 exits are all classified
   // `internal`, sanitized, and pinned. A provider-only (non-Actor) session
   // drives the branch that reserves a dispatch, calls the provider, and
   // registers the row; the provider seam is stubbed per invariant so each
@@ -260,7 +260,7 @@ describe('execution-http (P5-T3)', () => {
       });
 
     try {
-      // E1 (provider.ts:529) — an `ok` execute reply without `operation_id`
+      // note: E1 (provider.ts:529) — an `ok` execute reply without `operation_id`
       // violates the provider protocol invariant: typed `internal`/500, never a
       // fabricated operation.
       core.providerCall = async (request) => ({
@@ -273,7 +273,7 @@ describe('execution-http (P5-T3)', () => {
       assert.equal(noOperationId.payload.error.code, 'internal', noOperationId.text);
       assert.equal(noOperationId.payload.error.message, 'Internal server error', noOperationId.text);
 
-      // E2 (provider.ts:540) — the reservation taken synchronously by
+      // note: E2 (provider.ts:540) — the reservation taken synchronously by
       // `beginProviderOperationDispatch` must still be held when the row is
       // registered; losing it is `internal`/500, not a silent unregistered op.
       core.providerCall = async (request) => {
@@ -290,7 +290,7 @@ describe('execution-http (P5-T3)', () => {
       assert.equal(lostAdmission.payload.error.code, 'internal', lostAdmission.text);
       assert.equal(lostAdmission.payload.error.message, 'Internal server error', lostAdmission.text);
 
-      // E3 (errors.ts:90-91) — a native `internal` rejection on the prompt path
+      // note: E3 (errors.ts:90-91) — a native `internal` rejection on the prompt path
       // is the sanitization boundary: 500 `internal` with a constant message,
       // and the native detail never crosses the wire.
       const nativeDetail = '/Users/private-operator/.nexus42/state.db';
@@ -324,7 +324,7 @@ describe('execution-http (P5-T3)', () => {
     }
   });
 
-  // E4 (errors.ts:64) is unreachable through the mapper: the parser gate
+  // note: E4 (errors.ts:64) is unreachable through the mapper: the parser gate
   // (`CORE_ERROR_CODES`) rejects an unknown code before the mapper and every
   // accepted code is in `STATUS_BY_CODE`, so the fallback is a defensive arm.
   // E5 (errors.ts:111) is wire-reachable — a plain `Error` rejection at the
@@ -333,12 +333,12 @@ describe('execution-http (P5-T3)', () => {
   test('every mapper 500 fallback arm is classified internal and sanitized', async () => {
     const { mapNativeError, statusForCode } = await import(join(serviceRoot, 'dist/errors.js'));
 
-    // E4 — a code outside both lookup tables falls back to the defensive 500.
+    // note: E4 — a code outside both lookup tables falls back to the defensive 500.
     assert.equal(statusForCode('internal'), 500);
     assert.equal(statusForCode('not_supported'), 501);
     assert.equal(statusForCode('no_such_code'), 500);
 
-    // E5 — a rejection that is neither an `HttpError` nor a parseable native
+    // note: E5 — a rejection that is neither an `HttpError` nor a parseable native
     // envelope, nor a pre-wire `invalid ` validation, is the catch-all
     // `internal`/500 with the constant sanitized message.
     const unmapped = mapNativeError(
@@ -357,7 +357,7 @@ describe('execution-http (P5-T3)', () => {
     const orchestration = await jsonFetch(`${baseUrl}/v1/daemon/orchestration/presets`);
     assert.equal(orchestration.status, 200, orchestration.text);
 
-    // An unknown preset id is the core authority's own refusal (404), and a
+    // why: An unknown preset id is the core authority's own refusal (404), and a
     // strategy patch against a nonexistent strategy is refused by the same
     // authority — both prove the route is live over real state, not 501.
     const missingPreset = await jsonFetch(`${baseUrl}/v1/daemon/presets/preset_missing`);
@@ -374,11 +374,11 @@ describe('execution-http (P5-T3)', () => {
         },
       },
     );
-    // The route is live over the core authority: the missing strategy is the
+    // note: The route is live over the core authority: the missing strategy is the
     // core's own 404 refusal — never 501, never a synthesized success.
     assert.equal(strategyPatch.status, 404, strategyPatch.text);
 
-    // The Compute family (v1.195 P2-T3) is a mounted family of its own
+    // note: The Compute family (v1.195 P2-T3) is a mounted family of its own
     // (`compute.ts`) over the hosted owner, not an unmigrated route: this
     // profile therefore answers from the compute/owner boundary — never the
     // router's 501. The live C1–C8 contracts (and their refusals) are asserted

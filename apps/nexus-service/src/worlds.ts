@@ -1,5 +1,5 @@
 /**
- * World family HTTP surface (P5-T1): World lifecycle (P0-T1 authority),
+ * note: World family HTTP surface (P5-T1): World lifecycle (P0-T1 authority),
  * fork / pack / rules / world findings (P0-T2) and the World timeline reads
  * (P0-T3). Every operation is a thin translation over the native family
  * surface — the stored Principal is minted natively, ownership/CAS/effects
@@ -100,7 +100,7 @@ export function importWorldPack(
 }
 
 /**
- * `include_archived` — the rule-list inclusion flag (V1.198 §13).
+ * invariant: `include_archived` — the rule-list inclusion flag (V1.198 §13).
  *
  * Exactly one occurrence, exactly `true` or `false`: absent → default read
  * (archived omitted). A duplicate key, another value, or an unknown query key
@@ -177,12 +177,12 @@ export function timelineOverview(
     service.core.timelineOverview(principal, cursor === null ? {} : { cursor }),
   );
 }
-/** The wire timeline-event status vocabulary (`CoreTimelineEventsQuery.status`). */
+/** note: The wire timeline-event status vocabulary (`CoreTimelineEventsQuery.status`). */
 const TIMELINE_EVENT_STATUSES: readonly NonNullable<
   CoreTimelineEventsQuery['status']
 >[] = ['canon', 'provisional', 'rejected'];
 
-/** Validate `?status=` against the wire union (400 on anything else). */
+/** note: Validate `?status=` against the wire union (400 on anything else). */
 function timelineEventStatus(raw: string): NonNullable<CoreTimelineEventsQuery['status']> {
   if ((TIMELINE_EVENT_STATUSES as readonly string[]).includes(raw)) {
     return raw as NonNullable<CoreTimelineEventsQuery['status']>;
@@ -340,8 +340,8 @@ export const WORLD_ROUTES: readonly DomainRoute[] = [
       body: await listTimelineEvents(service, params[0], search),
     }),
   },
-  // ── World KB canvas identities promoted from the legacy matcher (verbatim
-  // verb/path/tier; handlers shared with the world-kb module) ────────────────
+  // note: World KB canvas identities promoted from the legacy matcher (verbatim
+  // verb/path/tier; handlers shared with the world-kb module)
   {
     method: 'POST',
     pattern: /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/promote-candidate$/,

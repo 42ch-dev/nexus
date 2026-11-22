@@ -28,7 +28,7 @@ const SLUG = 'default';
 const OWNED_WORLD = 'wld_owned';
 
 /**
- * P0-T5 bounded real-native target: the production native boot and the
+ * note: P0-T5 bounded real-native target: the production native boot and the
  * readiness it publishes.
  *
  * Every observation below comes from the real service over the real native
@@ -51,7 +51,7 @@ function resolvePython() {
 }
 
 /**
- * The selected provider this product dispatches to, pointed at a runtime that
+ * note: The selected provider this product dispatches to, pointed at a runtime that
  * cannot start: its ordinary+sealed probe fails deterministically, and no
  * process is spawned to do it.
  */
@@ -64,7 +64,7 @@ enabled = true
 `;
 
 /**
- * The selected ACP provider (the deterministic test-protocol fixture peer).
+ * note: The selected ACP provider (the deterministic test-protocol fixture peer).
  *
  * `fixtureLog` points the fixture's own request log at an absolute path inside
  * the case's disposable home, so a case can read back the prompt a real engine
@@ -97,7 +97,7 @@ ${envTable}`;
 }
 
 /**
- * Seed one disposable home: the shared native wire fixture (creator, workspace,
+ * note: Seed one disposable home: the shared native wire fixture (creator, workspace,
  * durable store, worlds/KB) plus the two things an initialized profile needs —
  * the agent-host provider selection, and the selected workspace's registered
  * creative root.
@@ -147,7 +147,7 @@ async function jsonFetch(url, { method = 'GET', body } = {}) {
 }
 
 /**
- * Freeze a runnable applied identity for a scaffolded user preset.
+ * why: Freeze a runnable applied identity for a scaffolded user preset.
  *
  * The intake has one arm: a user bundle runs the document its current apply
  * installed, and a bundle with no apply is refused before graph construction.
@@ -185,7 +185,7 @@ async function startServiceOn(home, extra = {}) {
 }
 
 /**
- * Boot one real service process over `home` and return the discovery record it
+ * note: Boot one real service process over `home` and return the discovery record it
  * published, then let it close. A separate process is what the product's
  * restart is, so this observes the record exactly as a restarted service
  * publishes it.
@@ -213,7 +213,7 @@ await service.close();
   return JSON.parse(record[1]);
 }
 
-/** Runtime status plus the discovery record this open service published. */
+/** note: Runtime status plus the discovery record this open service published. */
 async function observe(service) {
   const response = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
   assert.equal(response.status, 200, response.text);
@@ -221,7 +221,7 @@ async function observe(service) {
 }
 
 /**
- * I-000436 — the P0-T6 block is EXCLUDED on the GitHub linux runner, not absent
+ * why: I-000436 — the P0-T6 block is EXCLUDED on the GitHub linux runner, not absent
  * from it (I-000427), and not called flaky: the file's own process dies there
  * with signal SIGSEGV, 58.1 s in, after the P0-T5 block had run to completion
  * and P0-T6's build step had passed, with no failing assertion (run 43489148101,
@@ -273,7 +273,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
   });
 
   test('hosted readiness and owner: an unprobed selected provider is not ready', async () => {
-    // The selected provider's ordinary+sealed probe cannot succeed: the
+    // why: The selected provider's ordinary+sealed probe cannot succeed: the
     // configured runtime does not exist. Catalog presence is a candidate, so
     // the profile must be published degraded rather than ready.
     const service = await startServiceOn(seededHome(BROKEN_SELECTED_PROVIDER));
@@ -283,7 +283,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       assert.equal(status.runtime_mode, 'provider_degraded', JSON.stringify(status));
       assert.equal(status.acp.tool_execution_enabled, false);
       assert.equal(service.service.providerReady, false);
-      // The owner itself DID boot: the profile is initialized, and only the
+      // note: The owner itself DID boot: the profile is initialized, and only the
       // provider lane is not ready.
       assert.equal(discovery.readiness, 'ready');
     } finally {
@@ -292,7 +292,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
   });
 
   test('hosted readiness and owner: a probed selected provider is ready', async () => {
-    // Positive control for the same rule: with the selection probed available
+    // why: Positive control for the same rule: with the selection probed available
     // the profile is published ready. An implementation that always reports
     // not-ready cannot pass both cases.
     const service = await startServiceOn(seededHome(acpProviderConfig()));
@@ -308,7 +308,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
 
   test('hosted readiness and owner: publishes the actual owner epoch', async () => {
     const home = seededHome(BROKEN_SELECTED_PROVIDER);
-    // Each boot is its own service process (the product's real restart), so the
+    // why: Each boot is its own service process (the product's real restart), so the
     // published epoch is observed exactly as a restarted service reports it.
     const first = bootInChildProcess(home);
     assert.equal(first.readiness, 'ready', JSON.stringify(first));
@@ -317,7 +317,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       `an established hosted owner must publish its real epoch, got ${first.engine_epoch}`,
     );
 
-    // Every owner admission advances the writer protocol's engine epoch, so a
+    // invariant: Every owner admission advances the writer protocol's engine epoch, so a
     // literal/constant epoch cannot satisfy both observations.
     const second = bootInChildProcess(home);
     assert.ok(
@@ -372,11 +372,11 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
     assert.equal(reportA.state, 'closed', JSON.stringify(reportA));
     assert.equal(reportA.cleanup_confirmed, true, JSON.stringify(reportA));
 
-    // `coreA`/`ownerA` stay referenced for the rest of this case (and the
+    // why: `coreA`/`ownerA` stay referenced for the rest of this case (and the
     // epoch below is read from `ownerA`): the release must not depend on the
     // closed owner's references being dropped.
 
-    // The next owner over the SAME home, in the SAME process: the confirmed
+    // note: The next owner over the SAME home, in the SAME process: the confirmed
     // close released the workspace authority, so this composes and admits a
     // NEW engine generation instead of refusing `busy`.
     const coreB = await openCore(
@@ -389,7 +389,6 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
         Number.isInteger(ownerB.engine_epoch) && ownerB.engine_epoch > ownerA.engine_epoch,
         `the next owner is a new admission (${ownerA.engine_epoch} -> ${ownerB.engine_epoch})`,
       );
-      // A live duplicate is still refused.
       await assert.rejects(
         () => coreB.startExecutionOwner(),
         (error) => {
@@ -408,7 +407,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
   test('hosted readiness and owner: an unconfirmed cleanup cannot publish a new owner', async () => {
     const home = seededHome(BROKEN_SELECTED_PROVIDER);
     const { openCore } = await import('@42ch/nexus-native');
-    // The forced-unconfirmed seam is a test-only native export, reached the
+    // note: The forced-unconfirmed seam is a test-only native export, reached the
     // same way the other focused suites reach it.
     const { loadNodePath } = await import(
       join(root, 'packages', 'nexus-native', 'dist', 'loader.js')
@@ -422,12 +421,12 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
 
     binding.forceUnconfirmedCleanup(true);
     try {
-      // An unconfirmed cleanup reports what it is: never a confirmed close.
+      // note: An unconfirmed cleanup reports what it is: never a confirmed close.
       const reportA = await coreA.close();
       assert.equal(reportA.state, 'interrupted', JSON.stringify(reportA));
       assert.equal(reportA.cleanup_confirmed, false, JSON.stringify(reportA));
 
-      // …and it keeps the home fenced: the SAME process cannot publish a new
+      // invariant: …and it keeps the home fenced: the SAME process cannot publish a new
       // owner over it while the retained cleanup is unsettled.
       await assert.rejects(
         () =>
@@ -436,7 +435,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
             undefined,
           ),
         (error) => {
-          // The native open rejection for a retained cleanup is a plain reason
+          // note: The native open rejection for a retained cleanup is a plain reason
           // ("interrupted: …"), which the binding surfaces as its generic
           // `open_failed` envelope; what matters is that no owner is published.
           assert.ok(
@@ -450,7 +449,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       binding.forceUnconfirmedCleanup(false);
     }
 
-    // With the forced failure gone, the retained owner settles on the retried
+    // why: With the forced failure gone, the retained owner settles on the retried
     // close and only THEN does the home admit a real new owner — the
     // unconfirmed attempt never published one.
     const coreB = await openCore(
@@ -469,7 +468,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
   });
 
   test('hosted readiness and owner: no canonical creative root probes nothing and publishes no owner', async () => {
-    // The same probe-able ACP selection as the positive control, seeded with
+    // note: The same probe-able ACP selection as the positive control, seeded with
     // its registered creative root first: the valid-root control must report
     // the REAL owner epoch and a probed-ready provider.
     const home = seededHome(acpProviderConfig());
@@ -486,7 +485,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       await control.close();
     }
 
-    // Then invalidate ONLY the selected `meta.json.local_root`. The provider
+    // note: Then invalidate ONLY the selected `meta.json.local_root`. The provider
     // selection is unchanged and would still probe if it were probed, so a
     // ready lane here would prove a probe ran outside the selected creative
     // root. Without a canonical root there must be NO owner-bound probe, NO
@@ -503,7 +502,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       assert.equal(status.workspace_initialized, true, JSON.stringify(status));
       assert.equal(status.runtime_mode, 'provider_degraded', JSON.stringify(status));
       assert.equal(rootless.service.providerReady, false, JSON.stringify(status));
-      // No owner was established, so no owner epoch is published: the service
+      // invariant: No owner was established, so no owner epoch is published: the service
       // sentinel for "no engine epoch", never a fabricated or null-epoch
       // ready owner.
       assert.equal(discovery.engine_epoch, 0, JSON.stringify(discovery));
@@ -513,7 +512,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
   });
 
   /**
-   * The admitted root is PINNED. A supported `meta.json.local_root` write —
+   * invariant: The admitted root is PINNED. A supported `meta.json.local_root` write —
    * the exact document `nexus42 creator workspace create --creative-root`
    * writes — that lands after `openCore` bound its Host probe to the earlier
    * root must never be joined to that Host: the stale admission is refused
@@ -534,7 +533,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
     try {
       writeFileSync(metaPath, JSON.stringify({ local_root: movedRoot }));
 
-      // Whatever this admission answers, it must not be a published owner:
+      // invariant: Whatever this admission answers, it must not be a published owner:
       // the Host probe lane was bound to the root that was selected at open.
       let established = null;
       let refusal = null;
@@ -558,7 +557,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       assert.equal(report.cleanup_confirmed, true, JSON.stringify(report));
     }
 
-    // Nothing was published and no authority was retained: a FRESH open that
+    // invariant: Nothing was published and no authority was retained: a FRESH open that
     // selects the moved root admits a real owner over it.
     const coreB = await open();
     try {
@@ -581,7 +580,7 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       const { status, discovery } = await observe(service);
       assert.equal(status.workspace_initialized, true, JSON.stringify(status));
       assert.equal(status.runtime_mode, 'domain_only');
-      // A domain-only profile owns no execution engine, so it publishes the
+      // why: A domain-only profile owns no execution engine, so it publishes the
       // "no engine epoch" sentinel rather than a synthesized owner epoch.
       assert.equal(discovery.engine_epoch, 0);
 
@@ -613,19 +612,19 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
   });
 });
 
-// ── P0-T6: native/HTTP control closure (W1–W7 / S0-1–S0-7 boundary) ─────────
+// note: P0-T6 native/HTTP control closure (W1–W7 / S0-1–S0-7 boundary)
 
 const FOREIGN_CREATOR = 'other_creator';
 const FOREIGN_SCHEDULE_ID = 'SCH_foreign_control';
 const FOREIGN_SESSION_ID = 'sess_foreign_control';
 
-/** Resolve after `ms` milliseconds. */
+/** note: Resolve after `ms` milliseconds. */
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Poll `read` until `done` accepts its value; fail the case if the bounded
+ * note: Poll `read` until `done` accepts its value; fail the case if the bounded
  * window closes first. Admission is asynchronous by contract (§3.3): the row
  * is durable before `POST /schedules` answers, and the owned run appears on
  * the SAME durable row only after the hosted admission clock admits it — so
@@ -644,7 +643,7 @@ async function waitFor(read, done, { label, timeout = 30_000 } = {}) {
 }
 
 /**
- * The W6 success-path graph: `branch_a` routes to the `join` converge gate
+ * note: The W6 success-path graph: `branch_a` routes to the `join` converge gate
  * whose second upstream (`branch_b`) is never walked, so the admitted run parks
  * at that gate durably — no human wait token, no deadline, and (unlike a manual
  * wait) a legal plain resume. The manifest is written through the public preset
@@ -680,7 +679,7 @@ states:
 }
 
 /**
- * The P0-T6 STRUCT-BINDING fixture (Critical): three boundaries whose prompts
+ * invariant: The P0-T6 STRUCT-BINDING fixture (Critical): three boundaries whose prompts
  * render the core-context payload under the namespace its KIND owns.
  *
  * `first` renders `{{core_context.text}}` (the version-0 text seed), `second`
@@ -739,7 +738,7 @@ states:
 }
 
 /**
- * The P0-T6 ADMISSION-STRUCT fixture: ONE boundary that renders the structured
+ * note: The P0-T6 ADMISSION-STRUCT fixture: ONE boundary that renders the structured
  * payload the run was ADMITTED against.
  *
  * A schedule with no owned run can be structurally edited (the public PATCH
@@ -775,7 +774,7 @@ states:
 }
 
 /**
- * The P0-T6 RE-DRIVE fixture: the SAME unreachable-branch park as the W6 case,
+ * note: The P0-T6 RE-DRIVE fixture: the SAME unreachable-branch park as the W6 case,
  * but with the DR-06 bounded-join deadline and a `timed_out` reroute state.
  *
  * The admitted run still parks at `join` (1/2 arrivals, no human wait, no
@@ -827,7 +826,7 @@ states:
 }
 
 /**
- * The W5 boundary graph (S0-3): one state whose `enter` action is the real
+ * note: The W5 boundary graph (S0-3): one state whose `enter` action is the real
  * `acp.prompt` capability, with the frozen `core_context.text` rendered into the
  * prompt payload. The engine renders capability args against the run's context
  * snapshot at the state boundary, and the fixture peer logs the exact prompt it
@@ -864,11 +863,11 @@ states:
 `;
 }
 
-/** The capacity holder for the W5 case: the scaffold preset, which parks. */
+/** note: The capacity holder for the W5 case: the scaffold preset, which parks. */
 const STEER_HOLDER_PRESET = 'p0t6-steer-holder';
 
 /**
- * The W5 ACTIVE-RUN graph (S0-3): three state boundaries in a row, each of
+ * note: The W5 ACTIVE-RUN graph (S0-3): three state boundaries in a row, each of
  * which renders the run's frozen `core_context.text` through the real
  * `acp.prompt` capability.
  *
@@ -924,7 +923,7 @@ states:
 }
 
 /**
- * The dsh native provider, backed by the repository's scripted SDK-wire mock
+ * why: The dsh native provider, backed by the repository's scripted SDK-wire mock
  * runtime (the existing `native_protocol/mock_dsh_agent.py` fixture).
  *
  * `env` carries the fixture's own documented knobs: `REQ_LOG` (its request
@@ -957,7 +956,7 @@ ${envTable}
 }
 
 /**
- * The W7 preset (S0-6): one prompt state, then a manual wait so the run is
+ * note: The W7 preset (S0-6): one prompt state, then a manual wait so the run is
  * non-terminal while the boundary that owns the session is still alive.
  * `deny_all` is the only narrowed scope the dsh native provider can serve for
  * an orchestration prompt (it selects the sealed deny-all recipe); the mock
@@ -991,7 +990,7 @@ states:
 }
 
 /**
- * Seed the durable rows only ANOTHER creator could have written: one terminal
+ * why: Seed the durable rows only ANOTHER creator could have written: one terminal
  * root run and one terminal schedule owned by `other_creator`, inside the same
  * workspace state DB the restored owner serves.
  *
@@ -1032,7 +1031,7 @@ conn.commit()
 
 describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { skip: SIGSEGV_EXCLUSION }, () => {
   before(() => {
-    // The Rust addon carries the new boundary, and the TS facade re-declares
+    // why: The Rust addon carries the new boundary, and the TS facade re-declares
     // it; the service compiles against the facade's declaration output, so all
     // three are built here (each is incremental after the first run).
     assert.equal(
@@ -1070,7 +1069,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         return response.payload;
       };
 
-      // W1: a real user preset through the public authoring surface, then the
+      // note: W1: a real user preset through the public authoring surface, then the
       // schedule that runs it. Its scaffold graph opens the workspace and then
       // waits for manual input, so the admitted run stays non-terminal for the
       // whole control journey — no model request is involved anywhere.
@@ -1093,7 +1092,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       const scheduleId = created.payload.schedule_id;
       assert.ok(scheduleId, created.text);
 
-      // W2: the durable row is listable for that creator/preset.
+      // note: W2: the durable row is listable for that creator/preset.
       const listed = await jsonFetch(`${base}/v1/daemon/orchestration/schedules`);
       assert.equal(listed.status, 200, listed.text);
       const listedRow = listed.payload.items.find((row) => row.schedule_id === scheduleId);
@@ -1102,7 +1101,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(listedRow.preset_id, presetId, listed.text);
       assert.ok(listed.payload.pagination, listed.text);
 
-      // W4 + S0-2: admission is asynchronous, and the owned run identity lands
+      // note: W4 + S0-2: admission is asynchronous, and the owned run identity lands
       // on that durable row; the run then parks at the preset's manual wait.
       const admitted = await waitFor(
         () => inspectSchedule(),
@@ -1117,7 +1116,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(parked.session.creator_id, CREATOR, JSON.stringify(parked));
       assert.equal(parked.session.preset_id, presetId, JSON.stringify(parked));
 
-      // W3: the overlay list is the DURABLE run set of this creator.
+      // note: W3: the overlay list is the DURABLE run set of this creator.
       const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
       assert.equal(sessions.status, 200, sessions.text);
       const sessionRow = sessions.payload.items.find((row) => row.session_id === runId);
@@ -1126,7 +1125,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(sessionRow.preset_id, presetId, sessions.text);
       assert.equal(sessionRow.status, 'waiting_for_input', sessions.text);
 
-      // W4: inspect reports the durable status, the owned run and the context
+      // note: W4: inspect reports the durable status, the owned run and the context
       // version of THAT schedule.
       const inspected = await inspectSchedule();
       assert.equal(inspected.schedule.schedule_id, scheduleId, JSON.stringify(inspected));
@@ -1136,7 +1135,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.deepEqual(inspected.depends_on, [], JSON.stringify(inspected));
       assert.equal(inspected.concurrency_kind, 'serial', JSON.stringify(inspected));
 
-      // W5: every refused append is a typed client refusal that leaves the
+      // invariant: W5: every refused append is a typed client refusal that leaves the
       // durable version and status untouched — a failed append is a failed
       // Steer, never a half-applied version and never a resume.
       for (const body of [{}, { op: 'bogus', body: 'x' }, { op: 'struct_merge' }]) {
@@ -1160,7 +1159,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       );
       assert.equal(afterRefusal.schedule.status, 'running', JSON.stringify(afterRefusal));
 
-      // W5: the real Steer append is durable BEFORE any resume counts.
+      // invariant: W5: the real Steer append is durable BEFORE any resume counts.
       const appended = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
         method: 'PATCH',
         body: { op: 'append', body: 'P0-T6 steer idea' },
@@ -1174,7 +1173,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `the appended version must be the durable pointer: ${JSON.stringify(afterAppend)}`,
       );
 
-      // W6: a plain resume must not bypass the run's manual wait. The exact
+      // note: W6: a plain resume must not bypass the run's manual wait. The exact
       // durable conflict comes back (409 + coded detail), the durable append
       // stays, and NO second workflow is minted for the schedule.
       const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
@@ -1198,7 +1197,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `resume must never create a second workflow: ${sessionsAfterResume.text}`,
       );
 
-      // W7: cancel settles the SAME run (never a provider acknowledgement),
+      // note: W7: cancel settles the SAME run (never a provider acknowledgement),
       // and the durable identity survives the terminal settlement.
       const cancelled = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
         method: 'POST',
@@ -1215,7 +1214,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       const settledSession = await inspectSession(runId);
       assert.equal(settledSession.session.status, 'cancelled', JSON.stringify(settledSession));
 
-      // The append on a terminal schedule is the state conflict, and the
+      // invariant: The append on a terminal schedule is the state conflict, and the
       // cancelled row stays inspectable (never a fabricated empty list).
       const terminalAppend = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
         method: 'PATCH',
@@ -1246,7 +1245,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
     try {
       const base = service.url;
 
-      // Both foreign rows are inside this workspace store, so a read that
+      // why: Both foreign rows are inside this workspace store, so a read that
       // ignored the stored owner would serve them.
       const schedules = await jsonFetch(`${base}/v1/daemon/orchestration/schedules`);
       assert.equal(schedules.status, 200, schedules.text);
@@ -1269,7 +1268,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `a foreign run must never be listed: ${sessions.text}`,
       );
 
-      // A foreign id closes EXACTLY like an absent one: same status, same
+      // invariant: A foreign id closes EXACTLY like an absent one: same status, same
       // code, no payload and no existence signal.
       for (const id of [FOREIGN_SCHEDULE_ID, 'SCH_absent_control']) {
         const response = await jsonFetch(`${base}/v1/daemon/orchestration/schedules/${id}`);
@@ -1282,7 +1281,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         assert.equal(response.payload.error.code, 'not_found', response.text);
       }
 
-      // An explicit foreign creator filter is refused BEFORE any query runs —
+      // invariant: An explicit foreign creator filter is refused BEFORE any query runs —
       // never answered with a silently empty page.
       for (const family of ['schedules', 'sessions']) {
         const response = await jsonFetch(
@@ -1292,7 +1291,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         assert.equal(response.payload.error.code, 'forbidden', response.text);
       }
 
-      // Malformed query input is the typed client refusal.
+      // note: Malformed query input is the typed client refusal.
       const badLimit = await jsonFetch(`${base}/v1/daemon/orchestration/schedules?limit=abc`);
       assert.equal(badLimit.status, 400, badLimit.text);
       assert.equal(badLimit.payload.error.code, 'invalid_input', badLimit.text);
@@ -1307,7 +1306,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(badSessionSort.status, 400, badSessionSort.text);
       assert.equal(badSessionSort.payload.error.details?.field, 'sort', badSessionSort.text);
 
-      // An UNSUPPORTED or misspelled query key is NOT silently discarded. The
+      // why: An UNSUPPORTED or misspelled query key is NOT silently discarded. The
       // generated query DTOs are `additionalProperties: false`, so a key this
       // surface does not forward can never be answered as a broader
       // unfiltered page — that would make a caller believe a filter it asked
@@ -1323,7 +1322,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         }
       }
 
-      // …while every SUPPORTED key still reaches the core owner: the explicit
+      // note: …while every SUPPORTED key still reaches the core owner: the explicit
       // own-creator filter is accepted (the foreign-creator refusal above
       // proves it is forwarded, not dropped), and the page size the owner
       // echoes is the one that was asked for rather than the default.
@@ -1335,7 +1334,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         assert.equal(own.payload.pagination.limit, 1, own.text);
       }
 
-      // Control on an unknown schedule is the not-found refusal, with no
+      // note: Control on an unknown schedule is the not-found refusal, with no
       // mutation of anything else.
       const unknownSignal = await jsonFetch(`${base}/v1/daemon/orchestration/schedules/SCH_absent_control/signal`, {
         method: 'POST',
@@ -1349,7 +1348,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * W6 (S0-4): the public SUCCESS branch of the resume journey.
+   * note: W6 (S0-4): the public SUCCESS branch of the resume journey.
    *
    * The round-trip case above pins the refusal half — a plain resume must not
    * bypass a run parked at a MANUAL human wait. This case pins the other half:
@@ -1387,7 +1386,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         return response.payload;
       };
 
-      // W1: author the graph through the public preset surface. The scaffold
+      // note: W1: author the graph through the public preset surface. The scaffold
       // creates the user bundle; the validated PATCH replaces its YAML with a
       // converge gate whose second upstream branch is never walked, so the
       // admitted run parks durably at that gate (no human wait, no deadline).
@@ -1413,7 +1412,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       const scheduleId = created.payload.schedule_id;
       assert.ok(scheduleId, created.text);
 
-      // Admission is asynchronous by contract: the run identity lands on the
+      // note: Admission is asynchronous by contract: the run identity lands on the
       // durable row, then the run parks at the gate.
       const admitted = await waitFor(
         () => inspectSchedule(scheduleId),
@@ -1421,7 +1420,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         { label: `schedule ${scheduleId} owned run identity` },
       );
       const runId = admitted.schedule.current_session_id;
-      // The run projection cannot tell a committed converge-gate park from an
+      // why: The run projection cannot tell a committed converge-gate park from an
       // inter-task boundary pause the drive loop is about to step past, so the
       // park is confirmed by a quiet window: a still-driving run shows itself
       // as `running` (or as a fresh prompt-free step) inside it, and only the
@@ -1442,7 +1441,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(parked.session.creator_id, CREATOR, JSON.stringify(parked));
       assert.equal(parked.session.preset_id, RESUME_PARK_PRESET, JSON.stringify(parked));
 
-      // W6 state: `pause` flips the durable schedule ROW while the run it owns
+      // note: W6 state: `pause` flips the durable schedule ROW while the run it owns
       // keeps its identity, so the row claims `paused` while the run is still
       // the parked one this schedule owns.
       const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
@@ -1455,7 +1454,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(afterPause.schedule.status, 'paused', JSON.stringify(afterPause));
       assert.equal(afterPause.schedule.current_session_id, runId, JSON.stringify(afterPause));
 
-      // W6: the resume reaches that SAME run, and the response carries the
+      // note: W6: the resume reaches that SAME run, and the response carries the
       // durable RUN status — never a synthesized success.
       const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
         method: 'POST',
@@ -1465,14 +1464,14 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(resumed.payload.schedule_id, scheduleId, resumed.text);
       assert.equal(resumed.payload.status, 'running', resumed.text);
 
-      // The durable row follows the run it owns: both public projections read
+      // invariant: The durable row follows the run it owns: both public projections read
       // the reconciled state, the identity is unchanged, and no second
       // workflow was minted for the schedule.
       const afterResume = await inspectSchedule(scheduleId);
       assert.equal(afterResume.schedule.status, 'running', JSON.stringify(afterResume));
       assert.equal(afterResume.schedule.current_session_id, runId, JSON.stringify(afterResume));
 
-      // P0-T6: the status mutation alone would leave this run with NO owner
+      // why: P0-T6: the status mutation alone would leave this run with NO owner
       // (its driver already stopped on the park), so the resume also RE-DRIVES
       // the same root through the coordinator's single-flight owner. This
       // graph's gate can never be satisfied, so the honest post-resume outcome
@@ -1506,7 +1505,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * W5 (S0-3): the next execution boundary reads the HTTP-appended version.
+   * note: W5 (S0-3): the next execution boundary reads the HTTP-appended version.
    *
    * The append is made over the public HTTP surface against a schedule parked
    * at a LEGAL boundary (the row is `paused` — it owns no run yet), and the
@@ -1551,7 +1550,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         return response.payload;
       };
 
-      // The capacity holder: the scaffold graph opens the workspace and parks
+      // note: The capacity holder: the scaffold graph opens the workspace and parks
       // at its manual wait, so it owns the creator's serial capacity without
       // any model request.
       const holderScaffold = await jsonFetch(`${base}/v1/daemon/presets`, {
@@ -1572,7 +1571,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         { label: `holder schedule ${holderId} admission` },
       );
 
-      // W1: author the boundary graph through the public preset surface.
+      // note: W1: author the boundary graph through the public preset surface.
       const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
         method: 'POST',
         body: { name: STEER_BOUNDARY_PRESET },
@@ -1600,7 +1599,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(created.payload.core_context_version, 0, created.text);
       const scheduleId = created.payload.schedule_id;
 
-      // The serial gate holds the boundary row unadmitted, so the parked row
+      // why: The serial gate holds the boundary row unadmitted, so the parked row
       // below is the row's REAL state rather than a winning race: it owns no
       // run, and no boundary prompt has run yet.
       await delay(1_500);
@@ -1617,7 +1616,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         'no execution boundary may run before the append',
       );
 
-      // W5 boundary: the row is parked at a legal boundary (paused, no run).
+      // note: W5 boundary: the row is parked at a legal boundary (paused, no run).
       const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
         method: 'POST',
         body: { signal: 'pause' },
@@ -1625,7 +1624,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(paused.status, 200, paused.text);
       assert.equal(paused.payload.status, 'paused', paused.text);
 
-      // W5: the HTTP append commits the next immutable version.
+      // note: W5: the HTTP append commits the next immutable version.
       const appended = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
         method: 'PATCH',
         body: { op: 'append', body: STEER_IDEA },
@@ -1636,7 +1635,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(afterAppend.schedule.current_core_context_version, 1, JSON.stringify(afterAppend));
       assert.equal(afterAppend.schedule.current_session_id, undefined, JSON.stringify(afterAppend));
 
-      // Free the capacity, then resume: the resume crosses the next execution
+      // note: Free the capacity, then resume: the resume crosses the next execution
       // boundary — the admission claim of this schedule's ONE run.
       const holderCancelled = await jsonFetch(`${scheduleUrl(holderId)}/signal`, {
         method: 'POST',
@@ -1650,7 +1649,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(resumed.status, 200, resumed.text);
       assert.equal(resumed.payload.status, 'running', resumed.text);
 
-      // THE OBSERVATION: the boundary's own rendered prompt. A boundary that
+      // why: THE OBSERVATION: the boundary's own rendered prompt. A boundary that
       // did not read the committed version renders the empty version-0 seed
       // (`<marker>||END`), so this equality is the discriminating assertion.
       const prompts = await waitFor(readBoundaryPrompts, (entries) => entries.length > 0, {
@@ -1662,7 +1661,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `the next execution boundary must render the committed version: ${JSON.stringify(prompts)}`,
       );
 
-      // The run identity is the schedule's own and stays single: the resume
+      // invariant: The run identity is the schedule's own and stays single: the resume
       // minted no second workflow, and inspect still reads the committed
       // version.
       const settled = await waitFor(
@@ -1691,7 +1690,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * W5 (S0-3) ACTIVE RUN: a version committed over HTTP while a run is already
+   * note: W5 (S0-3) ACTIVE RUN: a version committed over HTTP while a run is already
    * ADMITTED and mid-execution is consumed at that SAME run's next outer state
    * transition.
    *
@@ -1735,7 +1734,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
             .filter((entry) => entry.event === 'prompt')
             .map((entry) => entry.prompt)
         : [];
-    // Release the n-th recorded prompt; the peer resumes that exact step.
+    // note: Release the n-th recorded prompt; the peer resumes that exact step.
     const releasePrompt = (n) => writeFileSync(join(gateDir, `release-${n}`), 'release');
 
     const service = await startServiceOn(home);
@@ -1759,7 +1758,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
           body: { op: 'append', body },
         });
 
-      // W1: author the three-boundary graph through the public preset surface.
+      // note: W1: author the three-boundary graph through the public preset surface.
       const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
         method: 'POST',
         body: { name: ACTIVE_CONTEXT_PRESET },
@@ -1785,7 +1784,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(created.payload.core_context_version, 0, created.text);
       const scheduleId = created.payload.schedule_id;
 
-      // Admission: the run is ADMITTED (its identity lands on the durable row)
+      // note: Admission: the run is ADMITTED (its identity lands on the durable row)
       // and its first state boundary renders the frozen version-0 seed.
       const admitted = await waitFor(
         () => inspectSchedule(scheduleId),
@@ -1803,7 +1802,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `state 'first' renders the frozen version-0 seed: ${JSON.stringify(firstPrompts)}`,
       );
 
-      // W5: the append commits version 1 while state 'first' is IN FLIGHT. It
+      // invariant: W5: the append commits version 1 while state 'first' is IN FLIGHT. It
       // must not disturb the admitted run: same identity, same durable
       // projection, same single prompt (the in-flight state is untouched).
       const inFlight = await inspectSession(runId);
@@ -1823,7 +1822,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       );
       assert.deepEqual(readPrompts(), [firstPrompt], 'the in-flight state is not re-rendered');
 
-      // THE OBSERVATION: release the in-flight state; the SAME run's NEXT
+      // why: THE OBSERVATION: release the in-flight state; the SAME run's NEXT
       // boundary renders the version the append committed.
       releasePrompt(1);
       const secondPrompt = `${ACTIVE_CONTEXT_MARKER}:second|${ACTIVE_CONTEXT_IDEA}|END`;
@@ -1836,7 +1835,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `the next state boundary reads the committed version: ${JSON.stringify(secondPrompts)}`,
       );
 
-      // W5: a second edit committed while state 'second' is in flight must not
+      // invariant: W5: a second edit committed while state 'second' is in flight must not
       // alter THAT state's snapshot — it lands at the boundary after it.
       const secondEdit = await appendContext(scheduleId, ACTIVE_CONTEXT_IDEA_2);
       assert.equal(secondEdit.status, 200, secondEdit.text);
@@ -1856,7 +1855,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `state 'second' keeps its start-of-state snapshot and the newest edit lands at 'third': ${JSON.stringify(thirdPrompts)}`,
       );
 
-      // The run settles on the SAME identity: one run, no re-append, no extra
+      // invariant: The run settles on the SAME identity: one run, no re-append, no extra
       // boundary render, and the committed pointer is still the last edit.
       releasePrompt(3);
       const settled = await waitFor(
@@ -1885,7 +1884,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * W7 (S0-6): an unconfirmed stop is durable `interrupted`, never a cancel
+   * note: W7 (S0-6): an unconfirmed stop is durable `interrupted`, never a cancel
    * success.
    *
    * The run's owned Host session is made genuinely unconfirmable INSIDE the
@@ -1953,7 +1952,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       await applyPreset(base, UNCONFIRMED_CANCEL_PRESET);
       const scheduleId = created.payload.schedule_id;
 
-      // The boundary really ran and its owned session is retained: the run
+      // note: The boundary really ran and its owned session is retained: the run
       // parks at this preset's manual wait, which is only reached after the
       // prompt attempt settled. Cancelling from that state is the public
       // cancel of a non-terminal admitted workflow.
@@ -1975,12 +1974,12 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         body: { signal: 'cancel' },
       });
       assert.equal(cancelled.status, 200, cancelled.text);
-      // Never a success: the unconfirmed stop is reported as `interrupted`,
+      // invariant: Never a success: the unconfirmed stop is reported as `interrupted`,
       // and specifically NOT as `cancelled`.
       assert.equal(cancelled.payload.status, 'interrupted', cancelled.text);
       assert.notEqual(cancelled.payload.status, 'cancelled', cancelled.text);
 
-      // The durable winner is the interrupted run with its actionable cleanup
+      // note: The durable winner is the interrupted run with its actionable cleanup
       // reason — not a fabricated cancelled row.
       const settledSession = await inspectSession(runId);
       assert.equal(settledSession.session.status, 'interrupted', JSON.stringify(settledSession));
@@ -1990,7 +1989,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `the unconfirmed cleanup must stay actionable: ${JSON.stringify(settledSession)}`,
       );
 
-      // The owning schedule row is NOT promoted to `cancelled` (the settlement
+      // invariant: The owning schedule row is NOT promoted to `cancelled` (the settlement
       // is a deliberate no-op for an unconfirmed cleanup) and keeps its run.
       const afterCancel = await inspectSchedule(scheduleId);
       assert.notEqual(afterCancel.schedule.status, 'cancelled', JSON.stringify(afterCancel));
@@ -2006,7 +2005,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.ok(listedRow, `the interrupted schedule stays listed: ${listed.text}`);
       assert.notEqual(listedRow.status, 'cancelled', listed.text);
 
-      // The unconfirmed outcome is ACTIONABLE, not a dead end (§3.4): the
+      // why: The unconfirmed outcome is ACTIONABLE, not a dead end (§3.4): the
       // retained cleanup owner is retried by a further cancel. Once the
       // provider's delayed close finally completes, the same public signal
       // confirms the stop and settles `cancelled` — which also releases the
@@ -2032,7 +2031,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * P0-T6 CRITICAL: a `Struct` version committed over HTTP while a run is
+   * invariant: P0-T6 CRITICAL: a `Struct` version committed over HTTP while a run is
    * already ADMITTED and mid-execution must resolve under the STRUCTURED
    * namespace at that same run's next outer state boundary.
    *
@@ -2116,7 +2115,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(created.payload.core_context_version, 0, created.text);
       const scheduleId = created.payload.schedule_id;
 
-      // Admission: the first boundary renders the version-0 TEXT seed.
+      // note: Admission: the first boundary renders the version-0 TEXT seed.
       const admitted = await waitFor(
         () => inspectSchedule(scheduleId),
         (payload) => Boolean(payload.schedule.current_session_id),
@@ -2130,13 +2129,13 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       });
       assert.deepEqual(readPrompts(), [firstPrompt], 'state first renders the text seed');
 
-      // The struct commit lands while state `first` is IN FLIGHT.
+      // note: The struct commit lands while state `first` is IN FLIGHT.
       const merged = await mergeStruct(scheduleId, { idea: STRUCT_CONTEXT_IDEA });
       assert.equal(merged.status, 200, merged.text);
       assert.equal(merged.payload.new_version, 1, merged.text);
       assert.deepEqual(readPrompts(), [firstPrompt], 'the in-flight state is not re-rendered');
 
-      // THE OBSERVATION: the next boundary renders the committed STRUCT field.
+      // why: THE OBSERVATION: the next boundary renders the committed STRUCT field.
       releasePrompt(1);
       const secondPrompt = `${STRUCT_CONTEXT_MARKER}:second|${STRUCT_CONTEXT_IDEA}|END`;
       const afterFirst = await waitFor(
@@ -2153,12 +2152,12 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         `the committed struct payload must resolve at the next boundary (run settled '${afterFirst.status}')`,
       );
 
-      // A second struct commit while state `second` is in flight is consumed by
+      // invariant: A second struct commit while state `second` is in flight is consumed by
       // the boundary AFTER it — the pointer is re-read per boundary.
       const late = await mergeStruct(scheduleId, { late: STRUCT_CONTEXT_LATE });
       assert.equal(late.status, 200, late.text);
       assert.equal(late.payload.new_version, 2, late.text);
-      // The run sits AT the state whose prompt is still held, so its snapshot
+      // why: The run sits AT the state whose prompt is still held, so its snapshot
       // for this step is frozen: the second commit must not reach it. (The
       // durable STATUS stays the inter-task boundary value while a step is in
       // flight, so the durable POSITION is the observation.)
@@ -2202,7 +2201,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * P0-T6: a `Struct` version FROZEN AT ADMISSION must resolve at the run's
+   * invariant: P0-T6: a `Struct` version FROZEN AT ADMISSION must resolve at the run's
    * FIRST state boundary.
    *
    * A row with no owned run may be structurally edited (the public PATCH
@@ -2260,7 +2259,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       await applyPreset(base, STRUCT_ADMIT_PRESET);
       const scheduleId = created.payload.schedule_id;
 
-      // A LEGAL structural edit on a row that owns no run yet (the PATCH
+      // note: A LEGAL structural edit on a row that owns no run yet (the PATCH
       // refuses terminal rows; a parked row is editable): version 1 is the
       // STRUCT payload the resumed run is admitted against.
       const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
@@ -2311,7 +2310,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
   });
 
   /**
-   * P0-T6 IMPORTANT: a legal pause → resume of an already-admitted row must
+   * note: P0-T6 IMPORTANT: a legal pause → resume of an already-admitted row must
    * RE-DRIVE the run it owns onto its next state.
    *
    * The run parks at the bounded join (1/2 arrivals) and its driver stops, so
@@ -2381,7 +2380,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
         { label: `schedule ${scheduleId} owned run identity` },
       );
       const runId = admitted.schedule.current_session_id;
-      // Confirm a STEADY park (see the W6 case): only the gate park stays put,
+      // why: Confirm a STEADY park (see the W6 case): only the gate park stays put,
       // so the deadline below is genuinely waiting on a run nobody drives.
       await waitFor(
         async () => {
@@ -2398,7 +2397,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(parked.session.session_id, runId, JSON.stringify(parked));
       assert.deepEqual(readPrompts(), [], 'the join park renders no prompt');
 
-      // Cross the join deadline WHILE nothing drives the run: only a driver
+      // why: Cross the join deadline WHILE nothing drives the run: only a driver
       // evaluates `timeout_ms`, so the park cannot advance on its own.
       await delay(RESUME_TIMEOUT_MS + 400);
 
@@ -2416,7 +2415,7 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { s
       assert.equal(resumed.status, 200, resumed.text);
       assert.equal(resumed.payload.status, 'running', resumed.text);
 
-      // THE OBSERVATION: the SAME run leaves the park and crosses its next
+      // why: THE OBSERVATION: the SAME run leaves the park and crosses its next
       // boundary. Without the re-drive this never happens — the run would sit
       // at `running` with no owner and the schedule would never settle.
       const settled = await waitFor(

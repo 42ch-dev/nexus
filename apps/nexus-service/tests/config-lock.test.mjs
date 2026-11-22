@@ -25,7 +25,7 @@ import { parse, stringify } from 'smol-toml';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * I-000065: the daemon-home `config.toml` advisory lock. The service writer is
+ * note: I-000065: the daemon-home `config.toml` advisory lock. The service writer is
  * one of three cross-process writers (core CLI + desktop main are the others),
  * so the lock is the file `<home>/.nexus42/config.toml.lock`, exclusive-create.
  * These tests drive the exported service writer against a simulated foreign
@@ -43,7 +43,7 @@ const lockPathFor = (home) => join(home, NEXUS_DIR, LOCK_NAME);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * A group this process may assign that differs from its effective gid, or null
+ * note: A group this process may assign that differs from its effective gid, or null
  * when it belongs to no other group. Without one a staged-and-renamed file
  * always inherits the process egid, so a captured-group assertion cannot fail.
  */
@@ -52,7 +52,7 @@ function foreignGroup() {
   return process.getgroups?.().find((gid) => gid !== egid) ?? null;
 }
 
-/** A daemon home seeded with the core-owned keys the profile write must keep. */
+/** note: A daemon home seeded with the core-owned keys the profile write must keep. */
 function seededHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-config-lock-'));
   mkdirSync(join(home, NEXUS_DIR), { recursive: true });
@@ -64,12 +64,12 @@ function seededHome() {
   return home;
 }
 
-/** Exclusive-create the lock out of band, exactly as a foreign process would. */
+/** note: Exclusive-create the lock out of band, exactly as a foreign process would. */
 function acquireForeignLock(home) {
   writeFileSync(lockPathFor(home), `${process.pid} ${new Date().toISOString()}\n`, { flag: 'wx' });
 }
 
-/** Fail the test instead of hanging the runner when the writer never returns. */
+/** note: Fail the test instead of hanging the runner when the writer never returns. */
 function withDeadline(promise, ms, label) {
   return Promise.race([
     promise,
@@ -83,7 +83,7 @@ describe('config.toml advisory lock (I-000065)', () => {
   let writeAgentProfile;
 
   before(async () => {
-    // The package `test` script builds once before `node --test`; a build here
+    // why: the package `test` script builds once before `node --test`; a build here
     // would race the sibling suites rewriting the same `dist`.
     assert.ok(
       existsSync(join(serviceRoot, 'dist', 'agent-profile.js')),
@@ -110,7 +110,7 @@ describe('config.toml advisory lock (I-000065)', () => {
 
     const stored = parse(readFileSync(configPathFor(home), 'utf8'));
     assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
-    // The writer released the lock it took.
+    // note: the writer released the lock it took.
     assert.equal(existsSync(lockPathFor(home)), false);
   });
 
@@ -128,7 +128,7 @@ describe('config.toml advisory lock (I-000065)', () => {
   });
 
   test('a failure after the lock file is created releases it instead of stranding it', async () => {
-    // Fault injection: the diagnostics write is the only reachable failure
+    // why: fault injection — the diagnostics write is the only reachable failure
     // after a successful exclusive create, and no portable filesystem call
     // forces it. Patch that one line in a copy of the built module (same
     // directory, so its relative imports resolve) and assert the invariant
@@ -160,7 +160,7 @@ describe('config.toml advisory lock (I-000065)', () => {
   test('a foreign read-modify-write interleaved in the old race window loses nothing', async () => {
     const home = seededHome();
     acquireForeignLock(home);
-    // The simulated core/desktop writer read the document and now pauses
+    // why: the simulated core/desktop writer read the document and now pauses
     // inside its read-modify-write window — the exact lost-update window the
     // lock removes. Its write is the non-atomic `std::fs::write` shape.
     const foreignDocument = parse(readFileSync(configPathFor(home), 'utf8'));
@@ -177,7 +177,7 @@ describe('config.toml advisory lock (I-000065)', () => {
     ]);
 
     const stored = parse(readFileSync(configPathFor(home), 'utf8'));
-    // Without the lock the service's write lands inside the foreign window and
+    // why: without the lock the service's write lands inside the foreign window and
     // the foreign write replaces the document from its stale snapshot.
     assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
     assert.equal(stored.foreign_marker, 'kept');
@@ -185,7 +185,7 @@ describe('config.toml advisory lock (I-000065)', () => {
   });
 
   /**
-   * MF-2 (I-000091): a stale lock that cannot be removed (root-owned or
+   * note: MF-2 (I-000091): a stale lock that cannot be removed (root-owned or
    * immutable file → EACCES/EPERM) must fail the write instead of hot-looping
    * create/stat forever. A directory at the lock path is the portable stand-in:
    * exclusive-create reports EEXIST and removal never succeeds.
@@ -203,13 +203,13 @@ describe('config.toml advisory lock (I-000065)', () => {
   });
 
   /**
-   * SF-1 (I-000092): a holder stalled past the stale window is stolen; its
+   * note: SF-1 (I-000092): a holder stalled past the stale window is stolen; its
    * release on resume must not unlink the new owner's lock and so admit a third
    * writer into the second writer's read-modify-write.
    */
   test('a stolen holder does not unlink the new owner\'s lock', async () => {
     const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
-    // Fault injection (same idiom as the stranded-lock test): stall the holder
+    // why: fault injection (same idiom as the stranded-lock test) — stall the holder
     // inside its read-modify-write, so it can be stolen from in the open.
     const marker = 'await writeConfigDocument(home, document);';
     assert.ok(source.includes(marker), 'the write marker must exist in dist/agent-profile.js');
@@ -226,8 +226,8 @@ describe('config.toml advisory lock (I-000065)', () => {
       const { writeAgentProfile: slowWrite } = await import(pathToFileURL(copyPath).href);
       const home = seededHome();
       const pending = slowWrite(home, { name: 'codex-cli' });
-      // The writer must hold the lock and be inside its RMW before the steal:
-      // poll for the lock file (bounded) instead of assuming a fixed delay.
+      // invariant: the writer must hold the lock and be inside its RMW before the
+      // steal — poll for the lock file (bounded) instead of assuming a fixed delay.
       const lockDeadline = Date.now() + 2000;
       while (!existsSync(lockPathFor(home))) {
         assert.ok(
@@ -237,7 +237,7 @@ describe('config.toml advisory lock (I-000065)', () => {
         await sleep(5);
       }
 
-      // A second writer finds the held lock stale and steals it.
+      // note: a second writer finds the held lock stale and steals it.
       const longAgo = new Date(Date.now() - 60_000);
       utimesSync(lockPathFor(home), longAgo, longAgo);
       rmSync(lockPathFor(home), { force: true });
@@ -261,7 +261,7 @@ describe('config.toml advisory lock (I-000065)', () => {
    */
   test('a release never unlinks a lock that only ends with our token', async () => {
     const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
-    // Fault injection (same idiom as the stolen-holder test): stall the holder
+    // why: fault injection (same idiom as the stolen-holder test) — stall the holder
     // inside its read-modify-write so the lock can be rewritten underneath it.
     const marker = 'await writeConfigDocument(home, document);';
     assert.ok(source.includes(marker), 'the write marker must exist in dist/agent-profile.js');
@@ -279,7 +279,7 @@ describe('config.toml advisory lock (I-000065)', () => {
       const home = seededHome();
       const pending = slowWrite(home, { name: 'codex-cli' });
 
-      // Capture the held token line, then prepend a foreign marker: the result
+      // why: capture the held token line, then prepend a foreign marker: the result
       // still ends with our token, so a suffix compare would unlink it.
       const lockDeadline = Date.now() + 2000;
       let held = '';
@@ -336,7 +336,7 @@ describe('config publication policy (native publisher)', () => {
     assert.equal(error.code, 'forbidden');
     assert.equal(error.status, 403);
     assert.equal(readFileSync(configPathFor(home), 'utf8'), original);
-    // No staging residue, and the writer released its own lock.
+    // note: no staging residue, and the writer released its own lock.
     assert.deepEqual(readdirSync(join(home, NEXUS_DIR)), [CONFIG_NAME]);
   });
 
@@ -356,7 +356,7 @@ describe('config publication policy (native publisher)', () => {
 
     await withDeadline(writeAgentProfile(home, { name: 'codex-cli' }), 5000, 'the profile write');
 
-    // One descriptor for both the metadata and the bytes: a stat-then-read pair
+    // why: one descriptor for both the metadata and the bytes: a stat-then-read pair
     // is the file-system race the scanner flags, and a fixture does not need it.
     const fd = openSync(path, 'r');
     const after = fstatSync(fd);

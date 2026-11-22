@@ -1,5 +1,5 @@
 /**
- * Pattern package registry family (v1.239 P3-T4): the read-only listing of the
+ * note: pattern package registry family (v1.239 P3-T4) — the read-only listing of the
  * local packages under `<home>/.nexus42/patterns`.
  *
  * The reader owns discovery, manifest validation and the fragment pin; nothing
@@ -20,10 +20,10 @@ import type { DomainRoute } from './routes.js';
 import { HttpError } from './errors.js';
 import { parseOptionalInteger, refuseUnknownQueryKeys, withPrincipal } from './world-kb.js';
 
-/** Page size when the query names none. */
+/** note: page size when the query names none. */
 const DEFAULT_LIMIT = 100;
 
-/** Largest page one request may ask for: what a UI can render as one listing page. */
+/** note: largest page one request may ask for — what a UI can render as one listing page. */
 const MAX_LIMIT = 200;
 
 /** `GET /v1/daemon/patterns` — cursor-paginated, `package_dir` ascending as UTF-8 bytes. */
@@ -41,7 +41,7 @@ export async function listPatterns(
   };
 
   const scanned = await withPrincipal(service, (principal) => service.core.listPatterns(principal));
-  // The listing contract owns the order, not the scan that happened to produce it: UTF-8 byte
+  // invariant: the listing contract owns the order, not the scan that happened to produce it — UTF-8 byte
   // order, which is what the reader sorts by, never a locale-dependent collation.
   let items: PatternSummary[] = [...scanned].sort((left, right) =>
     Buffer.compare(Buffer.from(left.package_dir, 'utf8'), Buffer.from(right.package_dir, 'utf8')),

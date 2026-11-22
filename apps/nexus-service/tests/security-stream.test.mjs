@@ -13,7 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
 const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
-/** The Creator/workspace the seed binary materializes (`wire_fixture.rs`). */
+/** note: The Creator/workspace the seed binary materializes (`wire_fixture.rs`). */
 const SEEDED_CREATOR = 'ctr_testcreator';
 
 const RAW_SSE_HARD_TIMEOUT_MS = 30_000;
@@ -78,7 +78,7 @@ async function startSharedService(home, port = 0, apiKey, tlsOpts) {
   throw lastError;
 }
 
-// The fixture log is SHARED by every peer of a run (probes and session
+// why: The fixture log is SHARED by every peer of a run (probes and session
 // processes append concurrently), so a torn or interleaved line is an expected
 // artifact of reading it, not a lost read: an unreadable file still answers
 // `[]`, but one malformed line skips only itself.
@@ -92,7 +92,7 @@ function readFixtureLog(logPath) {
     if (!line.trim()) continue;
     try {
       entries.push(JSON.parse(line));
-    } catch { /* a partial/interleaved write costs its own line only */ }
+    } catch { /* note: a partial/interleaved write costs its own line only */ }
   }
   return entries;
 }
@@ -108,7 +108,7 @@ function seedHome(extraEnv = {}, extraProviders = '', maxSessions = 0) {
   const home = mkdtempSync(join(tmpdir(), 'nexus-security-stream-'));
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { stdio: 'inherit' });
   assert.equal(seed.status, 0, seed.stderr?.toString());
-  // The selected-workspace registration the product's create path writes: an
+  // why: The selected-workspace registration the product's create path writes: an
   // engine-owner open pins this root as the Host's workspace boundary and probes
   // the catalog there. Without it every provider stays `probe_context_unavailable`
   // and the service reports `provider_degraded` — the provider-only lane keeps
@@ -133,7 +133,7 @@ function seedHome(extraEnv = {}, extraProviders = '', maxSessions = 0) {
   const log = join(home, 'fixture.log');
   const python = resolvePython();
   const envLines = Object.entries({ ACP_FIXTURE_LOG: log, ...extraEnv }).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join('\n');
-  // `max_sessions` is the Host's own live-session budget and must precede every
+  // why: `max_sessions` is the Host's own live-session budget and must precede every
   // table header; a multi-row journey legitimately needs more live sessions than
   // the default, and the budget itself is not what such a test is asserting.
   // The base provider is written out completely — table AND env — before any
@@ -152,7 +152,7 @@ async function jsonFetch(url, { method = 'GET', headers = {}, body, ca } = {}) {
     const payload = text.length > 0 ? JSON.parse(text) : null;
     return { status: response.status, headers: response.headers, payload, text };
   }
-  // HTTPS against the test's own generated certificate: full certificate and
+  // safety: HTTPS against the test's own generated certificate: full certificate and
   // hostname validation, scoped to this trust anchor — no process-wide bypass.
   return new Promise((resolveFetch, rejectFetch) => {
     const request = https.request(url, { method, headers, ca, rejectUnauthorized: true }, (res) => {
@@ -231,7 +231,7 @@ function rawSseGet(baseUrl, path, { headers = {}, pauseAfterHeaders = false, pau
   });
 }
 
-/** Minimal SSE GET that resolves with the HTTP status line; caller destroys the socket. */
+/** note: Minimal SSE GET that resolves with the HTTP status line; caller destroys the socket. */
 function rawHttpStatusLine(baseUrl, path, { headers = {}, timeoutMs = 2_000 } = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, baseUrl);
@@ -273,7 +273,7 @@ async function providerFlow(url, headers = {}) {
 }
 
 /**
- * The ACP families the Character journey drives — one provider per wire stop
+ * note: The ACP families the Character journey drives — one provider per wire stop
  * reason, using the fixture's own `ACP_FIXTURE_STOP_REASON` knob (default
  * `end_turn`) plus `ACP_FIXTURE_PROMPT_ERROR` for the deterministic JSON-RPC
  * prompt failure. The provider ids are distinct because the Host keys a session
@@ -302,7 +302,7 @@ function characterProviderConfig(logPath) {
 }
 
 /**
- * Poll the authority's own Character read until the run leaves `running`. This
+ * note: Poll the authority's own Character read until the run leaves `running`. This
  * is the core's truth, not the transport mirror's: the row it returns is the
  * `CharacterOperationResult` the adapter→Host→core→native path settled.
  */
@@ -388,7 +388,7 @@ describe('security-stream (P4-T2)', () => {
     const envHome = seedHome({ OVERSIZED_UPDATE: '1' });
     const prevHwm = process.env.NEXUS_SSE_SOCKET_HWM;
     const prevPullDelay = process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
-    // A small handoff chunk plus a first-pull delay longer than the observation
+    // why: A small handoff chunk plus a first-pull delay longer than the observation
     // window makes the pull gate deterministic: no pull can happen while stalled.
     process.env.NEXUS_SSE_SOCKET_HWM = '128';
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1800';
@@ -403,14 +403,14 @@ describe('security-stream (P4-T2)', () => {
       const pullsDuringStall = sseTestHooks.providerPullCount;
       await new Promise((r) => setTimeout(r, 700));
       const pullsStillStalled = sseTestHooks.providerPullCount;
-      // No further pulls while the socket reader is stalled — the pull gate holds.
+      // note: No further pulls while the socket reader is stalled — the pull gate holds.
       assert.equal(pullsDuringStall, pullsBefore, 'no pull during the stall');
       assert.equal(pullsStillStalled, pullsBefore, 'still no pull while stalled');
       await socketPromise;
       const pullsAfter = sseTestHooks.providerPullCount;
       assert.ok(pullsAfter >= pullsStillStalled, 'pull count is monotonic');
       const reconnect = await rawSseGet(local.url, `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`, { endPattern: /event: gap|OpFinished|OpFailed/ });
-      // Recovery pulls after the stall and the stream ends inspectably.
+      // note: Recovery pulls after the stall and the stream ends inspectably.
       assert.ok(sseTestHooks.providerPullCount > pullsBefore, 'pulls resume after the stall');
       assert.match(reconnect.raw.replace(/\r?\n/g, ''), /event: gap|OpFinished|OpFailed/);
       const inspect = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${operationId}`);
@@ -436,7 +436,7 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(wrongEpoch.status, 400);
     assert.equal(wrongEpoch.payload.error.details?.variant, 'history_unavailable');
     const lastId = events.at(-1)?.id;
-    // A retry at the exact terminal sequence must settle promptly on its own:
+    // why: A retry at the exact terminal sequence must settle promptly on its own:
     // the bounded body read fails if the stream leaks open, and the body must
     // carry no fabricated event or gap.
     const equal = await fetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}&cursor=${encodeURIComponent(lastId)}`, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(5_000) });
@@ -450,27 +450,27 @@ describe('security-stream (P4-T2)', () => {
     const { sessionId, operationId } = await providerFlow(baseUrl);
     const eventsPath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
     const idsOf = (body) => parseSseChunks(body.split(/\r?\n\r?\n/).slice(1).join('\r\n\r\n')).map((frame) => frame.id);
-    // Replay the completed operation: its retained frames are the resume truth.
+    // note: Replay the completed operation: its retained frames are the resume truth.
     const full = await rawSseGet(baseUrl, eventsPath);
     const frames = parseSseChunks(full.raw.split(/\r?\n\r?\n/).slice(1).join('\r\n\r\n'));
     assert.ok(frames.length >= 3, `the run must retain at least three frames, got ${frames.length}`);
     const resumeFrom = frames[0].id;
     const after = frames.slice(1);
 
-    // The standard reconnect header alone resumes strictly after that id.
+    // note: The standard reconnect header alone resumes strictly after that id.
     const headerOnly = await rawSseGet(baseUrl, eventsPath, { headers: { 'Last-Event-ID': resumeFrom } });
     assert.deepEqual(idsOf(headerOnly.raw), after.map((frame) => frame.id), 'Last-Event-ID must resume after the id it carries');
 
-    // A query cursor pointing elsewhere on the same request loses to the header.
+    // note: A query cursor pointing elsewhere on the same request loses to the header.
     const both = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(frames[1].id)}`, { headers: { 'Last-Event-ID': resumeFrom } });
     assert.deepEqual(idsOf(both.raw), after.map((frame) => frame.id), 'the retained header must outrank the query cursor');
 
-    // An empty header carries no usable id: it must yield to the query cursor
+    // note: An empty header carries no usable id: it must yield to the query cursor
     // rather than clobber it with an empty cursor (which would replay all).
     const emptyHeader = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`, { headers: { 'Last-Event-ID': '' } });
     assert.deepEqual(idsOf(emptyHeader.raw), after.map((frame) => frame.id), 'an empty Last-Event-ID must yield to the query cursor');
 
-    // The query-parameter path stays available when no header is sent.
+    // note: The query-parameter path stays available when no header is sent.
     const queryOnly = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`);
     assert.deepEqual(idsOf(queryOnly.raw), after.map((frame) => frame.id), 'the query cursor path must keep resuming');
   });
@@ -487,7 +487,7 @@ describe('security-stream (P4-T2)', () => {
       const path = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
       const url = new URL(path, local.url);
       const request = `GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\n\r\n`;
-      // Hold 16 genuinely live subscribers inside the first-pull gate.
+      // note: Hold 16 genuinely live subscribers inside the first-pull gate.
       for (let i = 0; i < 16; i += 1) {
         const socket = trackSocket(net.connect(Number(url.port), url.hostname));
         sockets.push(socket);
@@ -512,7 +512,7 @@ describe('security-stream (P4-T2)', () => {
   test('sequential completed SSE requests over keep-alive never exhaust the subscriber cap', async () => {
     const { sessionId, operationId } = await providerFlow(baseUrl);
     const eventsUrl = `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
-    // The first request rides the still-running operation so the hub retains
+    // why: The first request rides the still-running operation so the hub retains
     // the full stream; the rest replay the completed hub. Every response
     // completes normally while undici keeps the keep-alive socket pooled —
     // exactly the shape that charged one leaked admission per request before
@@ -538,13 +538,13 @@ describe('security-stream (P4-T2)', () => {
     try {
       const { sessionId, operationId } = await providerFlow(local.url);
       const completedPath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
-      // One completed keep-alive request: the response ends while the pooled
+      // why: One completed keep-alive request: the response ends while the pooled
       // socket stays open, so only a completion-time release frees its slot —
       // a socket-destroying client would mask the leak via socket close.
       const completed = await fetch(`${local.url}${completedPath}`, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(20_000) });
       assert.equal(completed.status, 200);
       await completed.text();
-      // Start a second operation in the same session. Its subscribers remain
+      // note: Start a second operation in the same session. Its subscribers remain
       // live in the first-pull gate while the completed operation's keep-alive
       // admission must already have been released.
       const executed = await jsonFetch(
@@ -629,7 +629,7 @@ describe('security-stream (P4-T2)', () => {
       const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'cancel-me' } });
       const cancel = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
       assert.equal(cancel.payload.status, 'cancelled');
-      // The accepted cancel must settle observable + durable truth: a repeated
+      // invariant: The accepted cancel must settle observable + durable truth: a repeated
       // GET reports `cancelled` (never a stale `running`), and the session is no
       // longer busy.
       const opAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`)).payload;
@@ -643,13 +643,13 @@ describe('security-stream (P4-T2)', () => {
   test('list/get/shutdown responses match generated schema keys', async () => {
     const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
     const sessionId = created.payload.session_id;
-    // Exact key sets: no undocumented field may leak through any of these.
+    // invariant: Exact key sets: no undocumented field may leak through any of these.
     assert.deepEqual(Object.keys(created.payload).sort(), ['provider_id', 'session_id', 'state']);
     const listed = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`);
     assert.deepEqual(Object.keys(listed.payload).sort(), ['items', 'pagination']);
     assert.ok(Array.isArray(listed.payload.items));
     assert.deepEqual(Object.keys(listed.payload.pagination).sort().filter((k) => k !== 'next_cursor'), ['has_more', 'limit']);
-    // The list reflects native host truth; the JS-provider adapter owns its
+    // why: The list reflects native host truth; the JS-provider adapter owns its
     // sessions in-process, so list truth and cache truth are checked separately.
     for (const item of listed.payload.items) {
       assert.deepEqual(Object.keys(item).sort(), ['provider_id', 'session_id', 'state']);
@@ -672,7 +672,7 @@ describe('security-stream (P4-T2)', () => {
     const stale = hub.planReplay(`${hub.epoch}:1`);
     assert.equal(stale.kind, 'stale');
     assert.equal(stale.gap.reason, 'history_unavailable');
-    // A gap larger than the reserved 4 KiB control slot is rejected outright.
+    // note: A gap larger than the reserved 4 KiB control slot is rejected outright.
     assert.equal(hub.recordGap({ reason: 'interrupted', operation_id: hub.operationId, resync_required: true, inspect_url: '/x', padding: 'x'.repeat(SSE_RESERVED_CONTROL_BYTES) }), null);
     const terminal = hub.recordEvent({ OpFinished: { transcript: 'ok' } });
     assert.equal(hub.recordEvent({ OpFinished: { transcript: 'dup' } })?.id, terminal.id);
@@ -689,14 +689,14 @@ describe('security-stream (P4-T2)', () => {
     const terminal = hub.recordEvent({ OpFinished: { transcript: 'done' } });
     const seq = (f) => Number(f.id.split(':')[1]);
     assert.ok(seq(a) < seq(gap) && seq(gap) < seq(b) && seq(b) < seq(terminal));
-    // Terminal is its own control slot, never a data permit.
+    // invariant: Terminal is its own control slot, never a data permit.
     assert.equal(terminal.isControl, true);
-    // framesAfter must merge by sequence, not concatenate data→gap→terminal.
+    // invariant: framesAfter must merge by sequence, not concatenate data→gap→terminal.
     const after = hub.framesAfter(seq(a));
     const ordered = after.map(seq);
     assert.deepEqual(ordered, [...ordered].sort((x, y) => x - y));
     assert.deepEqual(after.map((f) => f.event), ['gap', 'provider_event', 'provider_event']);
-    // A replay from the very start keeps the same strict order.
+    // note: A replay from the very start keeps the same strict order.
     const all = hub.planReplay(undefined);
     const allSeq = all.frames.map(seq);
     assert.deepEqual(allSeq, [...allSeq].sort((x, y) => x - y));
@@ -705,7 +705,7 @@ describe('security-stream (P4-T2)', () => {
   test('a 4096-byte serialized control frame is accepted, one byte more is rejected', async () => {
     const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
     const { SSE_RESERVED_CONTROL_BYTES } = await import(join(serviceRoot, 'dist/config.js'));
-    // Find the exact padding whose serialized frame equals the 4 KiB bound.
+    // note: Find the exact padding whose serialized frame equals the 4 KiB bound.
     const probe = new OperationEventHub('00000000-0000-4000-8000-000000000030', '00000000-0000-4000-8000-000000000031');
     const baseBytes = Buffer.byteLength(
       `id: ${probe.epoch}:1\nevent: gap\ndata: ${JSON.stringify({ reason: 'lagging', operation_id: probe.operationId, resync_required: true, inspect_url: '/x', padding: '' })}\n\n`,
@@ -745,18 +745,18 @@ describe('security-stream (P4-T2)', () => {
     const operationId = '00000000-0000-4000-8000-000000000102';
     registry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Running', activeOpId: operationId });
     registry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
-    // The cancel is accepted first: the registry settles the operation to the
+    // note: The cancel is accepted first: the registry settles the operation to the
     // `cancelled` terminal exactly like the cancel route does.
     registry.settleOperationStatus(operationId, 'cancelled');
     assert.equal(registry.operationRecord(operationId).status, 'cancelled');
     assert.equal(registry.activeOperationCount(), 0, 'an accepted cancel is no longer charged as active');
-    // A late provider terminal event must not rewrite the accepted outcome:
+    // invariant: A late provider terminal event must not rewrite the accepted outcome:
     // first terminal wins, matching the durable journal's one terminal.
     registry.finishOperation(operationId, { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } }, null);
     const record = registry.operationRecord(operationId);
     assert.equal(record.status, 'cancelled', 'a late OpFinished must not overwrite the accepted cancel');
     assert.equal(record.terminalEvent, null, 'the late event is not adopted as the terminal');
-    // The session stays released exactly once and remains consistent.
+    // note: The session stays released exactly once and remains consistent.
     assert.equal(registry.sessionRecord(sessionId).activeOpId, null);
     assert.equal(registry.sessionRecord(sessionId).state, 'Ready');
     assert.equal(registry.activeOperationCount(), 0);
@@ -769,7 +769,7 @@ describe('security-stream (P4-T2)', () => {
     const operationId = '00000000-0000-4000-8000-000000000202';
     const lateOpFinished = { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } };
 
-    // ── Registry status + hub/replay consistency through the real ingest path.
+    // note: Registry status + hub/replay consistency through the real ingest path.
     const registry = new ProviderRegistry();
     const serviceStub = { providerRegistry: registry };
     registry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Running', activeOpId: operationId });
@@ -793,7 +793,7 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(gapPayload.inspect_url, `/v1/daemon/agent-host/operations/${operationId}`);
     assert.equal(gapPayload.operation_id, operationId);
 
-    // ── Control: an accepted terminal still lands in the hub as a real terminal.
+    // note: Control: an accepted terminal still lands in the hub as a real terminal.
     const okSession = '00000000-0000-4000-8000-000000000203';
     const okOperation = '00000000-0000-4000-8000-000000000204';
     registry.registerSession({ sessionId: okSession, providerId: 'mock-acp', state: 'Running', activeOpId: okOperation });
@@ -803,7 +803,7 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(okHub.hasTerminal(), true, 'an accepted terminal is still recorded');
     assert.equal(registry.operationRecord(okOperation).status, 'finished');
 
-    // ── A live SSE loop against the already-cancelled canonical op terminates
+    // note: A live SSE loop against the already-cancelled canonical op terminates
     // with the one bounded resync gap — no hang, no fabricated terminal frame.
     const written = [];
     const fakeRes = {
@@ -834,7 +834,7 @@ describe('security-stream (P4-T2)', () => {
     const lateOpFinished = { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } };
     const postCloseProgress = { Progress: { message: 'post-close progress must never appear' } };
     const registry = new ProviderRegistry();
-    // The live pull loop: the accepted cancel lands while a pull batch is in
+    // why: The live pull loop: the accepted cancel lands while a pull batch is in
     // flight, so the batch carries BOTH the refused late terminal, a trailing
     // non-terminal event behind it, and a provider gap — the exact race in
     // which nothing may follow the fail-closed `interrupted` marker.
@@ -887,7 +887,7 @@ describe('security-stream (P4-T2)', () => {
     const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
     const { OperationEventHub, streamSessionEvents } = await import(join(serviceRoot, 'dist/sse.js'));
 
-    // ── Plan level: a closed hub can never advance, so an equal-cursor retry
+    // note: Plan level: a closed hub can never advance, so an equal-cursor retry
     // must plan an end — never a wait (terminal retained, refused terminal) —
     // while a live hub, including an empty one, still waits for future truth.
     const doneHub = new OperationEventHub('00000000-0000-4000-8000-000000000501', '00000000-0000-4000-8000-000000000502');
@@ -902,7 +902,7 @@ describe('security-stream (P4-T2)', () => {
     const emptyLiveHub = new OperationEventHub('00000000-0000-4000-8000-000000000505', '00000000-0000-4000-8000-000000000506');
     assert.equal(emptyLiveHub.planReplay(`${emptyLiveHub.epoch}:0`).kind, 'wait', 'an empty open hub is live: cursor 0 waits for future truth');
 
-    // ── Stream level, terminal hub: the retry settles promptly and fabricates
+    // note: Stream level, terminal hub: the retry settles promptly and fabricates
     // no gap and no event.
     const registry = new ProviderRegistry();
     const sessionId = '00000000-0000-4000-8000-000000000507';
@@ -928,7 +928,7 @@ describe('security-stream (P4-T2)', () => {
     ]);
     assert.equal(written.join(''), '', 'terminal equal-cursor retry must end with no fabricated gap or event');
 
-    // ── Stream level, live hub: equal cursor stays open while no future frame
+    // note: Stream level, live hub: equal cursor stays open while no future frame
     // exists yet, then delivers the future truth (and the terminal) when the
     // provider produces it — normal live follow is preserved.
     const liveRegistry = new ProviderRegistry();
@@ -967,7 +967,7 @@ describe('security-stream (P4-T2)', () => {
     };
     let settled = false;
     const liveStream = streamSessionEvents(liveStub, liveSession, new URLSearchParams({ operation_id: liveOperation, cursor: firstFrame.id }), liveRes).then(() => { settled = true; });
-    // Outlast the default 450ms first-pull delay: the loop is now parked on
+    // why: Outlast the default 450ms first-pull delay: the loop is now parked on
     // the gated first pull, proving the wait belongs to the live hub, not to
     // startup lag.
     await new Promise((r) => setTimeout(r, 600));
@@ -989,7 +989,7 @@ describe('security-stream (P4-T2)', () => {
     const local = await startProviderService(blockHome.home, 0);
     const { MAX_ACTIVE_PROVIDER_OPERATIONS } = await import(join(serviceRoot, 'dist/config.js'));
     try {
-      // One blocked operation per session: the cap is process-wide across live ops.
+      // note: One blocked operation per session: the cap is process-wide across live ops.
       for (let i = 0; i < MAX_ACTIVE_PROVIDER_OPERATIONS; i += 1) {
         const created = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
         const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: `blocked-${i}` } });
@@ -1012,7 +1012,7 @@ describe('security-stream (P4-T2)', () => {
       const sessionId = created.payload.session_id;
       const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${sessionId}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'resync' } });
       const operationId = executed.payload.operation_id;
-      // The native host now tracks JS-provider sessions, so hostQuery resolves
+      // note: The native host now tracks JS-provider sessions, so hostQuery resolves
       // launch/execute with the admitted provider id and ownership.
       const nativeSessions = await local.service.core.hostQuery({ query: 'list_sessions' });
       const nativeSession = nativeSessions.sessions.items.find((s) => s.session_id === sessionId);
@@ -1021,10 +1021,10 @@ describe('security-stream (P4-T2)', () => {
       const nativeOp = await local.service.core.hostQuery({ query: 'get_operation', operation_id: operationId });
       assert.equal(nativeOp.operation.session_id, sessionId);
       assert.equal(nativeOp.operation.status, 'running');
-      // Simulate a restart: drop the process-local cache while native truth holds.
+      // note: Simulate a restart: drop the process-local cache while native truth holds.
       local.service.providerRegistry.removeSession(sessionId);
       assert.equal(local.service.providerRegistry.operationRecord(operationId), undefined, 'registry must be cold');
-      // GET must hydrate from native truth, not fabricate a 404.
+      // invariant: GET must hydrate from native truth, not fabricate a 404.
       const got = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${sessionId}`);
       assert.equal(got.status, 200);
       assert.equal(got.payload.session_id, sessionId);
@@ -1032,13 +1032,13 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(inspect.status, 200);
       assert.equal(inspect.payload.session_id, sessionId);
       assert.equal(inspect.payload.status, 'running');
-      // SSE with the cold cache hydrates the omitted operation_id from native
+      // invariant: SSE with the cold cache hydrates the omitted operation_id from native
       // truth and passes admission (200, not 400/404) before headers.
       const omitted = await fetch(`${local.url}/v1/daemon/agent-host/sessions/${sessionId}/events`, { headers: { Accept: 'text/event-stream' } });
       assert.equal(omitted.status, 200);
       assert.match(omitted.headers.get('content-type') ?? '', /text\/event-stream/);
       await omitted.body?.cancel();
-      // A wrong-session operation is still refused before headers.
+      // note: A wrong-session operation is still refused before headers.
       const other = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
       const cross = await fetch(`${local.url}/v1/daemon/agent-host/sessions/${other.payload.session_id}/events?operation_id=${operationId}`, { headers: { Accept: 'text/event-stream' } });
       assert.equal(cross.status, 403);
@@ -1050,7 +1050,7 @@ describe('security-stream (P4-T2)', () => {
     const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
     const sessionId = created.payload.session_id;
     const operationId = '00000000-0000-4000-8000-00000000c001';
-    // Native-terminal status with no local terminal event — the exact shape a
+    // note: Native-terminal status with no local terminal event — the exact shape a
     // hydrated record presents. Cancel must reject, never dispatch.
     service.service.providerRegistry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Ready', activeOpId: null });
     service.service.providerRegistry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'completed', terminalEvent: null, terminalTranscript: null });
@@ -1062,19 +1062,19 @@ describe('security-stream (P4-T2)', () => {
   test('multibyte character across chunk boundary is byte-exact JSON', async () => {
     const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
     const hub = new OperationEventHub('00000000-0000-4000-8000-000000000040', '00000000-0000-4000-8000-000000000041');
-    // Surrogate-pair characters make UTF-16 slicing corrupt the JSON payload.
+    // why: Surrogate-pair characters make UTF-16 slicing corrupt the JSON payload.
     const message = '\u{1F389}'.repeat(300) + '\u00e9'.repeat(50);
     const frame = hub.recordEvent({ Progress: { message } });
     assert.ok(frame);
     const utf16Length = frame.buffer.toString('utf8').length;
     assert.ok(frame.buffer.length > utf16Length, 'multibyte payload must exceed UTF-16 length');
     assert.equal(frame.wireBytes, frame.buffer.length, 'charged bytes must equal serialized Buffer length');
-    // Reconstruct the data payload from the exact bytes the socket would write.
+    // note: Reconstruct the data payload from the exact bytes the socket would write.
     const text = frame.buffer.toString('utf8');
     const dataLine = text.split('\n').find((line) => line.startsWith('data: '));
     const parsed = JSON.parse(dataLine.slice(6));
     assert.equal(parsed.Progress.message, message);
-    // A chunk boundary mid-character must not split the code point: the socket
+    // invariant: A chunk boundary mid-character must not split the code point: the socket
     // receives bytes and reassembles them, so concatenate bytes then decode.
     const chunkSize = 7;
     const chunks = [];
@@ -1082,7 +1082,7 @@ describe('security-stream (P4-T2)', () => {
       chunks.push(frame.buffer.subarray(off, Math.min(off + chunkSize, frame.buffer.length)));
     }
     assert.equal(Buffer.concat(chunks).toString('utf8'), text, 'byte chunking must round-trip the exact UTF-8 text');
-    // Byte accounting must be UTF-8, not UTF-16 code units.
+    // invariant: Byte accounting must be UTF-8, not UTF-16 code units.
     assert.equal(Buffer.byteLength(text, 'utf8'), frame.buffer.length);
     assert.notEqual(text.length, frame.buffer.length, 'UTF-16 length differs from UTF-8 byte length');
   });
@@ -1092,7 +1092,7 @@ describe('security-stream (P4-T2)', () => {
     const hub = new OperationEventHub('00000000-0000-4000-8000-000000000050', '00000000-0000-4000-8000-000000000051');
     const frame = hub.recordEvent({ Progress: { message: 'x'.repeat(256) } });
     assert.ok(frame);
-    // A stub response that refuses the first write, then drains.
+    // note: A stub response that refuses the first write, then drains.
     const written = [];
     const listeners = new Map();
     const res = {
@@ -1101,14 +1101,14 @@ describe('security-stream (P4-T2)', () => {
       socket: { setNoDelay() {} },
       write(chunk) {
         written.push(Buffer.from(chunk));
-        // Accept only after a drain has been signalled.
+        // note: Accept only after a drain has been signalled.
         if (written.length === 1) {
           setImmediate(() => listeners.get('drain')?.());
           return false;
         }
         return true;
       },
-      // The real response is an emitter: the writer's drain wait attaches three
+      // why: The real response is an emitter: the writer's drain wait attaches three
       // one-shot listeners and detaches all three when it settles, so the stub
       // must remove the listener it was given — a name-keyed `off` that removes
       // the attached callback, exactly what `once` would undo. A missing `off`
@@ -1122,7 +1122,7 @@ describe('security-stream (P4-T2)', () => {
     const result = await writer.writeFrame(frame);
     assert.equal(result, 'ok');
     assert.ok(sseTestHooks.writeBlockedCount > before, 'write(false) must be observed');
-    // The writer resumed the same frame after drain: all bytes landed exactly
+    // note: The writer resumed the same frame after drain: all bytes landed exactly
     // once, as slices of the serialized Buffer (no UTF-16 slicing).
     assert.equal(Buffer.concat(written).toString('utf8'), frame.buffer.toString('utf8'));
     assert.equal(writer.outboundBackpressured, false, 'backpressure flag clears after drain');
@@ -1133,19 +1133,19 @@ describe('security-stream (P4-T2)', () => {
     const budget = await import(join(serviceRoot, 'dist/environment-budget.js'));
     const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
     budget.resetEnvironmentBudgetForTests();
-    // Saturate the data pool exactly.
+    // note: Saturate the data pool exactly.
     let filled = 0;
     while (budget.tryReserveEnvironmentBytes(1 << 20)) filled += 1;
     const saturated = budget.environmentBudgetReserved();
     assert.ok(saturated >= 8 * 1024 * 1024 - (1 << 20));
     const hub = new OperationEventHub('00000000-0000-4000-8000-000000000070', '00000000-0000-4000-8000-000000000071');
-    // A data frame cannot be retained while the pool is full → fail closed with a gap.
+    // invariant: A data frame cannot be retained while the pool is full → fail closed with a gap.
     const rejected = hub.recordEvent({ Progress: { message: 'x'.repeat(4096) } });
     assert.ok(rejected, 'fail-closed must still produce a gap');
     assert.equal(rejected.event, 'gap');
     const rejectedData = rejected.buffer.toString('utf8').split('\n').find((l) => l.startsWith('data: '));
     assert.equal(JSON.parse(rejectedData.slice(6)).reason, 'interrupted');
-    // The dedicated control pool still permits a terminal after a full data pool.
+    // note: The dedicated control pool still permits a terminal after a full data pool.
     const hub2 = new OperationEventHub('00000000-0000-4000-8000-000000000072', '00000000-0000-4000-8000-000000000073');
     const terminal = hub2.recordEvent({ OpFinished: { session_id: hub2.sessionId, op_id: 'o', reason: 'end_turn' } });
     assert.ok(terminal?.isTerminal, 'terminal must be retained despite a full data pool');
@@ -1159,7 +1159,7 @@ describe('security-stream (P4-T2)', () => {
     const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
     budget.resetEnvironmentBudgetForTests();
     const hubs = [];
-    // 65 terminal hubs would each retain a 1 MiB-scale terminal; the data pool
+    // why: 65 terminal hubs would each retain a 1 MiB-scale terminal; the data pool
     // (8 MiB) must stop retention before the global cap is exceeded.
     for (let i = 0; i < 65; i += 1) {
       const hub = new OperationEventHub(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, `00000000-0000-4000-8000-${String(1000 + i).padStart(12, '0')}`);
@@ -1183,7 +1183,7 @@ describe('security-stream (P4-T2)', () => {
     const proof = budget.environmentBudgetProof();
     assert.equal(proof.ceilingBytes, 32 * 1024 * 1024);
     assert.ok(proof.totalBytes <= proof.ceilingBytes, `proof ${proof.totalBytes} exceeds ceiling`);
-    // The proof must be the sum of real categories, not a relabelled constant.
+    // invariant: The proof must be the sum of real categories, not a relabelled constant.
     const expected =
       proof.tsfnSharedBytes +
       proof.nativeProviderBytes +
@@ -1195,13 +1195,13 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(proof.totalBytes, expected);
     assert.ok(proof.nodeControlBytes >= 560 * 1024, 'control reserve covers 70 hubs x 2 x 4KiB');
     assert.ok(proof.nodeControlBytes <= proof.ceilingBytes);
-    // Node retained budget is clamped: an env override cannot raise it.
+    // invariant: Node retained budget is clamped: an env override cannot raise it.
     const { SSE_MAX_AGGREGATE_PENDING_BYTES, SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING } = await import(join(serviceRoot, 'dist/config.js'));
     assert.ok(SSE_MAX_AGGREGATE_PENDING_BYTES <= SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING);
   });
 
   test('actor/viewpoint create reaches the core authority instead of a blanket not_migrated', async () => {
-    // The former blanket `501 route_not_migrated` is gone: a well-formed pair
+    // why: The former blanket `501 route_not_migrated` is gone: a well-formed pair
     // now reaches the Actor Host authority, whose stored admission refuses an
     // unowned Actor/World before any Host or provider effect. This home has no
     // Character fixture, so both denials below are store-level `not_found`s —
@@ -1246,7 +1246,7 @@ describe('security-stream (P4-T2)', () => {
     const local = await startProviderService(home.home, 0);
     try {
       const post = (body) => jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      // Unknown key, wrong optional type, malformed actor pair, malformed refs.
+      // note: Unknown key, wrong optional type, malformed actor pair, malformed refs.
       const cases = [
         { provider_id: 'mock-acp', unexpected: 1 },
         { provider_id: 'mock-acp', cwd: 42 },
@@ -1273,11 +1273,11 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
         assert.equal(res.payload.error.code, 'invalid_input');
       }
-      // A well-formed prompt with an unknown key is rejected too.
+      // note: A well-formed prompt with an unknown key is rejected too.
       const created = await post({ provider_id: 'mock-acp' });
       assert.equal(created.status, 200);
       const sid = created.payload.session_id;
-      // Capture the adapter's log *after* the one legitimate create, then prove
+      // why: Capture the adapter's log *after* the one legitimate create, then prove
       // no malformed body mutates it further.
       const logAfterValidCreate = readFixtureLog(home.log).length;
       const exec = (body) => jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${sid}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
@@ -1292,7 +1292,7 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
         assert.equal(res.payload.error.code, 'invalid_input');
       }
-      // A well-formed `set_model` answered 501 `route_not_migrated` here until
+      // note: A well-formed `set_model` answered 501 `route_not_migrated` here until
       // ea75345d4 migrated it to provider dispatch, so there is no unsupported
       // well-formed branch left to pin; the malformed bodies above stay the
       // only requests that must not reach the adapter.
@@ -1311,18 +1311,18 @@ describe('security-stream (P4-T2)', () => {
     const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
     const sessionId = created.payload.session_id;
     const operationId = '00000000-0000-4000-8000-00000000d001';
-    // Native-interrupted status with no local terminal event — the exact shape a
+    // note: Native-interrupted status with no local terminal event — the exact shape a
     // hydrated record presents after a SessionStopped.
     service.service.providerRegistry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Ready', activeOpId: null });
     const before = service.service.providerRegistry.activeOperationCount();
     service.service.providerRegistry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'interrupted', terminalEvent: null, terminalTranscript: null });
-    // Not charged against the live-operation cap.
+    // invariant: Not charged against the live-operation cap.
     assert.equal(service.service.providerRegistry.activeOperationCount(), before, 'interrupted must not be charged as active');
-    // GET surfaces the terminal status exactly.
+    // note: GET surfaces the terminal status exactly.
     const inspect = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/operations/${operationId}`);
     assert.equal(inspect.status, 200);
     assert.equal(inspect.payload.status, 'interrupted');
-    // Cancel must reject before any provider mutation.
+    // invariant: Cancel must reject before any provider mutation.
     const cancel = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/operations/${operationId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
     assert.equal(cancel.status, 409);
     assert.equal(cancel.payload.error.code, 'busy');
@@ -1367,7 +1367,7 @@ describe('security-stream (P4-T2)', () => {
     for (const url of refused) {
       assert.throws(() => validateCdnUrl(url), /public HTTPS CDN URL/, url);
     }
-    // Public name and literal hosts stay admitted.
+    // note: Public name and literal hosts stay admitted.
     validateCdnUrl('https://cdn.example.com/registry.json');
     validateCdnUrl('https://8.8.8.8/x');
     validateCdnUrl('https://172.32.0.1/x');
@@ -1386,7 +1386,7 @@ describe('security-stream (P4-T2)', () => {
       const runtime = await fetchJson('/v1/daemon/runtime/status');
       assert.equal(runtime.payload.runtime_mode, 'provider_enabled');
 
-      // The World registration is the fixture's; the Character and its binding
+      // note: The World registration is the fixture's; the Character and its binding
       // are created through the surface itself, so the admission below is the
       // stored one the authority really serves.
       const created = await fetchJson('/v1/daemon/characters', {
@@ -1398,7 +1398,7 @@ describe('security-stream (P4-T2)', () => {
       const characterId = created.payload.character.character_id;
       const bindingId = created.payload.binding.binding_id;
 
-      // One row per outcome this adapter can really produce. `end_turn` is the
+      // why: One row per outcome this adapter can really produce. `end_turn` is the
       // only row allowed to keep a successful transcript; `mirror: null` marks
       // the row whose terminal may not reach the transport lane at all (the
       // JSON-RPC prompt failure tears the transport down), where only "never a
@@ -1414,7 +1414,7 @@ describe('security-stream (P4-T2)', () => {
 
       const results = [];
       for (const row of rows) {
-        // `cwd` is deliberately omitted: the admitted creative-root pin governs
+        // why: `cwd` is deliberately omitted: the admitted creative-root pin governs
         // the Host session and, through it, the provider launch below.
         const session = await fetchJson('/v1/daemon/agent-host/sessions', {
           method: 'POST',
@@ -1436,7 +1436,7 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(executed.status, 200, `${row.provider}: ${executed.text}`);
         const operationId = executed.payload.operation_id;
 
-        // The real adapter → Host → core → native → SSE path: the raw stream is
+        // note: The real adapter → Host → core → native → SSE path: the raw stream is
         // read over TCP while the authority's own Character read settles.
         const sse = rawSseGet(local.url, `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`);
         const outcome = await waitForCharacterOutcome(local.url, operationId);
@@ -1456,7 +1456,7 @@ describe('security-stream (P4-T2)', () => {
         if (row.terminal === 'OpFinished') {
           assert.equal(finishedFrames[0].data.OpFinished.reason, row.reason, `${row.provider} must reach SSE with its own reason`);
         } else {
-          // The JSON-RPC failure can surface as `provider_eof` or
+          // why: The JSON-RPC failure can surface as `provider_eof` or
           // `protocol_error`, so the failure row is pinned rather than a racy
           // category; the bounded resync gap is the same row's other truthful
           // shape. What may never appear is a success frame.
@@ -1464,7 +1464,7 @@ describe('security-stream (P4-T2)', () => {
           assert.ok(failedFrames.length === 1 || frames.some((frame) => frame.event === 'gap'), `${row.provider} must end in the failure row or its resync gap`);
         }
 
-        // The transport mirror must agree with the authority: no non-success
+        // invariant: The transport mirror must agree with the authority: no non-success
         // row may read as `finished` or keep a successful transcript.
         const record = local.service.providerRegistry.operationRecord(operationId);
         assert.ok(record, `${row.provider} mirror record`);
@@ -1477,7 +1477,7 @@ describe('security-stream (P4-T2)', () => {
         else assert.equal(record.status, row.mirror, `${row.provider} mirror status`);
       }
 
-      // Five acceptance rows, pairwise distinct: succeeded, both limit reasons
+      // note: Five acceptance rows, pairwise distinct: succeeded, both limit reasons
       // kept as their own `incomplete` row, failed, and cancelled.
       assert.deepEqual(
         [...new Set(results.map((result) => `${result.run}/${result.finish ?? ''}`))].sort(),
@@ -1490,7 +1490,7 @@ describe('security-stream (P4-T2)', () => {
         ],
       );
 
-      // The omitted `cwd` really became the admitted pin: every peer process —
+      // why: The omitted `cwd` really became the admitted pin: every peer process —
       // the catalog probes and the row sessions alike — records the directory it
       // was created in, and every row's own prompt really reached a peer.
       const pin = realpathSync(home.creativeRoot);
@@ -1507,7 +1507,7 @@ describe('security-stream (P4-T2)', () => {
         );
       }
 
-      // A cold transport mirror still answers with the authority's own truth:
+      // invariant: A cold transport mirror still answers with the authority's own truth:
       // drop the mirror's session (and with it the operation record) and re-read.
       const cold = results.find((result) => result.row.provider === 'mock-acp-max-tokens');
       local.service.providerRegistry.removeSession(cold.sessionId);
@@ -1518,7 +1518,7 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(reread.payload.finish_reason, 'max_tokens');
       assert.equal(reread.payload.capture.status, 'disabled');
 
-      // The log is shared by every peer of this run, so the reader must survive
+      // why: The log is shared by every peer of this run, so the reader must survive
       // a torn/interleaved write: the readable lines stay readable and only the
       // partial line is skipped.
       const intact = readFixtureLog(journeyLog);
@@ -1530,7 +1530,7 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(afterTorn.at(-1).event, 'after_torn', 'the line after the torn write is still readable');
     } finally {
       await closeServiceBounded(local);
-      // The journey's own fixtures (its log dir and its seeded home) are this
+      // note: The journey's own fixtures (its log dir and its seeded home) are this
       // slice's; the peer processes above are already reaped by the close.
       rmSync(journeyDir, { recursive: true, force: true });
       rmSync(home.home, { recursive: true, force: true });
@@ -1570,7 +1570,7 @@ describe('security-stream (P4-T2)', () => {
       const pendingBefore = (await fetchJson(`/v1/daemon/characters/${characterId}/memory/pending-review/count`)).payload.count;
       assert.equal(pendingBefore, 0);
 
-      // Admission refusals, all before any Host/provider effect: a Character
+      // invariant: Admission refusals, all before any Host/provider effect: a Character
       // this creator does not own, a foreign World, and a cwd outside the
       // admitted pin (the Nexus root the pre-T2 default used to resolve to).
       const admissions = [
@@ -1584,7 +1584,7 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(refused.payload.error.code, code, refused.text);
       }
 
-      // A Character `remember:true` is refused before any effect: no
+      // invariant: A Character `remember:true` is refused before any effect: no
       // reservation, no provider work, no pending capture.
       const remember = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
         method: 'POST',
@@ -1594,7 +1594,7 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(remember.status, 501, remember.text);
       assert.equal(remember.payload.error.code, 'route_not_migrated');
 
-      // Zero Host effects: no new session, no busy session, no charged
+      // note: Zero Host effects: no new session, no busy session, no charged
       // live operation.
       const nativeSessionsAfter = (await local.service.core.hostQuery({ query: 'list_sessions' })).sessions.items.length;
       assert.equal(nativeSessionsAfter, nativeSessionsBefore, 'a refusal must not create a Host session');
@@ -1602,15 +1602,15 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(mirror.activeOpId, null, 'the refused prompt must not mark the session busy');
       assert.equal(mirror.state, 'Ready');
       assert.equal(registry.activeOperationCount(), 0, 'a refusal must never hold the live-operation cap');
-      // Zero provider effects: not one launch or prompt reached a peer.
+      // invariant: Zero provider effects: not one launch or prompt reached a peer.
       assert.equal(readFixtureLog(home.log).length, launchesBefore, 'a refusal must not launch a provider');
-      // Zero memory effects: nothing pending, nothing written.
+      // invariant: Zero memory effects: nothing pending, nothing written.
       const pendingAfter = (await fetchJson(`/v1/daemon/characters/${characterId}/memory/pending-review/count`)).payload.count;
       assert.equal(pendingAfter, pendingBefore);
       const fragments = await fetchJson(`/v1/daemon/characters/${characterId}/memory/fragments`);
       assert.equal(fragments.payload.fragments.length, 0, 'a refusal must not write a memory fragment');
 
-      // Liveness control: the same admission and pin still run a normal prompt,
+      // why: Liveness control: the same admission and pin still run a normal prompt,
       // so the zeros above are the refusals' doing, not a dead fixture.
       const control = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
         method: 'POST',
@@ -1643,7 +1643,7 @@ describe('security-stream (P4-T2)', () => {
     };
     const opFinished = (index, reason) => ({ OpFinished: { session_id: sessionOf(index), op_id: operationOf(index), reason } });
 
-    // Every reason the wire can carry, through the real ingest path, judged on
+    // note: Every reason the wire can carry, through the real ingest path, judged on
     // the consumer-visible operation record.
     const projection = [
       ['end_turn', 'finished', true],
@@ -1668,7 +1668,7 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(registry.activeOperationCount(), 0, `reason ${reason} is terminal, not live work`);
     });
 
-    // First terminal wins: an `incomplete` run that later hears `end_turn` keeps
+    // invariant: First terminal wins: an `incomplete` run that later hears `end_turn` keeps
     // its own reason — and therefore still has no successful transcript.
     const late = projection.length + 1;
     startOperation(late);
@@ -1679,7 +1679,7 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(pinned.terminalEvent.OpFinished.reason, 'max_tokens', 'the first terminal is not rewritten');
     assert.equal(pinned.terminalTranscript, null, 'a late success cannot add a successful transcript');
 
-    // An accepted cancel stays authoritative, exactly as before.
+    // invariant: An accepted cancel stays authoritative, exactly as before.
     const settled = late + 1;
     startOperation(settled);
     registry.settleOperationStatus(operationOf(settled), 'cancelled');
@@ -1689,7 +1689,7 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(cancelled.terminalEvent, null);
     assert.equal(cancelled.terminalTranscript, null);
 
-    // Fail closed: a terminal whose reason is missing, or outside the wire set,
+    // invariant: Fail closed: a terminal whose reason is missing, or outside the wire set,
     // is a failure — never a completed turn with a successful transcript.
     const unusable = [
       ['a terminal with no reason', (index) => ({ session_id: sessionOf(index), op_id: operationOf(index) })],
@@ -1704,7 +1704,7 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(record.terminalTranscript, null, `${label} must not retain a successful transcript`);
     });
 
-    // `SessionStopped` stays the `stopped` terminal it always was.
+    // note: `SessionStopped` stays the `stopped` terminal it always was.
     const stoppedIndex = 95;
     startOperation(stoppedIndex);
     ingestEvents(serviceStub, operationOf(stoppedIndex), [{ SessionStopped: { session_id: sessionOf(stoppedIndex), reason: 'graceful_shutdown' } }]);
@@ -1712,7 +1712,7 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(stopped.status, 'stopped');
     assert.equal(stopped.terminalTranscript, null, 'a stopped session has no successful transcript');
 
-    // The consumer gate this status feeds: an `incomplete` run is terminal work
+    // note: The consumer gate this status feeds: an `incomplete` run is terminal work
     // for the cancel path, which refuses it before dispatching any provider
     // mutation. Driven through the real consumer with a hydrated native row (a
     // terminal status and no local terminal event yet), so the assertion covers

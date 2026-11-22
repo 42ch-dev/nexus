@@ -18,7 +18,7 @@ import type { CoreServiceDiscovery } from '@42ch/nexus-contracts';
 import { HttpError } from './errors.js';
 
 /**
- * Launch/discovery file protocol (architecture §7, frozen before P5/P6).
+ * note: Launch/discovery file protocol (architecture §7, frozen before P5/P6).
  *
  * - Discovery record: `<user_home>/.nexus42/run/service.json`, written 0600 in
  *   a 0700 directory, published by atomic rename only after the listener, core
@@ -42,7 +42,7 @@ const RECORD_FILE = 'service.json';
 const LOCK_FILE = 'service.start.lock';
 const RECORD_MODE = 0o600;
 const RUN_DIR_MODE = 0o700;
-/** Bounded wait for a live owner's start window before refusing. */
+/** note: Bounded wait for a live owner's start window before refusing. */
 const LOCK_ACQUIRE_TIMEOUT_MS = 3_000;
 const LOCK_RETRY_DELAY_MS = 25;
 
@@ -59,7 +59,7 @@ export interface DiscoveryLockToken {
   token: string;
 }
 
-/** lstat `path` as a real (non-symlink) directory; refuse anything else. */
+/** note: lstat `path` as a real (non-symlink) directory; refuse anything else. */
 function assertRealDirectory(path: string): void {
   let stats;
   try {
@@ -73,7 +73,7 @@ function assertRealDirectory(path: string): void {
 }
 
 /**
- * Create `path` as a real private directory: the per-level mkdir never
+ * note: Create `path` as a real private directory: the per-level mkdir never
  * follows a planted symlink (it fails with EEXIST instead), and an existing
  * real directory — including a legacy permissive one — is forced back to
  * `mode` before anything is written beneath it.
@@ -97,7 +97,7 @@ function ensureRealDir(path: string, mode: number): void {
   }
 }
 
-/** Create the private run directory without following a planted symlink. */
+/** safety: Create the private run directory without following a planted symlink. */
 function ensureRunDir(home: string): string {
   const nexusDir = join(home, RUN_DIR_SEGMENTS[0]);
   const runDir = join(nexusDir, RUN_DIR_SEGMENTS[1]);
@@ -116,7 +116,7 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** Raw lock-file bytes, or null when unreadable (treated as stale). */
+/** note: Raw lock-file bytes, or null when unreadable (treated as stale). */
 function readLockTokenBytes(path: string): string | null {
   try {
     return readFileSync(path, 'utf8');
@@ -138,7 +138,7 @@ function parseLockToken(raw: string | null): DiscoveryLockToken | null {
       return parsed as DiscoveryLockToken;
     }
   } catch {
-    // Corrupt lock: treated as stale by the acquire loop.
+    // note: Corrupt lock: treated as stale by the acquire loop.
   }
   return null;
 }
@@ -162,7 +162,7 @@ function writeFileSyncExclusive(path: string, data: string, mode: number): void 
     try {
       closeSync(fd);
     } catch {
-      // The failing write already closed the descriptor.
+      // why: The failing write already closed the descriptor.
     }
     rmSync(path, { force: true });
     throw error;
@@ -202,7 +202,7 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
           );
         }
       } else if (readLockTokenBytes(path) === raw) {
-        // Stale (dead owner) or corrupt. Clear it only when the file still
+        // why: Stale (dead owner) or corrupt. Clear it only when the file still
         // holds the exact bytes just judged stale: re-reading immediately
         // before the unlink closes the window where a successor's fresh
         // O_EXCL lock (a uuid this process never generated) could be deleted
@@ -215,7 +215,7 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
   try {
     return await fn();
   } finally {
-    // Release only if we still own the lock file (never delete a successor's).
+    // invariant: Release only if we still own the lock file (never delete a successor's).
     const holder = parseLockToken(readLockTokenBytes(path));
     if (holder?.token === token.token) {
       rmSync(path, { force: true });
@@ -254,9 +254,9 @@ export async function publishDiscovery(record: CoreServiceDiscovery): Promise<vo
 }
 
 export interface DiscoveryRemoval {
-  /** True when this process owned the published record and removed it. */
+  /** note: True when this process owned the published record and removed it. */
   removed: boolean;
-  /** Why nothing was removed: no published record, or a replacement owns it. */
+  /** note: Why nothing was removed: no published record, or a replacement owns it. */
   reason: 'no_record' | 'not_owner' | 'removed';
 }
 
@@ -291,7 +291,7 @@ export function readPublishedDiscovery(home: string): CoreServiceDiscovery | nul
   const path = discoveryRecordPath(home);
   let stats;
   try {
-    // lstat, never stat: a planted symlink at the leaf is refused, not read.
+    // safety: lstat, never stat: a planted symlink at the leaf is refused, not read.
     stats = lstatSync(path);
   } catch {
     return null;

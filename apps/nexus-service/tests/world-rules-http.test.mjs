@@ -1,5 +1,5 @@
 /**
- * World structured-rule HTTP inclusion + lifecycle (V1.198 P0-T3).
+ * why: World structured-rule HTTP inclusion + lifecycle (V1.198 P0-T3).
  *
  * Drives the real service over the real native binding: the fixture home is
  * seeded through `native-wire-fixture-seed`, the service is built and started
@@ -67,7 +67,7 @@ async function startDomainService(home, port) {
   });
 }
 
-/** `POST .../rules` — asserts 201 and returns the created `rule_id`. */
+/** note: `POST .../rules` — asserts 201 and returns the created `rule_id`. */
 async function createRule(baseUrl, overrides = {}) {
   const res = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/rules`, {
     method: 'POST',
@@ -84,7 +84,7 @@ async function createRule(baseUrl, overrides = {}) {
   return res.payload.rule_id;
 }
 
-/** `PATCH .../rules/{id}` with one supplied member. */
+/** note: `PATCH .../rules/{id}` with one supplied member. */
 function patchRule(baseUrl, ruleId, body, world = OWNED_WORLD) {
   return jsonFetch(`${baseUrl}/v1/daemon/worlds/${world}/rules/${ruleId}`, {
     method: 'PATCH',
@@ -92,7 +92,7 @@ function patchRule(baseUrl, ruleId, body, world = OWNED_WORLD) {
   });
 }
 
-/** The listed rule ids of the owned World for the given query suffix. */
+/** note: The listed rule ids of the owned World for the given query suffix. */
 async function listRuleIds(baseUrl, query = '') {
   const res = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/rules${query}`);
   assert.equal(res.status, 200, res.text);
@@ -129,7 +129,7 @@ describe('world-rules-http (V1.198 P0-T3)', () => {
         await service.close();
       }
     } finally {
-      // Remove the seeded home even when the service close fails; `home` is
+      // why: Remove the seeded home even when the service close fails; `home` is
       // unset when the `before` hook failed before seeding it.
       if (home) rmSync(home, { recursive: true, force: true });
     }
@@ -213,11 +213,11 @@ describe('world-rules-http (V1.198 P0-T3)', () => {
       { body: { status: 'deprecated' }, field: 'status' },
       { body: { status: 'archived', canonical_name: 'Resurrected' }, field: 'canonical_name' },
       { body: { canonical_name: 'Resurrected' }, field: 'canonical_name' },
-      // An explicit null is a SUPPLIED member, not an absent one: the native
+      // why: An explicit null is a SUPPLIED member, not an absent one — the native
       // presence capture must survive the typed decode, so this names `status`
       // rather than degrading into the empty-PATCH refusal.
       { body: { status: null }, field: 'status' },
-      // A raw empty object supplies nothing and still names `patch`.
+      // note: A raw empty object supplies nothing and still names `patch`.
       { body: {}, field: 'patch' },
     ];
     for (const { body, field } of cases) {

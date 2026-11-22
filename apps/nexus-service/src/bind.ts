@@ -40,7 +40,7 @@ export function validateStartupBind(config: ResolvedServiceConfig): void {
       'non-loopback connections require --allow-remote',
     );
   }
-  // TLS stays available and recommended outside development, but plain-HTTP
+  // why: TLS stays available and recommended outside development, but plain-HTTP
   // LAN dev is supported: every authenticated remote request is admitted
   // without TLS material (access spec §3.1), and a remote bind still requires
   // an API key below.

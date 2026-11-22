@@ -13,11 +13,11 @@ const serviceRoot = join(__dirname, '..');
 const CREATOR = 'ctr_testcreator';
 const SLUG = 'default';
 const MODULE = 'basic-combat';
-/** A World owned by another creator in the seeded store (`seed_wire_home`). */
+/** note: A World owned by another creator in the seeded store (`seed_wire_home`). */
 const FOREIGN_WORLD = 'wld_foreign';
 
 /**
- * P2-T3 bounded real-native target: the eight public Compute operations of
+ * note: P2-T3 bounded real-native target: the eight public Compute operations of
  * current-host contracts §5 (C1–C8) over the real service, the real native
  * addon, the real hosted execution owner and the REAL WASM module the factory
  * warmed at boot.
@@ -40,7 +40,7 @@ function seededHome() {
     { cwd: root, stdio: 'inherit' },
   );
   assert.equal(seed.status, 0, seed.stderr?.toString());
-  // The selected workspace's registered creative root: the ONE document
+  // why: the selected workspace's registered creative root — the ONE document
   // `nexus42 creator workspace create --creative-root <abs>` writes, and what
   // lets this profile establish the hosted execution owner (and therefore the
   // WASM runtime the Compute family drives).
@@ -68,7 +68,7 @@ async function startComputeService(home, port) {
   return startService({ home, host: '127.0.0.1', port, allowRemote: false });
 }
 
-/** One owned World, created through the retained World route. */
+/** note: One owned World, created through the retained World route. */
 async function createWorld(baseUrl, title) {
   const created = await jsonFetch(`${baseUrl}/v1/daemon/worlds`, {
     method: 'POST',
@@ -80,7 +80,7 @@ async function createWorld(baseUrl, title) {
 }
 
 /**
- * One computable `character` entry, created through the retained World-KB
+ * note: One computable `character` entry, created through the retained World-KB
  * patch route (`expected_version: 0` on an absent entity IS the create path).
  * The body carries exactly what the `basic-combat` manifest declares:
  * immutable combat params in `attributes` and the mutable runtime state in
@@ -114,7 +114,7 @@ async function stageCombatant(baseUrl, worldId, entityId, name, stats) {
   assert.equal(staged.status, 200, staged.text);
 }
 
-/** The existing World-KB state read: computability flag + mutable state (C9). */
+/** note: The existing World-KB state read: computability flag + mutable state (C9). */
 async function readKeyBlockState(baseUrl, worldId, entityId) {
   const read = await jsonFetch(
     `${baseUrl}/v1/daemon/worlds/${worldId}/kb/key-blocks/${entityId}/state`,
@@ -123,7 +123,7 @@ async function readKeyBlockState(baseUrl, worldId, entityId) {
   return read.payload;
 }
 
-/** The existing World timeline read, filtered to the accepted-run family (C9). */
+/** note: The existing World timeline read, filtered to the accepted-run family (C9). */
 async function readComputeTimeline(baseUrl, worldId) {
   const read = await jsonFetch(
     `${baseUrl}/v1/daemon/worlds/${worldId}/timeline/events?event_type=compute_result&status=canon`,
@@ -144,7 +144,7 @@ async function runModule(baseUrl, worldId, attackerId, defenderId) {
 }
 
 /**
- * The two `kb_<hex>` entity ids one staged World uses. Entity ids must satisfy
+ * note: The two `kb_<hex>` entity ids one staged World uses. Entity ids must satisfy
  * the retained `kb_<hex>` convention, so the per-World suffix is taken from the
  * World's own hex uuid.
  */
@@ -153,7 +153,7 @@ function combatantIds(worldId) {
   return { attackerId: `kb_a${suffix}`, defenderId: `kb_d${suffix}` };
 }
 
-/** A World with one attacker (20 ATK) and one defender (30/50 HP, 5 DEF). */
+/** note: A World with one attacker (20 ATK) and one defender (30/50 HP, 5 DEF). */
 async function stageCombatWorld(baseUrl, title) {
   const worldId = await createWorld(baseUrl, title);
   const { attackerId, defenderId } = combatantIds(worldId);
@@ -224,15 +224,15 @@ describe('compute-http (v1.195 P2-T3)', () => {
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
-    // Every Compute identity is creator-tier: the WASM edge is never reachable
-    // without the stored principal the transport already authenticated.
+    // invariant: every Compute identity is creator-tier — the WASM edge is never
+    // reachable without the stored principal the transport already authenticated.
     for (const route of compute) {
       assert.equal(route.tier, 'tier2', `${route.method} ${route.path} must be tier2`);
     }
   });
 
   test('compute lifecycle: real module schema, zero-effect run, review reads and one accept', async () => {
-    // ── C1 discovery: the installed module is listed, not an empty catalog. ──
+    // note: C1 discovery — the installed module is listed, not an empty catalog.
     const discovery = await jsonFetch(`${baseUrl}/v1/daemon/compute/modules`);
     assert.equal(discovery.status, 200, discovery.text);
     const summary = discovery.payload.items.find((item) => item.module_id === MODULE);
@@ -242,7 +242,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(summary.status, 'ok');
     assert.equal(discovery.payload.has_more, false);
 
-    // ── C2 detail: the invocation schema is the SHIPPED manifest. ───────────
+    // note: C2 detail — the invocation schema is the SHIPPED manifest.
     const detail = await jsonFetch(`${baseUrl}/v1/daemon/compute/modules/${MODULE}`);
     assert.equal(detail.status, 200, detail.text);
     assert.equal(detail.payload.nexus_abi_version, 1);
@@ -261,7 +261,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
 
     const { worldId, attackerId, defenderId } = await stageCombatWorld(baseUrl, 'Compute HTTP world');
 
-    // ── C3 run: real WASM proposals, and the World is NOT mutated. ──────────
+    // note: C3 run — real WASM proposals, and the World is NOT mutated.
     const run = await runModule(baseUrl, worldId, attackerId, defenderId);
     assert.equal(run.status, 200, run.text);
     assert.equal(run.payload.status, 'succeeded', run.text);
@@ -270,7 +270,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     const runId = run.payload.run_id;
     assert.ok(runId?.startsWith('run_'), `a real run id: ${run.text}`);
     const proposals = run.payload.proposals;
-    // The generated envelope's typed members are what the wire carries: the
+    // why: the generated envelope's typed members are what the wire carries: the
     // freeform `battle_report` is typed to its `kind` discriminator (its
     // remaining members are declared `additionalProperties: true` and are NOT
     // part of the generated DTO), so the module's real arithmetic is proven by
@@ -288,13 +288,13 @@ describe('compute-http (v1.195 P2-T3)', () => {
       `the module authored this summary: ${run.text}`,
     );
 
-    // Zero effect before accept, observed through the existing reads.
+    // invariant: zero effect before accept, observed through the existing reads.
     const untouched = await readKeyBlockState(baseUrl, worldId, defenderId);
     assert.equal(untouched.is_computable, true);
     assert.equal(untouched.state.character.current_hp, 30);
     assert.deepEqual(await readComputeTimeline(baseUrl, worldId), []);
 
-    // ── C4 detail / C5 history of THAT run. ────────────────────────────────
+    // note: C4 detail / C5 history of THAT run.
     const runDetail = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs/${runId}`);
     assert.equal(runDetail.status, 200, runDetail.text);
     assert.equal(runDetail.payload.run_id, runId);
@@ -321,7 +321,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
       history.text,
     );
 
-    // ── C6 accept ONCE: the proposals become durable World truth. ───────────
+    // note: C6 accept ONCE — the proposals become durable World truth.
     const accepted = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs/${runId}/accept`, {
       method: 'POST',
       body: {},
@@ -332,13 +332,13 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(accepted.payload.applied.events_created, 1);
     assert.equal(accepted.payload.timeline_event_ids.length, 1);
 
-    // C9: the accepted effect through the EXISTING KB read.
+    // note: C9 — the accepted effect through the EXISTING KB read.
     const applied = await readKeyBlockState(baseUrl, worldId, defenderId);
     assert.equal(applied.state.character.current_hp, 15, `damage 20−5 must land: ${JSON.stringify(applied)}`);
     const attackerUntouched = await readKeyBlockState(baseUrl, worldId, attackerId);
     assert.equal(attackerUntouched.state.character.current_hp, 100);
 
-    // C9: the accepted effect through the EXISTING timeline read.
+    // note: C9 — the accepted effect through the EXISTING timeline read.
     const timeline = await readComputeTimeline(baseUrl, worldId);
     assert.equal(timeline.length, 1, JSON.stringify(timeline));
     assert.equal(timeline[0].id, accepted.payload.timeline_event_ids[0]);
@@ -353,8 +353,8 @@ describe('compute-http (v1.195 P2-T3)', () => {
       `the event names the entities it moved: ${JSON.stringify(timeline[0])}`,
     );
 
-    // A SECOND accept loses on the CAS and applies nothing again. The retained
-    // 409 is the status; the finer `conflict` code rides `details.wire_code`,
+    // invariant: a SECOND accept loses on the CAS and applies nothing again. The
+    // retained 409 is the status; the finer `conflict` code rides `details.wire_code`,
     // exactly as the other `CoreError::Coded` refusals cross this boundary
     // (the P0 workflow-conflict selectors assert the same pair).
     const second = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs/${runId}/accept`, {
@@ -371,7 +371,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     );
     assert.equal((await readComputeTimeline(baseUrl, worldId)).length, 1, 'no duplicate event');
 
-    // The applied row stays inspectable: status flipped, proposals retained.
+    // note: the applied row stays inspectable — status flipped, proposals retained.
     const appliedDetail = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs/${runId}`);
     assert.equal(appliedDetail.status, 200, appliedDetail.text);
     assert.equal(appliedDetail.payload.status, 'applied');
@@ -379,8 +379,8 @@ describe('compute-http (v1.195 P2-T3)', () => {
   });
 
   test('compute lifecycle: a schema-invalid run persists as a failed row with its input detail', async () => {
-    // A computable entry the manifest's `key_block_state.character` schema
-    // REJECTS: `current_hp` has `minimum: 0`. The KB write path validates the
+    // why: a computable entry the manifest's `key_block_state.character` schema
+    // REJECTS — `current_hp` has `minimum: 0`. The KB write path validates the
     // body structurally (novel category/attributes shape), not against the
     // module manifest, and the core's ComputeInputBuilder does not read the
     // manifest schema either — so this input passes assembly and fails at the
@@ -406,7 +406,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
       currentHp: 30,
     });
 
-    // The refusal is the retained 422 `invalid_input` with per-entry detail.
+    // note: the refusal is the retained 422 `invalid_input` with per-entry detail.
     const refused = await runModule(baseUrl, worldId, attackerId, defenderId);
     assert.equal(refused.status, 422, refused.text);
     assert.equal(refused.payload.error.code, 'invalid_input', refused.text);
@@ -419,7 +419,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     );
     assert.equal(entries.every((entry) => typeof entry.reason === 'string'), true, refused.text);
 
-    // …and the FAILED row is durably persisted and reviewable: it lists under
+    // note: …and the FAILED row is durably persisted and reviewable — it lists under
     // the failed filter and its detail keeps the same input detail.
     const failedList = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs?world_id=${worldId}&status=failed`,
@@ -446,8 +446,8 @@ describe('compute-http (v1.195 P2-T3)', () => {
       `the durable failure detail survives the read: ${failedDetail.text}`,
     );
 
-    // A failed run is a review row, not an effect: the World is untouched and
-    // there is nothing to accept (the run never reached `succeeded`).
+    // invariant: a failed run is a review row, not an effect — the World is untouched
+    // and there is nothing to accept (the run never reached `succeeded`).
     const defenderState = await readKeyBlockState(baseUrl, worldId, defenderId);
     assert.equal(defenderState.state.character.current_hp, 30);
     assert.deepEqual(await readComputeTimeline(baseUrl, worldId), []);
@@ -466,16 +466,16 @@ describe('compute-http (v1.195 P2-T3)', () => {
       'Compute ownership world',
     );
 
-    // A Foreign World is refused by the ownership gate BEFORE module lookup,
-    // so an unowned World never learns whether the module exists.
+    // invariant: a Foreign World is refused by the ownership gate BEFORE module
+    // lookup, so an unowned World never learns whether the module exists.
     const foreign = await runModule(baseUrl, FOREIGN_WORLD, attackerId, defenderId);
     assert.equal(foreign.status, 403, foreign.text);
     assert.equal(foreign.payload.error.code, 'forbidden', foreign.text);
     const absentWorld = await runModule(baseUrl, 'wld_absent', attackerId, defenderId);
     assert.equal(absentWorld.status, 403, absentWorld.text);
 
-    // A failure inside an OWNED World is still no effect: an unknown module is
-    // a typed refusal and nothing is persisted.
+    // invariant: a failure inside an OWNED World is still no effect — an unknown
+    // module is a typed refusal and nothing is persisted.
     const unknownModule = await jsonFetch(`${baseUrl}/v1/daemon/compute/run`, {
       method: 'POST',
       body: {
@@ -487,7 +487,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(unknownModule.status, 404, unknownModule.text);
     assert.equal(unknownModule.payload.error.code, 'not_found', unknownModule.text);
 
-    // A malformed request body / query is a typed client refusal, not a 500.
+    // note: a malformed request body / query is a typed client refusal, not a 500.
     const missingScope = await jsonFetch(`${baseUrl}/v1/daemon/compute/run`, {
       method: 'POST',
       body: { module_id: MODULE },
@@ -504,7 +504,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(badStatus.status, 400, badStatus.text);
     assert.equal(badStatus.payload.error.code, 'invalid_input', badStatus.text);
 
-    // Foreign runs are never listed, and an unknown run/World is not found —
+    // note: foreign runs are never listed, and an unknown run/World is not found —
     // never a fabricated row.
     const foreignHistory = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs?world_id=${FOREIGN_WORLD}`,
@@ -520,7 +520,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
       assert.equal(missing.payload.error.code, 'not_found', `${path}: ${missing.text}`);
     }
 
-    // The refused calls left the World exactly as staged.
+    // invariant: the refused calls left the World exactly as staged.
     const untouched = await readKeyBlockState(baseUrl, worldId, defenderId);
     assert.equal(untouched.state.character.current_hp, 30);
     assert.deepEqual(await readComputeTimeline(baseUrl, worldId), []);
@@ -529,7 +529,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
   test('compute clear: World-scoped terminal clear keeps accepted effects', async () => {
     const { worldId, attackerId, defenderId } = await stageCombatWorld(baseUrl, 'Compute clear world');
 
-    // One accepted run: the World effect this clear must NEVER undo.
+    // note: one accepted run — the World effect this clear must NEVER undo.
     const acceptedRun = await runModule(baseUrl, worldId, attackerId, defenderId);
     assert.equal(acceptedRun.payload.status, 'succeeded', acceptedRun.text);
     const appliedRunId = acceptedRun.payload.run_id;
@@ -539,7 +539,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     });
     assert.equal(accepted.status, 200, accepted.text);
 
-    // One discarded run: proposals dropped, World untouched (C7).
+    // note: one discarded run — proposals dropped, World untouched (C7).
     const discardRun = await runModule(baseUrl, worldId, attackerId, defenderId);
     assert.equal(discardRun.payload.status, 'succeeded', discardRun.text);
     const discardedRunId = discardRun.payload.run_id;
@@ -552,7 +552,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     const afterDiscard = await readKeyBlockState(baseUrl, worldId, defenderId);
     assert.equal(afterDiscard.state.character.current_hp, 15, 'discard commits nothing');
     assert.equal((await readComputeTimeline(baseUrl, worldId)).length, 1);
-    // A second discard loses the CAS (409 + the coded detail).
+    // invariant: a second discard loses the CAS (409 + the coded detail).
     const secondDiscard = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs/${discardedRunId}/discard`,
       { method: 'POST' },
@@ -560,7 +560,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(secondDiscard.status, 409, secondDiscard.text);
     assert.equal(secondDiscard.payload.error.details?.wire_code, 'conflict', secondDiscard.text);
 
-    // ── Malformed Clear queries are typed 422 and delete NOTHING. ───────────
+    // note: malformed Clear queries are typed 422 and delete NOTHING.
     const malformed = [
       ['/v1/daemon/compute/runs', 'missing World scope'],
       [`/v1/daemon/compute/runs?world_id=${worldId}&status=running`, 'non-terminal status'],
@@ -572,13 +572,13 @@ describe('compute-http (v1.195 P2-T3)', () => {
       assert.equal(refused.status, 422, `${label}: ${refused.text}`);
       assert.equal(refused.payload.error.code, 'invalid_input', `${label}: ${refused.text}`);
     }
-    // …and both rows are still there after every refused clear.
+    // note: …and both rows are still there after every refused clear.
     for (const runId of [appliedRunId, discardedRunId]) {
       const survived = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs/${runId}`);
       assert.equal(survived.status, 200, `${runId} must survive a malformed clear: ${survived.text}`);
     }
 
-    // ── A scoped clear removes ONLY the matching terminal row. ─────────────
+    // note: a scoped clear removes ONLY the matching terminal row.
     const clearedApplied = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs?world_id=${worldId}&status=applied`,
       { method: 'DELETE' },
@@ -592,13 +592,13 @@ describe('compute-http (v1.195 P2-T3)', () => {
     );
     assert.equal(discardedSurvived.status, 200, discardedSurvived.text);
 
-    // The accepted World effect stands after its history row is gone (C8).
+    // invariant: the accepted World effect stands after its history row is gone (C8).
     const effectStands = await readKeyBlockState(baseUrl, worldId, defenderId);
     assert.equal(effectStands.state.character.current_hp, 15);
     const timelineStands = await readComputeTimeline(baseUrl, worldId);
     assert.equal(timelineStands.length, 1);
 
-    // ── The unfiltered Clear drops the remaining terminal row too. ─────────
+    // note: the unfiltered Clear drops the remaining terminal row too.
     const clearedRest = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs?world_id=${worldId}`, {
       method: 'DELETE',
     });
@@ -611,7 +611,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(effectSurvivesClear.state.character.current_hp, 15);
     assert.equal((await readComputeTimeline(baseUrl, worldId)).length, 1);
 
-    // A foreign World is refused before any row is touched.
+    // invariant: a foreign World is refused before any row is touched.
     const foreignClear = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs?world_id=${FOREIGN_WORLD}`,
       { method: 'DELETE' },

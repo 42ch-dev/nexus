@@ -1,5 +1,5 @@
 /**
- * Same-run workflow observation transport (v1.195 P1-T3): the retained
+ * note: Same-run workflow observation transport (v1.195 P1-T3): the retained
  * `GET /v1/daemon/orchestration/sessions/{run_id}/events` identity over the
  * native subscription authority P1-T1 built.
  *
@@ -39,7 +39,7 @@ import {
 } from './sse.js';
 import { refuseUnknownQueryKeys, withPrincipal } from './world-kb.js';
 
-/** The run-event control frames: no data frame, no terminal run state. */
+/** note: The run-event control frames: no data frame, no terminal run state. */
 const CONTROL_EVENTS: Record<string, true> = { gap: true, history_unavailable: true };
 
 /**
@@ -66,13 +66,13 @@ export async function streamWorkflowEvents(
         : { run_id: runId, last_event_id: lastEventId },
     );
     const subscriptionId = subscription.subscription_id;
-    // The permit outlives no path: a released/foreign token is the only
+    // why: The permit outlives no path: a released/foreign token is the only
     // answer a second release can get, so both callers ignore it.
     const release = () => {
       void service.core.releaseWorkflowEvents(principal, subscriptionId).catch(() => undefined);
     };
     res.once('close', release);
-    // The run's ring can legitimately deliver MORE than one explicit `gap`
+    // why: The run's ring can legitimately deliver MORE than one explicit `gap`
     // frame in one stream (a stored oversize-gap record plus the retention
     // gap), so this writer must not collapse control frames the way the Host
     // hub's single-slot model does.
@@ -87,7 +87,7 @@ export async function streamWorkflowEvents(
       });
       for (;;) {
         if (clientDisconnected(res)) return;
-        // The drain gate is the backpressure boundary: the core's ring already
+        // why: The drain gate is the backpressure boundary: the core's ring already
         // holds the frames, so a reader that has not caught up must not be
         // pulled ahead of. The pull itself blocks until a frame, a stream end
         // or the release above wakes it.

@@ -16,7 +16,7 @@ const IDENTITY = { creatorId: 'c1', workspaceSlug: 'default' };
 const NOT_ESTABLISHED = { engine_epoch: null, provider_ready: false };
 const ESTABLISHED = { engine_epoch: 7, provider_ready: true };
 
-/** Run `work` while collecting everything the helper writes to stderr. */
+/** note: Run `work` while collecting everything the helper writes to stderr. */
 async function captureStderr(work) {
   const original = process.stderr.write;
   const lines = [];

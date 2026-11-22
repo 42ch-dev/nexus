@@ -8,7 +8,7 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SESSION = '9f9619ff-8b86-4d11-b42d-00cf4fc964ff';
 
 /**
- * CAP-007 / I-000131: `POST /v1/daemon/agent-host/sessions/{id}/operations`
+ * note: CAP-007 / I-000131: `POST /v1/daemon/agent-host/sessions/{id}/operations`
  * serves all three generated branches. `set_model`/`set_mode` used to answer
  * 501; they now dispatch on the provider lane (HostOperation wire payload) or
  * forward unchanged to the native authority for Actor-backed sessions.
