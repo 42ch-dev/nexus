@@ -3,6 +3,8 @@
 //! Same source as `nexus-knowledge`'s target (`#[path]`), so both backends
 //! answer one contract; each case gets its own freshly migrated database and
 //! store.
+// why: one contract source is compiled into both crates, so a backend cannot
+// drift without failing one of the two test targets.
 
 #![allow(clippy::unwrap_used)]
 
@@ -11,7 +13,7 @@ use nexus_local_db::kb_store::SqliteKbStore;
 #[path = "../../nexus-knowledge/tests/support/kb_store_contract.rs"]
 mod kb_store_contract;
 
-/// A fresh migrated database with the two contract worlds seeded.
+/// note: A fresh migrated database with the two contract worlds seeded.
 async fn fresh_store() -> (tempfile::TempDir, SqliteKbStore) {
     let dir = tempfile::tempdir().unwrap();
     let pool = nexus_local_db::open_pool(&dir.path().join("test.db"))
@@ -22,7 +24,7 @@ async fn fresh_store() -> (tempfile::TempDir, SqliteKbStore) {
         ("wld_1", "Test World", "test-world"),
         ("wld_2", "Second World", "second-world"),
     ] {
-        // The deleted source-unit cases seeded the creator row with display
+        // note: the deleted source-unit cases seeded the creator row with display
         // name `Test`, so the contract keeps that row shape.
         nexus_local_db::kb_store::seed::world_with(
             &pool,

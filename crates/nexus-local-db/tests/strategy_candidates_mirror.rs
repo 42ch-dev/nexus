@@ -5,6 +5,8 @@
 //! = revision` accepts `revision: null` on its own. The type conjunction is what makes the
 //! documented "a row whose document disagrees is unrepresentable" true for an admitted SQL writer;
 //! the reader-side `decode_stored` check stays the fail-closed boundary.
+// why: SQLite treats a NULL CHECK result as a pass, so only the type
+// conjunction makes the disagreement unrepresentable for admitted writers.
 
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -18,7 +20,7 @@ async fn pool() -> (SqlitePool, tempfile::TempDir) {
     (guarded.clone_pool(), dir)
 }
 
-/// One raw insert through the admitted writer, so the CHECK is the only thing that can refuse it.
+/// note: One raw insert through the admitted writer, so the CHECK is the only thing that can refuse it.
 async fn insert(pool: &SqlitePool, revision: i64, document: &Value) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO strategy_candidates \

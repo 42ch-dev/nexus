@@ -6,6 +6,8 @@
 //!
 //! Covers: insert → read-back verbatim; when-axis list ordering; delete;
 //! FK integrity (unknown holder rejected; holder delete cascades).
+// why: storage must not duplicate adapter-side validation, so these cases pin
+// the raw column round-trip and the DDL constraints only.
 
 #![allow(clippy::unwrap_used)]
 
@@ -25,7 +27,7 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Seed creator + world + a holder `kb_key_blocks` row (FK target for
+/// note: Seed creator + world + a holder `kb_key_blocks` row (FK target for
 /// `mind_states.holder_entry_id`), returning the holder entry id.
 async fn seed_holder(pool: &sqlx::SqlitePool) -> String {
     // SAFETY: test-only fixture scaffolding — inserts match the creators /
@@ -55,7 +57,7 @@ async fn seed_holder(pool: &sqlx::SqlitePool) -> String {
     holder_id
 }
 
-/// Raw column values for the store — the full valid row used by the
+/// note: Raw column values for the store — the full valid row used by the
 /// verbatim round-trip (mirrors the spoke `mind-state.schema.json` keys;
 /// `snapshot` / `deltas` / `source_anchor` / `extensions` arrive as JSON
 /// strings).
@@ -64,8 +66,6 @@ const VALID_SNAPSHOT_JSON: &str =
 const VALID_DELTAS_JSON: &str = r#"[{"path":"attention","previous":null,"next":"the box"}]"#;
 const VALID_SOURCE_ANCHOR_JSON: &str = r#"{"event_id":"evt_transfer"}"#;
 const VALID_EXTENSIONS_JSON: &str = r#"{"nexus":{"note":"derivative snapshot"}}"#;
-
-// ── insert + get (verbatim round-trip) ─────────────────────────
 
 #[tokio::test]
 async fn insert_valid_mind_state_roundtrips_verbatim() {
@@ -105,7 +105,7 @@ async fn insert_valid_mind_state_roundtrips_verbatim() {
         Some(VALID_SOURCE_ANCHOR_JSON)
     );
     assert_eq!(row.extensions_json.as_deref(), Some(VALID_EXTENSIONS_JSON));
-    // created_at / updated_at are store-stamped at insert (RFC 3339).
+    // note: created_at / updated_at are store-stamped at insert (RFC 3339).
     assert_ne!(row.created_at, "");
     assert_ne!(row.updated_at, "");
 
@@ -126,14 +126,12 @@ async fn get_missing_mind_state_returns_none() {
     assert!(get_mind_state(&pool, "ms_nope").await.unwrap().is_none());
 }
 
-// ── list (when-axis ordering) ───────────────────────────────────
-
 #[tokio::test]
 async fn list_mind_states_by_holder_orders_by_occurred_at_then_sort_key() {
     let (pool, _dir) = setup_db().await;
     let holder_id = seed_holder(&pool).await;
 
-    // Same occurred_at → sort_key tiebreak (reverse key order on purpose).
+    // note: same occurred_at → sort_key tiebreak (reverse key order on purpose).
     insert_mind_state(
         &pool,
         "ms_late",
@@ -179,7 +177,7 @@ async fn list_mind_states_by_holder_orders_by_occurred_at_then_sort_key() {
     )
     .await
     .unwrap();
-    // No occurred_at → NULL sorts first within the holder.
+    // note: no occurred_at → NULL sorts first within the holder.
     insert_mind_state(
         &pool,
         "ms_null",
@@ -200,14 +198,12 @@ async fn list_mind_states_by_holder_orders_by_occurred_at_then_sort_key() {
     let ids: Vec<&str> = rows.iter().map(|r| r.mind_state_id.as_str()).collect();
     assert_eq!(ids, vec!["ms_null", "ms_early", "ms_same", "ms_late"]);
 
-    // Other holders are not returned.
+    // note: other holders are not returned.
     let other = list_mind_states_by_holder(&pool, "kb_other_holder")
         .await
         .unwrap();
     assert!(other.is_empty());
 }
-
-// ── delete ──────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn delete_mind_state_removes_row_and_reports_existence() {
@@ -232,11 +228,9 @@ async fn delete_mind_state_removes_row_and_reports_existence() {
 
     assert!(delete_mind_state(&pool, "ms_001").await.unwrap());
     assert!(get_mind_state(&pool, "ms_001").await.unwrap().is_none());
-    // Second delete of the same id reports no row matched.
+    // note: second delete of the same id reports no row matched.
     assert!(!delete_mind_state(&pool, "ms_001").await.unwrap());
 }
-
-// ── FK integrity (DDL) ──────────────────────────────────────────
 
 #[tokio::test]
 async fn insert_with_unknown_holder_fails_foreign_key() {

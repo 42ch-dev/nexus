@@ -11,27 +11,29 @@
 //!
 //! Threshold is intentionally conservative (>= 50) so adding/removing a few
 //! queries does not trip it, but a mass deletion (137 lost) would.
+// why: a silent mass deletion is invisible until an offline build fails, so the
+// cache gets its own cheap standalone guard.
 
 #![allow(clippy::unwrap_used)]
 
 use std::path::Path;
 
-/// Locate the workspace `.sqlx/` directory from this crate's manifest dir.
+/// note: Locate the workspace `.sqlx/` directory from this crate's manifest dir.
 ///
 /// `CARGO_MANIFEST_DIR` = `.../nexus/crates/nexus-local-db` at compile time.
 /// The workspace root is two levels up; `.sqlx/` lives at the workspace root.
 fn workspace_sqlx_dir() -> std::path::PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    // crates/nexus-local-db → workspace root is ../../
+    // note: crates/nexus-local-db → workspace root is ../../
     manifest_dir
         .join("../../.sqlx")
-        // Normalized for cross-platform comparison; if the workspace is
+        // note: normalized for cross-platform comparison; if the workspace is
         // relocated this test still resolves correctly via CARGO_MANIFEST_DIR.
         .canonicalize()
         .unwrap_or_else(|_| manifest_dir.join("../../.sqlx"))
 }
 
-/// Conservative floor on the number of `query-*.json` artifacts that must be
+/// note: Conservative floor on the number of `query-*.json` artifacts that must be
 /// committed. The V1.58 tree has ~140; the P1 incident dropped it to 1.
 /// A threshold of 50 catches mass deletion without being brittle to normal
 /// query add/remove churn.

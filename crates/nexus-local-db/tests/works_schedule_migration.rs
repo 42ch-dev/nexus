@@ -16,7 +16,7 @@
 
 use sqlx::Row;
 
-/// Helper: fresh pool with all migrations applied.
+/// note: Helper — fresh pool with all migrations applied.
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -25,7 +25,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Build a minimal `WorkRecord` for integration tests (mirrors the
+/// note: Build a minimal `WorkRecord` for integration tests (mirrors the
 /// `#[cfg(test)] sample_work_for_test` in `works.rs`, duplicated here because
 /// that helper is `pub(crate)` and thus invisible to the `tests/` crate).
 #[allow(clippy::needless_pass_by_value)]
@@ -66,7 +66,7 @@ fn sample_work(work_id: &str, work_ref: &str) -> nexus_local_db::works::WorkReco
     }
 }
 
-/// Insert a minimal Work row so the DAO has something to target.
+/// note: Insert a minimal Work row so the DAO has something to target.
 async fn seed_work(pool: &sqlx::SqlitePool, work_id: &str, work_ref: &str) {
     let record = sample_work(work_id, work_ref);
     nexus_local_db::works::create_work(pool, &record)
@@ -93,7 +93,7 @@ async fn forward_migration_adds_schedule_json_column_nullable() {
         "works.schedule_json column must exist after migration"
     );
 
-    // Existing Work gets NULL (= use defaults).
+    // note: existing Work gets NULL (= use defaults).
     seed_work(&pool, "wrk_fwd", "fwd-ref").await;
     let opt = nexus_local_db::works::get_schedule_json(&pool, "wrk_fwd")
         .await
@@ -122,7 +122,7 @@ async fn rollback_drops_schedule_json_column() {
         .execute(&pool)
         .await
         .expect("drop dependent partial index before DROP COLUMN");
-    // V1.52 migration 202606190004 also adds idx_works_schedule_json (non-partial);
+    // note: V1.52 migration 202606190004 also adds idx_works_schedule_json (non-partial);
     // must drop that too before DROP COLUMN.
     sqlx::query("DROP INDEX IF EXISTS idx_works_schedule_json")
         .execute(&pool)
@@ -133,7 +133,6 @@ async fn rollback_drops_schedule_json_column() {
         .await
         .expect("SQLite must support DROP COLUMN (>=3.35)");
 
-    // Column is gone.
     let row = sqlx::query("PRAGMA table_info(works)")
         .fetch_all(&pool)
         .await
@@ -147,7 +146,7 @@ async fn rollback_drops_schedule_json_column() {
         "works.schedule_json column must be gone after simulated rollback"
     );
 
-    // Other columns / rows survive the rollback (data preserved).
+    // note: other columns / rows survive the rollback (data preserved).
     let work = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_rb")
         .await
         .unwrap();
@@ -176,7 +175,7 @@ async fn dao_empty_string_resets_to_defaults() {
     let (pool, _dir) = fresh_pool().await;
     seed_work(&pool, "wrk_empty", "empty-ref").await;
 
-    // Set a blob, then reset to empty (defaults).
+    // note: set a blob, then reset to empty (defaults).
     nexus_local_db::works::set_schedule_json(
         &pool,
         "wrk_empty",
@@ -216,7 +215,7 @@ async fn resolve_work_id_by_ref_or_id_matches_both() {
     let (pool, _dir) = fresh_pool().await;
     seed_work(&pool, "wrk_match", "match-ref").await;
 
-    // By work_ref.
+    // note: by work_ref.
     let by_ref = nexus_local_db::works::resolve_work_id_by_ref_or_id(
         &pool,
         "ctr_test",
@@ -227,7 +226,7 @@ async fn resolve_work_id_by_ref_or_id_matches_both() {
     .unwrap();
     assert_eq!(by_ref.as_deref(), Some("wrk_match"));
 
-    // By work_id.
+    // note: by work_id.
     let by_id = nexus_local_db::works::resolve_work_id_by_ref_or_id(
         &pool,
         "ctr_test",
@@ -238,7 +237,7 @@ async fn resolve_work_id_by_ref_or_id_matches_both() {
     .unwrap();
     assert_eq!(by_id.as_deref(), Some("wrk_match"));
 
-    // Neither → None.
+    // note: neither → None.
     let none = nexus_local_db::works::resolve_work_id_by_ref_or_id(
         &pool,
         "ctr_test",
@@ -250,7 +249,7 @@ async fn resolve_work_id_by_ref_or_id_matches_both() {
     assert!(none.is_none());
 }
 
-/// R-V150-WLA-06 (V1.50 P-last WL-A / cron-foundation qc1 S6): when the
+/// note: R-V150-WLA-06 (V1.50 P-last WL-A / cron-foundation qc1 S6) — when the
 /// `work_ref` of one row collides with the `work_id` of another row (a
 /// theoretical edge case — slugs and `wrk_...` IDs normally live in
 /// different namespaces), `resolve_work_id_by_ref_or_id` must
@@ -260,16 +259,16 @@ async fn resolve_work_id_by_ref_or_id_matches_both() {
 #[tokio::test]
 async fn resolve_work_id_by_ref_or_id_prefers_work_ref_match_on_collision() {
     let (pool, _dir) = fresh_pool().await;
-    // Row A: work_id = "wrk_collision", work_ref = "shared-token".
+    // note: row A — work_id = "wrk_collision", work_ref = "shared-token".
     seed_work(&pool, "wrk_collision", "shared-token").await;
-    // Row B: work_id = "shared-token" (collides with A's work_ref), work_ref unset.
+    // note: row B — work_id = "shared-token" (collides with A's work_ref), work_ref unset.
     let mut row_b = sample_work("shared-token", "");
     row_b.work_ref = None;
     nexus_local_db::works::create_work(&pool, &row_b)
         .await
         .unwrap();
 
-    // Both rows match the positional `shared-token` (A via work_ref, B
+    // note: both rows match the positional `shared-token` (A via work_ref, B
     // via work_id). The query must return A's work_id ("wrk_collision")
     // because work_ref wins over id per the doc contract.
     let resolved = nexus_local_db::works::resolve_work_id_by_ref_or_id(
@@ -314,7 +313,7 @@ async fn list_works_schedule_returns_all_works() {
     assert!(b.schedule_json.is_none(), "unset Work must read as None");
 }
 
-/// R-V150P0-W4: `list_works_schedule` honors the `limit` cap.
+/// note: R-V150P0-W4 — `list_works_schedule` honors the `limit` cap.
 #[tokio::test]
 async fn list_works_schedule_applies_limit() {
     let (pool, _dir) = fresh_pool().await;
@@ -331,7 +330,7 @@ async fn list_works_schedule_applies_limit() {
         rows.len()
     );
 
-    // None → default cap (100) returns all 5 seeded rows.
+    // note: None → default cap (100) returns all 5 seeded rows.
     let rows_all = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default", None)
         .await
         .unwrap();

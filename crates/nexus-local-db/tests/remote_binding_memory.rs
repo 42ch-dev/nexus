@@ -19,6 +19,8 @@
 //!   supervisor-selected conservative policy; owner confirmation pending);
 //! * terminal bookkeeping is cleared with the binding and never blocks a valid
 //!   deletion.
+// why: the dependency facts gate binding removal, so the invariants are proved
+// through the authoritative transaction rather than a mocked port.
 #![allow(clippy::unwrap_used)]
 
 use nexus_local_db::{
@@ -41,7 +43,7 @@ const NOW: &str = "2026-11-04T00:00:00Z";
 
 struct Seed {
     character_id: String,
-    /// The binding the dependency facts are attached to; a sibling binding
+    /// note: The binding the dependency facts are attached to; a sibling binding
     /// keeps removal away from the last-active refusal.
     binding_id: String,
 }
@@ -193,7 +195,7 @@ fn assert_remote_conflict(error: LocalDbError) {
     }
 }
 
-/// Two independent admissions: retiring one attempt's admission releases
+/// note: Two independent admissions — retiring one attempt's admission releases
 /// nothing else, and the binding stays non-removable until the other settles.
 #[tokio::test]
 async fn independent_admissions_retire_only_themselves() {
@@ -217,7 +219,7 @@ async fn independent_admissions_retire_only_themselves() {
     remove(&seed, &pool).await.unwrap();
 }
 
-/// An unknown admission survives close/reopen, and a later successful attempt
+/// note: An unknown admission survives close/reopen, and a later successful attempt
 /// neither settles it nor makes the binding removable.
 #[tokio::test]
 async fn unknown_admission_survives_reopen_and_later_success() {
@@ -257,7 +259,7 @@ async fn unknown_admission_survives_reopen_and_later_success() {
     remove(&seed, &reopened).await.unwrap();
 }
 
-/// A disposal acknowledgement that precedes the capture-result publication is
+/// note: A disposal acknowledgement that precedes the capture-result publication is
 /// durable: the late `live` publication cannot resurrect the candidate.
 #[tokio::test]
 async fn acknowledgement_before_publication_cannot_resurrect() {
@@ -293,7 +295,7 @@ async fn acknowledgement_before_publication_cannot_resurrect() {
     remove(&seed, &pool).await.unwrap();
 }
 
-/// Review consumption and the returned record references are one dependency
+/// note: Review consumption and the returned record references are one dependency
 /// transfer: the candidate stops blocking, the record does, and a shared
 /// promotion release lets the binding go.
 #[tokio::test]
@@ -312,7 +314,7 @@ async fn review_transfers_dependency_and_promotion_releases_it() {
     assert_eq!(dependencies(&pool, &seed.binding_id).await, (0, 1));
     assert_remote_conflict(remove(&seed, &pool).await.unwrap_err());
 
-    // One local transaction: consume the candidate and publish the records the
+    // note: one local transaction — consume the candidate and publish the records the
     // provider receipt returned.
     let mut tx = begin_immediate(&pool).await.unwrap();
     record_remote_binding_object_tx(
@@ -359,7 +361,7 @@ async fn review_transfers_dependency_and_promotion_releases_it() {
     );
 }
 
-/// A stale or foreign namespace can neither retire another namespace's
+/// note: A stale or foreign namespace can neither retire another namespace's
 /// admission nor release another namespace's live fact.
 #[tokio::test]
 async fn namespace_mismatch_cannot_erase_another_namespaces_facts() {
@@ -407,7 +409,7 @@ async fn namespace_mismatch_cannot_erase_another_namespaces_facts() {
     remove(&seed, &pool).await.unwrap();
 }
 
-/// A fact write for a binding that no longer exists is a no-op, so a late
+/// note: A fact write for a binding that no longer exists is a no-op, so a late
 /// acknowledgement can never revive a deleted binding.
 #[tokio::test]
 async fn late_acknowledgement_cannot_revive_a_deleted_binding() {
@@ -442,7 +444,7 @@ async fn late_acknowledgement_cannot_revive_a_deleted_binding() {
     assert_eq!(count, 0, "the deleted binding gains no new dependency");
 }
 
-/// The full `NonZeroU64` generation range is exact identity: two generations at
+/// note: The full `NonZeroU64` generation range is exact identity — two generations at
 /// (and beyond) the signed-integer boundary share no row, so releasing one can
 /// never release the other's live dependency.
 #[tokio::test]
@@ -510,7 +512,7 @@ async fn cross_generation_release_cannot_release_another_generation() {
     );
 }
 
-/// I-000333: the monotone object-fact surface is exactly the consumer-visible
+/// note: I-000333: the monotone object-fact surface is exactly the consumer-visible
 /// upsert plus the binding cleanup, so the SQL boundary takes no extra trigger
 /// (PM decision 2: the acceptance's "if needed" branch is not taken).
 ///
@@ -549,7 +551,7 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
         }
     };
 
-    // Forward transitions are accepted: live → consumed → released.
+    // note: forward transitions are accepted — live → consumed → released.
     record(
         &pool,
         &ns,
@@ -577,7 +579,7 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
     .await;
     assert_eq!(state_of("rec_monotone").await.as_deref(), Some("released"));
 
-    // Backward transitions never rewrite the released fact.
+    // note: backward transitions never rewrite the released fact.
     for stale in [
         RemoteBindingObjectState::Live,
         RemoteBindingObjectState::Consumed,
@@ -597,7 +599,7 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
         );
     }
 
-    // `consumed` is terminal against `live` as well.
+    // note: `consumed` is terminal against `live` as well.
     record(
         &pool,
         &ns,
@@ -625,7 +627,7 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
         "no terminal fact blocks removal"
     );
 
-    // The cleanup deletes rows instead of rewriting states, and a fact for the
+    // note: the cleanup deletes rows instead of rewriting states, and a fact for the
     // removed binding is a no-op (the mapped surface cannot revive it).
     remove(&seed, &pool).await.unwrap();
     assert_eq!(fact_states(&pool, &seed.binding_id).await, Vec::new());

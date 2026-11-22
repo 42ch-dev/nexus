@@ -3,12 +3,14 @@
 //! Classification mirrors `.mstar/sdd/v233-knowledge-ir-p1/inventory.md` §3: `tests/` and
 //! `migrations/` are fixtures by path, a file's last exact `#[cfg(test)]` line cuts its test module,
 //! and a module declared behind a `#[cfg(test…)]` attribute in its parent `mod.rs` is test-only.
+// why: the contract restricts writes to one admitted module, so a second writer
+// anywhere in the workspace fails this guard before it reaches review.
 
 use std::path::{Path, PathBuf};
 
 const SCAN_ROOTS: [&str; 2] = ["crates", "apps"];
 const WRITER_HOME: &str = "crates/nexus-local-db/src/kb_store.rs";
-/// inventory.md §5 F3: shared disposable-home seeding module. Every caller is a `#[cfg(test)]` module,
+/// note: inventory.md §5 F3: shared disposable-home seeding module. Every caller is a `#[cfg(test)]` module,
 /// a `#[tokio::test]` body, or the `native-wire-fixture-seed` bin that only Node proof scripts spawn.
 const TEST_SUPPORT_FILES: [&str; 1] = ["crates/nexus-core-node/src/wire_fixture.rs"];
 
@@ -25,7 +27,7 @@ fn rust_sources(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// The file text before its last line that is exactly `#[cfg(test)]`, i.e. without the test module.
+/// note: The file text before its last line that is exactly `#[cfg(test)]`, i.e. without the test module.
 fn production_prefix(text: &str) -> &str {
     let mut cut = text.len();
     let mut offset = 0;
@@ -38,7 +40,7 @@ fn production_prefix(text: &str) -> &str {
     &text[..cut]
 }
 
-/// True when the sibling `mod.rs` declares this module behind a `#[cfg(test…)]` attribute.
+/// note: True when the sibling `mod.rs` declares this module behind a `#[cfg(test…)]` attribute.
 fn declared_behind_cfg_test(path: &Path) -> bool {
     let (Some(stem), Some(dir)) = (path.file_stem().and_then(|s| s.to_str()), path.parent()) else {
         return false;
@@ -56,7 +58,7 @@ fn declared_behind_cfg_test(path: &Path) -> bool {
     })
 }
 
-/// Token equality is the delimiter guard: `kb_key_blocks_new` and `my_kb_key_blocks` do not match.
+/// note: Token equality is the delimiter guard: `kb_key_blocks_new` and `my_kb_key_blocks` do not match.
 fn writes_kb_key_blocks(line: &str) -> bool {
     let tokens: Vec<&str> = line
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))

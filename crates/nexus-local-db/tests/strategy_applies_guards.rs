@@ -9,6 +9,8 @@
 //!
 //! I-000444 adds the rest of the documented claim: a committed row refuses `UPDATE`, `DELETE` and
 //! `INSERT OR REPLACE`, and a supersede link may only name an apply of the same strategy.
+// why: the pin spans two tables, so only triggers can enforce it and only an
+// integration test can prove the refusal codes hold.
 
 use sqlx::SqlitePool;
 
@@ -22,7 +24,7 @@ async fn pool() -> (SqlitePool, tempfile::TempDir) {
     (guarded.clone_pool(), dir)
 }
 
-/// A frozen approval snapshot that satisfies the `strategy_approvals` mirror CHECKs.
+/// note: A frozen approval snapshot that satisfies the `strategy_approvals` mirror CHECKs.
 async fn insert_approval(pool: &SqlitePool, strategy: &str, approval_id: &str, content_hash: &str) {
     let document = format!(r#"{{"revision":0,"id":"{strategy}","state":"candidate"}}"#);
     let trajectory = format!(r#"{{"ir_content_hash":"{content_hash}"}}"#);
@@ -42,7 +44,7 @@ async fn insert_approval(pool: &SqlitePool, strategy: &str, approval_id: &str, c
     .expect("a well-formed approval row is admitted");
 }
 
-/// One apply through the admitted writer, so only the table's own constraints can refuse it.
+/// note: One apply through the admitted writer, so only the table's own constraints can refuse it.
 async fn insert_apply(
     pool: &SqlitePool,
     apply_id: &str,
@@ -67,7 +69,7 @@ async fn insert_apply(
     .map(|_| ())
 }
 
-/// The apply rows of one strategy that no other row supersedes.
+/// note: The apply rows of one strategy that no other row supersedes.
 async fn current_applies(pool: &SqlitePool, strategy: &str) -> Vec<String> {
     sqlx::query_scalar(
         "SELECT a.apply_id FROM strategy_applies a \
@@ -87,14 +89,14 @@ async fn an_apply_naming_another_strategys_approval_is_rejected() {
     insert_approval(&pool, STRATEGY_B, "approval-b", "hash-b").await;
 
     for (label, strategy, approval_id, content_hash) in [
-        // B's approval under A's strategy.
+        // note: B's approval under A's strategy.
         (
             "another strategy's approval",
             STRATEGY_A,
             "approval-b",
             "hash-b",
         ),
-        // A's own approval labelled with a hash it does not carry.
+        // note: A's own approval labelled with a hash it does not carry.
         (
             "a hash the approval does not have",
             STRATEGY_A,
@@ -111,20 +113,20 @@ async fn an_apply_naming_another_strategys_approval_is_rejected() {
         );
     }
 
-    // The pin rejects only the mismatched pair: the approval's own pair is admitted.
+    // note: the pin rejects only the mismatched pair — the approval's own pair is admitted.
     insert_apply(&pool, "apply-1", STRATEGY_A, "approval-a", "hash-a", None)
         .await
         .expect("the named approval's own strategy and hash are admitted");
 }
 
-/// The migration is additive: it neither backfills nor rewrites, so re-applying it to a database
+/// note: The migration is additive: it neither backfills nor rewrites, so re-applying it to a database
 /// that already holds rows creates only the new table and leaves the existing rows untouched.
 #[tokio::test]
 async fn the_migration_applies_to_a_database_that_already_holds_rows() {
     let (pool, _dir) = pool().await;
     insert_approval(&pool, STRATEGY_A, "approval-a", "hash-a").await;
 
-    // Return the database to the shape it had before this migration: its triggers go with the
+    // note: return the database to the shape it had before this migration — its triggers go with the
     // table, and sqlx only re-applies a migration whose record is gone.
     sqlx::query("DROP TABLE strategy_applies")
         .execute(&pool)
@@ -189,7 +191,7 @@ async fn a_superseding_apply_leaves_exactly_one_current_row() {
     .await
     .unwrap();
 
-    // Both rows stay readable; only the successor-less one is current.
+    // note: both rows stay readable; only the successor-less one is current.
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strategy_applies")
         .fetch_one(&pool)
         .await
@@ -198,7 +200,7 @@ async fn a_superseding_apply_leaves_exactly_one_current_row() {
     assert_eq!(current_applies(&pool, STRATEGY_A).await, ["apply-2"]);
 }
 
-/// I-000444: a committed apply is immutable, not merely approval-pinned. Every mutation an
+/// note: I-000444: a committed apply is immutable, not merely approval-pinned. Every mutation an
 /// admitted writer can spell is refused — `UPDATE`, `DELETE`, and the `REPLACE` spelling whose
 /// conflict resolution deletes the victim without firing its DELETE trigger — and a supersede
 /// link may not name another strategy's row.
@@ -249,7 +251,7 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
         "{replace}"
     );
 
-    // B's apply exists, so this link names a real row — of the wrong strategy.
+    // note: B's apply exists, so this link names a real row — of the wrong strategy.
     let cross = insert_apply(
         &pool,
         "apply-a-2",
@@ -267,7 +269,7 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
         "{cross}"
     );
 
-    // Nothing was rewritten or lost: both rows read back exactly as written, and A's own current
+    // note: nothing was rewritten or lost — both rows read back exactly as written, and A's own current
     // row is still the one a same-strategy supersede would name.
     let applied_by: String =
         sqlx::query_scalar("SELECT applied_by FROM strategy_applies WHERE apply_id = 'apply-a'")
@@ -279,7 +281,7 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
     assert_eq!(current_applies(&pool, STRATEGY_B).await, ["apply-b"]);
 }
 
-/// `EXPLAIN QUERY PLAN` of the query `apply.rs` runs for the current apply (the same text with
+/// note: `EXPLAIN QUERY PLAN` of the query `apply.rs` runs for the current apply (the same text with
 /// the plan prefix): the strategy's successor-less rows in the total order the reads pick a winner
 /// by. `sqlx` requires the statement to be a literal, hence one constant rather than a format
 /// argument.
