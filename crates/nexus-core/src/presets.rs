@@ -925,16 +925,14 @@ fn atomic_write_with_dir_fsync(
                     "FILE_SYNC_ERROR",
                     format!("cannot fsync final file: {}", e.source),
                 )),
-                Stage::DirOpen => Err(internal(
-                    "DIR_SYNC_ERROR",
-                    format!("cannot open bundle directory for fsync: {}", e.source),
-                )),
-                // fsync parent directory so the rename is durable; a directory
-                // fsync failure is warning-only on this path.
-                Stage::DirSync => {
+                // Both directory stages run strictly after the rename, so the
+                // new bytes are already visible; only crash durability is at
+                // risk, which makes them warning-only on this path.
+                Stage::DirOpen | Stage::DirSync => {
                     if let Some(parent) = target_path.parent() {
                         tracing::warn!(
                             parent = %parent.display(),
+                            stage = ?e.stage,
                             error = %e.source,
                             "strategy patch: directory fsync failed"
                         );

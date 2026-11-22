@@ -796,17 +796,25 @@ pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::V
 /// filesystem, fsync it, then rename it into place (`rename` is atomic on
 /// POSIX) and fsync the parent directory so the rename is durable.
 ///
-/// A directory-fsync failure is warning-only, matching the policy `presets`
-/// applies to the same kernel: the rename has already made the new bytes
-/// visible, so the only exposure is losing that rename on a crash.
+/// A directory-open or directory-fsync failure is warning-only: both stages
+/// run strictly after the rename, so the new bytes are already visible and
+/// the only exposure is losing that rename on a crash. The rename succeeding
+/// also means the parent existed, which leaves only transient resource and
+/// permission failures here.
 fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     match crate::atomic_write::atomic_write(path, &tmp, contents.as_bytes(), false) {
         Ok(()) => Ok(()),
-        Err(e) if matches!(e.stage, crate::atomic_write::Stage::DirSync) => {
+        Err(e)
+            if matches!(
+                e.stage,
+                crate::atomic_write::Stage::DirOpen | crate::atomic_write::Stage::DirSync
+            ) =>
+        {
             if let Some(parent) = path.parent() {
                 tracing::warn!(
                     parent = %parent.display(),
+                    stage = ?e.stage,
                     error = %e.source,
                     "identity cache: directory fsync failed"
                 );
