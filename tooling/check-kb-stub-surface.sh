@@ -276,7 +276,7 @@ check() {
 
   for name in "${MAPPERS[@]}"; do
     rows="$(printf '%s\n' "$hits" | awk -F'\t' -v want="$name" '$1 == "MAPPER" && $2 == want')"
-    count="$(printf '%s\n' "$rows" | grep -c '[^[:space:]]' || true)"
+    count="$(printf '%s\n' "$rows" | awk 'NF && $0 !~ /^[[:space:]]*$/ { n++ } END { print n + 0 }')"
     if [ "$count" -ne 1 ]; then
       echo "FAIL: expected exactly one definition of \`fn $name\` under crates/ and apps/, found $count:"
       printf '%s\n' "$rows" | awk -F'\t' 'NF == 5 { printf "  %s:%s (prefix %s)\n", $3, $4, ($5 == "" ? "none" : $5) }'
@@ -356,7 +356,7 @@ selftest() {
       echo "$out" | sed 's/^/  /'
       failures=$((failures + 1))
     else
-      summary="$(printf '%s\n' "$out" | grep -m1 '^FAIL' || true)"
+      summary="$(printf '%s\n' "$out" | awk '/^FAIL/ { print; exit }')"
       echo "OK: self-test '$label' -> ${summary:-accepted}"
     fi
   }

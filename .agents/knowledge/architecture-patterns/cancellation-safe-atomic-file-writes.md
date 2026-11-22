@@ -32,7 +32,7 @@ The wrapper used to perform write → fsync → rename itself, so a dropped futu
 - `prepare_temp(tmp, content)` — write the caller's temp file and fsync it. This is the long, cancellable part; run it on the blocking pool.
 - `commit(target, tmp, fsync_final)` — rename, optional final-file fsync, parent-directory fsync. Run it from the still-live caller, via a blocking task only so it does not stall a runtime worker.
 
-The invariant that matters: **no `?` and no state transition between the temp file existing and the commit decision**. Once the caller's await returns, it commits; if it was cancelled, nothing is committed. Keep a `prepare + commit` convenience function for synchronous callers that have no cancellation point at all — do not force them into two calls.
+The invariant that matters: **between `prepare_temp` returning and the `commit` call, no `?` and no state transition**. `prepare_temp` itself can fail — that is a failed write, not a cancellation — but a cancellation can only land after the temp file exists and before the caller commits, so a cancelled caller never renames. Once the caller's await returns, it commits. Keep a `prepare + commit` convenience function for synchronous callers that have no cancellation point at all — do not force them into two calls.
 
 **Do not justify the old boundary with a lock.** An advisory lock with a TTL measured from acquisition does not cover a task that outlives its caller: the tail only has to cross the takeover point, not the whole TTL. If the lock has no `Drop` release (an explicit `release(self)` only), a cancelled caller keeps it until expiry and the window is real.
 

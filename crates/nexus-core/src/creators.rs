@@ -795,10 +795,26 @@ pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::V
 /// Crash-safe file write: write to a sibling temp file on the same
 /// filesystem, fsync it, then rename it into place (`rename` is atomic on
 /// POSIX) and fsync the parent directory so the rename is durable.
+///
+/// A directory-fsync failure is warning-only, matching the policy `presets`
+/// applies to the same kernel: the rename has already made the new bytes
+/// visible, so the only exposure is losing that rename on a crash.
 fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
-    crate::atomic_write::atomic_write(path, &tmp, contents.as_bytes(), false)
-        .map_err(crate::atomic_write::AtomicWriteError::into_io)
+    match crate::atomic_write::atomic_write(path, &tmp, contents.as_bytes(), false) {
+        Ok(()) => Ok(()),
+        Err(e) if matches!(e.stage, crate::atomic_write::Stage::DirSync) => {
+            if let Some(parent) = path.parent() {
+                tracing::warn!(
+                    parent = %parent.display(),
+                    error = %e.source,
+                    "identity cache: directory fsync failed"
+                );
+            }
+            Ok(())
+        }
+        Err(e) => Err(crate::atomic_write::AtomicWriteError::into_io(e)),
+    }
 }
 
 /// Write the identity cache to disk with an atomic temp-file + rename.
