@@ -72,22 +72,22 @@ use serde_json::json;
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Maximum size in bytes for the serialized `battle_report` field (64 KiB).
+/// note: maximum size in bytes for the serialized `battle_report` field (64 KiB).
 /// R-V161P0-LOW-003: freeform `battle_report` cap to prevent unbounded output.
 #[cfg(feature = "wasm")]
 const BATTLE_REPORT_MAX_BYTES: usize = 64 * 1024;
 
-/// Input for `narrative.compute`.
+/// note: input for `narrative.compute`.
 #[cfg(feature = "wasm")]
 #[derive(Debug, Deserialize)]
 struct NarrativeComputeInput {
     world_id: String,
-    /// Caller creator id (admission gate).
+    /// note: caller creator id (admission gate).
     creator_id: String,
-    /// Which embedded module to invoke (default: `"basic-combat"`).
+    /// note: which embedded module to invoke (default: `"basic-combat"`).
     #[serde(default = "default_module_id")]
     module_id: String,
-    /// Optional module-declared invocation parameters passed into the
+    /// note: optional module-declared invocation parameters passed into the
     /// `ComputeInput.invocation` field.
     #[serde(default)]
     invocation_params: Option<Value>,
@@ -99,18 +99,18 @@ fn default_module_id() -> String {
     String::from("basic-combat")
 }
 
-/// Execute a WASM compute module for a world's computable `KnowledgeEntryRecord`s.
+/// note: executes a WASM compute module for a world's computable `KnowledgeEntryRecord`s.
 #[derive(Clone)]
 pub struct NarrativeCompute {
-    // The pool is consumed by the gated executor body; on a no-WASM build the
+    // why: the pool is consumed by the gated executor body; on a no-WASM build the
     // field only carries the constructor input for a `wasm`-enabled consumer.
     #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
     pool: Option<Arc<sqlx::SqlitePool>>,
-    /// The sandboxed WASM engine (feature `wasm`; absent otherwise and on the
+    /// note: the sandboxed WASM engine (feature `wasm`; absent otherwise and on the
     /// engine-less arm — `run()` then fails closed with `WorkerUnavailable`).
     #[cfg(feature = "wasm")]
     engine: Option<Arc<WasmEngine>>,
-    /// Daemon-wide compilation cache (R-V161P3-PERF-002). When present, the
+    /// note: daemon-wide compilation cache (R-V161P3-PERF-002). When present, the
     /// module for an invocation is resolved by id from this cache instead of
     /// recompiling on every `run()`.
     #[cfg(feature = "wasm")]
@@ -129,7 +129,7 @@ impl NarrativeCompute {
         }
     }
 
-    /// Construct with a pool only — the pure/pool-bound constructor (C3).
+    /// note: construct with a pool only — the pure/pool-bound constructor (C3).
     ///
     /// **No engine is constructed here**, in any build: a plain constructor
     /// that minted its own `WasmEngine` would fork the daemon's ONE engine
@@ -150,7 +150,7 @@ impl NarrativeCompute {
         }
     }
 
-    /// Construct with a pool and a **shared, daemon-wide** `WasmEngine` +
+    /// note: construct with a pool and a **shared, daemon-wide** `WasmEngine` +
     /// `ModuleCache` (P-last T1 singleton injection — closes R-V161P3-PERF-001).
     ///
     /// The daemon builds one engine + one cache at boot (pre-warmed with
@@ -183,7 +183,7 @@ impl Capability for NarrativeCompute {
         "narrative.compute"
     }
 
-    /// Executable only when the daemon-wide engine + cache were injected
+    /// note: executable only when the daemon-wide engine + cache were injected
     /// (C3 contract): pool-bound or standalone instances are reserved-only
     /// rows — describable metadata, refusing dispatch with
     /// `WorkerUnavailable` before any effect.
@@ -203,8 +203,6 @@ impl Capability for NarrativeCompute {
 
     #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        // WASM executor body (feature `wasm`): parses the AR-37 input, then
-        // resolves the engine/cache and runs the admitted module fail-closed.
         #[cfg(feature = "wasm")]
         {
             let parsed: NarrativeComputeInput = serde_json::from_value(input).map_err(|e| {
@@ -227,11 +225,10 @@ impl Capability for NarrativeCompute {
                 "narrative.compute admitted"
             );
 
-            // Admission gate: creator must own the world.
+            // safety: the creator must own the world (admission gate).
             ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
-            // 1. Read computable KnowledgeEntries from the KB store.
-            // The compute payload is model-facing, so its rows are read through the
+            // why: the compute payload is model-facing, so its rows are read through the
             // admitted Creator ActorView: another holder's `owner-private` World row
             // never reaches the module, and a caller whose selection cannot be
             // resolved refuses here instead of widening to the World listing.
@@ -251,11 +248,10 @@ impl Capability for NarrativeCompute {
                 ));
             }
 
-            // Domain KnowledgeEntries are serialized into the compute envelope's
+            // note: domain KnowledgeEntries are serialized into the compute envelope's
             // `key_blocks` items (opaque JSON objects; spoke-adapter-architecture
             // spec §3.4) inline below.
 
-            // 2. Read narrative state (timeline position, root branch).
             let gw =
                 nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
             let world_state = gw
@@ -271,11 +267,10 @@ impl Capability for NarrativeCompute {
             let narrative_state = json!({
                 "world_id": parsed.world_id,
                 "branch_id": branch_id,
-                "timeline_position": "0", // V1.61: default to start of timeline
+                "timeline_position": "0", // note: V1.61 — default to start of timeline
             });
 
-            // 3. Build ComputeInput envelope and invoke WASM.
-            // The compute envelope's world_ref/narrative_state are typify-inlined
+            // why: the compute envelope's world_ref/narrative_state are typify-inlined
             // copies (`ComputeInputWorldRef`, `ComputeInputNarrativeState`) that
             // are wire-equivalent to the domain contract types; JSON round-trips
             // bridge them (drift gate proves equivalence). `key_blocks` items are
@@ -290,7 +285,7 @@ impl Capability for NarrativeCompute {
                     .into_iter()
                     .map(
                         |kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord| {
-                            // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
+                            // note: V1.139 P0 — ComputeInput.key_blocks is opaque spoke-
                             // KnowledgeEntry JSON (the spoke $ref is unresolved at
                             // codegen). Convert domain KnowledgeEntryRecord → spoke
                             // KnowledgeEntry (sole conversion seam, now a free
@@ -314,7 +309,7 @@ impl Capability for NarrativeCompute {
                 }),
             };
 
-            // Resolve the compiled module + manifest from the daemon-wide cache
+            // note: resolve the compiled module + manifest from the daemon-wide cache
             // (R-V161P3-PERF-002: compile once, reuse). Modules are pre-warmed at
             // daemon boot (embedded + user-installed); a cache miss means the
             // requested module id is neither embedded nor installed under
@@ -336,7 +331,6 @@ impl Capability for NarrativeCompute {
             let module = cached.module.clone();
             let manifest = cached.manifest.clone();
 
-            // Invoke compute with graceful error handling.
             let output = match engine.compute(&module, &manifest, &compute_input) {
                 Ok(o) => o,
                 Err(e) => {
@@ -351,7 +345,6 @@ impl Capability for NarrativeCompute {
                 }
             };
 
-            // 4. Validate battle_report size (R-V161P0-LOW-003).
             if let Ok(report_bytes) = serde_json::to_vec(&output.battle_report) {
                 if report_bytes.len() > BATTLE_REPORT_MAX_BYTES {
                     return Err(CapabilityError::InputInvalid(format!(
@@ -362,10 +355,8 @@ impl Capability for NarrativeCompute {
                 }
             }
 
-            // 5. Apply state_delta to KB state fields.
             let applied = state_delta::apply_state_delta_pool(pool, &output.state_delta).await?;
 
-            // 6. Create new KnowledgeEntries from output.
             let new_kb_count =
                 create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
                     .await
@@ -373,7 +364,6 @@ impl Capability for NarrativeCompute {
                         CapabilityError::Internal(format!("create new key_blocks: {e}"))
                     })?;
 
-            // 7. Append timeline events from output.
             let evt_count = append_timeline_events(
                 pool,
                 &parsed.world_id,
@@ -420,9 +410,7 @@ impl Capability for NarrativeCompute {
     }
 }
 
-// ─── New KnowledgeEntryRecord creation ─────────────────────────────────────────────────
-
-/// Create new `KnowledgeEntryRecord`s emitted by the compute module. Each block is inserted
+/// note: create new `KnowledgeEntryRecord`s emitted by the compute module. Each block is inserted
 /// with `provisional` status via the KB store.
 ///
 /// # Security: `world_id` re-assertion (R-V161P3-CORR-002)
@@ -445,7 +433,7 @@ async fn create_new_key_blocks(
     let mut created = 0usize;
 
     for kb_map in blocks {
-        // V1.139 P0: compute output `new_key_blocks` is opaque spoke-
+        // note: V1.139 P0 — compute output `new_key_blocks` is opaque spoke-
         // KnowledgeEntry JSON. Convert Map → spoke KnowledgeEntry → domain
         // KnowledgeEntryRecord (sole conversion seam, now a free function in
         // nexus-spoke-adapter — V1.145 P1a) before persisting.
@@ -473,9 +461,7 @@ async fn create_new_key_blocks(
     Ok(created)
 }
 
-// ─── Timeline event appending ──────────────────────────────────────────────
-
-/// Append timeline events emitted by the compute module via the narrative
+/// note: append timeline events emitted by the compute module via the narrative
 /// gateway.
 ///
 /// Returns the number of events created.
@@ -498,7 +484,7 @@ async fn append_timeline_events(
             event_type,
             evt.title.as_deref().map(String::as_str),
             evt.summary.as_deref(),
-            None, // modules_json — compute lane writes no modules
+            None, // note: modules_json — compute lane writes no modules
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("append timeline event: {e}")))?;
@@ -508,9 +494,7 @@ async fn append_timeline_events(
     Ok(count)
 }
 
-// ─── Error handling: compute_error timeline event ──────────────────────────
-
-/// Create a `compute_error` timeline event and return a graceful error.
+/// note: create a `compute_error` timeline event and return a graceful error.
 ///
 /// The daemon must NOT crash on compute failure (compass T4). Instead, a
 /// `TimelineEvent` with `event_type: StateUpdate` and `title: "compute_error"`
@@ -530,7 +514,7 @@ async fn handle_compute_error(
         "narrative.compute failed; recording compute_error timeline event"
     );
 
-    // Best-effort: append the error event. If this also fails, we still return
+    // why: best-effort — append the error event. If this also fails, we still return
     // the original compute error so the caller knows something went wrong.
     let evt_result = nexus_local_db::narrative_write::append_event(
         pool,
@@ -539,7 +523,7 @@ async fn handle_compute_error(
         "state_update",
         Some("compute_error"),
         Some(error_detail),
-        None, // modules_json — error marker writes no modules
+        None, // note: modules_json — error marker writes no modules
     )
     .await;
 
@@ -556,8 +540,6 @@ async fn handle_compute_error(
     )))
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -570,10 +552,10 @@ mod tests {
     #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::KbStore;
 
-    // Fixtures below serve only the executor-driven (wasm) cases; gating them
+    // why: fixtures below serve only the executor-driven (wasm) cases; gating them
     // keeps the default-build test surface warning-free (C3).
 
-    /// The explicit compute attachment real executor runs need (C3): a
+    /// note: the explicit compute attachment real executor runs need (C3): a
     /// pool-bound capability over a real engine + warmed cache — exactly what
     /// the production runtime injects. Plain constructors never build engines.
     #[cfg(feature = "wasm")]
@@ -592,7 +574,7 @@ mod tests {
         world_id: &str,
         canonical_name: &str,
     ) -> serde_json::Map<String, serde_json::Value> {
-        // V1.139 P0: compute wire key_blocks is opaque spoke-KnowledgeEntry
+        // note: V1.139 P0 — compute wire key_blocks is opaque spoke-KnowledgeEntry
         // JSON. Fixture carries the spoke field names (entry_id, entry_type,
         // extensions.nexus.world_id).
         serde_json::from_value(json!({
@@ -610,7 +592,7 @@ mod tests {
         .expect("minimal spoke KnowledgeEntry wire fixture")
     }
 
-    /// Seed the creator **and its registry holder**: the compute input resolves
+    /// note: seed the creator **and its registry holder**: the compute input resolves
     /// an admitted `ActorView` selection, which fails closed without the holder
     /// row.
     #[cfg(feature = "wasm")]
@@ -620,7 +602,7 @@ mod tests {
             .unwrap();
     }
 
-    /// Seed only the stored `creators` row, with no registry holder.
+    /// note: seed only the stored `creators` row, with no registry holder.
     #[cfg(feature = "wasm")]
     async fn seed_creator_without_holder(pool: &sqlx::SqlitePool, creator_id: &str) {
         sqlx::query(
@@ -634,7 +616,7 @@ mod tests {
         .unwrap();
     }
 
-    /// Seed one computable World-row `KnowledgeEntry` with an explicit
+    /// note: seed one computable World-row `KnowledgeEntry` with an explicit
     /// governance pair (`None`/`None` is the shared row).
     #[cfg(feature = "wasm")]
     async fn seed_computable_row(
@@ -715,8 +697,6 @@ mod tests {
         kb_store.insert_knowledge_entry(kb.clone()).await.unwrap();
         kb
     }
-
-    // ── apply_json_delta unit tests ────────────────────────────────────────
 
     #[test]
     fn delta_set_numeric() {
@@ -841,7 +821,7 @@ mod tests {
             &Some(json!(20)),
         )
         .unwrap();
-        // Integer preservation: 80 + 20 = 100, both i64 → result is i64
+        // why: integer preservation: 80 + 20 = 100, both i64 → result is i64
         assert_eq!(state["character"]["current_hp"], 100);
         assert!(state["character"]["current_hp"].is_i64());
     }
@@ -860,12 +840,9 @@ mod tests {
         assert_eq!(state["character"]["current_hp"], 100.0);
     }
 
-    // ── Integration: narrative.compute capability ──────────────────────────
-
-    // H1 / R-V161P3-CORR-002: create_new_key_blocks re-asserts world_id before
+    // safety: H1 / R-V161P3-CORR-002: create_new_key_blocks re-asserts world_id before
     // any insert, rejecting cross-world block injection from a (hypothetically
     // hostile or buggy) module.
-    // Exercises the gated compute helper; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_rejects_cross_world_injection() {
@@ -875,12 +852,10 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
-        // And nothing was inserted.
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         assert!(kb_store.get_knowledge_entry("kb_hostile").await.is_err());
     }
 
-    // Exercises the gated compute helper; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_accepts_matching_world_id() {
@@ -896,7 +871,6 @@ mod tests {
         assert!(kb_store.get_knowledge_entry("kb_ok").await.is_ok());
     }
 
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_missing_world() {
@@ -913,7 +887,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::Forbidden(_)));
     }
 
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_cross_creator() {
@@ -932,7 +905,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::Forbidden(_)));
     }
 
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_rejects_no_computable_blocks() {
@@ -950,7 +922,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_invalid_input() {
@@ -960,10 +931,9 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    /// R5: only the admitted computable rows reach the compute input — another
+    /// note: R5: only the admitted computable rows reach the compute input — another
     /// holder's private row does not, so a World whose only computable row is
     /// governed privately by another holder admits no computable entry at all.
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_excludes_other_holders_private_rows() {
@@ -984,7 +954,7 @@ mod tests {
         )
         .await;
 
-        // Differential: the unscoped listing holds the row, so the refusal below
+        // why: the unscoped listing holds the row, so the refusal below
         // is the selection's policy and not an empty KB.
         let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
             .list_by_world("wld_a")
@@ -1010,9 +980,8 @@ mod tests {
         }
     }
 
-    /// R5 fail-closed: without an admitted scope the capability refuses instead
+    /// note: R5 fail-closed — without an admitted scope the capability refuses instead
     /// of reading the World listing.
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_fails_closed_without_a_holder() {
@@ -1049,9 +1018,8 @@ mod tests {
         assert!(matches!(err, CapabilityError::WorkerUnavailable));
     }
 
-    /// Full integration test: create world with 2 computable characters,
+    /// note: full integration test — create world with 2 computable characters,
     /// run narrative.compute, verify output.
-    // Drives the gated WASM executor end-to-end; runs under `--features wasm`.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn narrative_compute_full_cycle() {
@@ -1059,13 +1027,12 @@ mod tests {
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
-        // Seed two computable characters with HP state.
         let _kb_a = seed_computable_character(&pool, "wld_a", "Hero", 100, 80).await;
         let _kb_b = seed_computable_character(&pool, "wld_a", "Villain", 120, 120).await;
 
         let cap = with_real_engine(pool.clone());
 
-        // The basic-combat module expects two combatants; if it runs successfully
+        // why: the basic-combat module expects two combatants; if it runs successfully
         // it will return state_delta + battle_report. If it traps (e.g., because
         // the module's ABI doesn't handle our exact character shapes), the error
         // path creates a compute_error timeline event instead of crashing.
@@ -1080,7 +1047,6 @@ mod tests {
 
         match result {
             Ok(out) => {
-                // Compute succeeded — verify the output shape.
                 assert!(
                     out.get("battle_report").is_some(),
                     "expected battle_report in output"
@@ -1095,7 +1061,7 @@ mod tests {
                 );
             }
             Err(e) => {
-                // Compute failure is allowed in tests — verifying it doesn't crash.
+                // why: compute failure is allowed in tests — verifying it doesn't crash.
                 // The compute_error timeline event should have been recorded.
                 let err_str = e.to_string();
                 assert!(

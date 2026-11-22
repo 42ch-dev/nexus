@@ -14,16 +14,16 @@ use crate::user_capability::{UserCapability, UserCapabilityDescriptor};
 use std::collections::HashSet;
 use std::path::Path;
 
-/// A capability directory skipped during the scan, with the named reason.
+/// note: a capability directory skipped during the scan, with the named reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedCapability {
-    /// The directory (or declared) name the scan was processing.
+    /// note: the directory (or declared) name the scan was processing.
     pub name: String,
-    /// Human-readable reason for the skip (also logged at `warn!`).
+    /// note: human-readable reason for the skip (also logged at `warn!`).
     pub reason: String,
 }
 
-/// Per-admitted-capability file-stat snapshot captured at scan time
+/// note: per-admitted-capability file-stat snapshot captured at scan time
 /// (V1.176 PR wave 2, Greptile P1).
 ///
 /// `files` maps file name → `[size, mtime_ns]` — the same shape the
@@ -34,9 +34,9 @@ pub struct SkippedCapability {
 /// between the scan and the baseline derivation).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmittedCapabilityStats {
-    /// The admitted capability's declared name (== directory name).
+    /// note: the admitted capability's declared name (== directory name).
     pub name: String,
-    /// `{file_name: [size, mtime_ns]}` captured inside the scan.
+    /// note: `{file_name: [size, mtime_ns]}` captured inside the scan.
     pub files: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -51,19 +51,19 @@ pub struct AdmittedCapabilityStats {
 /// them at the boundary.
 #[derive(Default)]
 pub struct ScanOutcome {
-    /// Admitted user capabilities in scan order (first-in-wins for
+    /// note: admitted user capabilities in scan order (first-in-wins for
     /// duplicate declared names).
     pub admitted: Vec<UserCapability>,
-    /// Skipped capability directories with named reasons — never a scan error.
+    /// note: skipped capability directories with named reasons — never a scan error.
     pub skipped: Vec<SkippedCapability>,
-    /// Transient marker (W-3, V1.176 P1 QC fix, qc3 S-4): `true` when a
+    /// note: transient marker (W-3, V1.176 P1 QC fix, qc3 S-4) — `true` when a
     /// per-entry `read_dir` error interrupted the iteration, so the scan
     /// may have missed names. The watcher's merge then carries last-good
     /// for every name this scan did not re-admit — an incomplete scan must
     /// never read as a deletion (the I-1 semantics of the digest's
     /// `Unreadable` case).
     pub transient: bool,
-    /// Admission-time per-file stat snapshots (V1.176 PR wave 2, Greptile
+    /// note: admission-time per-file stat snapshots (V1.176 PR wave 2, Greptile
     /// P1): one entry per admitted capability, captured INSIDE the scan, so
     /// the watcher's baseline is scan-time ground truth — never a later
     /// re-read of the filesystem (which could absorb an edit made between
@@ -71,7 +71,7 @@ pub struct ScanOutcome {
     pub admitted_stats: Vec<AdmittedCapabilityStats>,
 }
 
-/// Scan `dir` (`~/.nexus42/capabilities/<name>/`) for capability descriptors
+/// note: scan `dir` (`~/.nexus42/capabilities/<name>/`) for capability descriptors
 /// (AR-35).
 ///
 /// - Missing or unreadable `dir` → empty outcome (user capabilities are
@@ -109,7 +109,7 @@ pub struct ScanOutcome {
 /// `WorkerUnavailable`. The engine boot arm is
 /// [`scan_user_capabilities_with_executor`] (feature `wasm`).
 #[must_use]
-#[allow(clippy::implicit_hasher)] // same builder-agnostic set contract as `admit`
+#[allow(clippy::implicit_hasher)] // why: same builder-agnostic set contract as `admit`
 pub fn scan_user_capabilities(dir: &Path, builtin_names: &HashSet<&str>) -> ScanOutcome {
     #[cfg(feature = "wasm")]
     {
@@ -121,7 +121,7 @@ pub fn scan_user_capabilities(dir: &Path, builtin_names: &HashSet<&str>) -> Scan
     }
 }
 
-/// Engine boot arm of [`scan_user_capabilities`] (feature `wasm`, AR-37):
+/// note: engine boot arm of [`scan_user_capabilities`] (feature `wasm`, AR-37) —
 /// forwards the daemon-wide executor handles so every admitted capability
 /// can run its module.
 #[must_use]
@@ -142,7 +142,7 @@ pub fn scan_user_capabilities_with_executor(
 
 #[must_use]
 #[allow(clippy::implicit_hasher)]
-#[allow(clippy::too_many_lines)] // one linear scan loop: splitting it scatters the AR-43 gate sequence
+#[allow(clippy::too_many_lines)] // why: one linear scan loop; splitting it scatters the AR-43 gate sequence
 fn scan_user_capabilities_inner(
     dir: &Path,
     builtin_names: &HashSet<&str>,
@@ -159,7 +159,7 @@ fn scan_user_capabilities_inner(
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return outcome,
         Err(e) => {
-            // Non-missing read failures are still boot-safe: warn and treat
+            // why: non-missing read failures are still boot-safe — warn and treat
             // the directory as empty — but mark the outcome TRANSIENT
             // (Bugbot High, V1.176 PR wave): a successful digest poll
             // followed by a FAILED rescan (EACCES/EMFILE race) must never
@@ -176,14 +176,14 @@ fn scan_user_capabilities_inner(
         }
     };
 
-    // Collect entries first so processing order is deterministic: sort by
+    // why: collect entries first so processing order is deterministic — sort by
     // directory name (S-003/M2 — `read_dir` order is not guaranteed).
     let mut entries: Vec<std::fs::DirEntry> = Vec::new();
     for entry in read {
         match entry {
             Ok(e) => entries.push(e),
             Err(e) => {
-                // Per-entry I/O error (W-3, V1.176 P1 QC fix, qc3 S-4): the
+                // why: per-entry I/O error (W-3, V1.176 P1 QC fix, qc3 S-4) — the
                 // scan may have MISSED names — mark the outcome transient so
                 // the watcher's merge keeps last-good for every name this
                 // scan did not re-admit (an incomplete scan must never read
@@ -205,7 +205,7 @@ fn scan_user_capabilities_inner(
         let dir_name = match entry.file_name().into_string() {
             Ok(name) => name,
             Err(bad) => {
-                // Non-UTF-8 names cannot be capability names (AR-34 charset) —
+                // why: non-UTF-8 names cannot be capability names (AR-34 charset) —
                 // skip with a warn + record (S-002, AR-35 all-skips-logged).
                 let lossy = bad.to_string_lossy();
                 skip(
@@ -219,12 +219,12 @@ fn scan_user_capabilities_inner(
         if !path.is_dir() {
             continue;
         }
-        // Skip system-prefixed and hidden dirs (preset scanner precedent).
+        // why: skip system-prefixed and hidden dirs (preset scanner precedent).
         if dir_name.starts_with('_') || dir_name.starts_with('.') {
             continue;
         }
 
-        // V1.176 PR wave 2 (Greptile P1): capture the per-file stat
+        // why: V1.176 PR wave 2 (Greptile P1) — capture the per-file stat
         // snapshot BEFORE the descriptor read, so the watcher's baseline
         // is scan-time ground truth. Any edit landing after this capture
         // diverges the first poll from the baseline and triggers a
@@ -243,7 +243,7 @@ fn scan_user_capabilities_inner(
             }
         };
 
-        // Duplicate declared names (AR-36): first-in-sorted-order wins, the
+        // why: duplicate declared names (AR-36) — first-in-sorted-order wins, the
         // rest skipped + logged. Checked BEFORE the dir-name mismatch check
         // (M1 QC wave): the mismatch guard fires on a dir whose descriptor
         // name differs from its dir name; the duplicate guard must fire when
@@ -272,7 +272,7 @@ fn scan_user_capabilities_inner(
             continue;
         }
 
-        // AR-43 (P1 T4): admission gates run before the capability is
+        // why: AR-43 (P1 T4) — admission gates run before the capability is
         // emitted — collision (builtin wins, gate 1), module-file presence
         // (gate 2), `wasm_sha256` pairing (gate 3, AR-39) — fail-closed per
         // candidate; a rejected candidate is a named skip (never a panic,
@@ -289,7 +289,7 @@ fn scan_user_capabilities_inner(
         };
         admitted_names.insert(descriptor.name.clone());
 
-        // AR-37: the registered capability carries its own dir (source of
+        // why: AR-37 — the registered capability carries its own dir (source of
         // manifest.json + <module-id>.wasm) and the daemon-wide engine/cache.
         // The engine arm passes Some/Some so run() executes the module; the
         // engine-less arm passes None/None (AR-44) so run() returns
@@ -304,7 +304,7 @@ fn scan_user_capabilities_inner(
         #[cfg(not(feature = "wasm"))]
         let admitted_cap = UserCapability::new(&descriptor, path);
         outcome.admitted.push(admitted_cap);
-        // V1.176 PR wave 2 (Greptile P1): the admission-time stat snapshot
+        // why: V1.176 PR wave 2 (Greptile P1) — the admission-time stat snapshot
         // captured above rides the outcome so the watcher's baseline is
         // scan-time ground truth (see `digest_from_admitted`).
         outcome.admitted_stats.push(AdmittedCapabilityStats {
@@ -316,7 +316,7 @@ fn scan_user_capabilities_inner(
     outcome
 }
 
-/// Read + validate `<name>/capability.json`; returns a named reason on
+/// note: read + validate `<name>/capability.json`; returns a named reason on
 /// failure (read error, parse error, or AR-34 validation failure).
 fn read_descriptor(path: &Path) -> Result<UserCapabilityDescriptor, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -360,7 +360,7 @@ pub(crate) fn dir_file_digest(cap_dir: &Path) -> serde_json::Map<String, serde_j
     files
 }
 
-/// Record a skip and log it at `warn!` (AR-35: all skips are logged; the
+/// note: record a skip and log it at `warn!` (AR-35: all skips are logged; the
 /// daemon never fails boot on a bad user capability).
 ///
 /// `pub(crate)`: reachable to sibling modules (the registry append path);
@@ -384,13 +384,13 @@ mod tests {
     use crate::test_support::{descriptor_json, write_capability_dir};
     use crate::Capability;
 
-    /// The builtin-name set the registry passes into the scan (a small,
+    /// note: the builtin-name set the registry passes into the scan (a small,
     /// realistic subset used by the scan tests; `sync.pull` collides).
     fn builtins() -> HashSet<&'static str> {
         HashSet::from(["sync.pull", "narrative.compute"])
     }
 
-    /// 64 lowercase hex chars (valid per AR-34 format rules) for descriptors
+    /// note: 64 lowercase hex chars (valid per AR-34 format rules) for descriptors
     /// whose skip fires BEFORE admission (validation / mismatch / duplicate
     /// guards) — the module pair's real hash is never consulted.
     const FAKE_SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -428,7 +428,7 @@ mod tests {
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
-    /// Bugbot High (V1.176 PR wave): a top-level non-`NotFound` `read_dir`
+    /// note: Bugbot High (V1.176 PR wave) — a top-level non-`NotFound` `read_dir`
     /// failure (EACCES/EMFILE race — here: a regular file → ENOTDIR, the
     /// same non-NotFound branch) must mark the outcome **transient**, so
     /// the watcher's merge carries last-good instead of reading every
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn scan_validation_failure_is_skipped_with_reason() {
-        // "BadName" parses (String field) but fails AR-34 validation (uppercase).
+        // why: "BadName" parses (String field) but fails AR-34 validation (uppercase).
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("BadName");
         std::fs::create_dir_all(&dir).unwrap();
@@ -510,15 +510,15 @@ mod tests {
         );
     }
 
-    /// AR-43 (P1 T4): a scan dir with a valid descriptor AND a colliding
+    /// note: AR-43 (P1 T4) — a scan dir with a valid descriptor AND a colliding
     /// (builtin-named) descriptor — the valid one registers, the colliding
     /// one is skipped with a named `NameCollision` reason, the catalog lacks
     /// the colliding name, and nothing panics (AC-V172-2 skip-and-log).
     #[test]
     fn scan_mixed_dir_admits_valid_and_skips_colliding() {
         let tmp = tempfile::tempdir().unwrap();
-        write_capability_dir(tmp.path(), "sync.pull"); // builtin name (gate 1)
-        write_capability_dir(tmp.path(), "demo.pull"); // valid, admitted
+        write_capability_dir(tmp.path(), "sync.pull"); // why: builtin name (gate 1)
+        write_capability_dir(tmp.path(), "demo.pull"); // note: valid, admitted
         let outcome = scan_user_capabilities(tmp.path(), &builtins());
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(outcome.skipped, [] as [crate::scan::SkippedCapability; 0]);
     }
 
-    /// M1 (QC wave): two dirs cannot both declare the same descriptor name
+    /// note: M1 (QC wave) — two dirs cannot both declare the same descriptor name
     /// (dir-name == descriptor-name makes this structurally impossible), but
     /// the duplicate guard must still be exercised: first-in-sorted-order
     /// wins, the second is skipped with a named reason. `a.dup` sorts before
@@ -558,10 +558,9 @@ mod tests {
     #[test]
     fn scan_duplicate_declared_name_first_sorted_wins_second_skipped() {
         let tmp = tempfile::tempdir().unwrap();
-        // Same declared name in two dirs — `a.dup` sorts before `b.dup`.
+        // why: same declared name in two dirs — `a.dup` sorts before `b.dup`.
         write_capability_dir(tmp.path(), "a.dup");
         write_capability_dir(tmp.path(), "b.dup");
-        // Rewrite b.dup's descriptor to declare the same name as a.dup.
         let b_dir = tmp.path().join("b.dup");
         std::fs::write(
             b_dir.join("capability.json"),
@@ -586,13 +585,13 @@ mod tests {
         );
     }
 
-    // S-003/M2: scan order must be deterministic (sorted by directory name),
+    // why: S-003/M2 — scan order must be deterministic (sorted by directory name),
     // not filesystem `read_dir` order. The admitted order equals sorted dir
     // names regardless of creation order.
     #[test]
     fn scan_order_is_sorted_by_directory_name() {
         let tmp = tempfile::tempdir().unwrap();
-        // Create out of alphabetical order — the scan must still admit in
+        // why: create out of alphabetical order — the scan must still admit in
         // sorted order.
         write_capability_dir(tmp.path(), "zeta.cap");
         write_capability_dir(tmp.path(), "alpha.cap");

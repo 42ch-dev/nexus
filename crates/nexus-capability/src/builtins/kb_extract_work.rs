@@ -11,6 +11,7 @@
 //! `WorkerUnavailable`.
 //!
 //! Design: plan `2026-05-26-v1.30-kb-extract-lifecycle-hardening.md` §K4.
+// note: the pipeline steps above are the R16 contract; the plan holds the design rationale.
 
 use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -18,25 +19,21 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
-// Structured response expected from the extraction prompt
-// ---------------------------------------------------------------------------
-
-/// Structured response expected from the extraction LLM prompt.
+/// note: structured response expected from the extraction LLM prompt.
 #[derive(Debug, Deserialize)]
 struct ExtractResponse {
     block_type: String,
     canonical_name: String,
-    /// Body may be a structured JSON object (preferred) or a plain string.
+    /// note: body may be a structured JSON object (preferred) or a plain string.
     #[serde(deserialize_with = "deserialize_body")]
     body: String,
-    // Value unused for provenance, but its `String` type check rejects a malformed LLM response.
+    // why: value unused for provenance, but its `String` type check rejects a malformed LLM response.
     #[serde(default)]
     #[allow(dead_code)]
     source_work_entry_id: String,
 }
 
-/// Deserialize `body` from either a JSON object (serialized to string) or a plain string.
+/// note: deserialize `body` from either a JSON object (serialized to string) or a plain string.
 fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
     use serde::de::Error as _;
     let value = serde_json::Value::deserialize(de)?;
@@ -46,16 +43,12 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
     }
 }
 
-// ---------------------------------------------------------------------------
-// KbExtractWork capability
-// ---------------------------------------------------------------------------
-
-/// Bounded length of the source-anchor excerpt taken from the admitted Work
+/// note: bounded length of the source-anchor excerpt taken from the admitted Work
 /// artifact (v1.191 P1 T13). The anchor is built from the artifact the
 /// orchestrator loaded, never from the model's own prose.
 const SOURCE_ANCHOR_EXCERPT_CHARS: usize = 256;
 
-/// The placeholder the native callback returns when preparing the model's
+/// note: the placeholder the native callback returns when preparing the model's
 /// candidate fails; the precise error is carried out of the callback and
 /// returned instead of this reject.
 fn extract_reject() -> nexus_spoke_adapter::SpokeReject {
@@ -66,7 +59,7 @@ fn extract_reject() -> nexus_spoke_adapter::SpokeReject {
     }
 }
 
-/// The `kb.extract_work` capability.
+/// note: the `kb.extract_work` capability.
 ///
 /// Holds an optional `SqlitePool` for job lifecycle management and `KnowledgeEntryRecord`
 /// insertion. When `pool` is `None`, returns `WorkerUnavailable`.
@@ -91,13 +84,13 @@ pub struct KbExtractWork {
 }
 
 impl KbExtractWork {
-    /// Create a new instance without a pool (placeholder mode).
+    /// note: create a new instance without a pool (placeholder mode).
     #[must_use]
     pub const fn new() -> Self {
         Self { pool: None }
     }
 
-    /// Create a new instance with a pool for full e2e pipeline.
+    /// note: create a new instance with a pool for full e2e pipeline.
     #[must_use]
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
         Self {
@@ -112,7 +105,7 @@ impl Default for KbExtractWork {
     }
 }
 
-/// Structured prompt template for KB extraction.
+/// note: structured prompt template for KB extraction.
 pub fn extraction_prompt(work_content: &str) -> String {
     format!(
         r#"You are a knowledge extraction assistant. Given the following work-scope knowledge content, extract a single structured key block.
@@ -132,7 +125,7 @@ Respond with the JSON object now:"#
     )
 }
 
-/// Parse the JSON response from the extraction LLM into a structured type.
+/// note: parse the JSON response from the extraction LLM into a structured type.
 fn parse_extraction_response(response_text: &str) -> Result<ExtractResponse, CapabilityError> {
     let cleaned = response_text
         .trim()
@@ -146,7 +139,7 @@ fn parse_extraction_response(response_text: &str) -> Result<ExtractResponse, Cap
     })
 }
 
-/// Parse block type string into `BlockType`.
+/// note: parse block type string into `BlockType`.
 ///
 /// Accepts both `snake_case` wire values (P1 extract.md) and `PascalCase` (legacy).
 fn parse_block_type(s: &str) -> Result<nexus_contracts::BlockType, CapabilityError> {
@@ -165,7 +158,7 @@ fn parse_block_type(s: &str) -> Result<nexus_contracts::BlockType, CapabilityErr
     }
 }
 
-// Single-pass claim→extract→insert→finalize pipeline; splitting would obscure the state machine.
+// why: single-pass claim→extract→insert→finalize pipeline; splitting would obscure the state machine.
 #[allow(clippy::too_many_lines)]
 #[async_trait]
 impl Capability for KbExtractWork {
@@ -204,7 +197,7 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
 
-        // v1.191 P1 T13 (durable §8): the real production run identity. The
+        // why: v1.191 P1 T13 (durable §8) — the real production run identity. The
         // engine injects the trusted `_session_id` at run admission; the
         // extraction runs through `orchestrate_extract`, whose request type
         // refuses an empty run id. A capability invoked outside a trusted run
@@ -221,9 +214,7 @@ impl Capability for KbExtractWork {
                 )
             })?;
 
-        // ── Phase 1: Load or claim job ──────────────────────────────
         let job = if let Some(job_id) = input.get("job_id").and_then(|v| v.as_str()) {
-            // Load specific job
             let job = nexus_local_db::get_extract_job(pool, job_id)
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("Failed to load job: {e}")))?
@@ -231,12 +222,11 @@ impl Capability for KbExtractWork {
                     CapabilityError::InputInvalid(format!("Job '{job_id}' not found"))
                 })?;
 
-            // QC2 W-005: Re-validate creator ownership on explicit job_id path.
+            // safety: QC2 W-005 — re-validate creator ownership on explicit job_id path.
             if job.creator_id != creator_id {
                 return Err(CapabilityError::InputInvalid("job creator mismatch".into()));
             }
 
-            // Reject wrong status
             if job.status != "queued" && job.status != "running" {
                 return Err(CapabilityError::InputInvalid(format!(
                     "Job '{}' has status '{}', expected 'queued' or 'running'",
@@ -245,8 +235,7 @@ impl Capability for KbExtractWork {
             }
             job
         } else {
-            // Claim next queued job for this creator
-            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S1
+            // why: WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S1
             // — cross-creator job_id claim test gap: claim path only tested for
             // same-creator; cross-creator race condition not exercised in CI.
             // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S2
@@ -263,7 +252,7 @@ impl Capability for KbExtractWork {
         };
 
         let job_id = job.job_id.clone();
-        // The job row is the authority for the extraction target (v1.191 P1
+        // why: the job row is the authority for the extraction target (v1.191 P1
         // T13, durable §8): the stored target is what the run is admitted for,
         // so a caller that omits `world_id` cannot make the capability skip a
         // World-bound job. An explicit `world_id` stays an override, and the
@@ -280,7 +269,7 @@ impl Capability for KbExtractWork {
             .unwrap_or(&job.work_entry_id)
             .to_string();
 
-        // QC1/2 W-002: a worldless Work (legacy V1.39 job with no World to
+        // why: QC1/2 W-002 — a worldless Work (legacy V1.39 job with no World to
         // promote into) is a success no-op so the preset state machine can
         // cleanly transition to done.
         if world_id.is_empty() {
@@ -291,14 +280,13 @@ impl Capability for KbExtractWork {
             }));
         }
 
-        // ── Phase 2: Load work content ──────────────────────────────
         let work_content = input
             .get("work_content")
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
         if work_content.is_empty() {
-            // Return prompt-phase data so the outer flow can load content
+            // why: return prompt-phase data so the outer flow can load content
             // and call acp.prompt before finalizing.
             return Ok(json!({
                 "job_id": job_id,
@@ -311,11 +299,9 @@ impl Capability for KbExtractWork {
             }));
         }
 
-        // ── Phase 3: Check for LLM response ─────────────────────────
         let llm_response = input.get("llm_response").and_then(|v| v.as_str());
 
         let Some(response_text) = llm_response else {
-            // Build and return the extraction prompt for acp.prompt execution
             let prompt = extraction_prompt(work_content);
             let prompt_length = prompt.len();
             return Ok(json!({
@@ -329,11 +315,9 @@ impl Capability for KbExtractWork {
             }));
         };
 
-        // ── Phase 4: Parse LLM response → prepared candidate via the wrapper ────
         let extract = match parse_extraction_response(response_text) {
             Ok(resp) => resp,
             Err(e) => {
-                // Mark job as failed
                 let _ = nexus_local_db::mark_extract_job_failed(
                     pool,
                     &job_id,
@@ -357,7 +341,7 @@ impl Capability for KbExtractWork {
             }
         };
 
-        // Determine validation mode from profile_hint (V1.40 P3).
+        // note: determine validation mode from profile_hint (V1.40 P3).
         let profile_hint = input
             .get("profile_hint")
             .and_then(|v| v.as_str())
@@ -368,7 +352,6 @@ impl Capability for KbExtractWork {
             nexus_knowledge::world_kb::ValidationMode::Generic
         };
 
-        // Build body from LLM response.
         let body: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
             if let Ok(parsed) = serde_json::from_str(&extract.body) {
                 parsed
@@ -381,7 +364,7 @@ impl Capability for KbExtractWork {
                 }
             };
 
-        // The trusted job target policy (durable §§3, 8): the job's stored
+        // safety: the trusted job target policy (durable §§3, 8) — the job's stored
         // controlling Creator must still own the target World, and the audience
         // is the service's in-scope default. Resolved before the model's
         // candidate can name anything — the model never reaches this pair.
@@ -404,7 +387,7 @@ impl Capability for KbExtractWork {
             }
         };
 
-        // The admitted source bundle and the source anchor both come from the
+        // safety: the admitted source bundle and the source anchor both come from the
         // actual Work artifact: the text the orchestrator loaded plus the job's
         // stored artifact locator. Never the model's own prose, never empty.
         let source_id = job
@@ -436,7 +419,7 @@ impl Capability for KbExtractWork {
             "text": work_content,
         });
 
-        // The native extractor callback prepares the model's candidate under the
+        // why: the native extractor callback prepares the model's candidate under the
         // trusted target policy; the adapter converts it to the wire candidate
         // and the upstream orchestrator validates the run. The callback crosses
         // to the adapter's driver thread, so its failure travels back through
@@ -457,7 +440,7 @@ impl Capability for KbExtractWork {
                     bundle,
                 },
                 move |run_input| async move {
-                    // The admitted bundle is the only source the extractor sees.
+                    // invariant: the admitted bundle is the only source the extractor sees.
                     if run_input.input["text"].as_str().is_none() {
                         *failure
                             .lock()
@@ -486,7 +469,7 @@ impl Capability for KbExtractWork {
                                 candidates: vec![prepared],
                                 method: Some("kb.extract_work".to_string()),
                                 coverage_hint: None,
-                                // This path's prompt extracts a single KE and
+                                // why: this path's prompt extracts a single KE and
                                 // proposes no relationships; SPOKE's success arm
                                 // is KE-only, so the sidecar is carried (never
                                 // dropped) and stays empty here.
@@ -508,7 +491,7 @@ impl Capability for KbExtractWork {
             .await
         };
 
-        // A callback failure is the precise error, not the placeholder reject.
+        // why: a callback failure is the precise error, not the placeholder reject.
         let callback_failure = failure
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -537,9 +520,7 @@ impl Capability for KbExtractWork {
             );
         }
 
-        // ── Phase 4b: commit the validated candidates AND the job terminal in
-        // ONE caller-owned transaction (durable §8) ──────────────────────────
-        // The candidates are written exactly as the protocol validated them
+        // why: the candidates are written exactly as the protocol validated them
         // (same ids, same governance) through the bound-tx persist seam, and the
         // job is flipped to done in the same transaction. A refused/failed run
         // therefore can never leave a done job without its entry, and dropping
@@ -558,7 +539,7 @@ impl Capability for KbExtractWork {
                 Ok(r) => insert_result = Some(r),
                 Err(e) => {
                     drop(tx);
-                    // Mark job as failed so the content loss window is closed.
+                    // why: mark job as failed so the content loss window is closed.
                     let _ = nexus_local_db::mark_extract_job_failed(
                         pool,
                         &job_id,
@@ -578,7 +559,7 @@ impl Capability for KbExtractWork {
             return Err(CapabilityError::Internal(reason));
         };
 
-        // The terminal claim rechecks the job's stored status in the same
+        // why: the terminal claim rechecks the job's stored status in the same
         // transaction: a job another actor already cancelled/finished rolls the
         // candidates back instead of reporting success.
         match nexus_local_db::kb_extract_job::mark_done_in_tx(&mut tx, &job_id).await {
@@ -639,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_parse_extraction_response_rejects_wrong_typed_source_id() {
-        // `source_work_entry_id` is a validation carrier: a non-string value must fail
+        // why: `source_work_entry_id` is a validation carrier — a non-string value must fail
         // parsing (as it always has), not be silently ignored.
         for bad in ["null", "123"] {
             let json = format!(
@@ -692,12 +673,10 @@ mod tests {
         assert!(cap.pool.is_none());
     }
 
-    // ── v1.191 P1 T13: real caller path through the adapter wrapper ────────
-
     const CREATOR: &str = "ctr_t13";
     const WORLD: &str = "wld_t13";
 
-    /// A guarded engine pool with one World owned by `CREATOR`.
+    /// note: a guarded engine pool with one World owned by `CREATOR`.
     ///
     /// The tempdir is returned first so the pool (declared second at the call
     /// site) drops before it, which Windows requires for the directory removal.
@@ -716,7 +695,7 @@ mod tests {
         (dir, pool)
     }
 
-    /// Enqueue one queued extract job for the seeded World.
+    /// note: enqueue one queued extract job for the seeded World.
     async fn enqueue_job(pool: &sqlx::SqlitePool) -> String {
         nexus_local_db::enqueue_extract_job_with_artifact(
             pool,
@@ -734,7 +713,7 @@ mod tests {
         .job_id
     }
 
-    /// A model response for one novel-profile candidate.
+    /// note: a model response for one novel-profile candidate.
     fn model_response(attributes: &serde_json::Value) -> String {
         json!({
             "block_type": "character",
@@ -755,7 +734,7 @@ mod tests {
         })
     }
 
-    /// Rows in the World KB of the seeded World.
+    /// note: rows in the World KB of the seeded World.
     async fn world_rows(
         pool: &sqlx::SqlitePool,
     ) -> Vec<nexus_knowledge::world_kb::KnowledgeEntryRecord> {
@@ -789,11 +768,11 @@ mod tests {
         let rows = world_rows(&pool).await;
         assert_eq!(rows.len(), 1, "exactly the validated candidate");
         assert_eq!(rows[0].entry_id, entry_id, "same id the job reported");
-        // The trusted job target policy (an in-scope World container) resolved
+        // why: the trusted job target policy (an in-scope World container) resolved
         // to shared: neither governance column is written.
         assert_eq!(rows[0].holder_entry_id, None);
         assert_eq!(rows[0].disclosure, None);
-        // The source anchor comes from the admitted Work artifact, not the
+        // why: the source anchor comes from the admitted Work artifact, not the
         // model's own prose.
         let anchor = rows[0].source_anchor.as_ref().expect("source anchor");
         assert_eq!(
@@ -808,7 +787,7 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // The model tries to make the row owner-private under its own holder;
+        // why: the model tries to make the row owner-private under its own holder;
         // the trusted target policy decides instead.
         let input = json!({
             "creator_id": CREATOR,
@@ -869,7 +848,7 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // The model output names a candidate the domain rules refuse (a path
+        // why: the model output names a candidate the domain rules refuse (a path
         // separator in the canonical name), so the native extractor rejects and
         // the run never reaches persistence.
         let input = json!({
@@ -905,7 +884,7 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // The stored controlling Creator no longer matches the job's: the
+        // why: the stored controlling Creator no longer matches the job's — the
         // trusted target refuses before anything is written.
         sqlx::query("UPDATE kb_extract_jobs SET creator_id = ? WHERE job_id = ?")
             .bind("ctr_other")
@@ -961,7 +940,7 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // Hold the write lock so the finalize's candidate insert can never
+        // why: hold the write lock so the finalize's candidate insert can never
         // commit, then drop the run future on the timeout: a run that cannot
         // commit must leave zero candidate rows and no `done` terminal.
         let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();

@@ -7,13 +7,14 @@
 //!    the prompt through the daemon Host plane and returns the agent output.
 //! 2. **Standalone (no executor)**: returns `WorkerUnavailable` — no echo or
 //!    placeholder success in production.
+// why: standalone mode must not fake agent output in production.
 
 use crate::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// The `acp.prompt` capability.
+/// note: the `acp.prompt` capability.
 ///
 /// Input schema: `{ prompt: string, tool_policy: enum }`
 ///
@@ -26,7 +27,7 @@ use std::sync::Arc;
 /// plane. Otherwise returns `WorkerUnavailable` (standalone/test mode).
 pub struct AcpPrompt {
     executor: Option<Arc<dyn PromptExecutor>>,
-    /// Per-run coordinator cancellation tokens (A1): the executor listens to
+    /// why: per-run coordinator cancellation tokens (A1); the executor listens to
     /// the token for the current run concurrently with the Host stream.
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
@@ -34,7 +35,7 @@ pub struct AcpPrompt {
 }
 
 impl AcpPrompt {
-    /// Create in standalone/test mode (no prompt executor).
+    /// note: create in standalone/test mode (no prompt executor).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -45,7 +46,7 @@ impl AcpPrompt {
         }
     }
 
-    /// Create with a prompt executor for production Host dispatch.
+    /// note: create with a prompt executor for production Host dispatch.
     #[must_use]
     pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
@@ -56,7 +57,7 @@ impl AcpPrompt {
         }
     }
 
-    /// Builder-style per-run coordinator cancellation tokens (A1).
+    /// note: builder-style per-run coordinator cancellation tokens (A1).
     #[must_use]
     pub fn with_session_cancels(
         mut self,
@@ -110,7 +111,7 @@ impl Capability for AcpPrompt {
                 |s| std::str::FromStr::from_str(s).map_err(CapabilityError::InputInvalid),
             )?;
 
-        // Security: only accept context-injected identity fields (prefixed _).
+        // safety: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR).
         //
@@ -133,7 +134,7 @@ impl Capability for AcpPrompt {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // A1: resolve the coordinator cancellation token for this run from
+        // why: A1 — resolve the coordinator cancellation token for this run from
         // the shared per-run map. FAIL-CLOSED: a run with no registered
         // token refuses with `CancellationUnavailable` — a fresh token would
         // be uncancellable by any coordinator (never mint one here). The run
@@ -169,7 +170,7 @@ mod tests {
         assert_eq!(cap.name(), "acp.prompt");
     }
 
-    // ── Standalone mode (no executor) ─────────────────────────────────
+    // note: standalone mode (no executor).
 
     #[tokio::test]
     async fn acp_prompt_standalone_returns_unavailable() {
@@ -198,7 +199,7 @@ mod tests {
         assert!(err.contains("missing 'prompt'"), "error: {err}");
     }
 
-    // ── With mock prompt executor ─────────────────────────────────────
+    // note: with mock prompt executor.
 
     struct MockAcpExecutor {
         captured: std::sync::Mutex<Option<PromptRequest>>,
@@ -224,7 +225,7 @@ mod tests {
         let executor = Arc::new(MockAcpExecutor {
             captured: std::sync::Mutex::new(None),
         });
-        // Seed the run's coordinator token (fail-closed contract: unregistered
+        // why: seed the run's coordinator token (fail-closed contract: unregistered
         // runs refuse CancellationUnavailable; production registers at admission).
         let cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         cancels

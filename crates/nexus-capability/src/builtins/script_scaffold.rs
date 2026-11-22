@@ -25,6 +25,7 @@
 //!
 //! Calls `validate_work_ref` from `novel_scaffold_sanitize` before any
 //! path joining, mirroring the novel scaffold pattern.
+// note: traversal rules live in `novel_scaffold_sanitize::validate_work_ref`.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{
@@ -38,7 +39,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
-/// Input for the script scaffold capability.
+/// note: input for the script scaffold capability.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
@@ -50,7 +51,7 @@ struct ScaffoldInput {
     world_id: Option<String>,
 }
 
-/// Output from the script scaffold capability.
+/// note: output from the script scaffold capability.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldOutput {
@@ -59,7 +60,7 @@ struct ScaffoldOutput {
     dirs_created: Vec<String>,
 }
 
-/// Predefined script template content with YAML frontmatter.
+/// note: predefined script template content with YAML frontmatter.
 struct ScriptTemplate {
     section_weight: &'static str,
     title: &'static str,
@@ -91,9 +92,7 @@ fn render_template(tmpl: &ScriptTemplate) -> String {
     )
 }
 
-// ── ScaffoldTransaction (V1.55 P3 fix-wave: create/overwrite tracking + atomic writes) ──
-//
-// Tracks each file write as either a creation (didn't exist before) or an
+// note: tracks each file write as either a creation (didn't exist before) or an
 // overwrite (existed before, original content saved). On rollback (Drop):
 //   - Temp files are cleaned up
 //   - Overwritten files are restored from snapshot
@@ -104,13 +103,13 @@ fn render_template(tmpl: &ScriptTemplate) -> String {
 // removes what this run wrote.
 
 struct ScaffoldTransaction {
-    /// Files that did NOT exist before — deleted on rollback.
+    /// note: files that did NOT exist before — deleted on rollback.
     created_files: Vec<PathBuf>,
-    /// Files that existed before — original content restored on rollback.
+    /// note: files that existed before — original content restored on rollback.
     overwritten_files: Vec<(PathBuf, Vec<u8>)>,
-    /// Directories created — removed in reverse on rollback.
+    /// note: directories created — removed in reverse on rollback.
     created_dirs: Vec<PathBuf>,
-    /// Temp files that may need cleanup on rollback (write started but rename didn't complete).
+    /// note: temp files that may need cleanup on rollback (write started but rename didn't complete).
     temp_files: Vec<PathBuf>,
     committed: bool,
 }
@@ -130,7 +129,7 @@ impl ScaffoldTransaction {
         self.committed = true;
     }
 
-    /// Create a directory if it doesn't exist. Returns `true` if freshly created.
+    /// note: create a directory if it doesn't exist. Returns `true` if freshly created.
     fn create_dir(&mut self, dir: &Path) -> Result<bool, CapabilityError> {
         if dir.exists() {
             return Ok(false);
@@ -141,7 +140,7 @@ impl ScaffoldTransaction {
         Ok(true)
     }
 
-    /// Commit a file through the Work artifact port.
+    /// note: commit a file through the Work artifact port.
     ///
     /// If the file already exists, its original content is saved so rollback
     /// can restore it. The bytes land through the injected executor (Work
@@ -156,7 +155,6 @@ impl ScaffoldTransaction {
     ) -> Result<(), CapabilityError> {
         let path = workspace_root.join("Works").join(work_ref).join(rel_child);
 
-        // Snapshot original if exists
         let original = if path.exists() {
             let data = std::fs::read(&path).map_err(|e| {
                 CapabilityError::Internal(format!("read original {}: {e}", path.display()))
@@ -168,7 +166,6 @@ impl ScaffoldTransaction {
 
         commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
 
-        // Track
         let is_create = original.is_none();
         match original {
             Some(data) => self.overwritten_files.push((path.clone(), data)),
@@ -189,7 +186,6 @@ impl Drop for ScaffoldTransaction {
         if self.committed {
             return;
         }
-        // 1. Clean up temp files (partial writes)
         for tmp in &self.temp_files {
             if let Err(e) = std::fs::remove_file(tmp) {
                 tracing::warn!(
@@ -199,7 +195,6 @@ impl Drop for ScaffoldTransaction {
                 );
             }
         }
-        // 2. Restore overwritten files
         for (path, original) in &self.overwritten_files {
             if let Err(e) = std::fs::write(path, original) {
                 tracing::warn!(
@@ -209,7 +204,6 @@ impl Drop for ScaffoldTransaction {
                 );
             }
         }
-        // 3. Delete created files
         for f in &self.created_files {
             if let Err(e) = std::fs::remove_file(f) {
                 tracing::warn!(
@@ -219,7 +213,6 @@ impl Drop for ScaffoldTransaction {
                 );
             }
         }
-        // 4. Delete created dirs in reverse (children before parents)
         for d in self.created_dirs.iter().rev() {
             if let Err(e) = std::fs::remove_dir(d) {
                 tracing::warn!(
@@ -239,7 +232,7 @@ impl Drop for ScaffoldTransaction {
     }
 }
 
-/// `script.project_scaffold` capability.
+/// note: `script.project_scaffold` capability.
 pub struct ScriptProjectScaffold {
     pool: Option<sqlx::SqlitePool>,
     works_root: PathBuf,
@@ -247,7 +240,7 @@ pub struct ScriptProjectScaffold {
 }
 
 impl ScriptProjectScaffold {
-    /// Create a standalone (no-pool) instance for testing.
+    /// note: create a standalone (no-pool) instance for testing.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -257,7 +250,7 @@ impl ScriptProjectScaffold {
         }
     }
 
-    /// Create an instance with a DB pool (default Works root).
+    /// note: create an instance with a DB pool (default Works root).
     #[must_use]
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
         Self {
@@ -267,7 +260,7 @@ impl ScriptProjectScaffold {
         }
     }
 
-    /// Create an instance with a DB pool and custom Works root (for e2e tests).
+    /// note: create an instance with a DB pool and custom Works root (for e2e tests).
     #[must_use]
     pub const fn new_with_root(pool: sqlx::SqlitePool, works_root: PathBuf) -> Self {
         Self {
@@ -277,7 +270,7 @@ impl ScriptProjectScaffold {
         }
     }
 
-    /// Attach the workspace executor that carries the Work artifact port.
+    /// note: attach the workspace executor that carries the Work artifact port.
     #[must_use]
     pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
         self.executor = executor;
@@ -311,7 +304,7 @@ impl Capability for ScriptProjectScaffold {
             CapabilityError::InputInvalid(format!("script.project_scaffold input: {e}"))
         })?;
 
-        // ── FIX (qc2 C-001): validate work_ref against path traversal ──
+        // safety: validate work_ref against path traversal (qc2 C-001).
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
         info!(
@@ -331,7 +324,7 @@ impl Capability for ScriptProjectScaffold {
         let logs_write_dir = logs_dir.join("write");
         let logs_review_dir = logs_dir.join("review");
 
-        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // why: the Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. Only the ref is claimed here; the
         // profile lands with the finished scaffold, and a failure restores it.
@@ -346,7 +339,6 @@ impl Capability for ScriptProjectScaffold {
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
             let mut tx = ScaffoldTransaction::new();
 
-            // Create directory structure (idempotent — only tracks newly created dirs)
             for dir in [
                 &work_dir,
                 &scripts_dir,
@@ -359,7 +351,6 @@ impl Capability for ScriptProjectScaffold {
                 tx.create_dir(dir)?;
             }
 
-            // Write README.md (through the Work artifact port; tracks create vs overwrite)
             let readme_content = format!(
                 "# {title}\n\nScript project.\n\n- **Work ID**: {work_id}\n- **Profile**: script\n",
                 title = inp.title,
@@ -374,7 +365,6 @@ impl Capability for ScriptProjectScaffold {
             )
             .await?;
 
-            // Write Scripts/script.md
             let script_content = render_template(&SCRIPT_TEMPLATES[0]);
             tx.write_file(
                 executor,
@@ -385,7 +375,6 @@ impl Capability for ScriptProjectScaffold {
             )
             .await?;
 
-            // Write Beats/beat-sheet.md
             let beat_content = render_template(&SCRIPT_TEMPLATES[1]);
             tx.write_file(
                 executor,
@@ -396,7 +385,6 @@ impl Capability for ScriptProjectScaffold {
             )
             .await?;
 
-            // Write Characters/characters.md
             let characters_content = render_template(&SCRIPT_TEMPLATES[2]);
             tx.write_file(
                 executor,
@@ -407,7 +395,7 @@ impl Capability for ScriptProjectScaffold {
             )
             .await?;
 
-            // Files landed — publish the profile identity, then commit the guard.
+            // note: files landed — publish the profile identity, then commit the guard.
             publish_work_identity(
                 self.pool.as_ref(),
                 &inp.creator_id,
@@ -417,7 +405,6 @@ impl Capability for ScriptProjectScaffold {
             )
             .await?;
 
-            // Output diagnostics use new file lists
             let files_created: Vec<String> = tx
                 .created_files
                 .iter()
@@ -472,7 +459,7 @@ mod tests {
     use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
 
-    /// Capability over a temp `Works/` root with a recording executor.
+    /// note: capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> ScriptProjectScaffold {
         let executor: Arc<dyn WorkspaceExecutor> =
             RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
@@ -521,8 +508,6 @@ mod tests {
         assert_eq!(cap.name(), "script.project_scaffold");
     }
 
-    // ── ScaffoldTransaction: rollback + commit (updated for create/overwrite) ──
-
     #[test]
     fn scaffold_transaction_rollback_cleans_up_created_files() {
         use tempfile::TempDir;
@@ -539,7 +524,7 @@ mod tests {
         let mut tx = ScaffoldTransaction::new();
         tx.created_files.push(file_path.clone());
         tx.created_dirs.push(sub_dir.clone());
-        // NOT committed → Drop should clean up created items
+        // note: not committed → Drop should clean up created items
 
         drop(tx);
 
@@ -551,7 +536,6 @@ mod tests {
             !sub_dir.exists(),
             "created subdir should be removed by rollback"
         );
-        // work_dir itself (pre-existing) should remain
         assert!(
             work_dir.exists(),
             "pre-existing work_dir should survive rollback"
@@ -572,14 +556,12 @@ mod tests {
         let mut tx = ScaffoldTransaction::new();
         tx.created_files.push(file_path.clone());
         tx.created_dirs.push(work_dir);
-        tx.commit(); // committed → Drop is no-op
+        tx.commit();
 
         drop(tx);
 
         assert!(file_path.exists(), "file should remain after commit");
     }
-
-    // ── Fix 1 regression: pre-existing user content survives rollback ──
 
     #[tokio::test]
     async fn rollback_preserves_pre_existing_user_content() {
@@ -592,10 +574,9 @@ mod tests {
         let readme_path = work_dir.join("README.md");
         let user_content = "# My Script\n\nThis is my personal README with custom notes.\n";
 
-        // Pre-create a file with user-authored content (simulating re-init)
+        // note: pre-create a file with user-authored content (simulating re-init)
         std::fs::write(&readme_path, user_content).expect("write user README");
 
-        // Simulate scaffold: write_file tracks overwrite
         let executor = RecordingExecutor::new();
         let mut tx = ScaffoldTransaction::new();
         tx.create_dir(&work_dir).unwrap();
@@ -611,11 +592,10 @@ mod tests {
         .await
         .expect("write scaffold README");
 
-        // Before commit, force rollback (simulate DB failure)
-        // Drop without commit → should restore original user content
+        // why: before commit, force rollback (simulate DB failure); Drop without
+        // commit must restore the original user content.
         drop(tx);
 
-        // User content must be preserved
         let restored = std::fs::read_to_string(&readme_path).expect("read restored README");
         assert_eq!(
             restored, user_content,
@@ -626,8 +606,6 @@ mod tests {
             "rollback must remove scaffold-overwritten content"
         );
     }
-
-    // ── Fix 2 regression: path traversal rejection ──
 
     #[tokio::test]
     async fn script_scaffold_rejects_path_traversal_in_work_ref() {
@@ -657,8 +635,6 @@ mod tests {
         );
     }
 
-    // ── Fix 4 regression: crash mid-transaction leaves no half-written file ──
-
     #[test]
     fn crash_mid_transaction_leaves_no_half_written_file() {
         use tempfile::TempDir;
@@ -669,33 +645,27 @@ mod tests {
 
         let final_path = work_dir.join("template.md");
 
-        // Simulate a crash during write_file: create the temp file,
+        // why: simulate a crash during write_file: create the temp file,
         // but don't rename it. This simulates the temp+rename pattern
         // where the rename hasn't happened yet.
         let mut tx = ScaffoldTransaction::new();
-        // Write to temp, then simulate crash before rename by
+        // note: write to temp, then simulate crash before rename by
         // directly pushing a temp that won't get renamed
         let tmp_path = final_path.with_extension("tmp");
         std::fs::write(&tmp_path, "partial content").expect("write temp");
         tx.temp_files.push(tmp_path.clone());
 
-        // Rollback (Drop without commit)
         drop(tx);
 
-        // The temp file must be cleaned up
         assert!(
             !tmp_path.exists(),
             "temp file must be cleaned up on rollback"
         );
-        // The final path must NOT exist (rename never happened)
         assert!(
             !final_path.exists(),
             "final path must not exist — rename never completed"
         );
-        // No half-written content at either path
     }
-
-    // ── Integration: scaffold idempotency with write_file ──
 
     #[tokio::test]
     async fn scaffold_creates_directory_tree() {
@@ -763,7 +733,6 @@ mod tests {
         let root = tmp.path().join("Works");
         let cap = cap_with_root(root.clone());
 
-        // First run: scaffold creates files
         let input = serde_json::json!({
             "creator_id": "creator_test",
             "work_id": "wrk_idem_script",
@@ -774,27 +743,21 @@ mod tests {
         let scaffold = out1["scaffold_root"].as_str().expect("root");
         let readme_path = std::path::Path::new(scaffold).join("README.md");
 
-        // User modifies README
         let user_content = "# My Custom Script README\n\nUser-authored content.";
         std::fs::write(&readme_path, user_content).expect("write user content");
 
-        // Second run: scaffold with write_file (tracks as overwrite + restores on rollback)
-        // Write another file first to verify multi-file tracking
         let extra_path = std::path::Path::new(scaffold).join("extra.md");
         std::fs::write(&extra_path, "extra").expect("write extra");
 
         let _out2 = cap.run(input).await.expect("second run");
 
-        // User content preserved (write_file saves snapshot on overwrite, but commit keeps new content)
         let readme_after = std::fs::read_to_string(&readme_path).expect("read after second run");
-        // After commit, the new scaffold content replaced user content (expected for re-init)
+        // why: after commit, the new scaffold content replaced user content (expected for re-init)
         assert!(
             readme_after.contains("Script project"),
             "after commit, scaffold content should be present"
         );
     }
-
-    // ── Work artifact port seam ──
 
     #[tokio::test]
     async fn scaffold_refuses_without_workspace_executor() {

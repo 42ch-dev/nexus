@@ -1,6 +1,7 @@
 //! Built-in capability implementations.
 //!
 //! One module per built-in.
+// note: capability IDs and schemas live in `nexus-preset::capability_catalog`.
 
 mod acp_prompt;
 mod context_summarize;
@@ -60,7 +61,7 @@ pub use sync::{SyncPull, SyncPush};
 pub use timeline::TimelineEventAppend;
 pub use workspace::{WorkspaceCommit, WorkspaceOpen};
 pub use world::{WorldDeltaApply, WorldDeltaPropose, WorldStateQuery};
-// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S5
+// why: WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S5
 // — world_refs_validate is exposed as a library function but not registered
 // as a Capability in the builtins registry; it is called directly by daemon
 // handlers. Acceptable until capability registration is unified.

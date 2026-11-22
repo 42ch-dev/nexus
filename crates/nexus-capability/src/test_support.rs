@@ -7,12 +7,13 @@
 //! (daemon-runtime integration tests, nexus42 journeys) remain: those are
 //! separate crates and a feature-gated public helper is the documented
 //! follow-up if the copies keep churning.
+// why: one fixture instead of byte-identical copies in each orchestration test module.
 
 use sha2::Digest;
 use std::fmt::Write as _;
 use std::path::Path;
 
-/// Lowercase hex digest of `bytes` (64 chars for a SHA-256).
+/// note: lowercase hex digest of `bytes` (64 chars for a SHA-256).
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = sha2::Sha256::digest(bytes);
@@ -23,14 +24,14 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex
 }
 
-/// Write `<dir>/manifest.json` + `<dir>/basic-combat.wasm` with a **real**
+/// note: write `<dir>/manifest.json` + `<dir>/basic-combat.wasm` with a **real**
 /// matching sha (the AR-39 pairing admission verifies). Returns the sha.
 #[must_use]
 pub fn write_module_pair(dir: &Path) -> String {
     write_module_pair_with_bytes(dir, b"fake module bytes")
 }
 
-/// Like [`write_module_pair`] but with caller-chosen wasm bytes — the
+/// note: like [`write_module_pair`] but with caller-chosen wasm bytes — the
 /// hot-reload edit tests need a trio whose digest differs from the
 /// fixture's constant bytes while the sha pairing still passes.
 ///
@@ -58,7 +59,7 @@ pub fn write_module_pair_with_bytes(dir: &Path, wasm: &[u8]) -> String {
     sha
 }
 
-/// Descriptor JSON declaring `name` with the given `wasm_sha256`.
+/// note: descriptor JSON declaring `name` with the given `wasm_sha256`.
 #[must_use]
 pub fn descriptor_json(name: &str, sha: &str) -> String {
     format!(
@@ -71,7 +72,7 @@ pub fn descriptor_json(name: &str, sha: &str) -> String {
     )
 }
 
-/// Write an admitted `<name>/capability.json` trio (AR-35 layout): a
+/// note: write an admitted `<name>/capability.json` trio (AR-35 layout): a
 /// hash-consistent `manifest.json` + `<module-id>.wasm` pair so the AR-43
 /// admission gates pass inside the scan.
 ///
@@ -86,7 +87,7 @@ pub fn write_capability_dir(root: &Path, name: &str) {
     std::fs::write(dir.join("capability.json"), descriptor_json(name, &sha)).unwrap();
 }
 
-/// A registry holding exactly `caps` and no builtins: a path that resolves through it can
+/// note: a registry holding exactly `caps` and no builtins: a path that resolves through it can
 /// only reach the caller's own rows, so a bypassed resolution fails loudly instead of
 /// passing silently.
 #[must_use]

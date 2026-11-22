@@ -37,7 +37,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
 use std::time::Duration;
-/// Result of one digest poll of the user-capability scan directory.
+/// note: result of one digest poll of the user-capability scan directory.
 ///
 /// The watcher treats the three states differently (I-1, PL-9):
 /// - [`DigestPoll::Missing`]: the scan dir is **absent** (`NotFound`) — the
@@ -51,12 +51,12 @@ use std::time::Duration;
 /// - [`DigestPoll::Tree`]: the structural digest of a readable scan dir.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigestPoll {
-    /// Scan directory absent (`NotFound`).
+    /// note: scan directory absent (`NotFound`).
     Missing,
-    /// Scan directory present but unreadable, with the io error message
+    /// note: scan directory present but unreadable, with the io error message
     /// (path + error) for the once-per-error-state log.
     Unreadable(String),
-    /// Structural digest of the present, readable scan dir.
+    /// note: structural digest of the present, readable scan dir.
     Tree(serde_json::Value),
 }
 
@@ -90,7 +90,7 @@ pub const USER_CAP_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 ///   (AR-91 #3).
 #[must_use]
 pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
-    // A `NotFound` read failure is the honest "no dir" state; ANY other
+    // why: a `NotFound` read failure is the honest "no dir" state; ANY other
     // read failure (EACCES, EMFILE, ENOTDIR, …) is a transient unreadable
     // dir and must NOT be treated as a deletion (I-1) — the watcher keeps
     // last-good unchanged.
@@ -103,7 +103,7 @@ pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
     entries.sort_by_key(std::fs::DirEntry::file_name);
     let mut tree = serde_json::Map::new();
     for entry in entries {
-        // Non-UTF-8 names cannot be capability names (AR-34 charset) — the
+        // why: non-UTF-8 names cannot be capability names (AR-34 charset) — the
         // scan skips them too.
         let Ok(name) = entry.file_name().into_string() else {
             continue;
@@ -121,7 +121,7 @@ pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
     DigestPoll::Tree(serde_json::Value::Object(tree))
 }
 
-/// Build the watcher's initial baseline from the BOOT scan's admitted
+/// note: build the watcher's initial baseline from the BOOT scan's admitted
 /// outcome.
 ///
 /// The baseline must represent exactly what the registry serves — never a
@@ -198,7 +198,7 @@ pub fn rebuild_registry_with_merge(
     }
 }
 
-/// Engine boot arm of [`rebuild_registry_with_merge`] (feature `wasm`).
+/// note: engine boot arm of [`rebuild_registry_with_merge`] (feature `wasm`).
 ///
 /// Rebuilds the builtins through
 /// [`CapabilityRegistry::with_runtime_deps_and_wasm`] and forwards the
@@ -235,7 +235,7 @@ fn rebuild_registry_inner(
     )>,
     #[cfg(not(feature = "wasm"))] _executor: (),
 ) -> (CapabilityRegistry, ScanOutcome) {
-    // Collision ownership derives from THE DECLARATION (C3 contract), never
+    // why: collision ownership derives from THE DECLARATION (C3 contract), never
     // from constructed handler objects: the watcher rebuild gates against
     // the preset catalog's canonical names, so a builtin declared without a
     // handler object still cannot be claimed by a user capability.
@@ -256,18 +256,18 @@ fn rebuild_registry_inner(
     let outcome = ScanOutcome {
         admitted: merged.clone(),
         skipped: scan.skipped,
-        // W-3 (qc3 S-4): a scan interrupted by a per-entry read error is
+        // why: W-3 (qc3 S-4): a scan interrupted by a per-entry read error is
         // transient — the merge keeps last-good for every name it did not
         // re-admit, so an incomplete scan never reads as deletions.
         transient: scan.transient,
-        // V1.176 PR wave 2: admission-time stats for the entries THIS scan
+        // why: V1.176 PR wave 2: admission-time stats for the entries THIS scan
         // admitted (carried last-good entries have no fresh stats — theirs
         // were captured at their own admission). The boot site derives the
         // watcher baseline only from the boot outcome, where admitted ==
         // scan-admitted, so the baseline is complete by construction.
         admitted_stats: scan.admitted_stats,
     };
-    // Shared append seam (M-3): the same boxing path as the boot
+    // why: shared append seam (M-3): the same boxing path as the boot
     // constructors' `append_user_caps`, so a change to the append (extra
     // index/logging) lands in one place.
     reg.append_user_cap_entries(&merged);
@@ -303,7 +303,7 @@ pub fn merge_user_caps(scan: &ScanOutcome, mirror: &[UserCapability]) -> Vec<Use
         if seen.contains(cap.name()) {
             continue;
         }
-        // A transient scan is incomplete — carry every unmatched last-good
+        // why: a transient scan is incomplete — carry every unmatched last-good
         // entry instead of dropping it as if deleted (W-3).
         if scan.transient || skipped_names.contains(cap.name()) {
             merged.push(cap.clone());
@@ -348,7 +348,7 @@ where
     S: FnMut() -> SF,
     SF: Future<Output = ()> + Send,
 {
-    // Seeded baseline (W-B): the boot scan's digest, so the first poll is
+    // why: seeded baseline (W-B): the boot scan's digest, so the first poll is
     // a comparison, not a baseline establishment. An `Unreadable` poll
     // never disturbs it (I-1); `Missing`/`Tree` after it rescan on change.
     let mut last_digest: Option<DigestPoll> = Some(initial_digest);
@@ -361,7 +361,7 @@ where
         let digest = poll().await;
         match &digest {
             DigestPoll::Unreadable(message) => {
-                // Transient read failure (EACCES, EMFILE, ENOTDIR, …): keep
+                // why: transient read failure (EACCES, EMFILE, ENOTDIR, …): keep
                 // last-good unchanged — no rescan, no swap, baseline intact
                 // (I-1). Log once per error-state, not every tick.
                 if !unreadable_warned {
@@ -382,7 +382,7 @@ where
             tokio::time::sleep(interval).await;
             continue;
         }
-        // Any divergence from the seeded baseline rescans — including the
+        // why: any divergence from the seeded baseline rescans — including the
         // first poll when it differs from the boot scan's digest (W-B).
         // `last_digest` is always `Some` after seeding; `Unreadable` polls
         // never reach this point (they `continue` above).
@@ -424,14 +424,14 @@ mod tests {
             .collect()
     }
 
-    /// Input schemas that differ BETWEEN generations of the same capability
+    /// note: input schemas that differ BETWEEN generations of the same capability
     /// name, so the catalog surface itself discriminates which row a
     /// generation resolves (the shared writer's fixed schemas would make two
     /// generations indistinguishable).
     const GEN_ONE_SCHEMA: &str = r#"{"type":"object","generation":1}"#;
     const GEN_TWO_SCHEMA: &str = r#"{"type":"object","generation":2}"#;
 
-    /// Write a hash-consistent trio whose descriptor declares `schema` — the
+    /// note: write a hash-consistent trio whose descriptor declares `schema` — the
     /// generation-discriminating fixture used by the reservation test.
     fn write_trio_with_schema(root: &Path, name: &str, schema: &str, wasm: &[u8]) {
         let dir = root.join(name);
@@ -450,7 +450,7 @@ mod tests {
         .unwrap();
     }
 
-    /// User-capability names a registry CARRIES (origin-filtered, sorted) —
+    /// note: user-capability names a registry CARRIES (origin-filtered, sorted) —
     /// the declaration set, not the executable lookup: a user capability
     /// admitted without a binding is carried (and reserved) even though
     /// `get`/`iter` do not yield it (C3 contract).
@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn digest_present_but_unreadable_path_is_not_missing() {
-        // A path that exists but cannot be read as a directory (here: a
+        // why: a path that exists but cannot be read as a directory (here: a
         // regular file → ENOTDIR; EACCES/EMFILE hit the same non-NotFound
         // branch) must NOT be conflated with a missing dir (I-1) — the
         // watcher keeps last-good on `Unreadable`.
@@ -500,13 +500,13 @@ mod tests {
         let DigestPoll::Tree(first) = scan_dir_digest(tmp.path()) else {
             panic!("expected a Tree digest for the present dir");
         };
-        // Identical content → identical digest (deterministic ordering).
+        // why: identical content → identical digest (deterministic ordering).
         let DigestPoll::Tree(same) = scan_dir_digest(tmp.path()) else {
             panic!("expected a Tree digest for the present dir");
         };
         assert_eq!(same, first);
 
-        // A file change (different size) → changed digest.
+        // why: a file change (different size) → changed digest.
         let wasm_path = tmp.path().join("demo.pull/basic-combat.wasm");
         std::fs::write(&wasm_path, b"fake module bytes, now longer").unwrap();
         let DigestPoll::Tree(changed) = scan_dir_digest(tmp.path()) else {
@@ -545,12 +545,11 @@ mod tests {
         let (_, boot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = boot_outcome.admitted;
 
-        // Break demo.pull's trio (invalid descriptor) and delete gone.cap.
         std::fs::remove_dir_all(tmp.path().join("gone.cap")).unwrap();
         std::fs::write(tmp.path().join("demo.pull/capability.json"), "{ not json").unwrap();
 
         let (_, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
-        // demo.pull skipped with the boot vocabulary reason, gone.cap dropped.
+        // why: demo.pull skipped with the boot vocabulary reason, gone.cap dropped.
         assert_eq!(hot_outcome.skipped.len(), 1);
         assert_eq!(hot_outcome.skipped[0].name, "demo.pull");
         assert!(
@@ -579,7 +578,7 @@ mod tests {
         let deps = test_deps();
         let (_, boot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = boot_outcome.admitted;
-        // Rebuild unchanged: the name is admitted again, and the merge must
+        // why: rebuild unchanged, the name is admitted again, and the merge must
         // NOT duplicate it (new entry wins, mirror copy dropped).
         let (reg, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
         assert_eq!(
@@ -591,7 +590,7 @@ mod tests {
     }
     #[test]
     fn merge_transient_scan_carries_unmatched_last_good() {
-        // W-3 (qc3 S-4): a per-entry `read_dir` error makes the scan
+        // why: W-3 (qc3 S-4) — a per-entry `read_dir` error makes the scan
         // outcome transient — the merge keeps last-good for EVERY name the
         // scan did not re-admit, instead of dropping it as if the dir had
         // been deleted (I-1 consistency with the digest's Unreadable case).
@@ -603,7 +602,7 @@ mod tests {
         let mirror = boot_outcome.admitted;
         assert_eq!(mirror.len(), 2, "both names admitted at boot");
 
-        // The interrupted hot scan re-admits only demo.pull and is marked
+        // why: the interrupted hot scan re-admits only demo.pull and is marked
         // transient — gone.cap was never observed, so it must NOT be
         // dropped as a deletion.
         let scan = ScanOutcome {
@@ -619,7 +618,7 @@ mod tests {
             vec!["demo.pull".to_string(), "gone.cap".to_string()],
             "transient scan carries every unmatched last-good entry"
         );
-        // Control: a NON-transient scan drops the absent name (removal).
+        // why: control — a NON-transient scan drops the absent name (removal).
         let scan = ScanOutcome {
             admitted: vec![mirror[0].clone()],
             skipped: Vec::new(),
@@ -646,10 +645,9 @@ mod tests {
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = test_deps();
 
-        // Boot path: the boot constructor family.
         let (boot_reg, boot_outcome) =
             CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
-        // Hot path with an EMPTY prior mirror (nothing to carry/drop).
+        // why: hot path with an EMPTY prior mirror (nothing to carry/drop).
         let (hot_reg, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
 
         assert_eq!(
@@ -687,7 +685,7 @@ mod tests {
 
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
-        // Dispatch-through-snapshot: clone the Arc exactly as the spine does,
+        // why: dispatch-through-snapshot — clone the Arc exactly as the spine does,
         // then break the trio on disk and swap.
         let held = holder.get().expect("registry present before swap");
         std::fs::write(tmp.path().join("demo.pull/capability.json"), "{ not json").unwrap();
@@ -699,7 +697,7 @@ mod tests {
         );
         holder.swap(std::sync::Arc::new(reg2));
 
-        // The pre-swap snapshot still carries last-good for the name and the
+        // why: the pre-swap snapshot still carries last-good for the name and the
         // invocation completes honestly against the held snapshot's own row
         // (engine-less arm → the AR-44 stub contract; the executable lookup
         // misses because the row has no binding in this build — C3 contract).
@@ -718,7 +716,6 @@ mod tests {
             matches!(err, crate::CapabilityError::WorkerUnavailable),
             "call completes honestly against the held snapshot: {err:?}"
         );
-        // And the swapped registry carries last-good for the same name.
         let live = holder.get().expect("swapped registry present");
         assert!(
             live.is_reserved_only("demo.pull"),
@@ -726,11 +723,7 @@ mod tests {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // Unbound compute name stays reserved across hot swaps (C3, corrected)
-    // -------------------------------------------------------------------------
-
-    /// C3 missing-edge case, in the CORRECTED contract shape (I-000544):
+    /// note: C3 missing-edge case, in the CORRECTED contract shape (I-000544):
     /// `get`/`iter` are real executable lookups, so a row without a binding
     /// is NOT yielded; the name survives in `reserved_names` (the full
     /// projection) and the metadata surface; workflow dispatch of the name
@@ -748,14 +741,14 @@ mod tests {
     /// 3. A hot swap that DROPS the row leaves the name reserved: metadata
     ///    gone, reservation intact.
     #[tokio::test]
-    #[allow(clippy::too_many_lines)] // one generation-sequence narrative; splitting hides the swap story
+    #[allow(clippy::too_many_lines)] // why: one generation-sequence narrative; splitting hides the swap story
     async fn unbound_compute_name_remains_reserved_after_hot_swap() {
         use nexus_preset::capability_catalog::CapabilityCatalog;
 
         let tmp = tempfile::tempdir().unwrap();
         let deps = test_deps();
 
-        // Boot with an empty scan dir: no user name is reserved yet.
+        // why: boot with an empty scan dir — no user name is reserved yet.
         let (reg0, outcome0) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         assert!(
             outcome0.admitted.is_empty(),
@@ -764,7 +757,7 @@ mod tests {
         let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
         assert!(!holder.reserved_names().any(|n| n == "demo.compute"));
 
-        // 1. Hot-admit a compute-capable user capability with no binding.
+        // note: 1. Hot-admit a compute-capable user capability with no binding.
         write_trio_with_schema(
             tmp.path(),
             "demo.compute",
@@ -787,7 +780,7 @@ mod tests {
             "the builtin compute name is reserved too, also without a binding here"
         );
 
-        // CORRECTED shape: the executable lookup misses the unbound row, and
+        // why: CORRECTED shape — the executable lookup misses the unbound row, and
         // the name exists only as a reservation — the dispatch discriminator
         // (a workflow dispatch of this name returns WorkerUnavailable BEFORE
         // any effect; enforced at the orchestration dispatch sites).
@@ -805,7 +798,7 @@ mod tests {
             "iter is runnable-only too"
         );
 
-        // Metadata does not shrink: known metadata resolves WITHOUT the
+        // why: metadata does not shrink — known metadata resolves WITHOUT the
         // executor (the CapabilityCatalog reads the descriptor surface).
         assert_eq!(
             CapabilityCatalog::input_schema(&gen1, "demo.compute"),
@@ -813,7 +806,7 @@ mod tests {
             "known metadata resolves without constructing an executor"
         );
 
-        // Effect evidence at the row level: the stored row's invocation is
+        // why: effect evidence at the row level — the stored row's invocation is
         // the typed worker refusal — exactly the refusal workflow dispatch
         // produces for this name, before any effect.
         let stored_row = gen1
@@ -828,7 +821,7 @@ mod tests {
             "the unbound invocation refuses with WorkerUnavailable, got {err:?}"
         );
 
-        // 2. Replace the entry and hot-swap it in; retain the pre-swap
+        // note: 2. Replace the entry and hot-swap it in; retain the pre-swap
         //    generation exactly as an in-flight dispatch would hold it.
         let gen1_retained = holder.get().expect("generation before the replacement");
         write_trio_with_schema(
@@ -849,7 +842,7 @@ mod tests {
             Some(GEN_TWO_SCHEMA),
             "the swapped-in metadata is the new generation's"
         );
-        // Namespace evidence: the retained generation's metadata surface
+        // why: namespace evidence — the retained generation's metadata surface
         // resolves only its OWN row — the swapped-in entry is unreachable
         // through it.
         assert_eq!(
@@ -858,7 +851,7 @@ mod tests {
             "a retained old generation cannot dispatch through the swapped-in entry"
         );
 
-        // 3. Drop the row (dir deleted) and hot-swap the rebuild.
+        // note: 3. Drop the row (dir deleted) and hot-swap the rebuild.
         std::fs::remove_dir_all(tmp.path().join("demo.compute")).unwrap();
         let (reg3, outcome3) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         assert!(
@@ -882,7 +875,7 @@ mod tests {
         );
     }
 
-    /// INVARIANT PIN, not a regression test for the order inside `swap` (C3
+    /// note: INVARIANT PIN, not a regression test for the order inside `swap` (C3
     /// fix round 2 relabel): this case drives the two half-steps manually in
     /// the safe order, so changing only the composition inside `swap` cannot
     /// make it fail. What it pins is the half-step SEMANTICS the safe
@@ -908,7 +901,7 @@ mod tests {
         write_capability_dir(tmp.path(), "demo.compute");
         let (reg1, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
 
-        // Half-step 1: reserve only — the name joins the live reservation.
+        // note: half-step 1 — reserve only; the name joins the live reservation.
         holder.reserve_generation(&reg1);
         assert!(
             holder.reserved_names().any(|n| n == "demo.compute"),
@@ -923,7 +916,7 @@ mod tests {
             "publication has not happened while the reservation is already in place"
         );
 
-        // Half-step 2: publish — the row is carried (reserved-only: the
+        // note: half-step 2 — publish; the row is carried (reserved-only: the
         // fixture admits without a binding) and the reservation already holds.
         holder.publish_generation(std::sync::Arc::new(reg1));
         let live = holder.get().expect("published generation");
@@ -934,7 +927,7 @@ mod tests {
         assert!(holder.reserved_names().any(|n| n == "demo.compute"));
     }
 
-    /// INVARIANT PIN (C3 fix round 2 relabel): the publication path itself
+    /// note: INVARIANT PIN (C3 fix round 2 relabel): the publication path itself
     /// enforces the ordering invariant — publishing a generation whose names
     /// are NOT yet reserved fires the debug invariant. This case calls the
     /// publish half directly, so it passes regardless of the order inside
@@ -952,7 +945,7 @@ mod tests {
         let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(reg0));
         write_capability_dir(tmp.path(), "demo.compute");
         let (reg1, _) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
-        // Publish WITHOUT reserving first — the invariant must fire.
+        // why: publish WITHOUT reserving first — the invariant must fire.
         holder.publish_generation(std::sync::Arc::new(reg1));
     }
 
@@ -960,7 +953,7 @@ mod tests {
     // No-op stability (AR-95 #5) + transient-error safety (I-1) + M-6
     // -------------------------------------------------------------------------
 
-    /// The real hot-reload action (mirror of the boot wiring): rebuild +
+    /// note: the real hot-reload action (mirror of the boot wiring) — rebuild +
     /// merge + swap, updating the last-admitted mirror.
     fn hot_rebuild_test(
         holder: &CapabilityRegistryHolder,
@@ -976,13 +969,13 @@ mod tests {
         *mirror = outcome.admitted;
     }
 
-    /// Drive the real watch loop (real `scan_dir_digest` + real rebuild/swap)
+    /// note: drive the real watch loop (real `scan_dir_digest` + real rebuild/swap)
     /// for `max_ticks`, returning the loop's rescan count. `on_poll` runs
     /// just before each digest read (with the tick number and the scan dir)
     /// so a test can mutate the scan dir mid-loop — the baseline and the
     /// subsequent change happen inside ONE loop invocation, which is how
     /// the production watcher behaves.
-    #[allow(clippy::too_many_arguments)] // test helper: all eight are the wiring inputs
+    #[allow(clippy::too_many_arguments)] // why: test helper — all eight are the wiring inputs
     async fn run_real_watch(
         scan_dir: &Path,
         holder: &CapabilityRegistryHolder,
@@ -998,7 +991,7 @@ mod tests {
         let deps = deps.clone();
         let mirror = std::sync::Arc::clone(mirror);
         let on_poll = std::sync::Arc::new(on_poll);
-        // W-B: the baseline is seeded from the boot-state digest the
+        // why: W-B — the baseline is seeded from the boot-state digest the
         // production boot site computes (the state the mirror was built
         // from) — the first poll compares against it. Production derives
         // the baseline from admission-time stat snapshots captured inside
@@ -1036,7 +1029,7 @@ mod tests {
     #[tokio::test]
     async fn unchanged_digest_and_missing_dir_produce_no_rescans() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        // W-B: the baseline is SEEDED (boot digest), so these legs only
+        // why: W-B — the baseline is SEEDED (boot digest), so these legs only
         // assert no-op stability when the first poll equals the seed —
         // exactly the production steady state.
         let tree = DigestPoll::Tree(serde_json::json!({"a.cap": {"capability.json": [12, 34]}}));
@@ -1060,7 +1053,7 @@ mod tests {
         assert_eq!(scans, 0, "unchanged digest → no scan");
         assert_eq!(rescans, 0, "no rescan action fired");
 
-        // Missing dir → stable `Missing` digest → no rescans, no skip spam.
+        // why: missing dir → stable `Missing` digest → no rescans, no skip spam.
         tick.store(0, Ordering::Relaxed);
         let scans = watch_loop_inner(
             Duration::from_millis(1),
@@ -1093,7 +1086,7 @@ mod tests {
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
                 async {
-                    // Two baseline-identical ticks, then a change, then a
+                    // why: two baseline-identical ticks, then a change, then a
                     // no-op tick — a shared-only capture (AtomicUsize) so
                     // the future has no escaping mutable borrow and stays
                     // Send.
@@ -1117,7 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn boot_to_first_poll_change_is_detected() {
-        // W-B (qc2 F-001 / qc3 W-1): the watcher is seeded with the BOOT
+        // why: W-B (qc2 F-001 / qc3 W-1) — the watcher is seeded with the BOOT
         // scan's digest as its initial baseline, so an on-disk change
         // between the boot scan and the FIRST poll (a complete trio written
         // in that window) triggers a rebuild — it is NOT absorbed as the
@@ -1132,7 +1125,7 @@ mod tests {
             boot_state.clone(),
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
-                // The first poll ALREADY diverges from the boot baseline.
+                // why: the first poll ALREADY diverges from the boot baseline.
                 async { changed_on_disk.clone() }
             },
             || {
@@ -1151,7 +1144,7 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_poll_keeps_last_good_no_rescan() {
-        // I-1: a transiently unreadable scan dir must NOT be treated as a
+        // why: I-1 — a transiently unreadable scan dir must NOT be treated as a
         // deletion. The baseline survives, no rescan fires, and the
         // registry generation (the last-good) is untouched.
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1184,7 +1177,7 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_scan_dir_keeps_last_good_registry() {
-        // I-1 end-to-end leg: after a Tree baseline, a present-but-unreadable
+        // why: I-1 end-to-end leg — after a Tree baseline, a present-but-unreadable
         // scan dir (replaced by a regular file → ENOTDIR, the same
         // non-NotFound branch as EACCES/EMFILE) keeps the last-good registry
         // generation: no rescan, no swap, no name drop, mirror untouched.
@@ -1202,7 +1195,7 @@ mod tests {
         let ticks = AtomicUsize::new(0);
         let rescans = AtomicUsize::new(0);
 
-        // On the third poll (after the baseline and one no-op tick) the
+        // why: on the third poll (after the baseline and one no-op tick) the
         // scan dir is replaced by a present regular file: every later
         // read_dir fails with a non-NotFound error → Unreadable, and the
         // watcher must keep last-good (no rescan, no swap).
@@ -1239,7 +1232,7 @@ mod tests {
 
     #[tokio::test]
     async fn digest_ok_then_rescan_unreadable_keeps_last_good() {
-        // Bugbot High (V1.176 PR wave): a successful digest poll followed
+        // why: Bugbot High (V1.176 PR wave) — a successful digest poll followed
         // by a FAILED rescan (top-level non-NotFound `read_dir` error —
         // EACCES/EMFILE race) must NOT read as deletions. The scan marks
         // its outcome transient, so the merge carries every unmatched
@@ -1257,12 +1250,12 @@ mod tests {
             std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted));
         assert_eq!(mirror.lock().unwrap().len(), 1, "one name admitted at boot");
 
-        // The scan dir becomes unreadable (ENOTDIR — the same non-NotFound
+        // why: the scan dir becomes unreadable (ENOTDIR — the same non-NotFound
         // branch as EACCES/EMFILE) AFTER the digest poll succeeded.
         std::fs::remove_dir_all(&scan_dir).unwrap();
         std::fs::write(&scan_dir, b"transiently unreadable").unwrap();
 
-        // The digest poll already returned a Tree (digest OK) before the
+        // why: the digest poll already returned a Tree (digest OK) before the
         // failure; the rescan then runs against the unreadable dir. The
         // poll digest diverges from the baseline exactly once, so exactly
         // one rescan fires.
@@ -1308,7 +1301,7 @@ mod tests {
 
     #[tokio::test]
     async fn baseline_derived_from_scan_outcome_detects_between_scan_and_digest_write() {
-        // Greptile P1 (V1.176 PR wave): a complete trio written between
+        // why: Greptile P1 (V1.176 PR wave) — a complete trio written between
         // the boot scan and the boot digest computation must NOT be
         // absorbed into the watcher's baseline. The baseline is derived
         // from what the scan actually ADMITTED, so the first poll sees
@@ -1330,7 +1323,7 @@ mod tests {
             "alpha.cap admitted at boot"
         );
 
-        // The between-scan-and-digest write: a complete trio lands on disk
+        // why: the between-scan-and-digest write — a complete trio lands on disk
         // AFTER the boot scan admitted alpha.cap but BEFORE the baseline
         // is derived. The scan-outcome-derived baseline must NOT contain
         // it.
@@ -1380,7 +1373,7 @@ mod tests {
         );
     }
 
-    /// Rewrite `<root>/<name>/` with a NEW consistent trio whose wasm
+    /// note: rewrite `<root>/<name>/` with a NEW consistent trio whose wasm
     /// differs in size from the fixture's constant bytes — the AR-39 sha
     /// pairing still passes (manifest + descriptor are rewritten to
     /// match), but the digest diverges from any pre-edit baseline.
@@ -1399,7 +1392,7 @@ mod tests {
 
     #[tokio::test]
     async fn baseline_from_admission_stats_detects_edit_between_scan_and_digest() {
-        // Greptile P1 (V1.176 PR wave 2): an EDIT to an admitted trio
+        // why: Greptile P1 (V1.176 PR wave 2) — an EDIT to an admitted trio
         // between the boot scan and the baseline derivation must NOT be
         // absorbed into the baseline. The baseline is built from
         // admission-time stat snapshots captured INSIDE the scan, so the
@@ -1421,7 +1414,7 @@ mod tests {
             "alpha.cap admitted at boot"
         );
 
-        // The between-scan-and-digest EDIT: the trio is rewritten with new
+        // why: the between-scan-and-digest EDIT — the trio is rewritten with new
         // content (a longer wasm + matching shas) AFTER the boot scan
         // admitted it but BEFORE the baseline is derived. The
         // admission-time baseline must reflect the PRE-edit state, so the
@@ -1481,7 +1474,7 @@ mod tests {
             scans, 1,
             "first poll diverges from the admission-time baseline → exactly one rescan"
         );
-        // The rebuilt registry serves the EDITED content — the stale
+        // why: the rebuilt registry serves the EDITED content — the stale
         // pre-edit capability is not served past the first poll.
         let new_sha = crate::test_support::sha256_hex(b"fake module bytes, now longer");
         let live_mirror = mirror.lock().unwrap();
@@ -1536,7 +1529,7 @@ mod tests {
 
     #[tokio::test]
     async fn deleted_scan_dir_drops_user_cap_names() {
-        // I-1 deleted leg: an absent dir after a Tree baseline is the honest
+        // why: I-1 deleted leg — an absent dir after a Tree baseline is the honest
         // removal contract — exactly one rescan, and the merge drops the
         // name from the swapped registry.
         let tmp = tempfile::tempdir().unwrap();
@@ -1552,7 +1545,7 @@ mod tests {
         let ticks = AtomicUsize::new(0);
         let rescans = AtomicUsize::new(0);
 
-        // The user deletes the scan dir on the third poll (after the
+        // why: the user deletes the scan dir on the third poll (after the
         // baseline and one no-op tick): Missing after Tree → exactly one
         // rescan, and the rebuild-with-merge drops the name (removal
         // contract).

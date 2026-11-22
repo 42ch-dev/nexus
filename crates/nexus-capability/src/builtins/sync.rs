@@ -5,20 +5,17 @@
 //! indicating that cloud sync is disabled. The actual implementation
 //! lives in `nexus-cloud-sync` and is wired when the CLI enables the
 //! `legacy-sync` feature.
+// why: the local-only build has no cloud line, so both stubs return a permanent error.
 
 use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde_json::Value;
 
-/// Cloud-sync-disabled error message shared by all three cloud stubs.
+/// note: cloud-sync-disabled error message shared by both cloud stubs.
 const CLOUD_LINE_DISABLED: &str =
     "cloud line disabled: sync requires nexus-cloud-sync (enable legacy-sync feature)";
 
-// ---------------------------------------------------------------------------
-// sync.pull
-// ---------------------------------------------------------------------------
-
-/// Pull remote deltas for a workspace.
+/// note: pull remote deltas for a workspace.
 ///
 /// **Stub**: returns `PermanentExternal` error in local-only builds.
 /// The real implementation lives in `nexus-cloud-sync`.
@@ -43,11 +40,7 @@ impl Capability for SyncPull {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sync.push
-// ---------------------------------------------------------------------------
-
-/// Push local outbox to remote.
+/// note: push local outbox to remote.
 ///
 /// **Stub**: returns `PermanentExternal` error in local-only builds.
 /// The real implementation lives in `nexus-cloud-sync`.

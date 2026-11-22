@@ -14,6 +14,7 @@
 //! (`read_kb_state_in_tx` / `update_kb_state_in_tx`) — SQL ownership lives in
 //! `nexus-local-db` (W3: one `kb_key_blocks` write-path family); this module
 //! owns the semantic merge.
+// why: keep the SQL write-path family in nexus-local-db while this module owns merge semantics.
 
 use crate::CapabilityError;
 use nexus_contracts::generated::daemon_api::compute::compute_output::ComputeOutputStateDeltaItem as ComputeOutputStateDelta;
@@ -22,10 +23,10 @@ use nexus_knowledge::world_kb::KbStore;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
-/// Valid `state_delta.op` variants recognized by merge operations.
+/// note: valid `state_delta.op` variants recognized by merge operations.
 pub const VALID_OPS: &[&str] = &["add", "sub", "set"];
 
-/// Map the generated enum to a wire string.
+/// note: map the generated enum to a wire string.
 #[must_use]
 pub const fn state_delta_op_wire(
     op: nexus_contracts::generated::daemon_api::compute::compute_output::ComputeOutputStateDeltaItemOp,
@@ -38,7 +39,7 @@ pub const fn state_delta_op_wire(
     }
 }
 
-/// Apply a list of `ComputeOutputStateDelta` entries to the world's
+/// note: apply a list of `ComputeOutputStateDelta` entries to the world's
 /// `KnowledgeEntryRecord` bodies (pool-backed).  Used by `narrative.compute`.
 ///
 /// Returns the number of state deltas successfully applied.
@@ -90,7 +91,7 @@ pub async fn apply_state_delta_pool(
     Ok(applied)
 }
 
-/// Apply a list of `ComputeOutputStateDelta` entries inside a caller-owned
+/// note: apply a list of `ComputeOutputStateDelta` entries inside a caller-owned
 /// `SQLite` transaction.  Used by the Accept handler (V1.147 P0 direct lane).
 ///
 /// `world_id` is the **admitted world** (the run's `world_id`).  Every
@@ -139,8 +140,8 @@ pub async fn apply_state_delta_in_tx(
             ));
         }
 
-        // Read through the local-db storage primitive inside the caller's TX.
-        // Compile-time checked query (F-004 fix — the Accept path is the
+        // why: read through the local-db storage primitive inside the caller's TX;
+        // SQL is compile-time checked (F-004 fix — the Accept path is the
         // highest-risk write path, so its SQL must be offline-validated).
         let Some(row) = read_kb_state_in_tx(tx, target_id)
             .await
@@ -155,7 +156,7 @@ pub async fn apply_state_delta_in_tx(
         let body_json_str = row.body_json;
         let target_world_id = row.world_id;
 
-        // F-001: world-scope check — a delta targeting another world's KB
+        // invariant: F-001 world-scope check — a delta targeting another world's KB
         // must reject the whole Accept (caller rolls back the TX).
         if target_world_id != world_id {
             return Err(CapabilityError::InputInvalid(format!(
@@ -180,7 +181,6 @@ pub async fn apply_state_delta_in_tx(
             .take()
             .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
 
-        // Validate path: first segment is the block_type state key.
         let path_segments: Vec<&str> = delta.path.split('.').collect();
         if path_segments.is_empty() {
             return Err(CapabilityError::InputInvalid(
@@ -206,7 +206,7 @@ pub async fn apply_state_delta_in_tx(
             CapabilityError::Internal(format!("serialize updated body for '{target_id}': {e}"))
         })?;
 
-        // Storage primitive: world-scoped UPDATE (defense in depth — a target
+        // why: world-scoped UPDATE (defense in depth — a target
         // that somehow changed worlds mid-TX cannot be written either).
         let affected = update_kb_state_in_tx(tx, target_id, world_id, &updated_body_json)
             .await
@@ -226,7 +226,7 @@ pub async fn apply_state_delta_in_tx(
     Ok(applied)
 }
 
-/// Apply a single delta to an in-memory `KnowledgeEntryRecord`.
+/// note: apply a single delta to an in-memory `KnowledgeEntryRecord`.
 /// Used by the pool-backed variant (which already has the full entry loaded).
 fn apply_single_delta(
     kb: &mut KnowledgeEntryRecord,
@@ -266,7 +266,7 @@ fn apply_single_delta(
     Ok(())
 }
 
-/// Apply a single value change at a JSON path inside the state object.
+/// note: apply a single value change at a JSON path inside the state object.
 ///
 /// `state_key` is the top-level key inside the state map (e.g. `"character"`).
 /// `rest_path` is the remaining path segments inside the `state_key` object.
@@ -329,7 +329,7 @@ pub fn apply_json_delta(
     Ok(())
 }
 
-/// Apply a single operation to a field in the state map.
+/// why: apply a single operation to a field in the state map.
 ///
 /// Game state values (HP, ATK, DEF) are well within `i64`/`f64` safe
 /// ranges; the precision-loss warnings from the casts below are

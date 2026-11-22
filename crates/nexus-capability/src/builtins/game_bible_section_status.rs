@@ -28,6 +28,7 @@
 //! - `updated`: whether the frontmatter was changed
 //! - `new_section_status`: the new status value
 //! - `section_path`: the full path to the updated file
+// note: the `V1.56` / `R-V155P2-F002` tags trace this writer to the fix-wave that introduced it.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
@@ -39,7 +40,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
-/// Input for `game_bible.section_status.update`.
+/// note: input for `game_bible.section_status.update`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct SectionStatusInput {
@@ -52,7 +53,7 @@ struct SectionStatusInput {
     works_root: Option<String>,
 }
 
-/// Output from `game_bible.section_status.update`.
+/// note: output from `game_bible.section_status.update`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct SectionStatusOutput {
@@ -61,14 +62,13 @@ struct SectionStatusOutput {
     section_path: String,
 }
 
-/// Valid transition states.
+/// note: valid transition states.
 const VALID_STATUSES: &[&str] = &["draft", "reviewed", "accepted"];
 
-/// Validate that `from → to` is a legal transition.
+/// note: validate that `from → to` is a legal transition.
 ///
 /// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
 pub fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityError> {
-    // Validate status values are known
     if !VALID_STATUSES.contains(&from) {
         return Err(CapabilityError::InputInvalid(format!(
             "unknown from_status '{from}'; allowed: draft, reviewed, accepted"
@@ -102,7 +102,7 @@ pub fn validate_transition(from: &str, to: &str) -> Result<&'static str, Capabil
     }
 }
 
-/// Parse YAML frontmatter from a file's content.
+/// note: parse YAML frontmatter from a file's content.
 ///
 /// Returns the frontmatter lines (between `---` delimiters) and the body content.
 ///
@@ -114,7 +114,6 @@ pub fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), C
             "section file has no YAML frontmatter (missing opening ---)".into(),
         ));
     }
-    // Find closing `---`
     let mut end_idx = None;
     for (i, line) in lines.iter().enumerate().skip(1) {
         if line.trim() == "---" {
@@ -132,7 +131,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), C
     Ok((fm_lines, 0, end))
 }
 
-/// Replace a frontmatter field value in the content.
+/// note: replace a frontmatter field value in the content.
 ///
 /// Uses line-based matching: finds `key:` lines and replaces the value.
 /// Preserves all other frontmatter fields and body content.
@@ -185,9 +184,8 @@ pub fn replace_frontmatter_field(
         )));
     }
 
-    // Also update `last_updated` if present
-    // This re-scans the output since the frontmatter loop already passed.
-    // We do a second pass on the result to update last_updated.
+    // why: `last_updated` is updated in a second pass — the frontmatter loop
+    // above already passed it, so this re-scans the output.
     let now = chrono::Utc::now().to_rfc3339();
     let mut final_result = String::with_capacity(result.len());
     let mut in_fm = false;
@@ -222,16 +220,15 @@ pub fn replace_frontmatter_field(
         final_result.push('\n');
     }
 
-    // If last_updated wasn't present, insert it after the last frontmatter field
-    // before closing ---. But this is complex with line-based approach.
-    // For now, if it's not there, we won't add it (preserves exactly what author had).
-    // Future: could add a full YAML parse layer.
-    let _ = lu_replaced; // acceptable if absent — only updated when present
+    // simplify: `last_updated` is only rewritten when the author already declared it,
+    // never inserted, because line-based editing cannot place a new field safely;
+    // upgrade: when a full YAML parse layer replaces this line-based pass.
+    let _ = lu_replaced;
 
     Ok(final_result)
 }
 
-/// `game_bible.section_status.update` capability.
+/// note: `game_bible.section_status.update` capability.
 pub struct GameBibleSectionStatusUpdate {
     works_root: PathBuf,
     executor: Option<Arc<dyn WorkspaceExecutor>>,
@@ -254,7 +251,7 @@ impl GameBibleSectionStatusUpdate {
         }
     }
 
-    /// Attach the workspace executor that carries the Work artifact port.
+    /// note: attach the workspace executor that carries the Work artifact port.
     #[must_use]
     pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
         self.executor = executor;
@@ -285,10 +282,10 @@ impl Capability for GameBibleSectionStatusUpdate {
             CapabilityError::InputInvalid(format!("game_bible.section_status.update input: {e}"))
         })?;
 
-        // Validate work_ref against path traversal
+        // safety: validate work_ref against path traversal.
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
-        // Resolve the one absolute `Works/` tree this run reads and writes.
+        // note: resolve the one absolute `Works/` tree this run reads and writes.
         let works_root = inp
             .works_root
             .as_deref()
@@ -300,7 +297,7 @@ impl Capability for GameBibleSectionStatusUpdate {
         let design_dir = work_dir.join("Design");
         let section_full_path = design_dir.join(&inp.section_path);
 
-        // Guard against path-traversal in section_path (e.g. "../../.ssh/authorized_keys").
+        // safety: reject path traversal in section_path (e.g. "../../.ssh/authorized_keys").
         let design_dir_canonical = std::fs::canonicalize(&design_dir).map_err(|e| {
             CapabilityError::InputInvalid(format!("cannot resolve design dir: {e}"))
         })?;
@@ -325,7 +322,7 @@ impl Capability for GameBibleSectionStatusUpdate {
             "game_bible.section_status.update: start"
         );
 
-        // Read current content (use canonical path to close TOCTOU)
+        // safety: read via the canonical path to close the TOCTOU window.
         let content = std::fs::read_to_string(&section_canonical).map_err(|e| {
             CapabilityError::Internal(format!(
                 "read section file {}: {e}",
@@ -333,17 +330,14 @@ impl Capability for GameBibleSectionStatusUpdate {
             ))
         })?;
 
-        // Parse frontmatter to extract current section_status
         let current_status = extract_frontmatter_field(&content, "section_status")?;
 
-        // Validate transition
         validate_transition(&current_status, &inp.new_status)?;
 
-        // Replace the section_status field
         let updated_content =
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
-        // Commit through the Work artifact port (canonical path → Work-relative child)
+        // note: commit through the Work artifact port (canonical path → Work-relative child).
         let work_dir_canonical = design_dir_canonical
             .parent()
             .ok_or_else(|| CapabilityError::Internal(format!("missing work dir for {work_ref}")))?;
@@ -385,7 +379,7 @@ impl Capability for GameBibleSectionStatusUpdate {
     }
 }
 
-/// Extract a frontmatter field value from YAML frontmatter content.
+/// note: extract a frontmatter field value from YAML frontmatter content.
 ///
 /// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
 pub fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, CapabilityError> {
@@ -415,10 +409,6 @@ pub fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, Cap
     )))
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::super::work_commit::test_support::RecordingExecutor;
@@ -427,8 +417,6 @@ mod tests {
     fn test_executor(works_root: &std::path::Path) -> Arc<dyn WorkspaceExecutor> {
         RecordingExecutor::at(works_root.parent().expect("works root has a parent"))
     }
-
-    // ── Transition validation ──
 
     #[test]
     fn transition_draft_to_reviewed_valid() {
@@ -494,8 +482,6 @@ mod tests {
         assert!(validate_transition("draft", "bogus").is_err());
     }
 
-    // ── Frontmatter extraction ──
-
     #[test]
     fn extract_section_status_draft() {
         let content = "---\nsection_status: draft\nsection_weight: critical\n---\n\n# Overview\n";
@@ -522,8 +508,6 @@ mod tests {
         assert!(extract_frontmatter_field(content, "section_status").is_err());
     }
 
-    // ── Frontmatter replacement ──
-
     #[test]
     fn replace_section_status_draft_to_reviewed() {
         let content = "---\nsection_status: draft\nsection_weight: critical\n---\n\n# Overview\n";
@@ -540,7 +524,6 @@ mod tests {
         let updated = replace_frontmatter_field(content, "section_status", "accepted").unwrap();
         assert!(updated.contains("section_status: accepted"));
         assert!(updated.contains("section_weight: important"));
-        // last_updated should be updated
         assert!(updated.contains("last_updated: "));
     }
 
@@ -550,15 +533,11 @@ mod tests {
         assert!(replace_frontmatter_field(content, "section_status", "reviewed").is_err());
     }
 
-    // ── Capability name ──
-
     #[test]
     fn capability_name_matches() {
         let cap = GameBibleSectionStatusUpdate::new();
         assert_eq!(cap.name(), "game_bible.section_status.update");
     }
-
-    // ── Capability run with temp dir ──
 
     #[tokio::test]
     async fn run_updates_section_status_draft_to_reviewed() {
@@ -713,7 +692,7 @@ mod tests {
         let updated = std::fs::read_to_string(&section_path).unwrap();
         assert!(updated.contains("section_status: reviewed"));
         assert!(updated.contains("section_weight: critical"));
-        assert!(updated.contains("last_updated: ")); // updated with current timestamp
+        assert!(updated.contains("last_updated: "));
         assert!(updated.contains("# Pillars"));
     }
 
@@ -744,7 +723,6 @@ mod tests {
 
         cap.run(input).await.expect("run");
 
-        // No temp file left behind
         assert!(!section_path.with_extension("tmp").exists());
         assert!(section_path.exists());
     }
@@ -760,7 +738,7 @@ mod tests {
         let original = "---\nsection_status: draft\n---\n# Overview\n";
         std::fs::write(&section_path, original).expect("write");
 
-        // The port refuses the write (missing works row).
+        // note: the port refuses the write (missing works row).
         let cap = GameBibleSectionStatusUpdate::with_works_root(works_root.clone())
             .with_workspace_executor(Some(RecordingExecutor::refusing_at(
                 tmp.path(),
@@ -814,7 +792,7 @@ mod tests {
         );
     }
 
-    /// QC1-001 / QC2-F001 for this writer: with the DEFAULT relative `Works`
+    /// note: QC1-001 / QC2-F001 for this writer: with the DEFAULT relative `Works`
     /// root the read, the canonical guard and the port commit must all address
     /// the executor's workspace. The process cwd (the crate checkout) is not
     /// that workspace, so a cwd-relative resolution fails to find the section.

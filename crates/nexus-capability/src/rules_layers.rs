@@ -22,28 +22,28 @@ use nexus_contracts::local::orchestration::WorkArtifactCommitInput;
 
 use crate::{CapabilityError, WorkspaceExecutor};
 
-/// Embedded default scaffold for `Works/<work_ref>/AGENTS.md`.
+/// note: embedded default scaffold for `Works/<work_ref>/AGENTS.md`.
 ///
 /// Compiled into the binary via `include_str!`. The `{{work_ref}}`
 /// placeholder is rendered by [`render_default_agents_md`].
 pub const DEFAULT_AGENTS_MD_SCAFFOLD: &str =
     include_str!("../embedded-rules/work-agents-scaffold.md");
 
-/// Marker line used to locate the `## Accepted rule suggestions` section
+/// note: marker line used to locate the `## Accepted rule suggestions` section
 /// when appending. Kept in sync with [`DEFAULT_AGENTS_MD_SCAFFOLD`].
 const ACCEPTED_SECTION_HEADER: &str = "## Accepted rule suggestions";
 
-/// Outcome of [`append_rule_suggestion`].
+/// note: outcome of [`append_rule_suggestion`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppendOutcome {
-    /// A new entry was appended to the file.
+    /// note: a new entry was appended to the file.
     Appended,
-    /// The `finding_id` was already present in the file; the file was not
+    /// note: the `finding_id` was already present in the file; the file was not
     /// modified (idempotent).
     AlreadyPresent,
 }
 
-/// Render the default `AGENTS.md` scaffold for a Work.
+/// note: render the default `AGENTS.md` scaffold for a Work.
 ///
 /// Replaces the `{{work_ref}}` placeholder in the embedded template.
 #[must_use]
@@ -51,7 +51,7 @@ pub fn render_default_agents_md(work_ref: &str) -> String {
     DEFAULT_AGENTS_MD_SCAFFOLD.replace("{{work_ref}}", work_ref)
 }
 
-/// Render a unified diff previewing what [`reset_agents_md`] would change.
+/// note: render a unified diff previewing what [`reset_agents_md`] would change.
 ///
 /// Returns an empty [`String`] when `current` already equals the default
 /// scaffold for `work_ref` (i.e. reset would be a no-op). The diff uses the
@@ -69,14 +69,14 @@ pub fn diff_agents_md_vs_scaffold(current: &str, work_ref: &str) -> String {
     unified_diff(current, &target)
 }
 
-/// Context lines shown around each change (matches `diff -u` default).
+/// note: context lines shown around each change (matches `diff -u` default).
 const DIFF_CONTEXT: usize = 3;
-/// Edit-op tags for [`build_edit_script`].
+/// note: edit-op tags for [`build_edit_script`].
 const DIFF_EQUAL: u8 = 0;
 const DIFF_DELETE: u8 = 1;
 const DIFF_INSERT: u8 = 2;
 
-/// Standard line-level unified diff between `from` (`---`) and `to` (`+++`).
+/// note: standard line-level unified diff between `from` (`---`) and `to` (`+++`).
 ///
 /// Returns an empty [`String`] when the inputs are line-wise identical.
 /// Dependency-free: a single CLI preview path does not justify pulling in a
@@ -91,13 +91,13 @@ fn unified_diff(from: &str, to: &str) -> String {
     emit_hunks(&script)
 }
 
-/// Build the LCS edit script between two line slices as `(tag, line)` tuples.
+/// note: build the LCS edit script between two line slices as `(tag, line)` tuples.
 ///
 /// Tags: [`DIFF_EQUAL`] (context), [`DIFF_DELETE`] (in `from_lines`),
 /// [`DIFF_INSERT`] (in `to_lines`).
 fn build_edit_script<'a>(from_lines: &'a [&'a str], to_lines: &'a [&'a str]) -> Vec<(u8, &'a str)> {
     let (from_len, to_len) = (from_lines.len(), to_lines.len());
-    // LCS length table: `dp[i][j]` = LCS length of `from_lines[i..]` / `to_lines[j..]`.
+    // note: `dp[i][j]` is the LCS length of `from_lines[i..]` / `to_lines[j..]`.
     let mut dp = vec![vec![0u32; to_len + 1]; from_len + 1];
     for i in (0..from_len).rev() {
         for j in (0..to_len).rev() {
@@ -135,11 +135,11 @@ fn build_edit_script<'a>(from_lines: &'a [&'a str], to_lines: &'a [&'a str]) -> 
     script
 }
 
-/// Group the edit `script` into unified-diff hunks and emit it with
+/// note: group the edit `script` into unified-diff hunks and emit it with
 /// `---` / `+++` headers.
 fn emit_hunks(script: &[(u8, &str)]) -> String {
     let len = script.len();
-    // Prefix counts of from/to lines consumed up to each index → hunk headers.
+    // note: prefix counts of from/to lines consumed up to each index → hunk headers.
     let mut a_prefix = vec![0usize; len + 1];
     let mut b_prefix = vec![0usize; len + 1];
     for (idx, &(tag, _)) in script.iter().enumerate() {
@@ -147,7 +147,7 @@ fn emit_hunks(script: &[(u8, &str)]) -> String {
         b_prefix[idx + 1] = b_prefix[idx] + usize::from(tag != DIFF_DELETE);
     }
 
-    // Dilate each change by `DIFF_CONTEXT` and merge overlapping runs → hunks.
+    // note: dilate each change by `DIFF_CONTEXT` and merge overlapping runs → hunks.
     let mut in_hunk = vec![false; len];
     for (idx, &(tag, _)) in script.iter().enumerate() {
         if tag != DIFF_EQUAL {
@@ -174,7 +174,7 @@ fn emit_hunks(script: &[(u8, &str)]) -> String {
 
         let a_count = a_prefix[hunk_end_excl] - a_prefix[hunk_start];
         let b_count = b_prefix[hunk_end_excl] - b_prefix[hunk_start];
-        // 1-based start; when a side contributes 0 lines, anchor at the line
+        // note: 1-based start; when a side contributes 0 lines, anchor at the line
         // before the hunk per diff convention.
         let a_start = if a_count == 0 {
             a_prefix[hunk_start]
@@ -206,7 +206,7 @@ fn emit_hunks(script: &[(u8, &str)]) -> String {
     out
 }
 
-/// Format a hunk range as `start` (when `count == 1`) or `start,count`,
+/// note: format a hunk range as `start` (when `count == 1`) or `start,count`,
 /// matching the `diff -u` / `git diff` convention.
 fn hunk_range(start: usize, count: usize) -> String {
     if count == 1 {
@@ -216,7 +216,7 @@ fn hunk_range(start: usize, count: usize) -> String {
     }
 }
 
-/// Append an accepted `rule_suggestion` to `Works/<work_ref>/AGENTS.md`.
+/// note: append an accepted `rule_suggestion` to `Works/<work_ref>/AGENTS.md`.
 ///
 /// The entry is written under the `## Accepted rule suggestions` section.
 /// The append is **idempotent on `finding_id`**: if the file already
@@ -262,7 +262,7 @@ pub async fn append_rule_suggestion(
     timestamp_rfc3339: &str,
 ) -> Result<AppendOutcome, CapabilityError> {
     let agents_md_path = agents_md_path(workspace_root, work_ref);
-    // A missing file is seeded from the scaffold; any other read fault is a
+    // note: a missing file is seeded from the scaffold; any other read fault is a
     // real error, not an absent file.
     let existing = match std::fs::read_to_string(&agents_md_path) {
         Ok(text) => text,
@@ -287,7 +287,7 @@ pub async fn append_rule_suggestion(
     Ok(AppendOutcome::Appended)
 }
 
-/// Reset `Works/<work_ref>/AGENTS.md` to the default scaffold.
+/// note: reset `Works/<work_ref>/AGENTS.md` to the default scaffold.
 ///
 /// Overwrites the file with [`render_default_agents_md`] through the Work
 /// artifact port. The Work's chapter artifacts and other files are NOT
@@ -306,15 +306,15 @@ pub async fn reset_agents_md(
     commit_agents_md(executor, workspace_root, work_ref, &scaffold).await
 }
 
-/// The Work-relative artifact name this module owns.
+/// note: the Work-relative artifact name this module owns.
 const AGENTS_MD: &str = "AGENTS.md";
 
-/// The absolute `Works/<work_ref>/AGENTS.md` the read half addresses.
+/// note: the absolute `Works/<work_ref>/AGENTS.md` the read half addresses.
 fn agents_md_path(workspace_root: &Path, work_ref: &str) -> std::path::PathBuf {
     workspace_root.join("Works").join(work_ref).join(AGENTS_MD)
 }
 
-/// The write half: one Work artifact commit under the Work lock.
+/// note: the write half — one Work artifact commit under the Work lock.
 async fn commit_agents_md(
     executor: &dyn WorkspaceExecutor,
     workspace_root: &Path,
@@ -332,16 +332,16 @@ async fn commit_agents_md(
         .map(|_| ())
 }
 
-/// Build the markdown entry for one accepted rule suggestion.
+/// note: build the markdown entry for one accepted rule suggestion.
 fn format_accepted_entry(finding_id: &str, rule_text: &str, timestamp_rfc3339: &str) -> String {
-    // Trim and normalize newlines so the entry renders as a tight block.
+    // note: trim and normalize newlines so the entry renders as a tight block.
     let body = rule_text.trim();
     format!(
         "<!-- finding_id: {finding_id} -->\n**Accepted {timestamp_rfc3339}** (finding `{finding_id}`)\n\n{body}\n",
     )
 }
 
-/// Ensure the `## Accepted rule suggestions` section exists in `content`.
+/// note: ensure the `## Accepted rule suggestions` section exists in `content`.
 ///
 /// Returns the content with the section header appended if it was missing.
 fn ensure_accepted_section(content: &str) -> String {
@@ -354,16 +354,12 @@ fn ensure_accepted_section(content: &str) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::work_commit::test_support::RecordingExecutor;
 
-    /// A temp workspace root plus the recording executor that commits where the
+    /// note: a temp workspace root plus the recording executor that commits where the
     /// real port would: `<root>/Works/<work_ref>/AGENTS.md`.
     fn workspace() -> (tempfile::TempDir, std::sync::Arc<RecordingExecutor>) {
         (
@@ -381,7 +377,7 @@ mod tests {
         let rendered = render_default_agents_md("neon-river");
         assert!(rendered.contains("# AGENTS.md — neon-river"));
         assert!(rendered.contains("## Accepted rule suggestions"));
-        // Template placeholder must be fully replaced.
+        // note: the template placeholder must be fully replaced.
         assert!(!rendered.contains("{{work_ref}}"));
     }
 
@@ -434,7 +430,7 @@ mod tests {
 
         assert_eq!(out2, AppendOutcome::AlreadyPresent);
         let content = std::fs::read_to_string(agents_md(root.path(), "neon-river")).expect("read");
-        // The marker appears exactly once.
+        // note: the marker appears exactly once.
         assert_eq!(
             content
                 .matches(&format!("<!-- finding_id: {fid} -->"))
@@ -461,7 +457,7 @@ mod tests {
         assert_eq!(out, AppendOutcome::Appended);
         let content =
             std::fs::read_to_string(agents_md(root.path(), "ghost-novel")).expect("seeded file");
-        // Seeded header carries the work_ref.
+        // note: seeded header carries the work_ref.
         assert!(content.contains("# AGENTS.md — ghost-novel"));
         assert!(content.contains("## Accepted rule suggestions"));
         assert!(content.contains("<!-- finding_id: fnd_seed -->"));
@@ -471,7 +467,7 @@ mod tests {
     async fn rules_layers_append_adds_section_when_missing() {
         let (root, exec) = workspace();
         let path = agents_md(root.path(), "legacy");
-        // Pre-existing file without the accepted section (e.g. legacy file).
+        // note: pre-existing file without the accepted section (e.g. legacy file).
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(&path, "# AGENTS.md — legacy\n\n- POV: first\n").expect("write");
 
@@ -490,7 +486,7 @@ mod tests {
         let content = std::fs::read_to_string(&path).expect("read");
         assert!(content.contains("## Accepted rule suggestions"));
         assert!(content.contains("<!-- finding_id: fnd_legacy -->"));
-        // Original content preserved.
+        // note: original content preserved.
         assert!(content.contains("POV: first"));
     }
 
@@ -498,7 +494,7 @@ mod tests {
     async fn rules_layers_reset_restores_default_scaffold() {
         let (root, exec) = workspace();
         let path = agents_md(root.path(), "neon-river");
-        // File with user edits + accepted entries.
+        // note: file with user edits + accepted entries.
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(
             &path,
@@ -538,7 +534,7 @@ mod tests {
 
     #[tokio::test]
     async fn rules_layers_write_is_refused_when_the_port_refuses() {
-        // A Work with no `works` row is refused by the port; nothing lands.
+        // note: a Work with no `works` row is refused by the port; nothing lands.
         let (root, _) = workspace();
         let err = append_rule_suggestion(
             RecordingExecutor::refusing("AGENTS.md").as_ref(),
@@ -554,8 +550,6 @@ mod tests {
         assert!(!agents_md(root.path(), "orphan").exists());
     }
 
-    // ── V1.48 P2-fix1: diff_agents_md_vs_scaffold ──────────────────────
-
     #[test]
     fn rules_layers_diff_empty_when_current_equals_scaffold() {
         let scaffold = render_default_agents_md("neon-river");
@@ -568,7 +562,7 @@ mod tests {
 
     #[test]
     fn rules_layers_diff_marks_accepted_entries_as_removed() {
-        // Current file = scaffold + one accepted entry (what `findings accept` produced).
+        // note: current file = scaffold + one accepted entry (what `findings accept` produced).
         let mut current = render_default_agents_md("neon-river");
         current.push_str("\n<!-- finding_id: fnd_01HMV -->\n");
         current.push_str("**Accepted 2026-06-16T12:00:00Z** (finding `fnd_01HMV`)\n");
@@ -576,7 +570,7 @@ mod tests {
 
         let diff = diff_agents_md_vs_scaffold(&current, "neon-river");
 
-        // The accepted entry lines are in `current` but NOT the scaffold, so
+        // note: the accepted entry lines are in `current` but NOT the scaffold, so
         // reset would discard them → they must appear as `-` (removed) lines.
         assert!(
             diff.contains("-<!-- finding_id: fnd_01HMV -->"),
@@ -586,7 +580,7 @@ mod tests {
             diff.contains("-Prefer first-person POV in dialogue scenes."),
             "diff:\n{diff}"
         );
-        // The scaffold lines are unchanged context, not added.
+        // note: the scaffold lines are unchanged context, not added.
         assert!(
             !diff.contains("+Prefer first-person POV"),
             "added (+) lines should not include current-only content"
@@ -595,7 +589,7 @@ mod tests {
 
     #[test]
     fn rules_layers_diff_has_unified_format_headers() {
-        // A file missing some scaffold lines → those lines appear as `+`.
+        // note: a file missing some scaffold lines → those lines appear as `+`.
         let current = "# AGENTS.md — neon-river\n\n- POV: first\n";
         let diff = diff_agents_md_vs_scaffold(current, "neon-river");
 
@@ -604,7 +598,7 @@ mod tests {
             diff.contains("@@ -"),
             "expected at least one @@ hunk header:\n{diff}"
         );
-        // Scaffold-only content (e.g. the accepted-section header) is added.
+        // note: scaffold-only content (e.g. the accepted-section header) is added.
         assert!(
             diff.contains("+## Accepted rule suggestions") || diff.contains("+## Style"),
             "expected an added scaffold section header; diff:\n{diff}"

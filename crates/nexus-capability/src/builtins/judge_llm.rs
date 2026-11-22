@@ -8,28 +8,29 @@
 //!    policy through the Host plane, and parses the agent response as GO/NOGO.
 //! 2. **Standalone (no executor)**: returns `WorkerUnavailable` — no heuristic
 //!    matching on input text.
+// why: standalone mode must not guess a verdict from input text.
 
 use crate::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// Judge response verdicts that count as "go" (first-token match only).
+/// note: judge response verdicts that count as "go" (first-token match only).
 const GO_WORDS: &[&str] = &["go", "continue", "yes", "proceed", "pass", "approve", "ok"];
 
-/// Judge response verdicts that count as "no-go" (first-token match only).
+/// note: judge response verdicts that count as "no-go" (first-token match only).
 const NOGO_WORDS: &[&str] = &[
     "nogo", "stop", "no", "revise", "wait", "reject", "deny", "fail",
 ];
 
-/// The `judge.llm` capability.
+/// note: the `judge.llm` capability.
 ///
 /// Holds an optional [`PromptExecutor`] for agent calls. When present, sends
 /// the evaluation prompt via the Host plane. When absent, returns
 /// [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct JudgeLlm {
     executor: Option<Arc<dyn PromptExecutor>>,
-    /// Per-run coordinator cancellation tokens (A1): the executor listens to
+    /// why: per-run coordinator cancellation tokens (A1); the executor listens to
     /// the token for the current run concurrently with the Host stream.
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
@@ -37,7 +38,7 @@ pub struct JudgeLlm {
 }
 
 impl JudgeLlm {
-    /// Create in standalone/test mode (no prompt executor).
+    /// note: create in standalone/test mode (no prompt executor).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -48,7 +49,7 @@ impl JudgeLlm {
         }
     }
 
-    /// Create with a prompt executor for production Host dispatch.
+    /// note: create with a prompt executor for production Host dispatch.
     #[must_use]
     pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
@@ -59,7 +60,7 @@ impl JudgeLlm {
         }
     }
 
-    /// Builder-style per-run coordinator cancellation tokens (A1).
+    /// note: builder-style per-run coordinator cancellation tokens (A1).
     #[must_use]
     pub fn with_session_cancels(
         mut self,
@@ -86,7 +87,7 @@ impl Capability for JudgeLlm {
         "judge.llm"
     }
 
-    // Identity fields ("_creator_id", "_session_id") are injected by
+    // safety: identity fields ("_creator_id", "_session_id") are injected by
     // orchestration context, NOT accepted from user input (security:
     // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
@@ -111,7 +112,7 @@ impl Capability for JudgeLlm {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
 
-        // Security: only accept context-injected identity fields (prefixed _).
+        // safety: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR). See SEC-V131-01.
         //
@@ -134,14 +135,13 @@ impl Capability for JudgeLlm {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // A1: resolve the coordinator cancellation token for this run from
+        // why: A1 — resolve the coordinator cancellation token for this run from
         // the shared per-run map. FAIL-CLOSED: a run with no registered
         // token refuses with `CancellationUnavailable` — a fresh token would
         // be uncancellable by any coordinator (never mint one here). The run
         // admission path (engine start/spawn/recovery) registers the token.
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
-        // Build judge prompt with GO/NOGO framing.
         let judge_prompt = format!(
             "You are a judge. Evaluate the following and respond with GO or NOGO.\n\
          Respond with ONLY 'GO' or 'NOGO' followed by a brief reason.\n\n\
@@ -168,7 +168,7 @@ impl Capability for JudgeLlm {
     }
 }
 
-/// Parse a judge LLM response text into a boolean verdict.
+/// note: parse a judge LLM response text into a boolean verdict.
 ///
 /// Uses **first-token matching**: extracts the first whitespace/punctuation-
 /// delimited token from the trimmed, lowercased response and checks it
@@ -181,7 +181,6 @@ impl Capability for JudgeLlm {
 pub fn parse_judge_response(text: &str) -> (bool, String) {
     let lower = text.trim().to_lowercase();
 
-    // Extract the first token (delimited by whitespace or punctuation).
     let first_token = lower
         .split(|c: char| {
             c.is_whitespace() || c == '.' || c == '!' || c == ',' || c == ';' || c == ':'
@@ -190,7 +189,7 @@ pub fn parse_judge_response(text: &str) -> (bool, String) {
         .unwrap_or("")
         .trim();
 
-    // Check NOGO first to avoid "nogo" matching "go".
+    // why: checking NOGO first avoids "nogo" matching "go".
     for word in NOGO_WORDS {
         if first_token == *word {
             return (
@@ -228,7 +227,7 @@ pub fn parse_judge_response(text: &str) -> (bool, String) {
 mod tests {
     use super::*;
 
-    /// Shared cancellation map with coordinator tokens registered for the
+    /// why: shared cancellation map with coordinator tokens registered for the
     /// given run ids (fail-closed contract; production registers at run
     /// admission).
     fn cancels_with(
@@ -271,7 +270,7 @@ mod tests {
     fn parse_nogo_response() {
         assert!(!parse_judge_response("No, wait for more input").0);
         assert!(!parse_judge_response("Stop here").0);
-        // R-V133P3-01: "nogo" must NOT match "go" — first-token parse.
+        // note: R-V133P3-01 — "nogo" must NOT match "go"; first-token parse.
         assert!(!parse_judge_response("NOGO because of missing data").0);
         assert!(!parse_judge_response("nogo").0);
         assert!(!parse_judge_response("I think we should NOGO this.").0);
@@ -309,7 +308,7 @@ mod tests {
         assert!(!parse_judge_response("nogo").0);
     }
 
-    // ── J2: Standalone mode returns WorkerUnavailable ─────────────────
+    // note: J2 — standalone mode returns WorkerUnavailable.
 
     #[tokio::test]
     async fn judge_llm_standalone_returns_unavailable() {
@@ -324,9 +323,9 @@ mod tests {
         );
     }
 
-    // ── J2: With mock executor — GO response ──────────────────────────
+    // note: J2 — with mock executor, GO response.
 
-    /// Mock executor that records the `run_id` it was called with,
+    /// note: mock executor that records the `run_id` it was called with,
     /// enabling identity-spoof regression tests.
     struct MockGoExecutor {
         captured_run_id: std::sync::Mutex<String>,
@@ -365,7 +364,7 @@ mod tests {
         assert!(result["reason"].as_str().unwrap().contains("go"));
     }
 
-    // ── J2: With mock executor — NOGO response ────────────────────────
+    // note: J2 — with mock executor, NOGO response.
 
     struct MockNogoExecutor;
 
@@ -402,9 +401,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── SEC-V131-01: Identity boundary regression tests ────────────────
+    // note: SEC-V131-01 — identity boundary regression tests.
 
-    /// Proves that raw `creator_id` / `session_id` from preset args are
+    /// why: proves that raw `creator_id` / `session_id` from preset args are
     /// NOT forwarded to the executor — only context-injected `_session_id`
     /// is trusted as the run identity. M-002: with no trusted `_session_id`
     /// the capability now fails closed (Forbidden) instead of falling back
@@ -416,7 +415,7 @@ mod tests {
             .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "prompt": "evaluate",
-            // Spoof attempt: raw preset args should be ignored
+            // why: spoof attempt — raw preset args should be ignored
             "creator_id": "spoofed_creator",
             "session_id": "spoofed_session"
         });
@@ -425,7 +424,6 @@ mod tests {
             result.is_err(),
             "SEC-V131-01/M-002: raw session_id must never be trusted; missing trusted _session_id must refuse"
         );
-        // The executor must never have been reached with a spoofed id.
         assert_eq!(
             *executor.captured_run_id.lock().expect("capture lock"),
             "",
@@ -433,7 +431,7 @@ mod tests {
         );
     }
 
-    /// Proves context-injected `_session_id` is used as the run identity.
+    /// note: proves context-injected `_session_id` is used as the run identity.
     #[tokio::test]
     async fn judge_llm_context_injected_identity_trusted() {
         let executor = Arc::new(MockGoExecutor::new());
@@ -452,7 +450,7 @@ mod tests {
         );
     }
 
-    /// Proves context-injected identity wins even when raw args are present.
+    /// note: proves context-injected identity wins even when raw args are present.
     #[tokio::test]
     async fn judge_llm_context_identity_overrides_raw_spoof() {
         let executor = Arc::new(MockGoExecutor::new());

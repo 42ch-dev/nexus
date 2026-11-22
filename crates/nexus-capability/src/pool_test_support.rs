@@ -2,10 +2,11 @@
 //!
 //! Each call owns its tempdir and pool: tests never share a database or a
 //! static pool, and a dropped `TempDir` removes the files with it.
+// why: per-test isolation — no shared static pool ever leaks between tests.
 
 use sqlx::SqlitePool;
 
-/// Open a guarded engine pool in its own tempdir.
+/// note: open a guarded engine pool in its own tempdir.
 ///
 /// The tempdir is returned **first** so `let (_dir, pool) = …` declares the
 /// pool second and therefore drops it first: on Windows a directory cannot be

@@ -7,6 +7,7 @@
 //!
 //! The probe is fail-closed: a compiler that cannot answer means the build
 //! stops, never that the target is assumed absent.
+// why: gating at build time keeps embedded-module tests off toolchains without the target.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,7 +15,7 @@ use std::process::Command;
 const TARGET: &str = "wasm32-unknown-unknown";
 
 fn main() {
-    // Declare the custom cfg flag early so rustc does not warn about
+    // why: declare the custom cfg flag early so rustc does not warn about
     // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
 
@@ -22,11 +23,11 @@ fn main() {
     let sysroot = sysroot_of(&rustc);
     let rustlib = sysroot.join("lib/rustlib");
 
-    // Installing or removing the target changes this directory, not a package
+    // why: installing or removing the target changes this directory, not a package
     // file, so a warm build cache would otherwise keep a stale cfg. A missing
     // directory makes Cargo rerun every build, which is the safe direction.
     println!("cargo:rerun-if-changed={}", rustlib.display());
-    // RUSTC selects which sysroot is read above, so a different compiler must
+    // why: RUSTC selects which sysroot is read above, so a different compiler must
     // be re-probed even when its sysroot directory looks unchanged.
     println!("cargo:rerun-if-env-changed=RUSTC");
 
@@ -42,7 +43,7 @@ fn main() {
     println!("cargo:rustc-cfg=nexus_no_wasm_target");
 }
 
-/// True when the wasm target's std directory is present.
+/// note: true when the wasm target's std directory is present.
 ///
 /// Only `NotFound` means "not installed". Any other stat failure, or an entry
 /// that is not a directory, is an unanswerable state and panics — `is_dir()`
@@ -67,7 +68,7 @@ fn wasm_target_installed(target_dir: &Path) -> bool {
     }
 }
 
-/// The sysroot of the compiler Cargo is actually driving (RUSTC, not PATH).
+/// note: the sysroot of the compiler Cargo is actually driving (RUSTC, not PATH).
 ///
 /// `rustc --print sysroot --target <t>` exits 0 even for a target that is not
 /// installed, so presence is decided from the sysroot's `lib/rustlib/<target>`

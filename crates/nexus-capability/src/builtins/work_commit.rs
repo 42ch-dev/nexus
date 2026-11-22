@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 
 use crate::{CapabilityError, WorkspaceExecutor};
 
-/// The injected executor, or the house "provider not wired" refusal.
+/// note: the injected executor, or the house "provider not wired" refusal.
 ///
 /// # Errors
 /// [`CapabilityError::WorkerUnavailable`] when the registry arm attached no
@@ -26,7 +26,7 @@ pub fn require_executor(
         .ok_or(CapabilityError::WorkerUnavailable)
 }
 
-/// The absolute `Works/` directory a scaffold run writes into, plus the
+/// note: the absolute `Works/` directory a scaffold run writes into, plus the
 /// workspace root the port rebuilds it under.
 ///
 /// Resolved once per run from the executor's own workspace root — never the
@@ -45,7 +45,7 @@ pub fn resolve_works_dirs(
 ) -> Result<(PathBuf, PathBuf), CapabilityError> {
     let workspace_root = executor.workspace_root()?;
     let works_dir = workspace_root.join("Works");
-    // The port always rebuilds `<workspace_root>/Works/<ref>/<child>` and the
+    // why: the port always rebuilds `<workspace_root>/Works/<ref>/<child>` and the
     // real executor refuses any other parent only at commit — after the claim
     // and the mkdir. Confining the root here keeps a foreign or nested tree
     // from being mutated at all.
@@ -59,7 +59,7 @@ pub fn resolve_works_dirs(
     Ok((workspace_root, works_dir))
 }
 
-/// The `work_ref` this run claimed on the works row, kept so a failed or
+/// note: the `work_ref` this run claimed on the works row, kept so a failed or
 /// cancelled scaffold can put the prior value back.
 ///
 /// The claim stays armed until the scaffold decides: [`Self::disarm`] keeps
@@ -79,18 +79,18 @@ struct PriorWorkRef {
 }
 
 impl WorkRefClaim {
-    /// The ref this run must use for every `Works/<ref>/` read and port commit.
+    /// note: the ref this run must use for every `Works/<ref>/` read and port commit.
     #[must_use]
     pub fn effective(&self) -> &str {
         &self.effective
     }
 
-    /// Keep the claimed ref: the scaffold finished, so the guard must not fire.
+    /// note: keep the claimed ref: the scaffold finished, so the guard must not fire.
     pub fn disarm(mut self) {
         self.prior = None;
     }
 
-    /// Put the prior `work_ref` back after an unsuccessful scaffold.
+    /// note: put the prior `work_ref` back after an unsuccessful scaffold.
     ///
     /// The update matches only while the row still holds the ref this run
     /// claimed, so a concurrent writer's ref is never clobbered. The guard
@@ -120,6 +120,7 @@ impl Drop for WorkRefClaim {
         // run from here. Drop cannot await; the runtime finishes the update.
         // shortcut: needs a live runtime — a cancellation while the runtime is
         // shutting down can miss the revert.
+        // upgrade: when the guard can run the revert without a live runtime.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 if let Err(err) = restore_prior(&pool, &prior).await {
@@ -154,7 +155,7 @@ async fn restore_prior(pool: &SqlitePool, prior: &PriorWorkRef) -> Result<(), Ca
     Ok(())
 }
 
-/// Claim `work_ref` for the Work so the port can resolve `Works/<work_ref>/`.
+/// note: claim `work_ref` for the Work so the port can resolve `Works/<work_ref>/`.
 ///
 /// The port resolves the Work through the works row, so a first scaffold has
 /// to publish its ref before the first byte. This publishes only that minimum
@@ -176,7 +177,7 @@ pub async fn claim_work_ref(
     requested: Option<&str>,
 ) -> Result<WorkRefClaim, CapabilityError> {
     let Some(pool) = pool else {
-        // No row to read: a partial re-init that excludes `work_ref` cannot
+        // why: no row to read, so a partial re-init that excludes `work_ref` cannot
         // resolve the stored ref, so refuse instead of guessing.
         let Some(work_ref) = requested else {
             return Err(CapabilityError::InputInvalid(
@@ -244,7 +245,7 @@ pub async fn claim_work_ref(
     })
 }
 
-/// Publish a scaffold's final profile + ref after its files landed.
+/// note: publish a scaffold's final profile + ref after its files landed.
 ///
 /// # Errors
 /// [`CapabilityError::Forbidden`] when the row is missing or not owned by
@@ -277,7 +278,7 @@ pub async fn publish_work_identity(
     Ok(())
 }
 
-/// Commit one Work artifact byte write (`<workspace_root>/Works/<work_ref>/<rel_child>`).
+/// note: commit one Work artifact byte write (`<workspace_root>/Works/<work_ref>/<rel_child>`).
 ///
 /// # Errors
 /// Propagates the executor's refusal: [`CapabilityError::Forbidden`] for a
@@ -301,7 +302,7 @@ pub async fn commit_work_bytes(
         .map(|_| ())
 }
 
-/// Recording test executor for the builtin modules' own tests.
+/// note: recording test executor for the builtin modules' own tests.
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod test_support {
     use std::path::Path;
@@ -314,7 +315,7 @@ pub mod test_support {
 
     use crate::{CapabilityError, WorkspaceExecutor};
 
-    /// Writes each artifact where the core port would put it and records the
+    /// note: writes each artifact where the core port would put it and records the
     /// commit; `fail_on` simulates the port's missing-work-row refusal.
     #[derive(Default)]
     pub struct RecordingExecutor {
@@ -325,14 +326,14 @@ pub mod test_support {
     }
 
     impl RecordingExecutor {
-        /// A recorder with no bound workspace: `commit_work_artifact` still
+        /// note: a recorder with no bound workspace: `commit_work_artifact` still
         /// writes, but a caller that must resolve `Works/` refuses first.
         #[must_use]
         pub fn new() -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self::default())
         }
 
-        /// A recorder bound to `workspace_root` — the root a scaffold run
+        /// note: a recorder bound to `workspace_root` — the root a scaffold run
         /// resolves its `Works/` bookkeeping against.
         pub fn at(workspace_root: impl Into<std::path::PathBuf>) -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self {
@@ -341,7 +342,7 @@ pub mod test_support {
             })
         }
 
-        /// A recorder whose commit of `rel_child` refuses like the port does
+        /// note: a recorder whose commit of `rel_child` refuses like the port does
         /// for a Work with no `works` row.
         #[must_use]
         pub fn refusing(rel_child: &'static str) -> std::sync::Arc<Self> {
@@ -353,7 +354,7 @@ pub mod test_support {
             })
         }
 
-        /// [`Self::refusing`] over a bound workspace root.
+        /// note: [`Self::refusing`] over a bound workspace root.
         pub fn refusing_at(
             workspace_root: impl Into<std::path::PathBuf>,
             rel_child: &'static str,
@@ -366,7 +367,7 @@ pub mod test_support {
             })
         }
 
-        /// [`Self::at`] whose commits signal [`Self::reached`] and then never
+        /// note: [`Self::at`] whose commits signal [`Self::reached`] and then never
         /// finish — a scaffold suspended mid-write, ready to be cancelled.
         pub fn hanging_at(workspace_root: impl Into<std::path::PathBuf>) -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self {
@@ -519,7 +520,7 @@ mod tests {
         .expect("read works row")
     }
 
-    /// One pooled connection, no acquire timeout: holding it keeps any
+    /// note: one pooled connection, no acquire timeout: holding it keeps any
     /// competing statement pending until the test releases it.
     async fn single_connection_pool(dir: &Path, work_ref: Option<&str>) -> SqlitePool {
         let guarded = nexus_local_db::writer_protocol::init_engine_pool(
@@ -576,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn a_late_novel_transaction_failure_restores_the_prior_ref() {
         let tmp = tempfile::tempdir().expect("tmpdir");
-        // The works row names a creator with no `creators` row, so
+        // why: the works row names a creator with no `creators` row, so
         // `create_world_tx` fails inside the chapters/world transaction AFTER
         // the scaffold files landed.
         let pool = pool_with_work(tmp.path(), Some("prior-ref"), None).await;
@@ -727,13 +728,13 @@ mod tests {
             }))
             .await
         });
-        // The claim is published before the first commit, so reaching the
+        // why: the claim is published before the first commit, so reaching the
         // hanging commit proves the claim is set when the future is dropped.
         reached.notified().await;
         run.abort();
         assert!(run.await.is_err(), "the scaffold run was cancelled");
 
-        // The drop guard restores on its own task; give it turns to land.
+        // note: the drop guard restores on its own task; give it turns to land.
         let mut restored = false;
         for _ in 0..200 {
             if stored_identity(&pool).await.0.as_deref() == Some("prior-ref") {
@@ -764,7 +765,7 @@ mod tests {
             Some("claimed-ref")
         );
 
-        // Holding the only pooled connection keeps the compensating UPDATE
+        // why: holding the only pooled connection keeps the compensating UPDATE
         // pending, so the restore below is cancelled mid-await.
         let held = pool.acquire().await.expect("occupy the only connection");
         let started = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -779,7 +780,7 @@ mod tests {
         assert!(restore.await.is_err(), "the restore was cancelled");
         drop(held);
 
-        // The guard restores on its own task; give it turns to land.
+        // note: the guard restores on its own task; give it turns to land.
         let mut restored = false;
         for _ in 0..200 {
             if stored_identity(&pool).await.0.as_deref() == Some("prior-ref") {
@@ -794,7 +795,7 @@ mod tests {
         );
     }
 
-    /// An alternate `Works` tree is refused by the resolver, before the claim
+    /// note: an alternate `Works` tree is refused by the resolver, before the claim
     /// or any directory/byte mutation.
     async fn refuses_works_root(workspace: &Path, works_root: PathBuf) {
         let dir = tempfile::tempdir().expect("tmpdir");

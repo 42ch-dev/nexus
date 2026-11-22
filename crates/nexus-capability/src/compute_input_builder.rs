@@ -1,6 +1,7 @@
 //! Shared `ComputeInput` assembly for WASM compute invocations.
 //!
 //! Extracted from the duplicate logic in `narrative_compute.rs` L216–291.
+// why: one assembly path replaced the two duplicated implementations.
 //! This builder reads the KB store through an **admitted read selection**
 //! (durable §4.1/§4.2), filters by the module manifest's
 //! `required_key_block_types`, loads referenced entries for `*_id`
@@ -30,42 +31,42 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use thiserror::Error;
 
-// Re-export the generated ComputeInput types used in the public API.
+// note: import the generated ComputeInput types used in the public API.
 use nexus_contracts::generated::daemon_api::compute::compute_input::{
     ComputeInput, ComputeInputNarrativeState, ComputeInputWorldRef,
     ComputeInputWorldRefTimelineHeadEventId, ComputeInputWorldRefWorldId,
 };
 
-/// Errors that can occur while assembling a [`ComputeInput`].
+/// note: errors that can occur while assembling a [`ComputeInput`].
 #[derive(Debug, Error)]
 pub enum ComputeBuildError {
-    /// The world has no computable knowledge entries matching the module's
+    /// note: the world has no computable knowledge entries matching the module's
     /// `required_key_block_types`.
     #[error("no computable knowledge entries found in world")]
     NoComputableEntries,
 
-    /// An invocation-parameter `*_id` referenced an entry that belongs to a
+    /// note: an invocation-parameter `*_id` referenced an entry that belongs to a
     /// different world.
     #[error("cross-world reference: {0}")]
     ReferencedEntryNotInWorld(String),
 
-    /// An invocation-parameter `*_id` referenced an entry that does not exist.
+    /// note: an invocation-parameter `*_id` referenced an entry that does not exist.
     #[error("referenced entry not found: {0}")]
     ReferencedEntryNotFound(String),
 
-    /// A database error occurred during KB or narrative-state queries.
+    /// note: a database error occurred during KB or narrative-state queries.
     #[error("store error: {0}")]
     Store(#[from] sqlx::Error),
 
-    /// A narrative gateway error occurred while reading world state.
+    /// note: a narrative gateway error occurred while reading world state.
     #[error("narrative error: {0}")]
     Narrative(#[from] nexus_narrative::NarrativeError),
 
-    /// A KB store error occurred during entry queries.
+    /// note: a KB store error occurred during entry queries.
     #[error("kb store error: {0}")]
     KbStore(String),
 
-    /// An internal invariant was violated (should not occur with valid inputs).
+    /// note: an internal invariant was violated (should not occur with valid inputs).
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -76,7 +77,7 @@ impl From<nexus_knowledge::world_kb::KbStoreError> for ComputeBuildError {
     }
 }
 
-/// Builder that assembles a [`ComputeInput`] envelope for a World-scoped
+/// note: builder that assembles a [`ComputeInput`] envelope for a World-scoped
 /// compute invocation.
 ///
 /// # Example
@@ -96,12 +97,12 @@ pub struct ComputeInputBuilder {
     world_id: String,
     module_manifest: ModuleManifest,
     invocation_params: Map<String, Value>,
-    /// The admitted read selection every KB row of this payload is read
+    /// note: the admitted read selection every KB row of this payload is read
     /// through (durable §4.1). Required, never optional: an absent selection
     /// would have to mean "read the whole World", which is exactly the read
     /// this payload must not perform.
     selection: KnowledgeReadScope,
-    /// Optional branch/head override resolved by the caller (direct lane).
+    /// note: optional branch/head override resolved by the caller (direct lane).
     /// When `None`, [`Self::read_narrative_state`] falls back to the
     /// gateway's world state (world root branch) — preserving the original
     /// behavior for callers that do not resolve a position themselves.
@@ -109,7 +110,7 @@ pub struct ComputeInputBuilder {
 }
 
 impl ComputeInputBuilder {
-    /// Create a new builder bound to an admitted read selection.
+    /// note: create a new builder bound to an admitted read selection.
     #[must_use]
     pub fn new(
         pool: SqlitePool,
@@ -128,7 +129,7 @@ impl ComputeInputBuilder {
         }
     }
 
-    /// Override the narrative position (branch + timeline head) used for the
+    /// note: override the narrative position (branch + timeline head) used for the
     /// `ComputeInput.world_ref`.
     ///
     /// The direct Control Room lane resolves the branch (validated under the
@@ -146,7 +147,7 @@ impl ComputeInputBuilder {
         self
     }
 
-    /// Assemble the [`ComputeInput`] envelope.
+    /// note: assemble the [`ComputeInput`] envelope.
     ///
     /// # Errors
     ///
@@ -193,7 +194,7 @@ impl ComputeInputBuilder {
         })
     }
 
-    /// Query admitted computable entries and filter by the manifest's
+    /// note: query admitted computable entries and filter by the manifest's
     /// `required_key_block_types`.
     ///
     /// The World container must be one of the selection's authorized
@@ -229,7 +230,7 @@ impl ComputeInputBuilder {
         Ok(key_blocks)
     }
 
-    /// Load entries referenced by `*_id` invocation-param keys.
+    /// note: load entries referenced by `*_id` invocation-param keys.
     ///
     /// The referenced ids are read through the admitted selection, so an id
     /// whose row another holder owns privately — or whose container the
@@ -263,7 +264,7 @@ impl ComputeInputBuilder {
             .map(|entry| (entry.entry_id.clone(), entry))
             .collect();
 
-        // Reported per referenced id, in the caller's `*_id` key order, so the
+        // why: reported per referenced id, in the caller's `*_id` key order, so the
         // refusal names exactly the parameter the module asked for.
         for ref_id in &referenced_entry_ids {
             let Some(ref_entry) = admitted.remove(ref_id) else {
@@ -286,7 +287,7 @@ impl ComputeInputBuilder {
         Ok(())
     }
 
-    /// Read narrative state: branch ID (default root) and timeline head.
+    /// note: read narrative state: branch ID (default root) and timeline head.
     async fn read_narrative_state(
         &self,
         gw: &SqliteNarrativeGateway,
@@ -299,7 +300,7 @@ impl ComputeInputBuilder {
         Ok((branch_id, timeline_head_event_id))
     }
 
-    /// Build the `ComputeInputWorldRef` from resolved narrative state.
+    /// note: build the `ComputeInputWorldRef` from resolved narrative state.
     fn build_world_ref(
         &self,
         branch_id: &str,
@@ -328,7 +329,7 @@ impl ComputeInputBuilder {
     }
 }
 
-/// Convert domain `KnowledgeEntryRecord` entries to spoke `KnowledgeEntry` JSON object maps.
+/// note: convert domain `KnowledgeEntryRecord` entries to spoke `KnowledgeEntry` JSON object maps.
 fn convert_entries_to_spoke_json(entries: Vec<KnowledgeEntryRecord>) -> Vec<Map<String, Value>> {
     entries
         .into_iter()

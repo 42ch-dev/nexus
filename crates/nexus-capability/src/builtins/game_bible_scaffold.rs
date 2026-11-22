@@ -1,4 +1,5 @@
 //! `game_bible.project_scaffold` capability.
+// note: rollback is Drop-based; see `ScaffoldTransaction` below.
 //!
 //! V1.54 P1: second non-novel profile scaffold.
 //! Creates `Works/<work_ref>/Design/` with 12 template files, a README.md,
@@ -37,7 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
-/// Input for the game-bible scaffold capability.
+/// note: input for the game-bible scaffold capability.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
@@ -49,7 +50,7 @@ struct ScaffoldInput {
     world_id: Option<String>,
 }
 
-/// Output from the game-bible scaffold capability.
+/// note: output from the game-bible scaffold capability.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldOutput {
@@ -58,7 +59,7 @@ struct ScaffoldOutput {
     dirs_created: Vec<String>,
 }
 
-/// Predefined Design template content with YAML frontmatter.
+/// note: predefined Design template content with YAML frontmatter.
 struct DesignTemplate {
     filename: &'static str,
     section_weight: &'static str,
@@ -148,8 +149,6 @@ fn render_template(tmpl: &DesignTemplate) -> String {
     )
 }
 
-// ── ScaffoldTransaction (V1.55 P3 fix-wave: create/overwrite tracking + atomic writes) ──
-
 struct ScaffoldTransaction {
     created_files: Vec<PathBuf>,
     overwritten_files: Vec<(PathBuf, Vec<u8>)>,
@@ -183,7 +182,7 @@ impl ScaffoldTransaction {
         Ok(true)
     }
 
-    /// Commit a file through the Work artifact port.
+    /// why: commit a file through the Work artifact port.
     ///
     /// If the file already exists, its original content is saved so rollback
     /// can restore it. The bytes land through the injected executor (Work
@@ -275,7 +274,7 @@ impl Drop for ScaffoldTransaction {
     }
 }
 
-/// `game_bible.project_scaffold` capability.
+/// note: `game_bible.project_scaffold` capability.
 pub struct GameBibleProjectScaffold {
     pool: Option<sqlx::SqlitePool>,
     works_root: PathBuf,
@@ -310,7 +309,7 @@ impl GameBibleProjectScaffold {
         }
     }
 
-    /// Attach the workspace executor that carries the Work artifact port.
+    /// note: attach the workspace executor that carries the Work artifact port.
     #[must_use]
     pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
         self.executor = executor;
@@ -344,7 +343,6 @@ impl Capability for GameBibleProjectScaffold {
             CapabilityError::InputInvalid(format!("game_bible.project_scaffold input: {e}"))
         })?;
 
-        // ── FIX (P3 fix-wave): validate work_ref against path traversal ──
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
         info!(
@@ -362,7 +360,7 @@ impl Capability for GameBibleProjectScaffold {
         let logs_design_dir = logs_dir.join("design");
         let logs_review_dir = logs_dir.join("review");
 
-        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // why: the Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. Only the ref is claimed here; the
         // profile lands with the finished scaffold, and a failure restores it.
@@ -377,7 +375,6 @@ impl Capability for GameBibleProjectScaffold {
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
             let mut tx = ScaffoldTransaction::new();
 
-            // Create directory structure (idempotent)
             for dir in [
                 &work_dir,
                 &design_dir,
@@ -388,7 +385,6 @@ impl Capability for GameBibleProjectScaffold {
                 tx.create_dir(dir)?;
             }
 
-            // Write README.md (through the Work artifact port; tracks create vs overwrite)
             let readme_content = format!(
         "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
         title = inp.title,
@@ -403,7 +399,6 @@ impl Capability for GameBibleProjectScaffold {
             )
             .await?;
 
-            // Write 12 Design/*.md template files
             for tmpl in DESIGN_TEMPLATES {
                 let content = render_template(tmpl);
                 let rel_child = Path::new("Design").join(tmpl.filename);
@@ -411,7 +406,7 @@ impl Capability for GameBibleProjectScaffold {
                     .await?;
             }
 
-            // Files landed — publish the profile identity, then commit the guard.
+            // why: files landed — publish the profile identity, then commit the guard.
             publish_work_identity(
                 self.pool.as_ref(),
                 &inp.creator_id,
@@ -476,7 +471,7 @@ mod tests {
     use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
 
-    /// Capability over a temp `Works/` root with a recording executor.
+    /// note: capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> GameBibleProjectScaffold {
         let executor: Arc<dyn WorkspaceExecutor> =
             RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
@@ -527,8 +522,6 @@ mod tests {
         let cap = GameBibleProjectScaffold::new();
         assert_eq!(cap.name(), "game_bible.project_scaffold");
     }
-
-    // ── ScaffoldTransaction tests ──
 
     #[test]
     fn scaffold_transaction_rollback_cleans_up_created_files() {
@@ -584,8 +577,6 @@ mod tests {
         assert!(file_path.exists(), "file should remain after commit");
     }
 
-    // ── Fix 1 regression: pre-existing user content survives rollback ──
-
     #[tokio::test]
     async fn rollback_preserves_pre_existing_user_content() {
         use tempfile::TempDir;
@@ -612,7 +603,6 @@ mod tests {
         .await
         .expect("write scaffold README");
 
-        // Rollback without commit
         drop(tx);
 
         let restored = std::fs::read_to_string(&readme_path).expect("read restored README");
@@ -622,8 +612,6 @@ mod tests {
         );
         assert!(!restored.contains("Overwritten"));
     }
-
-    // ── Fix 2 regression: path traversal rejection ──
 
     #[tokio::test]
     async fn game_bible_scaffold_rejects_path_traversal_in_work_ref() {
@@ -653,8 +641,6 @@ mod tests {
         );
     }
 
-    // ── Fix 4 regression: crash mid-transaction leaves no half-written file ──
-
     #[test]
     fn crash_mid_transaction_leaves_no_half_written_file() {
         use tempfile::TempDir;
@@ -678,8 +664,6 @@ mod tests {
         );
         assert!(!final_path.exists(), "final path must not exist");
     }
-
-    // ── Work artifact port seam ──
 
     #[tokio::test]
     async fn scaffold_writes_every_file_through_the_port() {

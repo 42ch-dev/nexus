@@ -3,12 +3,13 @@
 //! Moved verbatim from `nexus-orchestration/src/quality_loop.rs`; the
 //! review-time hook in `quality_loop` and the extraction builtins consume the
 //! same single implementation — no second resolver exists.
+// why: one resolver keeps the review hook and builtins from drifting apart.
 
 use crate::CapabilityError;
 use nexus_knowledge::world_kb::KnowledgeGovernance;
 use sqlx::SqlitePool;
 
-/// `holder-product.md` §11).
+/// note: see `holder-product.md` §11.
 ///
 /// Resolved from stored state by [`resolve_extraction_target`] before the
 /// model runs, then threaded to the extraction capability as trusted context.
@@ -16,14 +17,14 @@ use sqlx::SqlitePool;
 /// secret shared and cannot name someone else's holder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractionTarget {
-    /// The World container the extracted entries belong to.
+    /// note: the World container the extracted entries belong to.
     pub world_id: String,
-    /// The governance pair the service decided for this target.
+    /// note: the governance pair the service decided for this target.
     pub governance: KnowledgeGovernance,
 }
 
 impl ExtractionTarget {
-    /// The trusted-context JSON field the extraction capability consumes.
+    /// note: the trusted-context JSON field the extraction capability consumes.
     #[must_use]
     pub fn context_value(&self) -> serde_json::Value {
         serde_json::json!({
@@ -33,7 +34,7 @@ impl ExtractionTarget {
         })
     }
 
-    /// Parse a trusted target out of its context value.
+    /// note: parse a trusted target out of its context value.
     ///
     /// Fails closed on an empty container or a malformed native governance
     /// pair, so a caller cannot hand the extractor an invented policy.
@@ -65,8 +66,8 @@ impl ExtractionTarget {
     }
 }
 
-/// Resolve the trusted extraction target of one production run from stored
-/// state (durable §§3, 8).
+/// note: resolve the trusted extraction target of one production run from
+/// stored state (durable §§3, 8).
 ///
 /// Two trusted steps, both outside the model's reach:
 ///

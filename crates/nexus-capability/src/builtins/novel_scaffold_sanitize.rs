@@ -7,18 +7,19 @@
 //! escape the workspace or break path conventions.
 //!
 //! Fixes QC findings C-1, C-4, and W-2.
+// why: these helpers are the only gate between untrusted input and paths/DB rows.
 
 use crate::CapabilityError;
 
-/// Maximum slug length (matches typical filesystem path budget).
+/// note: maximum slug length (matches typical filesystem path budget).
 pub const SLUG_MAX_LEN: usize = 64;
 
-/// Minimum `total_planned_chapters` (worldless or world-bound).
+/// note: minimum `total_planned_chapters` (worldless or world-bound).
 pub const MIN_CHAPTERS: i32 = 1;
-/// Maximum `total_planned_chapters` (matches `init-chapters.md` prompt range).
+/// note: maximum `total_planned_chapters` (matches `init-chapters.md` prompt range).
 pub const MAX_CHAPTERS: i32 = 100;
 
-/// Validate a user-supplied `work_ref` slug.
+/// note: validate a user-supplied `work_ref` slug.
 ///
 /// Accepts kebab-case alphanumeric slugs of length `1..=64`, lowercase only.
 /// Rejects values containing `..`, `/`, `\`, NUL bytes, control characters,
@@ -43,7 +44,7 @@ fn validate_slug_inner(s: &str, label: &str) -> Result<String, CapabilityError> 
             s.len()
         )));
     }
-    // Explicit path-traversal / separator rejection (defense-in-depth on top
+    // why: explicit path-traversal / separator rejection (defense-in-depth on top
     // of the character class check below).
     if s.contains("..") || s.contains('/') || s.contains('\\') || s.contains('\0') {
         return Err(CapabilityError::InputInvalid(format!(
@@ -78,7 +79,7 @@ fn validate_slug_inner(s: &str, label: &str) -> Result<String, CapabilityError> 
     Ok(s.to_string())
 }
 
-/// Validate `total_planned_chapters`.
+/// note: validate `total_planned_chapters`.
 ///
 /// Must be in the inclusive range `1..=100` to match the
 /// `init-chapters.md` prompt advertised range.
@@ -92,7 +93,7 @@ pub fn validate_total_chapters(n: i32) -> Result<u32, CapabilityError> {
             "total_planned_chapters must be {MIN_CHAPTERS}..={MAX_CHAPTERS} (got {n})"
         )));
     }
-    // i32 -> u32 is safe given the bounds above.
+    // safety: i32 -> u32 conversion is safe given the bounds above.
     Ok(u32::try_from(n).expect("bounded 1..=100"))
 }
 

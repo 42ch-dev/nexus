@@ -5,6 +5,7 @@
 //! `works.current_chapter` field when appropriate (T4).
 //!
 //! Design: novel-writing/workflow-profile.md §4.1.2 (truth model), §5.1 (finalize gate).
+// note: without a pool the DB row is skipped and only frontmatter is updated.
 
 use super::work_commit::{commit_work_bytes, require_executor};
 use crate::{Capability, CapabilityError, WorkspaceExecutor};
@@ -15,70 +16,62 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-// ---------------------------------------------------------------------------
-// Input / Output types
-// ---------------------------------------------------------------------------
-
-/// Capability input.
+/// note: capability input.
 #[derive(Debug, Deserialize)]
 struct TransitionInput {
-    /// Work entity ID (wrk_...).
+    /// note: work entity ID (wrk_...).
     work_id: String,
-    /// Creator ID (`ctr_...`), required for `works.patch_work`.
+    /// note: creator ID (`ctr_...`), required for `works.patch_work`.
     #[serde(default)]
     creator_id: Option<String>,
-    /// Chapter number (1-based).
+    /// note: chapter number (1-based).
     chapter: i32,
-    /// Volume number (V1.42: defaults to 1 for single-volume Works).
+    /// note: volume number (V1.42: defaults to 1 for single-volume Works).
     #[serde(default = "default_volume")]
     volume: i32,
-    /// Status to transition FROM (guard; mismatch = error).
+    /// note: status to transition FROM (guard; mismatch = error).
     from_status: String,
-    /// Status to transition TO.
+    /// note: status to transition TO.
     to_status: String,
-    /// Optional actual word count (set on finalize).
+    /// note: optional actual word count (set on finalize).
     #[serde(default)]
     actual_word_count: Option<u32>,
-    /// When true, override a NOGO judge result (audit-logged).
+    /// note: when true, override a NOGO judge result (audit-logged).
     #[serde(default)]
     force: bool,
-    /// Reason for force override (required when force=true).
+    /// note: reason for force override (required when force=true).
     #[serde(default)]
     reason: Option<String>,
-    /// Workspace root path.
+    /// note: workspace root path.
     #[serde(default)]
     workspace_root: Option<String>,
-    /// Work reference (directory name under Works/).
+    /// note: work reference (directory name under Works/).
     #[serde(default)]
     work_ref: Option<String>,
-    /// Body path relative to workspace root (for frontmatter update).
+    /// note: body path relative to workspace root (for frontmatter update).
     #[serde(default)]
     body_path: Option<String>,
 }
 
-/// Default volume number (1 for single-volume Works).
+/// note: default volume number (1 for single-volume Works).
 const fn default_volume() -> i32 {
     1
 }
 
-/// Capability output.
+/// note: capability output.
 #[derive(Debug, serde::Serialize)]
 struct TransitionOutput {
-    /// Previous status.
+    /// note: previous status.
     from_status: String,
-    /// New status.
+    /// note: new status.
     to_status: String,
-    /// Whether the transition was forced.
+    /// note: whether the transition was forced.
     forced: bool,
-    /// Actual word count (if set).
+    /// note: actual word count (if set).
     actual_word_count: Option<u32>,
 }
 
-// ---------------------------------------------------------------------------
-// Capability struct
-// ---------------------------------------------------------------------------
-
-/// Chapter status transition capability.
+/// note: chapter status transition capability.
 ///
 /// In standalone mode (no pool), performs frontmatter-only transitions
 /// (testing / preview). With a pool, also updates the `work_chapters` DB row.
@@ -88,7 +81,7 @@ pub struct NovelChapterTransition {
 }
 
 impl NovelChapterTransition {
-    /// Create a standalone (pool-less) instance.
+    /// note: create a standalone (pool-less) instance.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -97,7 +90,7 @@ impl NovelChapterTransition {
         }
     }
 
-    /// Create a pool-backed instance.
+    /// note: create a pool-backed instance.
     #[must_use]
     pub const fn with_pool(pool: sqlx::SqlitePool) -> Self {
         Self {
@@ -106,7 +99,7 @@ impl NovelChapterTransition {
         }
     }
 
-    /// Attach the workspace executor that carries the Work artifact port.
+    /// note: attach the workspace executor that carries the Work artifact port.
     #[must_use]
     pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
         self.executor = executor;
@@ -141,7 +134,7 @@ impl Capability for NovelChapterTransition {
 
         let forced = inp.force;
 
-        // Audit log for force overrides
+        // note: force overrides are audit-logged.
         if forced {
             let reason = inp.reason.as_deref().unwrap_or("<no reason>");
             warn!(
@@ -152,16 +145,16 @@ impl Capability for NovelChapterTransition {
             );
         }
 
-        // If pool is available, update DB row
+        // note: only a pool-backed instance can update the DB row.
         if let Some(pool) = &self.pool {
             self.transition_db(pool, &inp).await?;
         }
 
-        // If workspace_root + work_ref + body_path available, update frontmatter
+        // note: frontmatter is only updated when all three path fields are present.
         if let (Some(ws_root), Some(work_ref), Some(body_path)) =
             (&inp.workspace_root, &inp.work_ref, &inp.body_path)
         {
-            // The chapter body is a Work artifact: its bytes commit through the
+            // why: the chapter body is a Work artifact — its bytes commit through the
             // injected port, addressed relative to `Works/<work_ref>/`.
             let work_root = Path::new("Works").join(work_ref);
             let rel_child = Path::new(body_path).strip_prefix(&work_root).map_err(|_| {
@@ -215,7 +208,7 @@ impl Capability for NovelChapterTransition {
 }
 
 impl NovelChapterTransition {
-    /// Update the `work_chapters` DB row.
+    /// note: update the `work_chapters` DB row.
     async fn transition_db(
         &self,
         pool: &sqlx::SqlitePool,
@@ -223,7 +216,7 @@ impl NovelChapterTransition {
     ) -> Result<(), CapabilityError> {
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Read current status to validate from_status guard
+        // note: read the current status to validate the from_status guard.
         let current =
             nexus_local_db::work_chapters::get_chapter(pool, &inp.work_id, inp.chapter, inp.volume)
                 .await
@@ -243,7 +236,7 @@ impl NovelChapterTransition {
             )));
         }
 
-        // Determine word_count for finalize transitions
+        // note: word_count is only recorded for finalize transitions.
         let actual_wc = if inp.to_status == "finalized" {
             inp.actual_word_count
         } else {
@@ -262,7 +255,7 @@ impl NovelChapterTransition {
         .await
         .map_err(|e| CapabilityError::Internal(format!("update_status: {e}")))?;
 
-        // T6 (V1.38 P0): current_chapter advances ONLY on finalize.
+        // invariant: T6 (V1.38 P0) — current_chapter advances ONLY on finalize.
         // Per novel-workflow-profile §4.5.2, current_chapter is the latest
         // finalized chapter number — not the chapter being drafted or outlined.
         if inp.to_status == "finalized" {
@@ -274,7 +267,7 @@ impl NovelChapterTransition {
         Ok(())
     }
 
-    /// Advance `works.current_chapter` to the given chapter number.
+    /// note: advance `works.current_chapter` to the given chapter number.
     async fn advance_current_chapter(
         pool: &sqlx::SqlitePool,
         creator_id: &str,
@@ -298,7 +291,7 @@ impl NovelChapterTransition {
         Ok(())
     }
 
-    /// Replace a single YAML frontmatter field value.
+    /// note: replace a single YAML frontmatter field value.
     ///
     /// Simple line-based replacement: finds `key: <old>` between `---` delimiters
     /// and replaces with `key: <new>`.
@@ -324,7 +317,6 @@ impl NovelChapterTransition {
             if in_frontmatter && trimmed.starts_with(key) {
                 if let Some(rest) = trimmed.strip_prefix(key) {
                     if rest.starts_with(':') || rest.starts_with(" :") {
-                        // Replace the value
                         result.push_str(key);
                         result.push_str(": ");
                         result.push_str(new_value);
@@ -341,10 +333,6 @@ impl NovelChapterTransition {
         result
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -448,13 +436,13 @@ Body text here.";
 
         assert_eq!(out["to_status"], "finalized");
 
-        // The bytes went through the Work artifact port.
+        // note: the bytes went through the Work artifact port.
         let commits = executor.commits();
         assert_eq!(commits.len(), 1);
         assert_eq!(commits[0].rel_child, "ch01-intro.md");
         assert!(commits[0].content.contains("status: finalized"));
 
-        // Verify frontmatter was updated
+        // note: verify frontmatter was updated.
         let updated = std::fs::read_to_string(&chapter_path).unwrap();
         assert!(updated.contains("status: finalized"));
         assert!(!updated.contains("status: draft"));
@@ -498,7 +486,7 @@ Body text here.";
     //    chapter currently being outlined or drafted."
     // =======================================================================
 
-    /// Insert a minimal work row with `current_chapter = 0`.
+    /// note: insert a minimal work row with `current_chapter = 0`.
     async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
         // SAFETY: INSERT against works — runtime query.
         sqlx::query(
@@ -517,7 +505,7 @@ Body text here.";
         .unwrap();
     }
 
-    /// Read `works.current_chapter` for a work.
+    /// note: read `works.current_chapter` for a work.
     async fn read_current_chapter(pool: &sqlx::SqlitePool, work_id: &str) -> i32 {
         // SAFETY: SELECT against works — runtime query.
         let row: (i32,) = sqlx::query_as("SELECT current_chapter FROM works WHERE work_id = ?")
@@ -537,7 +525,7 @@ Body text here.";
         let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_457_cc").await;
 
-        // Seed 3 chapters (ch1, ch2, ch3 — all not_started, volume=1).
+        // note: seed 3 chapters (ch1, ch2, ch3 — all not_started, volume=1).
         nexus_local_db::work_chapters::seed_chapters(
             &pool,
             "wrk_457_cc",
@@ -550,14 +538,14 @@ Body text here.";
 
         let cap = NovelChapterTransition::with_pool(pool.clone());
 
-        // Initial state: current_chapter = 0
+        // note: initial state: current_chapter = 0.
         assert_eq!(
             read_current_chapter(&pool, "wrk_457_cc").await,
             0,
             "initial current_chapter should be 0"
         );
 
-        // Transition ch1: not_started → outlined — current_chapter must NOT change.
+        // note: transition ch1 not_started → outlined — current_chapter must NOT change.
         cap.run(serde_json::json!({
             "work_id": "wrk_457_cc",
             "creator_id": "ctr_test",
@@ -574,7 +562,7 @@ Body text here.";
             "§4.5.2 invariant: not_started→outlined must NOT advance current_chapter"
         );
 
-        // Transition ch1: outlined → draft — current_chapter must NOT change.
+        // note: transition ch1 outlined → draft — current_chapter must NOT change.
         cap.run(serde_json::json!({
             "work_id": "wrk_457_cc",
             "creator_id": "ctr_test",
@@ -591,7 +579,7 @@ Body text here.";
             "§4.5.2 invariant: outlined→draft must NOT advance current_chapter"
         );
 
-        // Transition ch1: draft → finalized — current_chapter becomes 1.
+        // note: transition ch1 draft → finalized — current_chapter becomes 1.
         cap.run(serde_json::json!({
             "work_id": "wrk_457_cc",
             "creator_id": "ctr_test",
@@ -609,7 +597,7 @@ Body text here.";
             "§4.5.2 invariant: draft→finalized advances current_chapter to 1"
         );
 
-        // Transition ch3: not_started → draft (skip ch2) — current_chapter
+        // note: transition ch3 not_started → draft (skip ch2) — current_chapter
         // must NOT jump to 3. It stays at 1 because draft is not finalize.
         // This verifies the "never skips ahead" clause.
         cap.run(serde_json::json!({
@@ -628,7 +616,7 @@ Body text here.";
             "§4.5.2 invariant: drafting ch3 must NOT advance current_chapter (only finalize does)"
         );
 
-        // Transition ch2: not_started → finalized (out of order) —
+        // note: transition ch2 not_started → finalized (out of order) —
         // current_chapter becomes 2 (just-finalized chapter number).
         cap.run(serde_json::json!({
             "work_id": "wrk_457_cc",

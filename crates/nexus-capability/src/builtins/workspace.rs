@@ -1,4 +1,5 @@
 //! `workspace.open` and `workspace.commit` capabilities (v1.188 P3).
+// why: without an injected executor both return `WorkerUnavailable` rather than erroring at construction.
 
 use crate::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;

@@ -23,6 +23,7 @@
 //! `sequence_no` 0 on the new branch, recording the parent branch + fork point.
 //! Mirrors the `nexus.reference.refresh` (V1.58 P1) orchestration handler
 //! pattern.
+// why: keep local forking distinct from the platform-only PD-01 community fork.
 
 use crate::builtins::world::ensure_world_owned;
 use crate::{Capability, CapabilityError};
@@ -31,23 +32,23 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// Input for `nexus.fork.create`.
+/// note: input for `nexus.fork.create`.
 #[derive(Debug, Deserialize)]
 struct ForkCreateInput {
     world_id: String,
-    /// Caller creator id (admission gate).
+    /// note: caller creator id (admission gate).
     creator_id: String,
-    /// The branch the new fork diverges from.
+    /// note: the branch the new fork diverges from.
     parent_branch_id: String,
-    /// The event on the parent branch that is the fork point (branch head
+    /// note: the event on the parent branch that is the fork point (branch head
     /// after which the new branch diverges).
     forked_from_event_id: String,
-    /// Optional human-readable label for the new branch.
+    /// note: optional human-readable label for the new branch.
     #[serde(default)]
     label: Option<String>,
 }
 
-/// Create a local timeline fork (new branch within an owned world).
+/// note: create a local timeline fork (new branch within an owned world).
 #[derive(Debug, Clone)]
 pub struct ForkCreate {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -73,7 +74,7 @@ impl Default for ForkCreate {
     }
 }
 
-/// Generate a new fork branch id.
+/// note: generate a new fork branch id.
 fn generate_fork_branch_id() -> String {
     format!("fbk_{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
 }
@@ -105,7 +106,7 @@ impl Capability for ForkCreate {
             "fork.create admitted"
         );
 
-        // Admission gate: creator must own the world.
+        // why: admission gate — creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         // Validate the fork point event exists and belongs to the parent branch.
@@ -127,10 +128,9 @@ impl Capability for ForkCreate {
             )));
         }
 
-        // Allocate the new branch id.
         let new_branch_id = generate_fork_branch_id();
 
-        // Materialize the fork by appending a `fork_created` marker event on the
+        // why: materialize the fork by appending a `fork_created` marker event on the
         // new branch at sequence_no 0. This establishes the branch in storage
         // (lazy forks are otherwise invisible until the first real event).
         let label = parsed.label.clone().unwrap_or_else(|| "fork".to_string());
@@ -138,7 +138,7 @@ impl Capability for ForkCreate {
             "forked from {}/{} ({label})",
             parsed.parent_branch_id, parsed.forked_from_event_id
         );
-        // Carrier B (plan 2026-08-12-v1.162-p1-fork-backend-foundation): the
+        // why: Carrier B (plan 2026-08-12-v1.162-p1-fork-backend-foundation) — the
         // marker is written `status=canon` with structured lineage in
         // `extensions_nexus_json` (`fork_lineage`). Canon status reflects that
         // a fork creation is a committed structural fact and makes the marker
@@ -181,8 +181,6 @@ impl Capability for ForkCreate {
     }
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -218,7 +216,7 @@ mod tests {
             "story_advance",
             Some("Parent event"),
             None,
-            None, // modules_json — test seed writes no modules
+            None, // why: modules_json — test seed writes no modules
         )
         .await
         .unwrap();
@@ -371,7 +369,7 @@ mod tests {
             .unwrap();
         let new_branch = out["branch_id"].as_str().unwrap();
 
-        // The marker must be findable in a canon-filtered read — exactly the
+        // why: the marker must be findable in a canon-filtered read — exactly the
         // SQL the timeline-events route runs (`status` defaults to `canon`,
         // `event_type` exact-match; see `list_timeline_events_page`). This
         // verifies the Narrative-layer read does not choke on the
@@ -401,7 +399,7 @@ mod tests {
             extensions["fork_lineage"]["forked_from_event_id"],
             fork_point
         );
-        // Default-label contract: the caller omitted `label`, so the marker
+        // why: default-label contract — the caller omitted `label`, so the marker
         // must carry the canonical `"fork"` default.
         assert_eq!(extensions["fork_lineage"]["label"], "fork");
     }

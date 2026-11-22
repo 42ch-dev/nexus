@@ -3,6 +3,7 @@
 //! Creates the `Works/<work_ref>/` directory tree, renders templates from
 //! the `novel-project-init` embedded preset, seeds `work_chapters` rows,
 //! and updates the `works` table — all atomically per V1.36 §5.4.
+// note: the tree, chapter rows, and works PATCH commit or roll back together.
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
 use super::work_commit::{claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs};
@@ -17,11 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
-// ---------------------------------------------------------------------------
-// Input / Output types
-// ---------------------------------------------------------------------------
-
-/// Derive a slug from a title: lowercase, spaces → hyphens, strip non-alphanumeric.
+/// note: derive a slug from a title: lowercase, spaces → hyphens, strip non-alphanumeric.
 fn slug_from_title(title: &str) -> String {
     title
         .to_lowercase()
@@ -39,36 +36,36 @@ fn slug_from_title(title: &str) -> String {
         .to_string()
 }
 
-/// Capability input: all fields gathered by the init preset's grill-me.
+/// note: capability input: all fields gathered by the init preset's grill-me.
 #[derive(Debug, Deserialize)]
 struct ScaffoldInput {
-    /// Creator ID owning the Work.
+    /// note: creator ID owning the Work.
     creator_id: String,
-    /// Work ID (wrk_...).
+    /// note: work ID (wrk_...).
     work_id: String,
-    /// Human-readable short reference used in paths (e.g. "my-novel").
+    /// note: human-readable short reference used in paths (e.g. "my-novel").
     work_ref: String,
-    /// Work title.
+    /// note: work title.
     title: String,
-    /// V1.40 mandatory: either `world_id` or `create_world=true` must be set.
+    /// note: V1.40 mandatory: either `world_id` or `create_world=true` must be set.
     /// `world_id` binds to an existing World.
     world_id: Option<String>,
-    /// When `true`, create a new World and bind its `world_id` to the Work.
+    /// note: when `true`, create a new World and bind its `world_id` to the Work.
     /// Mutually exclusive with `world_id` being set.
     /// One of `world_id` or `create_world` is required for V1.40 new Works.
     create_world: Option<bool>,
-    /// Title for the new World (used only when `create_world == true`).
+    /// note: title for the new World (used only when `create_world == true`).
     world_title: Option<String>,
-    /// Slug for the new World (used only when `create_world == true`;
+    /// note: slug for the new World (used only when `create_world == true`;
     /// defaults to title-derived slug).
     world_slug: Option<String>,
-    /// Total number of chapters planned.
+    /// note: total number of chapters planned.
     total_planned_chapters: i32,
-    /// V1.42 multi-volume: number of volumes (default 1).
+    /// note: V1.42 multi-volume: number of volumes (default 1).
     /// When > 1, chapters are distributed evenly across volumes.
     #[serde(default = "default_total_volumes")]
     total_volumes: i32,
-    /// F4 (W-2-qc2): explicit list of `works` columns the user supplied
+    /// note: F4 (W-2-qc2): explicit list of `works` columns the user supplied
     /// in this `grill-me` session. When `None`, all fields are updated
     /// (initial bootstrap). When `Some`, only the listed columns are
     /// updated on re-init — matches spec §5.4.4 "PATCH only updates
@@ -81,29 +78,25 @@ struct ScaffoldInput {
     fields_changed: Option<Vec<String>>,
 }
 
-/// Default volume count (1 for single-volume Works).
+/// note: default volume count (1 for single-volume Works).
 const fn default_total_volumes() -> i32 {
     1
 }
 
-/// Capability output.
+/// note: capability output.
 #[derive(Debug, Serialize)]
 struct ScaffoldOutput {
-    /// Absolute path to the created `Works/<work_ref>/` directory.
+    /// note: absolute path to the created `Works/<work_ref>/` directory.
     scaffold_root: String,
-    /// Number of chapter rows seeded.
+    /// note: number of chapter rows seeded.
     chapters_seeded: usize,
-    /// Files created (relative paths from `scaffold_root`).
+    /// note: files created (relative paths from `scaffold_root`).
     files_created: Vec<String>,
-    /// Directories created (relative paths from `scaffold_root`).
+    /// note: directories created (relative paths from `scaffold_root`).
     dirs_created: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Template rendering helpers
-// ---------------------------------------------------------------------------
-
-/// Lazily-initialized handlebars registry for novel scaffold templates.
+/// note: lazily-initialized handlebars registry for novel scaffold templates.
 ///
 /// F3 (W-1): replaces the previous naive `String::replace` renderer with
 /// `handlebars-rust` to (a) support the broader `{{var}}` / `{{nested.path}}`
@@ -127,7 +120,7 @@ fn scaffold_handlebars() -> &'static handlebars::Handlebars<'static> {
     })
 }
 
-/// Render a novel-scaffold template using handlebars-rust in strict mode.
+/// note: render a novel-scaffold template using handlebars-rust in strict mode.
 ///
 /// `vars` is a flat list of `(key, value)` pairs converted into a JSON
 /// object for rendering. Strict mode causes any unbound `{{key}}` in the
@@ -153,18 +146,14 @@ fn render_template(template: &str, vars: &[(&str, &str)]) -> Result<String, Capa
         .map_err(|e| CapabilityError::Internal(format!("template render: {e}")))
 }
 
-/// Read a template from the embedded preset directory.
+/// note: read a template from the embedded preset directory.
 ///
 /// Uses the embedded-presets `include_dir!` tree compiled into the binary.
 fn load_template(name: &str) -> Option<String> {
     nexus_preset::read_embedded_template("novel-project-init", &format!("templates/{name}"))
 }
 
-// ---------------------------------------------------------------------------
-// Capability struct
-// ---------------------------------------------------------------------------
-
-/// `novel.project_scaffold` capability — creates the full Works tree for a novel.
+/// note: `novel.project_scaffold` capability — creates the full Works tree for a novel.
 ///
 /// This capability is stateless; it receives all context via input and operates
 /// on the filesystem + DB pool provided by the daemon runtime.
@@ -195,7 +184,7 @@ pub struct NovelProjectScaffold {
 }
 
 impl NovelProjectScaffold {
-    /// Create a standalone (no-pool) instance for testing.
+    /// note: create a standalone (no-pool) instance for testing.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -205,7 +194,7 @@ impl NovelProjectScaffold {
         }
     }
 
-    /// Create an instance with a DB pool (default Works root).
+    /// note: create an instance with a DB pool (default Works root).
     #[must_use]
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
         Self {
@@ -215,7 +204,7 @@ impl NovelProjectScaffold {
         }
     }
 
-    /// Create an instance with a DB pool and a custom works root directory.
+    /// note: create an instance with a DB pool and a custom works root directory.
     ///
     /// Used by hermetic integration tests that need to place the scaffold
     /// under a `tempfile::TempDir` rather than the real workspace.
@@ -228,7 +217,7 @@ impl NovelProjectScaffold {
         }
     }
 
-    /// Attach the workspace executor that carries the Work artifact port.
+    /// note: attach the workspace executor that carries the Work artifact port.
     #[must_use]
     pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
         self.executor = executor;
@@ -262,7 +251,7 @@ impl Capability for NovelProjectScaffold {
             CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
         })?;
 
-        // F8 (W-4): structured lifecycle logging for novel.project_scaffold.
+        // why: F8 (W-4) — structured lifecycle logging for novel.project_scaffold.
         info!(
             work_id = %inp.work_id,
             work_ref = %inp.work_ref,
@@ -278,12 +267,12 @@ impl Capability for NovelProjectScaffold {
             );
         }
 
-        // ── F1 — sanitize untrusted grill-me values (C-1, C-4, W-2) ────
+        // why: F1 — sanitize untrusted grill-me values (C-1, C-4, W-2):
         // Reject path-traversal, separators, uppercase, oversize, control
         // characters; bound chapter count to 1..=100 (matches prompt range).
         let work_ref = validate_work_ref(&inp.work_ref)?;
         let total_chapters_bounded = validate_total_chapters(inp.total_planned_chapters)?;
-        // V1.42: validate total_volumes
+        // note: V1.42 — validate total_volumes.
         if inp.total_volumes < 1 {
             return Err(CapabilityError::InputInvalid(
                 "total_volumes must be >= 1".to_string(),
@@ -295,7 +284,7 @@ impl Capability for NovelProjectScaffold {
                 inp.total_volumes, inp.total_planned_chapters
             )));
         }
-        // Re-bind to the validated values so downstream code cannot accidentally
+        // why: re-bind to the validated values so downstream code cannot accidentally
         // use the raw input fields.
         let mut inp = ScaffoldInput {
             creator_id: inp.creator_id,
@@ -310,9 +299,9 @@ impl Capability for NovelProjectScaffold {
             total_volumes: inp.total_volumes,
             fields_changed: inp.fields_changed,
         };
-        let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
+        let _ = total_chapters_bounded; // why: kept for documentation; bounded i32 reused below
 
-        // ── T0.2: V1.40 mandatory world binding ──────────────────────
+        // why: T0.2 — V1.40 mandatory world binding:
         // Every new Work MUST have either an existing `world_id` or
         // `create_world == true`. Worldless Works cannot be created in V1.40.
         if !inp.create_world.unwrap_or(false) && inp.world_id.is_none() {
@@ -325,7 +314,7 @@ impl Capability for NovelProjectScaffold {
             ));
         }
 
-        // ── T3: resolve world_id from create_world or existing binding ──
+        // why: T3 — resolve world_id from create_world or existing binding.
         // When `create_world == true`, invoke `nexus_local_db::create_world_tx`
         // inside the same DB transaction as seed_chapters + patch_work to
         // guarantee atomicity (spec §3.5.1.1: "no partial scaffold").
@@ -360,14 +349,14 @@ impl Capability for NovelProjectScaffold {
             ));
         }
 
-        // For the existing-world-id path, resolve here (outside tx).
+        // why: for the existing-world-id path, resolve here (outside tx).
         let pre_existing_world_id = if should_create_world {
             None
         } else {
             inp.world_id.clone()
         };
 
-        // ── F5 — verify pre-existing world_id FK exists before any side effect ─
+        // why: F5 — verify pre-existing world_id FK exists before any side effect.
         // When using create_world, the FK check happens inside the tx (below).
         // When using a pre-existing world_id, validate now (outside tx) for early
         // rejection, then re-verify inside the tx for atomicity.
@@ -397,7 +386,7 @@ impl Capability for NovelProjectScaffold {
         let executor = require_executor(self.executor.as_ref())?;
         let (workspace_root, works_dir) = resolve_works_dirs(executor, &self.works_root)?;
 
-        // The Work artifact port resolves `Works/<work_ref>` through the works
+        // why: the Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. A partial re-init that does not
         // select `work_ref` keeps the stored value instead of overwriting it;
@@ -414,24 +403,22 @@ impl Capability for NovelProjectScaffold {
             requested_ref,
         )
         .await?;
-        // Address the effective ref everywhere below: on a partial re-init the
+        // why: address the effective ref everywhere below: on a partial re-init the
         // port resolves the Work by the stored ref, not the requested one.
         inp.work_ref = claim.effective().to_string();
         let root = works_dir.join(&inp.work_ref);
 
         let result = async {
 
-        // ── T2a: root directory ────────────────────────────────────────
-        // F2 (C-002, C-2, W-3): all subsequent FS writes register with
+        // why: F2 (C-002, C-2, W-3) — all subsequent FS writes register with
         // `txn`. On any `?` propagation before `txn.commit()`, the Drop
         // impl removes only the files/dirs THIS invocation created.
         let mut txn = ScaffoldTransaction::new(executor.records_work_artifacts());
 
         txn.create_dir(&root)?;
 
-        // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
-            // V1.40: resolved_world_id is always Some (mandatory binding check above).
+            // note: V1.40 — resolved_world_id is always Some (mandatory binding check above).
             // For the create_world path, the world_id is generated inside the
             // DB transaction below; the README renders a placeholder instead.
             let world_section = if should_create_world {
@@ -442,7 +429,6 @@ impl Capability for NovelProjectScaffold {
                 .map(|id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."))
                 .expect("world_id must be resolved at this point — mandatory binding check at line ~284 guarantees Some")
             };
-            // Description placeholder — collected during grill-me; left empty in V1.36.
             let description = format!("Long-term goal and initial creative direction for **{}** (work_ref: `{}`). Fill in as grill-me captures intent.", inp.title, inp.work_ref);
             let total = inp.total_planned_chapters.to_string();
             let rendered = render_template(
@@ -466,23 +452,20 @@ impl Capability for NovelProjectScaffold {
             .await?;
         }
 
-        // ── T2c–T2g: Outlines/ subtree ────────────────────────────────
         let outlines = root.join("Outlines");
         txn.create_dir(&outlines)?;
 
-        // T2d: Outlines/chapters/
         let outlines_chapters = outlines.join("chapters");
         txn.create_dir(&outlines_chapters)?;
 
-        // T2e: volume-outline.md
-        // V1.42: render multi-volume structure when total_volumes > 1
+        // why: V1.42 — render multi-volume structure when total_volumes > 1.
         if inp.total_volumes > 1 {
-            // Generate multi-volume outline per spec §4.5.5
+            // note: generate multi-volume outline per spec §4.5.5.
             let chapters_per_volume = inp.total_planned_chapters / inp.total_volumes;
             let mut volume_entries: Vec<String> = Vec::new();
             let mut ch_start = 1;
             for vol in 1..=inp.total_volumes {
-                // Distribute remainder chapters across early volumes
+                // why: distribute remainder chapters across early volumes.
                 let extra = i32::from(vol <= (inp.total_planned_chapters % inp.total_volumes));
                 let ch_end = ch_start + chapters_per_volume + extra - 1;
                 volume_entries.push(format!(
@@ -526,7 +509,6 @@ impl Capability for NovelProjectScaffold {
             .await?;
         }
 
-        // T2f: foreshadowing.md
         if let Some(tmpl) = load_template("foreshadowing.md") {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
@@ -540,7 +522,6 @@ impl Capability for NovelProjectScaffold {
             .await?;
         }
 
-        // T2g: event-index.md
         if let Some(tmpl) = load_template("event-index.md") {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
@@ -554,15 +535,13 @@ impl Capability for NovelProjectScaffold {
             .await?;
         }
 
-        // ── T2h: Stories/ ──────────────────────────────────────────────
         let stories = root.join("Stories");
         txn.create_dir(&stories)?;
 
-        // ── T2i: Logs/ ─────────────────────────────────────────────────
         let logs = root.join("Logs");
         txn.create_dir(&logs)?;
 
-        // V1.39 P3 (DF-66): Logs subdirectories for write discipline.
+        // why: V1.39 P3 (DF-66) — Logs subdirectories for write discipline.
         for subdir in &["brainstorm", "write", "review", "publish"] {
             let sd = logs.join(subdir);
             txn.create_dir(&sd)?;
@@ -590,8 +569,7 @@ impl Capability for NovelProjectScaffold {
         )
         .await?;
 
-        // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
-        // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
+        // why: V1.37 (R-V136P1-02) — T3 + T4 now run inside a single DB
         // transaction. If either step fails, both roll back atomically.
         // V1.40 (QC2 W-01 / QC3 W-1): create_world is also inside this
         // transaction, so no orphan world rows can remain on failure.
@@ -604,9 +582,7 @@ impl Capability for NovelProjectScaffold {
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("begin transaction: {e}")))?;
 
-            // ── Resolve world_id inside the transaction ──
             let resolved_world_id: String = if should_create_world {
-                // Create a new World inside the transaction
                 let (title, slug) = world_title_for_create
                     .as_ref()
                     .expect("validated above: should_create_world → world_title is Some");
@@ -628,13 +604,13 @@ impl Capability for NovelProjectScaffold {
                 );
                 result.world_id
             } else {
-                // Pre-existing world_id — already validated outside, re-verify inside tx.
+                // why: pre-existing world_id — already validated outside, re-verify inside tx.
                 pre_existing_world_id
                     .clone()
                     .expect("one of should_create_world or pre_existing_world_id must be set")
             };
 
-            // V1.42: use multi-volume seeding when total_volumes > 1
+            // note: V1.42 — use multi-volume seeding when total_volumes > 1.
             if inp.total_volumes > 1 {
                 let chapters_per_volume = inp.total_planned_chapters / inp.total_volumes;
                 work_chapters::seed_chapters_multi_volume_tx(
@@ -661,7 +637,7 @@ impl Capability for NovelProjectScaffold {
                 .map_err(|e| CapabilityError::Internal(format!("seed_chapters_tx: {e}")))?;
             }
 
-            // F4 (W-2-qc2): when `fields_changed` is provided, PATCH only
+            // why: F4 (W-2-qc2) — when `fields_changed` is provided, PATCH only
             // those columns (re-init). When absent, PATCH all (initial
             // bootstrap). The `current_chapter = 0` reset is part of the
             // initial bootstrap shape and is suppressed on partial re-init.
@@ -723,7 +699,6 @@ impl Capability for NovelProjectScaffold {
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("patch_work_tx: {e}")))?;
 
-            // Both seed + patch succeeded — commit the transaction.
             tx.commit()
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("commit transaction: {e}")))?;
@@ -738,8 +713,8 @@ impl Capability for NovelProjectScaffold {
             "novel.project_scaffold: chapters seeded + works patched (atomic with world creation)"
         );
 
-        // ── F2: scaffold succeeded — project the txn-owned paths into
-        //        the output shape, then commit to suppress Drop rollback.
+        // why: F2 — project the txn-owned paths into the output shape, then
+        // commit to suppress Drop rollback.
         let files_created: Vec<String> = txn
             .files_created
             .iter()
@@ -755,7 +730,7 @@ impl Capability for NovelProjectScaffold {
             .collect();
         txn.commit();
 
-        // F8 (W-4): success — DB+FS committed.
+        // note: F8 (W-4) — success: DB+FS committed.
         info!(
             work_id = %inp.work_id,
             work_ref = %inp.work_ref,
@@ -791,11 +766,7 @@ impl Capability for NovelProjectScaffold {
     }
 }
 
-// ---------------------------------------------------------------------------
-// FS helpers (idempotent — T6 compliance)
-// ---------------------------------------------------------------------------
-
-/// Commit a file through the Work artifact port, only if it doesn't exist
+/// note: commit a file through the Work artifact port, only if it doesn't exist
 /// (idempotent per T6).
 ///
 /// On rollback, only files this call actually wrote (return value `true`)
@@ -818,11 +789,7 @@ async fn write_file_idem(
     Ok(true)
 }
 
-// ---------------------------------------------------------------------------
-// ScaffoldTransaction — F2 (C-002, C-2, W-3) — FS rollback guard
-// ---------------------------------------------------------------------------
-//
-// Wraps the in-flight FS scaffold so that, if any subsequent step (template
+// why: F2 (C-002, C-2, W-3) — wraps the in-flight FS scaffold so that, if any subsequent step (template
 // render, chapter seed, works PATCH) returns an error before `commit()` is
 // called, the guard's `Drop` impl removes only the files and directories
 // THIS invocation created. Files/dirs that pre-existed (e.g. re-init over
@@ -837,7 +804,7 @@ async fn write_file_idem(
 struct ScaffoldTransaction {
     files_created: Vec<PathBuf>,
     dirs_created: Vec<PathBuf>,
-    /// Whether the executor records its writes instead of landing them. Such a
+    /// note: whether the executor records its writes instead of landing them. Such a
     /// run never owns a path on disk, so its rollback is inert.
     recording: bool,
     committed: bool,
@@ -853,7 +820,7 @@ impl ScaffoldTransaction {
         }
     }
 
-    /// Create a directory and all parents. No-op if it already exists, and a
+    /// note: create a directory and all parents. No-op if it already exists, and a
     /// no-op entirely under a recording executor: the bytes those directories
     /// would hold never land, so leaving them behind would change the tree a
     /// dry run promises to leave alone.
@@ -873,7 +840,7 @@ impl ScaffoldTransaction {
         Ok(())
     }
 
-    /// Mark the scaffold as successfully committed; the Drop impl becomes
+    /// note: mark the scaffold as successfully committed; the Drop impl becomes
     /// a no-op. Call only after all DB writes succeed.
     const fn commit(&mut self) {
         self.committed = true;
@@ -882,14 +849,14 @@ impl ScaffoldTransaction {
 
 impl Drop for ScaffoldTransaction {
     fn drop(&mut self) {
-        // A recording run owns nothing on disk: its byte commits only logged
+        // why: a recording run owns nothing on disk: its byte commits only logged
         // intended writes, so every registered path may be an entry this run
         // never created (a dangling symlink passes the `exists()` check as
         // absent). Rolling back would delete the user's own tree.
         if self.committed || self.recording {
             return;
         }
-        // Best-effort rollback. We log but do not panic — if the FS state
+        // why: best-effort rollback. We log but do not panic — if the FS state
         // is inconsistent, the next idempotent re-init will reconcile.
         for f in &self.files_created {
             if let Err(e) = std::fs::remove_file(f) {
@@ -900,7 +867,7 @@ impl Drop for ScaffoldTransaction {
                 );
             }
         }
-        // Remove dirs in reverse (children before parents).
+        // why: remove dirs in reverse (children before parents).
         for d in self.dirs_created.iter().rev() {
             if let Err(e) = std::fs::remove_dir(d) {
                 tracing::warn!(
@@ -918,17 +885,13 @@ impl Drop for ScaffoldTransaction {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
     use tempfile::TempDir;
 
-    /// Capability over a temp `Works/` root with a recording executor.
+    /// note: capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> NovelProjectScaffold {
         let executor: Arc<dyn WorkspaceExecutor> =
             RecordingExecutor::at(works_root.parent().expect("works root has a parent"));
@@ -956,7 +919,7 @@ mod tests {
 
     #[test]
     fn render_template_strict_mode_rejects_unbound_var() {
-        // F3 (W-1): strict mode catches misspelled / unbound placeholders
+        // why: F3 (W-1) — strict mode catches misspelled / unbound placeholders
         // instead of silently producing literal "{{...}}" in the output.
         let tmpl = "Hello {{name}}, Ref: {{work_ref}}";
         let err = render_template(tmpl, &[("work_ref", "abc")]).expect_err("must error");
@@ -969,7 +932,7 @@ mod tests {
 
     #[test]
     fn render_template_preserves_special_chars_no_html_escape() {
-        // F3 (W-1): no_escape mode preserves &, <, > as-is for Markdown.
+        // note: F3 (W-1) — no_escape mode preserves &, <, > as-is for Markdown.
         let tmpl = "{{body}}";
         let rendered =
             render_template(tmpl, &[("body", "A & B < C > D")]).expect("no-escape render");
@@ -995,34 +958,32 @@ mod tests {
         let scaffold = out["scaffold_root"].as_str().expect("scaffold_root");
         let scaffold_path = Path::new(scaffold);
 
-        // Verify directories
         assert!(scaffold_path.join("Outlines").is_dir());
         assert!(scaffold_path.join("Outlines/chapters").is_dir());
         assert!(scaffold_path.join("Stories").is_dir());
         assert!(scaffold_path.join("Logs").is_dir());
-        // V1.39 P3: Logs subdirectories
+        // note: V1.39 P3 — Logs subdirectories.
         assert!(scaffold_path.join("Logs/brainstorm").is_dir());
         assert!(scaffold_path.join("Logs/write").is_dir());
         assert!(scaffold_path.join("Logs/review").is_dir());
         assert!(scaffold_path.join("Logs/publish").is_dir());
-        // V1.48 P2: Layer 2 is now AGENTS.md at Work root (not Rules/novel-rules.md).
+        // note: V1.48 P2 — Layer 2 is now AGENTS.md at Work root (not Rules/novel-rules.md).
         assert!(
             scaffold_path.join("AGENTS.md").is_file(),
             "AGENTS.md must be scaffolded at Work root"
         );
-        // Legacy Rules/ dir is intentionally NOT created for new scaffolds.
+        // why: legacy Rules/ dir is intentionally NOT created for new scaffolds.
         assert!(
             !scaffold_path.join("Rules").exists(),
             "Rules/ dir must not be created for new V1.48 scaffolds"
         );
 
-        // Verify files
         assert!(scaffold_path.join("README.md").is_file());
         assert!(scaffold_path.join("Outlines/volume-outline.md").is_file());
         assert!(scaffold_path.join("Outlines/foreshadowing.md").is_file());
         assert!(scaffold_path.join("Outlines/event-index.md").is_file());
 
-        // No chapters seeded (no pool)
+        // note: no chapters seeded (no pool).
         assert_eq!(out["chapters_seeded"], 0);
     }
 
@@ -1041,18 +1002,14 @@ mod tests {
             "total_planned_chapters": 1,
         });
 
-        // First run
         let out1 = cap.run(input.clone()).await.expect("first run");
         let scaffold = out1["scaffold_root"].as_str().expect("root");
         let readme = Path::new(scaffold).join("README.md");
 
-        // Write custom content
         std::fs::write(&readme, "CUSTOM CONTENT").expect("write custom");
 
-        // Second run
         let _out2 = cap.run(input).await.expect("second run");
 
-        // Custom content preserved
         let content = std::fs::read_to_string(&readme).expect("read");
         assert_eq!(
             content, "CUSTOM CONTENT",
@@ -1067,15 +1024,12 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── T0.2: mandatory world_id binding tests ────────────────────────
-
     #[tokio::test]
     async fn scaffold_rejects_worldless_creation_missing_world_id_and_create_world() {
         let tmp = TempDir::new().expect("tmpdir");
         let root = tmp.path().join("Works");
         let cap = cap_with_root(root);
 
-        // No world_id, no create_world → fail-closed
         let input = serde_json::json!({
             "creator_id": "creator_test",
             "work_id": "wrk_worldless_reject",
@@ -1133,8 +1087,6 @@ mod tests {
             "README should NOT contain worldless text for V1.40 bound Work"
         );
     }
-
-    // ── Work artifact port seam ──
 
     #[tokio::test]
     async fn scaffold_refuses_without_workspace_executor() {

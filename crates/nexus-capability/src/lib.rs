@@ -1,15 +1,12 @@
 //! Capability port/error contract plus the registry, builtins and
 //! admission/scan/watch machinery (moved from `nexus-orchestration` in v249 C2).
+// note: this module is the v249 C2 home of the capability contract and registry.
 
 use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
-/// Errors produced by capability execution.
+/// note: Errors produced by capability execution.
 #[derive(Error, Debug)]
 pub enum CapabilityError {
     #[error("invalid input: {0}")]
@@ -32,7 +29,7 @@ pub enum CapabilityError {
     Internal(String),
 }
 
-/// Resolve a run's coordinator cancellation token from the shared per-run
+/// note: Resolve a run's coordinator cancellation token from the shared per-run
 /// map (A1).
 ///
 /// **Fail-closed**: a run with no registered token returns
@@ -46,7 +43,7 @@ pub enum CapabilityError {
 /// Returns [`CapabilityError::CancellationUnavailable`] when `session_id` has
 /// no registered coordinator token, or [`CapabilityError::Internal`] when the
 /// shared map lock is poisoned.
-#[allow(clippy::implicit_hasher)] // DefaultHasher session-cancel map; hashing is not hot on this lookup path
+#[allow(clippy::implicit_hasher)] // why: DefaultHasher session-cancel map; hashing is not hot on this lookup path
 pub fn resolve_session_cancellation(
     session_cancels: &std::sync::RwLock<
         std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -63,24 +60,20 @@ pub fn resolve_session_cancellation(
     })
 }
 
-// ---------------------------------------------------------------------------
-// PromptExecutor — injected production prompt seam (A1)
-// ---------------------------------------------------------------------------
-
-/// Tool permission policy for a prompt operation (A1).
+/// note: Tool permission policy for a prompt operation (A1).
 ///
 /// Orchestration maps its existing policy to a narrowing [`PromptPermissionScope`]
 /// that the Host intersects with its own configuration per operation. The scope
 /// can narrow but never elevate Host configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolPolicy {
-    /// All tools auto-granted (V1.0 behavior).
+    /// note: All tools auto-granted (V1.0 behavior).
     AutoGrantAll,
-    /// Reads allowed, writes require upcall.
+    /// note: Reads allowed, writes require upcall.
     AutoGrantReadOnly,
-    /// No tools allowed.
+    /// note: No tools allowed.
     DenyAll,
-    /// Every tool triggers upcall.
+    /// note: Every tool triggers upcall.
     RequestPolicy,
 }
 
@@ -92,13 +85,13 @@ impl std::str::FromStr for ToolPolicy {
             "auto_grant_all" => Ok(Self::AutoGrantAll),
             "deny_all" => Ok(Self::DenyAll),
             "request_policy" => Ok(Self::RequestPolicy),
-            _ => Ok(Self::AutoGrantReadOnly), // safe default
+            _ => Ok(Self::AutoGrantReadOnly), // why: safe default
         }
     }
 }
 
 impl ToolPolicy {
-    /// Serialize to the string form used in IPC.
+    /// note: Serialize to the string form used in IPC.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -109,7 +102,7 @@ impl ToolPolicy {
         }
     }
 
-    /// Map this orchestration policy to the narrowing Host permission scope (A1).
+    /// why: Map this orchestration policy to the narrowing Host permission scope (A1).
     ///
     /// The scope is intersected with Host configuration per operation; it can
     /// narrow but never elevate. `None` preserves the standalone Host/Character
@@ -137,52 +130,52 @@ impl ToolPolicy {
     }
 }
 
-/// Narrowing permission scope for a Host prompt operation (A1).
+/// note: Narrowing permission scope for a Host prompt operation (A1).
 ///
 /// Intersected with Host configuration per operation; a provider unable to
 /// honor a requested scope refuses `not_supported` rather than silently
 /// discarding the policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PromptPermissionScope {
-    /// Read-only tools allowed.
+    /// note: Read-only tools allowed.
     pub allow_read: bool,
-    /// Write tools allowed.
+    /// note: Write tools allowed.
     pub allow_write: bool,
-    /// Destructive tools allowed.
+    /// note: Destructive tools allowed.
     pub allow_destructive: bool,
 }
 
-/// Typed prompt request (A1).
+/// note: Typed prompt request (A1).
 #[derive(Debug, Clone)]
 pub struct PromptRequest {
-    /// Trusted run identity.
+    /// note: Trusted run identity.
     pub run_id: String,
-    /// Task id the prompt belongs to.
+    /// note: Task id the prompt belongs to.
     pub task_id: String,
-    /// Optional agent role reference.
+    /// note: Optional agent role reference.
     pub agent_ref: Option<String>,
-    /// The prompt text.
+    /// note: The prompt text.
     pub prompt: String,
-    /// Tool policy for this prompt.
+    /// note: Tool policy for this prompt.
     pub tool_policy: ToolPolicy,
-    /// Coordinator cancellation token.
+    /// invariant: Coordinator cancellation token.
     pub cancellation: tokio_util::sync::CancellationToken,
 }
 
-/// Typed prompt result (A1).
+/// note: Typed prompt result (A1).
 ///
 /// Non-EndTurn stop reasons are errors, never success fields.
 #[derive(Debug, Clone)]
 pub struct PromptResult {
-    /// Full message text collected from `MessageDelta` events.
+    /// note: Full message text collected from `MessageDelta` events.
     pub full_text: String,
-    /// Host session id the prompt executed on.
+    /// note: Host session id the prompt executed on.
     pub host_session_id: String,
-    /// Host operation id that produced the result.
+    /// note: Host operation id that produced the result.
     pub operation_id: String,
 }
 
-/// Provider trait for production prompt execution (A1).
+/// note: Provider trait for production prompt execution (A1).
 ///
 /// Implemented by the daemon-owned `HostPromptExecutor` over the existing
 /// `HostFacade`. `nexus-orchestration` stays Host-agnostic: SDK/provider
@@ -190,14 +183,14 @@ pub struct PromptResult {
 /// standalone/test mode with clear error messages.
 #[async_trait]
 pub trait PromptExecutor: Send + Sync {
-    /// Execute one prompt through the Host plane.
+    /// note: Execute one prompt through the Host plane.
     ///
     /// Returns the typed result on success, or a [`CapabilityError`] on
     /// refusal/EOF/denial/timeout/cancellation — never a partial-output
     /// success.
     async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError>;
 
-    /// Finalize a run's owned Host sessions after the run reached a
+    /// note: Finalize a run's owned Host sessions after the run reached a
     /// confirmed terminal state (A5). Waits (bounded) for any in-flight
     /// operation's cleanup to complete, then shuts down and evicts every
     /// `(run, role)` session. Returns `Ok(())` only when cleanup is
@@ -208,7 +201,7 @@ pub trait PromptExecutor: Send + Sync {
     }
 }
 
-/// Provider trait for daemon-side `nexus.*` tool dispatch (DF-47 production wiring).
+/// note: Provider trait for daemon-side `nexus.*` tool dispatch (DF-47 production wiring).
 ///
 /// Implemented by `nexus-daemon-runtime`'s `DaemonToolDispatchAdapter`, which
 /// dispatches through `HostToolExecutor::dispatch_for_schedule` (the Schedule
@@ -219,7 +212,7 @@ pub trait PromptExecutor: Send + Sync {
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 #[async_trait]
 pub trait DaemonToolDispatch: Send + Sync {
-    /// Dispatch a `nexus.*` tool call through the daemon's unified registry.
+    /// note: Dispatch a `nexus.*` tool call through the daemon's unified registry.
     ///
     /// Returns the tool result JSON on success, or a `CapabilityError` on failure.
     async fn dispatch_tool(
@@ -230,7 +223,7 @@ pub trait DaemonToolDispatch: Send + Sync {
     ) -> Result<serde_json::Value, CapabilityError>;
 }
 
-/// Provider trait for production workspace open/commit (v1.188 P3).
+/// note: Provider trait for production workspace open/commit (v1.188 P3).
 #[async_trait]
 pub trait WorkspaceExecutor: Send + Sync {
     async fn open(
@@ -243,7 +236,7 @@ pub trait WorkspaceExecutor: Send + Sync {
         input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
     ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>;
 
-    /// The absolute workspace root whose `Works/` tree this executor commits.
+    /// note: The absolute workspace root whose `Works/` tree this executor commits.
     ///
     /// A builtin resolves its `Works/<work_ref>/` bookkeeping against this
     /// root, so existence checks, directory creation, the port commit and
@@ -258,7 +251,7 @@ pub trait WorkspaceExecutor: Send + Sync {
         Err(CapabilityError::WorkerUnavailable)
     }
 
-    /// Whether this executor records Work artifact writes instead of landing
+    /// note: Whether this executor records Work artifact writes instead of landing
     /// them.
     ///
     /// A scaffold creates the `Works/<work_ref>/` directory skeleton itself,
@@ -272,7 +265,7 @@ pub trait WorkspaceExecutor: Send + Sync {
         false
     }
 
-    /// Commit one Work artifact byte write (`Works/<work_ref>/<rel_child>`).
+    /// note: Commit one Work artifact byte write (`Works/<work_ref>/<rel_child>`).
     ///
     /// The single production implementation delegates to the core byte-write
     /// port, so an orchestration caller writes Work bytes under the port's
@@ -297,7 +290,7 @@ pub trait WorkspaceExecutor: Send + Sync {
     }
 }
 
-/// Provider for live workspace session state (v1.188 P3).
+/// note: Provider for live workspace session state (v1.188 P3).
 ///
 /// Preset conditional edges may reference `_context.workspace.<field>`. The
 /// graph task resolves that object from this provider at
@@ -306,16 +299,12 @@ pub trait WorkspaceExecutor: Send + Sync {
 /// placeholder. `None` (no provider) leaves `_context.workspace` absent.
 #[async_trait]
 pub trait WorkspaceStateProvider: Send + Sync {
-    /// Latest durable workspace state, or `None` when the workspace has no
+    /// note: Latest durable workspace state, or `None` when the workspace has no
     /// committed session yet.
     async fn workspace_state(&self) -> Option<serde_json::Value>;
 }
 
-// ---------------------------------------------------------------------------
-// Capability trait
-// ---------------------------------------------------------------------------
-
-/// Provenance of a capability (AR-40).
+/// note: Provenance of a capability (AR-40).
 ///
 /// Marker-only: `Builtin` is the default (zero edits to the ~34 builtin
 /// impls); `User` marks a locally-installed user capability. The enum stays
@@ -324,34 +313,34 @@ pub trait WorkspaceStateProvider: Send + Sync {
 /// to the `"builtin"` / `"user"` string enum itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityOrigin {
-    /// Shipped with the engine (default).
+    /// note: Shipped with the engine (default).
     Builtin,
-    /// Installed by a developer at `~/.nexus42/capabilities/<name>/`.
+    /// note: Installed by a developer at `~/.nexus42/capabilities/<name>/`.
     User,
 }
 
-/// A capability that can be invoked as a graph-flow Task node.
+/// note: A capability that can be invoked as a graph-flow Task node.
 ///
 /// Per the design spec, every capability ships its own input/output JSON Schema
 /// as `&'static str` constants. These are **local** types, not wire contracts.
 #[async_trait]
 pub trait Capability: Send + Sync {
-    /// Dot-separated capability name, e.g. `"sync.pull"`.
+    /// note: Dot-separated capability name, e.g. `"sync.pull"`.
     fn name(&self) -> &'static str;
 
-    /// JSON Schema (draft 2020-12) describing valid inputs.
+    /// note: JSON Schema (draft 2020-12) describing valid inputs.
     fn input_schema(&self) -> &'static str;
 
-    /// JSON Schema (draft 2020-12) describing the output shape.
+    /// note: JSON Schema (draft 2020-12) describing the output shape.
     fn output_schema(&self) -> &'static str;
 
-    /// Provenance marker (AR-40). Defaults to [`CapabilityOrigin::Builtin`] —
+    /// note: Provenance marker (AR-40). Defaults to [`CapabilityOrigin::Builtin`] —
     /// only user-installed capabilities override it.
     fn origin(&self) -> CapabilityOrigin {
         CapabilityOrigin::Builtin
     }
 
-    /// Whether this instance carries an EXECUTABLE binding in this build
+    /// note: Whether this instance carries an EXECUTABLE binding in this build
     /// (C3 contract: `get`/`iter` are real executable lookups and must not
     /// yield a row that can only refuse).
     ///
@@ -365,22 +354,20 @@ pub trait Capability: Send + Sync {
         true
     }
 
-    /// Execute the capability with the given input.
+    /// note: Execute the capability with the given input.
     ///
     /// Returns a JSON `Value` on success or a [`CapabilityError`].
     async fn run(&self, input: Value) -> Result<Value, CapabilityError>;
 }
 
-// ===========================================================================
-// Registry + admission/scan/watch + builtins (moved from
-// `nexus-orchestration/src/capability/` in v249 C2)
-// ===========================================================================
+// note: registry + admission/scan/watch + builtins moved here from
+// `nexus-orchestration/src/capability/` in v249 C2.
 
 pub mod admission;
 pub mod builtins;
 pub mod compute_input_builder;
 pub mod extraction_target;
-// Test-only pool bootstrap shared by this crate's unit tests. Not a shipping
+// why: Test-only pool bootstrap shared by this crate's unit tests. Not a shipping
 // surface: compiled only under `cfg(test)`, never re-exported.
 #[cfg(test)]
 pub(crate) mod pool_test_support;
@@ -395,11 +382,7 @@ pub mod watch;
 use std::path::Path;
 use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
-// PromptExecutor — injected production prompt seam (A1)
-// ---------------------------------------------------------------------------
-
-/// Whether `path` names an already occupied filesystem entry, without
+/// note: Whether `path` names an already occupied filesystem entry, without
 /// following a symlink.
 ///
 /// `Path::exists` is `metadata().is_ok()`, and `metadata` follows the link: a
@@ -419,29 +402,25 @@ pub(crate) fn path_is_occupied(path: &Path) -> bool {
 /// copy from boot to rebuild fresh registries on the same admission path.
 #[derive(Clone)]
 pub struct CapabilityRuntimeDeps {
-    /// Pool for pool-backed capabilities (`kb.extract_work`, etc.).
+    /// note: Pool for pool-backed capabilities (`kb.extract_work`, etc.).
     pub pool: Option<sqlx::SqlitePool>,
-    /// Production prompt executor for LLM-backed capabilities (`judge.llm`,
+    /// note: Production prompt executor for LLM-backed capabilities (`judge.llm`,
     /// `context.summarize`, `acp.prompt`, `nexus.llm.extract`).
     pub prompt_executor: Option<std::sync::Arc<dyn PromptExecutor>>,
-    /// Per-run coordinator cancellation tokens (A1) — the executor listens to
+    /// note: Per-run coordinator cancellation tokens (A1) — the executor listens to
     /// the token for the current run concurrently with the Host stream.
     pub session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-    /// Daemon-side tool dispatch for `nexus.*` tools (DF-47, V1.42 P3).
+    /// note: Daemon-side tool dispatch for `nexus.*` tools (DF-47, V1.42 P3).
     pub daemon_tool_dispatch: Option<std::sync::Arc<dyn DaemonToolDispatch>>,
-    /// CDN fetch config for `registry.refresh` (V1.57 P1 — constructor-injected).
+    /// note: CDN fetch config for `registry.refresh` (V1.57 P1 — constructor-injected).
     pub cdn_config: Option<builtins::CdnConfig>,
-    /// Production workspace executor for `workspace.open` / `workspace.commit`.
+    /// note: Production workspace executor for `workspace.open` / `workspace.commit`.
     pub workspace_executor: Option<std::sync::Arc<dyn WorkspaceExecutor>>,
 }
 
-// ---------------------------------------------------------------------------
-// CapabilityRegistry
-// ---------------------------------------------------------------------------
-
-/// Registry of available capabilities.
+/// note: Registry of available capabilities.
 ///
 /// Built at daemon startup and **rebuilt as a fresh instance** on
 /// user-capability hot reload (V1.176 P1, AR-92): the live generation is
@@ -454,13 +433,13 @@ pub struct CapabilityRuntimeDeps {
 /// constructor and append path — never lazily.
 pub struct CapabilityRegistry {
     capabilities: Vec<Box<dyn Capability>>,
-    /// Eager index: `name` → position in `capabilities`. Built by every
+    /// note: Eager index: `name` → position in `capabilities`. Built by every
     /// constructor and append path (never on-demand).
     index: Option<std::collections::HashMap<&'static str, usize>>,
 }
 
 impl CapabilityRegistry {
-    /// Create a registry pre-populated with all built-in capabilities.
+    /// note: Create a registry pre-populated with all built-in capabilities.
     ///
     /// Built-ins: `sync.pull`, `sync.push`, `outbox.flush`, `outbox.compact`,
     /// `workspace.open`, `workspace.commit`, `registry.refresh`,
@@ -493,41 +472,39 @@ impl CapabilityRegistry {
             Box::new(builtins::KbExtractWork::new()),
             Box::new(builtins::LlmExtract::new()),
             Box::new(builtins::SoulExperienceAggregate),
-            // F6 (C-001): register novel.project_scaffold in the
+            // why: F6 (C-001) — register novel.project_scaffold in the
             // pool-less registry so embedded preset validation can
             // resolve it. The pool-bound variant is registered via
             // [`with_builtins_and_pool`] for runtime use.
             Box::new(builtins::NovelProjectScaffold::new()),
-            // P3 (T3): register novel.chapter_transition for chapter
+            // note: P3 (T3) — novel.chapter_transition handles chapter
             // status transitions (DB + frontmatter).
             Box::new(builtins::NovelChapterTransition::new()),
-            // V1.52 T-A P2: register essay.project_scaffold for
+            // note: V1.52 T-A P2 — essay.project_scaffold is registered for
             // embedded preset validation.
             Box::new(builtins::EssayProjectScaffold::new()),
-            // V1.63 P2: register essay.draft_status.finalize for the
+            // why: V1.63 P2 — essay.draft_status.finalize serves the
             // essay-writing preset's finalize_commit state. This registry
             // carries no workspace executor, so the instance is
             // validation-only — `with_runtime_deps` registers the executable
             // one.
             Box::new(builtins::EssayDraftStatusFinalize::new()),
-            // V1.54 P1: register game_bible.project_scaffold for
+            // note: V1.54 P1 — game_bible.project_scaffold is registered for
             // embedded preset validation.
             Box::new(builtins::GameBibleProjectScaffold::new()),
-            // V1.55 P3: register script.project_scaffold for
+            // note: V1.55 P3 — script.project_scaffold is registered for
             // embedded preset validation.
             Box::new(builtins::ScriptProjectScaffold::new()),
-            // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
-            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
             Box::new(builtins::ScriptSectionStatusUpdate::new()),
-            // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
-            // (pool-less; return WorkerUnavailable without a pool).
+            // note: V1.60 P0 — DF-46 local parity for 5 orchestration-scope
+            // capabilities (pool-less; returns WorkerUnavailable without a pool).
             Box::new(builtins::WorldStateQuery::new()),
             Box::new(builtins::WorldDeltaPropose::new()),
             Box::new(builtins::WorldDeltaApply::new()),
             Box::new(builtins::TimelineEventAppend::new()),
             Box::new(builtins::ForkCreate::new()),
-            // V1.61 P3: narrative.compute — sandboxed WASM compute for world state.
+            // note: V1.61 P3 — narrative.compute is sandboxed WASM compute for world state.
             Box::new(builtins::NarrativeCompute::new()),
         ];
         let mut reg = Self {
@@ -538,7 +515,7 @@ impl CapabilityRegistry {
         reg
     }
 
-    /// Create a registry with built-in capabilities and a pool.
+    /// note: Create a registry with built-in capabilities and a pool.
     ///
     /// Same as [`with_builtins`] but `kb.extract_work` receives the pool
     /// for full e2e lifecycle, and all creator capabilities receive a
@@ -574,27 +551,22 @@ impl CapabilityRegistry {
             Box::new(builtins::SoulExperienceAggregate),
             Box::new(builtins::NovelProjectScaffold::with_pool(pool.clone())),
             Box::new(builtins::NovelChapterTransition::with_pool(pool.clone())),
-            // V1.52 T-A P2: essay.project_scaffold with pool.
+            // note: V1.52 T-A P2 — essay.project_scaffold with pool.
             Box::new(builtins::EssayProjectScaffold::with_pool(pool.clone())),
-            // V1.63 P2: essay.draft_status.finalize (pool only, no workspace
-            // executor — validation-only here; `with_runtime_deps` registers
-            // the executable instance).
+            // why: V1.63 P2 — essay.draft_status.finalize gets pool only, no
+            // workspace executor, so it stays validation-only here;
+            // `with_runtime_deps` registers the executable instance.
             Box::new(builtins::EssayDraftStatusFinalize::new()),
-            // V1.54 P1: game_bible.project_scaffold with pool.
             Box::new(builtins::GameBibleProjectScaffold::with_pool(pool.clone())),
-            // V1.55 P3: script.project_scaffold with pool.
             Box::new(builtins::ScriptProjectScaffold::with_pool(pool.clone())),
-            // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
-            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
             Box::new(builtins::ScriptSectionStatusUpdate::new()),
-            // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities.
+            // note: V1.60 P0 — DF-46 local parity for 5 orchestration-scope capabilities.
             Box::new(builtins::WorldStateQuery::with_pool(pool.clone())),
             Box::new(builtins::WorldDeltaPropose::with_pool(pool.clone())),
             Box::new(builtins::WorldDeltaApply::with_pool(pool.clone())),
             Box::new(builtins::TimelineEventAppend::with_pool(pool.clone())),
             Box::new(builtins::ForkCreate::with_pool(pool.clone())),
-            // V1.61 P3: narrative.compute with pool.
             Box::new(builtins::NarrativeCompute::with_pool(pool)),
         ];
         let mut reg = Self {
@@ -605,7 +577,7 @@ impl CapabilityRegistry {
         reg
     }
 
-    /// Create a registry with runtime dependencies injected.
+    /// note: Create a registry with runtime dependencies injected.
     ///
     /// Production daemon boot should use this constructor when both a pool
     /// and worker provider are available. Capabilities without runtime deps
@@ -630,7 +602,7 @@ impl CapabilityRegistry {
         Self::build_with_narrative_compute(deps, narrative_compute)
     }
 
-    /// Create a registry with runtime dependencies **and** a daemon-wide
+    /// note: Create a registry with runtime dependencies **and** a daemon-wide
     /// singleton `WasmEngine` + `ModuleCache` injected into `narrative.compute`
     /// (P-last T1/T4 — closes R-V161P3-PERF-001/002).
     ///
@@ -659,7 +631,7 @@ impl CapabilityRegistry {
         Self::build_with_narrative_compute(deps, narrative_compute)
     }
 
-    /// Create a registry with runtime dependencies, the daemon-wide singleton
+    /// note: Create a registry with runtime dependencies, the daemon-wide singleton
     /// `WasmEngine` + `ModuleCache`, **and** user capabilities scanned from
     /// `scan_dir` (V1.172 P0, DR-10; AR-36).
     ///
@@ -687,7 +659,7 @@ impl CapabilityRegistry {
         (reg, outcome)
     }
 
-    /// Create a registry with runtime dependencies **and** user capabilities
+    /// note: Create a registry with runtime dependencies **and** user capabilities
     /// scanned from `scan_dir`, on the engine-less boot path (V1.172 P0,
     /// DR-10; AR-36/AR-44).
     ///
@@ -704,7 +676,7 @@ impl CapabilityRegistry {
         (reg, outcome)
     }
 
-    /// Append admitted user capabilities after builtins and rebuild the eager
+    /// note: Append admitted user capabilities after builtins and rebuild the eager
     /// index (AR-36). Shared by the two user-capability constructors.
     ///
     /// The engine arm passes the daemon-wide [`WasmEngine`] + [`ModuleCache`]
@@ -720,7 +692,7 @@ impl CapabilityRegistry {
     /// collision lands in `outcome.skipped` with the named `NameCollision`
     /// reason and is `warn!`-logged before the append.
     fn append_user_caps(&mut self, scan_dir: &std::path::Path) -> scan::ScanOutcome {
-        // Collision ownership derives from THE DECLARATION (C3 contract),
+        // invariant: Collision ownership derives from THE DECLARATION (C3 contract),
         // never from constructed handler objects: a builtin declared without
         // a handler object still blocks a user capability from claiming its
         // name.
@@ -731,7 +703,7 @@ impl CapabilityRegistry {
         outcome
     }
 
-    /// Engine boot arm of [`append_user_caps`]: forwards the daemon-wide
+    /// note: Engine boot arm of [`append_user_caps`]: forwards the daemon-wide
     /// executor handles into the scan so `UserCapability::new_with_executor`
     /// carries them from construction (AR-37).
     #[cfg(feature = "wasm")]
@@ -741,7 +713,7 @@ impl CapabilityRegistry {
         engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
         module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
     ) -> scan::ScanOutcome {
-        // Collision ownership derives from THE DECLARATION (C3 contract),
+        // invariant: Collision ownership derives from THE DECLARATION (C3 contract),
         // never from constructed handler objects — same as the engine-less
         // arm.
         let builtin_names: std::collections::HashSet<&str> =
@@ -756,7 +728,7 @@ impl CapabilityRegistry {
         outcome
     }
 
-    /// Box and append `admitted` after builtins and rebuild the eager index —
+    /// note: Box and append `admitted` after builtins and rebuild the eager index —
     /// the single registry-append seam shared by the boot constructors
     /// ([`append_user_caps`]) and the hot-reload watcher
     /// (`rebuild_registry_with_merge`, V1.176 P1 M-3) so the boxing stays in
@@ -769,7 +741,7 @@ impl CapabilityRegistry {
         self.build_index();
     }
 
-    /// Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
+    /// note: Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
     /// parameterized only by the `narrative.compute` instance to register.
     #[must_use]
     #[allow(clippy::too_many_lines)]
@@ -818,7 +790,7 @@ impl CapabilityRegistry {
                         .with_session_cancels(deps.session_cancels.clone())
                 });
 
-        // V1.57 P1: cdn_config is constructor-injected (no global state).
+        // why: V1.57 P1 — cdn_config is constructor-injected (no global state).
         let registry_refresh = deps
             .cdn_config
             .as_ref()
@@ -914,7 +886,6 @@ impl CapabilityRegistry {
                     })
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.52 T-A P2: essay.project_scaffold with runtime deps.
             Box::new(
                 deps.pool
                     .as_ref()
@@ -923,7 +894,7 @@ impl CapabilityRegistry {
                     })
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.63 P2: essay.draft_status.finalize — the essay preset's
+            // why: V1.63 P2 — essay.draft_status.finalize is the essay preset's
             // finalize_commit writer. It writes Work bytes, so it needs the
             // runtime executor; `with_builtins` registers it without one and
             // therefore stays validation-only.
@@ -931,7 +902,6 @@ impl CapabilityRegistry {
                 builtins::EssayDraftStatusFinalize::new()
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.54 P1: game_bible.project_scaffold with runtime deps.
             Box::new(
                 deps.pool
                     .as_ref()
@@ -940,7 +910,6 @@ impl CapabilityRegistry {
                     })
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.55 P3: script.project_scaffold with runtime deps.
             Box::new(
                 deps.pool
                     .as_ref()
@@ -949,18 +918,16 @@ impl CapabilityRegistry {
                     })
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(
                 builtins::GameBibleSectionStatusUpdate::new()
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
             Box::new(
                 builtins::ScriptSectionStatusUpdate::new()
                     .with_workspace_executor(deps.workspace_executor.clone()),
             ),
-            // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
-            // (pool-conditional; pool-less returns WorkerUnavailable).
+            // note: V1.60 P0 — DF-46 local parity for 5 orchestration-scope
+            // capabilities (pool-conditional; pool-less returns WorkerUnavailable).
             Box::new(
                 deps.pool
                     .as_ref()
@@ -996,7 +963,7 @@ impl CapabilityRegistry {
                         builtins::ForkCreate::with_pool(pool.clone())
                     }),
             ),
-            // V1.61 P3: narrative.compute — the caller decides the compute
+            // why: V1.61 P3 — the caller decides the compute
             // attachment: `with_runtime_deps` registers the pool-bound but
             // engine-less form (WorkerUnavailable on invoke); only
             // `with_runtime_deps_and_wasm` injects the daemon-wide singleton
@@ -1011,7 +978,7 @@ impl CapabilityRegistry {
         reg
     }
 
-    /// Create a registry from an explicit capability set (for testing and
+    /// note: Create a registry from an explicit capability set (for testing and
     /// the engine-contract integration cases that inject a probe registry).
     #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
@@ -1024,7 +991,7 @@ impl CapabilityRegistry {
         reg
     }
 
-    /// Create an empty registry (for testing).
+    /// note: Create an empty registry (for testing).
     #[must_use]
     pub fn empty() -> Self {
         let mut reg = Self {
@@ -1035,7 +1002,7 @@ impl CapabilityRegistry {
         reg
     }
 
-    /// Build the name-to-index `HashMap` for O(1) lookups.
+    /// note: Build the name-to-index `HashMap` for O(1) lookups.
     ///
     /// Called by every constructor and by the append seam
     /// ([`append_user_cap_entries`]) after `capabilities` is populated —
@@ -1048,7 +1015,7 @@ impl CapabilityRegistry {
         self.index = Some(idx);
     }
 
-    /// Look up a capability by its dot-separated name — a REAL EXECUTABLE
+    /// note: Look up a capability by its dot-separated name — a REAL EXECUTABLE
     /// lookup (C3 contract).
     ///
     /// Uses the pre-built `HashMap` index for O(1) amortized lookups, then
@@ -1063,7 +1030,7 @@ impl CapabilityRegistry {
         self.lookup(name).filter(|cap| cap.runnable())
     }
 
-    /// Look up an ADMITTED row regardless of whether this build binds an
+    /// note: Look up an ADMITTED row regardless of whether this build binds an
     /// executor for it.
     ///
     /// [`get`](Self::get) is the executable view (C3 contract). Dispatch needs
@@ -1077,7 +1044,7 @@ impl CapabilityRegistry {
         Some(self.capabilities[*pos].as_ref())
     }
 
-    /// Iterate over the EXECUTABLE capabilities (C3 contract) — rows whose
+    /// note: Iterate over the EXECUTABLE capabilities (C3 contract) — rows whose
     /// binding is unavailable in this build are not yielded; the full
     /// canonical + admitted-user name projection is
     /// [`reserved_names`](Self::reserved_names).
@@ -1088,7 +1055,7 @@ impl CapabilityRegistry {
             .filter(|cap| cap.runnable())
     }
 
-    /// Whether `name` exists ONLY as a reservation in this build: admitted
+    /// note: Whether `name` exists ONLY as a reservation in this build: admitted
     /// and describable, but with no executable binding — `get` answers
     /// `None` for it (C3 contract).
     ///
@@ -1110,7 +1077,7 @@ impl CapabilityRegistry {
                 || nexus_preset::capability_catalog::builtin_input_schema(name).is_some())
     }
 
-    /// The FULL canonical + admitted-user name projection of THIS generation
+    /// note: The FULL canonical + admitted-user name projection of THIS generation
     /// (C3 contract): canonical names come from THE DECLARATION
     /// ([`nexus_preset::capability_catalog::builtin_names`]) — a builtin is
     /// reserved and describable even when no handler object is constructed
@@ -1119,7 +1086,7 @@ impl CapabilityRegistry {
     /// hot-reload ACCUMULATION across generations lives on
     /// [`CapabilityRegistryHolder::reserved_names`].
     pub fn reserved_names(&self) -> impl Iterator<Item = &'static str> {
-        // Row names are `&'static str` (builtin literals + interned user
+        // why: Row names are `&'static str` (builtin literals + interned user
         // strings): snapshotted into an owned Vec, so the iterator captures
         // no borrow of the registry.
         let user_names: Vec<&'static str> = self
@@ -1131,7 +1098,7 @@ impl CapabilityRegistry {
         nexus_preset::capability_catalog::builtin_names().chain(user_names)
     }
 
-    /// Return the number of registered rows — the full carrier set,
+    /// note: Return the number of registered rows — the full carrier set,
     /// INCLUDING reserved-only rows (compute-capable names whose binding is
     /// unavailable in this build). This is the bookkeeping count, not the
     /// executable count; [`iter`](Self::iter) yields the executable subset.
@@ -1140,7 +1107,7 @@ impl CapabilityRegistry {
         self.capabilities.len()
     }
 
-    /// Return whether the registry is empty.
+    /// note: Return whether the registry is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.capabilities.is_empty()
@@ -1148,7 +1115,7 @@ impl CapabilityRegistry {
 }
 
 impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry {
-    /// Known metadata WITHOUT constructing executors (C3 contract): the
+    /// note: Known metadata WITHOUT constructing executors (C3 contract): the
     /// schema resolves for any declared row — including reserved-only
     /// compute-capable names — AND for canonical builtin names present only
     /// in the declaration with no handler object constructed (QC2-02): the
@@ -1162,11 +1129,7 @@ impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry 
     }
 }
 
-// ---------------------------------------------------------------------------
-// CapabilityRegistryHolder — hot-reload swap seam (V1.176 P1, AR-92)
-// ---------------------------------------------------------------------------
-
-/// Shared holder for the live capability registry (AR-92).
+/// note: Shared holder for the live capability registry (AR-92).
 ///
 /// A hot reload rebuilds a **fresh** [`CapabilityRegistry`] on the same
 /// scan/admission path as boot and atomically swaps it into this holder —
@@ -1194,7 +1157,7 @@ impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry 
 #[derive(Clone, Default)]
 pub struct CapabilityRegistryHolder {
     inner: std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<CapabilityRegistry>>>>,
-    /// Every canonical name ever swapped into this holder — builtin names
+    /// note: Every canonical name ever swapped into this holder — builtin names
     /// from boot plus every user name any hot swap admitted. Union-only;
     /// names are `&'static str` (builtin literals + interned user strings),
     /// so the set adds no per-swap allocation beyond the entry itself.
@@ -1202,24 +1165,24 @@ pub struct CapabilityRegistryHolder {
 }
 
 impl CapabilityRegistryHolder {
-    /// Create an empty holder. The boot registry is swapped in before any
+    /// note: Create an empty holder. The boot registry is swapped in before any
     /// reader, the engine, or a graph build touches it.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Clone the current registry under the read lock, if one has been
+    /// note: Clone the current registry under the read lock, if one has been
     /// swapped in.
     #[must_use]
     pub fn get(&self) -> Option<std::sync::Arc<CapabilityRegistry>> {
         self.inner
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
+            .unwrap_or_else(std::sync::PoisonError::into_inner) // why: poison-recovery (crate policy)
             .clone()
     }
 
-    /// Every canonical name ever swapped into this holder — the FULL
+    /// note: Every canonical name ever swapped into this holder — the FULL
     /// projection (C3 contract): builtin names from boot plus every user
     /// name any hot swap admitted, INCLUDING compute-capable names whose
     /// binding is unavailable (`wasm` off; invoking refuses
@@ -1229,7 +1192,7 @@ impl CapabilityRegistryHolder {
     /// [`CapabilityRegistry::iter`], so a hot swap can never un-reserve a
     /// canonical name.
     pub fn reserved_names(&self) -> impl Iterator<Item = &'static str> {
-        // Names are `&'static str`, so the snapshot needs no lock lifetime:
+        // why: Names are `&'static str`, so the snapshot needs no lock lifetime:
         // collected under a short read guard, then streamed without holding
         // the lock (an admission closure can run under the write lock while
         // a caller still iterates an older projection). The collect is
@@ -1238,14 +1201,14 @@ impl CapabilityRegistryHolder {
         let names: Vec<&'static str> = self
             .reserved
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
+            .unwrap_or_else(std::sync::PoisonError::into_inner) // why: poison-recovery (crate policy)
             .iter()
             .copied()
             .collect();
         names.into_iter()
     }
 
-    /// Run `f` with the live reservation held EXCLUSIVELY (C3 fix round 2:
+    /// note: Run `f` with the live reservation held EXCLUSIVELY (C3 fix round 2:
     /// the peer admission check-and-register seam).
     ///
     /// `f` sees the reservation as it is at call time and the holder
@@ -1271,11 +1234,11 @@ impl CapabilityRegistryHolder {
         let guard = self
             .reserved
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner); // poison-recovery (crate policy)
+            .unwrap_or_else(std::sync::PoisonError::into_inner); // why: poison-recovery (crate policy)
         f(&guard)
     }
 
-    /// Reserve the canonical names of `registry` — the FIRST half of
+    /// note: Reserve the canonical names of `registry` — the FIRST half of
     /// [`swap`](Self::swap), strictly before publication.
     ///
     /// The names come from the FULL declaration projection
@@ -1297,7 +1260,7 @@ impl CapabilityRegistryHolder {
         let incoming = registry.reserved_names();
         self.reserved
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
+            .unwrap_or_else(std::sync::PoisonError::into_inner) // why: poison-recovery (crate policy)
             .extend(incoming);
     }
 
@@ -1329,7 +1292,7 @@ impl CapabilityRegistryHolder {
         drop(previous);
     }
 
-    /// Atomically swap in a freshly rebuilt registry: its canonical names are
+    /// note: Atomically swap in a freshly rebuilt registry: its canonical names are
     /// reserved BEFORE the generation is published (the two half-steps, in
     /// that order). A reservation read racing this swap therefore observes
     /// either (previous rows, reservation without the new names) or (new
@@ -1344,7 +1307,7 @@ impl CapabilityRegistryHolder {
         self.publish_generation(registry);
     }
 
-    /// Create a holder pre-populated with `registry` — boot convenience:
+    /// note: Create a holder pre-populated with `registry` — boot convenience:
     /// the boot registry is swapped in before readers, the engine, and the
     /// watcher exist, and every later generation arrives via [`swap`](Self::swap).
     #[must_use]
@@ -1365,7 +1328,7 @@ mod tests {
 
     #[test]
     fn registry_has_32_builtins() {
-        // V1.186 removed the obsolete `acp.session_load` placeholder from the
+        // why: V1.186 removed the obsolete `acp.session_load` placeholder from the
         // prior 34; v231 removed `nexus.reference.refresh` (33→32).
         let reg = CapabilityRegistry::with_builtins();
         assert_eq!(reg.len(), 32);
@@ -1401,7 +1364,6 @@ mod tests {
             "script.project_scaffold",
             "game_bible.section_status.update",
             "script.section_status.update",
-            // V1.60 P0: DF-46 orchestration capabilities (full nexus.* names).
             "nexus.world.state.query",
             "nexus.world.delta.propose",
             "nexus.world.delta.apply",
@@ -1413,7 +1375,7 @@ mod tests {
                 "expected builtin '{name}' to be registered"
             );
         }
-        // `narrative.compute` in the plain builtin registry carries NO engine
+        // why: `narrative.compute` in the plain builtin registry carries NO engine
         // binding (real compute attaches the daemon-wide singleton): the
         // executable lookup misses it (C3 contract), the name stays reserved.
         assert!(reg.get("narrative.compute").is_none());
@@ -1429,8 +1391,8 @@ mod tests {
 
     #[test]
     fn builtin_capability_origin_defaults_to_builtin() {
-        // AR-40: the default `origin()` is `Builtin` — zero edits to the ~34
-        // builtin impls; a builtin capability must report `Builtin`.
+        // why: AR-40 — the default `origin()` is `Builtin` (zero edits to the
+        // ~34 builtin impls); a builtin capability must report `Builtin`.
         let reg = CapabilityRegistry::with_builtins();
         let cap = reg
             .get("sync.pull")
@@ -1442,7 +1404,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        // Runnable-only iteration (C3 contract): 31 builtins execute from the
+        // why: Runnable-only iteration (C3 contract): 31 builtins execute from the
         // plain registry; `narrative.compute` carries no engine binding here
         // and is not yielded (V1.186 removed `acp.session_load`; v231 removed
         // `nexus.reference.refresh`; 33→32 carried rows, 31 executable).
@@ -1457,20 +1419,17 @@ mod tests {
         assert!(names.contains(&"soul.experience.aggregate"));
         assert!(names.contains(&"novel.project_scaffold"));
         assert!(names.contains(&"novel.chapter_transition"));
-        // V1.60 P0 DF-46 orchestration capabilities.
         assert!(names.contains(&"nexus.world.state.query"));
         assert!(names.contains(&"nexus.fork.create"));
-        // V1.63 P2 essay.draft_status.finalize.
         assert!(names.contains(&"essay.draft_status.finalize"));
-        // V1.67 P2 script.section_status.update.
         assert!(names.contains(&"script.section_status.update"));
-        // And the compute-capable name is not in the executable projection —
+        // note: And the compute-capable name is not in the executable projection —
         // it lives in the reservation instead.
         assert!(!names.contains(&"narrative.compute"));
         assert!(reg.reserved_names().any(|n| n == "narrative.compute"));
     }
 
-    /// QC2-02 property, proved on the DECLARATION (C3 contract): a canonical
+    /// note: QC2-02 property, proved on the DECLARATION (C3 contract): a canonical
     /// builtin stays describable and reserved even when NO handler object is
     /// constructed for it.
     ///
@@ -1491,19 +1450,18 @@ mod tests {
             "no handler object is constructed for any builtin"
         );
 
-        // Describable purely by the declaration.
         assert_eq!(
             CapabilityCatalog::input_schema(&reg, "narrative.compute"),
             Some(nexus_preset::capability_catalog::NARRATIVE_COMPUTE_INPUT_SCHEMA),
             "a declared builtin with no handler resolves its schema"
         );
 
-        // Reserved purely by the declaration — the dispatch discriminator
+        // note: Reserved purely by the declaration — the dispatch discriminator
         // treats it as known (WorkerUnavailable before any effect).
         assert!(reg.get("narrative.compute").is_none());
         assert!(reg.is_reserved_only("narrative.compute"));
 
-        // The generation projection holds every declared name, and the
+        // note: The generation projection holds every declared name, and the
         // collision set a scan receives IS that projection.
         let generation: HashSet<&str> = reg.reserved_names().collect();
         for declared in nexus_preset::capability_catalog::builtin_names() {
@@ -1513,8 +1471,6 @@ mod tests {
             );
         }
 
-        // And the holder's accumulated projection inherits it through the
-        // boot swap.
         let holder = CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
             CapabilityRegistry::empty(),
         ));
@@ -1524,7 +1480,7 @@ mod tests {
         );
     }
 
-    /// Anti-drift anchor for the declaration roster: every builtin row the
+    /// note: Anti-drift anchor for the declaration roster: every builtin row the
     /// registry constructs must name a DECLARATION entry. A builtin added to
     /// the registry without a declaration entry (or vice versa, caught by
     /// the preset crate's own roster/schema lockstep test) turns this red —
@@ -1541,12 +1497,10 @@ mod tests {
                 cap.name()
             );
         }
-        // The carried-row count equals the declaration: nothing declared is
-        // missing from the boot registry either.
         assert_eq!(reg.len(), declared.len());
     }
 
-    /// The runtime-deps registry is the supported executable path for the
+    /// note: The runtime-deps registry is the supported executable path for the
     /// essay finalizer: an invocation resolved from it must reach the injected
     /// Work executor instead of refusing with `WorkerUnavailable`.
     #[tokio::test]
@@ -1588,8 +1542,7 @@ mod tests {
         );
     }
 
-    // ── User capability constructors (T2 / AR-36) ───────────────────────
-    // The trio fixture is the shared `test_support::write_capability_dir`
+    // note: The trio fixture is the shared `test_support::write_capability_dir`
     // (qc1 S-1): one writer for the in-crate test modules.
 
     #[tokio::test]
@@ -1616,7 +1569,7 @@ mod tests {
             outcome.skipped
         );
         assert_eq!(reg.len(), base_len + 1, "base builtins + 1 user capability");
-        // Builtins first, then the appended user capability (AR-36 order).
+        // why: Builtins first, then the appended user capability (AR-36 order).
         // The runnable projection is UNCHANGED (C3 contract): the user
         // capability admits without a binding in this build, so it is a
         // reserved-only row — carried, reserved, describable, not executable.
@@ -1625,17 +1578,13 @@ mod tests {
             names, base_names,
             "the executable projection is the builtin set; the unbound user row is not yielded"
         );
-        // Carried and reserved: the eager index holds it (declaration set),
-        // the reservation holds it, and the lookup misses it.
         assert!(reg.get("demo.pull").is_none());
         assert!(reg.is_reserved_only("demo.pull"));
         assert!(reg.reserved_names().any(|n| n == "demo.pull"));
-        // Known metadata resolves without constructing an executor.
         assert_eq!(
             nexus_preset::capability_catalog::CapabilityCatalog::input_schema(&reg, "demo.pull"),
             Some(r#"{"type":"object"}"#),
         );
-        // Registered through the index (not just iterated).
         assert!(reg.get("demo.pull").is_none());
         let reserved_row = reg
             .capabilities
@@ -1652,7 +1601,7 @@ mod tests {
 
     #[test]
     fn user_cap_colliding_with_builtin_is_skipped_builtin_wins() {
-        // P1 T4 (AR-43 gate 1): a user capability named like a builtin
+        // why: P1 T4 (AR-43 gate 1) — a user capability named like a builtin
         // (here `sync.pull`) is skipped inside the scan with a named
         // `NameCollision` reason — the builtin keeps serving `get()` and the
         // catalog lists exactly one row (builtin wins, AR-36/AR-43).
@@ -1680,10 +1629,8 @@ mod tests {
             "named NameCollision reason, got: {:?}",
             outcome.skipped[0].reason
         );
-        // Builtin still serves `get()` through the eager index.
         let cap = reg.get("sync.pull").expect("builtin still indexed");
         assert_eq!(cap.input_schema(), builtins::SyncPull.input_schema());
-        // Catalog has exactly one row for the name.
         let rows = reg.iter().filter(|c| c.name() == "sync.pull").count();
         assert_eq!(rows, 1, "no duplicate catalog row");
     }
@@ -1717,7 +1664,7 @@ mod tests {
             outcome.skipped
         );
         let cap = reg.get("demo.pull").expect("user cap indexed");
-        // PL-10: the admitted-with-engine path no longer returns the P0
+        // why: PL-10 — the admitted-with-engine path no longer returns the P0
         // stub's WorkerUnavailable — the real executor (AR-37) runs. The
         // fixture's module pair is hash-consistent (admitted) but its wasm
         // bytes are not valid wasm, so the first `run()` fails fail-closed

@@ -8,6 +8,7 @@
 //! This capability is designed to be called from a preset (schedule-driven)
 //! or directly from the CLI. No LLM invocation occurs inside this capability;
 //! if LLM polish is desired, chain `context.summarize` afterwards.
+// why: the capability is deliberately side-effect-free so presets and the CLI share one path.
 
 use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ use serde_json::{json, Value};
 
 /// The `soul.experience.aggregate` capability.
 ///
-/// Input schema:
+/// note: input schema:
 /// ```json
 /// { "creator_id": string, "home_dir": string }
 /// ```
@@ -70,13 +71,13 @@ impl Capability for SoulExperienceAggregate {
 
         let home = std::path::Path::new(home_dir);
 
-        // Use the preview function (no SOUL.md write) so the capability is
+        // why: use the preview function (no SOUL.md write) so the capability is
         // side-effect-free. The preset orchestrator or CLI is responsible for
         // writing the result to SOUL.md.
         let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
             home,
             MemoryBearerRef::Creator(creator_id),
-            None, // Deterministic path only — no LLM synthesizer
+            None, // why: deterministic path only, no LLM synthesizer
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("experience aggregation failed: {e}")))?;
@@ -149,7 +150,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let home = tmp.path();
 
-        // Create SOUL first so preview can load it
+        // why: create SOUL first so preview can load it
         nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest"))
             .unwrap();
 
@@ -171,11 +172,10 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let home = tmp.path();
 
-        // Create SOUL
         nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest2"))
             .unwrap();
 
-        // Create an experience-kind memory
+        // note: an experience-kind memory
         let mut mem = nexus_creator_memory::LongTermMemory::new("story_summary");
         mem.set_body("An epic tale of courage and determination.");
         nexus_creator_memory::memory_io::save_memory(

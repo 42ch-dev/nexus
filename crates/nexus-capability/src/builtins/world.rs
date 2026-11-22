@@ -17,6 +17,7 @@
 //! `world.delta.apply` is **runtime-side** (resolves `acp-capability-set.md`
 //! §8 Open Item line 223): the agent proposes, the runtime applies under a
 //! transaction with ownership re-check.
+// note: the design contract is world-delta-propose-apply.md (V1.60 P0).
 
 use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -28,9 +29,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-// ─── Shared admission gate ─────────────────────────────────────────────────
-
-/// Verify that `creator_id` owns `world_id`.
+/// note: verify that `creator_id` owns `world_id`.
 ///
 /// V1.67 P2 (R-V160P0-QC2-W001): delegates to the shared
 /// [`nexus_local_db::narrative_write::is_world_owned`] gate so the ownership
@@ -58,7 +57,7 @@ pub async fn ensure_world_owned(
     }
 }
 
-/// Resolve the admitted `ActorView` read selection of one owned World
+/// note: resolve the admitted `ActorView` read selection of one owned World
 /// (durable §4.1) for a capability that reads World KB rows.
 ///
 /// The selection is derived from stored ownership and the holder registry, so
@@ -94,7 +93,7 @@ pub async fn admitted_creator_view_scope(
         })
 }
 
-/// Resolve the workspace slug for a world (diagnostics / audit context).
+/// note: resolve the workspace slug for a world (diagnostics / audit context).
 ///
 /// Returns `"default"` when the stored `workspace_id` is the local sentinel
 /// `"wrk_local"` or empty — matching the local-first single-workspace posture.
@@ -113,31 +112,29 @@ async fn workspace_slug_for(pool: &sqlx::SqlitePool, world_id: &str) -> String {
     }
 }
 
-// ─── Input shapes ──────────────────────────────────────────────────────────
-
-/// Input for `nexus.world.state.query`.
+/// note: input for `nexus.world.state.query`.
 #[derive(Debug, Deserialize)]
 struct WorldStateQueryInput {
     world_id: String,
-    /// Caller creator id (admission gate).
+    /// note: caller creator id (admission gate).
     creator_id: String,
-    /// Which slice to return. Defaults to `"all"`.
+    /// note: which slice to return. Defaults to `"all"`.
     #[serde(default)]
     slice: Option<String>,
-    /// Optional branch filter for the timeline slice.
+    /// note: optional branch filter for the timeline slice.
     #[serde(default)]
     branch_id: Option<String>,
-    /// Optional cap on the number of timeline events returned.
+    /// note: optional cap on the number of timeline events returned.
     #[serde(default)]
     limit: Option<usize>,
 }
 
-/// Input for `nexus.world.delta.propose`.
+/// note: input for `nexus.world.delta.propose`.
 #[derive(Debug, Deserialize)]
 struct WorldDeltaProposeInput {
     world_id: String,
     creator_id: String,
-    /// Input changeset: each entry is an intended change without `old_value`
+    /// note: input changeset — each entry is an intended change without `old_value`
     /// (the handler populates `old_value` from current state).
     changeset: Vec<InputChange>,
 }
@@ -152,7 +149,7 @@ struct InputChange {
     rationale: String,
 }
 
-/// Input for `nexus.world.delta.apply` (the delta package).
+/// note: input for `nexus.world.delta.apply` (the delta package).
 #[derive(Debug, Deserialize)]
 struct WorldDeltaApplyInput {
     policy_context: PolicyContext,
@@ -161,7 +158,7 @@ struct WorldDeltaApplyInput {
     atomic: bool,
 }
 
-// Justification: `*_id` suffix is the canonical schema column naming for
+// why: `*_id` suffix is the canonical schema column naming for
 // entity identifiers (world_id, creator_id, source_work_id) — diverging would
 // break the delta-package contract documented in world-delta-propose-apply.md.
 #[allow(clippy::struct_field_names)]
@@ -189,9 +186,7 @@ const fn default_true() -> bool {
     true
 }
 
-// ─── Capability: nexus.world.state.query ───────────────────────────────────
-
-/// Query KB/timeline slices for a world (read-only snapshot).
+/// note: query KB/timeline slices for a world (read-only snapshot).
 #[derive(Debug, Clone)]
 pub struct WorldStateQuery {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -244,7 +239,6 @@ impl Capability for WorldStateQuery {
             "world.state.query admitted"
         );
 
-        // Admission gate: creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         let slice = parsed.slice.as_deref().unwrap_or("all");
@@ -253,7 +247,7 @@ impl Capability for WorldStateQuery {
 
         let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
 
-        // World metadata (always returned).
+        // note: world metadata is returned for every slice.
         let world = gw
             .get_world_state(&parsed.world_id)
             .await
@@ -261,7 +255,7 @@ impl Capability for WorldStateQuery {
         let world_json =
             serde_json::to_value(&world).map_err(|e| CapabilityError::Internal(e.to_string()))?;
 
-        // KB slice. The KB rows are model-facing, so they are read through the
+        // why: the KB rows are model-facing, so they are read through the
         // admitted Creator ActorView — another holder's `owner-private` World
         // row is never part of the slice, and an unresolvable selection refuses
         // rather than widening to the World listing. A timeline-only slice
@@ -281,7 +275,6 @@ impl Capability for WorldStateQuery {
             Vec::new()
         };
 
-        // Timeline slice.
         let timeline = if want_timeline {
             gw.get_timeline(&parsed.world_id, parsed.branch_id.as_deref(), parsed.limit)
                 .await
@@ -303,9 +296,7 @@ impl Capability for WorldStateQuery {
     }
 }
 
-// ─── Capability: nexus.world.delta.propose ─────────────────────────────────
-
-/// Produce a structured delta package from an input changeset (no writes).
+/// note: produce a structured delta package from an input changeset (no writes).
 #[derive(Debug, Clone)]
 pub struct WorldDeltaPropose {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -359,25 +350,23 @@ impl Capability for WorldDeltaPropose {
             "world.delta.propose admitted"
         );
 
-        // Admission gate.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         let slug = workspace_slug_for(pool, &parsed.world_id).await;
         let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
         let mut proposed: Vec<Value> = Vec::with_capacity(parsed.changeset.len());
         for ch in parsed.changeset {
-            // V1.60 supports kb_key_block (create/update) + world_metadata title.
+            // note: V1.60 supports kb_key_block (create/update) + world_metadata title.
             let old_value = match (ch.entity.as_str(), ch.entity_id.as_deref()) {
                 ("kb_key_block", Some(kid)) => {
                     let existing = store.get_knowledge_entry(kid).await.ok();
                     existing.and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
                 }
                 ("kb_key_block", None) => {
-                    // Create path — no prior value.
+                    // note: create path — no prior value.
                     Some(Value::Null)
                 }
                 ("world_metadata", _) if ch.field == "title" => {
-                    // Read current title from the world row.
                     sqlx::query_scalar::<_, String>(
                         "SELECT title FROM narrative_worlds WHERE world_id = ?",
                     )
@@ -419,7 +408,7 @@ impl Capability for WorldDeltaPropose {
     }
 }
 
-/// Extract a serializable field value from a `KnowledgeEntryRecord` for the lost-update guard.
+/// note: extract a serializable field value from a `KnowledgeEntryRecord` for the lost-update guard.
 fn field_of(
     kb: &nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord,
     field: &str,
@@ -436,9 +425,7 @@ fn field_of(
     }
 }
 
-// ─── Capability: nexus.world.delta.apply ───────────────────────────────────
-
-/// Apply a delta package under a transaction with a lost-update guard.
+/// note: apply a delta package under a transaction with a lost-update guard.
 #[derive(Debug, Clone)]
 pub struct WorldDeltaApply {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -464,7 +451,7 @@ impl Default for WorldDeltaApply {
     }
 }
 
-/// Maximum number of `key_block_id` values to bind in a single pre-fetch
+/// note: maximum number of `key_block_id` values to bind in a single pre-fetch
 /// IN-list. `SQLite` supports far more, but a fixed cap keeps the generated
 /// SQL and bind-count bounded regardless of caller input size.
 const KB_PREFETCH_CHUNK_SIZE: usize = 500;
@@ -501,7 +488,7 @@ impl Capability for WorldDeltaApply {
             "world.delta.apply admitted"
         );
 
-        // Atomic apply: the whole package runs in one transaction. `atomic:false`
+        // note: the whole package runs in one transaction — `atomic:false`
         // is accepted but V1.60 still applies transactionally (partial commit is
         // post-1.0); the output reports `atomic_applied: true`.
         let mut tx = pool
@@ -528,7 +515,7 @@ impl Capability for WorldDeltaApply {
         let mut results: Vec<Value> = Vec::with_capacity(parsed.proposed_changes.len());
         let mut all_applied = true;
 
-        // V1.67 P2 (R-V160P0-QC3-W001 / W-002): pre-fetch current body_json
+        // why: V1.67 P2 (R-V160P0-QC3-W001 / W-002) — pre-fetch current body_json
         // for all kb_key_block update targets in chunked, deduplicated
         // IN-lists, replacing the per-change SELECT + UPDATE N+1 pattern
         // while bounding the SQL size regardless of caller input.
@@ -546,7 +533,7 @@ impl Capability for WorldDeltaApply {
 
         let mut live_body_map: HashMap<String, Option<String>> = HashMap::new();
         if !update_kids.is_empty() {
-            // Dedupe ids so duplicate entity_id entries do not inflate bind
+            // why: dedupe ids so duplicate entity_id entries do not inflate bind
             // counts or generate redundant IN-list chunks.
             let mut seen = HashSet::with_capacity(update_kids.len());
             let unique_update_kids: Vec<&str> = update_kids
@@ -577,12 +564,11 @@ impl Capability for WorldDeltaApply {
         }
 
         for ch in parsed.proposed_changes {
-            // Capture the rationale for the audit trail before `ch` is consumed.
+            // why: capture the rationale for the audit trail before `ch` is consumed.
             let rationale = ch.rationale.clone();
             match (ch.entity.as_str(), ch.entity_id.as_deref()) {
                 ("kb_key_block", Some(kid)) => {
-                    // Update path with lost-update guard.
-                    // body_json is a nullable column → scalar type is Option<String>.
+                    // note: body_json is a nullable column → scalar type is Option<String>.
                     // V1.67 P2 (R-V160P0-QC3-W001): value was pre-fetched in
                     // bulk above instead of issuing one SELECT per change.
                     let live_body = live_body_map.get(kid).cloned().unwrap_or(None);
@@ -606,7 +592,7 @@ impl Capability for WorldDeltaApply {
                         }
                     }
 
-                    // Apply the field update. V1.60 supports body_json + status.
+                    // note: V1.60 supports body_json + status.
                     match ch.field.as_str() {
                         "body_json" => {
                             let body_str = serde_json::to_string(&ch.new_value)
@@ -645,9 +631,8 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("kb_key_block", None) => {
-                    // Create path: insert a new provisional key block via the
-                    // proper DAO method (`insert_key_block_in_tx`), which shares
-                    // this handler's transaction so the create rolls back
+                    // why: insert through the proper DAO method (`insert_key_block_in_tx`),
+                    // which shares this handler's transaction so the create rolls back
                     // atomically with sibling changes.
                     //
                     // R-V160P0-QC1-W001: the prior hand-written INSERT
@@ -665,7 +650,7 @@ impl Capability for WorldDeltaApply {
                                 "create kb_key_block requires new_value.canonical_name".into(),
                             )
                         })?;
-                    // Parse `block_type` into the enum (snake_case wire form).
+                    // note: parse `block_type` into the enum (snake_case wire form).
                     // Defaults to `BlockType::Character` (the canonical default)
                     // when absent or unrecognised; the prior "concept" literal
                     // was never a valid variant.
@@ -712,7 +697,7 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("world_metadata", _) if ch.field == "title" => {
-                    // Lost-update guard: compare old_value (if supplied) to the
+                    // note: lost-update guard — compare old_value (if supplied) to the
                     // live title before applying. SAFETY: SELECT against known
                     // narrative_worlds schema.
                     let live_title: Option<String> =
@@ -769,7 +754,6 @@ impl Capability for WorldDeltaApply {
             }
         }
 
-        // Commit the atomic batch.
         tx.commit()
             .await
             .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
@@ -789,15 +773,13 @@ impl Capability for WorldDeltaApply {
     }
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::pool_test_support::fresh_pool;
 
-    /// Seed the creator **and its registry holder**: the KB reads resolve an
+    /// note: seed the creator **and its registry holder** — the KB reads resolve an
     /// admitted `ActorView` selection, which fails closed without the holder row.
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         nexus_local_db::ensure_creator_row(pool, creator_id, "Test Creator")
@@ -805,7 +787,7 @@ mod tests {
             .unwrap();
     }
 
-    /// Seed only the stored `creators` row, with no registry holder: the shape a
+    /// note: seed only the stored `creators` row, with no registry holder — the shape a
     /// KB read must refuse rather than read unscoped.
     async fn seed_creator_without_holder(pool: &sqlx::SqlitePool, creator_id: &str) {
         sqlx::query(
@@ -819,7 +801,7 @@ mod tests {
         .unwrap();
     }
 
-    /// Seed one World-row `KnowledgeEntry` with an explicit governance pair
+    /// note: seed one World-row `KnowledgeEntry` with an explicit governance pair
     /// (`None`/`None` is the shared row), returning its id.
     async fn seed_kb_row(
         pool: &sqlx::SqlitePool,
@@ -842,7 +824,7 @@ mod tests {
             .entry_id
     }
 
-    /// Seed one World key block with a known body and a fixed `updated_at`, so
+    /// why: seed one World key block with a known body and a fixed `updated_at`, so
     /// an apply's timestamp advance is observable rather than racing the seed.
     async fn seed_kb_block_with_body(
         pool: &sqlx::SqlitePool,
@@ -863,7 +845,7 @@ mod tests {
         kid
     }
 
-    /// The columns the delta-apply writers may touch, read back as stored so a
+    /// note: the columns the delta-apply writers may touch, read back as stored so a
     /// non-write or rollback is compared byte-for-byte.
     async fn kb_snapshot(
         pool: &sqlx::SqlitePool,
@@ -879,7 +861,7 @@ mod tests {
         .unwrap()
     }
 
-    /// The `entry_id`s of the returned `kb_blocks` slice.
+    /// note: the `entry_id`s of the returned `kb_blocks` slice.
     fn kb_block_ids(out: &Value) -> Vec<String> {
         out["kb_blocks"]
             .as_array()
@@ -901,7 +883,7 @@ mod tests {
         )
         .await
         .unwrap();
-        // Rename to a fixed id for deterministic tests.
+        // why: rename to a fixed id for deterministic tests.
         sqlx::query("UPDATE narrative_worlds SET world_id = ? WHERE owner_creator_id = ?")
             .bind(world_id)
             .bind(owner)
@@ -915,7 +897,7 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
-        // Append a timeline event so the timeline slice is non-empty.
+        // why: append a timeline event so the timeline slice is non-empty.
         let world = sqlx::query_scalar::<_, String>(
             "SELECT root_fork_branch_id FROM narrative_worlds WHERE world_id = 'wld_a'",
         )
@@ -929,7 +911,7 @@ mod tests {
             "story_advance",
             Some("E1"),
             None,
-            None, // modules_json — test seed writes no modules
+            None, // note: modules_json — test seed writes no modules
         )
         .await
         .unwrap();
@@ -966,7 +948,7 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    /// R5: the KB slice holds the shared rows and the creator's own private
+    /// note: R5 — the KB slice holds the shared rows and the creator's own private
     /// rows, never another holder's private World row.
     #[tokio::test]
     async fn world_state_query_excludes_other_holders_private_rows() {
@@ -997,7 +979,7 @@ mod tests {
         )
         .await;
 
-        // Differential: the unscoped listing holds all three rows, so the
+        // why: the unscoped listing holds all three rows, so the
         // exclusion below is the selection's policy, not an empty KB.
         let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
             .list_by_world("wld_a")
@@ -1026,7 +1008,7 @@ mod tests {
         );
     }
 
-    /// R5 fail-closed: without an admitted scope the capability refuses instead
+    /// note: R5 fail-closed — without an admitted scope the capability refuses instead
     /// of reading the World listing.
     #[tokio::test]
     async fn world_state_query_fails_closed_without_a_holder() {
@@ -1053,8 +1035,6 @@ mod tests {
         );
     }
 
-    // ── nexus.world.delta.propose ────────────────────────────────────────────
-
     #[tokio::test]
     async fn world_delta_propose_success_populates_old_value() {
         let (_dir, pool) = fresh_pool().await;
@@ -1077,7 +1057,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["schema_version"], 1);
         assert_eq!(out["policy_context"]["world_id"], "wld_a");
-        // old_value should be populated from current state (the seeded title).
         assert_eq!(out["proposed_changes"][0]["old_value"], "Test World");
         assert_eq!(out["proposed_changes"][0]["new_value"], "New Title");
     }
@@ -1114,8 +1093,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    // ── nexus.world.delta.apply ──────────────────────────────────────────────
-
     #[tokio::test]
     async fn world_delta_apply_title_update_success() {
         let (_dir, pool) = fresh_pool().await;
@@ -1144,7 +1121,6 @@ mod tests {
         assert_eq!(out["applied"][0]["status"], "applied");
         assert_eq!(out["atomic_applied"], true);
 
-        // Verify the title was actually updated.
         let title: String =
             sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = 'wld_a'")
                 .fetch_one(&pool)
@@ -1183,7 +1159,6 @@ mod tests {
         seed_world(&pool, "ctr_a", "wld_a").await;
 
         let cap = WorldDeltaApply::with_pool(pool.clone());
-        // Supply a stale old_value that does not match the live title.
         let out = cap
             .run(json!({
                 "policy_context": {"world_id": "wld_a", "creator_id": "ctr_a"},
@@ -1199,7 +1174,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["applied"][0]["status"], "conflict");
         assert_eq!(out["atomic_applied"], false);
-        // The live title must NOT have changed (transaction rolled back).
         let title: String =
             sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = 'wld_a'")
                 .fetch_one(&pool)
@@ -1210,7 +1184,7 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_apply_kb_key_block_create_persists_row() {
-        // Regression for R-V160P0-QC1-W001: the kb_key_block create branch
+        // why: R-V160P0-QC1-W001 — the kb_key_block create branch
         // previously hand-wrote an INSERT referencing a non-existent
         // `metadata_json` column (and an invalid "concept" block_type default).
         // None of the 9 in-file tests exercised the create path, so CI stayed
@@ -1246,7 +1220,6 @@ mod tests {
             .await
             .expect("create kb_key_block must succeed (W-001 regression)");
 
-        // The change reports applied with a freshly minted kb_ id.
         assert_eq!(out["applied"][0]["status"], "applied");
         assert_eq!(out["atomic_applied"], true);
         let new_id = out["applied"][0]["entity_id"]
@@ -1257,9 +1230,8 @@ mod tests {
             "expected a kb_ prefixed id, got {new_id}"
         );
 
-        // The row actually persisted with the canonical schema columns. This
-        // read-back would have failed entirely under the old hand-written SQL
-        // (the INSERT never succeeded).
+        // why: this read-back would have failed entirely under the old
+        // hand-written SQL (the INSERT never succeeded).
         let (row_canonical, row_type, row_status, row_body): (
             String,
             String,
@@ -1284,7 +1256,7 @@ mod tests {
         assert!(body.contains("protagonist"));
     }
 
-    // V1.67 P2 (R-V160P0-QC3-W001): regression test for the N+1 SELECT fix.
+    // note: V1.67 P2 (R-V160P0-QC3-W001) — regression test for the N+1 SELECT fix.
     // Applies 4 kb_key_block updates in one delta package and asserts both
     // successful applies and conflict detection still work, while using the
     // bulk pre-fetch path instead of one SELECT per change.
@@ -1294,7 +1266,6 @@ mod tests {
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
-        // Seed two key blocks via the create path.
         let cap = WorldDeltaApply::with_pool(pool.clone());
         let out = cap
             .run(json!({
@@ -1333,7 +1304,6 @@ mod tests {
         let hero_id = out["applied"][0]["entity_id"].as_str().unwrap();
         let villain_id = out["applied"][1]["entity_id"].as_str().unwrap();
 
-        // Apply two body_json updates and one stale conflict in one package.
         let out2 = cap
             .run(json!({
                 "policy_context": {
@@ -1368,7 +1338,6 @@ mod tests {
         assert_eq!(out2["applied"][1]["status"], "conflict");
         assert_eq!(out2["atomic_applied"], false);
 
-        // The successful update must have persisted; the conflict must not.
         let hero_body: Option<String> =
             sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind(hero_id)
@@ -1386,7 +1355,7 @@ mod tests {
         assert!(villain_body.unwrap().contains("20"));
     }
 
-    // V1.67 P2 fix-wave 1 (W-002): regression test for chunked/deduped
+    // note: V1.67 P2 fix-wave 1 (W-002) — regression test for chunked/deduped
     // kb_key_block pre-fetch. Applies body_json updates for more ids than
     // one IN-list chunk can hold, verifying the handler still returns correct
     // results and does not construct an oversized SQL statement.
@@ -1459,7 +1428,7 @@ mod tests {
         assert_eq!(usize::try_from(applied_count).unwrap_or(usize::MAX), total);
     }
 
-    /// Stale preimage: a body update whose `old_value` no longer matches the
+    /// note: stale preimage — a body update whose `old_value` no longer matches the
     /// live body reports `conflict` and writes nothing — the stored body and
     /// the row's `revision` stay exactly as they were.
     #[tokio::test]
@@ -1495,7 +1464,7 @@ mod tests {
         assert_eq!(before.3, None, "the seeded row carries no revision");
     }
 
-    /// Applied patch: body and status both take the new value and `updated_at`
+    /// note: applied patch — body and status both take the new value and `updated_at`
     /// advances, while `revision` stays untouched — the no-OCC contract of this
     /// capability is asserted, not assumed.
     #[tokio::test]
@@ -1544,7 +1513,7 @@ mod tests {
         assert_eq!(revision, None);
     }
 
-    /// Batch atomicity: a later change refusing in the same package rolls back
+    /// note: batch atomicity — a later change refusing in the same package rolls back
     /// the earlier "applied" write of that transaction.
     #[tokio::test]
     async fn world_delta_apply_kb_batch_rolls_back_applied_writes_on_refusal() {
@@ -1589,7 +1558,7 @@ mod tests {
         );
     }
 
-    /// Create branch: the provisional insert lands inside the handler's
+    /// note: create branch — the provisional insert lands inside the handler's
     /// transaction, so a later refusal in the same package removes it again.
     #[tokio::test]
     async fn world_delta_apply_kb_create_rolls_back_on_later_refusal() {

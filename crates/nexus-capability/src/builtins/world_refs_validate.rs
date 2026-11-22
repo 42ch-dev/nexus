@@ -10,61 +10,62 @@
 //! - **Legacy worldless Works** (`world_id == NULL`, V1.39 and earlier):
 //!   warn-only (does not block). V1.40 creation/init must not produce this
 //!   state; the warn-only path exists solely for backward-compatible reads.
+// note: the `V1.40 DF-63 W4` tag marks the plan work item that introduced this validator.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-/// A single validation finding for a `world_refs` entry.
+/// note: a single validation finding for a `world_refs` entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorldRefFinding {
-    /// The invalid `world_refs` entry.
+    /// note: the invalid `world_refs` entry.
     pub entry: String,
-    /// Finding kind: `warning` or `error`.
+    /// note: finding kind: `warning` or `error`.
     pub severity: WorldRefSeverity,
-    /// Human-readable description.
+    /// note: human-readable description.
     pub message: String,
 }
 
-/// Severity of a `world_refs` finding.
+/// note: severity of a `world_refs` finding.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WorldRefSeverity {
-    /// Non-blocking advisory (outline stage or legacy worldless Work).
+    /// note: non-blocking advisory (outline stage or legacy worldless Work).
     Warning,
-    /// Blocking error (finalize stage, World-bound Work).
+    /// note: blocking error (finalize stage, World-bound Work).
     Error,
 }
 
-/// Result of `world_refs` validation.
+/// note: result of `world_refs` validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldRefsValidationResult {
-    /// All findings (warnings + errors).
+    /// note: all findings (warnings + errors).
     pub findings: Vec<WorldRefFinding>,
-    /// Whether the validation blocks the transition.
+    /// note: whether the validation blocks the transition.
     pub blocks: bool,
 }
 
-/// Parameters controlling `world_refs` validation behavior.
+/// note: parameters controlling `world_refs` validation behavior.
 #[derive(Debug, Clone)]
 pub struct WorldRefsValidationParams {
-    /// The validation stage: `outline` or `finalize`.
+    /// note: the validation stage: `outline` or `finalize`.
     pub stage: ValidationStage,
-    /// Whether the Work has a `world_id` (World-bound vs worldless).
+    /// note: whether the Work has a `world_id` (World-bound vs worldless).
     pub is_world_bound: bool,
-    /// Whether the user passed `--force` to override blocking errors.
+    /// note: whether the user passed `--force` to override blocking errors.
     pub force: bool,
 }
 
-/// Stage of validation.
+/// note: stage of validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationStage {
-    /// Outline stage — warnings only.
+    /// note: outline stage — warnings only.
     Outline,
-    /// Finalize stage — errors for World-bound Works.
+    /// note: finalize stage — errors for World-bound Works.
     Finalize,
 }
 
-/// Validate `world_refs` entries against a set of known valid World KB item ids.
+/// note: validate `world_refs` entries against a set of known valid World KB item ids.
 ///
 /// # Arguments
 ///
@@ -95,7 +96,6 @@ pub fn validate_world_refs<S: BuildHasher>(
     for raw in world_refs {
         let trimmed = raw.trim().to_string();
 
-        // Reject duplicates after trimming
         if !seen.insert(trimmed.clone()) {
             findings.push(WorldRefFinding {
                 entry: raw.clone(),
@@ -105,7 +105,6 @@ pub fn validate_world_refs<S: BuildHasher>(
             continue;
         }
 
-        // Reject empty after trim
         if trimmed.is_empty() {
             findings.push(WorldRefFinding {
                 entry: raw.clone(),
@@ -115,11 +114,9 @@ pub fn validate_world_refs<S: BuildHasher>(
             continue;
         }
 
-        // Check existence in valid_ids
         if !valid_ids.contains(&trimmed) {
-            // Determine severity based on stage and world binding
             let (severity, message) = if !params.is_world_bound {
-                // Legacy V1.39 worldless Work: always warn-only (backward-compat read).
+                // why: legacy V1.39 worldless Work — always warn-only (backward-compat read).
                 (
                     WorldRefSeverity::Warning,
                     format!(
@@ -128,7 +125,7 @@ pub fn validate_world_refs<S: BuildHasher>(
                     ),
                 )
             } else if params.stage == ValidationStage::Outline {
-                // Outline: warnings for World-bound Works
+                // note: outline — warnings for World-bound Works.
                 (
                     WorldRefSeverity::Warning,
                     format!(
@@ -137,7 +134,7 @@ pub fn validate_world_refs<S: BuildHasher>(
                     ),
                 )
             } else {
-                // Finalize: errors for World-bound Works
+                // note: finalize — errors for World-bound Works.
                 has_error = true;
                 (
                     WorldRefSeverity::Error,
@@ -155,7 +152,6 @@ pub fn validate_world_refs<S: BuildHasher>(
         }
     }
 
-    // Determine if validation blocks the transition
     let blocks = has_error && !params.force;
 
     WorldRefsValidationResult { findings, blocks }
@@ -248,7 +244,6 @@ mod tests {
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.findings[0].severity, WorldRefSeverity::Warning);
         assert!(!result.blocks);
-        // Legacy worldless Works produce advisory warnings mentioning legacy
         assert!(
             result.findings[0].message.contains("legacy V1.39"),
             "legacy worldless warning should mention V1.39 legacy"

@@ -1,4 +1,5 @@
 //! `judge.rule` capability — pure function rule evaluation (no LLM).
+// note: anything outside the grammar below is refused as InputInvalid.
 //!
 //! Evaluates rule expressions over `contextData` JSON. Supported syntax:
 //! - `"always_true"` / `"always_false"` — boolean literals
@@ -13,7 +14,7 @@ use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{JudgeRuleInput, JudgeRuleOutput};
 use serde_json::Value;
 
-/// Evaluate a pure rule (AST over context data).
+/// note: evaluate a pure rule (AST over context data).
 ///
 /// Supports boolean literals, field equality/inequality, and numeric comparison.
 /// Returns `InputInvalid` for truly unsupported syntax.
@@ -43,22 +44,16 @@ impl Capability for JudgeRule {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Rule evaluation engine
-// ---------------------------------------------------------------------------
-
-/// Evaluate a rule expression against context data.
+/// note: evaluate a rule expression against context data.
 fn evaluate_rule(rule: &str, context_data: &Value) -> Result<(bool, String), CapabilityError> {
     let trimmed = rule.trim();
 
-    // Boolean literals
     match trimmed {
         "always_true" => return Ok((true, "rule: always_true → go".to_string())),
         "always_false" => return Ok((false, "rule: always_false → nogo".to_string())),
         _ => {}
     }
 
-    // Context field comparisons: "context.<field> <op> <value>"
     if let Some(rest) = trimmed.strip_prefix("context.") {
         return evaluate_context_comparison(rest, context_data);
     }
@@ -68,12 +63,12 @@ fn evaluate_rule(rule: &str, context_data: &Value) -> Result<(bool, String), Cap
     )))
 }
 
-/// Parse and evaluate a context comparison like `count >= 1` or `status == "active"`.
+/// note: parse and evaluate a context comparison like `count >= 1` or `status == "active"`.
 fn evaluate_context_comparison(
     expr: &str,
     context_data: &Value,
 ) -> Result<(bool, String), CapabilityError> {
-    // Try operators in order of longest-first to avoid partial matches.
+    // why: try operators in order of longest-first to avoid partial matches.
     let operators = [">=", "<=", "!=", "==", ">", "<"];
 
     for op in operators {
@@ -111,9 +106,8 @@ fn evaluate_context_comparison(
     )))
 }
 
-/// Evaluate string/boolean/number equality.
+/// note: evaluate string/boolean/number equality.
 fn evaluate_equality(field: &str, field_value: &Value, expected: &str) -> (bool, String) {
-    // Try to parse expected as a quoted string
     let expected_val =
         if let Some(unquoted) = expected.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
             serde_json::Value::String(unquoted.to_string())
@@ -124,10 +118,10 @@ fn evaluate_equality(field: &str, field_value: &Value, expected: &str) -> (bool,
         } else if let Ok(n) = expected.parse::<i64>() {
             serde_json::Value::Number(n.into())
         } else if let Ok(n) = expected.parse::<f64>() {
-            // f64 is lossy but acceptable for rule evaluation
+            // why: f64 is lossy but acceptable for rule evaluation.
             serde_json::to_value(n).unwrap_or_default()
         } else {
-            // Treat as plain string comparison against field_value's string repr
+            // why: treat as plain string comparison against field_value's string repr.
             let field_str = field_value.as_str().unwrap_or("");
             let result = field_str == expected;
             return (
@@ -143,7 +137,7 @@ fn evaluate_equality(field: &str, field_value: &Value, expected: &str) -> (bool,
     )
 }
 
-/// Evaluate numeric comparison.
+/// note: evaluate numeric comparison.
 fn evaluate_numeric(
     field: &str,
     field_value: &Value,
@@ -172,7 +166,7 @@ fn evaluate_numeric(
     ))
 }
 
-/// Extract an f64 from a JSON value (Number only).
+/// note: extract an f64 from a JSON value (Number only).
 fn value_to_f64(v: &Value) -> Option<f64> {
     v.as_f64()
 }
@@ -207,8 +201,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["result"], false);
     }
-
-    // ── J1: Field equality tests ──────────────────────────────────────
 
     #[tokio::test]
     async fn judge_rule_field_equals_string() {
@@ -262,8 +254,6 @@ mod tests {
         assert_eq!(out["result"], true);
     }
 
-    // ── J1: Field inequality tests ────────────────────────────────────
-
     #[tokio::test]
     async fn judge_rule_field_not_equals() {
         let cap = JudgeRule;
@@ -276,8 +266,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["result"], true);
     }
-
-    // ── J1: Numeric comparison tests ──────────────────────────────────
 
     #[tokio::test]
     async fn judge_rule_numeric_gte() {
@@ -357,8 +345,6 @@ mod tests {
         assert_eq!(out["result"], true);
     }
 
-    // ── J1: Error cases ───────────────────────────────────────────────
-
     #[tokio::test]
     async fn judge_rule_unsupported_syntax() {
         let cap = JudgeRule;
@@ -382,7 +368,7 @@ mod tests {
         let result = cap
             .run(json!({
                 "rule": "always_true"
-                // missing contextData
+                // why: missing contextData
             }))
             .await;
         assert!(result.is_err());
@@ -415,8 +401,6 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not numeric"), "error: {err}");
     }
-
-    // ── Unit tests for evaluate_rule ──────────────────────────────────
 
     #[test]
     fn unit_evaluate_always_true() {

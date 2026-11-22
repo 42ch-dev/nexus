@@ -5,6 +5,7 @@
 //! Capabilities use [`CreatorCapabilityStore`] (orchestration-side adapter
 //! backed by `Arc<SqlitePool>`) for real persistence. When no store is
 //! injected (standalone/test mode), capabilities return stub responses.
+// why: the store is optional so standalone/test mode needs no SQLite pool.
 
 use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -16,11 +17,7 @@ use nexus_contracts::local::orchestration::{
 use serde_json::Value;
 use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
-// CreatorCapabilityStore — orchestration-side adapter
-// ---------------------------------------------------------------------------
-
-/// Orchestration-side adapter that centralizes creator identity resolution,
+/// note: orchestration-side adapter that centralizes creator identity resolution,
 /// memory fragment queries, and prompt injection queue operations.
 ///
 /// Backed by `Arc<SqlitePool>` and injected into all three creator capabilities.
@@ -30,7 +27,7 @@ pub struct CreatorCapabilityStore {
 }
 
 impl CreatorCapabilityStore {
-    /// Create a new store from a `SqlitePool`.
+    /// note: create a new store from a `SqlitePool`.
     #[must_use]
     pub fn new(pool: sqlx::SqlitePool) -> Self {
         Self {
@@ -38,15 +35,15 @@ impl CreatorCapabilityStore {
         }
     }
 
-    /// Create a new store from an `Arc<SqlitePool>`.
-    // Arc::new is not const, so this cannot be const fn on stable.
+    /// note: create a new store from an `Arc<SqlitePool>`.
+    // why: Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     #[must_use]
     pub fn from_arc(pool: Arc<sqlx::SqlitePool>) -> Self {
         Self { pool }
     }
 
-    /// Resolve the creator identity from capability input.
+    /// note: resolve the creator identity from capability input.
     ///
     /// Only accepts **context-injected** identity fields (prefixed with `_`)
     /// to prevent cross-creator authorization bypass (IDOR). The orchestration
@@ -65,12 +62,10 @@ impl CreatorCapabilityStore {
     /// Returns `CapabilityError::InputInvalid` if no creator identity can be resolved.
     /// Returns `CapabilityError::Internal` if a database lookup fails.
     pub async fn resolve_creator_id(&self, input: &Value) -> Result<String, CapabilityError> {
-        // Step 1: context-injected _creator_id
         if let Some(id) = input.get("_creator_id").and_then(|v| v.as_str()) {
             return Ok(id.to_string());
         }
 
-        // Step 2: context-injected _schedule_id → creator_schedules.creator_id
         if let Some(schedule_id) = input.get("_schedule_id").and_then(|v| v.as_str()) {
             let row = sqlx::query_scalar!(
                 "SELECT creator_id FROM creator_schedules WHERE schedule_id = ?",
@@ -85,7 +80,6 @@ impl CreatorCapabilityStore {
             }
         }
 
-        // Step 3: context-injected _session_id → orchestration_sessions.creator_id
         if let Some(session_id) = input.get("_session_id").and_then(|v| v.as_str()) {
             let row = sqlx::query_scalar!(
                 "SELECT creator_id FROM orchestration_sessions WHERE session_id = ?",
@@ -100,14 +94,13 @@ impl CreatorCapabilityStore {
             }
         }
 
-        // Step 4: unresolved
         Err(CapabilityError::InputInvalid(
             "missing creator identity: orchestration context must inject _creator_id, _schedule_id, or _session_id"
                 .into(),
         ))
     }
 
-    /// Resolve `session_id` from capability input.
+    /// note: resolve `session_id` from capability input.
     ///
     /// Only accepts context-injected `_session_id`. Falls back to `"default"`
     /// only in standalone/test mode (no store injected).
@@ -118,7 +111,7 @@ impl CreatorCapabilityStore {
         "default".to_string()
     }
 
-    /// Read memory fragments for a creator with optional keyword filter.
+    /// note: read memory fragments for a creator with optional keyword filter.
     ///
     /// Returns the count of matching fragments.
     ///
@@ -135,13 +128,12 @@ impl CreatorCapabilityStore {
             .await
             .map_err(|e| CapabilityError::Internal(format!("read_memory: {e}")))?;
 
-        // If count is within limit, return it directly; otherwise return limit
-        // (we count, not fetch, so this is informational)
+        // why: we count instead of fetching, so `limit` is informational only.
         let _ = limit;
         Ok(count)
     }
 
-    /// Write a memory fragment for a creator.
+    /// note: write a memory fragment for a creator.
     ///
     /// Returns the fragment ID of the newly created fragment.
     ///
@@ -170,7 +162,7 @@ impl CreatorCapabilityStore {
             summary: content.to_string(),
             created_at: now,
             ttl: None,
-            world_id: None, // V1.81: standalone writes have no world context
+            world_id: None, // note: V1.81 standalone writes have no world context
         };
 
         nexus_local_db::create_fragment(self.pool.as_ref(), &fragment)
@@ -180,7 +172,7 @@ impl CreatorCapabilityStore {
         Ok(fragment_id)
     }
 
-    /// Enqueue a prompt for later consumption.
+    /// note: enqueue a prompt for later consumption.
     ///
     /// Inserts a `queued` row into `creator_prompt_injections`.
     ///
@@ -219,7 +211,7 @@ impl CreatorCapabilityStore {
         Ok(injection_id)
     }
 
-    /// Drain queued prompt injections for a creator/session.
+    /// note: drain queued prompt injections for a creator/session.
     ///
     /// Claims queued rows and returns them for consumption by `acp.prompt`.
     ///
@@ -245,7 +237,7 @@ impl CreatorCapabilityStore {
     }
 }
 
-/// Generate a simple ULID-like ID for fragment/injection primary keys.
+/// note: generate a simple ULID-like ID for fragment/injection primary keys.
 /// Uses timestamp + counter for uniqueness within this process.
 fn generate_ulid() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -259,11 +251,7 @@ fn generate_ulid() -> String {
     format!("{ts:016x}{counter:08x}")
 }
 
-// ---------------------------------------------------------------------------
-// creator.read_memory
-// ---------------------------------------------------------------------------
-
-/// Read entries from the creator memory store.
+/// note: read entries from the creator memory store.
 ///
 /// When no store is injected (standalone/test mode), returns `count: 0`.
 pub struct CreatorReadMemory {
@@ -271,15 +259,15 @@ pub struct CreatorReadMemory {
 }
 
 impl CreatorReadMemory {
-    /// Create without a store (placeholder mode).
+    /// note: create without a store (placeholder mode).
     #[must_use]
     pub const fn new() -> Self {
         Self { store: None }
     }
 
-    /// Create with a store for real persistence.
+    /// note: create with a store for real persistence.
     #[must_use]
-    // Arc::new is not const, so this cannot be const fn on stable.
+    // why: Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
         Self { store: Some(store) }
@@ -311,7 +299,6 @@ impl Capability for CreatorReadMemory {
             })?;
 
         let Some(store) = &self.store else {
-            // Standalone/test mode — return zero count
             let output = CreatorReadMemoryOutput { count: 0 };
             return serde_json::to_value(output)
                 .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
@@ -329,11 +316,7 @@ impl Capability for CreatorReadMemory {
     }
 }
 
-// ---------------------------------------------------------------------------
-// creator.write_memory
-// ---------------------------------------------------------------------------
-
-/// Append/update creator memory.
+/// note: append/update creator memory.
 ///
 /// When no store is injected (standalone/test mode), returns a stub fragment ID.
 pub struct CreatorWriteMemory {
@@ -341,15 +324,15 @@ pub struct CreatorWriteMemory {
 }
 
 impl CreatorWriteMemory {
-    /// Create without a store (placeholder mode).
+    /// note: create without a store (placeholder mode).
     #[must_use]
     pub const fn new() -> Self {
         Self { store: None }
     }
 
-    /// Create with a store for real persistence.
+    /// note: create with a store for real persistence.
     #[must_use]
-    // Arc::new is not const, so this cannot be const fn on stable.
+    // why: Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
         Self { store: Some(store) }
@@ -381,7 +364,6 @@ impl Capability for CreatorWriteMemory {
             })?;
 
         let Some(store) = &self.store else {
-            // Standalone/test mode — return stub
             let output = CreatorWriteMemoryOutput {
                 fragment_id: "stub-fragment-id".to_string(),
             };
@@ -407,11 +389,7 @@ impl Capability for CreatorWriteMemory {
     }
 }
 
-// ---------------------------------------------------------------------------
-// creator.inject_prompt
-// ---------------------------------------------------------------------------
-
-/// Queue a prompt to be sent on the next `acp.prompt`.
+/// note: queue a prompt to be sent on the next `acp.prompt`.
 ///
 /// When no store is injected (standalone/test mode), returns `{ queued: true }`
 /// without persistence.
@@ -420,15 +398,15 @@ pub struct CreatorInjectPrompt {
 }
 
 impl CreatorInjectPrompt {
-    /// Create without a store (placeholder mode).
+    /// note: create without a store (placeholder mode).
     #[must_use]
     pub const fn new() -> Self {
         Self { store: None }
     }
 
-    /// Create with a store for real persistence.
+    /// note: create with a store for real persistence.
     #[must_use]
-    // Arc::new is not const, so this cannot be const fn on stable.
+    // why: Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
         Self { store: Some(store) }
@@ -459,7 +437,6 @@ impl Capability for CreatorInjectPrompt {
                 CapabilityError::InputInvalid(format!("creator.inject_prompt input: {e}"))
             })?;
 
-        // Validate prompt is non-empty
         if parsed.prompt.trim().is_empty() {
             return Err(CapabilityError::InputInvalid(
                 "prompt must not be empty".into(),
@@ -467,7 +444,6 @@ impl Capability for CreatorInjectPrompt {
         }
 
         let Some(store) = &self.store else {
-            // Standalone/test mode — return stub
             let output = CreatorInjectPromptOutput { queued: true };
             return serde_json::to_value(output)
                 .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
@@ -493,11 +469,7 @@ impl Capability for CreatorInjectPrompt {
     }
 }
 
-// ---------------------------------------------------------------------------
-// creator.write_brief
-// ---------------------------------------------------------------------------
-
-/// Required keys in a valid creative brief (work-experience-model §4).
+/// note: required keys in a valid creative brief (work-experience-model §4).
 const BRIEF_REQUIRED_KEYS: &[&str] = &[
     "genre",
     "tone",
@@ -510,7 +482,7 @@ const BRIEF_REQUIRED_KEYS: &[&str] = &[
     "open_questions_resolved",
 ];
 
-/// Required string keys that must be non-empty after trim.
+/// note: required string keys that must be non-empty after trim.
 const BRIEF_REQUIRED_NONEMPTY_KEYS: &[&str] = &[
     "genre",
     "tone",
@@ -519,10 +491,10 @@ const BRIEF_REQUIRED_NONEMPTY_KEYS: &[&str] = &[
     "setting_hook",
 ];
 
-/// Required array keys that must have at least one entry.
+/// note: required array keys that must have at least one entry.
 const BRIEF_REQUIRED_ARRAY_KEYS: &[&str] = &["constraints", "themes"];
 
-/// Validate a creative brief JSON against §4 schema.
+/// note: validate a creative brief JSON against §4 schema.
 ///
 /// Returns `Ok(())` if valid, or an error message describing what's wrong.
 ///
@@ -533,7 +505,6 @@ fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
         .as_object()
         .ok_or_else(|| "brief must be a JSON object".to_string())?;
 
-    // W-V133P2-04: brief_schema_version must be present and equal to 1
     let version = obj
         .get("brief_schema_version")
         .ok_or_else(|| "missing required field 'brief_schema_version'".to_string())?;
@@ -547,14 +518,12 @@ fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
         }
     }
 
-    // Check all required keys present
     for key in BRIEF_REQUIRED_KEYS {
         if !obj.contains_key(*key) {
             return Err(format!("missing required field '{key}'"));
         }
     }
 
-    // Check string fields non-empty
     for key in BRIEF_REQUIRED_NONEMPTY_KEYS {
         if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
             if val.trim().is_empty() {
@@ -565,13 +534,11 @@ fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
         }
     }
 
-    // Check array fields have at least one entry
     for key in BRIEF_REQUIRED_ARRAY_KEYS {
         if let Some(arr) = obj.get(*key).and_then(|v| v.as_array()) {
             if arr.is_empty() {
                 return Err(format!("field '{key}' must have at least one entry"));
             }
-            // Each entry must be a non-empty string
             for (i, entry) in arr.iter().enumerate() {
                 let s = entry
                     .as_str()
@@ -585,7 +552,7 @@ fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
         }
     }
 
-    // non_goals and open_questions_resolved should be arrays (may be empty)
+    // note: non_goals and open_questions_resolved may be empty arrays.
     for key in &["non_goals", "open_questions_resolved"] {
         if !obj.get(*key).is_some_and(serde_json::Value::is_array) {
             return Err(format!("field '{key}' must be an array"));
@@ -595,7 +562,7 @@ fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate and persist a creative brief on a Work entity.
+/// note: validate and persist a creative brief on a Work entity.
 ///
 /// Parses `brief_text` as JSON, validates against §4 schema, and writes
 /// to the Work via `patch_work` in `nexus_local_db`. Sets
@@ -608,13 +575,13 @@ pub struct CreatorWriteBrief {
 }
 
 impl CreatorWriteBrief {
-    /// Create without a store (placeholder mode).
+    /// note: create without a store (placeholder mode).
     #[must_use]
     pub const fn new() -> Self {
         Self { store: None }
     }
 
-    /// Create with a store for real persistence.
+    /// note: create with a store for real persistence.
     #[must_use]
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
@@ -646,16 +613,13 @@ impl Capability for CreatorWriteBrief {
                 CapabilityError::InputInvalid(format!("creator.write_brief input: {e}"))
             })?;
 
-        // Parse brief_text as JSON
         let brief: serde_json::Value = serde_json::from_str(&parsed.brief_text).map_err(|e| {
             CapabilityError::InputInvalid(format!("brief_text is not valid JSON: {e}"))
         })?;
 
-        // Validate against §4 schema
         validate_creative_brief(&brief).map_err(CapabilityError::InputInvalid)?;
 
         let Some(store) = &self.store else {
-            // Standalone/test mode — return stub
             let output = CreatorWriteBriefOutput {
                 written: true,
                 intake_status: "complete".to_string(),
@@ -694,16 +658,12 @@ impl Capability for CreatorWriteBrief {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::pool_test_support::fresh_pool;
 
-    /// Standalone mode: no store injected — returns zero count.
+    /// note: standalone mode: no store injected — returns zero count.
     #[tokio::test]
     async fn read_memory_standalone_returns_zero() {
         let cap = CreatorReadMemory::new();
@@ -714,7 +674,7 @@ mod tests {
         assert_eq!(out["count"], 0);
     }
 
-    /// Standalone mode: no store injected — returns stub fragment ID.
+    /// note: standalone mode: no store injected — returns stub fragment ID.
     #[tokio::test]
     async fn write_memory_standalone_returns_stub() {
         let cap = CreatorWriteMemory::new();
@@ -729,7 +689,7 @@ mod tests {
         assert_eq!(out["fragmentId"], "stub-fragment-id");
     }
 
-    /// R-V181P0-QC1-W001: `write_memory` standalone path always uses
+    /// why: R-V181P0-QC1-W001: `write_memory` standalone path always uses
     /// `world_id: None`. The review pipeline is the `world_id` propagation
     /// path; standalone writes (e.g. from an ACP session without an active
     /// world context) have no world binding.
@@ -754,7 +714,6 @@ mod tests {
             "expected real fragment ID, got: {fragment_id}"
         );
 
-        // Verify the persisted fragment has world_id = None
         let list = nexus_local_db::list_fragments(&pool, "ctr_noworld")
             .await
             .unwrap();
@@ -765,7 +724,7 @@ mod tests {
         );
     }
 
-    /// Standalone mode: no store injected — returns queued without persistence.
+    /// note: standalone mode: no store injected — returns queued without persistence.
     #[tokio::test]
     async fn inject_prompt_standalone_returns_queued() {
         let cap = CreatorInjectPrompt::new();
@@ -779,7 +738,7 @@ mod tests {
         assert_eq!(out["queued"], true);
     }
 
-    /// Inject prompt with empty text should fail.
+    /// note: inject prompt with empty text should fail.
     #[tokio::test]
     async fn inject_prompt_rejects_empty() {
         let cap = CreatorInjectPrompt::new();
@@ -793,16 +752,16 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("empty"));
     }
 
-    /// Standalone mode: missing creator identity should fail.
+    /// note: standalone mode: missing creator identity should fail.
     #[tokio::test]
     async fn read_memory_standalone_no_identity_ok() {
-        // Standalone mode returns count 0 without identity resolution
+        // why: standalone mode returns count 0 without identity resolution.
         let cap = CreatorReadMemory::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
         assert_eq!(out["count"], 0);
     }
 
-    // ── Integration tests (require SQLite) ──────────────────────────────
+    // note: integration tests require SQLite.
 
     #[tokio::test]
     async fn read_memory_with_store_returns_count() {
@@ -810,7 +769,6 @@ mod tests {
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorReadMemory::with_store(store);
 
-        // Seed a fragment
         nexus_local_db::create_fragment(
             cap.store.as_ref().unwrap().pool.as_ref(),
             &nexus_local_db::MemoryFragmentRecord {
@@ -873,7 +831,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Filter by "alpha" — should get 1
         let out = cap
             .run(serde_json::json!({"_creator_id": "ctr_test", "keyword": "alpha"}))
             .await
@@ -888,7 +845,6 @@ mod tests {
         let write_cap = CreatorWriteMemory::with_store(store.clone());
         let read_cap = CreatorReadMemory::with_store(store);
 
-        // Write
         let write_out = write_cap
             .run(serde_json::json!({
                 "content": "A memory of the protagonist",
@@ -904,7 +860,6 @@ mod tests {
             "expected real fragment ID, got: {fragment_id}"
         );
 
-        // Read — should find the fragment
         let read_out = read_cap
             .run(serde_json::json!({"_creator_id": "ctr_roundtrip"}))
             .await
@@ -918,7 +873,6 @@ mod tests {
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorInjectPrompt::with_store(store.clone());
 
-        // Enqueue
         let out = cap
             .run(serde_json::json!({
                 "prompt": "write chapter 1",
@@ -930,7 +884,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["queued"], true);
 
-        // Drain — should find the queued prompt
         let drained = store
             .drain_prompt_queue("ctr_inject", "sess_inject", 10)
             .await
@@ -946,7 +899,6 @@ mod tests {
         let store = Arc::new(CreatorCapabilityStore::new(pool));
         let cap = CreatorInjectPrompt::with_store(store.clone());
 
-        // Enqueue low priority first
         cap.run(serde_json::json!({
             "prompt": "low priority",
             "priority": 0,
@@ -956,7 +908,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Enqueue high priority second
         cap.run(serde_json::json!({
             "prompt": "high priority",
             "priority": 10,
@@ -966,7 +917,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Drain — high priority should come first
         let drained = store
             .drain_prompt_queue("ctr_prio", "sess_prio", 1)
             .await
@@ -975,7 +925,7 @@ mod tests {
         assert_eq!(drained[0].prompt, "high priority");
     }
 
-    /// Verifies that raw `creator_id` (without underscore) is REJECTED.
+    /// why: verifies that raw `creator_id` (without underscore) is REJECTED.
     /// Only `_creator_id` (context-injected) is accepted for security.
     #[tokio::test]
     async fn resolve_creator_id_rejects_raw_creator_id() {
@@ -1006,7 +956,6 @@ mod tests {
     #[tokio::test]
     async fn resolve_creator_id_from_schedule_id() {
         let (_dir, pool) = fresh_pool().await;
-        // Insert a schedule row
         let now = chrono::Utc::now().timestamp();
         sqlx::query!(
             "INSERT INTO creator_schedules
@@ -1066,9 +1015,7 @@ mod tests {
             .contains("missing creator identity"));
     }
 
-    // ── creator.write_brief tests ──────────────────────────────────────
-
-    /// Standalone mode: valid brief returns written=true.
+    /// note: standalone mode: valid brief returns written=true.
     #[tokio::test]
     async fn write_brief_standalone_valid_brief() {
         let cap = CreatorWriteBrief::new();
@@ -1096,7 +1043,7 @@ mod tests {
         assert_eq!(out["intakeStatus"], "complete");
     }
 
-    /// Standalone mode: invalid JSON in `brief_text` should fail.
+    /// note: standalone mode: invalid JSON in `brief_text` should fail.
     #[tokio::test]
     async fn write_brief_standalone_invalid_json() {
         let cap = CreatorWriteBrief::new();
@@ -1111,14 +1058,14 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("not valid JSON"));
     }
 
-    /// Standalone mode: missing required field should fail.
+    /// note: standalone mode: missing required field should fail.
     #[tokio::test]
     async fn write_brief_standalone_missing_field() {
         let cap = CreatorWriteBrief::new();
         let brief = serde_json::json!({
             "genre": "sci-fi",
             "tone": "tense"
-            // missing audience, constraints, themes, etc.
+            // note: missing audience, constraints, themes, etc.
         });
         let result = cap
             .run(serde_json::json!({
@@ -1135,7 +1082,7 @@ mod tests {
         );
     }
 
-    /// Standalone mode: empty string field should fail.
+    /// note: standalone mode: empty string field should fail.
     #[tokio::test]
     async fn write_brief_standalone_empty_genre() {
         let cap = CreatorWriteBrief::new();
@@ -1166,7 +1113,7 @@ mod tests {
         );
     }
 
-    /// Standalone mode: empty constraints array should fail.
+    /// note: standalone mode: empty constraints array should fail.
     #[tokio::test]
     async fn write_brief_standalone_empty_constraints() {
         let cap = CreatorWriteBrief::new();
@@ -1197,7 +1144,7 @@ mod tests {
         );
     }
 
-    /// W-V133P2-04: missing `brief_schema_version` should fail.
+    /// note: W-V133P2-04: missing `brief_schema_version` should fail.
     #[tokio::test]
     async fn write_brief_standalone_missing_schema_version() {
         let cap = CreatorWriteBrief::new();
@@ -1211,7 +1158,7 @@ mod tests {
             "protagonist_hook": "A detective",
             "setting_hook": "A city",
             "open_questions_resolved": []
-            // brief_schema_version intentionally omitted
+            // why: brief_schema_version intentionally omitted
         });
         let result = cap
             .run(serde_json::json!({
@@ -1228,7 +1175,7 @@ mod tests {
         );
     }
 
-    /// W-V133P2-04: wrong `brief_schema_version` should fail.
+    /// note: W-V133P2-04: wrong `brief_schema_version` should fail.
     #[tokio::test]
     async fn write_brief_standalone_wrong_schema_version() {
         let cap = CreatorWriteBrief::new();
@@ -1259,14 +1206,13 @@ mod tests {
         );
     }
 
-    /// Integration: `write_brief` with store writes to Work entity.
+    /// note: integration: `write_brief` with store writes to Work entity.
     #[tokio::test]
     async fn write_brief_with_store_roundtrip() {
         let (_dir, pool) = fresh_pool().await;
         let store = Arc::new(CreatorCapabilityStore::new(pool.clone()));
         let cap = CreatorWriteBrief::with_store(store);
 
-        // Seed a Work
         nexus_local_db::create_work(
             &pool,
             &nexus_local_db::WorkRecord {
@@ -1331,7 +1277,6 @@ mod tests {
         assert_eq!(out["written"], true);
         assert_eq!(out["intakeStatus"], "complete");
 
-        // Verify the Work was actually updated
         let updated = nexus_local_db::get_work(&pool, "ctr_brief_test", "wrk_brief_test")
             .await
             .unwrap()

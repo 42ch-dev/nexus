@@ -19,6 +19,7 @@
 //!
 //! Writes commit through the injected Work artifact port (Work lock +
 //! durable atomic write).
+// note: the `V1.63 P2` tag marks the plan revision this writer arrived in.
 
 use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{commit_work_bytes, require_executor, resolve_works_dirs};
@@ -30,14 +31,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
-/// Input for `essay.draft_status.finalize`.
+/// note: input for `essay.draft_status.finalize`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct FinalizeDraftInput {
     work_ref: String,
     #[serde(default)]
     works_root: Option<String>,
-    // Value unused, but deserializing it preserves rejection of a declared-schema input
+    // why: value unused, but deserializing it preserves rejection of a declared-schema input
     // the handler never supported (integer `word_count`); only `"auto"` is accepted.
     #[serde(default)]
     #[allow(dead_code)]
@@ -50,7 +51,7 @@ enum WordCount {
     Auto,
 }
 
-/// Output from `essay.draft_status.finalize`.
+/// note: output from `essay.draft_status.finalize`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct FinalizeDraftOutput {
@@ -59,14 +60,14 @@ struct FinalizeDraftOutput {
     word_count: usize,
 }
 
-/// `essay.draft_status.finalize` capability.
+/// note: `essay.draft_status.finalize` capability.
 pub struct EssayDraftStatusFinalize {
     works_root: PathBuf,
     executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
 impl EssayDraftStatusFinalize {
-    /// Create with default Works root.
+    /// note: create with the default Works root.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -75,7 +76,7 @@ impl EssayDraftStatusFinalize {
         }
     }
 
-    /// Attach the workspace executor that carries the Work artifact port.
+    /// note: attach the workspace executor that carries the Work artifact port.
     #[must_use]
     pub fn with_workspace_executor(mut self, executor: Option<Arc<dyn WorkspaceExecutor>>) -> Self {
         self.executor = executor;
@@ -120,18 +121,15 @@ impl Capability for EssayDraftStatusFinalize {
         let (workspace_root, works_dir) = resolve_works_dirs(executor, &works_root)?;
         let draft_path = works_dir.join(&work_ref).join("Drafts").join("draft.md");
 
-        // Read current draft
         let content = tokio::fs::read_to_string(&draft_path)
             .await
             .map_err(|e| CapabilityError::Internal(format!("read draft.md: {e}")))?;
 
-        // Parse and update YAML frontmatter
         let updated_content = update_frontmatter_status(&content)?;
 
-        // Count words in body (excluding frontmatter)
+        // note: word count excludes the frontmatter block.
         let word_count = count_body_words(&updated_content);
 
-        // Commit through the Work artifact port
         commit_work_bytes(
             executor,
             &workspace_root,
@@ -158,7 +156,7 @@ impl Capability for EssayDraftStatusFinalize {
     }
 }
 
-/// Update the `status` field in YAML frontmatter to `finalized`, and update
+/// note: update the `status` field in YAML frontmatter to `finalized`, and update
 /// `word_count` to the auto-counted value.
 ///
 /// Frontmatter is delimited by `---` lines at the start of the file.
@@ -171,8 +169,7 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
         ));
     }
 
-    // Find the closing `---` after the opening.
-    let after_open = &trimmed[3..]; // skip opening ---
+    let after_open = &trimmed[3..]; // note: skip the opening `---`.
     let closing_idx = after_open
         .find("\n---")
         .or_else(|| after_open.find("\r\n---"));
@@ -183,9 +180,9 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
     };
 
     let fm_body = &after_open[..closing_idx];
-    let rest = &after_open[closing_idx..]; // includes \n--- and body
+    let rest = &after_open[closing_idx..]; // note: includes the `\n---` and the body.
 
-    // Build new frontmatter: same keys but status=finalized + word_count updated.
+    // note: rebuild the frontmatter with the same keys, `status=finalized` and an updated `word_count`.
     let word_count = count_body_words(rest);
 
     let mut new_fm = String::new();
@@ -196,7 +193,7 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
     for line in fm_body.lines() {
         let trimmed_line = line.trim();
         if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
-            // Preserve empty lines and comments
+            // note: preserve empty lines and comments.
             if !new_fm.is_empty() {
                 new_fm.push('\n');
             }
@@ -234,7 +231,7 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
                 }
             }
         } else {
-            // Non-key-value line — preserve as-is
+            // note: non-key-value line — preserved as-is.
             if !new_fm.is_empty() {
                 new_fm.push('\n');
             }
@@ -242,7 +239,7 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
         }
     }
 
-    // Ensure status and word_count exist (insert if missing).
+    // note: ensure status and word_count exist (insert if missing).
     if !found_status {
         new_fm.push_str("\nstatus: finalized");
     }
@@ -250,20 +247,20 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
         let _ = std::fmt::Write::write_fmt(&mut new_fm, format_args!("\nword_count: {word_count}"));
     }
 
-    // Ensure title comes first if present (simple reorder)
+    // note: ensure `title` comes first if present (simple reorder).
     let new_fm = if found_title {
         reorder_frontmatter_title_first(&new_fm)
     } else {
         new_fm
     };
 
-    // `rest` already starts with `\n---` (it's the slice from the closing
+    // why: `rest` already starts with `\n---` (it's the slice from the closing
     // delimiter onward), so we must NOT add another `\n---` here — that
     // would produce a double closing delimiter and corrupt the frontmatter.
     Ok(format!("---\n{new_fm}{rest}"))
 }
 
-/// Reorder frontmatter so `title` comes first.
+/// note: reorder frontmatter so `title` comes first.
 fn reorder_frontmatter_title_first(fm: &str) -> String {
     let mut lines: Vec<&str> = fm.lines().collect();
     if let Some(title_pos) = lines.iter().position(|l| l.trim().starts_with("title:")) {
@@ -275,9 +272,9 @@ fn reorder_frontmatter_title_first(fm: &str) -> String {
     lines.join("\n")
 }
 
-/// Count words in the essay body (after frontmatter `---` closing).
+/// note: count words in the essay body (after the frontmatter `---` closing).
 fn count_body_words(text: &str) -> usize {
-    // Skip past the closing `---` of frontmatter
+    // note: skip past the closing `---` of the frontmatter.
     let body = text.find("\n---").map_or(text, |idx| &text[idx + 4..]);
     body.split_whitespace().count()
 }
@@ -374,7 +371,6 @@ mod tests {
         let content =
             "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three four five";
         let result = update_frontmatter_status(content).unwrap();
-        // word_count should be recalculated
         assert!(
             result.contains("word_count: 5"),
             "expected word_count: 5 in result: {result}"
@@ -419,7 +415,7 @@ mod tests {
 
     #[test]
     fn finalize_input_rejects_integer_word_count() {
-        // `word_count` is a validation carrier: the declared input schema admits an integer
+        // why: `word_count` is a validation carrier: the declared input schema admits an integer
         // (capability_catalog.rs), but only `"auto"` is supported, so an integer must be
         // rejected at deserialization as it always was.
         let json = r#"{"work_ref":"x","word_count":123}"#;
@@ -428,14 +424,13 @@ mod tests {
 
     #[test]
     fn update_frontmatter_no_double_closing_delimiter() {
-        // Regression: PR #86 Greptile review found that the format string
+        // why: PR #86 Greptile review found that the format string
         // emitted a redundant `\n---` because `rest` already carries the
         // closing delimiter. This produced malformed YAML frontmatter:
         // `---\n<fm>\n---\n---\n<body>` (double closing delimiter).
         let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three";
         let result = update_frontmatter_status(content).unwrap();
 
-        // Count occurrences of lines that are exactly `---`.
         let delimiter_count = result.lines().filter(|l| *l == "---").count();
         assert_eq!(
             delimiter_count, 2,
@@ -445,14 +440,14 @@ mod tests {
 
     #[test]
     fn update_frontmatter_idempotent_on_retry() {
-        // Regression: re-running the capability on an already-finalized
+        // why: re-running the capability on an already-finalized
         // file must not compound corruption. Running twice should produce
         // the same well-formed output as running once.
         let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three";
         let once = update_frontmatter_status(content).unwrap();
         let twice = update_frontmatter_status(&once).unwrap();
 
-        // Both runs should have exactly 2 `---` delimiters.
+        // note: both runs should have exactly 2 `---` delimiters.
         for (label, text) in [("once", &once), ("twice", &twice)] {
             let count = text.lines().filter(|l| *l == "---").count();
             assert_eq!(
@@ -460,18 +455,17 @@ mod tests {
                 "idempotent run {label}: expected 2 delimiters, got {count}.\n{text}"
             );
         }
-        // Body content preserved across both runs.
         assert!(twice.contains("one two three"));
         assert!(twice.contains("status: finalized"));
     }
 
     #[test]
     fn update_frontmatter_word_count_not_off_by_one() {
-        // Regression: the double `---` bug caused count_body_words to
+        // why: the double `---` bug caused count_body_words to
         // find the spurious first `---` and then count `---` as a word.
         let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\nalpha beta gamma";
         let result = update_frontmatter_status(content).unwrap();
-        // 3 words in body; the bug would have counted 4 (--- as a word).
+        // note: 3 words in the body; the bug would have counted 4 (`---` as a word).
         assert!(
             result.contains("word_count: 3"),
             "expected word_count: 3, result has wrong count.\n{result}"

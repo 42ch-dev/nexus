@@ -11,39 +11,40 @@
 //! `ScanOutcome.skipped` with the named reason). Clamping (AR-38) is the only
 //! gate that **never** rejects: over-max overrides are tightened DOWN to the
 //! host maxima, never silently raised.
+// note: callers record rejections as `ScanOutcome.skipped`; this module never logs.
 
 use crate::user_capability::{clamp_sandbox, CapabilityDescriptorError, UserCapabilityDescriptor};
 use std::collections::HashSet;
 use std::path::Path;
 
-/// A descriptor that passed every admission gate (AR-43).
+/// note: a descriptor that passed every admission gate (AR-43).
 ///
 /// The descriptor's `sandbox` field carries the **clamped** overrides (AR-38);
 /// every other field is the author's value as-is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmittedCapability {
-    /// The admitted descriptor with sandbox clamped to the host maxima.
+    /// note: the admitted descriptor with sandbox clamped to the host maxima.
     pub descriptor: UserCapabilityDescriptor,
 }
 
-/// Reasons a candidate capability is refused admission (AR-43).
+/// note: reasons a candidate capability is refused admission (AR-43).
 ///
 /// `Display`-message-only, like [`CapabilityDescriptorError`]: callers log the
 /// message with the capability name and record a skip (AR-35 all-skips-logged).
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum AdmissionError {
-    /// The descriptor violates the AR-34 contract (surfaced before the
+    /// note: the descriptor violates the AR-34 contract (surfaced before the
     /// AR-43 gates; see the `+ structural errors` note in the T3 brief).
     #[error("descriptor validation failed: {0}")]
     Descriptor(CapabilityDescriptorError),
-    /// AR-43 gate 1: the declared name equals a builtin — builtin wins.
+    /// note: AR-43 gate 1 — the declared name equals a builtin; builtin wins.
     #[error("{0}")]
     NameCollision(String),
-    /// AR-43 gate 2: `manifest.json` or `<module-id>.wasm` missing in the
+    /// note: AR-43 gate 2 — `manifest.json` or `<module-id>.wasm` missing in the
     /// capability dir.
     #[error("{0}")]
     ModuleNotFound(String),
-    /// AR-43 gate 3: `wasm_sha256` pairing fails — the wasm bytes do not
+    /// note: AR-43 gate 3 — `wasm_sha256` pairing fails; the wasm bytes do not
     /// match the manifest's declared hash, the manifest declares no hash
     /// (fail-closed), or the descriptor's `wasmSha256` differs from the
     /// manifest-verified digest (AR-39).
@@ -51,7 +52,7 @@ pub enum AdmissionError {
     HashMismatch(String),
 }
 
-/// Admit a user capability per AR-43, in strict order:
+/// note: admit a user capability per AR-43, in strict order:
 ///
 /// 1. **Collision** — `descriptor.name` in `builtin_names` → reject
 ///    (builtin wins; AR-36/AR-43). Checked before any file I/O, so a
@@ -81,12 +82,12 @@ pub fn admit(
     dir: &Path,
     builtin_names: &HashSet<&str>,
 ) -> Result<AdmittedCapability, AdmissionError> {
-    // Structural gate: an AR-34-invalid descriptor cannot be admitted (the
+    // why: structural gate — an AR-34-invalid descriptor cannot be admitted (the
     // scan's `read_descriptor` already validates, but `admit` is the
     // standalone contract — defensive).
     descriptor.validate().map_err(AdmissionError::Descriptor)?;
 
-    // AR-43 gate 1: collision (builtin wins).
+    // note: AR-43 gate 1 — collision (builtin wins).
     if builtin_names.contains(descriptor.name.as_str()) {
         return Err(AdmissionError::NameCollision(format!(
             "user capability '{}' collides with a builtin (builtin wins)",
@@ -94,7 +95,7 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 2: module file pairing presence. The manifest types are the
+    // why: AR-43 gate 2 — module file pairing presence. The manifest types are the
     // shared `nexus-module-manifest` surface (pure metadata — no WASM engine),
     // so gates 2–4 run identically with the `wasm` feature off; only the
     // executable binding behind `run()` is gated (WorkerUnavailable).
@@ -114,7 +115,7 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 3: wasm_sha256 pairing (AR-39 — single hash path).
+    // note: AR-43 gate 3 — wasm_sha256 pairing (AR-39, single hash path).
     // Read/parse failures here are pairing failures: the manifest's declared
     // hash is the only digest we can verify against.
     let manifest_json = std::fs::read(&manifest_path).map_err(|e| {
@@ -146,7 +147,7 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 4: clamp sandbox overrides to the host maxima — never
+    // why: AR-43 gate 4 — clamp sandbox overrides to the host maxima, never
     // rejects (AR-38). `clamp_sandbox` lives beside `SandboxOverrides` in
     // `user_capability.rs` (also re-applied at `UserCapability::new`, F1).
     let mut admitted_descriptor = descriptor.clone();
@@ -164,7 +165,7 @@ mod tests {
     use sha2::Digest;
     use std::fmt::Write as _;
 
-    /// 64 lowercase hex chars (valid per AR-34/AR-39 format rules).
+    /// note: 64 lowercase hex chars (valid per AR-34/AR-39 format rules).
     const FAKE_SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn sha256_hex(bytes: &[u8]) -> String {
@@ -176,7 +177,7 @@ mod tests {
         hex
     }
 
-    /// Write `<dir>/manifest.json` + `<dir>/basic-mod.wasm` with a **real**
+    /// note: write `<dir>/manifest.json` + `<dir>/basic-mod.wasm` with a **real**
     /// matching sha (the AR-39 pairing). Returns the sha.
     fn write_module_pair(dir: &Path) -> String {
         let wasm = b"fake module bytes";
@@ -198,7 +199,7 @@ mod tests {
         sha
     }
 
-    /// A valid descriptor JSON for `name` (moduleId `basic-mod`); `sandbox`
+    /// note: a valid descriptor JSON for `name` (moduleId `basic-mod`); `sandbox`
     /// is embedded when given.
     fn descriptor_json(name: &str, sha: &str, sandbox: Option<&str>) -> String {
         let sandbox_json = sandbox.map_or_else(String::new, |s| format!("\"sandbox\": {s},"));
@@ -217,7 +218,7 @@ mod tests {
         serde_json::from_str(json).expect("descriptor JSON parses")
     }
 
-    /// Stage `<root>/<name>/` with the full AR-35 trio; returns the descriptor
+    /// note: stage `<root>/<name>/` with the full AR-35 trio; returns the descriptor
     /// parsed from the written capability.json.
     fn stage(root: &Path, name: &str, sandbox: Option<&str>) -> UserCapabilityDescriptor {
         let dir = root.join(name);
@@ -242,7 +243,7 @@ mod tests {
         );
         let admitted = admit(&descriptor, &tmp.path().join("demo.pull"), &builtins())
             .expect("valid trio admitted");
-        // Overrides inside the maxima pass through untouched (not raised).
+        // why: overrides inside the maxima pass through untouched (not raised).
         let sandbox = admitted
             .descriptor
             .sandbox
@@ -251,7 +252,7 @@ mod tests {
         assert_eq!(sandbox.fuel, Some(5_000_000));
         assert_eq!(sandbox.memory_mib, Some(32));
         assert_eq!(sandbox.wall_time_ms, Some(10_000));
-        // Everything else stays as authored.
+        // why: everything else stays as authored.
         assert_eq!(admitted.descriptor.name, "demo.pull");
         assert_eq!(
             admitted.descriptor.wasm.wasm_sha256,
@@ -262,7 +263,7 @@ mod tests {
     #[test]
     fn admit_collision_rejects_builtin_name() {
         let tmp = tempfile::tempdir().unwrap();
-        // `sync.pull` is a builtin — rejected by gate 1 even with a complete
+        // why: `sync.pull` is a builtin — rejected by gate 1 even with a complete
         // dir (builtin wins, AR-43 order: collision first).
         let descriptor = stage(tmp.path(), "sync.pull", None);
         let err = admit(&descriptor, &tmp.path().join("sync.pull"), &builtins())
@@ -274,7 +275,7 @@ mod tests {
         assert!(err.to_string().contains("sync.pull"));
     }
 
-    /// AR-43 order: collision is gate 1 — a colliding name is rejected with
+    /// note: AR-43 order — collision is gate 1, so a colliding name is rejected with
     /// `NameCollision` even when the module files are absent (never falls
     /// through to `ModuleNotFound`).
     #[test]
@@ -282,7 +283,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("sync.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Empty dir: no manifest.json, no wasm. Gate 1 must still win.
+        // why: empty dir — no manifest.json, no wasm, yet gate 1 must still win.
         let descriptor = parse(&descriptor_json("sync.pull", FAKE_SHA, None));
         let err = admit(&descriptor, &dir, &builtins()).expect_err("collision first");
         assert!(
@@ -296,7 +297,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Only the wasm is present; manifest.json is missing.
+        // why: only the wasm is present; manifest.json is missing.
         std::fs::write(dir.join("basic-mod.wasm"), b"fake module bytes").unwrap();
         let descriptor = descriptor_json("demo.pull", &sha256_hex(b"fake module bytes"), None);
         let descriptor = parse(&descriptor);
@@ -313,7 +314,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Only manifest.json is present (no `<module-id>.wasm`).
+        // why: only manifest.json is present (no `<module-id>.wasm`).
         let sha = sha256_hex(b"fake module bytes");
         let manifest = format!(
             r#"{{ "name": "Basic Mod", "version": "1.0.0",
@@ -331,14 +332,14 @@ mod tests {
         assert!(err.to_string().contains("basic-mod.wasm"));
     }
 
-    /// Descriptor `wasmSha256` != manifest-verified digest → `HashMismatch`
+    /// note: descriptor `wasmSha256` != manifest-verified digest → `HashMismatch`
     /// (AR-39 fail-closed pairing).
     #[test]
     fn admit_hash_mismatch_descriptor_vs_manifest_rejects() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        let _ = write_module_pair(&dir); // real hash of the written bytes
+        let _ = write_module_pair(&dir); // why: real hash of the written bytes
         let wrong = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
         let descriptor = parse(&descriptor_json("demo.pull", wrong, None));
         let err = admit(&descriptor, &dir, &builtins()).expect_err("hash mismatch");
@@ -353,14 +354,14 @@ mod tests {
         );
     }
 
-    /// Wasm bytes not matching the manifest's declared hash → `HashMismatch`
+    /// note: wasm bytes not matching the manifest's declared hash → `HashMismatch`
     /// from `verify_wasm_sha256` (bytes/declaration mismatch).
     #[test]
     fn admit_hash_mismatch_wasm_vs_manifest_rejects() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Declare a hash that does NOT match the bytes actually written.
+        // why: declare a hash that does NOT match the bytes actually written.
         let declared = sha256_hex(b"different bytes");
         let manifest = format!(
             r#"{{ "module_id": "basic-mod", "name": "Basic Mod", "version": "1.0.0",
@@ -383,7 +384,7 @@ mod tests {
         );
     }
 
-    /// A manifest without a declared `wasm_sha256` is unverifiable → rejected
+    /// note: a manifest without a declared `wasm_sha256` is unverifiable → rejected
     /// fail-closed under gate 3 (AR-39: single hash path).
     #[test]
     fn admit_manifest_without_declared_hash_rejects_fail_closed() {
@@ -411,7 +412,7 @@ mod tests {
         assert!(err.to_string().contains("does not declare wasm_sha256"));
     }
 
-    /// Clamping never rejects: over-max overrides are tightened DOWN to the
+    /// note: clamping never rejects — over-max overrides are tightened DOWN to the
     /// `SandboxConfig::default()` maxima (AR-38) — not rejected, not raised.
     #[test]
     fn admit_clamps_over_max_overrides_down_never_rejects() {
@@ -437,7 +438,7 @@ mod tests {
         );
     }
 
-    /// Clamping preserves absent overrides: a descriptor without a sandbox
+    /// note: clamping preserves absent overrides — a descriptor without a sandbox
     /// stays `None` (host defaults) — admission never invents values.
     #[test]
     fn admit_absent_sandbox_stays_absent() {
@@ -451,7 +452,7 @@ mod tests {
         );
     }
 
-    /// Structural gate: an AR-34-invalid descriptor surfaces as the
+    /// note: structural gate — an AR-34-invalid descriptor surfaces as the
     /// `Descriptor` variant before any AR-43 gate runs.
     #[test]
     fn admit_invalid_descriptor_surfaces_descriptor_error() {
@@ -459,7 +460,7 @@ mod tests {
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
         let sha = write_module_pair(&dir);
-        // "BadName" parses but fails AR-34 validation (uppercase).
+        // why: "BadName" parses but fails AR-34 validation (uppercase).
         let descriptor = parse(&descriptor_json("BadName", &sha, None));
         let err = admit(&descriptor, &dir, &builtins()).expect_err("invalid name");
         assert!(
