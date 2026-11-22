@@ -1228,14 +1228,7 @@ fn write_mod_rs(
             "//! Scope submodule names can collide (e.g. `domain::memory` vs `daemon_api::memory`);".into(),
             "//! the flat TYPE re-exports are all unique, so the module-name ambiguity is benign.".into(),
             "#![allow(ambiguous_glob_reexports)]".into(),
-            // `//` *string* lines (not Rust comments here) so the justification
-            // travels with the generated code. See plan v1.138 T4 (architect Q4).
-            "// Clippy: typify-generated code is machine output. The allows below are the".into(),
-            "// complete set that fires on typify 0.3 output under this workspace's pedantic +".into(),
-            "// nursery groups (plan v1.138 T4, architect Q4 lock). They are not hand-tunable".into(),
-            "// without forking typify. Scoped to this `generated` subtree ONLY — hand-written".into(),
-            "// code under `src/local/` and `src/enum_conversions.rs` is NOT covered. Mirrors".into(),
-            "// the `.rustfmt.toml` `ignore` precedent that exempts generated code.".into(),
+            "// @generated clippy allow set for typify 0.3 output - do not hand-tune; complete set under workspace pedantic + nursery groups.".into(),
             "#![allow(".into(),
             "    clippy::clone_on_copy,".into(),
             "    clippy::default_trait_access,".into(),
