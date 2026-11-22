@@ -89,13 +89,14 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)] // why: clap derive requires non-boxed subcommands for flatten
 pub enum Commands {
-    /// note: Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
+    /// Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
+    // note: clap renders this doc as --help text; keep the text stable
     Creator {
         #[command(subcommand)]
         command: CreatorCommand,
     },
 
-    /// note: Connect Host — peer surface for third-party reasoners (world-scoped ops,
+    /// Connect Host — peer surface for third-party reasoners (world-scoped ops,
     /// gated compute, host-level reads)
     ///
     /// Runs a `spoke-connect` node in a separate OS process: signed-hello
@@ -109,24 +110,27 @@ pub enum Commands {
     /// (`commands/connect/mod.rs`). Only `project` and unknown ops are
     /// refused (`op_unsupported`). Compiled only
     /// when the `connect-host` feature is enabled.
+    // note: clap renders this doc as --help text; keep the text stable
     #[cfg(feature = "connect-host")]
     Connect {
         #[command(subcommand)]
         command: ConnectCommand,
     },
 
-    /// note: ACP capability plane (agents, registry, connectivity)
+    /// ACP capability plane (agents, registry, connectivity)
+    // note: clap renders this doc as --help text; keep the text stable
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
     },
 
-    /// note: Compute module authoring loop (V1.170 P0, AR-9) — build, validate,
+    /// Compute module authoring loop (V1.170 P0, AR-9) — build, validate,
     /// and install WASM compute modules.
     ///
     /// `build`, `validate`, and `install` are daemon-free (the author loop
     /// needs no runtime). The group carries no `connect-host` feature
     /// dependency — the default graph stays libp2p-free.
+    // note: clap renders this doc as --help text; keep the text stable
     Compute {
         #[command(subcommand)]
         command: ComputeCommand,
@@ -150,19 +154,22 @@ pub enum Commands {
         command: CapabilityCommand,
     },
 
-    /// note: Manage the Electron desktop bundle (unsigned macOS packaging)
+    /// Manage the Electron desktop bundle (unsigned macOS packaging)
+    // note: clap renders this doc as --help text; keep the text stable
     Desktop {
         #[command(subcommand)]
         command: DesktopCommand,
     },
 
-    /// note: Platform interaction (auth, context, **sync**)
+    /// Platform interaction (auth, context, **sync**)
+    // note: clap renders this doc as --help text; keep the text stable
     Platform {
         #[command(subcommand)]
         command: PlatformCommand,
     },
 
-    /// note: System management (diagnostics, config, identity, completion, etc.)
+    /// System management (diagnostics, config, identity, completion, etc.)
+    // note: clap renders this doc as --help text; keep the text stable
     System {
         #[command(subcommand)]
         command: SystemCommand,
@@ -184,9 +191,10 @@ pub enum Commands {
         command: PresetCommand,
     },
 
-    /// note: Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
+    /// Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
     /// reads the workspace checkpoint store read-only; the V1.35 cli-spec §6
     /// visible-group lock forces hiding (same posture as `preset`).
+    // note: clap renders this doc as --help text; keep the text stable
     #[command(hide = true)]
     Ops {
         #[command(subcommand)]

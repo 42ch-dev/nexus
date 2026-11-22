@@ -22,13 +22,15 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum PlatformCommand {
-    /// note: Authentication (login/logout/status)
+    /// Authentication (login/logout/status)
+    // note: clap renders this doc as --help text; keep the text stable
     Auth {
         #[command(subcommand)]
         command: auth::AuthCommand,
     },
 
-    /// note: Context assembly
+    /// Context assembly
+    // note: clap renders this doc as --help text; keep the text stable
     Context {
         // note: ContextCommand is large (many `Option<String>` flags, incl. `--stage`);
         // boxed to keep `PlatformCommand` small (type-size hygiene; no behavior).
@@ -36,7 +38,8 @@ pub enum PlatformCommand {
         command: Box<context::ContextCommand>,
     },
 
-    /// note: Synchronize workspace with platform (pull, push, status, resolve, world, retry)
+    /// Synchronize workspace with platform (pull, push, status, resolve, world, retry)
+    // note: clap renders this doc as --help text; keep the text stable
     Sync {
         #[command(subcommand)]
         command: SyncCommand,

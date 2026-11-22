@@ -10,59 +10,77 @@ use crate::errors::Result;
 use clap::Subcommand;
 use nexus_acp_host::PermissionPolicy;
 
-/// note: Permission management commands (agent-scoped rules)
+/// Permission management commands (agent-scoped rules)
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum PermissionCommand {
-    /// note: List permission rules, optionally filtered by agent
+    /// List permission rules, optionally filtered by agent
+    // note: clap renders this doc as --help text; keep the text stable
     List {
-        /// note: Filter by agent ID
+        /// Filter by agent ID
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         agent: Option<String>,
 
-        /// note: Output format (text or json)
+        /// Output format (text or json)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(short = 'o', long = "output", default_value = "text")]
         output_format: String,
     },
 
-    /// note: Grant a capability for an agent
+    /// Grant a capability for an agent
+    // note: clap renders this doc as --help text; keep the text stable
     Grant {
-        /// note: Agent ID
+        /// Agent ID
+        // note: clap renders this doc as --help text; keep the text stable
         agent: String,
 
-        /// note: Capability name (e.g., "terminal.create")
+        /// Capability name (e.g., "terminal.create")
+        // note: clap renders this doc as --help text; keep the text stable
         capability: String,
     },
 
-    /// note: Deny a capability for an agent
+    /// Deny a capability for an agent
+    // note: clap renders this doc as --help text; keep the text stable
     Deny {
-        /// note: Agent ID
+        /// Agent ID
+        // note: clap renders this doc as --help text; keep the text stable
         agent: String,
 
-        /// note: Capability name (e.g., "terminal.kill")
+        /// Capability name (e.g., "terminal.kill")
+        // note: clap renders this doc as --help text; keep the text stable
         capability: String,
     },
 
-    /// note: Require user confirmation (ask) for a capability
+    /// Require user confirmation (ask) for a capability
+    // note: clap renders this doc as --help text; keep the text stable
     Ask {
-        /// note: Agent ID
+        /// Agent ID
+        // note: clap renders this doc as --help text; keep the text stable
         agent: String,
 
-        /// note: Capability name (e.g., "`file_system.write`")
+        /// Capability name (e.g., "`file_system.write`")
+        // note: clap renders this doc as --help text; keep the text stable
         capability: String,
     },
 
-    /// note: Revoke a specific rule for an agent+capability
+    /// Revoke a specific rule for an agent+capability
+    // note: clap renders this doc as --help text; keep the text stable
     Revoke {
-        /// note: Agent ID
+        /// Agent ID
+        // note: clap renders this doc as --help text; keep the text stable
         agent: String,
 
-        /// note: Capability name
+        /// Capability name
+        // note: clap renders this doc as --help text; keep the text stable
         capability: String,
     },
 
-    /// note: Reset all rules for an agent (or all agents)
+    /// Reset all rules for an agent (or all agents)
+    // note: clap renders this doc as --help text; keep the text stable
     Reset {
-        /// note: Reset rules for a specific agent only
+        /// Reset rules for a specific agent only
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         agent: Option<String>,
     },

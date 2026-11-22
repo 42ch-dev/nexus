@@ -671,7 +671,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // why: skip if disk I/O fails
+            return;
         }
 
         let result = refresh_access_token(&config).await;
@@ -718,7 +718,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // why: skip if disk I/O fails
+            return;
         }
 
         let result = refresh_access_token(&config).await;
@@ -745,7 +745,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // why: skip if disk I/O fails
+            return;
         }
 
         let result = refresh_access_token(&config).await;
@@ -863,7 +863,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // why: skip if disk I/O fails
+            return;
         }
 
         match logout(&config) {

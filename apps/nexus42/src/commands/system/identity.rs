@@ -22,38 +22,49 @@ use std::str::FromStr;
 
 #[derive(Debug, Subcommand)]
 pub enum IdentityCommand {
-    /// note: List all local identities
+    /// List all local identities
+    // note: clap renders this doc as --help text; keep the text stable
     List,
 
-    /// note: Create a new local identity
+    /// Create a new local identity
+    // note: clap renders this doc as --help text; keep the text stable
     Create {
-        /// note: Identity type: anonymous (ephemeral) or persistent (stored in `SQLite`)
+        /// Identity type: anonymous (ephemeral) or persistent (stored in `SQLite`)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_enum, default_value = "persistent")]
         kind: IdentityKindArg,
 
-        /// note: Display name for the identity (recommended for persistent)
+        /// Display name for the identity (recommended for persistent)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         name: Option<String>,
     },
 
-    /// note: Set the active identity for the current session
+    /// Set the active identity for the current session
+    // note: clap renders this doc as --help text; keep the text stable
     Use {
-        /// note: Creator ID of the identity to activate
+        /// Creator ID of the identity to activate
+        // note: clap renders this doc as --help text; keep the text stable
         creator_id: String,
     },
 
-    /// note: Link a local identity to a platform Creator
+    /// Link a local identity to a platform Creator
+    // note: clap renders this doc as --help text; keep the text stable
     Link {
-        /// note: Local creator ID to link
+        /// Local creator ID to link
+        // note: clap renders this doc as --help text; keep the text stable
         creator_id: String,
-        /// note: Platform Creator ID to link to
+        /// Platform Creator ID to link to
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         platform_id: String,
     },
 
-    /// note: Unlink a local identity from its platform Creator
+    /// Unlink a local identity from its platform Creator
+    // note: clap renders this doc as --help text; keep the text stable
     Unlink {
-        /// note: Local creator ID to unlink
+        /// Local creator ID to unlink
+        // note: clap renders this doc as --help text; keep the text stable
         creator_id: String,
     },
 }

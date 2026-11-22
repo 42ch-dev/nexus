@@ -25,22 +25,28 @@ use nexus_acp_host::{SessionEntry, SessionManager};
 
 #[derive(Debug, Subcommand)]
 pub enum SessionCommand {
-    /// note: List persisted ACP sessions
+    /// List persisted ACP sessions
+    // note: clap renders this doc as --help text; keep the text stable
     List {
-        /// note: Show all sessions including expired ones (don't auto-cleanup)
+        /// Show all sessions including expired ones (don't auto-cleanup)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         all: bool,
     },
 
-    /// note: Show details for a specific session
+    /// Show details for a specific session
+    // note: clap renders this doc as --help text; keep the text stable
     Show {
-        /// note: Session ID (or partial match)
+        /// Session ID (or partial match)
+        // note: clap renders this doc as --help text; keep the text stable
         session_id: String,
     },
 
-    /// note: Delete a session
+    /// Delete a session
+    // note: clap renders this doc as --help text; keep the text stable
     Delete {
-        /// note: Session ID to delete
+        /// Session ID to delete
+        // note: clap renders this doc as --help text; keep the text stable
         session_id: String,
     },
 }

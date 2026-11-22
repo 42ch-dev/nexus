@@ -52,10 +52,11 @@ mod exit {
     pub const PAIRING: i32 = 3;
 }
 
-/// note: Capability subcommands (AR-41 table).
+/// Capability subcommands (AR-41 table).
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum CapabilityCommand {
-    /// note: Validate a capability descriptor (and optionally its module pair).
+    /// Validate a capability descriptor (and optionally its module pair).
     ///
     /// Daemon-free. Runs the shared descriptor validator (AR-34) plus —
     /// with `--module` — the module's `manifest.json` + `<module-id>.wasm`
@@ -66,19 +67,23 @@ pub enum CapabilityCommand {
     /// pairing mismatch. Collision with a builtin is admission-time in the
     /// runtime that loads the capability; the CLI does not know the builtin
     /// name list (AR-41).
+    // note: clap renders this doc as --help text; keep the text stable
     Validate {
-        /// note: Path to the capability descriptor (`capability.json`).
+        /// Path to the capability descriptor (`capability.json`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         descriptor: PathBuf,
-        /// note: Module dir containing `manifest.json` + `<module-id>.wasm` to
+        /// Module dir containing `manifest.json` + `<module-id>.wasm` to
         /// also verify the AR-39 pairing.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         module: Option<PathBuf>,
-        /// note: Emit machine-readable field-level errors (JSON).
+        /// Emit machine-readable field-level errors (JSON).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         json: bool,
     },
-    /// note: Verify a descriptor + module trio and install it into
+    /// Verify a descriptor + module trio and install it into
     /// `~/.nexus42/capabilities/<name>/` (AR-35 layout:
     /// `capability.json` + `manifest.json` + `<module-id>.wasm`).
     ///
@@ -88,17 +93,22 @@ pub enum CapabilityCommand {
     /// builtin name list (AR-41). No `run`, no `scaffold` (PL-7).
     ///
     /// Exit codes (AR-41): 2 = validation, 3 = pairing, 1 = I/O/home.
+    // note: clap renders this doc as --help text; keep the text stable
     Install {
-        /// note: Path to the capability descriptor (`capability.json`).
+        /// Path to the capability descriptor (`capability.json`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         descriptor: PathBuf,
-        /// note: Path to the compiled `<module-id>.wasm`.
+        /// Path to the compiled `<module-id>.wasm`.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         wasm: PathBuf,
-        /// note: Path to the module's `manifest.json`.
+        /// Path to the module's `manifest.json`.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         manifest: PathBuf,
-        /// note: Emit machine-readable JSON.
+        /// Emit machine-readable JSON.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         json: bool,
     },

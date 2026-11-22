@@ -11,9 +11,11 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
-    /// note: Fork a new world from a parent world at a timeline event (platform API)
+    /// Fork a new world from a parent world at a timeline event (platform API)
+    // note: clap renders this doc as --help text; keep the text stable
     Fork,
-    /// note: Request a read-only world snapshot cursor from the platform
+    /// Request a read-only world snapshot cursor from the platform
+    // note: clap renders this doc as --help text; keep the text stable
     Snapshot,
 }
 

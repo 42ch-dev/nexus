@@ -10,27 +10,35 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// note: Get a configuration value
+    /// Get a configuration value
+    // note: clap renders this doc as --help text; keep the text stable
     Get {
-        /// note: Configuration key (e.g., `runtime_mode`, `platform_url`)
+        /// Configuration key (e.g., `runtime_mode`, `platform_url`)
+        // note: clap renders this doc as --help text; keep the text stable
         key: String,
     },
 
-    /// note: Set a configuration value
+    /// Set a configuration value
+    // note: clap renders this doc as --help text; keep the text stable
     Set {
-        /// note: Configuration key (e.g., `runtime_mode`, `platform_url`)
+        /// Configuration key (e.g., `runtime_mode`, `platform_url`)
+        // note: clap renders this doc as --help text; keep the text stable
         key: String,
-        /// note: Configuration value
+        /// Configuration value
+        // note: clap renders this doc as --help text; keep the text stable
         value: String,
     },
 
-    /// note: Unset (reset to default) a configuration key
+    /// Unset (reset to default) a configuration key
+    // note: clap renders this doc as --help text; keep the text stable
     Unset {
-        /// note: Configuration key to reset
+        /// Configuration key to reset
+        // note: clap renders this doc as --help text; keep the text stable
         key: String,
     },
 
-    /// note: Show the configuration file path
+    /// Show the configuration file path
+    // note: clap renders this doc as --help text; keep the text stable
     Path,
 }
 

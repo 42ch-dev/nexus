@@ -26,43 +26,52 @@ use clap_complete::Shell;
 
 #[derive(Debug, Subcommand)]
 pub enum SystemCommand {
-    /// note: Print CLI version info
+    /// Print CLI version info
+    // note: clap renders this doc as --help text; keep the text stable
     Version,
 
-    /// note: Diagnostic health checks
+    /// Diagnostic health checks
+    // note: clap renders this doc as --help text; keep the text stable
     Doctor,
 
-    /// note: Generate shell completion script
+    /// Generate shell completion script
+    // note: clap renders this doc as --help text; keep the text stable
     Completion {
-        /// note: Shell type (bash, zsh, fish, elvish, powershell)
+        /// Shell type (bash, zsh, fish, elvish, powershell)
+        // note: clap renders this doc as --help text; keep the text stable
         shell: String,
     },
 
-    /// note: Configuration file management
+    /// Configuration file management
+    // note: clap renders this doc as --help text; keep the text stable
     Config {
         #[command(subcommand)]
         command: config::ConfigCommand,
     },
 
-    /// note: Internal debugging utilities
+    /// Internal debugging utilities
+    // note: clap renders this doc as --help text; keep the text stable
     Debug {
         #[command(subcommand)]
         command: debug::DebugCommand,
     },
 
-    /// note: Database status and management
+    /// Database status and management
+    // note: clap renders this doc as --help text; keep the text stable
     Db {
         #[command(subcommand)]
         command: db::DbCommand,
     },
 
-    /// note: Local identity management
+    /// Local identity management
+    // note: clap renders this doc as --help text; keep the text stable
     Identity {
         #[command(subcommand)]
         command: identity::IdentityCommand,
     },
 
-    /// note: Runtime mode management
+    /// Runtime mode management
+    // note: clap renders this doc as --help text; keep the text stable
     RuntimeMode {
         #[command(subcommand)]
         command: runtime_mode::RuntimeModeCommand,

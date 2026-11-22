@@ -10,35 +10,45 @@ use clap::Subcommand;
 use nexus_acp_host::{DefaultPolicy, PermissionPolicy};
 use std::path::PathBuf;
 
-/// note: Policy management commands
+/// Policy management commands
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum PolicyCommand {
-    /// note: Grant a permission for ACP agents
+    /// Grant a permission for ACP agents
+    // note: clap renders this doc as --help text; keep the text stable
     Grant {
-        /// note: Permission name (e.g., "`file_system.read`")
+        /// Permission name (e.g., "`file_system.read`")
+        // note: clap renders this doc as --help text; keep the text stable
         permission: String,
     },
 
-    /// note: Deny a permission for ACP agents
+    /// Deny a permission for ACP agents
+    // note: clap renders this doc as --help text; keep the text stable
     Deny {
-        /// note: Permission name (e.g., "terminal.kill")
+        /// Permission name (e.g., "terminal.kill")
+        // note: clap renders this doc as --help text; keep the text stable
         permission: String,
     },
 
-    /// note: List all configured permissions
+    /// List all configured permissions
+    // note: clap renders this doc as --help text; keep the text stable
     List {
-        /// note: Output format (text or json)
+        /// Output format (text or json)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(short = 'o', long = "output", default_value = "text")]
         output_format: String,
     },
 
-    /// note: Set the default policy for unknown permissions
+    /// Set the default policy for unknown permissions
+    // note: clap renders this doc as --help text; keep the text stable
     Default {
-        /// note: Default policy: "ask", "grant", or "deny"
+        /// Default policy: "ask", "grant", or "deny"
+        // note: clap renders this doc as --help text; keep the text stable
         policy: String,
     },
 
-    /// note: Show current policy configuration
+    /// Show current policy configuration
+    // note: clap renders this doc as --help text; keep the text stable
     Show,
 }
 

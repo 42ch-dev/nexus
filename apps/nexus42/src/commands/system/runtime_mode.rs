@@ -8,11 +8,14 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum RuntimeModeCommand {
-    /// note: Show current runtime mode
+    /// Show current runtime mode
+    // note: clap renders this doc as --help text; keep the text stable
     Show,
-    /// note: Set runtime mode (`local_only`, `local_first`, `cloud_enhanced`)
+    /// Set runtime mode (`local_only`, `local_first`, `cloud_enhanced`)
+    // note: clap renders this doc as --help text; keep the text stable
     Set {
-        /// note: Target runtime mode
+        /// Target runtime mode
+        // note: clap renders this doc as --help text; keep the text stable
         mode: String,
     },
 }

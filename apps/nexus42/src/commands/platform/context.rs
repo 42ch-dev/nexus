@@ -31,70 +31,85 @@ use nexus_moment_context_assembly::cloud_stage::{
 
 #[derive(Debug, Subcommand)]
 pub enum ContextCommand {
-    /// note: Assemble three-domain Moment context from local persistent stores (SSOT)
+    /// Assemble three-domain Moment context from local persistent stores (SSOT)
+    // note: clap renders this doc as --help text; keep the text stable
     AssembleMoment {
-        /// note: World ID to include in Moment context
+        /// World ID to include in Moment context
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         world_id: Option<String>,
 
-        /// note: Work ID for the work-bound moment (V1.150 P1 — Moment Directive
+        /// Work ID for the work-bound moment (V1.150 P1 — Moment Directive
         /// scope resolution + chapter-advance TTL)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         work_id: Option<String>,
 
-        /// note: Branch ID within the world
+        /// Branch ID within the world
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         branch_id: Option<String>,
 
-        /// note: Event ID to focus context around
+        /// Event ID to focus context around
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         event_id: Option<String>,
 
-        /// note: Cross-domain token budget (approximate chars/4 heuristic)
+        /// Cross-domain token budget (approximate chars/4 heuristic)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         max_tokens: Option<usize>,
 
-        /// note: Exclude fragment keywords section (default: include fragments)
+        /// Exclude fragment keywords section (default: include fragments)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         no_fragments: bool,
 
-        /// note: Optional prompt hint for Stage0 / two-stage assembly
+        /// Optional prompt hint for Stage0 / two-stage assembly
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         hint: Option<String>,
 
-        /// note: Maximum number of KB knowledge entries to return
+        /// Maximum number of KB knowledge entries to return
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         kb_limit: Option<usize>,
 
-        /// note: Text search filter for KB query (case-insensitive substring)
+        /// Text search filter for KB query (case-insensitive substring)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         kb_search: Option<String>,
 
-        /// note: Filter KB by block type (character, ability, scene, etc.)
+        /// Filter KB by block type (character, ability, scene, etc.)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         kb_type: Option<String>,
 
-        /// note: Emit diagnostic inspector packet JSON (lore activation is on by default; `NEXUS_MCA_LORE_ACTIVATION=off` disables)
+        /// Emit diagnostic inspector packet JSON (lore activation is on by default; `NEXUS_MCA_LORE_ACTIVATION=off` disables)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         emit_packet: bool,
 
-        /// note: Render a human-readable inspector view of the enriched packet
+        /// Render a human-readable inspector view of the enriched packet
         /// (activation trace / slot map / budget / moment directive sections).
         /// Observation only — never changes assembled output (AC-I6).
         /// Mutually exclusive with --emit-packet.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, conflicts_with = "emit_packet")]
         inspect: bool,
 
-        /// note: Write inspector packet JSON to file instead of stdout
+        /// Write inspector packet JSON to file instead of stdout
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         packet_out: Option<String>,
 
-        /// note: Generation stage for spec §4 slot gating (V1.150 P2):
+        /// Generation stage for spec §4 slot gating (V1.150 P2):
         /// `intake|research|produce|review|persist|work_maintenance|system_maintenance|unspecified`.
         /// Default (absent) = unspecified = all slots on (current behavior,
         /// inspector path). The preset runner / schedule threads the
         /// executing stage through this flag (V1.150 generation-trigger wiring;
         /// local record).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         stage: Option<String>,
     },

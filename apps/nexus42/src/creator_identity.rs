@@ -153,13 +153,11 @@ pub fn get_creator_identity<'a>(
     cache.creators.get(creator_id)
 }
 
-/// Insert or update a creator identity entry in the cache and persist.
+/// note: Insert or update a creator identity entry in the cache and persist.
 ///
 /// # Errors
 ///
 /// Returns an error if the cache cannot be saved to disk.
-// TODO(V1.17): Consider migrating the identity cache to SQLite (nexus-local-db)
-// for proper concurrency safety beyond advisory locks.
 pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
     let mut cache = load_creator_identity_cache();
     cache.creators.insert(entry.creator_id.clone(), entry);

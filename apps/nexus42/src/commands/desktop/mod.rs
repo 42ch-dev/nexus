@@ -11,10 +11,11 @@ use clap::Subcommand;
 use std::path::PathBuf;
 use std::process::Stdio;
 
-/// note: Desktop shell subcommands.
+/// Desktop shell subcommands.
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum DesktopCommand {
-    /// note: Build the unsigned Electron desktop bundle.
+    /// Build the unsigned Electron desktop bundle.
     ///
     /// Delegates to the repository packaging driver
     /// (`pnpm build:desktop -- --arch <arch>`), which requires a
@@ -23,11 +24,13 @@ pub enum DesktopCommand {
     ///
     /// The lane is unsigned: signing, notarization and Apple credentials are
     /// not supported.
+    // note: clap renders this doc as --help text; keep the text stable
     Bundle {
-        /// note: Target architecture to package (`arm64` or `x64`).
+        /// Target architecture to package (`arm64` or `x64`).
         ///
         /// Defaults to this host's architecture. The packaging driver accepts
         /// only a native-architecture runner.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_parser = ["arm64", "x64"])]
         arch: Option<String>,
     },

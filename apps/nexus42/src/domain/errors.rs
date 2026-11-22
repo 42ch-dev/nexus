@@ -9,6 +9,7 @@ use thiserror::Error;
 /// note: Domain error type covering all aggregate validation and state transition errors.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainError {
+    /// note: Initiator lacks required permission for the operation.
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 
@@ -16,6 +17,7 @@ pub enum DomainError {
     #[error("creator is not paired with any user")]
     CreatorNotPaired,
 
+    /// note: Attempted an invalid state transition.
     #[error("invalid state transition: {from} → {to}")]
     InvalidTransition { from: String, to: String },
 
@@ -31,6 +33,7 @@ pub enum DomainError {
     #[error("entity is not in expected state: expected {expected}, got {actual}")]
     InvalidState { expected: String, actual: String },
 
+    /// note: Unresolved hard conflict prevents the operation.
     #[error("unresolved hard conflict: {0}")]
     UnresolvedConflict(String),
 
@@ -46,6 +49,7 @@ pub enum DomainError {
     #[error("revision mismatch: expected {expected}, got {actual}")]
     RevisionMismatch { expected: u64, actual: u64 },
 
+    /// note: A required field is missing or invalid.
     #[error("validation error: {0}")]
     ValidationError(String),
 
@@ -89,9 +93,11 @@ pub enum DomainError {
     #[error("invalid identity type: {0}")]
     InvalidIdentityType(String),
 
+    /// note: Operation requires platform connectivity but current mode prohibits it.
     #[error("operation '{operation}' is not available in {mode} mode")]
     PlatformOperationProhibited { mode: String, operation: String },
 
+    /// note: SOUL.md file not found at expected path.
     #[error("SOUL.md not found for creator '{creator_id}' at {path}")]
     SoulNotFound { creator_id: String, path: String },
 

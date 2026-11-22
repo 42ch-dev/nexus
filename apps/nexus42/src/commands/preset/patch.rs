@@ -45,96 +45,121 @@ use nexus_core::{CoreService, Principal};
 /// unbounded read.
 const PROMPT_FILE_MAX_BYTES: usize = 1024 * 1024;
 
-/// note: `preset patch` subcommands.
+/// `preset patch` subcommands.
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum PatchCommand {
-    /// note: Patch a state node (rename via --label, or update --description).
+    /// Patch a state node (rename via --label, or update --description).
     ///
     /// CAS-guarded: `--base-revision` must match the Strategy's current
     /// revision. On 409 `strategy_conflict`, re-read the Strategy and
     /// reapply with the new revision.
+    // note: clap renders this doc as --help text; keep the text stable
     State {
-        /// note: Strategy / user preset ID (bundle directory name).
+        /// Strategy / user preset ID (bundle directory name).
+        // note: clap renders this doc as --help text; keep the text stable
         strategy_id: String,
-        /// note: State ID to patch.
+        /// State ID to patch.
+        // note: clap renders this doc as --help text; keep the text stable
         state_id: String,
-        /// note: Revision observed on the last canonical read (CAS). On a 409
+        /// Revision observed on the last canonical read (CAS). On a 409
         /// `strategy_conflict`, re-read the Strategy (e.g. `preset show`)
         /// and reapply with the new revision.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "N")]
         base_revision: u64,
-        /// note: New state id — renames the state and rewrites all references
+        /// New state id — renames the state and rewrites all references
         /// (next targets, initial, branches).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         label: Option<String>,
-        /// note: New state description.
+        /// New state description.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         description: Option<String>,
-        /// note: Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
+        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Rewire a transition (create or update).
+    /// Rewire a transition (create or update).
     ///
     /// CAS-guarded: `--base-revision` must match the Strategy's current
     /// revision. On 409 `strategy_conflict`, re-read the Strategy and
     /// reapply with the new revision.
+    // note: clap renders this doc as --help text; keep the text stable
     Transition {
-        /// note: Strategy / user preset ID (bundle directory name).
+        /// Strategy / user preset ID (bundle directory name).
+        // note: clap renders this doc as --help text; keep the text stable
         strategy_id: String,
-        /// note: Revision observed on the last canonical read (CAS). On a 409
+        /// Revision observed on the last canonical read (CAS). On a 409
         /// `strategy_conflict`, re-read the Strategy (e.g. `preset show`)
         /// and reapply with the new revision.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "N")]
         base_revision: u64,
-        /// note: Source state ID whose outgoing transition is patched.
+        /// Source state ID whose outgoing transition is patched.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "STATE_ID")]
         source_state: String,
-        /// note: Operation: `create` or `update` (default: `update`).
+        /// Operation: `create` or `update` (default: `update`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_enum, default_value_t = TransitionOpArg::Update)]
         op: TransitionOpArg,
-        /// note: Old target state (required for `--op update`).
+        /// Old target state (required for `--op update`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "STATE_ID")]
         old_target: Option<String>,
-        /// note: New target state (required for `--op create`).
+        /// New target state (required for `--op create`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "STATE_ID")]
         new_target: Option<String>,
-        /// note: Branch condition expression (e.g. `_context._judge_result == true`).
+        /// Branch condition expression (e.g. `_context._judge_result == true`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         condition: Option<String>,
-        /// note: Create form: `next` (linear), `branch` (conditional rule), or
+        /// Create form: `next` (linear), `branch` (conditional rule), or
         /// `default` (conditional default target).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_enum)]
         transition_kind: Option<TransitionKindArg>,
-        /// note: Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
+        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Patch a state's prompt template.
+    /// Patch a state's prompt template.
     ///
     /// CAS-guarded: `--base-revision` must match the Strategy's current
     /// revision. On 409 `strategy_conflict`, re-read the Strategy and
     /// reapply with the new revision.
+    // note: clap renders this doc as --help text; keep the text stable
     Prompt {
-        /// note: Strategy / user preset ID (bundle directory name).
+        /// Strategy / user preset ID (bundle directory name).
+        // note: clap renders this doc as --help text; keep the text stable
         strategy_id: String,
-        /// note: State ID whose prompt template is patched.
+        /// State ID whose prompt template is patched.
+        // note: clap renders this doc as --help text; keep the text stable
         state_id: String,
-        /// note: Revision observed on the last canonical read (CAS). On a 409
+        /// Revision observed on the last canonical read (CAS). On a 409
         /// `strategy_conflict`, re-read the Strategy (e.g. `preset show`)
         /// and reapply with the new revision.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "N")]
         base_revision: u64,
-        /// note: Template path inside the bundle (e.g. `prompts/start.md`).
+        /// Template path inside the bundle (e.g. `prompts/start.md`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "PATH")]
         template_ref: String,
-        /// note: Template body source: a file path, or `-` to read stdin.
+        /// Template body source: a file path, or `-` to read stdin.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_name = "PATH")]
         file: String,
-        /// note: Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
+        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -143,20 +168,25 @@ pub enum PatchCommand {
 /// note: `--op` value for transition patches.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum TransitionOpArg {
-    /// note: Insert a new outgoing transition.
+    /// Insert a new outgoing transition.
+    // note: clap renders this doc as --help text; keep the text stable
     Create,
-    /// note: Rewire an existing outgoing transition.
+    /// Rewire an existing outgoing transition.
+    // note: clap renders this doc as --help text; keep the text stable
     Update,
 }
 
 /// note: `--transition-kind` value for transition creates.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum TransitionKindArg {
-    /// note: Linear scalar `next` target.
+    /// Linear scalar `next` target.
+    // note: clap renders this doc as --help text; keep the text stable
     Next,
-    /// note: Conditional `rules` branch.
+    /// Conditional `rules` branch.
+    // note: clap renders this doc as --help text; keep the text stable
     Branch,
-    /// note: Conditional `default` target.
+    /// Conditional `default` target.
+    // note: clap renders this doc as --help text; keep the text stable
     Default,
 }
 

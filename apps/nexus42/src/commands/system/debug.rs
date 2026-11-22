@@ -10,9 +10,11 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum DebugCommand {
-    /// note: Dump workspace state to JSON for debugging
+    /// Dump workspace state to JSON for debugging
+    // note: clap renders this doc as --help text; keep the text stable
     DumpWorkspace {
-        /// note: Output format: json or toml (default: json)
+        /// Output format: json or toml (default: json)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value = "json")]
         format: String,
     },

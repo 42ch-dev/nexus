@@ -59,14 +59,18 @@ use serde_json::Value;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-/// note: Operator-facing daemon-free inspection commands (hidden group).
+/// Operator-facing daemon-free inspection commands (hidden group).
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum OpsCommand {
-    /// note: Inspect checkpointed orchestration sessions (daemon-free, read-only)
+    /// Inspect checkpointed orchestration sessions (daemon-free, read-only)
+    // note: clap renders this doc as --help text; keep the text stable
     Inspect {
-        /// note: Session (run) id for the detail view; omit for the list view
+        /// Session (run) id for the detail view; omit for the list view
+        // note: clap renders this doc as --help text; keep the text stable
         session_id: Option<String>,
-        /// note: Emit the CLI-local inspect DTO verbatim (`snake_case`)
+        /// Emit the CLI-local inspect DTO verbatim (`snake_case`)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },

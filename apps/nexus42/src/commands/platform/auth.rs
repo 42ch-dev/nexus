@@ -9,31 +9,38 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// note: Login via device flow (OAuth)
+    /// Login via device flow (OAuth)
+    // note: clap renders this doc as --help text; keep the text stable
     Login,
 
-    /// note: Set access token directly (development/testing)
+    /// Set access token directly (development/testing)
     ///
     /// Hidden from `platform auth` to avoid exposing tokens as positional
     /// CLI arguments (visible in shell history / process listings).
     /// Kept for backward compat — use `nexus42 auth token` (hidden top-level)
     /// or environment-based auth instead.
+    // note: clap renders this doc as --help text; keep the text stable
     #[command(hide = true)]
     Token {
-        /// note: Access token
+        /// Access token
+        // note: clap renders this doc as --help text; keep the text stable
         access_token: String,
-        /// note: Expiry time in seconds (default: 3600)
+        /// Expiry time in seconds (default: 3600)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = 3600)]
         expires_in: u64,
-        /// note: User ID (prefix: "usr_")
+        /// User ID (prefix: "usr_")
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         user_id: Option<String>,
     },
 
-    /// note: Logout and clear credentials
+    /// Logout and clear credentials
+    // note: clap renders this doc as --help text; keep the text stable
     Logout,
 
-    /// note: Show authentication status
+    /// Show authentication status
+    // note: clap renders this doc as --help text; keep the text stable
     Status,
 }
 

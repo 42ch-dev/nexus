@@ -44,51 +44,64 @@ mod exit {
     pub const PAIRING: i32 = 3;
 }
 
-/// note: Compute module subcommands (AR-9 table).
+/// Compute module subcommands (AR-9 table).
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum ComputeCommand {
-    /// note: Build a compute module daemon-free: cargo build → locate the wasm
+    /// Build a compute module daemon-free: cargo build → locate the wasm
     /// artifact → inject `wasm_sha256` → stage the pair under
     /// `<module-dir>/dist/<module_id>/`.
     ///
     /// Environment contract: `RUSTUP_HOME`/`CARGO_HOME` are inherited from the
     /// calling environment.
+    // note: clap renders this doc as --help text; keep the text stable
     Build {
-        /// note: Path to the module's `manifest.json` (module dir = manifest parent).
+        /// Path to the module's `manifest.json` (module dir = manifest parent).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         manifest: PathBuf,
-        /// note: Build the release profile (default: debug).
+        /// Build the release profile (default: debug).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         release: bool,
     },
-    /// note: Validate a module manifest, optionally verifying `wasm_sha256`
+    /// Validate a module manifest, optionally verifying `wasm_sha256`
     /// pairing against the compiled `.wasm`.
+    // note: clap renders this doc as --help text; keep the text stable
     Validate {
-        /// note: Path to the module's `manifest.json`.
+        /// Path to the module's `manifest.json`.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         manifest: PathBuf,
-        /// note: Also verify `wasm_sha256` pairing against this `.wasm` file.
+        /// Also verify `wasm_sha256` pairing against this `.wasm` file.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         wasm: Option<PathBuf>,
-        /// note: Emit machine-readable field-level errors (JSON).
+        /// Emit machine-readable field-level errors (JSON).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         json: bool,
     },
-    /// note: Re-verify pairing and install a compiled pair into
+    /// Re-verify pairing and install a compiled pair into
     /// `~/.nexus42/modules/<id>/` (`<id>/<id>.wasm` + `<id>/manifest.json` —
     /// the layout `nexus-wasm-host`'s module cache warms via
     /// `ModuleCache::warm_dir`).
+    // note: clap renders this doc as --help text; keep the text stable
     Install {
-        /// note: Module id (must match the manifest's `module_id`).
+        /// Module id (must match the manifest's `module_id`).
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         module_id: String,
-        /// note: Path to the module's `manifest.json`.
+        /// Path to the module's `manifest.json`.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         manifest: PathBuf,
-        /// note: Path to the compiled `.wasm`.
+        /// Path to the compiled `.wasm`.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         wasm: PathBuf,
-        /// note: Emit machine-readable JSON.
+        /// Emit machine-readable JSON.
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         json: bool,
     },

@@ -27,11 +27,14 @@ use nexus_cloud_sync::sync_client::SyncClient;
 /// avoiding a direct dependency on the sync crate in the CLI layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ResolutionStrategy {
-    /// note: Accept server state, discard local changes.
+    /// Accept server state, discard local changes.
+    // note: clap renders this doc as --help text; keep the text stable
     AutoAccept,
-    /// note: Keep local state, discard server changes (destructive).
+    /// Keep local state, discard server changes (destructive).
+    // note: clap renders this doc as --help text; keep the text stable
     AutoReject,
-    /// note: Present conflict to user for manual resolution.
+    /// Present conflict to user for manual resolution.
+    // note: clap renders this doc as --help text; keep the text stable
     ManualReview,
 }
 
@@ -47,62 +50,78 @@ impl std::fmt::Display for ResolutionStrategy {
 
 #[derive(Debug, Subcommand)]
 pub enum SyncCommand {
-    /// note: Push local changes to platform
+    /// Push local changes to platform
+    // note: clap renders this doc as --help text; keep the text stable
     Push {
-        /// note: Workspace ID for the bundle
+        /// Workspace ID for the bundle
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         workspace_id: Option<String>,
 
-        /// note: World ID for the bundle
+        /// World ID for the bundle
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         world_id: Option<String>,
 
-        /// note: Creator ID submitting the bundle
+        /// Creator ID submitting the bundle
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         creator_id: Option<String>,
 
-        /// note: Force push even if precheck would fail
+        /// Force push even if precheck would fail
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         force: bool,
     },
 
-    /// note: Pull platform bundles into the local outbox (requires platform URL/token on daemon)
+    /// Pull platform bundles into the local outbox (requires platform URL/token on daemon)
+    // note: clap renders this doc as --help text; keep the text stable
     Pull {
-        /// note: World ID to pull (must match workspace sync binding when configured)
+        /// World ID to pull (must match workspace sync binding when configured)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         world_id: Option<String>,
 
-        /// note: Incremental cursor: only bundles after this server confirmed delta sequence
+        /// Incremental cursor: only bundles after this server confirmed delta sequence
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         after_sequence: Option<u64>,
     },
 
-    /// note: Show sync status
+    /// Show sync status
+    // note: clap renders this doc as --help text; keep the text stable
     Status,
 
-    /// note: Resolve a sync conflict with a specific strategy
+    /// Resolve a sync conflict with a specific strategy
+    // note: clap renders this doc as --help text; keep the text stable
     Resolve {
-        /// note: Outbox entry ID to resolve
+        /// Outbox entry ID to resolve
+        // note: clap renders this doc as --help text; keep the text stable
         outbox_entry_id: String,
 
-        /// note: Resolution strategy to apply
+        /// Resolution strategy to apply
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, value_enum)]
         resolution: ResolutionStrategy,
 
-        /// note: Skip confirmation prompt (for automation/scripts)
+        /// Skip confirmation prompt (for automation/scripts)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         force: bool,
     },
 
-    /// note: World fork and snapshot (migrated from `nexus42 world`)
+    /// World fork and snapshot (migrated from `nexus42 world`)
+    // note: clap renders this doc as --help text; keep the text stable
     World {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
 
-    /// note: Retry a failed sync operation (coming soon)
+    /// Retry a failed sync operation (coming soon)
+    // note: clap renders this doc as --help text; keep the text stable
     Retry {
-        /// note: Bundle ID to retry
+        /// Bundle ID to retry
+        // note: clap renders this doc as --help text; keep the text stable
         bundle_id: Option<String>,
     },
 }

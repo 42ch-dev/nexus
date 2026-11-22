@@ -55,35 +55,45 @@ impl std::str::FromStr for OutputFormat {
 }
 
 
-/// note: Registry subcommands
+/// Registry subcommands
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum RegistryCommand {
-    /// note: List available agents from the ACP registry
+    /// List available agents from the ACP registry
+    // note: clap renders this doc as --help text; keep the text stable
     List {
-        /// note: Output format (table or json)
+        /// Output format (table or json)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(short = 'f', long = "format", default_value = "table")]
         format: String,
     },
 
-    /// note: Show details for a specific agent
+    /// Show details for a specific agent
+    // note: clap renders this doc as --help text; keep the text stable
     Inspect {
-        /// note: Agent reference (partial match on id or name)
+        /// Agent reference (partial match on id or name)
+        // note: clap renders this doc as --help text; keep the text stable
         agent_ref: String,
     },
 }
 
-/// note: Agent subcommands
+/// Agent subcommands
+// note: clap renders this doc as --help text; keep the text stable
 #[derive(Debug, Subcommand)]
 pub enum AgentSubcommand {
-    /// note: Set the default agent for this workspace
+    /// Set the default agent for this workspace
+    // note: clap renders this doc as --help text; keep the text stable
     Use {
-        /// note: Agent reference (id or name)
+        /// Agent reference (id or name)
+        // note: clap renders this doc as --help text; keep the text stable
         agent_ref: String,
     },
 
-    /// note: List available agents
+    /// List available agents
+    // note: clap renders this doc as --help text; keep the text stable
     List {
-        /// note: Output format (table or json)
+        /// Output format (table or json)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(short = 'f', long = "format", default_value = "table")]
         format: String,
     },
@@ -91,57 +101,70 @@ pub enum AgentSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AcpCommand {
-    /// note: Verify ACP connectivity (registry or agent handshake)
+    /// Verify ACP connectivity (registry or agent handshake)
+    // note: clap renders this doc as --help text; keep the text stable
     Probe {
-        /// note: Probe registry connectivity (default when no --agent is given)
+        /// Probe registry connectivity (default when no --agent is given)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         registry: bool,
-        /// note: Probe a specific agent's ACP handshake
+        /// Probe a specific agent's ACP handshake
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, name = "AGENT")]
         agent: Option<String>,
     },
 
-    /// note: ACP registry management
+    /// ACP registry management
+    // note: clap renders this doc as --help text; keep the text stable
     Registry {
         #[command(subcommand)]
         command: RegistryCommand,
     },
 
-    /// note: Agent selection and discovery
+    /// Agent selection and discovery
+    // note: clap renders this doc as --help text; keep the text stable
     Agent {
         #[command(subcommand)]
         command: AgentSubcommand,
     },
 
-    /// note: ACP session persistence management
+    /// ACP session persistence management
+    // note: clap renders this doc as --help text; keep the text stable
     Session {
         #[command(subcommand)]
         command: session::SessionCommand,
     },
 
-    /// note: Global permission policy management
+    /// Global permission policy management
+    // note: clap renders this doc as --help text; keep the text stable
     Policy {
         #[command(subcommand)]
         command: policy::PolicyCommand,
     },
 
-    /// note: Agent-scoped permission rules
+    /// Agent-scoped permission rules
+    // note: clap renders this doc as --help text; keep the text stable
     Permission {
         #[command(subcommand)]
         command: permission::PermissionCommand,
     },
 
-    /// note: Run an ACP agent interactively or with a single message
+    /// Run an ACP agent interactively or with a single message
+    // note: clap renders this doc as --help text; keep the text stable
     Run {
-        /// note: Agent reference (id or name, partial match supported)
+        /// Agent reference (id or name, partial match supported)
+        // note: clap renders this doc as --help text; keep the text stable
         agent_ref: String,
-        /// note: Send a single message and exit (non-interactive mode)
+        /// Send a single message and exit (non-interactive mode)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(short, long)]
         message: Option<String>,
-        /// note: Working directory for the agent subprocess
+        /// Working directory for the agent subprocess
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(short, long)]
         cwd: Option<PathBuf>,
-        /// note: Run ID for trace correlation (auto-generated if omitted)
+        /// Run ID for trace correlation (auto-generated if omitted)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         run_id: Option<String>,
     },

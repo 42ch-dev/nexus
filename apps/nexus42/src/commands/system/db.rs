@@ -10,7 +10,8 @@ use nexus_local_db::{read_versions, validate, RuntimeRole};
 
 #[derive(Debug, Subcommand)]
 pub enum DbCommand {
-    /// note: Show database status (versions, health, tables)
+    /// Show database status (versions, health, tables)
+    // note: clap renders this doc as --help text; keep the text stable
     Status,
 }
 

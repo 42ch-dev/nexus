@@ -75,71 +75,93 @@ const SUPPORTED_IR_VERSION: u64 = 0;
 
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
-    /// note: List all discoverable presets (embedded + user + system)
+    /// List all discoverable presets (embedded + user + system)
+    // note: clap renders this doc as --help text; keep the text stable
     List {
-        /// note: Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
+        /// Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         intent: Option<String>,
-        /// note: Emit machine-readable JSON
+        /// Emit machine-readable JSON
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Print the profile for a preset (lanes + orchestration fields)
+    /// Print the profile for a preset (lanes + orchestration fields)
+    // note: clap renders this doc as --help text; keep the text stable
     Show {
-        /// note: Preset ID (embedded, user, or `_system.` qualified)
+        /// Preset ID (embedded, user, or `_system.` qualified)
+        // note: clap renders this doc as --help text; keep the text stable
         id: String,
-        /// note: Emit the daemon profile DTO verbatim (camelCase)
+        /// Emit the daemon profile DTO verbatim (camelCase)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Validate a preset YAML/bundle at a given path (local, in process)
+    /// Validate a preset YAML/bundle at a given path (local, in process)
+    // note: clap renders this doc as --help text; keep the text stable
     Validate {
-        /// note: Path to preset.yaml (or bundle directory)
+        /// Path to preset.yaml (or bundle directory)
+        // note: clap renders this doc as --help text; keep the text stable
         path: String,
-        /// note: Emit machine-readable JSON
+        /// Emit machine-readable JSON
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Rewrite a bundle's preset.yaml from its workflow.json (the only export)
+    /// Rewrite a bundle's preset.yaml from its workflow.json (the only export)
+    // note: clap renders this doc as --help text; keep the text stable
     Export {
-        /// note: Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
+        /// Bundle directory holding `workflow.json`; `preset.yaml` is written beside it
+        // note: clap renders this doc as --help text; keep the text stable
         path: String,
     },
-    /// note: Write a bundle's Workflow IR twin (the committed `ir-twins/<id>.workflow.ir.json`)
+    /// Write a bundle's Workflow IR twin (the committed `ir-twins/<id>.workflow.ir.json`)
+    // note: clap renders this doc as --help text; keep the text stable
     ExportIr {
-        /// note: Bundle directory holding `preset.yaml`
+        /// Bundle directory holding `preset.yaml`
+        // note: clap renders this doc as --help text; keep the text stable
         path: String,
-        /// note: File the imported `WorkflowDocument` is written to
+        /// File the imported `WorkflowDocument` is written to
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         out: String,
     },
-    /// note: Generate a strategy bundle from templates
+    /// Generate a strategy bundle from templates
+    // note: clap renders this doc as --help text; keep the text stable
     Scaffold {
-        /// note: Name for the new user preset
+        /// Name for the new user preset
+        // note: clap renders this doc as --help text; keep the text stable
         name: String,
-        /// note: Emit machine-readable JSON
+        /// Emit machine-readable JSON
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Import an external bundle as this workspace's strategy candidate
+    /// Import an external bundle as this workspace's strategy candidate
     ///
     /// Reads `preset.yaml` and its assets through the one bundle converter,
     /// validates and simulates the prospective revision-1 document, and commits
     /// it through the same CAS every compose operation uses. Prints the
     /// candidate together with the trajectory Approve accepts verbatim.
+    // note: clap renders this doc as --help text; keep the text stable
     Import {
-        /// note: Path to the bundle directory that holds `preset.yaml`
+        /// Path to the bundle directory that holds `preset.yaml`
+        // note: clap renders this doc as --help text; keep the text stable
         dir: String,
     },
-    /// note: Print trigger-lane classification only (never cron authoring)
+    /// Print trigger-lane classification only (never cron authoring)
+    // note: clap renders this doc as --help text; keep the text stable
     Trigger {
-        /// note: Preset ID (embedded, user, or `_system.` qualified)
+        /// Preset ID (embedded, user, or `_system.` qualified)
+        // note: clap renders this doc as --help text; keep the text stable
         id: String,
-        /// note: Emit machine-readable JSON
+        /// Emit machine-readable JSON
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Generate a strategy candidate from a declarative request
+    /// Generate a strategy candidate from a declarative request
     ///
     /// Runs the same lint-correct kernel the agent tool and the daemon route
     /// call — three transports, one implementation. The CLI attaches no model,
@@ -151,20 +173,25 @@ pub enum PresetCommand {
     /// steps); `--json` prints the committed candidate document with its
     /// semantic warnings instead — never a live strategy: validate, simulate
     /// and approve are separate steps.
+    // note: clap renders this doc as --help text; keep the text stable
     Generate {
-        /// note: Strategy id the candidate belongs to (also the document id)
+        /// Strategy id the candidate belongs to (also the document id)
+        // note: clap renders this doc as --help text; keep the text stable
         strategy_id: String,
-        /// note: Candidate revision you last read; the commit is `base-revision + 1`
+        /// Candidate revision you last read; the commit is `base-revision + 1`
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = 0)]
         base_revision: u64,
-        /// note: File holding the request JSON (the `GenerateRequest` contract)
+        /// File holding the request JSON (the `GenerateRequest` contract)
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long)]
         request: String,
-        /// note: Emit the D20 payload or the committed candidate as JSON
+        /// Emit the D20 payload or the committed candidate as JSON
+        // note: clap renders this doc as --help text; keep the text stable
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// note: Patch a strategy canvas node (state, transition, or prompt template)
+    /// Patch a strategy canvas node (state, transition, or prompt template)
     ///
     /// CAS-guarded direct-core writes over the strategy canvas seam
     /// (V1.175 P1 Task 2, group 1). Every leaf takes `--base-revision`;
@@ -174,6 +201,7 @@ pub enum PresetCommand {
     ///
     /// Retry guidance: on `strategy_conflict`, re-read the Strategy
     /// (e.g. `preset show`) and reapply with the new revision.
+    // note: clap renders this doc as --help text; keep the text stable
     Patch {
         #[command(subcommand)]
         command: patch::PatchCommand,
@@ -1129,7 +1157,8 @@ mod tests {
     use nexus_contracts::generated::core::orchestration_presets::preset_profile_signal::PresetProfileSignal;
     use nexus_contracts::generated::core::orchestration_presets::preset_profile_state::PresetProfileState;
 
-    /// note: Wrapper for parsing `PresetCommand` in tests.
+    /// Wrapper for parsing `PresetCommand` in tests.
+    // note: clap renders this doc as --help text; keep the text stable
     #[derive(Debug, clap::Parser)]
     #[command(subcommand_required = true, name = "preset")]
     struct PresetCli {
