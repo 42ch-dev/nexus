@@ -62,7 +62,7 @@ describe('getGalleryEntries', () => {
   it('indexes the session run view family on the Surfaces Daemon route', () => {
     const ids = getGalleryEntries('/surfaces/daemon').map((item) => item.id);
     expect(ids).toContain('surfaces-run-observation');
-    // The family stays reachable through the section index by state vocabulary.
+    // why: the family stays reachable through the section index by state vocabulary.
     const matched = filterGalleryEntries(getGalleryEntries('/surfaces/daemon'), 'replay').map(
       (item) => item.id,
     );

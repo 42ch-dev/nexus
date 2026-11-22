@@ -15,7 +15,7 @@ export type Theme = 'light' | 'dark' | 'system';
 
 interface ThemeContextValue {
   theme: Theme;
-  /** Effective resolved theme; always `'light'` or `'dark'`. */
+  /** note: effective resolved theme; always `'light'` or `'dark'`. */
   resolvedTheme: 'light' | 'dark';
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;

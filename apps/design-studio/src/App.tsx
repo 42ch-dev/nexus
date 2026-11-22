@@ -10,7 +10,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { HomePage } from '@/pages/home';
 
 /**
- * Route-level code splitting (S-002): the heavy gallery pages (tokens.tsx
+ * why: route-level code splitting (S-002) — the heavy gallery pages (tokens.tsx
  * ~2.3k lines, brand, components, surfaces subtree) are lazy-loaded so an
  * unrelated route does not eagerly parse every gallery module into the main
  * chunk. Each lazy route keeps the exact label/hash/fixture behavior; the
@@ -37,7 +37,7 @@ const SurfacesSelectionSubmenuPage = lazy(() =>
   import('@/pages/surfaces').then((m) => ({ default: m.SurfacesSelectionSubmenuPage })),
 );
 
-/** Accessible loading state shown while a lazy gallery chunk parses. */
+/** note: accessible loading state shown while a lazy gallery chunk parses. */
 function RouteLoading({ label }: { label: string }) {
   return (
     <div
@@ -52,17 +52,17 @@ function RouteLoading({ label }: { label: string }) {
   );
 }
 
-/** Wrap a lazy component in a Suspense boundary with an accessible fallback. */
+/** note: wrap a lazy component in a Suspense boundary with an accessible fallback. */
 function lazyRoute(node: ReactNode, label: string) {
   return <Suspense fallback={<RouteLoading label={label} />}>{node}</Suspense>;
 }
 
-/** Embedded layout routes defer readiness to nested leaf routes. */
+/** note: embedded layout routes defer readiness to nested leaf routes. */
 function embeddedLazyLayoutRoute(node: ReactNode, label: string) {
   return <Suspense fallback={<RouteLoading label={label} />}>{node}</Suspense>;
 }
 
-/** Embedded routes post ready only after the lazy gallery page commits. */
+/** note: embedded routes post ready only after the lazy gallery page commits. */
 function embeddedLazyRoute(node: ReactNode, label: string) {
   return (
     <Suspense fallback={<RouteLoading label={label} />}>

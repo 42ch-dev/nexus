@@ -2,9 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useTheme } from '@/components/theme-provider';
 import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 
-/* ------------------------------------------------------------------ */
-/*  Data — token inventory from SSOT                                    */
-/* ------------------------------------------------------------------ */
+// note: data — token inventory from the SSOT.
 
 interface ColorToken {
   label: string;
@@ -13,7 +11,7 @@ interface ColorToken {
 
 interface TokenGroup {
   title: string;
-  /** Optional Chronos / usage note rendered under the group title. */
+  /** note: optional Chronos / usage note rendered under the group title. */
   hint?: string;
   tokens: ColorToken[];
 }
@@ -207,7 +205,7 @@ const COLOR_GROUPS: TokenGroup[] = [
   },
 ];
 
-/* ---------- Semantic role triples (bg + text + border applied together) ----
+/* why: semantic role triples (bg + text + border applied together) ---------
  *
  * DESIGN.md defines status and surface chips as a *combination* of fill,
  * text and border. Flat swatches cannot show whether the trio reads as a
@@ -219,11 +217,11 @@ interface SemanticTriple {
   label: string;
   bg: string;
   text: string;
-  /** Border token; optional — some families (annotations) are bg+text only. */
+  /** note: border token; optional — some families (annotations) are bg+text only. */
   border?: string;
-  /** Short role line rendered inside the pill (meaningful reader). */
+  /** note: short role line rendered inside the pill (meaningful reader). */
   sample: string;
-  /** Mirrors the chip shape: pill (status/badge), surface (state alert), or
+  /** note: mirrors the chip shape — pill (status/badge), surface (state alert), or
    *  highlight (inline annotated text — bg+text only, no border). */
   shape?: 'pill' | 'surface' | 'highlight';
 }
@@ -268,7 +266,7 @@ const STATE_SURFACE_TRIPLES: SemanticTriple[] = [
   { label: 'info-surface', bg: '--color-info-surface', text: '--color-blue-1000', border: '--color-info-surface-border', sample: 'Info', shape: 'surface' },
 ];
 
-// Annotation highlights carry bg + text only (DESIGN.md components.reading-annotation-highlight-*);
+// why: annotation highlights carry bg + text only (DESIGN.md components.reading-annotation-highlight-*);
 // rendered as inline highlighted text — their actual role — with no fabricated border.
 const ANNOTATION_TRIPLES: SemanticTriple[] = [
   { label: 'highlight-yellow', bg: '--color-reading-annotation-highlight-yellow-background', text: '--color-reading-annotation-highlight-yellow-text', sample: 'The tide-mark is faint here', shape: 'highlight' },
@@ -277,7 +275,7 @@ const ANNOTATION_TRIPLES: SemanticTriple[] = [
   { label: 'highlight-pink', bg: '--color-reading-annotation-highlight-pink-background', text: '--color-reading-annotation-highlight-pink-text', sample: 'Questioned in the margin', shape: 'highlight' },
 ];
 
-/* ---------- Typography specimens (DESIGN.md frontmatter typography:) ----------
+/* why: typography specimens (DESIGN.md frontmatter typography:) ----------
  *
  * Class strings are written out literally so the Tailwind scanner emits them
  * (dynamic `text-${name}` interpolation is invisible to the scanner). Metrics
@@ -294,27 +292,27 @@ const ANNOTATION_TRIPLES: SemanticTriple[] = [
 interface TypoSpecimen {
   label: string;
   role: string;
-  /** Literal text-* size class from the shared preset. */
+  /** note: literal text-* size class from the shared preset. */
   textClass: string;
   /**
-   * Literal per-role font family utility (`font-<role>`), which resolves
+   * note: literal per-role font family utility (`font-<role>`), which resolves
    * through the generated `--text-<role>--font-family` var. Using the
    * role-scoped utility (not the coarse `font-sans`/`font-mono`) means a
    * DESIGN family edit to one role re-projects that specimen only — the
    * actual family is observable live from the rendered row.
    */
   familyClass: string;
-  /** Literal weight utility; display tier bakes weight 600 into text-display-*. */
+  /** note: literal weight utility; display tier bakes weight 600 into text-display-*. */
   weightClass?: 'font-heading' | 'font-semibold' | 'font-medium' | 'font-button';
   sampleText: string;
 }
 
 const TYPO_SPECIMENS: TypoSpecimen[] = [
-  // ── Content voice (V1.121 v0.4 display tier — sans) ──
+  // note: content voice — V1.121 v0.4 display tier (sans)
   { label: 'display-32', role: 'Content voice · page-level creative titles', textClass: 'text-display-32', familyClass: 'font-display-32', sampleText: 'The Orchard of Small Hours' },
   { label: 'display-24', role: 'Content voice · work / world titles', textClass: 'text-display-24', familyClass: 'font-display-24', sampleText: 'Chapter Six — The Long Descent' },
   { label: 'display-20', role: 'Content voice · card & chapter titles', textClass: 'text-display-20', familyClass: 'font-display-20', sampleText: 'A Field Guide to Tidal Magic' },
-  // ── Interface voice (sans) ──
+  // note: interface voice (sans)
   { label: 'heading-32', role: 'Page / view title', textClass: 'text-heading-32', familyClass: 'font-heading-32', weightClass: 'font-heading', sampleText: 'Heading 32 — The quick brown fox' },
   { label: 'heading-24', role: 'Section title', textClass: 'text-heading-24', familyClass: 'font-heading-24', weightClass: 'font-heading', sampleText: 'Heading 24 — The quick brown fox' },
   { label: 'heading-20', role: 'Card title / dense section', textClass: 'text-heading-20', familyClass: 'font-heading-20', weightClass: 'font-heading', sampleText: 'Heading 20 — The quick brown fox' },
@@ -327,12 +325,12 @@ const TYPO_SPECIMENS: TypoSpecimen[] = [
   { label: 'copy-12', role: 'Footnotes, dense metadata, existing utility', textClass: 'text-copy-12', familyClass: 'font-copy-12', sampleText: 'Body 12 — The quick brown fox jumps over the lazy dog. (copy-12 formalizes an existing Tailwind utility.)' },
   { label: 'button-14', role: 'Default button label', textClass: 'text-button-14', familyClass: 'font-button-14', weightClass: 'font-button', sampleText: 'Button 14 — Continue' },
   { label: 'button-12', role: 'Compact button label', textClass: 'text-button-12', familyClass: 'font-button-12', weightClass: 'font-semibold', sampleText: 'BUTTON 12 — SAVE' },
-  // ── Interface voice (mono) ──
+  // note: interface voice (mono)
   { label: 'label-12-mono', role: 'IDs, table figures, code-like values', textClass: 'text-label-12-mono', familyClass: 'font-label-12-mono', weightClass: 'font-medium', sampleText: 'mono-12 — 0xDEAD_BEEF_2024' },
   { label: 'copy-13-mono', role: 'Dense mono body', textClass: 'text-copy-13-mono', familyClass: 'font-copy-13-mono', sampleText: 'mono-13 — const answer = 42; // the quick brown fox' },
 ];
 
-/* ---------- Spacing scale (DESIGN.md frontmatter spacing:) ----------
+/* why: spacing scale (DESIGN.md frontmatter spacing:) ----------
  *
  * Bars render at true scale via the token's CSS custom property
  * (`width: var(--space-N)`), projected in tokens.css `:root` from the DESIGN
@@ -358,8 +356,6 @@ const SPACING_SCALE: SpacingStep[] = [
   { label: 'space-24', varName: '--space-24' },
 ];
 
-/* ---------- Radius scale (DESIGN.md frontmatter rounded:) ---------- */
-
 interface RadiusStep {
   label: string;
   varName: string;
@@ -372,8 +368,6 @@ const RADIUS_SCALE: RadiusStep[] = [
   { label: 'fullscreen', varName: '--radius-fullscreen' },
   { label: 'pill', varName: '--radius-pill' },
 ];
-
-/* ---------- Elevation scale (DESIGN.md §Elevation, V1.121 v0.4) ---------- */
 
 interface ElevationToken {
   label: string;
@@ -389,14 +383,12 @@ const ELEVATION_LEVELS: ElevationToken[] = [
   { label: 'elevation-4', varName: '--shadow-elevation-4', usage: 'Modal / dragging' },
 ];
 
-/** Legacy alias chain — zero consumer breakage (DESIGN.md §Elevation). */
+/** note: legacy alias chain — zero consumer breakage (DESIGN.md §Elevation). */
 const ELEVATION_ALIASES = [
   { label: 'shadow-card', varName: '--shadow-card', target: 'elevation-1' },
   { label: 'shadow-popover', varName: '--shadow-popover', target: 'elevation-3' },
   { label: 'shadow-modal', varName: '--shadow-modal', target: 'elevation-4' },
 ] as const;
-
-/* ---------- Motion tokens (DESIGN.md §Motion, V1.121 v0.4) ---------- */
 
 interface MotionToken {
   label: string;
@@ -418,7 +410,7 @@ const MOTION_EASINGS: MotionToken[] = [
   { label: 'ease-emphasized', varName: '--ease-emphasized', usage: 'Modal / panel enter' },
 ];
 
-/* ---------- Canvas tokens (V1.121 P3 — DESIGN.md §Canvas Surface) -------
+/* why: canvas tokens (V1.121 P3 — DESIGN.md §Canvas Surface) -------
  *
  * Live swatches for the canvas token families. Values resolve through
  * tokens.css `:root` (light) and `.dark` (dark) blocks — every swatch
@@ -430,15 +422,15 @@ const MOTION_EASINGS: MotionToken[] = [
 interface CanvasToken {
   label: string;
   varName: string;
-  /** When set, renders the swatch with the literal token as a border color. */
+  /** note: when set, renders the swatch with the literal token as a border color. */
   asBorder?: boolean;
-  /** When set, renders the swatch as a transparent fill (color-mix over page). */
+  /** note: when set, renders the swatch as a transparent fill (color-mix over page). */
   asTint?: boolean;
 }
 
 interface CanvasTokenGroup {
   title: string;
-  /** Optional blurb shown under the group title. */
+  /** note: optional blurb shown under the group title. */
   hint?: string;
   tokens: CanvasToken[];
 }
@@ -640,10 +632,10 @@ const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
   },
 ];
 
-/** Node-width family (P0 + P3) — five --canvas-node-width-* slots. */
+/** note: node-width family (P0 + P3) — five --canvas-node-width-* slots. */
 interface CanvasWidthToken {
   label: string;
-  /** Tailwind utility name; the chip's min-width resolves through the var. */
+  /** note: tailwind utility name; the chip's min-width resolves through the var. */
   utilityClass: string;
   varName: string;
 }
@@ -656,7 +648,7 @@ const CANVAS_NODE_WIDTHS: CanvasWidthToken[] = [
   { label: 'default', utilityClass: 'min-w-canvas-node-default', varName: '--canvas-node-width-default' },
 ];
 
-/* ---------- Structural scalars (DESIGN.md components.*) ----------
+/* why: structural scalars (DESIGN.md components.*) ----------
  *
  * Non-color sizing/geometry projections: footer-profile, setup-wizard,
  * sidebar-nav, dialog/sheet/listbox, reading-annotation/chrome. Read live via
@@ -667,9 +659,9 @@ interface ScalarToken {
   label: string;
   varName: string;
   usage: string;
-  /** Reading kind used to pick the honest, property-appropriate computed readout. */
+  /** note: reading kind used to pick the honest, property-appropriate computed readout. */
   kind?: 'color' | 'length' | 'shadow' | 'radius' | 'auto';
-  /** Which dimension to probe when kind is length (max-height/min-height probe height). */
+  /** note: which dimension to probe when kind is length (max-height/min-height probe height). */
   prop?: 'width' | 'height';
 }
 
@@ -763,13 +755,13 @@ const READING_CHROME_SCALARS: ScalarToken[] = [
 
 interface ReadingChromeSpecimen {
   label: string;
-  /** Flattened --reading-chrome-* property name in generated tokens.css. */
+  /** note: flattened --reading-chrome-* property name in generated tokens.css. */
   varName: string;
   sample: string;
   className: string;
-  /** Extra inline style applied via the live generated vars (non-color leaves). */
+  /** note: extra inline style applied via the live generated vars (non-color leaves). */
   styleVarNames?: Record<string, string>;
-  /** Computed CSS properties to read live and append to the row (font-size,
+  /** note: computed CSS properties to read live and append to the row (font-size,
    *  line-height, letter-spacing, margin-top, padding-left, text-align,
    *  text-transform, border-left, background-color, …). Key is the computed
    *  property, value is the var resolved by that property. */
@@ -995,12 +987,8 @@ const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
 /**
- * Single shared, visible (not display:none) off-screen probe element reused
+ * why: single shared, visible (not display:none) off-screen probe element reused
  * for every live computed read on this page (W-002). Creating/attaching a
  * fresh element per swatch across a theme flip produced hundreds of
  * createElement/appendChild/getComputedStyle/removeChild cycles; one
@@ -1015,7 +1003,7 @@ function sharedProbe(): HTMLDivElement {
     probeEl.style.left = '-9999px';
     probeEl.style.top = '0';
     probeEl.style.pointerEvents = 'none';
-    // Motion metadata is also measured here; property writes must never animate.
+    // why: motion metadata is also measured here; property writes must never animate.
     probeEl.style.transitionProperty = 'none';
     document.body.appendChild(probeEl);
   }
@@ -1023,7 +1011,7 @@ function sharedProbe(): HTMLDivElement {
 }
 
 /**
- * Read the computed background-color that results from applying a CSS
+ * note: read the computed background-color that results from applying a CSS
  * custom property to a DOM element.  This resolves *through* var()
  * chains (e.g. `var(--nexus-brand-deep-blue)`) and returns the final
  * rgb / rgba string the browser paints.
@@ -1035,7 +1023,7 @@ function resolveSwatchColor(varName: string): string {
 }
 
 /**
- * Read the computed box-shadow for a shadow CSS custom property, resolving
+ * note: read the computed box-shadow for a shadow CSS custom property, resolving
  * through the alias chain (`--shadow-card` → `var(--shadow-elevation-1)`)
  * to the value the browser actually paints.
  */
@@ -1046,7 +1034,7 @@ function resolveBoxShadow(varName: string): string {
 }
 
 /**
- * Read the computed width that results from assigning a CSS custom property
+ * note: read the computed width that results from assigning a CSS custom property
  * carrying a *length* (not a color) to the shared off-screen visible probe.
  * Resolves through var() chains and returns the final px string the browser
  * computes. Unlike a display:none box, a laid-out fixed-position element lets
@@ -1063,7 +1051,7 @@ function resolveSwatchLength(varName: string): string {
 }
 
 /**
- * Read a computed property produced by assigning a CSS custom property to the
+ * note: read a computed property produced by assigning a CSS custom property to the
  * shared visible probe — live from the token's declared value. Re-resolves on
  * theme flip (S-004) and returns '' when the var is not defined (jsdom).
  */
@@ -1079,12 +1067,13 @@ function useComputedVarValue(
     const computed = getComputedStyle(el)[property];
     const rafId = requestAnimationFrame(() => setValue(computed ?? ''));
     return () => cancelAnimationFrame(rafId);
+    // why: var, property and theme are the only inputs to the readout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [varName, property, resolvedTheme]);
   return value;
 }
 
-/** Live prefers-reduced-motion state (drives the demo honesty note). */
+/** note: live prefers-reduced-motion state (drives the demo honesty note). */
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
@@ -1097,19 +1086,15 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-/** Format a px value as rem (1rem = 16px). */
+/** note: format a px value as rem (1rem = 16px). */
 function pxToRem(px: number): string {
   return `${px / 16}rem`;
 }
 
-/** Trim a ratio to at most `decimals` places without trailing zeros. */
+/** note: trim a ratio to at most `decimals` places without trailing zeros. */
 function trimRatio(value: number, decimals: number): string {
   return String(Number(value.toFixed(decimals)));
 }
-
-/* ------------------------------------------------------------------ */
-/*  Sub-components                                                      */
-/* ------------------------------------------------------------------ */
 
 function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
@@ -1125,10 +1110,11 @@ function ColorSwatch({ token }: { token: ColorToken }) {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // Defer to next frame so CSS vars have been swapped.
+      // why: defer to next frame so CSS vars have been swapped.
       const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
       return () => cancelAnimationFrame(rafId);
     }
+    // why: the readout is a pure function of the token var and resolved theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);
 
@@ -1147,7 +1133,7 @@ function ColorSwatch({ token }: { token: ColorToken }) {
 }
 
 /**
- * Semantic role reader — applies bg + text + border as ONE compact control so
+ * note: semantic role reader — applies bg + text + border as ONE compact control so
  * the reviewer sees the actual readable pairing (and either a contrast pass or
  * failure) instead of three unrelated flat rectangles. Shape mirrors the chip
  * usage: pill for status/badge chips, surface for state alert blocks.
@@ -1166,6 +1152,7 @@ function SemanticRoleReader({ triple }: { triple: SemanticTriple }) {
       setReadouts(parts.join(' · '));
     });
     return () => cancelAnimationFrame(rafId);
+    // why: a theme flip is the only trigger; token values are static per theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme]);
 
@@ -1207,7 +1194,7 @@ function SemanticRoleReader({ triple }: { triple: SemanticTriple }) {
 }
 
 /**
- * Typography specimen row. Renders the specimen with the literal token
+ * note: typography specimen row. Renders the specimen with the literal token
  * classes and reads font-size / weight / font-family / line-height /
  * letter-spacing back from the computed style (live) for the metrics line.
  */
@@ -1219,7 +1206,7 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
   useEffect(() => {
     const el = specimenRef.current;
     if (!el) return;
-    // Re-read after the theme swap (next frame) so a light→dark change with
+    // why: re-read after the theme swap (next frame) so a light→dark change with
     // differing typography metrics/family re-projects the live readout and
     // keeps the labels agreeing with the rendered specimen.
     const rafId = requestAnimationFrame(() => {
@@ -1249,6 +1236,7 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
       setMetrics(parts.join(' · '));
     });
     return () => cancelAnimationFrame(rafId);
+    // why: a theme flip is the only trigger; token values are static per theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme]);
 
@@ -1284,7 +1272,7 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
 }
 
 /**
- * Spacing bar rendered at true scale — the bar's width is the token's CSS
+ * note: spacing bar rendered at true scale — the bar's width is the token's CSS
  * variable itself, so what you see is the token. The px/rem readout is read
  * live from the rendered bar.
  */
@@ -1323,7 +1311,7 @@ function SpacingBar({ step }: { step: SpacingStep }) {
   );
 }
 
-/** Radius swatch — the box's corner radius is the token's CSS variable. */
+/** note: radius swatch — the box's corner radius is the token's CSS variable. */
 function RadiusBox({ step }: { step: RadiusStep }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [radius, setRadius] = useState('');
@@ -1350,7 +1338,7 @@ function RadiusBox({ step }: { step: RadiusStep }) {
   );
 }
 
-/** Elevation swatch — shadow applied via the live CSS variable. */
+/** note: elevation swatch — shadow applied via the live CSS variable. */
 function ElevationCard({ token }: { token: ElevationToken }) {
   const { resolvedTheme } = useTheme();
   const [computed, setComputed] = useState<string>(() => resolveBoxShadow(token.varName));
@@ -1360,6 +1348,7 @@ function ElevationCard({ token }: { token: ElevationToken }) {
       const rafId = requestAnimationFrame(() => setComputed(resolveBoxShadow(token.varName)));
       return () => cancelAnimationFrame(rafId);
     }
+    // why: the readout is a pure function of the token var and resolved theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);
 
@@ -1380,7 +1369,7 @@ function ElevationCard({ token }: { token: ElevationToken }) {
   );
 }
 
-/** Alias-chain row — proves the legacy name resolves onto the scale. */
+/** note: alias-chain row — proves the legacy name resolves onto the scale. */
 function ElevationAliasRow({ alias }: { alias: (typeof ELEVATION_ALIASES)[number] }) {
   const { resolvedTheme } = useTheme();
   const [computed, setComputed] = useState<string>(() => resolveBoxShadow(alias.varName));
@@ -1390,6 +1379,7 @@ function ElevationAliasRow({ alias }: { alias: (typeof ELEVATION_ALIASES)[number
       const rafId = requestAnimationFrame(() => setComputed(resolveBoxShadow(alias.varName)));
       return () => cancelAnimationFrame(rafId);
     }
+    // why: the alias resolves through the same theme-dependent scale
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, alias.varName]);
 
@@ -1406,7 +1396,7 @@ function ElevationAliasRow({ alias }: { alias: (typeof ELEVATION_ALIASES)[number
   );
 }
 
-/** Motion token row — value read live from the token's CSS variable. */
+/** note: motion token row — value read live from the token's CSS variable. */
 function MotionRow({
   token,
   property,
@@ -1430,7 +1420,7 @@ function MotionRow({
 }
 
 /**
- * Canvas color swatch — resolves through tokens.css `:root` (light) and
+ * note: canvas color swatch — resolves through tokens.css `:root` (light) and
  * `.dark` (dark) blocks. Re-reads on theme flip so the visual reader can
  * verify both themes from the same gallery. The optional `asBorder` /
  * `asTint` modes let the swatch represent tokens that are typically used
@@ -1446,6 +1436,7 @@ function CanvasColorSwatch({ token }: { token: CanvasToken }) {
       const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
       return () => cancelAnimationFrame(rafId);
     }
+    // why: the readout is a pure function of the token var and resolved theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);
 
@@ -1468,7 +1459,7 @@ function CanvasColorSwatch({ token }: { token: CanvasToken }) {
 }
 
 /**
- * Ambient dot-grid swatch — renders the actual canvas dot-grid pattern at
+ * note: ambient dot-grid swatch — renders the actual canvas dot-grid pattern at
  * the live grid-gap / grid-dot-size metrics. The reader sees the same
  * texture the App canvas paints, in both themes. Metrics are read through the
  * shared laid-out probe (never a display:none box); when a metric is missing
@@ -1482,7 +1473,7 @@ function CanvasAmbientGridSwatch() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    // Read the live metrics through the shared laid-out probe. On first paint
+    // why: read the live metrics through the shared laid-out probe. On first paint
     // Vite may not yet have injected the CSS that defines the vars, so the
     // first read can be '' even though the value is valid moments later —
     // retry a bounded number of frames, then surface genuine unavailability.
@@ -1512,6 +1503,7 @@ function CanvasAmbientGridSwatch() {
       cancelled = true;
       for (const id of rafIds) cancelAnimationFrame(id);
     };
+    // why: a theme flip is the only trigger; token values are static per theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme]);
 
@@ -1545,7 +1537,7 @@ function CanvasAmbientGridSwatch() {
 }
 
 /**
- * Accent spine swatch — renders the surface's accent token as the same
+ * note: accent spine swatch — renders the surface's accent token as the same
  * 3px border-l stripe NodeChromeShell applies for `accent="<surface>"`.
  * Mirrors the spine shape so the visual reader sees the token in its
  * realistic context.
@@ -1559,6 +1551,7 @@ function CanvasAccentSpineSwatch({ token }: { token: CanvasToken }) {
       const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
       return () => cancelAnimationFrame(rafId);
     }
+    // why: the readout is a pure function of the token var and resolved theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);
 
@@ -1579,7 +1572,7 @@ function CanvasAccentSpineSwatch({ token }: { token: CanvasToken }) {
 }
 
 /**
- * Node-width utility chip — the chip's `min-width` resolves through the
+ * note: node-width utility chip — the chip's `min-width` resolves through the
  * --canvas-node-width-* CSS variable via the named utility class. The
  * rendered min-width is read live so the reader sees the actual px value
  * of the token.
@@ -1626,7 +1619,7 @@ const DEMO_BUTTON_CLASS =
   'px-3 py-1.5 rounded-control border border-gray-alpha-400 bg-background-100 text-button-14 font-button text-gray-1000 hover:bg-gray-alpha-100 transition-colors duration-state ease-standard motion-reduce:transition-none';
 
 /**
- * Card hover-lift recipe (DESIGN.md §Motion / §Elevation): rest elevation-1,
+ * note: card hover-lift recipe (DESIGN.md §Motion / §Elevation) — rest elevation-1,
  * hover elevation-2 + translateY(-1px) over 160ms ease-standard, pressed
  * returns to elevation-1. Reduced motion: instant state change, no
  * transform/opacity animation (motion-reduce guards).
@@ -1648,21 +1641,21 @@ function HoverLiftDemo() {
 }
 
 /**
- * Popover enter/exit recipe: enter opacity + scale(0.98 → 1) with
+ * note: popover enter/exit recipe — enter opacity + scale(0.98 → 1) with
  * duration-enter and ease-standard; exit fades with duration-exit.
  * Reduced motion collapses both to an instant state change.
  */
 function EnterExitDemo() {
   const [visible, setVisible] = useState(true);
 
-  // Clear any pending re-enter timer on unmount and between replays so a
+  // why: clear any pending re-enter timer on unmount and between replays so a
   // delayed state mutation never fires on a demo that left the tree or that
   // was superseded by a newer replay (S-003).
   const cleanupTimerRef = useRef<number | null>(null);
 
   const replay = () => {
     setVisible(false);
-    // Outlasts duration-exit (140ms) so the exit completes before re-enter.
+    // why: outlasts duration-exit (140ms) so the exit completes before re-enter.
     // Store the timer id so a stale replay cannot mutate state after unmount
     // or a newer replay has already reset the sequence.
     if (cleanupTimerRef.current !== null) {
@@ -1719,7 +1712,7 @@ function EnterExitDemo() {
 }
 
 /**
- * Disabled-wash chip (DESIGN.md §States, R-V1182P0-002 / v1.183 P0 AR-1) —
+ * note: disabled-wash chip (DESIGN.md §States, R-V1182P0-002 / v1.183 P0 AR-1) —
  * renders the shared disabled-state wash at the live
  * --color-states-disabled-opacity value (NOT a COLOR_GROUPS swatch:
  * ColorSwatch assumes color-valued vars; this is a scalar opacity). The
@@ -1739,6 +1732,7 @@ function DisabledWashDemo() {
     const value = getComputedStyle(el).opacity;
     const rafId = requestAnimationFrame(() => setComputed(value));
     return () => cancelAnimationFrame(rafId);
+    // why: a theme flip is the only trigger; token values are static per theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme]);
 
@@ -1765,7 +1759,7 @@ function DisabledWashDemo() {
 }
 
 /**
- * Read a structural CSS custom property using a property-appropriate probe.
+ * why: read a structural CSS custom property using a property-appropriate probe.
  *
  * We do NOT force every token through backgroundColor (which turns
  * `--dialog-width: calc(100% - 2rem)` into an empty/zero readout and any
@@ -1794,7 +1788,7 @@ function resolveScalarValue(
   if (kind === 'color') {
     el.style.backgroundColor = `var(${varName})`;
     const computed = getComputedStyle(el).backgroundColor;
-    // Transparent stays transparent — never turn it into "0px".
+    // why: transparent stays transparent — never turn it into "0px".
     if (computed === 'transparent' || computed === 'rgba(0, 0, 0, 0)') {
       return `${declared} → transparent`;
     }
@@ -1813,7 +1807,7 @@ function resolveScalarValue(
     return computed && computed !== '0px' ? `${declared} → ${computed}` : declared;
   }
 
-  // Length (or auto) — probe the relevant dimension on a VISIBLE (not
+  // why: length (or auto) — probe the relevant dimension on a VISIBLE (not
   // display:none / hidden) element so viewport/percentage/calc resolve
   // against a real box. We use `position:fixed; left:-9999px` on the shared
   // probe to keep it off-screen without removing it from layout resolution.
@@ -1826,7 +1820,7 @@ function resolveScalarValue(
 }
 
 /**
- * Scalar token row — reads the live computed value of a structural CSS var
+ * note: scalar token row — reads the live computed value of a structural CSS var
  * (length / color / shadow / radius) via a property-appropriate probe
  * element, re-resolving on theme flip, and shows BOTH the declared token
  * expression and the applied browser-computed result.
@@ -1840,6 +1834,7 @@ function ScalarRow({ token }: { token: ScalarToken }) {
       setComputed(resolveScalarValue(token.varName, token.kind, token.prop)),
     );
     return () => cancelAnimationFrame(rafId);
+    // why: the computed readout is a pure function of the listed token inputs and theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName, token.kind, token.prop]);
 
@@ -1857,7 +1852,7 @@ function ScalarRow({ token }: { token: ScalarToken }) {
   );
 }
 
-/** Reading-chrome specimen — sample text styled with the flattened css vars. */
+/** note: reading-chrome specimen — sample text styled with the flattened css vars. */
 function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
   const { resolvedTheme } = useTheme();
   const [readouts, setReadouts] = useState('');
@@ -1868,7 +1863,7 @@ function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
     const rafId = requestAnimationFrame(() => {
       const cs = getComputedStyle(el);
       const parts: string[] = [];
-      // Always show the resolved color readout first.
+      // why: always show the resolved color readout first.
       parts.push(cs.color);
       for (const { prop } of spec.readouts ?? []) {
         const v = cs[prop as keyof CSSStyleDeclaration] as string;
@@ -1877,6 +1872,7 @@ function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
       setReadouts(parts.join(' · '));
     });
     return () => cancelAnimationFrame(rafId);
+    // why: the spec is a stable module constant; only the theme changes the readout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, spec]);
 
@@ -1909,7 +1905,7 @@ function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
 }
 
 /**
- * Structural scalar section (DESIGN.md components.*) — footer-profile,
+ * note: structural scalar section (DESIGN.md components.*) — footer-profile,
  * setup-wizard step/surface, sidebar-nav/dialog/sheet/listbox chrome metrics,
  * and reading annotation/chrome scalar families. Rows read live generated
  * values so both themes are observable in one gallery.
@@ -1990,10 +1986,6 @@ function StructuralSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Sections                                                            */
-/* ------------------------------------------------------------------ */
-
 function SubNav() {
   const items = [
     { label: 'Colors', href: '#tokens-colors' },
@@ -2059,7 +2051,7 @@ function ColorsSection() {
         </div>
       ))}
 
-      {/* Semantic role readers — the trio bg/text/border as one control, so
+      {/* why: semantic role readers — the trio bg/text/border as one control, so
           the reviewer sees the actual readable state pill (or a contrast
           failure) instead of separate flat rectangles. */}
       <div className="mt-10 border-t border-gray-alpha-200 pt-8" data-testid="semantic-role-readers">
@@ -2167,7 +2159,7 @@ function TypographySection() {
         </div>
         <div>
           <div className="text-copy-13-mono font-mono text-gray-700">
-            mono-13 — const 中文 = 「变量名」 // the quick brown fox · CJK falls back to the named sans in the mono stack
+            {'mono-13 — const 中文 = 「变量名」 // the quick brown fox · CJK falls back to the named sans in the mono stack'}
           </div>
           <div className="text-label-12-mono font-mono text-gray-600 mt-1">
             LABEL-12-MONO — 0xDEAD_BEEF_2024 · 中文 id 亦可读
@@ -2178,7 +2170,7 @@ function TypographySection() {
   );
 }
 
-/** Read a CSS custom property's declared value from the document root, live per theme. */
+/** note: read a CSS custom property's declared value from the document root, live per theme. */
 function ReadingMetricValue({ varName }: { varName: string }) {
   const { resolvedTheme } = useTheme();
   const [value, setValue] = useState('');
@@ -2190,6 +2182,7 @@ function ReadingMetricValue({ varName }: { varName: string }) {
       setValue(v);
     });
     return () => cancelAnimationFrame(rafId);
+    // why: the root property value changes only with the var name or the theme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, varName]);
   return <>{value || varName}</>;
@@ -2318,7 +2311,7 @@ function MotionSection() {
 }
 
 /**
- * Canvas section (V1.121 P3 T4) — live swatches for every canvas token
+ * note: canvas section (V1.121 P3 T4) — live swatches for every canvas token
  * family: ambient (surface + grid + minimap + dot-grid pattern), node
  * chrome (fill / fill-hover / border / border-selected), edges & ports,
  * per-surface accent spines, and the five --canvas-node-width-* utility
@@ -2353,7 +2346,6 @@ function CanvasSection() {
                 <CanvasColorSwatch key={t.varName} token={t} />
               ),
             )}
-            {/* Ambient group also shows the live dot-grid pattern. */}
             {group.title === 'Ambient' && <CanvasAmbientGridSwatch />}
           </div>
         </div>
@@ -2391,10 +2383,6 @@ function CanvasSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Page                                                                */
-/* ------------------------------------------------------------------ */
 
 export function TokensPage() {
   return (

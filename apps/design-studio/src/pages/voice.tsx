@@ -4,22 +4,19 @@ import { cn, Badge, Card } from '@42ch/nexus-ui';
 
 import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 
-/* ------------------------------------------------------------------ */
-/*  Data — Voice & Content specimens from DESIGN.md §Voice & Content   */
-/*  and IA guide §4.4. Every fixture string is canonical from the      */
-/*  merged DESIGN SSOT.                                                */
-/* ------------------------------------------------------------------ */
+// note: data — Voice & Content specimens from DESIGN.md §Voice & Content and
+// IA guide §4.4. Every fixture string is canonical from the merged DESIGN SSOT.
 
 interface VoiceSpecimen {
-  /** Pattern label per §4.4 table. */
+  /** note: pattern label per §4.4 table. */
   label: string;
-  /** The voice rule this specimen demonstrates. */
+  /** note: the voice rule this specimen demonstrates. */
   rule: string;
-  /** Canonical fixture string from DESIGN SSOT. */
+  /** note: canonical fixture string from DESIGN SSOT. */
   fixture: string | { parts: string[] };
-  /** Optional DESIGN.md surface-label from the §4.4 table (e.g. "Page title"). */
+  /** note: optional DESIGN.md surface-label from the §4.4 table (e.g. "Page title"). */
   surfaceLabel?: string;
-  /** Whether the fixture is a multi-part row (like Verb-only buttons). */
+  /** note: whether the fixture is a multi-part row (like Verb-only buttons). */
   multi?: boolean;
 }
 
@@ -77,10 +74,6 @@ const SPECIMENS: VoiceSpecimen[] = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
-/*  Sub-components                                                      */
-/* ------------------------------------------------------------------ */
-
 function SectionHeading({ id, children }: { id?: string; children: ReactNode }) {
   return (
     <h3
@@ -105,7 +98,6 @@ function VoiceCard({
 
   return (
     <Card className="transition-colors">
-      {/* Pattern label + surface label + rule */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <span className="text-heading-16 font-semibold text-gray-1000">
           {specimen.label}
@@ -116,7 +108,6 @@ function VoiceCard({
       </div>
       <p className="text-copy-14 text-gray-700 mb-5">{specimen.rule}</p>
 
-      {/* Fixture display */}
       <div className="border border-gray-alpha-200 rounded-control bg-background-200 p-5">
         {specimen.multi ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -143,10 +134,6 @@ function VoiceCard({
     </Card>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  GUIDANCE SUMMARY (DESIGN.md §Voice & Content verbatim)             */
-/* ------------------------------------------------------------------ */
 
 const GUIDANCE_RULES = [
   'Helpful, plain, local-first — a careful CLI message translated into UI copy.',
@@ -181,10 +168,6 @@ function GuidanceBlock() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Page                                                                */
-/* ------------------------------------------------------------------ */
-
 export function VoicePage() {
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
@@ -208,7 +191,6 @@ export function VoicePage() {
       </p>
       <SurfaceSourceBadges importPaths={['DESIGN.md', '@42ch/nexus-ui']} />
 
-      {/* Guidance block first */}
       <section id="voice-guidance">
         <SectionHeading id="voice-guidance">Voice guidance summary</SectionHeading>
         <p className="text-copy-14 text-gray-700 mb-4">
@@ -218,7 +200,6 @@ export function VoicePage() {
         <GuidanceBlock />
       </section>
 
-      {/* Page title pattern */}
       <section id="voice-writing-patterns">
         <SectionHeading id="voice-writing-patterns">Writing Patterns</SectionHeading>
         <p className="text-copy-14 text-gray-700 mb-4">

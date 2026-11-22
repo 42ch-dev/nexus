@@ -109,7 +109,7 @@ describe('SurfaceSourceBadge', () => {
   });
 
   it('renders transitional tier', () => {
-    render(<SurfaceSourceBadge importPath="@web-ui/dialog" />); // transitional — badge path label (not an import)
+    render(<SurfaceSourceBadge importPath="@web-ui/dialog" />); // note: transitional — badge path label (not an import)
     expect(screen.getByTestId('surface-source-badge-transitional')).toBeInTheDocument();
   });
 

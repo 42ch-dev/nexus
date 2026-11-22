@@ -261,7 +261,7 @@ export function getGalleryEntries(pathname: string): readonly GalleryEntry[] {
   return CATALOG_BY_PATH[pathname] ?? [];
 }
 
-/** Frozen gallery labels keyed by route (spec §6) — used for pair-frame titles. */
+/** Frozen gallery labels keyed by route (docs/specs/surfaces/design-studio.md §6) — used for pair-frame titles. */
 const GALLERY_LABEL_BY_PATH: Readonly<Record<string, string>> = {
   '/tokens': 'Tokens',
   '/brand': 'Brand',
@@ -294,7 +294,7 @@ export function filterGalleryEntries(
   });
 }
 
-/** Focus the catalog heading below sticky chrome after route/hash navigation. */
+/** note: focus the catalog heading below sticky chrome after route/hash navigation. */
 function resolveGalleryFocusTarget(element: HTMLElement): HTMLElement {
   const tag = element.tagName.toLowerCase();
   if (/^h[1-6]$/.test(tag)) return element;
@@ -316,7 +316,7 @@ function resolveGalleryFocusTarget(element: HTMLElement): HTMLElement {
 }
 
 /**
- * Focus the catalog heading once the matched route has actually mounted.
+ * why: focus the catalog heading once the matched route has actually mounted.
  * Retries each animation frame until the target exists or the bounded
  * deadline passes — a nested lazy leaf still rendering its loading boundary
  * receives focus when it commits. Returns a cancel function; callers cancel

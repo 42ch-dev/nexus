@@ -31,7 +31,7 @@ export function GalleryShell({ children }: GalleryShellProps) {
     cancelFocusRef.current?.();
     cancelFocusRef.current = focusGalleryHeading(id);
   }, []);
-  // Deep links and Back/Forward focus the hash heading once the matched route
+  // why: deep links and Back/Forward focus the hash heading once the matched route
   // mounts. Pair mode never searches the parent document for fixture IDs —
   // the announcement and frame URL hash updates carry the selection there.
   useEffect(() => {
