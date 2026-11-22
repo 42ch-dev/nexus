@@ -574,7 +574,6 @@ mod tests {
         );
     }
 
-
     fn make_test_delta_with_timestamp(ts: &str) -> LocalDelta {
         LocalDelta {
             delta_type: DeltaType::KeyBlock,

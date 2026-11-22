@@ -42,7 +42,6 @@ const MAX_RETRIES: u64 = 5;
 /// note: Base delay for exponential backoff in seconds.
 const BASE_RETRY_DELAY_SECS: u64 = 2;
 
-
 /// note: Row mapping for `outbox_entries` queries (sqlx R2: module-level struct).
 #[derive(sqlx::FromRow)]
 struct OutboxRow {
@@ -1511,7 +1510,6 @@ mod tests {
         let entries = outbox.replay().await.expect("replay");
         assert!(entries.iter().all(|e| e.outbox_entry_id != entry_id));
     }
-
 
     #[tokio::test]
     async fn outbox_pool_lifecycle() {

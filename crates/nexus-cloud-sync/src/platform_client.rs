@@ -475,7 +475,6 @@ impl PlatformClient {
 mod tests {
     use super::*;
 
-
     #[test]
     fn classify_timeout_maps_to_staged_timeout() {
         let err = SyncError::SyncTimeout { seconds: 30 };
@@ -632,7 +631,6 @@ mod tests {
         assert!(msg.contains("platform integration failed"));
     }
 
-
     #[test]
     fn register_request_serialization() {
         let req = RegisterRequest {
@@ -745,7 +743,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn client_creation_requires_base_url() {
         let result = PlatformClient::new("", "some_token", "dev_123");
@@ -778,7 +775,6 @@ mod tests {
         let client = result.expect("ok");
         assert_eq!(client.base_url(), "https://api.example.com");
     }
-
 
     #[tokio::test]
     async fn register_creator_success() {
