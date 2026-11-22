@@ -51,7 +51,7 @@ import { generateCoreSliceClient } from './client-gen';
 type JsonSchema = Parameters<typeof compile>[0];
 
 const BANNER = `/**
- * AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
+ * @generated AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
  * Source: schemas/ (JSON Schema wire contracts)
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */`;

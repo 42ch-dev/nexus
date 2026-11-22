@@ -5,7 +5,7 @@ import path from 'path';
 import { resolveFromRoot, logger, readJSON } from './utils';
 
 const BANNER = `/**
- * AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
+ * @generated AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
  * Source: schemas/core/core-service-operations.schema.json
  * Generator: tooling/codegen/src/client-gen.ts
  */`;
