@@ -1,5 +1,4 @@
 /**
- * Approve wiring for the compose path (v239-p3-canvas-compose-ui T6).
  *
  * `POST /v1/daemon/strategies/{id}/approve` freezes the simulated candidate
  * into an immutable snapshot — it does not publish, apply, schedule or
@@ -65,7 +64,6 @@ export function useApproveStrategy(presetId: string) {
           trajectory: args.trajectory,
         });
         setState({ kind: 'approved', snapshot });
-        // Approving moves newest_approval; the status read is the badge's source,
         // and the approval list gains the just-frozen target as its first row.
         void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.applied(presetId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.approvals(presetId) });

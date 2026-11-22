@@ -1,5 +1,4 @@
 /**
- * Exact-origin network auth policy (v1.192 P0-T5).
  *
  * Main session hooks inject the stored `X-API-Key` ONLY for the selected
  * top-level webContents' fetch/XHR to the exact saved active endpoint

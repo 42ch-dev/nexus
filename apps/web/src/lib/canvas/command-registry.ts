@@ -41,7 +41,6 @@ export interface Command {
   /** Fired when the user activates the command (Enter/click). */
   readonly handler: () => void;
   /**
-   * Dynamic availability gate, evaluated by the palette on each render (NOT
    * tracked by the store — `available()` is render-time dynamic and the store
    * only emits on register/unregister). Commands whose `available` returns
    * `false` are hidden regardless of the query. Omit to always show.
@@ -49,16 +48,14 @@ export interface Command {
   readonly available?: () => boolean;
 }
 
-// --- module-level store ---------------------------------------------------
 
 // simplify: id-keyed Map (last-write-wins; unregister is id-keyed). Correct for
 // namespaced ids where no two surfaces register the same id (the palette use
-// case). Upgrade path if id collisions ever become real: ref-count
-// registrations so overlapping mounts do not prematurely evict each other.
+// case). upgrade: if id collisions ever become real, ref-count registrations
+// so overlapping mounts do not prematurely evict each other.
 const commandMap = new Map<string, Command>();
 const listeners = new Set<() => void>();
 
-// Cached snapshot — rebuilt only on mutation so `useSyncExternalStore` sees a
 // stable reference between changes (returning a fresh array each call would
 // trigger an infinite re-render loop).
 let commandSnapshot: readonly Command[] = [];
@@ -127,7 +124,6 @@ export function clearCommands(): void {
   emit();
 }
 
-// --- React bindings -------------------------------------------------------
 
 /**
  * Subscribe to the command store. Re-renders the caller on register/unregister
@@ -145,22 +141,21 @@ export function useCommands(): readonly Command[] {
  * The command is captured once on mount (keyed by `id`); changing other fields
  * after mount has no effect until the component re-mounts. This is correct for
  * surface commands whose handler is stable for the mount lifetime (the palette
- * use case). simplify: if a surface ever needs a live-updating handler/label,
- * keep the latest command in a ref and wrap `handler`/`available` to read
- * through it, rather than churning the registry on every render.
+ * use case). simplify: handler/label are captured once at mount, not refreshed.
+ * upgrade: if a surface ever needs a live-updating handler/label, keep the
+ * latest command in a ref and wrap `handler`/`available` to read through it,
+ * rather than churning the registry on every render.
  */
 export function useRegisterCommand(command: Command): void {
   useEffect(() => {
     registerCommand(command);
     return () => unregisterCommand(command.id);
-    // Mount/unmount only, keyed by id. Field changes after mount are ignored
     // by design (see docblock); depending on the whole `command` object would
     // re-register on every render if the caller passes an inline literal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [command.id]);
 }
 
-// --- query ----------------------------------------------------------------
 
 /** Relevance tiers for `filterCommands` (lower tier surfaces first). */
 const RANK_EXACT_LABEL = 0;

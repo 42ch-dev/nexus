@@ -139,8 +139,6 @@ pub async fn apply_state_delta_in_tx(
             ));
         }
 
-        // Read through the local-db storage primitive inside the caller's TX.
-        // Compile-time checked query (F-004 fix — the Accept path is the
         // highest-risk write path, so its SQL must be offline-validated).
         let Some(row) = read_kb_state_in_tx(tx, target_id)
             .await
@@ -155,7 +153,6 @@ pub async fn apply_state_delta_in_tx(
         let body_json_str = row.body_json;
         let target_world_id = row.world_id;
 
-        // F-001: world-scope check — a delta targeting another world's KB
         // must reject the whole Accept (caller rolls back the TX).
         if target_world_id != world_id {
             return Err(CapabilityError::InputInvalid(format!(
@@ -180,7 +177,6 @@ pub async fn apply_state_delta_in_tx(
             .take()
             .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
 
-        // Validate path: first segment is the block_type state key.
         let path_segments: Vec<&str> = delta.path.split('.').collect();
         if path_segments.is_empty() {
             return Err(CapabilityError::InputInvalid(
@@ -206,7 +202,6 @@ pub async fn apply_state_delta_in_tx(
             CapabilityError::Internal(format!("serialize updated body for '{target_id}': {e}"))
         })?;
 
-        // Storage primitive: world-scoped UPDATE (defense in depth — a target
         // that somehow changed worlds mid-TX cannot be written either).
         let affected = update_kb_state_in_tx(tx, target_id, world_id, &updated_body_json)
             .await

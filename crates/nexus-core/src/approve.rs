@@ -363,7 +363,6 @@ pub fn structural_refusal(
         .err()
         .unwrap_or_default()
         .into_iter()
-        // Outer-state loops are legal for imported presets (the same exception compose makes).
         .filter(|violation| !matches!(violation, Violation::GraphCycle { .. }))
         .collect();
     if !violations.is_empty() {
@@ -371,7 +370,6 @@ pub fn structural_refusal(
             violations: violations.iter().map(ToString::to_string).collect(),
         });
     }
-    // The pins refuse before the slots: an unavailable package still reports the slots its manifest
     // declared, so the pin is the root cause and must be the refusal.
     if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
         matches!(
@@ -470,7 +468,6 @@ impl CoreService {
         let revision = i64::try_from(candidate.revision)
             .map_err(|_| approval_internal("revision does not fit the row column"))?;
 
-        // The insert is the CAS: the row lands only while the stored candidate still sits at the
         // revision this approval verified (an absent row is revision 0). A compose that commits in
         // between makes the predicate fail, so it wins and this writer gets the typed conflict.
         let written = sqlx::query(

@@ -284,7 +284,6 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
         .expect("seed the remote selection");
     let path = home.nexus_home().join("config.toml");
 
-    // Authority before: a real open pins the stored remote selection.
     assert_remote_open_refusal(
         &CoreService::open(home.options(CoreAccess::ReadOnly))
             .await
@@ -292,7 +291,6 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
             .expect("the stored remote selection is pinned"),
     );
 
-    // This reader opened the document before the publish.
     let mut before = fs::File::open(&path).expect("pre-publication reader");
 
     service
@@ -320,7 +318,6 @@ async fn a_provider_selection_publish_never_exposes_a_partial_document() {
         .parse::<toml::Table>()
         .expect("the published document is complete TOML");
 
-    // Authority after: the same real open now pins the published local default.
     let core = CoreService::open(home.options(CoreAccess::ReadOnly))
         .await
         .expect("the published local default opens");
@@ -401,7 +398,6 @@ async fn a_failed_writer_open_releases_its_admission() {
             .expect("the stored remote selection refuses the writer open"),
     );
 
-    // The refused open took a guarded writer admission before the pin failed;
     // a real writer open now proves that admission was released.
     service
         .clear_memory_provider_selection()
@@ -428,7 +424,6 @@ async fn a_sealed_readonly_open_loads_a_legacy_snapshot_without_migrating() {
     let opened = CoreService::open(home.options(CoreAccess::ReadOnly)).await;
     drop(sealed);
 
-    // The snapshot really loaded: without its active creator and workspace the
     // read-only open refuses as `auth_required`/`uninitialized`.
     let core = opened.expect("a read-only open must load the legacy snapshot");
     core.close().await.expect("close");

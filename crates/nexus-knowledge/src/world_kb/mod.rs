@@ -51,7 +51,6 @@ pub use validation::{
     block_type_state_key, validate_body, validate_canonical_name, ValidationMode, NOVEL_CATEGORIES,
 };
 
-// V1.139 P1 T2 — wire-boundary re-export. `spoke_schemas::KnowledgeEntry` is the
 // spoke standard type; `KnowledgeEntryRecord` converts to/from it at the seam (see
 // `knowledge_entry.rs`). spoke-operations receive the spoke type only (spec §7).
 pub use spoke_schemas::KnowledgeEntry;

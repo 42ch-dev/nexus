@@ -65,7 +65,6 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-/** Absolute path of the guard under test. */
 const GUARD_PATH = realpathSync(
   fileURLToPath(new URL('./public-first-workflow-request-guard.mjs', import.meta.url)),
 );
@@ -94,12 +93,8 @@ const DENIED_CATEGORIES = new Set([
 /** Per-child bound; every case is a local spawn plus one loopback round trip. */
 const CHILD_TIMEOUT_MS = 30_000;
 
-// ---------------------------------------------------------------------------
-// Owned fixture sources
-// ---------------------------------------------------------------------------
 
 /**
- * The dsh stand-in: performs the guarded call(s) the spec names and reports
  * what happened, including the identity of what the guard forwarded. It never
  * prints anything but its single JSON result line.
  */
@@ -216,7 +211,6 @@ process.stdout.write(
 `;
 
 /**
- * Spy preload: loaded BEFORE the guard, so it becomes the guard's "original
  * fetch" and records exactly what the guard forwarded — the only way to prove
  * the headers/body/signal objects reached the transport by reference.
  */
@@ -229,7 +223,6 @@ globalThis.fetch = (input, init) => {
 `;
 
 /**
- * Preload that records, in one ordered trace, every `fsyncSync` (with the path
  * the fd was opened for) and the moment a dispatch reaches the transport. The
  * fs wrappers are installed before the guard loads, so the guard's own named
  * `node:fs` bindings are the wrappers.
@@ -262,7 +255,6 @@ globalThis.fetch = (input, init) => {
 `;
 
 /**
- * Preload that stubs the spent-token write: `short` writes half the payload on
  * the first call and reports that count, `stuck` reports zero bytes forever.
  * The guard must finish the write (or deny) rather than sync a truncation, so
  * the stub records writes, `fsyncSync` calls and the dispatch in ONE ordered
@@ -347,7 +339,6 @@ const STRIP_PATH = join(FIXTURE_ROOT, 'strip-fetch.mjs');
 const SHORT_WRITE_PATH = join(FIXTURE_ROOT, 'short-write.mjs');
 const STUCK_WRITE_PATH = join(FIXTURE_ROOT, 'stuck-write.mjs');
 /**
- * The launch shape the driver really uses: an executable entry with a node
  * shebang, exec'd directly rather than through `node <entry>`.
  */
 const SHEBANG_ENTRY_PATH = join(FIXTURE_ROOT, 'shebang-entry.mjs');
@@ -355,7 +346,6 @@ const LOCK_FETCH_PATH = join(FIXTURE_ROOT, 'lock-fetch.mjs');
 const FREEZE_FETCH_PATH = join(FIXTURE_ROOT, 'freeze-fetch.mjs');
 const LOCK_EVENTS_PATH = join(FIXTURE_ROOT, 'lock-events.mjs');
 /**
- * A stand-in installed runtime tree: a package root with the recorded entry and
  * a second entry inside it, so the in-package drift label can be exercised
  * without reading the operator's real installation.
  */
@@ -391,19 +381,14 @@ after(() => {
       if (existsSync(eventsDir)) chmodSync(eventsDir, 0o700);
       chmodSync(dir, 0o700);
     } catch {
-      // already removable
     }
     rmSync(dir, { recursive: true, force: true });
   }
   rmSync(FIXTURE_ROOT, { recursive: true, force: true });
 });
 
-// ---------------------------------------------------------------------------
-// Owned loopback endpoint
-// ---------------------------------------------------------------------------
 
 /**
- * One owned loopback endpoint. `mode` selects the transport behaviour (not a
  * data fixture): `ok` answers 200 JSON, `redirect302` answers a same-origin
  * redirect, `status429` answers a rate-limit response, `reset` destroys the
  * socket once the request arrived. Every request that reaches it is recorded,
@@ -463,7 +448,6 @@ function startEndpoint(mode) {
   });
 }
 
-/** Run `body` against one owned endpoint and always release it. */
 async function withEndpoint(mode, body) {
   const endpoint = await startEndpoint(mode);
   try {
@@ -473,9 +457,6 @@ async function withEndpoint(mode, body) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Child processes, attempt directories, evidence reads
-// ---------------------------------------------------------------------------
 
 /** One fresh owner-only attempt directory (mkdtemp creates mode 0700). */
 function makeAttemptDir() {
@@ -485,9 +466,6 @@ function makeAttemptDir() {
 }
 
 /**
- * Spawn one guarded child. The child environment is built from scratch, so the
- * test process's own environment can never leak into the case. Fields left
- * undefined are omitted, which is how the malformed-environment cases are made.
  */
 function runGuardChild({
   attemptDir,
@@ -540,13 +518,11 @@ function parseHarnessOutput(stdout) {
   }
 }
 
-/** A child that ran the stand-in to its end. */
 function assertChildRan(child, label) {
   assert.equal(child.code, 0, `${label} exited ${child.code} (signal ${child.signal}): ${child.stderr}`);
   assert.notEqual(child.result, null, `${label} produced no harness result: ${child.stderr}`);
 }
 
-/** The single call outcome of a one-call child. */
 function firstAttempt(child) {
   assert.ok(Array.isArray(child.result?.attempts) && child.result.attempts.length >= 1);
   return child.result.attempts[0];
@@ -561,7 +537,6 @@ function readEvents(attemptDir) {
     .map((name) => JSON.parse(readFileSync(join(eventsDir, name), 'utf8')));
 }
 
-/** Events grouped by kind. */
 function summarize(events) {
   return {
     loaded: events.filter((event) => event.kind === 'loaded'),
@@ -570,7 +545,6 @@ function summarize(events) {
   };
 }
 
-/** The terminal integrity marker, or null when the guard never wrote one. */
 function readMarker(attemptDir) {
   const markerPath = join(attemptDir, 'evidence-failed');
   if (!existsSync(markerPath)) return null;
@@ -578,7 +552,6 @@ function readMarker(attemptDir) {
 }
 
 /**
- * Restore the permissions the evidence-fault cases removed, so cleanup can
  * remove the attempt directory and later reads work normally.
  */
 function restoreAttemptDir(attemptDir) {
@@ -587,7 +560,6 @@ function restoreAttemptDir(attemptDir) {
   chmodSync(attemptDir, 0o700);
 }
 
-/** Every file under one attempt directory (the slot plus the events). */
 function listAttemptFiles(attemptDir) {
   const files = readdirSync(attemptDir, { withFileTypes: true })
     .filter((entry) => entry.isFile())
@@ -599,14 +571,10 @@ function listAttemptFiles(attemptDir) {
   return files;
 }
 
-/** A one-call spec against `url`. */
 function singleSpec(url, overrides = {}) {
   return { mode: 'single', url, method: 'POST', body: '{"model":"deepseek-chat"}', ...overrides };
 }
 
-// ---------------------------------------------------------------------------
-// The single admitted request
-// ---------------------------------------------------------------------------
 
 test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async () => {
   await withEndpoint('ok', async (endpoint) => {
@@ -632,7 +600,6 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
     });
     assertChildRan(child, 'single');
 
-    // The guard wrote nothing to the child's own channels.
     assert.equal(child.stdout.trim().split('\n').length, 1, child.stdout);
     assert.equal(/nexus/i.test(child.stderr), false, child.stderr);
 
@@ -641,7 +608,6 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
     assert.equal(attempt.redirected, false);
     assert.match(attempt.text, /READY/);
 
-    // What the endpoint actually received: exactly one request, unchanged.
     assert.equal(endpoint.requests.length, 1);
     assert.equal(endpoint.requests[0].method, 'POST');
     assert.equal(endpoint.requests[0].target, MODEL_TARGET);
@@ -649,7 +615,6 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
     assert.equal(endpoint.requests[0].headers['x-test-marker'], 'marker-1');
     assert.equal(endpoint.requests[0].body, secretBody);
 
-    // What the guard forwarded to the original transport: the caller's own
     // headers/body/signal objects, with only `redirect` forced.
     const transport = child.result.transport;
     assert.equal(transport.dispatches, 1);
@@ -675,9 +640,6 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
   });
 });
 
-// ---------------------------------------------------------------------------
-// Durability of the acknowledgment
-// ---------------------------------------------------------------------------
 
 test(
   'the spent token, its directory and its parent entry are synced before the admission is acknowledged',
@@ -694,9 +656,6 @@ test(
       });
       assertChildRan(child, 'sync');
       assert.equal(firstAttempt(child).status, 200);
-      // Ordered trace: the token, then its directory entry, then the attempt
-      // directory's own entry in the parent (I-000120), and only then the
-      // dispatch — a spend the driver is told succeeded must survive power loss.
       assert.deepEqual(child.result.trace, [
         { kind: 'sync', path: join(attemptDir, 'spent') },
         { kind: 'sync', path: attemptDir },
@@ -723,7 +682,6 @@ test(
       assert.equal(firstAttempt(child).status, 200);
       assert.equal(endpoint.requests.length, 1);
 
-      // The stub short-wrote the first call, so the guard must have written the
       // rest before syncing: one ordered trace proves nothing was synced while
       // the payload was still incomplete.
       const entries = child.result.trace;
@@ -734,18 +692,14 @@ test(
       assert.equal(writes[0].wrote < writes[0].requested, true, JSON.stringify(entries));
       const firstSync = kinds.indexOf('sync');
       assert.equal(kinds.lastIndexOf('write') < firstSync, true, JSON.stringify(entries));
-      // The first call carries the whole payload; every byte of it is on disk
       // by the time the sync runs.
       const writtenBeforeSync = entries
         .slice(0, firstSync)
         .filter((entry) => entry.kind === 'write')
         .reduce((total, entry) => total + entry.wrote, 0);
       assert.equal(writtenBeforeSync, writes[0].requested, JSON.stringify(entries));
-      // Exactly one sync of the spent token, and the dispatch comes last.
       assert.equal(syncs[0].path, join(attemptDir, 'spent'), JSON.stringify(entries));
       assert.equal(syncs.filter((entry) => entry.path === join(attemptDir, 'spent')).length, 1);
-      // I-000118: this success path must also sync the attempt directory (and
-      // its parent entry, I-000120) before the dispatch — not just the token.
       if (process.platform !== 'win32') {
         assert.deepEqual(
           syncs.map((entry) => entry.path),
@@ -776,8 +730,6 @@ test(
       });
       assertChildRan(child, 'stuck-write');
 
-      // Fail closed: no truncation is synced and nothing is dispatched, and the
-      // slot stays spent — a storage failure must not make the call retryable.
       assert.equal(firstAttempt(child).error?.code, 'filesystem_error');
       const entries = child.result.trace;
       assert.equal(entries.filter((entry) => entry.kind === 'sync').length, 0, JSON.stringify(entries));
@@ -786,7 +738,6 @@ test(
       assert.equal(endpoint.requests.length, 0);
       assert.equal(existsSync(join(attemptDir, 'spent')), true);
       assert.equal(statSync(join(attemptDir, 'spent')).size, 0);
-      // The truncated token is still a spent slot: a second guarded call in the
       // same child is denied, so a zero-byte `spent` can never reach ALLOW.
       assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
       const events = summarize(readEvents(attemptDir));
@@ -799,9 +750,6 @@ test(
   },
 );
 
-// ---------------------------------------------------------------------------
-// One slot per attempt: same process, concurrent, racing child, second launch
-// ---------------------------------------------------------------------------
 
 test('a second request in the same process is denied and never dispatched', async () => {
   await withEndpoint('ok', async (endpoint) => {
@@ -868,7 +816,6 @@ test('two child processes racing on one attempt admit exactly one', async () => 
       1,
     );
     assert.equal(endpoint.requests.length, 1);
-    // The loser never dispatched at all.
     assert.deepEqual(
       [a.result.transport.dispatches, b.result.transport.dispatches].sort((x, y) => x - y),
       [0, 1],
@@ -935,9 +882,6 @@ test('a fresh attempt directory is a fresh budget', async () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Transport answers that must not become a second request
-// ---------------------------------------------------------------------------
 
 test('a 302 answer is not followed, so it cannot become a second request', async () => {
   await withEndpoint('redirect302', async (endpoint) => {
@@ -953,7 +897,6 @@ test('a 302 answer is not followed, so it cannot become a second request', async
     assert.equal(attempt.status, undefined);
     assert.equal(typeof attempt.error?.message, 'string');
 
-    // One request, to the selected endpoint only; the redirect target was never
     // contacted, and the transport was dispatched exactly once.
     assert.deepEqual(
       endpoint.requests.map((request) => request.target),
@@ -1026,14 +969,10 @@ test('a connection reset spends the authorization and is never retried', async (
   });
 });
 
-// ---------------------------------------------------------------------------
-// Endpoint, method and runtime gates (all denied before the network)
-// ---------------------------------------------------------------------------
 
 test('an unexpected endpoint is denied before any network and spends nothing', async () => {
   await withEndpoint('ok', async (endpoint) => {
     await withEndpoint('ok', async (otherOrigin) => {
-      // Same path, another loopback origin: the exact selected URL is the rule,
       // not the path or the host suffix.
       const attemptDir = makeAttemptDir();
       const child = await runGuardChild({
@@ -1055,7 +994,6 @@ test('an unexpected endpoint is denied before any network and spends nothing', a
       assert.equal(denied[0].runtime, 'dsh');
       assert.equal(existsSync(join(attemptDir, 'spent')), false, 'a denial must not spend the slot');
 
-      // A different path on the selected origin (the `/models`-style probe).
       const probeDir = makeAttemptDir();
       const probe = await runGuardChild({
         attemptDir: probeDir,
@@ -1189,7 +1127,6 @@ test('a child process inside the installed package tree is denied as package_chi
 
 test('the guard refuses to run when the ceiling cannot be locked', async () => {
   await withEndpoint('ok', async (endpoint) => {
-    // A pre-existing non-configurable `fetch` (writable or not) cannot be turned
     // into the locked accessor. A replaceable wrapper would be a silent bypass —
     // a later assignment would drop the guard and the evidence produced before
     // the drop could still authorize the run — so the child fails closed.
@@ -1234,14 +1171,11 @@ test('an unrecordable denial is terminal for the attempt, not a silent zero-deni
     restoreAttemptDir(attemptDir);
     assertChildRan(child, 'unrecordable-denial');
 
-    // The first request is admitted normally and the slot is consumed.
     assert.equal(firstAttempt(child).status, 200);
     assert.equal(endpoint.requests.length, 1);
     assert.equal(child.result.transport.dispatches, 1);
-    // The second is denied before dispatch, exactly as it should be...
     assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
 
-    // ...but that denial could not be persisted, so the counts alone would read
     // as one admitted / zero denied with a spent slot — a clean-looking receipt
     // for an attempt in which an unexpected call was in fact refused. The marker
     // is what disqualifies it.
@@ -1256,7 +1190,6 @@ test('an unrecordable denial is terminal for the attempt, not a silent zero-deni
     assert.equal(marker.kind, 'denied');
     assert.equal(typeof marker.pid, 'number');
     assert.equal(typeof marker.at, 'string');
-    // The marker is evidence readers parse: safe keys only, nothing derived
     // from the request.
     assert.deepEqual(Object.keys(marker).sort(), ['at', 'kind', 'pid', 'reason', 'schema']);
     const markerText = readFileSync(join(attemptDir, 'evidence-failed'), 'utf8');
@@ -1278,7 +1211,6 @@ test('when neither an event nor the marker can be written the child is terminate
     const marker = readMarker(attemptDir);
     restoreAttemptDir(attemptDir);
 
-    // No marker channel either: the guard must not return a rejection the
     // runtime could catch and continue from, so the child dies.
     assert.equal(marker, null, 'a marker should have been impossible here');
     assert.equal(child.result, null, 'the guard let the child continue');
@@ -1300,7 +1232,6 @@ test('an unrecordable admission is never dispatched', async () => {
     restoreAttemptDir(attemptDir);
     assertChildRan(child, 'unrecordable-admission');
 
-    // The request was admissible, but its admission could not be persisted, so
     // it must not reach the transport at all.
     assert.equal(firstAttempt(child).error?.code, 'evidence_write_failed');
     assert.equal(child.result.transport.dispatches, 0);
@@ -1309,7 +1240,6 @@ test('an unrecordable admission is never dispatched', async () => {
     const events = summarize(readEvents(attemptDir));
     assert.equal(events.loaded.length, 1);
     assert.equal(events.admitted.length, 0);
-    // The slot was taken before the record attempt, and the attempt is
     // disqualified by the marker rather than by a missing event.
     assert.equal(existsSync(join(attemptDir, 'spent')), true);
     const marker = readMarker(attemptDir);
@@ -1333,7 +1263,6 @@ test('a loaded record that cannot be persisted taints the attempt and blocks dis
     restoreAttemptDir(attemptDir);
     assertChildRan(child, 'locked-events');
 
-    // The handshake could not be recorded, so nothing may be dispatched and the
     // attempt is disqualified by the marker rather than by a missing event.
     assert.equal(firstAttempt(child).error?.code, 'evidence_write_failed');
     assert.equal(child.result.transport.dispatches, 0);
@@ -1374,13 +1303,9 @@ test('a missing global fetch is an unsupported transport, not a bypass', async (
   });
 });
 
-// ---------------------------------------------------------------------------
-// Malformed environment and unusable evidence directory (fail closed)
-// ---------------------------------------------------------------------------
 
 test('an unusable guard environment fails closed without creating anything', async () => {
   await withEndpoint('ok', async (endpoint) => {
-    // (a) no selected URL at all.
     const missingUrlDir = makeAttemptDir();
     const missingUrl = await runGuardChild({
       attemptDir: missingUrlDir,
@@ -1399,7 +1324,6 @@ test('an unusable guard environment fails closed without creating anything', asy
     );
     assert.equal(existsSync(join(missingUrlDir, 'spent')), false);
 
-    // (b) the selected URL is not the model endpoint: the configuration gate
     // precedes the request gate, so the child cannot post its way in.
     const wrongPathDir = makeAttemptDir();
     const wrongPathUrl = `${endpoint.origin}/models`;
@@ -1415,7 +1339,6 @@ test('an unusable guard environment fails closed without creating anything', asy
       summarize(readEvents(wrongPathDir)).loaded[0].problems.includes('allowed_url_not_model_endpoint'),
     );
 
-    // (c) a query string is not the exact selected URL.
     const queryDir = makeAttemptDir();
     const query = await runGuardChild({
       attemptDir: queryDir,
@@ -1429,11 +1352,9 @@ test('an unusable guard environment fails closed without creating anything', asy
       summarize(readEvents(queryDir)).loaded[0].problems.includes('allowed_url_has_query_or_fragment'),
     );
 
-    // (d) a cleartext non-loopback origin is not the deterministic loopback
     // origin and is not HTTPS either: a configuration refusal, so a mis-set
     // selected URL can never become cleartext egress.
     const insecureTransportDir = makeAttemptDir();
-    // A cleartext origin that is not the loopback origin. `0.0.0.0` keeps the
     // case hermetic: even a guard that wrongly admitted it could only ever dial
     // the local host, and the connection is refused instantly.
     const cleartextUrl = 'http://0.0.0.0:1/chat/completions';
@@ -1452,7 +1373,6 @@ test('an unusable guard environment fails closed without creating anything', asy
     );
     assert.equal(existsSync(join(insecureTransportDir, 'spent')), false);
 
-    // (e) the attempt directory does not exist: denied, and NOT created — the
     // guard must never be able to recreate the evidence directory.
     const absentDir = join(makeAttemptDir(), 'never-created');
     const absent = await runGuardChild({
@@ -1465,7 +1385,6 @@ test('an unusable guard environment fails closed without creating anything', asy
     assert.equal(firstAttempt(absent).error?.code, 'attempt_dir_missing');
     assert.equal(existsSync(absentDir), false, 'the guard created the attempt directory');
 
-    // (f) group/other permission bits on an existing attempt directory.
     const insecureDir = makeAttemptDir();
     chmodSync(insecureDir, 0o755);
     const insecure = await runGuardChild({
@@ -1478,7 +1397,6 @@ test('an unusable guard environment fails closed without creating anything', asy
     assert.equal(firstAttempt(insecure).error?.code, 'attempt_dir_insecure');
     assert.equal(existsSync(join(insecureDir, 'spent')), false);
 
-    // (g) a relative attempt directory is not a directory this guard can trust.
     const relative = await runGuardChild({
       attemptDir: 'nexus-relative-attempt',
       allowedUrl: endpoint.url,
@@ -1488,14 +1406,9 @@ test('an unusable guard environment fails closed without creating anything', asy
     assertChildRan(relative, 'relative-attempt-dir');
     assert.equal(firstAttempt(relative).error?.code, 'attempt_dir_missing');
 
-    // Nothing reached the endpoint in any of the above.
     assert.equal(endpoint.requests.length, 0);
   });
 });
-
-// ---------------------------------------------------------------------------
-// The ceiling itself
-// ---------------------------------------------------------------------------
 
 test('the ceiling cannot be replaced and keeps denying after a tamper attempt', async () => {
   await withEndpoint('ok', async (endpoint) => {
@@ -1521,7 +1434,6 @@ test('the ceiling cannot be replaced and keeps denying after a tamper attempt', 
     assert.equal(tamper.configurable, false);
     assert.equal(tamper.stillFunction, true);
 
-    // Behaviourally: the fetch that follows the tamper attempt is still the
     // guard's, and it still denies.
     const after = child.result.attempts.find((attempt) => attempt.label === 'after-tamper');
     assert.equal(after.error?.code, 'unexpected_url');
@@ -1529,10 +1441,6 @@ test('the ceiling cannot be replaced and keeps denying after a tamper attempt', 
     assert.equal(endpoint.requests.length, 0);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Evidence safety
-// ---------------------------------------------------------------------------
 
 test('guard evidence carries no secret, no URL and only the contract fields', async () => {
   await withEndpoint('ok', async (endpoint) => {
@@ -1553,8 +1461,6 @@ test('guard evidence carries no secret, no URL and only the contract fields', as
     });
     assertChildRan(child, 'evidence');
 
-    // Positive control: the request really was dispatched with the secret —
-    // the negative assertions below are then about the evidence, not about a
     // request that never happened.
     assert.equal(endpoint.requests.length, 1);
     assert.equal(endpoint.requests[0].headers.authorization, secretHeader);
@@ -1582,8 +1488,6 @@ test('guard evidence carries no secret, no URL and only the contract fields', as
       }
     }
 
-    // Event files: the declared name shape, the declared key set per kind, the
-    // declared enums — nothing extra.
     const eventNames = readdirSync(join(attemptDir, 'events'));
     assert.ok(eventNames.length >= 3);
     for (const name of eventNames) {
@@ -1607,7 +1511,6 @@ test('guard evidence carries no secret, no URL and only the contract fields', as
       if (event.kind === 'denied') assert.ok(DENIED_CATEGORIES.has(event.category));
     }
 
-    // The consumed slot is secret-free as well.
     const spent = JSON.parse(readFileSync(join(attemptDir, 'spent'), 'utf8'));
     assert.deepEqual(Object.keys(spent).sort(), ['at', 'category', 'pid', 'schema']);
     assert.equal(spent.schema, SPENT_SCHEMA);

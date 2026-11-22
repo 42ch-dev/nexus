@@ -9,7 +9,6 @@ import {
 } from './card';
 
 /**
- * ListPageLayout — DESIGN.md §Component Primitives/ListPageLayout.
  *
  * V1.150 P1 — L2 pattern component: the shared list-page chrome behind
  * findings/works/chapters/sessions/schedule/capabilities/strategies/modules/

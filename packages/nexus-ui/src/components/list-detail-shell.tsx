@@ -3,7 +3,6 @@ import { type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * ListDetailShell — DESIGN.md §Component Primitives/ListDetailShell.
  *
  * V1.150 P3 — L2 pattern component: the fixed-width responsive master/detail
  * split behind findings-page and modules-page (stack below lg, 360px detail

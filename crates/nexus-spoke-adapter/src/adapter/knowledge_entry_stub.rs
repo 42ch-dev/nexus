@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! In-memory `KnowledgeEntryPort` stub — answers from a map, records every intent.
 //!
 //! Dry-run / preview callers need a `KnowledgeEntryPort` that mutates nothing:
@@ -60,7 +61,6 @@ impl StubKnowledgeEntryPort {
     }
 
     fn lock(&self) -> MutexGuard<'_, StubState> {
-        // A panicking caller must not destroy the log the assertion reads.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -86,7 +86,6 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
         result
     }
 
-    // No CAS: the production write below this stub is a plain INSERT, not a
     // revision compare, so there is no revision expectation for a preview to
     // carry. And this stub applies no store rule of its own — it records the
     // intent; whether the store would accept it is not a question it answers.

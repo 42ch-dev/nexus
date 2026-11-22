@@ -1,5 +1,4 @@
 /**
- * App rail — the translucent dock (IA spec §3.2, prototype visual baseline).
  *
  * A floating, blurred dock of app entries driven by the entrance-scoped
  * registry. Locked items render greyed with the § Copy reason as tooltip and

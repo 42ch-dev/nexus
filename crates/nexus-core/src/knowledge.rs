@@ -40,8 +40,6 @@ fn invalid_input(field: &str, reason: impl Into<String>) -> KnowledgeFault {
     }
 }
 
-// ─── Work-entry extract queue (`creator world kb queue-extract`) ──────────
-
 /// Input for [`CoreService::queue_kb_extract`].
 ///
 /// The creator and the workspace binding are derived from the verified
@@ -87,8 +85,6 @@ fn chapter_locator(chapter: Option<i32>) -> Result<ArtifactLocator, KnowledgeFau
 }
 
 impl CoreService {
-    // ── Work-entry extract queue (`creator world kb queue-extract` / `extract-status`) ──
-
     /// Enqueue a work-scope entry for extraction into a target world.
     ///
     /// Creates a row in `kb_extract_jobs` with status `queued`; the actual

@@ -14,10 +14,7 @@ const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    // v1.191 P1 T4/T9: a workspace identity is usable only once its subject and
-    // its holder registry row have committed together, and the admitted
     // ActorView/KB read scope fails closed (`holder_state_invalid`) on a raw
-    // subject row. Materialize through the one Creator materialization.
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
         .await
         .expect("seed creator");

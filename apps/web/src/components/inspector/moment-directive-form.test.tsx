@@ -1,5 +1,4 @@
 /**
- * MomentDirectiveForm — P1 T4 (DF-76) coverage.
  *
  * Exercises the thin set/clear form against stateful msw handlers for
  * `POST /v1/daemon/moment-directive` + `POST /v1/daemon/inspector/moment`,
@@ -173,13 +172,11 @@ describe('MomentDirectiveForm — set (T4)', () => {
     });
     expect(setRequests[0]).not.toHaveProperty('replace');
 
-    // Invalidation → the inspector packet refetches and shows the active
     // directive (set → active), and the Clear action becomes available.
     expect(await screen.findByTestId('directive-status-active')).toHaveTextContent('Active');
     expect(screen.queryByTestId('directive-none')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeEnabled());
 
-    // Success resets the form (QC3 S-3) — no ghost body/TTL for the next set.
     expect(screen.getByLabelText('Directive body')).toHaveValue('');
     expect(screen.getByLabelText('Generations')).not.toBeChecked();
     expect(screen.getByLabelText('TTL count')).toHaveValue(5);
@@ -215,7 +212,6 @@ describe('MomentDirectiveForm — clear (T4)', () => {
     await waitFor(() => expect(clearRequests).toHaveLength(1));
     expect(clearRequests[0]).toEqual({ action: 'clear', scope: { kind: 'work', id: 'work-a' } });
 
-    // Invalidation → the packet refetches to none; Clear deactivates.
     expect(await screen.findByTestId('directive-none')).toHaveTextContent('No active directive');
     await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeDisabled());
   });
@@ -226,7 +222,6 @@ describe('MomentDirectiveForm — clear (T4)', () => {
     const user = userEvent.setup();
     renderHarness();
 
-    // The packet reports the active directive as World-scoped; the form's own
     // scope default is Work — Clear must still target the World scope.
     expect(await screen.findByTestId('directive-status-active')).toBeInTheDocument();
     expect(screen.getByTestId('directive-scope')).toHaveTextContent('world');
@@ -236,7 +231,6 @@ describe('MomentDirectiveForm — clear (T4)', () => {
     await waitFor(() => expect(clearRequests).toHaveLength(1));
     expect(clearRequests[0]).toEqual({ action: 'clear', scope: { kind: 'world', id: 'world-a' } });
 
-    // The World directive was actually cleared — not still active.
     expect(await screen.findByTestId('directive-none')).toHaveTextContent('No active directive');
     expect(screen.queryByTestId('directive-status-active')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeDisabled());
@@ -262,13 +256,11 @@ describe('MomentDirectiveForm — 409 replace prompt (T4)', () => {
     await fillValidSet(user);
     await user.click(screen.getByTestId('directive-form-set'));
 
-    // 409 → the conflict prompt appears instead of overwriting silently.
     const conflict = await screen.findByTestId('directive-form-conflict');
     expect(conflict).toHaveTextContent('A directive is already active for this scope');
     expect(setRequests).toHaveLength(1);
     expect(setRequests[0]).not.toHaveProperty('replace');
 
-    // "Enable replace and retry" re-submits with `replace: true` and succeeds.
     await user.click(screen.getByTestId('directive-form-enable-replace'));
     await waitFor(() => expect(setRequests).toHaveLength(2));
     expect(setRequests[1].replace).toBe(true);
@@ -291,7 +283,6 @@ describe('MomentDirectiveForm — 409 replace prompt (T4)', () => {
     const retry = screen.getByTestId('directive-form-enable-replace');
     expect(retry).toBeEnabled();
 
-    // Clearing the body invalidates the form → the retry path can no longer
     // fire (it would silently no-op on the validation early-return).
     await user.clear(screen.getByLabelText('Directive body'));
     expect(screen.getByTestId('directive-form-errors')).toHaveTextContent(
@@ -299,7 +290,6 @@ describe('MomentDirectiveForm — 409 replace prompt (T4)', () => {
     );
     expect(screen.getByTestId('directive-form-enable-replace')).toBeDisabled();
 
-    // And it stays a no-op — no second request is fired.
     expect(setRequests).toHaveLength(1);
   });
 });
@@ -354,7 +344,6 @@ describe('MomentDirectiveForm — client-side validation mirrors the CLI (T4)', 
     await user.type(screen.getByLabelText('Directive body'), 'Keep the prose terse.');
     await user.click(screen.getByLabelText('Generations'));
 
-    // 2^53 overflows the JSON number on the wire — integral but not safe.
     fireEvent.change(screen.getByLabelText('TTL count'), {
       target: { value: String(Number.MAX_SAFE_INTEGER + 1) },
     });

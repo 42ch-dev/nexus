@@ -27,7 +27,6 @@ async fn init_pool_convenience() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let pool = init_pool(tmp.path()).await.unwrap();
 
-    // Verify all tables exist
     let tables: Vec<(String,)> = sqlx::query_as(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_sqlx_%' ORDER BY name",
     )
@@ -40,7 +39,6 @@ async fn init_pool_convenience() {
     assert!(table_names.contains(&"soul_meta"));
     assert!(table_names.contains(&"memory_fragments"));
 
-    // Verify versions are seeded
     let v = read_versions(&pool).await.unwrap();
     assert_eq!(v.db_schema_version, nexus_local_db::DB_SCHEMA_VERSION);
 }

@@ -194,7 +194,6 @@ pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bo
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
-    // The seam's admission pre-flight runs before the pool open: `Schema::init`
     // migrates — and therefore creates — the selected workspace, so a selection
     // that names no materialized workspace must be refused instead of having one
     // created for it.
@@ -258,7 +257,6 @@ pub async fn kb_rescan_hermetic(
         ))
     })?;
 
-    // Author gate: world owner must match the active creator (AC4).
     require_world_owner(pool, &world_id, creator_id).await?;
 
     let ws_dir = workspace_dir.ok_or_else(|| {
@@ -269,16 +267,12 @@ pub async fn kb_rescan_hermetic(
         )
     })?;
 
-    // Read the chapter's current prose.
     let prose = read_chapter_prose(pool, &work.work_id, chapter, ws_dir).await?;
 
-    // Fresh workspace_id (R-V150KBED-02 self-corrects here).
     let workspace_id = resolve_workspace_id(pool, creator_id).await;
 
-    // Heuristic extraction (review-time, no LLM).
     let candidates = extract_candidates_from_text(&prose);
 
-    // Diff baseline: pending candidates currently sourced from this chapter.
     let old_for_chapter = list_for_chapter(pool, &work.work_id, i64::from(chapter))
         .await
         .map_err(|e| CliError::Other(format!("Failed to list chapter candidates: {e}")))?;
@@ -316,10 +310,8 @@ pub async fn kb_rescan_hermetic(
     Ok(report)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
 // V1.51 T-A P1 — Work-scoped (`--work`) cross-chapter reconciliation
-// (closes R-V150KBED-08; spec: world-kb-runtime-architecture.md §5.5.1)
-// ═══════════════════════════════════════════════════════════════════════
+// (closes R-V150KBED-08; spec: docs/specs/architecture/world-kb-runtime-architecture.md §5.5.1)
 
 /// `creator world kb rescan --work <work_ref>` CLI entrypoint.
 ///
@@ -346,7 +338,6 @@ pub async fn kb_rescan_work(
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
-    // The seam's admission pre-flight runs before the pool open: `Schema::init`
     // migrates — and therefore creates — the selected workspace, so a selection
     // that names no materialized workspace must be refused instead of having one
     // created for it.
@@ -407,7 +398,6 @@ pub async fn kb_rescan_work_hermetic(
         ))
     })?;
 
-    // Author gate: world owner must match the active creator (AC4 / §5.5.3).
     require_world_owner(pool, &world_id, creator_id).await?;
 
     let ws_dir = workspace_dir.ok_or_else(|| {
@@ -418,19 +408,15 @@ pub async fn kb_rescan_work_hermetic(
         )
     })?;
 
-    // Enumerate chapters and extract per-chapter candidates (heuristic).
     let (chapters_scanned, per_chapter) = extract_per_chapter(pool, &work.work_id, ws_dir).await?;
 
-    // Pure cross-chapter aggregation (group by canonical_name).
     let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
 
-    // Existing active KnowledgeEntryRecord names (for the reuse summary + KB refresh).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
     let old_kb_rows = store
         .list_by_world(&world_id)
         .await
         .map_err(|e| CliError::Other(format!("Failed to list world KnowledgeEntries: {e}")))?;
-    // Mirrors the `kb_key_blocks` partial unique index
     // `WHERE status NOT IN ('deleted', 'merged', 'deprecated')` (nexus-kb
     // extract_sync); replicated here because that helper is crate-private.
     let active_kb_names: std::collections::HashSet<String> = old_kb_rows
@@ -439,7 +425,6 @@ pub async fn kb_rescan_work_hermetic(
         .map(|kb| kb.canonical_name.to_ascii_lowercase())
         .collect();
 
-    // Build the cross-chapter reuse summary (always; surfaces in both dry + non-dry).
     let cross_chapter_reuse: Vec<CrossChapterReuse> = aggregates
         .iter()
         .map(|a| CrossChapterReuse {
@@ -449,7 +434,6 @@ pub async fn kb_rescan_work_hermetic(
         })
         .collect();
 
-    // Existing pending/confirmed candidates for this work (for stale cleanup +
     // upsert classification). Loaded once across the whole work.
     let existing_for_work =
         nexus_local_db::kb_extract_job::list_pending_for_world(pool, &world_id, None)
@@ -471,7 +455,6 @@ pub async fn kb_rescan_work_hermetic(
         kb_removed_advisory: Vec::new(),
     };
 
-    // Non-dry path: acquire advisory lock before any DB upsert (T-B P0).
     // Dry path is read-only → no lock. Guard dropped at end of scope.
     let work_dir = ws_dir.join("Works").join(work_ref);
     let _file_lock = if dry_run || !work_dir.exists() {
@@ -480,7 +463,6 @@ pub async fn kb_rescan_work_hermetic(
         Some(acquire_work_lock(&work_dir)?)
     };
 
-    // Upsert one row per aggregate (DB uniqueness collapses same-name rows).
     sync_work_candidates(
         &mut report,
         pool,
@@ -493,7 +475,6 @@ pub async fn kb_rescan_work_hermetic(
     )
     .await?;
 
-    // Refresh confirmed KnowledgeEntryRecord bodies (same §5.5 invariant as chapter-scope).
     // Non-dry path applies via diff_and_apply; dry path computes only.
     sync_work_kb_rows(
         &mut report,
@@ -594,11 +575,10 @@ async fn sync_work_candidates(
         } else {
             agg.block_type.as_str()
         };
-        // TODO(T-B P1): swap this non-versioned upsert_pending_candidate call
         // for the versioned CAS path (kb_extract_jobs.version column +
         // cas_update helper) once T-B P1 ships. The advisory lock acquired
         // above is the cross-process guard; CAS will be the per-row optimistic
-        // guard. Single call-site swap — see world-kb-runtime-architecture.md
+        // guard. Single call-site swap — see docs/specs/architecture/world-kb-runtime-architecture.md
         // §5.5.1 "T-B P1 CAS hook".
         let outcome = if dry_run {
             preview_work_candidate_outcome(existing_for_work, agg)
@@ -628,7 +608,6 @@ async fn sync_work_candidates(
         }
     }
 
-    // Stale cleanup across the WHOLE work: pending candidates whose name no
     // longer appears in any chapter's aggregate.
     let new_names: std::collections::HashSet<String> = aggregates
         .iter()
@@ -647,7 +626,6 @@ async fn sync_work_candidates(
         let removed = if dry_run {
             true
         } else {
-            // Delete the stale pending row sourced from this work (any chapter).
             delete_pending_for_chapter_work(pool, work_id, old_name)
                 .await
                 .map_err(|e| CliError::Other(format!("Failed to delete stale candidate: {e}")))?
@@ -723,7 +701,6 @@ async fn sync_work_kb_rows(
     aggregates: &[AggregatedCandidate],
     dry_run: bool,
 ) -> Result<()> {
-    // Parse each aggregate's payload into a KnowledgeEntryBody for the delta.
     let mut new_bodies: Vec<(String, KnowledgeEntryBody)> = Vec::with_capacity(aggregates.len());
     for agg in aggregates {
         let body: KnowledgeEntryBody =
@@ -779,7 +756,6 @@ fn print_work_report(report: &WorkRescanReport, json: bool) {
             .join(",")
     );
 
-    // Cross-chapter reuse summary (AC3).
     if !report.cross_chapter_reuse.is_empty() {
         println!("  Cross-chapter reuse:");
         for r in &report.cross_chapter_reuse {
@@ -887,7 +863,6 @@ async fn sync_candidates(
         }
     }
 
-    // Stale pending candidates (sourced from this chapter, no longer present).
     let new_names: std::collections::HashSet<&str> = candidates
         .iter()
         .map(|c| c.canonical_name_guess.as_str())

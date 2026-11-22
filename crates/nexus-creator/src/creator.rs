@@ -233,8 +233,6 @@ impl Creator {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 impl From<nexus_contracts::Creator> for Creator {
     fn from(c: nexus_contracts::Creator) -> Self {
         Self {
@@ -416,7 +414,6 @@ mod tests {
         creator.archive().unwrap();
         assert_eq!(creator.status, "archived");
 
-        // Locking archived should work (admin override)
         creator.lock().unwrap();
         assert_eq!(creator.status, "locked");
     }

@@ -97,7 +97,6 @@ mod tests {
     fn config_command_get_reads_platform_url() {
         let config = CliConfig::default();
         let value = config.get("platform_url").unwrap();
-        // Default CliConfig has empty platform_url, but get() returns the default value
         assert_eq!(value, "https://api.nexus42.io");
     }
 
@@ -140,7 +139,6 @@ mod tests {
 
     #[test]
     fn valid_keys_match_config_module_constant() {
-        // Ensure we're using the same valid keys list
         assert!(VALID_CONFIG_KEYS.contains(&"runtime_mode"));
         assert!(VALID_CONFIG_KEYS.contains(&"platform_url"));
         assert!(VALID_CONFIG_KEYS.contains(&"daemon_url"));

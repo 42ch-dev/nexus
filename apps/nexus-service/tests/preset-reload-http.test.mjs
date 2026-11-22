@@ -10,7 +10,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
 /**
- * I-000084 bounded integration target: `POST /v1/daemon/presets/{id}:reload`
  * over the real in-process service and core. The endpoint is read-through: it
  * re-resolves the manifest from disk on every call, so the test proves it by
  * changing the disk between calls (create → resolves, edit → no longer
@@ -66,7 +65,6 @@ describe('preset reload (POST /v1/daemon/presets/{id}:reload)', () => {
     service = await startService({
       home,
       host: '127.0.0.1',
-      // Port 0: the OS picks a free port, so parallel suites never collide.
       port: 0,
       allowRemote: false,
       domainOnly: true,
@@ -80,7 +78,6 @@ describe('preset reload (POST /v1/daemon/presets/{id}:reload)', () => {
   test('reload re-reads the manifest from disk on every call', async () => {
     const url = `${service.url}/v1/daemon/presets/${PRESET_ID}:reload`;
 
-    // Unknown before the bundle exists — the route is not a 501 stub.
     const missing = await fetch(url, { method: 'POST' });
     assert.equal(missing.status, 404, await missing.text());
 
@@ -92,13 +89,11 @@ describe('preset reload (POST /v1/daemon/presets/{id}:reload)', () => {
     assert.equal(reloaded.status, 200, reloadedBody);
     assert.deepEqual(JSON.parse(reloadedBody), { id: PRESET_ID, reloaded: true });
 
-    // Corrupt the on-disk manifest: the reload re-parses it, so the preset no
     // longer resolves. A cached load would still answer 200 here.
     writeFileSync(join(bundleDir(home), 'preset.yaml'), 'revision: [unclosed\n', 'utf8');
     const broken = await fetch(url, { method: 'POST' });
     assert.equal(broken.status, 404, await broken.text());
 
-    // Restore, then delete: the reload follows disk state.
     writeFileSync(join(bundleDir(home), 'preset.yaml'), PRESET_YAML, 'utf8');
     assert.equal((await fetch(url, { method: 'POST' })).status, 200);
     rmSync(bundleDir(home), { recursive: true, force: true });

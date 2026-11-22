@@ -5,7 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { ListDetailShell } from './list-detail-shell';
 
 /**
- * V1.150 P3 — L2 pattern (DESIGN.md §Component Primitives/ListDetailShell).
  *
  * Pins caller-visible behavior: caller renders both the master list region
  * and the detail region (panel or a "no selection" EmptyState — the shell

@@ -1,5 +1,4 @@
 /**
- * Outline canvas — layout chrome (V1.73 B5 split, `R-V172P0-QC1-002`;
  * V1.108 P0 T3 — `CanvasHeader` with graph↔list toggle).
  *
  * Small presentational pieces used by the orchestrator header. Mirrors the
@@ -39,7 +38,6 @@ export function RevisionBadge({
 }
 
 /**
- * Outline canvas toolbar header — Work title, revision badge, and the
  * graph↔list alt-view toggle (FB-C1-004).
  *
  * Mirrors `strategy-canvas/canvas-layout.tsx` `CanvasHeader`: the toggle

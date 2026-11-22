@@ -120,7 +120,6 @@ test("checkVersionGreater refuses an existing suffixed v<version> tag", () => {
     assert.equal(report.tagExists, true);
     assert.ok(report.problems.some((problem) => problem.includes("already exists")));
 
-    // The later stable of the same core is a distinct ref and stays available.
     assert.equal(checkVersionGreater({ repoRoot: dir, target: "0.2.0" }).ok, true);
   } finally {
     cleanupTempRepo(dir);
@@ -136,7 +135,6 @@ test("checkVersionGreater rejects an existing v<version> tag", () => {
     assert.equal(report.ok, false);
     assert.equal(report.tagExists, true);
     assert.ok(report.problems.some((problem) => problem.includes("already exists")));
-    // An unrelated tag does not block the release (exact tag match only).
     tagRelease(dir, "v9.8.9");
     assert.equal(checkVersionGreater({ repoRoot: dir, target: "9.8.10" }).ok, true);
   } finally {
@@ -150,7 +148,6 @@ test("checkVersionGreater compares against origin/<base-ref>, not the working tr
     initGitRepo(dir);
     commitFile(dir, ROOT_PACKAGE_PATH, packageJsonWith(dir, '"version": "9.9.9"'), "release 9.9.9");
     gitOk(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    // Working tree still advertises the baseline; origin/main does not.
     gitOk(dir, ["checkout", "HEAD~1", "--", ROOT_PACKAGE_PATH]);
     assert.equal(
       JSON.parse(readRepoFile(dir, ROOT_PACKAGE_PATH)).version,

@@ -1,5 +1,4 @@
 /**
- * World KB canvas helper utilities (V1.74 A10 split).
  *
  * Small, stateless functions extracted from the orchestrator so the canvas
  * facade stays focused on composition. `patchFromForm` is exported here and
@@ -49,7 +48,6 @@ export function patchFromForm(form: EntityEditForm, dirty: EntityField[], dialec
     patch.body = form.bodyText.trim() ? safeJson(form.bodyText) : undefined;
   }
   if (dirty.includes('modules')) {
-    // L2-T2-001: reapply only the dialects the conflicting submit intended.
     // The captured form predates any concurrent writes that happened while
     // the modal was open, so rebuilding the other dialect from it would
     // overwrite them (e.g. a belief populated concurrently with the modal

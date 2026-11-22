@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Generate the CHANGELOG section (also the Release body source) for a release.
  *
  * Groups conventional commits over `<base>..<head>` into Features / Fixes /
  * Docs & chores. `chore(release):` bump commits are excluded — the release
@@ -192,7 +191,6 @@ export function collectCommits(repoRoot, baseRef, headRef = "HEAD") {
 export function resolveChangelogBase(repoRoot) {
   const tags = runGit(repoRoot, ["tag", "--list", "v*"]);
   if (tags.status === 0) {
-    // Re-derive "newest" with the release comparator: Git's version sort ranks
     // `v0.2.0-rc.1` above `v0.2.0` unless `versionsort.suffix` is configured,
     // an environment coupling this module refuses to inherit.
     /** @type {string | null} */

@@ -353,7 +353,6 @@ pub async fn list_runs(
     );
 
     if let Some(cursor_val) = cursor {
-        // Keyset cursor on (created_at, run_id): decode the opaque
         // "{created_at}|{run_id}" pair.  RFC3339 timestamps never contain
         // '|', so the split is unambiguous.
         let (cursor_created_at, cursor_run_id) = cursor_val
@@ -392,7 +391,6 @@ pub async fn list_runs(
 
     if let Some(ref world_ids) = filters.creator_world_ids {
         if world_ids.is_empty() {
-            // Empty set explicitly matches nothing (definitive no-op).
             // Without this the IN clause is skipped and every world matches,
             // which is surprising for an explicit `Some(vec![])`.
             builder.push(" AND 1 = 0");
@@ -407,7 +405,6 @@ pub async fn list_runs(
     }
 
     builder.push(" ORDER BY created_at DESC, run_id DESC LIMIT ");
-    // Fetch limit + 1 to detect `has_more` without a second query.
     // When limit == 0 this fetches 1 row: items will be empty but the
     // row exists — callers should pass limit >= 1 (see doc above).
     builder.push_bind(i64::from(limit) + 1);
@@ -505,7 +502,6 @@ pub async fn delete_terminal_runs(
         }
     }
     let result = match status {
-        // Guarded predicate: the IN-list is structural, so this arm can never
         // touch running/succeeded rows.
         None => {
             sqlx::query!(
@@ -517,7 +513,6 @@ pub async fn delete_terminal_runs(
             .execute(pool)
             .await?
         }
-        // `status` was validated as terminal above; the explicit equality
         // narrows Clear to exactly that state.
         Some(s) => {
             sqlx::query!(

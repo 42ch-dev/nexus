@@ -35,7 +35,6 @@ mod tests {
             result,
             "A bAsKeT hAs tHiRtY fIvE ApPlEs aNd sOmEoNe AdDs TwElVe MoRe"
         );
-        // None of the noise symbols should remain
         for sym in NOISE_SYMBOLS {
             assert!(!result.contains(*sym), "noise symbol '{sym}' still present");
         }
@@ -53,7 +52,6 @@ mod tests {
 
     #[test]
     fn strips_only_noise_symbols_leaving_punctuation() {
-        // Comma and period should be preserved
         assert_eq!(strip_noise("hello, world."), "hello, world.");
     }
 

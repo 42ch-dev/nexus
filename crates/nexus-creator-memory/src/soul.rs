@@ -74,7 +74,6 @@ impl SoulDocument {
     pub fn render(&self) -> String {
         let mut parts = Vec::new();
 
-        // Frontmatter (only if non-empty)
         if self.frontmatter.creator_id.is_some()
             || self.frontmatter.schema_version.is_some()
             || self.frontmatter.description.is_some()
@@ -84,21 +83,18 @@ impl SoulDocument {
             parts.push(format!("---\n{yaml}---\n"));
         }
 
-        // ## Personality
         parts.push(format!(
             "## {SECTION_PERSONALITY}\n\n{}",
             self.personality.as_deref().unwrap_or("")
         ));
         parts.push(String::new());
 
-        // ## Experience
         parts.push(format!(
             "## {SECTION_EXPERIENCE}\n\n{}",
             self.experience.as_deref().unwrap_or("")
         ));
         parts.push(String::new());
 
-        // Extra sections
         for (name, content) in &self.extra_sections {
             parts.push(format!("## {name}\n\n{content}"));
             parts.push(String::new());
@@ -131,15 +127,9 @@ impl SoulDocument {
     ///
     /// # Errors
     /// Returns `Err(MemoryError::...)` if validation fails.
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
-    /// Parse markdown content into a `SoulDocument`.
-    /// Extracts frontmatter (YAML) and H2 sections by exact heading text.
     pub fn parse(content: &str) -> Result<Self, MemoryError> {
         let mut doc = Self::new();
 
-        // Extract frontmatter
         let fm_content = extract_frontmatter(content);
         if !fm_content.is_empty() {
             match serde_yaml::from_str::<SoulFrontmatter>(&fm_content) {
@@ -150,7 +140,6 @@ impl SoulDocument {
             }
         }
 
-        // Extract H2 sections
         let sections = extract_h2_sections(content);
         for (heading, body) in sections {
             match heading.as_str() {
@@ -189,7 +178,6 @@ fn extract_frontmatter(content: &str) -> String {
     if !trimmed.starts_with("---") {
         return String::new();
     }
-    // Find closing ---
     trimmed[3..]
         .find("\n---")
         .map_or_else(String::new, |end| trimmed[3..3 + end].trim().to_string())
@@ -204,7 +192,6 @@ fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
 
     for line in content.lines() {
         if let Some(heading) = line.strip_prefix("## ") {
-            // Save previous section
             if let Some(prev) = current_heading.take() {
                 sections.push((prev, current_body.trim_end().to_string()));
             }
@@ -216,7 +203,6 @@ fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
         }
     }
 
-    // Don't forget the last section
     if let Some(heading) = current_heading.take() {
         sections.push((heading, current_body.trim_end().to_string()));
     }

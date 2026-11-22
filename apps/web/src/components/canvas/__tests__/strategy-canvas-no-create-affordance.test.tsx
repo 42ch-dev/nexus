@@ -1,5 +1,4 @@
 /**
- * Strategy canvas — no create affordance on either document shape
  * (canvas-legacy-affordances Task 4).
  *
  * Both shapes the canvas can render are read-only: the applied document and the
@@ -32,7 +31,6 @@ import { renderInApp } from '@/test/test-providers';
 const shellProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
 vi.mock('@/components/canvas/canvas-shell', () => ({
-  // Keep React Flow out of jsdom. The children are the inspector chrome a
   // selected node renders; the props are what the shell would wire.
   CanvasShell: (props: { children?: React.ReactNode } & Record<string, unknown>) => {
     shellProps.current = props;
@@ -41,7 +39,6 @@ vi.mock('@/components/canvas/canvas-shell', () => ({
   useNodeChangeHandler: () => () => {},
 }));
 
-// Not part of this proof, and it mounts its own queries.
 vi.mock('@/components/canvas/idea-input', () => ({
   IdeaInput: () => null,
 }));
@@ -55,7 +52,6 @@ const SESSIONS_PATH = '/v1/daemon/orchestration/sessions';
 const SCHEDULES_PATH = '/v1/daemon/orchestration/schedules';
 
 const SEED = servedIrDocument({ id: STRATEGY_ID });
-// The entering state carries a prompt template, so all three inspector sections
 // (state, transition, prompt) are rendered and asserted.
 const DOCUMENT: WorkflowDocument = {
   ...SEED,
@@ -89,20 +85,16 @@ const composeHandlers = () => ({
 function expectCanvasOffersNoCreateRoute(container: HTMLElement) {
   const canvas = within(container);
 
-  // Edge creation: no drag-to-connect and no reconnect gesture is wired.
   expect(shellProps.current.onConnect).toBeUndefined();
   expect(shellProps.current.onReconnect).toBeUndefined();
 
-  // The deleted keyboard create gesture opens nothing.
   fireEvent.keyDown(window, { key: 'N', shiftKey: true });
   expect(canvas.queryByText('Create Transition')).not.toBeInTheDocument();
 
-  // Transition create: no header entry, and the palette registers only the
   // graph↔list toggle (the create-transition command is gone, not hidden).
   expect(canvas.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
   expect(getCommands().map((command) => command.id)).toEqual(['strategy.toggle-view']);
 
-  // Inspector save: selecting the entry state and opening its editor reveals
   // no save control anywhere in the canvas.
   act(() => {
     (shellProps.current.onNodesChange as (changes: NodeChangeset) => void)(
@@ -176,7 +168,6 @@ describe('StrategyCanvas — no create affordance', () => {
     );
 
     const { container } = renderCanvas();
-    // The applied preset is what rendered (revision 0), not a compose candidate.
     expect(await screen.findByText('rev 0')).toBeInTheDocument();
 
     expectCanvasOffersNoCreateRoute(container);
@@ -199,7 +190,6 @@ describe('StrategyCanvas — no create affordance', () => {
     );
 
     const { container } = renderCanvas();
-    // The candidate is what rendered (revision 4), on the Compose surface.
     expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
     expect(await screen.findByText('rev 4')).toBeInTheDocument();
 

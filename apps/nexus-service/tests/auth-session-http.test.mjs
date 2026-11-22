@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Task 1 — browser access bootstrap (access spec §3.1 / §6.2).
  *
  * Covers the product behaviour of the tokenized `GET /__bootstrap` route:
  * one-time handoff to an `HttpOnly` session cookie, keyed-mode admission by
@@ -76,7 +75,6 @@ async function startServer({ keyed = false, clock } = {}) {
       port: 0,
       allowRemote: false,
     });
-    // Guarded tier1 route the admission assertions call; the runtime family is
     // unguarded and would answer 200 with or without credentials.
     const service = {
       startedAt: new Date().toISOString(),
@@ -120,7 +118,6 @@ test('tokens are single-use, replay-detectable and expire after their TTL', asyn
   const store = new AuthSessionStore(() => now);
 
   const token = store.mintToken();
-  // 256 bits base64url: 43 characters, no padding.
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(store.consumeToken(token), true);
   assert.equal(store.consumeToken(token), false);

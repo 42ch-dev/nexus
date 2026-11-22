@@ -1,4 +1,4 @@
-//! Host-visible identifier types.
+//! Host-visible identifier types. See docs/specs/agents/agent-host.md.
 //!
 //! All IDs are owned, `Hash`/`Eq`-compatible, and serializable for
 //! event emission and telemetry.
@@ -127,15 +127,12 @@ mod tests {
         let sid = HostSessionId::new();
         let oid = HostOperationId::new();
 
-        // Verify ProviderId serializes as newtype
         let pid_json = serde_json::to_string(&pid).unwrap();
         assert!(pid_json.contains("test-provider"));
 
-        // Verify roundtrip
         let pid_back: ProviderId = serde_json::from_str(&pid_json).unwrap();
         assert_eq!(pid, pid_back);
 
-        // Verify session/op IDs roundtrip
         let sid_json = serde_json::to_string(&sid).unwrap();
         let sid_back: HostSessionId = serde_json::from_str(&sid_json).unwrap();
         assert_eq!(sid, sid_back);

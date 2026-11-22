@@ -1,5 +1,4 @@
 /**
- * Settings section registry + URL resolver (V1.131 P2).
  */
 import { describe, expect, it } from 'vitest';
 

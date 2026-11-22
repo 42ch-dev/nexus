@@ -121,7 +121,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         "inspiration_log": fields.inspiration_log,
     });
 
-    // V1.38 P0 (T4): include work_ref and chapter when available.
     if let Some(ref wr) = fields.work_ref {
         map.as_object_mut().map(|o| {
             o.insert(
@@ -135,7 +134,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             .map(|o| o.insert("chapter".to_string(), serde_json::Value::Number(ch.into())));
     }
 
-    // V1.38 P1: include chapter context fields when available.
     if let Some(ref cl) = fields.chapter_label {
         map.as_object_mut().map(|o| {
             o.insert(
@@ -165,7 +163,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             .map(|o| o.insert("slug".to_string(), serde_json::Value::String(sl.clone())));
     }
 
-    // Fix W-2: research artifacts directory for produce stage (after research).
     if let Some(ref rad) = fields.research_artifacts_dir {
         map.as_object_mut().map(|o| {
             o.insert(
@@ -175,7 +172,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         });
     }
 
-    // V1.39 P3 (DF-65): read rules layers when workspace_dir and work_ref
     // are both present. Layer 1 = embedded default; Layer 2 = per-work file.
     if let (Some(ref ws_dir), Some(ref wref)) = (&fields.workspace_dir, &fields.work_ref) {
         if let Some(rules) = read_rules_layers(ws_dir, wref) {
@@ -188,7 +184,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         }
     }
 
-    // V1.49 P1 (narrative-indexes overlay §4): inject a compact foreshadowing
     // summary read from `Works/<work_ref>/Outlines/foreshadowing.md` when the
     // index is non-empty, so outline/draft prompts can surface active F###.
     // Mirrors the `rules_content` workspace read above. When the file is
@@ -211,7 +206,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         )
     });
 
-    // V1.40 P2 (QC3 C-1 fix): inject the pre-assembled World KB block.
     // The caller (CLI/daemon) is responsible for building the block via
     // `build_chapter_kb_block` and passing it here. When `None` (worldless
     // Works or legacy V1.39), the template guard `{{#if world_kb_block}}`
@@ -224,7 +218,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             )
         });
     } else {
-        // Ensure the key is present as empty string so strict-mode template
         // rendering does not fail on `{{preset.input.world_kb_block}}`.
         map.as_object_mut().map(|o| {
             o.insert(
@@ -234,7 +227,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         });
     }
 
-    // V1.40 P3 (T5): inject world_id for World-bound Works.
     // Persist stage uses this to route extraction to the correct World KB.
     // When None (legacy V1.39 worldless Works), the persist stage skips
     // World KB promotion.
@@ -247,7 +239,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         });
     }
 
-    // V1.44 P2 (F-004): inject volume for multi-volume Works.
     // The `novel-writing` preset can use `{{preset.input.volume}}` to preserve
     // cross-volume context (e.g. "Volume 2, Chapter 3").
     if let Some(vol) = fields.volume {
@@ -255,7 +246,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             .map(|o| o.insert("volume".to_string(), serde_json::Value::Number(vol.into())));
     }
 
-    // V1.48 P1 (overlay §2 Consumer): inject the pre-rendered open-findings
     // block. The caller (CLI/auto-chain) builds it via
     // `findings_block::build_open_findings_block` from the chapter-scoped DAO
     // query. When `None` (worldless Works, no open findings, or auto-chain
@@ -270,7 +260,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         )
     });
 
-    // N-10/N-14: internal-execution input projection — the research,
     // novel-brainstorm, and novel-review-master presets reference these
     // keys in their enter-action vars and prompt templates. Strict-mode
     // template rendering fails on MISSING keys, so every key a preset
@@ -315,7 +304,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
 pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> {
     let mut parts = Vec::new();
 
-    // Layer 1: embedded default (or user override).
     // Read from the dedicated embedded_rules module (not embedded-presets).
     // User override at ~/.nexus42/rules/writing-craft.md is a future addition
     // (requires home dir resolution at the call site).
@@ -480,8 +468,6 @@ mod tests {
         assert!(check_stage_advance(&work, "produce", false).is_ok());
     }
 
-    // ── T1: preset_for_stage schedule wiring for all 4 post-intake stages ──────
-
     #[test]
     fn preset_for_stage_research() {
         assert_eq!(preset_for_stage("research"), Some("research"));
@@ -522,28 +508,22 @@ mod tests {
     /// Validates that stage advance gates pass AND the correct preset is resolved.
     #[test]
     fn full_chain_gate_and_preset_resolution() {
-        // intake → research
         let intake_done = work_state("intake", "complete", "complete");
         assert!(check_stage_advance(&intake_done, "research", false).is_ok());
         assert_eq!(preset_for_stage("research"), Some("research"));
 
-        // research → produce
         let research_done = work_state("research", "complete", "complete");
         assert!(check_stage_advance(&research_done, "produce", false).is_ok());
         assert_eq!(preset_for_stage("produce"), Some("novel-writing"));
 
-        // produce → review
         let produce_done = work_state("produce", "complete", "complete");
         assert!(check_stage_advance(&produce_done, "review", false).is_ok());
         assert_eq!(preset_for_stage("review"), Some("novel-chapter-review"));
 
-        // review → persist
         let review_done = work_state("review", "complete", "complete");
         assert!(check_stage_advance(&review_done, "persist", false).is_ok());
         assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
     }
-
-    // ── T2: preset input templates consume Work fields ─────────────────────
 
     fn demo_work_fields(stage: &str) -> WorkFields {
         WorkFields {
@@ -592,7 +572,6 @@ mod tests {
     fn build_preset_input_contains_inspiration_log() {
         let fields = demo_work_fields("research");
         let input = build_preset_input(&fields);
-        // inspiration_log should be a valid JSON array string
         let log = input["inspiration_log"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(log).unwrap();
         assert!(parsed.is_array());
@@ -600,7 +579,6 @@ mod tests {
 
     #[test]
     fn preset_input_research_consumes_creative_brief_and_inspiration() {
-        // T2 verification: research stage preset receives creative_brief + inspiration_log
         let fields = demo_work_fields("research");
         let input = build_preset_input(&fields);
         assert!(
@@ -616,7 +594,6 @@ mod tests {
 
     #[test]
     fn preset_input_produce_consumes_creative_brief_and_inspiration() {
-        // T2 verification: novel-writing (produce) receives creative_brief + inspiration_log
         let fields = demo_work_fields("produce");
         let input = build_preset_input(&fields);
         assert!(
@@ -632,7 +609,6 @@ mod tests {
 
     #[test]
     fn preset_input_review_receives_work_id() {
-        // T2 verification: novel-chapter-review (review) receives work_id for context
         let fields = demo_work_fields("review");
         let input = build_preset_input(&fields);
         assert!(
@@ -644,7 +620,6 @@ mod tests {
 
     #[test]
     fn preset_input_persist_receives_work_id() {
-        // T2 verification: kb-extract (persist) receives work_id for KB extraction
         let fields = demo_work_fields("persist");
         let input = build_preset_input(&fields);
         assert!(
@@ -653,8 +628,6 @@ mod tests {
         );
         assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
     }
-
-    // ── R-FL-E-P2-03: build_schedule_for_stage facade ──────────────────────
 
     #[test]
     fn build_schedule_for_stage_research() {
@@ -713,8 +686,6 @@ mod tests {
         assert!(seed["creative_brief"].is_string());
         assert!(seed["inspiration_log"].is_string());
     }
-
-    // ── V1.38 P1: chapter context parameterization tests ─────────────────────
 
     /// Helper: produce `WorkFields` for a given chapter number.
     fn chapter_work_fields(chapter: i32, work_ref: &str) -> WorkFields {
@@ -814,12 +785,9 @@ mod tests {
         assert!(input.get("outline_path").is_none());
         assert!(input.get("body_path").is_none());
         assert!(input.get("slug").is_none());
-        // Base fields still present
         assert!(input.get("work_id").is_some());
         assert!(input.get("fl_e_stage").is_some());
-        // Fix W-2: research_artifacts_dir not present when None
         assert!(input.get("research_artifacts_dir").is_none());
-        // V1.40 P2: world_kb_block defaults to empty string for worldless Works
         assert_eq!(input["world_kb_block"], "");
     }
 
@@ -855,7 +823,6 @@ mod tests {
         );
         assert_eq!(input["slug"], "ch02");
 
-        // Seed should also contain the chapter context
         let seed: serde_json::Value = serde_json::from_str(&req.seed.unwrap()).unwrap();
         assert_eq!(seed["chapter"], 2);
         assert_eq!(seed["chapter_label"], "02");
@@ -870,12 +837,10 @@ mod tests {
         assert_eq!(chapter_label(100), "100");
     }
 
-    // ── V1.39 P3 → V1.40 P0.5: rules reader tests ──────────────────────
     // (V1.40 P0.5 migrated rules from embedded-presets/ to embedded_rules.rs)
 
     #[test]
     fn read_rules_layers_returns_layer1_from_embedded() {
-        // Layer 1 is always available from embedded_rules module (compile-time include_str!)
         let result = read_rules_layers("/nonexistent/workspace", "my-novel");
         assert!(
             result.is_some(),
@@ -897,7 +862,6 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
 
-        // Create Layer 2 file
         let rules_dir = ws.join("Works").join("test-novel").join("Rules");
         std::fs::create_dir_all(&rules_dir).expect("mkdir");
         std::fs::write(
@@ -928,7 +892,6 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
 
-        // Create empty Layer 2 file
         let rules_dir = ws.join("Works").join("empty-novel").join("Rules");
         std::fs::create_dir_all(&rules_dir).expect("mkdir");
         std::fs::write(rules_dir.join("novel-rules.md"), "  \n").expect("write");
@@ -946,15 +909,12 @@ mod tests {
         );
     }
 
-    // ── V1.48 P2: AGENTS.md preference (overlay §3.1) ──────────────────
-
     #[test]
     fn read_rules_layers_prefers_agents_md_when_present() {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
         let work_root = ws.join("Works").join("neon-river");
 
-        // Create BOTH the new AGENTS.md and the legacy Rules/novel-rules.md.
         // The AGENTS.md content must win.
         std::fs::create_dir_all(&work_root).expect("mkdir root");
         std::fs::write(
@@ -986,7 +946,6 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
 
-        // Only legacy file exists (pre-V1.48 Work).
         let rules_dir = ws.join("Works").join("legacy-novel").join("Rules");
         std::fs::create_dir_all(&rules_dir).expect("mkdir");
         std::fs::write(
@@ -1005,7 +964,6 @@ mod tests {
 
     #[test]
     fn read_rules_layers_neither_agents_md_nor_legacy_returns_layer1_only() {
-        // No Layer 2 files at all (fresh Work with neither file).
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
         std::fs::create_dir_all(ws.join("Works").join("bare-novel")).expect("mkdir");
@@ -1022,7 +980,6 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
 
-        // Create Layer 2 file
         let rules_dir = ws.join("Works").join("rules-test").join("Rules");
         std::fs::create_dir_all(&rules_dir).expect("mkdir");
         std::fs::write(rules_dir.join("novel-rules.md"), "- Tense: present\n").expect("write");
@@ -1083,8 +1040,6 @@ mod tests {
         );
     }
 
-    // ── V1.40 P2: world_kb_block preset input tests ─────────────────────────
-
     #[test]
     fn build_preset_input_includes_world_kb_block_when_set() {
         let mut fields = demo_work_fields("produce");
@@ -1104,12 +1059,9 @@ mod tests {
     fn build_preset_input_world_kb_block_defaults_to_empty_for_worldless() {
         let fields = demo_work_fields("produce");
         let input = build_preset_input(&fields);
-        // When world_kb_block is None (worldless), the key is still present
         // as empty string so strict-mode templates don't fail.
         assert_eq!(input["world_kb_block"], "");
     }
-
-    // ── V1.49 P1: foreshadowing_summary preset input tests ──────────────────
 
     #[test]
     fn build_preset_input_includes_foreshadowing_summary_when_index_populated() {
@@ -1118,7 +1070,6 @@ mod tests {
         let work = ws.join("Works").join("novel-fs");
         let outlines = work.join("Outlines");
         std::fs::create_dir_all(&outlines).expect("mkdir");
-        // Populate the index with two rows.
         std::fs::write(
             outlines.join("foreshadowing.md"),
             crate::narrative_index::serialize_foreshadowing_index(&[
@@ -1156,20 +1107,17 @@ mod tests {
     fn build_preset_input_foreshadowing_summary_empty_when_index_absent() {
         let tmp = tempfile::tempdir().expect("tmpdir");
         let ws = tmp.path();
-        // No Works/ tree at all.
         let mut fields = demo_work_fields("produce");
         fields.work_ref = Some("no-such-novel".to_string());
         fields.workspace_dir = Some(ws.to_string_lossy().to_string());
 
         let input = build_preset_input(&fields);
-        // Key present as empty string (strict-mode safe); the {{#if}} guard
         // in the prompt template omits the section.
         assert_eq!(input["foreshadowing_summary"], "");
     }
 
     #[test]
     fn build_preset_input_foreshadowing_summary_empty_when_no_workspace_dir() {
-        // Auto-chain enqueue path sets workspace_dir=None → summary stays empty
         // (no workspace read attempted).
         let fields = demo_work_fields("produce");
         let input = build_preset_input(&fields);

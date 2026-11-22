@@ -1,5 +1,4 @@
 /**
- * World default route + IA tests (V1.122 P1 T3, index owner revised by
  * v1219-world-module T1).
  *
  * Asserts the architect-locked information architecture:
@@ -25,7 +24,6 @@ import { TimelinePage } from '@/pages/timeline-page';
 import { WorldApp } from '@/components/world/world-app';
 
 /**
- * The World app surface reads the World + KB graph via TanStack Query; for
  * route-resolution tests we mock it so the test asserts routing (the index
  * owns the URL and renders the surface), not data loading.
  */
@@ -35,7 +33,6 @@ vi.mock('@/components/world/world-app', () => ({
 
 
 /**
- * The Timeline canvas pulls in `@xyflow/react` + the T2 adapter; for route-
  * resolution tests we mock it so the test asserts routing, not React Flow
  * rendering. The mock surfaces a stable test-id + the peer-surface nav
  * links so the IA assertions can probe them.
@@ -103,7 +100,6 @@ describe('World default route + IA (V1.122 P1 T3)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('world-app-mock')).toBeInTheDocument();
     });
-    // The URL is owned, not rewritten — the legacy Timeline stays a peer.
     expect(screen.getByTestId('location')).toHaveTextContent('/worlds/eryndor');
     expect(screen.queryByTestId('timeline-canvas-mock')).not.toBeInTheDocument();
   });
@@ -134,7 +130,6 @@ describe('World default route + IA (V1.122 P1 T3)', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/worlds/eryndor/kb',
     );
-    // The Timeline canvas does NOT mount on the World KB route.
     expect(screen.queryByTestId('timeline-canvas-mock')).not.toBeInTheDocument();
   });
 
@@ -150,7 +145,6 @@ describe('World default route + IA (V1.122 P1 T3)', () => {
     );
     });
     expect(screen.getByTestId('work-outline-outlet')).toBeInTheDocument();
-    // The Timeline canvas MUST NOT mount on Work entry.
     expect(screen.queryByTestId('timeline-canvas-mock')).not.toBeInTheDocument();
   });
 });

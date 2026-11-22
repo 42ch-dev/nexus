@@ -521,7 +521,6 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
         run_arm(&core, &principal, cmd).await
     }
     .await;
-    // `None` is a settled verb that prints nothing (`--json` on a remove).
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
@@ -1190,7 +1189,6 @@ async fn edit_character(
             "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
         ));
     }
-    // The tri-state `FieldPatch` is the storage contract: an omitted member
     // keeps the stored value, an explicit `--clear-*` clears it, and a supplied
     // value sets it. Persona is stored as a JSON object string.
     let persona_json = match persona {
@@ -1302,7 +1300,6 @@ async fn transition_character(
         .transition_character(principal, request)
         .await
         .map_err(map_core_error)?;
-    // The transition response carries the core's own Character wire; the
     // detail envelope is the retained CLI projection of the same fields.
     let character = serde_json::to_value(resp.character)?;
     let detail = CharacterDetail {
@@ -1371,7 +1368,6 @@ async fn edit_binding(
             "use either --world-sheet-entry-id or --clear-world-sheet, not both".into(),
         ));
     }
-    // Tri-state `FieldPatch`: `--clear-world-sheet` clears the nullable link,
     // a supplied entry id sets it, and an omitted member keeps it.
     let sheet_patch = if clear_world_sheet {
         FieldPatch::Clear
@@ -1743,7 +1739,6 @@ async fn add_knowledge(
     if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
         body["summary"] = serde_json::Value::String(text);
     }
-    // The retained absent/null distinction is a request-shape concern owned by
     // this leaf: the raw member presence drives the core's `summary_present`
     // bit, so a World-owned create carrying the member is refused by the core
     // exactly as the daemon adapter refused it.
@@ -1813,7 +1808,6 @@ async fn edit_knowledge(
                 .into(),
         ));
     }
-    // Tri-state `FieldPatch` is the storage contract: an omitted member keeps
     // the stored summary, `--clear-summary` clears it, a supplied text sets it.
     let summary_text = load_bounded_summary_text(summary, summary_file)?;
     let summary_patch = if clear_summary {
@@ -1823,7 +1817,6 @@ async fn edit_knowledge(
             .as_deref()
             .map_or(FieldPatch::Keep, FieldPatch::Set)
     };
-    // The closed `--audience` pair is admitted from the wire member exactly
     // like the native bridge: the CLI never supplies a holder id, and the core
     // resolves the permitted identity against stored state under the CAS.
     let audience_wire: Option<UpdateKnowledgeEntryRequestAudience> = audience
@@ -1953,7 +1946,6 @@ async fn view_knowledge(
         body["cursor"] = serde_json::Value::String(c);
     }
     let req: ViewRequest = serde_json::from_value(body)?;
-    // The read policy is chosen by the core from the admitted actor kind: a
     // Creator viewpoint is the management review, a Character viewpoint stays
     // the strict holder-filtered selection. This leaf selects neither.
     let query = ActorKnowledgeViewQuery {
@@ -1976,7 +1968,6 @@ async fn view_knowledge(
     }
     let mut lines: Vec<String> = Vec::with_capacity(resp.items.len() + 1);
     for item in &resp.items {
-        // Durable §7: the projection carries the native governance pair, never
         // the retired `creator_only` boolean — shared is the *absence* of
         // disclosure.
         let governance = item
@@ -2005,7 +1996,6 @@ async fn view_knowledge(
     Ok(Some(lines.join("\n")))
 }
 
-// ─── Character SOUL/Memory helpers (v1.184 P3) ─────────────────────────────
 //
 // Every memory arm is one core bearer operation behind the Character's
 // activity lease: capture, the retained pending reads/dismiss, the bounded
@@ -2190,7 +2180,6 @@ async fn memory_review(
             break;
         }
         if call + 1 >= CHARACTER_REVIEW_DRAIN_MAX_CALLS {
-            // Call cap reached with more rows reported by the core.
             has_more = true;
             cap_exhausted = true;
             break;
@@ -2296,8 +2285,6 @@ async fn memory_promote(
     )))
 }
 
-// ─── Character ToM helpers (v1.184 P4) ─────────────────────────────────────
-
 fn merge_tom_json_field(body: &mut serde_json::Value, key: &str, value: Option<String>) {
     if let Some(v) = value {
         body[key] = serde_json::Value::String(v);
@@ -2385,7 +2372,6 @@ async fn tom_show(
     if let Some(c) = cursor {
         body["cursor"] = serde_json::Value::String(c);
     }
-    // The core owns the page bounds and the opaque keyset cursor: this leaf
     // forwards them and never re-derives the keyset order.
     let query: ListCharacterTomQuery = serde_json::from_value(body)?;
     let resp = core
@@ -2447,7 +2433,6 @@ mod holder_public_tests {
     use super::{audience_wire, refuse_legacy_creator_only_flag, refuse_world_owned_summary};
     use std::path::Path;
 
-    // v1.191 P1 T9 (durable §5/§6): the CLI request surface for the shipped
     // `creator character knowledge` authoring commands.
 
     #[test]
@@ -2477,7 +2462,6 @@ mod holder_public_tests {
 
     #[test]
     fn v1191_holder_public_legacy_creator_only_flag_is_refused_by_presence() {
-        // `--creator-only` and `--creator-only=false` are both refused; only
         // an absent flag is accepted.
         for present in [Some(true), Some(false)] {
             let err = refuse_legacy_creator_only_flag(present).unwrap_err();

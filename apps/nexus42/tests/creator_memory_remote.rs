@@ -175,10 +175,6 @@ fn provider_store(home: &Path, creator: &str) -> PathBuf {
     nexus_home_layout::operational_workspace_dir(home, creator, WORKSPACE).join("memory-store")
 }
 
-// ---------------------------------------------------------------------------
-// C-111 local arm
-// ---------------------------------------------------------------------------
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn c_111_creator_cli_uses_pinned_provider_local() {
     let actor = DirectActor::new().await;
@@ -199,7 +195,6 @@ async fn c_111_creator_cli_uses_pinned_provider_local() {
         ],
     );
 
-    // The write landed in the PINNED LOCAL PROVIDER's store, not a legacy
     // long-term memory file: the provider owns the record projection.
     let store = provider_store(home, creator);
     let projections = walk_markdown(&store);
@@ -275,10 +270,6 @@ fn walk_markdown(root: &Path) -> Vec<String> {
     out.sort();
     out
 }
-
-// ---------------------------------------------------------------------------
-// C-111 remote arm (the non-default `memory-remote` feature)
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "memory-remote")]
 mod remote {
@@ -574,7 +565,6 @@ mod remote {
             task.abort();
             match tokio::time::timeout(BOUND, task).await {
                 Ok(Ok(())) => {}
-                // Expected after our own abort: a cancelled join is not a
                 // cleanup failure.
                 Ok(Err(error)) if error.is_cancelled() => {}
                 Ok(Err(error)) => failures.push(format!("accept join: {error}")),
@@ -701,7 +691,6 @@ mod remote {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn c_111_creator_cli_uses_pinned_provider_remote() {
-        // The durable independent fixture. Its admission table maps the dialing
         // credential's peer id to the operator principal holding `admin`.
         let fixture_home = TempDir::new().expect("fixture home");
         let provider = Arc::new(
@@ -724,7 +713,6 @@ mod remote {
         let creator = actor.creator_id().to_string();
         write_credential(&home, &CLIENT_SEED);
 
-        // The fixture's real service, wrapped only to count its record list/get
         // boundary. The seeded row exists in no local store.
         let counting = Arc::new(CountingService::new(provider.server(directory.admission())));
         let service: Arc<dyn RemoteMemoryService> = counting.clone();
@@ -756,7 +744,6 @@ mod remote {
         .await
         .expect("the CLI selection is written");
 
-        // A meaningful conflicting local artifact: its authored body differs
         // from every remote row, so a local fallback would be visible.
         let trap = home
             .join(".nexus42")
@@ -774,7 +761,6 @@ mod remote {
         )
         .expect("seed the local trap");
 
-        // list, show, create, list: one signed session each.
         let responders = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut accept_task = Some(serve(
             listener,
@@ -825,7 +811,6 @@ mod remote {
                 "the CLI's show crossed the remote provider's record read boundary"
             );
 
-            // The remote create path is retained: a CLI-authored row reaches
             // the same pinned provider and is listed with the seeded row.
             cli_ok_remote(
                 &home,
@@ -865,7 +850,6 @@ mod remote {
                 "the shown identity stayed the fixture's (seeded {seeded_id})"
             );
 
-            // Poll the owned handle BY REFERENCE: a timeout must leave the
             // handle owned here so teardown can abort and join the SAME task.
             let Some(task) = accept_task.as_mut() else {
                 return Err("accept task missing".to_string());
@@ -924,7 +908,6 @@ mod remote {
     /// runner must kill and reap the child and report it truthfully.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn c_111_cleanup_timeout_paths_are_bounded() {
-        // (a) accept-timeout ownership and cancellation.
         let fixture_home = TempDir::new().expect("fixture home");
         let provider = Arc::new(
             FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
@@ -979,7 +962,6 @@ mod remote {
             "the aborted task released the listener: {rebind:?}"
         );
 
-        // (b) real-child timeout at a short deterministic test deadline. The
         // holder acknowledges an ACTUAL successful TCP accept and retains the
         // accepted socket until the child is killed and reaped, so a CLI stall
         // before the dial fails this proof instead of passing it. The fallible
@@ -1090,7 +1072,6 @@ mod remote {
             }
         }
 
-        // (c) expected early real-CLI failure after the holder task exists: the
         // error is routed through the same bounded stop, and the listener is
         // released (rebind) before the expected failure is accepted.
         let actor = DirectActor::new().await;
@@ -1155,10 +1136,6 @@ mod remote {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Feature-off preservation: the remote selection still refuses, never falls back
-// ---------------------------------------------------------------------------
-
 #[cfg(not(feature = "memory-remote"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
@@ -1166,7 +1143,6 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
     let home = actor.home();
     let creator = actor.creator_id();
 
-    // A real local provider row exists first.
     cli_ok(
         home,
         &[
@@ -1182,7 +1158,6 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
     );
     assert_eq!(walk_markdown(&provider_store(home, creator)).len(), 1);
 
-    // The remote selection, written through the real CLI, has no client in this
     // graph: the pinned provider refuses instead of serving the local store.
     cli_ok(
         home,

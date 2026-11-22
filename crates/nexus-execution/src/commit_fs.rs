@@ -445,7 +445,6 @@ impl ScopeMutation {
         backup_basename: Option<&str>,
     ) -> io::Result<()> {
         self.cleanup_entry(rel_path, stage_basename, backup_basename);
-        // Confirm on a fresh walk rather than trusting the unlink results:
         // `cleanup_basename` swallows them by design.
         self.with_parent(rel_path, |parent, _| {
             for name in artifact_names(stage_basename, backup_basename) {
@@ -508,7 +507,6 @@ pub(crate) fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
 mod unix_dir {
     use super::{displaced_basename, restore_basename, CREATE_FILE_MODE};
     use nix::fcntl::{openat, renameat, AtFlags, OFlag};
-    // `libc` is reached THROUGH nix (`pub use libc`), so the cohort gains no
     // second edge for the three open flags below.
     use nix::libc;
     use nix::sys::stat::{mode_t, Mode};
@@ -582,7 +580,6 @@ mod unix_dir {
             if self.exists(name)? {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "stage exists"));
             }
-            // `Mode` is a bitflags type over the platform `mode_t` (u16 on
             // macOS, u32 on Linux), so the narrowing to that alias — not a
             // hard-coded u16 — is what keeps this portable. `from_bits_truncate`
             // then masks to the mode bits it recognises.
@@ -599,7 +596,6 @@ mod unix_dir {
                 mode,
             )
             .map_err(errno_io)?;
-            // The open returns the descriptor already owned, so the file wraps
             // it as-is: no reopened `/dev/fd` copy and no manual close.
             let mut file = File::from(fd);
             file.write_all(bytes)?;
@@ -646,7 +642,6 @@ mod unix_dir {
             let staged = self.hash_file(stage_basename)?;
             let displaced = displaced_basename(stage_basename);
 
-            // 1. Atomically capture whatever currently occupies the target.
             self.rename_within(target, &displaced)
                 .map_err(|err| match err {
                     CaptureError::Absent => {
@@ -655,7 +650,6 @@ mod unix_dir {
                     CaptureError::Io(e) => e,
                 })?;
 
-            // 2. The captured bytes MUST be the preimage we validated.
             let captured = self.hash_file(&displaced)?;
             if captured != expected_hash {
                 self.restore_captured(&displaced, target)?;
@@ -665,7 +659,6 @@ mod unix_dir {
                 ));
             }
 
-            // 3. Install the staged bytes without clobbering.
             self.link_no_clobber(stage_basename, target, "replace-displaced")?;
             self.unlink(stage_basename)?;
             let installed = self.hash_file(target)?;
@@ -705,10 +698,8 @@ mod unix_dir {
                 ));
             }
 
-            // Deterministic injection point for the capture/finalize window.
             super::run_after_delete_capture_hook();
 
-            // A delete is only valid while the target name is STILL absent.
             // A writer that re-created it during the window means the workspace
             // does not match the committed post-state: keep every artifact
             // (the capture, the backup, and the writer's bytes) and report a
@@ -739,13 +730,11 @@ mod unix_dir {
         ) -> io::Result<()> {
             if self.exists(target)? {
                 let current = self.hash_file(target)?;
-                // An entry whose preimage is ALREADY in place is a rollback
                 // that has already been applied (or was never applied at all).
                 // A replayed rollback must recognize that, not manufacture a
                 // conflict out of it.
                 let already_restored = pre_hash.is_some_and(|pre| current == pre);
                 match (post_hash, pre_hash) {
-                    // modify: the applied postimage (restore needed) or the
                     // restored preimage (idempotent no-op) are both valid.
                     (Some(post), Some(pre)) if current != post && current != pre => {
                         return Err(third_state(
@@ -753,14 +742,12 @@ mod unix_dir {
                             "target is neither the applied postimage nor the restored preimage",
                         ));
                     }
-                    // create rollback (no preimage): only the postimage is ours.
                     (Some(post), None) if current != post => {
                         return Err(third_state(
                             "rollback",
                             "target is not the applied postimage",
                         ));
                     }
-                    // delete rollback (no postimage): only the original is ours.
                     (None, Some(pre)) if current != pre => {
                         return Err(third_state("rollback", "target is not the preimage"));
                     }
@@ -852,7 +839,6 @@ mod unix_dir {
                 Mode::empty(),
             )
             .map_err(errno_io)?;
-            // The open flags above confine the lookup; the descriptor comes
             // back owned, so it is wrapped directly instead of being reopened.
             Ok(File::from(fd))
         }

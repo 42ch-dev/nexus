@@ -223,7 +223,6 @@ impl PublishFlock {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        // A join error is a panic inside the section, not an I/O outcome: the
         // unwinding task has already released the lease.
         tokio::task::spawn_blocking(move || (work(), self))
             .await
@@ -480,7 +479,6 @@ fn write_staged(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::
     }
     let staged_path = staged(&target, receipt_id);
     std::fs::write(&staged_path, effect.content.as_bytes())?;
-    // A-13: the staged bytes — and the directory entry that names them — must be
     // on disk before the journal's recovery bytes are cleared, or a power loss
     // loses the file while recovery still sees the intent as applied.
     sync_path(&staged_path)?;
@@ -559,7 +557,6 @@ pub fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::R
         ));
     }
     install(&staged_path, &target, receipt_id, effect)?;
-    // A-13: the settlement that clears the journal's recovery bytes runs only
     // after the installed file and its directory entry are durable.
     sync_path(&target)
 }
@@ -625,7 +622,6 @@ where
     if taken {
         let bytes = std::fs::read(&scratch)?;
         if matches_digest(&bytes, &effect.digest) {
-            // Crash between the install and the applied mark: the displaced
             // bytes ARE this intent's content, so they go back to the target —
             // dropping them would report success with the projection absent.
             match restore(&scratch, target) {
@@ -643,7 +639,6 @@ where
             return Ok(());
         }
         if !obsolete(&bytes, effect) {
-            // Not ours: restore it where it was, without replacing anything that
             // landed meanwhile. If even that is impossible the bytes stay at the
             // scratch path — preserved, never deleted.
             let _ = restore(&scratch, target);
@@ -656,7 +651,6 @@ where
     seam(Point::AfterDisplacement)?;
     match std::fs::hard_link(staged_path, target) {
         Ok(()) => {}
-        // A writer created the target after it was displaced: its bytes stay.
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(std::io::Error::other(format!(
                 "{} was replaced while this intent published",
@@ -666,7 +660,6 @@ where
         Err(error) => return Err(error),
     }
     let _ = std::fs::remove_file(staged_path);
-    // The verified predecessor must not outlive the link, and a scratch a
     // concurrent attempt of this same receipt left inside its own swap is
     // obsolete too. A failure here leaves obsolete bytes on disk, so it is
     // reported and the intent stays unsettled for a later pass to re-attempt
@@ -704,8 +697,9 @@ where
             // This intent's own obsolete leftover: drop it and take the name
             // once more. The read above decides; a name re-taken between that
             // read and this unlink would be deleted with it.
-            // shortcut: unlink-by-name cannot prove the inode it read; upgrade
-            // to an fd-relative unlink if the platform layer ever exposes one.
+            // shortcut: unlink-by-name cannot prove the inode it read;
+            // upgrade: use an fd-relative unlink if the platform layer ever
+            // exposes one.
             std::fs::remove_file(scratch)?;
             match std::fs::hard_link(target, scratch) {
                 Ok(()) => {}
@@ -766,7 +760,6 @@ where
     let scratch = displaced(&target, receipt_id);
     match std::fs::read(&target) {
         Ok(bytes) if matches_digest(&bytes, &effect.digest) => {
-            // Crash after publish, before the applied mark: the content is
             // already consistent, so the stale staged copy and the scratch an
             // interrupted displacement left (a superseded predecessor, or a
             // duplicate of this content) are dropped. A cleanup that fails is
@@ -795,7 +788,6 @@ where
             return Settled::Quarantined(format!("target read failed: {error}"));
         }
     }
-    // A scratch holds the previous version this intent displaced and never
     // superseded — or the intent's own bytes, when the crash landed after the
     // link. Verified against the intent's own digests, it completes the intent
     // without rewriting the journaled content.
@@ -805,7 +797,6 @@ where
                 let _ = std::fs::remove_file(&staged_path);
                 return durable_published(&target);
             }
-            // The target was re-created meanwhile: its bytes stay, and the
             // ownership rule below decides.
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => {
@@ -816,7 +807,6 @@ where
     let staged_bytes = std::fs::read(&staged_path).ok();
     let staged_path = match staged_bytes {
         Some(bytes) if matches_digest(&bytes, &effect.digest) => staged_path,
-        // Missing or mismatched staged content: regenerate it from the
         // journaled bytes, verify what was written, and publish that.
         _ => match write_staged(root, receipt_id, effect) {
             Ok(path) => path,
@@ -831,7 +821,6 @@ where
         return Settled::Quarantined("journaled content does not match its digest".to_string());
     }
     match install_verifying(&staged_path, &target, receipt_id, effect, seam) {
-        // The install removes every obsolete scratch before it reports success.
         Ok(()) => durable_published(&target),
         Err(error) => Settled::Quarantined(format!("publish failed: {error}")),
     }
@@ -957,7 +946,6 @@ mod tests {
         stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
 
-        // The foreign writer lands after the predecessor was displaced and
         // verified, at the point the old protocol removed the target.
         let error = install_verifying(&staged_path, &target, "rcp_b", &second, &|point| {
             if point == Point::AfterDisplacement {
@@ -1001,7 +989,6 @@ mod tests {
         stage(root, "rcp_a", &first).unwrap();
         publish(root, "rcp_a", &first).unwrap();
 
-        // A re-drive of the same intent: the target is already consistent, so the
         // swap that displaces it has to put those bytes back.
         stage(root, "rcp_a", &first).unwrap();
         publish(root, "rcp_a", &first).unwrap();
@@ -1063,7 +1050,6 @@ mod tests {
             .over(Some(first.digest));
         stage(root, "rcp_b", &second).unwrap();
         std::fs::rename(&target, displaced(&target, "rcp_b")).unwrap();
-        // The staged copy went with the process; only the scratch has the bytes.
         std::fs::remove_file(staged(&target, "rcp_b")).unwrap();
 
         assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
@@ -1148,7 +1134,6 @@ mod tests {
             "the deleted body is still on disk, so the intent may not settle"
         );
 
-        // The retry the unsettled intent gets: recovery's consistent branch
         // removes the body and only then settles the intent.
         assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert!(
@@ -1174,7 +1159,6 @@ mod tests {
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
             .over(Some(first.digest));
-        // The state the failed install above leaves: the new content at the
         // target, the deleted body at the receipt's scratch name.
         std::fs::write(&target, "two\n").unwrap();
         let scratch = displaced(&target, "rcp_b");
@@ -1311,7 +1295,6 @@ mod tests {
                     std::fs::create_dir_all(written.parent().unwrap()).unwrap();
                     std::fs::write(&written, "one\n").unwrap();
                     entered_tx.send(()).unwrap();
-                    // The operation the cancelled caller can no longer wait for.
                     finish_rx.recv().unwrap();
                     std::fs::write(&written, "two\n").unwrap();
                 })

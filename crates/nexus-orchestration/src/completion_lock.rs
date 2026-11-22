@@ -115,8 +115,6 @@ pub fn read_completion_lock(
         )
     })?;
 
-    // Backward-compat: missing schema_version treated as 1 (via serde default).
-    // Forward-compat: reject unknown future versions.
     if lock.schema_version > CURRENT_SCHEMA_VERSION {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -128,7 +126,6 @@ pub fn read_completion_lock(
         ));
     }
 
-    // Normalize missing schema_version (pre-V1.41 lock files) to 1.
     if lock.schema_version == 0 {
         lock.schema_version = 1;
     }
@@ -199,7 +196,6 @@ mod tests {
         let work_dir = ws.join("Works").join("test-novel");
         std::fs::create_dir_all(&work_dir).unwrap();
 
-        // Write a lock file without schema_version (pre-V1.41 format)
         let legacy_json =
             r#"{"work_id":"wrk_old","locked_at":"2026-06-10T10:00:00Z","reason":"completion"}"#;
         let lock_path = completion_lock_path(ws, "test-novel");
@@ -264,7 +260,6 @@ mod tests {
     #[test]
     fn release_idempotent_on_missing() {
         let dir = TempDir::new().unwrap();
-        // Should succeed even if file never existed
         release_completion_lock(dir.path(), "no-such-work").unwrap();
     }
 }

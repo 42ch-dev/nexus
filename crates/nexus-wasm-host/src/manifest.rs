@@ -36,7 +36,6 @@ use nexus_contracts::generated::daemon_api::compute::module_detail::{
     ModuleDetail, ModuleDetailHostFunctionsItem, ModuleDetailSchemas,
 };
 
-// V1.170 P0 (AR-8): the manifest types + validation core (`allows`,
 // `verify_wasm_sha256`) moved to the shared `nexus-module-manifest` crate.
 // This module re-exports them so every existing importer (`host.rs`,
 // `compute.rs`, `module_cache.rs`, `registry.rs`, daemon handlers, tests)
@@ -215,7 +214,6 @@ mod tests {
 
     #[test]
     fn manifest_without_schemas_is_backward_compat() {
-        // V1.61 manifests omit `schemas` → deserializes with schemas = None.
         let json = r#"{
             "module_id": "legacy-mod",
             "name": "Legacy Module",
@@ -290,7 +288,6 @@ mod tests {
 
     #[test]
     fn manifest_with_empty_schemas_object() {
-        // A manifest with `schemas: {}` should parse with all sub-fields None.
         let json = r#"{
             "module_id": "empty-schemas",
             "name": "Empty Schemas",
@@ -313,7 +310,6 @@ mod tests {
 
     #[test]
     fn wasm_sha256_field_is_backward_compat_absent() {
-        // V1.154 manifests omit `wasm_sha256` → deserializes with None and
         // verification is skipped (legacy stat-fence fallback).
         let json = r#"{
             "module_id": "legacy-mod",

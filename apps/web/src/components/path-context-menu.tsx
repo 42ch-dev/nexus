@@ -1,5 +1,4 @@
 /**
- * `PathContextMenu` — the V1.66 desktop right-click menu for chapter paths.
  *
  * Spec: web-ui-design-requirements §6.4 + DESIGN.md "Desktop Context Menu".
  *
@@ -126,7 +125,6 @@ export function PathContextMenu({
       await desktop[action](path);
       toast({ variant: 'success', title: commonT(successKey) });
     } catch (err) {
-      // The Rust path guard returns `path_outside_workspace`; surface its
       // plain-language copy verbatim (design-req §6.4 / DESIGN.md rule).
       const title = isOutsideWorkspaceError(err)
         ? commonT('toast.pathNotOpened')

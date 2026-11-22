@@ -39,7 +39,6 @@ export interface BriefTimeBandsProps {
   /** The era forest from `buildEraTree()` (Task 1). */
   tree: EraTreeNode[];
   /**
-   * Selection hand-off. Fires with the era's `key_block_id` when a band's
    * content is activated; the adapter routes it through the existing
    * React Flow selection flow so the era inspector opens (selection-only —
    * the time bands perform no writes).
@@ -48,7 +47,6 @@ export interface BriefTimeBandsProps {
 }
 
 /**
- * Indentation unit per nesting level (DESIGN.md `spacing.space-6` = 24px).
  * Nested bands shift right by one indent step per `depth` (spec §3.3.3).
  */
 const INDENT_UNIT_PX = 24;
@@ -61,14 +59,11 @@ const INDENT_UNIT_PX = 24;
  * once it lands — no component shape change needed.
  */
 const ERA_TYPE_COLORS: Readonly<Record<string, string>> = {
-  // Coarsest stratum → strongest bronze (kingdom), stepping lighter (age,
   // epoch) off the `--color-canvas-layer-brief-accent` spine.
   kingdom: 'var(--color-amber-900)',
   age: 'var(--color-amber-800)',
   epoch: 'var(--color-amber-700)',
-  // Accent tier — Timeline brand-blue (canvas-timeline-accent spine).
   period: 'var(--color-blue-1000)',
-  // Finest stratum → muted.
   'sub-age': 'var(--color-gray-700)',
 };
 
@@ -84,7 +79,6 @@ function eraColorOf(eraType: string | undefined): string {
 }
 
 /**
- * Extract the optional world-summary snippet from `body.attributes`.
  * Type narrowing mirrors `eraTypeOf` in `brief-era-tree.ts` — attributes are
  * `unknown` until narrowed; non-string / empty values are absent.
  */
@@ -101,7 +95,6 @@ export function BriefTimeBands({ tree, onSelectEra }: BriefTimeBandsProps) {
     () => new Set(),
   );
 
-  // Empty forest → no bands (hooks above already ran). The no-era-data copy
   // is owned by the V1.123 Brief empty-state panel in `timeline-canvas.tsx`
   // (`isBriefEmpty` gates it upstream, so this branch is defense-in-depth
   // for direct callers): the renderer must not fabricate a band surface for
@@ -125,7 +118,6 @@ export function BriefTimeBands({ tree, onSelectEra }: BriefTimeBandsProps) {
     const eraId = era.key_block_id;
     const title = era.canonical_name ?? t('timeline.briefEraNode.unnamed');
     const worldSummary = worldSummaryOf(era);
-    // DoD: bands at depth > 0 are collapsible; depth-0 bands stay expanded.
     const isCollapsible = depth > 0 && children.length > 0;
     const isCollapsed = collapsedIds.has(eraId);
     const toggleLabel = isCollapsed

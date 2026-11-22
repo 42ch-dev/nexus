@@ -171,7 +171,6 @@ async fn visible_peer_tool_still_requires_authorization() {
     // The operator allowlist is default-deny: admitting the anchor tool
     // requires naming it (the AR-68 #2(iii) contract).
     let allowlist: std::collections::HashSet<String> = std::iter::once(TOOL.to_string()).collect();
-    // The hello-negotiated capabilities must carry the id (Layer-1 refusal
     // `not_negotiated` otherwise).
     let negotiated: std::collections::HashSet<String> = std::iter::once(TOOL.to_string()).collect();
     let outcome = registry.admit_and_register(
@@ -191,7 +190,6 @@ async fn visible_peer_tool_still_requires_authorization() {
         "the admitted tool is visible in the registry"
     );
 
-    // An operator visibility policy that does NOT name the peer tool hides
     // it from the consumer: the seam refuses the call BEFORE the backend —
     // and therefore before any responder invocation.
     let hiding = VisibilityPolicy::from_visible(vec!["tools.other.unrelated".to_owned()]);
@@ -205,7 +203,6 @@ async fn visible_peer_tool_still_requires_authorization() {
         "a hidden tool is denied before any invocation"
     );
 
-    // Authorized dispatch: the absent policy (all visible, byte-identical
     // current behavior) lets the call reach the responder exactly once.
     let entry = registry.get(TOOL).expect("entry still dispatchable");
     let invoked = invoke_peer_tool(&entry, serde_json::json!({})).await;
@@ -215,7 +212,6 @@ async fn visible_peer_tool_still_requires_authorization() {
     );
     assert_eq!(responder.count(), 1, "exactly one peer invocation");
 
-    // Session close clears visibility: eviction removes the dispatchable
     // rows, so a later invoke is an honest not-found, never a dispatch.
     let evicted = registry.evict_peer(
         PEER,
@@ -226,7 +222,6 @@ async fn visible_peer_tool_still_requires_authorization() {
         registry.get(TOOL).is_none(),
         "visibility is cleared by session close"
     );
-    // The registry-side lookup is the dispatch authority: after close the
     // row is gone, so a late consumer cannot resolve or resurrect it.
     assert!(registry.get(TOOL).is_none());
     assert_eq!(
@@ -235,7 +230,6 @@ async fn visible_peer_tool_still_requires_authorization() {
         "the closed session performs no further peer invocations"
     );
 
-    // Late response ignored by generation: a reconnect is a NEW generation
     // (deterministic last-wins evicts the prior rows); the superseded
     // generation's monitor carrying the OLD responder can neither evict the
     // replacement nor resurrect its own rows.
@@ -296,7 +290,6 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
     let responder = CountingResponder::new();
     let responder_dyn = Arc::clone(&responder) as Arc<dyn PeerResponder>;
 
-    // (1) Whole-manifest validation first: a manifest advertising an id its
     //     own `capabilities[]` does not declare refuses the WHOLE ingest —
     //     no row, no session bookkeeping.
     let outcome = registry.admit_and_register(
@@ -323,7 +316,6 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         "a refused manifest registers no session rows"
     );
 
-    // (2) Not negotiated (absent from the daemon hello): refused even when
     //     the operator allowlist names it.
     let outcome = registry.admit_and_register(
         PEER_NEGOTIATION,
@@ -349,7 +341,6 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         [] as [std::string::String; 0]
     );
 
-    // (3) Default deny: an empty operator allowlist admits zero ids even
     //     though the id is negotiated and the peer is authenticated.
     let outcome = registry.admit_and_register(
         PEER_ALLOWLIST,
@@ -374,7 +365,6 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         [] as [std::string::String; 0]
     );
 
-    // (4) Reserved namespace: the daemon-owned `tools.nexus.*` family is
     //     refused even when negotiated AND explicitly allowlisted.
     let outcome = registry.admit_and_register(
         PEER_RESERVED,
@@ -395,7 +385,6 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         "a reserved-namespace id never becomes dispatchable"
     );
 
-    // (5) Exact-id admission: both advertised ids are negotiated, but the
     //     operator allowlist names only one — the admitted set is exactly
     //     that id, and its descriptor is carried verbatim.
     let outcome = registry.admit_and_register(
@@ -451,12 +440,10 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         "an id outside the operator allowlist is never dispatchable"
     );
 
-    // The authorized dispatch still reaches the peer exactly once.
     let invoked = invoke_peer_tool(&entry, serde_json::json!({})).await;
     assert!(invoked.is_ok(), "the admitted row dispatches: {invoked:?}");
     assert_eq!(responder.count(), 1);
 
-    // Cleanup: leave no rows in the process-global registry.
     for peer_id in [
         PEER_ADMITTED,
         PEER_NEGOTIATION,
@@ -472,7 +459,6 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
     );
 }
 
-// ── Peer-control lane state transitions (v1.190 P4-T3) ────────────────────
 //
 // The two cases below drive the lane the `ExecutionHandle` owns, not the
 // registry: a start REPLACES the allowlist (so a narrowing restart drops the
@@ -539,7 +525,6 @@ async fn lane_fixture() -> LaneFixture {
     .expect("config.toml");
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, LANE_CREATOR, LANE_SLUG);
     {
-        // The seed guard holds the DB's engine lock; it must be gone before
         // the engine-owner open below claims that lock itself.
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
@@ -729,7 +714,6 @@ async fn peer_control_acts_on_the_lane_installed_when_it_resolves() {
     let disable = f
         .handle
         .peer_control(&principal, control_request("disable", None));
-    // `join!` polls left to right, so `disable` reaches the seam before the
     // restart installs the fresh lane.
     let restart = async {
         gate.admitted.notified().await;
@@ -787,7 +771,6 @@ async fn peer_control_a_disabled_lane_refuses_everything_but_status_and_enable()
         .expect("the lane starts");
     assert!(!started.enabled, "the start reports the disabled lane");
 
-    // `status` is reachable: a lane that cannot be observed cannot be
     // diagnosed, so the reachable set is never empty.
     let reported = f
         .handle
@@ -796,7 +779,6 @@ async fn peer_control_a_disabled_lane_refuses_everything_but_status_and_enable()
         .expect("status is reachable on a disabled lane");
     assert!(!reported.enabled, "the lane still reports itself disabled");
 
-    // Allowlisted operations outside the reachable set are refused, naming the
     // lane state rather than reusing the allowlist refusal.
     let withheld_allow = f
         .handle
@@ -819,7 +801,6 @@ async fn peer_control_a_disabled_lane_refuses_everything_but_status_and_enable()
         "`disable` cannot re-enable a lane, so a disabled lane refuses it, got {withheld_disable:?}"
     );
 
-    // The allowlist refusal is unchanged: an operation the lane never granted
     // is still the plain allowlist refusal, not the lane-disabled one.
     let ungranted = f
         .handle
@@ -830,7 +811,6 @@ async fn peer_control_a_disabled_lane_refuses_everything_but_status_and_enable()
         "an operation off the allowlist keeps the allowlist refusal, got {ungranted:?}"
     );
 
-    // `enable` is reachable, and it restores the very operation refused above.
     let enabled = f
         .handle
         .peer_control(&principal, control_request("enable", None))
@@ -876,7 +856,6 @@ async fn a_disabled_lane_recovers_even_when_its_allowlist_omits_enable() {
         .expect("enable is reachable without being allowlisted");
     assert!(enabled.enabled, "enable restores the lane");
 
-    // The exemption restores no grant: the allowlist still bounds the lane.
     let still_withheld = f
         .handle
         .peer_control(&principal, control_request("disable", None))
@@ -948,7 +927,6 @@ async fn peer_control_start_rejects_an_undispatched_operation() {
         "an undispatched start allowlist entry is an allowed_operations refusal, got {refused:?}"
     );
 
-    // The refusal precedes the install, so no lane is left behind and the
     // next control call reports the lane-state cause, not a `peer_id`.
     let unstarted = f
         .handle

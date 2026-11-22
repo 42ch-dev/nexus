@@ -1,5 +1,4 @@
 /**
- * Conflict resolution modal for the World KB canvas write boundary (V1.73).
  *
  * Two KB-flavored variants (compass §1.1 A6, exact copy) reuse the generic
  * {@link ConflictModalBase} shell so the World KB surface inherits focus
@@ -143,7 +142,6 @@ export function WorldKbPromoteConflictModal({
   onDismiss,
 }: WorldKbPromoteConflictModalProps) {
   const { t } = useTranslation('canvas');
-  // The promote variant models a single promotion slot, but the user's pending
   // action is intentionally non-overlapping with the canonical action: "reapply"
   // means "redo my decision against the new version", not "clobber the same
   // field". Distinct ids keep ConflictModalBase's overlap guard from disabling
@@ -217,7 +215,6 @@ export function WorldKbPromoteConflictModal({
 }
 
 /**
- * Wrap a value in a <strong> so the entity/candidate name reads with emphasis in
  * the conflict body. The base modal renders the description inline, so this
  * returns a React node rather than a templated string.
  */

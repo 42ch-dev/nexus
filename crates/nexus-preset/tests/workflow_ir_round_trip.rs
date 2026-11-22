@@ -48,7 +48,6 @@ fn round_trip(id: &str) -> PresetIrImport {
     let source = FsAssetSource::new(&bundle).expect("open preset bundle");
     let imported = import_preset_bundle(&manifest, &source).expect("import preset bundle");
 
-    // Golden JSON: deserialize -> serialize is byte-identical to the committed fixture.
     let golden = std::fs::read_to_string(fixture_path(id)).expect("read golden fixture");
     let document: WorkflowDocument =
         serde_json::from_str(&golden).expect("golden fixture deserializes");
@@ -59,14 +58,12 @@ fn round_trip(id: &str) -> PresetIrImport {
         "`{id}` golden fixture is not canonical"
     );
 
-    // The fixture is the adapter's real output, not a hand-edited document.
     assert_eq!(
         serde_json::to_value(&document).expect("golden json"),
         serde_json::to_value(&imported.document).expect("imported json"),
         "`{id}` golden fixture drifted from the adapter output"
     );
 
-    // Typed round trip: PresetManifest -> WorkflowDocument -> PresetManifest.
     let exported = export_preset(&imported.document).expect("export document");
     assert_eq!(
         serde_json::to_value(&exported).expect("exported json"),
@@ -74,7 +71,6 @@ fn round_trip(id: &str) -> PresetIrImport {
         "`{id}` manifest changed through the IR"
     );
 
-    // Asset map: every referenced template has one entry with its bytes and BLAKE3 hash.
     assert_eq!(
         imported.document.assets.len(),
         imported.assets.len(),
@@ -102,7 +98,6 @@ fn game_narrative_round_trips_preset_ir() {
     assert_eq!(document.id.as_str(), "game-narrative");
     assert_eq!(document.assets.len(), 6);
 
-    // The declared signal can force the trigger lane.
     assert_eq!(document.signals.len(), 1);
     assert_eq!(document.signals[0].name, "game_event");
     assert_eq!(
@@ -119,7 +114,6 @@ fn game_narrative_round_trips_preset_ir() {
         Some(WorkflowInitialActionKind::SeedDirect)
     );
 
-    // Both lanes export `extract_characters.text`; the owning inner step carries it.
     assert_eq!(
         output_binding(document, "trigger_graph/extract_characters"),
         Some("extract_characters.text")
@@ -129,7 +123,6 @@ fn game_narrative_round_trips_preset_ir() {
         Some("extract_characters.text")
     );
 
-    // The sample declares no roles, so the document invents none.
     assert!(document.roles.is_empty());
 }
 
@@ -141,7 +134,6 @@ fn react_trpg_turn_round_trips_preset_ir() {
     assert_eq!(document.id.as_str(), "react-trpg-turn");
     assert_eq!(document.assets.len(), 5);
 
-    // No signals or roles declared; the lane selector is a judge edge pair.
     assert!(document.signals.is_empty());
     assert!(document.roles.is_empty());
     let go = document
@@ -157,7 +149,6 @@ fn react_trpg_turn_round_trips_preset_ir() {
         .expect("natural-language lane edge");
     assert_eq!(nogo.kind, WorkflowEdgeKind::Nogo);
 
-    // Both lanes export the narration text; the owning inner step carries it.
     assert_eq!(
         output_binding(document, "mechanical_graph/receipt_narration"),
         Some("receipt_narration.text")
@@ -167,7 +158,6 @@ fn react_trpg_turn_round_trips_preset_ir() {
         Some("receipt_narration.text")
     );
 
-    // The player response point stays a manual exit (no automatic transition).
     let wait = document
         .nodes
         .iter()

@@ -1,5 +1,4 @@
 /**
- * Brief flow tests (plan v1219-world-module T2) — empty state → inline
  * editor → saved card over the World app surface, locking the acceptance
  * contract:
  *
@@ -56,7 +55,6 @@ function graph(entities: WorldKbEntityProjection[]): WorldKbGraphResponse {
   return { entities, source_anchors: [], relationships: [] };
 }
 
-// Promise.withResolvers is unavailable at the current tsconfig lib — local
 // equivalent until the lib target reaches es2024.
 function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -100,7 +98,6 @@ function renderWorld(
 const BRIEF_TEXT = '一个魔法正在消亡的低魔奇幻世界';
 
 /**
- * Read the new Brief text off a patch request — create patches carry it as
  * `title`, edit patches as the merged `body.attributes.world_summary`.
  */
 function patchSummary(request: {
@@ -152,13 +149,11 @@ describe('Brief flow — empty state → editor', () => {
     await user.click(screen.getByTestId('world-brief-create'));
     const editor = await screen.findByTestId('world-brief-editor');
     expect(editor).toBeInTheDocument();
-    // T3 fix: the side checklist stays mounted while editing.
     expect(screen.getByTestId('world-side-checklist')).toBeInTheDocument();
     expect(screen.getByTestId('world-brief-input')).toHaveAttribute(
       'placeholder',
       '一个魔法正在消亡的低魔奇幻世界……',
     );
-    // 取消 unmounts the editor back to the empty state.
     await user.click(screen.getByTestId('world-brief-cancel'));
     expect(screen.getByTestId('world-brief-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('world-brief-editor')).not.toBeInTheDocument();
@@ -175,7 +170,6 @@ describe('Brief flow — empty state → editor', () => {
     expect(save).toBeDisabled();
     await user.type(screen.getByTestId('world-brief-input'), '魔法');
     expect(save).toBeEnabled();
-    // Validation is silent — no error surface at all.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
@@ -198,7 +192,6 @@ describe('Brief flow — create save', () => {
     const card = await screen.findByTestId('world-brief-card');
     expect(card).toHaveTextContent(BRIEF_TEXT);
     expect(await screen.findByTestId('world-brief-tag')).toHaveTextContent('BRIEF · 刚刚');
-    // The unlock follow-up card + toast render on success.
     expect(screen.getByTestId('world-brief-ready')).toHaveTextContent('世界已就绪');
     expect(screen.getByTestId('world-brief-ready')).toHaveTextContent(
       '「作品」模块已解锁——创建一个作品，开始在这个世界里写作。',
@@ -220,7 +213,6 @@ describe('Brief flow — create save', () => {
     expect(patch.title).toBe(BRIEF_TEXT);
     expect(patch.block_type).toBe('era');
     expect(patch.body.attributes.world_summary).toBe(BRIEF_TEXT);
-    // The editor is gone — the card replaced it without a reload.
     expect(screen.queryByTestId('world-brief-editor')).not.toBeInTheDocument();
   });
 
@@ -272,10 +264,8 @@ describe('Brief flow — save failure', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Brief 保存失败：boom。草稿已保留，可直接重试。');
-    // Editor stays mounted with the draft intact.
     expect(input).toHaveValue(BRIEF_TEXT);
 
-    // Retry with the draft intact succeeds.
     await user.click(screen.getByTestId('world-brief-save'));
     expect(await screen.findByTestId('world-brief-card')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -430,7 +420,6 @@ describe('Brief flow — no flash / no lost rows (fix round 1)', () => {
         body: { attributes: { world_summary: BRIEF_TEXT } },
       }),
     ]);
-    // First read resolves immediately; the post-save invalidation refetch
     // stays pending until the test releases it.
     let releaseRefetch: (g: WorldKbGraphResponse) => void = () => {};
     let read = 0;
@@ -449,7 +438,6 @@ describe('Brief flow — no flash / no lost rows (fix round 1)', () => {
     await user.click(screen.getByTestId('world-brief-save'));
 
     await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
-    // The editor is still mounted and the empty state never flashes — save
     // does not leave edit mode until the awaited graph refetch resolves.
     expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
     expect(screen.queryByTestId('world-brief-empty')).not.toBeInTheDocument();
@@ -519,14 +507,12 @@ describe('Brief flow — T3 checklist + Brief→Work unlock', () => {
     await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
     await user.click(screen.getByTestId('world-brief-save'));
 
-    // Persisted per creator; only `work` is written — no other unlock events.
     expect(window.localStorage.getItem(`nexus-activation:${CREATOR}`)).toBe(
       JSON.stringify({ work: true }),
     );
     expect(isUnlocked(CREATOR, 'work')).toBe(true);
     expect(isUnlocked(CREATOR, 'session')).toBe(false);
 
-    // Checklist: ① done, ② next, 进度 1 / 3.
     expect(await screen.findByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
     expect(screen.getByTestId('world-checklist-step-1')).toHaveClass('line-through');
     expect(screen.getByTestId('world-checklist-step-2')).toHaveClass('font-medium');
@@ -554,7 +540,6 @@ describe('Brief flow — T3 checklist + Brief→Work unlock', () => {
       `/worlds/${WORLD_ID}`,
       { activeCreatorId: CREATOR },
     );
-    // The unlock persisted across the reload — the rail/store sees it.
     expect(isUnlocked(CREATOR, 'work')).toBe(true);
   });
 
@@ -567,7 +552,6 @@ describe('Brief flow — T3 checklist + Brief→Work unlock', () => {
 
     expect(await screen.findByTestId('world-brief-card')).toBeInTheDocument();
     expect(screen.queryByTestId('world-brief-ready')).not.toBeInTheDocument();
-    // The checklist still reflects the saved Brief.
     expect(screen.getByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
   });
 });
@@ -588,7 +572,6 @@ describe('Brief flow — T3 fix round 1', () => {
         }),
       ]),
     };
-    // Work already unlocked for this creator (Brief saved earlier).
     window.localStorage.setItem(`nexus-activation:${CREATOR}`, JSON.stringify({ work: true }));
     const patchEntity = vi.fn(
       (_: string, request: { patch: { title?: string; body?: { attributes?: Record<string, unknown> } } }) => {
@@ -622,7 +605,6 @@ describe('Brief flow — T3 fix round 1', () => {
     expect(
       screen.queryByText('✅ Brief 已保存——「作品」模块已解锁'),
     ).not.toBeInTheDocument();
-    // The checklist stays at the saved-Brief state throughout.
     expect(screen.getByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
   });
 
@@ -647,7 +629,6 @@ describe('Brief flow — T3 fix round 1', () => {
       },
     );
 
-    // Locked first: a disabled button, not a link.
     const locked = await screen.findByTestId('rail-item-work');
     expect(locked.tagName).toBe('BUTTON');
     expect(locked).toHaveAttribute('aria-disabled', 'true');
@@ -657,7 +638,6 @@ describe('Brief flow — T3 fix round 1', () => {
     await user.click(screen.getByTestId('world-brief-save'));
     await screen.findByTestId('world-brief-card');
 
-    // The rail re-renders unlocked: a clickable NavLink, no lock styling.
     await waitFor(() =>
       expect(screen.getByTestId('rail-item-work').tagName).toBe('A'),
     );
@@ -723,7 +703,6 @@ describe('Brief flow — QC fix wave', () => {
     };
     expect(request.entity_id).toBe('kb-era-1');
     expect(request.expected_version).toBe(3);
-    // The title is not rewritten on edit; the body is merged, not replaced.
     expect(request.patch.title).toBeUndefined();
     expect(request.patch.block_type).toBeUndefined();
     expect(request.patch.body.attributes.world_summary).toBe('魔法回归的世界');
@@ -764,7 +743,6 @@ describe('Brief flow — QC fix wave', () => {
     const patchEntity = vi
       .fn()
       .mockImplementationOnce((_w: string, _r: unknown) => {
-        // The concurrent write lands; the invalidation refetch must see v2.
         graphRef.current = eraV2(BRIEF_TEXT);
         return Promise.reject(conflict());
       })
@@ -776,7 +754,6 @@ describe('Brief flow — QC fix wave', () => {
             patch: { body?: { attributes?: Record<string, unknown> } };
           },
         ) => {
-          // Without the graph refresh the retry would still pin version 1 and
           // re-fail deterministically.
           if (request.expected_version !== 2) return Promise.reject(conflict());
           graphRef.current = eraV2(patchSummary({ patch: request.patch }));
@@ -791,13 +768,11 @@ describe('Brief flow — QC fix wave', () => {
     await user.type(input, '魔法回归的世界');
     await user.click(screen.getByTestId('world-brief-save'));
 
-    // Inline failure copy; the editor stays mounted with the draft.
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Brief 保存失败：conflict。草稿已保留，可直接重试。',
     );
     expect(screen.getByTestId('world-brief-input')).toHaveValue('魔法回归的世界');
 
-    // Retry — now backed by the refreshed revision.
     await user.click(screen.getByTestId('world-brief-save'));
     expect(await screen.findByTestId('world-brief-card')).toHaveTextContent('魔法回归的世界');
     expect(patchEntity).toHaveBeenCalledTimes(2);
@@ -818,7 +793,6 @@ describe('Brief flow — QC fix wave', () => {
         body: { attributes: { world_summary: BRIEF_TEXT } },
       }),
     ]);
-    // The post-save invalidation refetch stays pending until released.
     let releaseRefetch: (g: WorldKbGraphResponse) => void = () => {};
     let read = 0;
     const graphFn = () => {
@@ -840,7 +814,6 @@ describe('Brief flow — QC fix wave', () => {
     await user.click(screen.getByTestId('world-brief-save'));
 
     await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
-    // The refetch is still pending (editor mounted) — yet the unlock is
     // already persisted and announced.
     expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
     expect(isUnlocked(CREATOR, 'work')).toBe(true);
@@ -885,14 +858,12 @@ describe('Brief flow — QC fix wave', () => {
     const input = await screen.findByTestId('world-brief-input');
     expect(input).toHaveValue(BRIEF_TEXT);
 
-    // The era vanishes from the graph mid-edit.
     graphRef.current = graph([]);
     await qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(WORLD_ID) });
     await waitFor(() =>
       expect(screen.queryByTestId('world-brief-card')).not.toBeInTheDocument(),
     );
 
-    // The editor survives on the snapshot — the save is still an OCC patch,
     // not a silent create.
     expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
     expect(screen.getByTestId('world-brief-input')).toHaveValue(BRIEF_TEXT);

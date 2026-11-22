@@ -150,7 +150,6 @@ pub fn run(command: PolicyCommand) -> Result<()> {
     Ok(())
 }
 
-// Helper to expose policy_path publicly
 fn get_policy_path(workspace_root: &std::path::Path) -> PathBuf {
     workspace_root.join(".nexus42").join("permissions.toml")
 }

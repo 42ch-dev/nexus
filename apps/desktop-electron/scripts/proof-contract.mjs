@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * P3-T3 runtime-evidence contract — the single authority shared by the runtime
  * driver (`proof-runtime.mjs`) and the package/decision gates.
  *
  * Two consumers, one definition: the driver uses it to decide whether a run may
@@ -129,7 +128,6 @@ function sameSummary(a, b) {
 }
 
 /**
- * Read `count` raw observations of `valueKey` (or the entry itself when
  * `valueKey` is null) from an array, requiring every value to be finite.
  */
 function readRawSamples(root, path, count, valueKey, reasons) {
@@ -243,7 +241,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
     };
   }
 
-  // --- canonical run metadata (C5) ------------------------------------------
   // Only an exact canonical run may gate, and the document has to say so. A
   // diagnostic document that happens to carry canonical-shaped observations is
   // still not canonical evidence.
@@ -260,7 +257,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
     return { state: 'malformed', reasons: ['runtime evidence carries no checks'], detail: {} };
   }
 
-  // --- completeness: exact phase set, exact check ID set, raw observations ----
   const phases = Array.isArray(doc.phases_executed) ? [...doc.phases_executed].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) : [];
   const expectedPhases = [...REQUIRED_PHASES].sort();
   if (phases.join(',') !== expectedPhases.join(',')) {
@@ -277,7 +273,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
 
   validateRawObservations(doc, reasons);
 
-  // --- provenance binding (I9) ----------------------------------------------
   const provenance = doc.provenance ?? {};
   for (const field of REQUIRED_PROVENANCE_FIELDS) {
     if (provenance[field] === undefined || provenance[field] === null || provenance[field] === '') {
@@ -294,7 +289,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
   }
   const recordedConfounders = Array.isArray(doc.validity?.confounders) ? doc.validity.confounders : null;
 
-  // Provenance is checked before validity: evidence measured against a different
   // artifact or revision is stale no matter how the run itself went. The
   // document's own confounders travel with the verdict so nothing is lost.
   if (mismatches.length > 0) {
@@ -305,7 +299,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
     };
   }
 
-  // --- validity: confounded runs are not product results (C6) ----------------
   // Any confounder — recorded, or implied by a non-LaunchServices launch method
   // — makes the run non-product *regardless* of the boolean the document asserts.
   // A document claiming `valid: true` alongside a direct launch or a non-empty
@@ -346,7 +339,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
     return { state: 'incomplete', reasons, detail: { phases_executed: phases } };
   }
 
-  // --- terminal verdicts, with the document's own status required to agree ----
   const byId = new Map(doc.checks.map((check) => [check.id, check]));
   const failed = [...byId.values()].filter((check) => check.ok !== true).map((check) => check.id);
   if (failed.length > 0) {
@@ -426,7 +418,6 @@ export function providerLifecycleComplete(op) {
   );
 }
 
-// --- artifact identity ------------------------------------------------------
 
 /** SHA-256 of one file, as lowercase hex. */
 export function sha256File(path) {

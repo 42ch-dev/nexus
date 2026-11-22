@@ -160,7 +160,6 @@ async fn handle_set(
     principal: &Principal,
     args: &MomentDirectiveSetArgs,
 ) -> Result<String> {
-    // ── Flag mapping (spec §3.1 / §3.3 "Write") ─────────────────────────
     let body = args.body.trim();
     if body.is_empty() {
         return Err(CliError::Config(
@@ -190,7 +189,6 @@ async fn handle_set(
         .await
         .map_err(map_core_error)?;
 
-    // `set` writes a row, so the core answers the `Directive` branch; the
     // empty branch would mean the settled row could not be decoded.
     let MomentDirectiveResponse::Directive {
         directive_id,
@@ -545,7 +543,6 @@ mod tests {
             let db_path = workspace_state_db_path(&user_home, &creator_id, WORKSPACE_SLUG);
             release_retained_writer_guards(&db_path);
 
-            // A `works` row with no bound World: the core refuses to *create*
             // one (V1.40+), but stored rows from that path still exist, and the
             // `--world` scope must refuse them rather than write a directive no
             // assembly could inject.
@@ -563,7 +560,6 @@ mod tests {
             }
             release_retained_writer_guards(&db_path);
 
-            // The core resolves workspace files against the operational
             // `meta.json` `local_root` (the same key the workspace
             // registration writes); the Work directory needs it.
             let creative_root = user_home.join("creative");
@@ -664,8 +660,6 @@ mod tests {
         }
     }
 
-    // ── Handler round trip: set → show → clear → show ─────────────────
-
     /// The three verbs map onto the three typed actions: `set` writes the
     /// trimmed body for the resolved (implicit) Work scope, `show` reads the
     /// effective row, and `clear` soft-deletes it — the next `show` reports
@@ -681,7 +675,6 @@ mod tests {
         );
         args.clear_on_scene_change = true;
 
-        // set — no --work: the active Work resolves implicitly.
         let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
         assert!(
             set.contains(&format!("✓ Moment Directive set for work {}", env.work_id)),
@@ -691,7 +684,6 @@ mod tests {
         assert!(set.contains("ttl: 5 generations"), "{set}");
         assert!(set.contains("clear_on_scene_change: yes"), "{set}");
 
-        // show — the Work's own row is the effective directive.
         let show = handle_show(&env.core, &env.principal, &scope_args(None, None))
             .await
             .unwrap();
@@ -713,7 +705,6 @@ mod tests {
             "the body is trimmed at write: {show}"
         );
 
-        // clear — soft-delete, then show reports none.
         let clear = handle_clear(&env.core, &env.principal, &scope_args(None, None))
             .await
             .unwrap();
@@ -726,7 +717,6 @@ mod tests {
             .unwrap();
         assert_eq!(after, "No active Moment Directive for this scope.");
 
-        // … and the cleared row is retained, not hard-deleted.
         let pool = env.pool().await;
         let row = get_active_for_work(&pool, &env.creator_id, &env.work_id)
             .await
@@ -752,7 +742,6 @@ mod tests {
     async fn implicit_work_resolution_falls_back_to_works_status_when_the_pool_is_empty() {
         let env = Env::new().await;
 
-        // Premise: the fixture's pool carries no `active` entry at all, so the
         // pool step alone cannot resolve anything here.
         let pool_page = env
             .core
@@ -772,7 +761,6 @@ mod tests {
             pool_page.entries.len()
         );
 
-        // Premise: the Work is the `status = active` row the fallback step
         // selects.
         let works_page = env
             .core
@@ -792,7 +780,6 @@ mod tests {
             "fixture premise: the Works selection is what the fallback reads"
         );
 
-        // The implicit resolution lands on that Work instead of refusing.
         let resolved = active_work_id_core(&env.core, &env.principal)
             .await
             .unwrap();
@@ -843,7 +830,6 @@ mod tests {
         assert!(show.contains("TTL: 4 remaining (chapters)"), "{show}");
         assert!(show.contains("British spelling always."), "{show}");
 
-        // The World scope itself is what `--world` selects, no Work needed.
         let direct = handle_show(
             &env.core,
             &env.principal,
@@ -878,7 +864,6 @@ mod tests {
             "a World override needs a bound World, got: {err}"
         );
 
-        // The Work scope itself still writes for that stored row.
         args.world = false;
         let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
         assert!(
@@ -1012,8 +997,6 @@ mod tests {
         .unwrap_err();
         assert!(format!("{err}").contains("mutually exclusive"), "{err}");
     }
-
-    // ── MCA injection journey through the core-owned directive store ───
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1155,7 +1138,6 @@ mod tests {
             .with_creator("ctr_test")
             .with_event("evt_e2e");
 
-        // First assemble: the directive injects and its TTL drops to 0.
         let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert_eq!(
             ctx.moment_directive.as_deref(),
@@ -1167,7 +1149,6 @@ mod tests {
         assert_eq!(row.ttl_remaining, 0);
         assert_eq!(row.status, "expired");
 
-        // Second assemble: the directive is gone (TTL-0 ⇒ no injection) and
         // the output is byte-identical to the no-directive path (AC-I1b).
         let ctx2 = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert!(ctx2.moment_directive.is_none());
@@ -1181,7 +1162,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn assemble_ttl_three_injects_exactly_three_then_stops() {
-        // V1.150 P2 dogfood (T4): `--ttl-generations 3` ⇒ the directive
         // injects on exactly 3 `assemble_moment` calls, then stops. Counting
         // one generation = one injecting assemble (spec §3.3).
         use nexus_moment_context_assembly::{
@@ -1232,7 +1212,6 @@ mod tests {
             .with_creator("ctr_test")
             .with_event("evt_e2e");
 
-        // Calls 1–3: the directive injects and the TTL counts down 3→2→1.
         for expected_remaining in [2, 1, 0] {
             let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
             assert_eq!(
@@ -1244,11 +1223,9 @@ mod tests {
             let row = get_by_id(&pool, "dir_ttl3").await.unwrap().unwrap();
             assert_eq!(row.ttl_remaining, expected_remaining);
         }
-        // After the 3rd injection the TTL is 0 → row expired.
         let expired = get_by_id(&pool, "dir_ttl3").await.unwrap().unwrap();
         assert_eq!(expired.status, "expired");
 
-        // Call 4: no injection (expired rows never inject, spec §3.3).
         let ctx4 = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert!(
             ctx4.moment_directive.is_none(),

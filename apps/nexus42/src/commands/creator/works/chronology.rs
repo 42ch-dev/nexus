@@ -21,8 +21,6 @@ use clap::Subcommand;
 use crate::config::{self, CliConfig};
 use crate::errors::{CliError, Result};
 
-// ── Clap subcommand definitions (spec §2.2) ──────────────────────────────
-
 /// `creator works chronology` subcommand group (spec §2.2).
 #[derive(Debug, Subcommand)]
 pub enum ChronologyCommand {
@@ -68,8 +66,6 @@ pub enum ChronologyCommand {
         json: bool,
     },
 }
-
-// ── Dispatcher + handlers ────────────────────────────────────────────────
 
 /// Dispatch `creator works chronology` subcommands.
 ///
@@ -278,8 +274,6 @@ async fn handle_advance(
     }
     Ok(())
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 /// SAFETY label for infallible `writeln!`/`write!` into a `String` (no IO).
 const WRITE_OK: &str = "write to String is infallible";

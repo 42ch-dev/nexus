@@ -1,4 +1,6 @@
 //! The embedding identity tuple and its mismatch evidence.
+//!
+//! see docs/specs/runtime/embedding-readiness.md.
 
 /// One component of [`EmbeddingIdentity`]. Mismatch evidence names the
 /// component(s) that changed so operators see *why* a rebuild is required.

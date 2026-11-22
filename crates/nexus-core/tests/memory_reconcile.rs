@@ -385,8 +385,6 @@ fn journalled_target(targets_json: &str) -> String {
         .to_string()
 }
 
-// ── Window (a): a crash before the journal commit ───────────────────────
-
 /// The journal commit is the point of no return. A crash before it leaves no
 /// effect at all — no row, no receipt, no file — and the idempotency key is
 /// still free, so the retry performs the operation for the first time.
@@ -406,7 +404,6 @@ async fn crash_before_journal_commit_leaves_no_effect_and_frees_the_key() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     assert_eq!(retry_class(&lost), "uncertain");
 
-    // Nothing was journaled, staged or published.
     assert_eq!(files_under(&root), Vec::<String>::new());
     let listed = wire(
         &provider
@@ -419,7 +416,6 @@ async fn crash_before_journal_commit_leaves_no_effect_and_frees_the_key() {
 
     drop(provider);
     let provider = open_provider(&env).await;
-    // The recovery pass has nothing to settle, and the retry is a first effect.
     assert_eq!(files_under(&root), Vec::<String>::new());
     let created = wire(
         &provider
@@ -436,8 +432,6 @@ async fn crash_before_journal_commit_leaves_no_effect_and_frees_the_key() {
     );
     assert_eq!(served["record"]["content"]["text"], TEXT);
 }
-
-// ── Window (b): a crash after the journal commit ────────────────────────
 
 /// After the journal commit the SQL effect is durable and recoverable. Until
 /// the intent is settled, the subject's objects are withheld from recall/list/get
@@ -460,7 +454,6 @@ async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
 
-    // §5.2 step 2: the receipt is durable at the point of no return, but the
     // pending window reports the pending state — and the read-only receipt
     // channel never settles the intent itself (MEM-R011).
     let receipt_id = receipt_id_of_key(&env, "k-post-commit").await;
@@ -472,7 +465,6 @@ async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     assert_eq!(error_code(&read), "OUTCOME_UNCERTAIN");
     assert_eq!(retry_class(&read), "uncertain");
 
-    // D-10 isolation: no half-committed content is readable while recovering.
     let record_id = only_record_id(&env).await;
     let withheld = wire(
         &provider
@@ -490,7 +482,6 @@ async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     assert_eq!(recalled["total_authorized"], 0);
     assert_eq!(files_under(&root), Vec::<String>::new());
 
-    // §5.2 step 2/S-2: the replay settles the journaled intent — it publishes
     // the planned target and only then terminalizes the receipt.
     let replayed = wire(
         &provider
@@ -519,7 +510,6 @@ async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     );
     assert_eq!(read_receipt(&read), replayed);
 
-    // A reopen finds the settled intent and leaves the published file alone.
     drop(provider);
     let provider = open_provider(&env).await;
     assert_eq!(files_under(&root), vec![format!("records/{record_id}.md")]);
@@ -558,7 +548,6 @@ async fn crash_after_staging_is_published_from_the_staged_file() {
         staged[0].contains(".staged"),
         "the staged file stays hidden until publish: {staged:?}"
     );
-    // S-1: quarantined immediately, with the payload kept for the re-drive.
     assert_eq!(journal_states(&env).await, vec!["quarantined"]);
     let record_id = only_record_id(&env).await;
     let withheld = wire(
@@ -602,7 +591,6 @@ async fn crash_after_publish_marks_the_intent_applied() {
             .await,
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
-    // The file is published but the intent is not settled — and it is recorded
     // as quarantined until a pass re-drives it.
     assert_eq!(journal_states(&env).await, vec!["quarantined"]);
     let record_id = only_record_id(&env).await;
@@ -685,7 +673,6 @@ async fn conflicting_target_is_quarantined_and_the_subject_reads_terminal() {
     );
     let record_id = only_record_id(&env).await;
 
-    // A different writer left bytes at the planned target.
     let target = root.join(format!("records/{record_id}.md"));
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "content this intent never produced").unwrap();
@@ -712,7 +699,6 @@ async fn conflicting_target_is_quarantined_and_the_subject_reads_terminal() {
         assert_eq!(error_code(&body), "INTERNAL_ERROR");
         assert_eq!(retry_class(&body), "terminal");
     }
-    // §5.2/D-10 disclosure: the terminal refusal names the subject, so it is
     // reserved for authorized readers. An unauthorized probe learns nothing —
     // not that the record exists, not which subject it belongs to.
     let probed = wire(
@@ -730,8 +716,6 @@ async fn conflicting_target_is_quarantined_and_the_subject_reads_terminal() {
     );
 }
 
-// ── The three file-effect seams ─────────────────────────────────────────
-
 /// Every content seam produces its projection: record create/promote, candidate
 /// consumption (the content-free audit shell) and profile authoring.
 #[tokio::test]
@@ -741,7 +725,6 @@ async fn all_three_seams_publish_their_projections() {
     ensure(&provider).await;
     let root = provider.file_root();
 
-    // capture → review(promote): a record projection plus the consumed shell.
     let captured = wire(
         &provider
             .capture(&admin(), capture_request("k-capture"))
@@ -771,7 +754,6 @@ async fn all_three_seams_publish_their_projections() {
         "the consumed shell is content-free: {shell_file}"
     );
 
-    // profile.update: the authored document becomes its own projection.
     wire(
         &provider
             .update_profile(
@@ -790,7 +772,6 @@ async fn all_three_seams_publish_their_projections() {
     assert!(profile_file.contains("profile_kind: personality"));
     assert!(profile_file.contains("Steady."));
 
-    // dismiss: the shell is projected, and no record is produced.
     let captured = wire(
         &provider
             .capture(&admin(), capture_request("k-capture-2"))
@@ -816,8 +797,6 @@ async fn all_three_seams_publish_their_projections() {
         "a dismissal produces no record projection"
     );
 }
-
-// ── C1: a committed version publishes over its own predecessor ──────────
 
 /// A crash after the commit of an **update** leaves the previous legitimate
 /// version at the target. Recovery must recognise it as the intent's recorded
@@ -966,8 +945,6 @@ async fn profile_crash_publishes_over_the_previous_document() {
     );
 }
 
-// ── C2: publish never overwrites foreign bytes, and orders per target ────
-
 /// The normal publish path refuses a target holding content the intent never
 /// produced: the effect commit stands, the bytes stay, and recovery later
 /// quarantines the subject rather than clobbering the target.
@@ -1101,7 +1078,6 @@ async fn committed_updates_publish_in_commit_order() {
     let second = receipt(&second);
     assert_eq!(second["result"]["revision"], 3);
 
-    // B settled A's unsettled predecessor inline, so A is terminal too.
     let pool = store_pool(&env).await;
     let (first_status,): (String,) =
         sqlx::query_as("SELECT status FROM memory_receipts WHERE idempotency_key = ?")
@@ -1135,8 +1111,6 @@ async fn committed_updates_publish_in_commit_order() {
     assert_eq!(served["record"]["content"]["text"], THIRD);
     assert_eq!(served["record"]["revision"], 3);
 }
-
-// ── C3: a settled intent retains no projection content ──────────────────
 
 /// A settled intent must not keep the body it published: after create →
 /// delete — before and after a restart — the journal holds no record text, and
@@ -1217,8 +1191,6 @@ async fn settled_intents_do_not_retain_projection_content() {
     assert!(!published.contains(TEXT));
 }
 
-// ── C4: post-commit settle failures are uncertain, never retryable ───────
-
 /// Both failure modes of the post-commit settlement (its transaction never
 /// opens / its write fails) leave the effect committed, so the caller learns
 /// `OUTCOME_UNCERTAIN` — never a retryable `INTERNAL_ERROR`.
@@ -1236,7 +1208,6 @@ async fn assert_settle_failure_is_uncertain(before_write: bool) {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     assert_eq!(retry_class(&lost), "uncertain");
 
-    // The effect committed and the next open settles the pending intent.
     drop(provider);
     let provider = open_provider(&env).await;
     assert_eq!(journal_states(&env).await, vec!["applied"]);
@@ -1274,7 +1245,6 @@ async fn settle_failure_on_the_replay_branch_is_uncertain() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // The first call commits its effect, then its settlement fails.
     provider.inject_settle_fault(true);
     let lost = wire(
         &provider
@@ -1283,7 +1253,6 @@ async fn settle_failure_on_the_replay_branch_is_uncertain() {
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
 
-    // The replay finds the pending receipt and re-drives it; this settlement
     // fails the same way.
     provider.inject_settle_fault(true);
     let replayed = wire(
@@ -1299,7 +1268,6 @@ async fn settle_failure_on_the_replay_branch_is_uncertain() {
         "the failed replay settlement left the intent recoverable, not applied"
     );
 
-    // Nothing was rolled back: the next open settles the intent and the replay
     // serves the committed receipt.
     drop(provider);
     let provider = open_provider(&env).await;
@@ -1317,8 +1285,6 @@ async fn settle_failure_on_the_replay_branch_is_uncertain() {
     );
     assert_eq!(record["record"]["content"]["text"], TEXT);
 }
-
-// ── C5: quarantine is not a disclosure channel ──────────────────────────
 
 /// A quarantined candidate answers the terminal refusal to a reader that may
 /// see it, and is indistinguishable from any absent candidate for one that may
@@ -1376,8 +1342,6 @@ async fn quarantined_candidate_is_invisible_to_unauthorized_probers() {
     assert_eq!(error_code(&probed), "NOT_FOUND");
     assert_eq!(error_details(&probed), error_details(&unknown));
 }
-
-// ── C6: a bounded pass leaves nothing silently pending ──────────────────
 
 /// More unsettled intents than one pass settles: the pass keeps its bound, the
 /// leftovers read terminally instead of looking like absence, and the next open
@@ -1447,8 +1411,6 @@ async fn overflow_beyond_the_bounded_pass_reads_terminal_then_recovers() {
     assert_eq!(listed["total_authorized"], count);
 }
 
-// ── NF4: a bounded pass advances past a head that keeps conflicting ─────
-
 /// 65 quarantined intents, the first 64 conflicting forever: a pass that always
 /// restarts at the oldest unsettled intent retries the same 64 by `seq` and the
 /// 65th is never selected — resolving only its target never gets it recovered.
@@ -1479,13 +1441,11 @@ async fn a_bounded_pass_advances_past_persistently_conflicting_heads() {
         .map(|journaled| journalled_target(journaled))
         .collect();
     assert_eq!(targets.len(), count);
-    // Every target conflicts: no intent can settle yet.
     std::fs::create_dir_all(root.join("records")).unwrap();
     for path in &targets {
         std::fs::write(root.join(path), "a writer this provider does not own").unwrap();
     }
 
-    // Pass 1 settles the first 64 and defers the one the bound did not reach.
     drop(provider);
     let provider = open_provider(&env).await;
     let states = journal_states(&env).await;
@@ -1503,7 +1463,6 @@ async fn a_bounded_pass_advances_past_persistently_conflicting_heads() {
         "the intent the bound did not reach is deferred, not silently dropped: {states:?}"
     );
 
-    // Pass 2 reaches the deferred one; it conflicts too, so all 65 are now
     // quarantined behind each other.
     drop(provider);
     let provider = open_provider(&env).await;
@@ -1517,7 +1476,6 @@ async fn a_bounded_pass_advances_past_persistently_conflicting_heads() {
         "the whole quarantine is settled-as-failed before the head is resolved"
     );
 
-    // Only the 65th's conflict is resolved; the head still conflicts.
     std::fs::remove_file(root.join(&targets[count - 1])).unwrap();
     drop(provider);
     let provider = open_provider(&env).await;
@@ -1546,8 +1504,6 @@ async fn a_bounded_pass_advances_past_persistently_conflicting_heads() {
     assert_eq!(error_code(&listed), "INTERNAL_ERROR");
     assert_eq!(retry_class(&listed), "terminal");
 }
-
-// ── F2: a later publication never overtakes an unsettled predecessor ────
 
 /// A create that stops after staging owns a target nothing has written yet
 /// (`row + journal + hidden staged file`, no target). A later delete of that
@@ -1683,8 +1639,6 @@ async fn an_unsettleable_predecessor_refuses_the_later_write() {
     assert_eq!(deletes, 0, "a refused write leaves no receipt");
 }
 
-// ── NF2: the swap's own crash window is recoverable ─────────────────────
-
 /// The window the rename-first protocol opened: the deleted body was displaced
 /// into the receipt's scratch sibling and the tombstone never linked. Recovery
 /// must finish the intent — and the superseded body must not survive as a
@@ -1714,7 +1668,6 @@ async fn a_deletion_crash_inside_the_swap_leaves_no_body_behind() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     let receipt_id = receipt_id_of_key(&env, "k-swap-delete").await;
 
-    // The crash instant: the body was displaced to its scratch sibling, the
     // tombstone stayed in the staged file, and the target is gone.
     let scratch = root.join(format!("records/.{record_id}.md.{receipt_id}.prior"));
     std::fs::rename(&target, &scratch).unwrap();
@@ -1739,8 +1692,6 @@ async fn a_deletion_crash_inside_the_swap_leaves_no_body_behind() {
     );
     assert!(served["record"]["tombstone"].is_object(), "{served}");
 }
-
-// ── F1: a failed cleanup leaves the intent unsettled, never applied ──────
 
 /// The state an install that linked the tombstone but could not unlink its
 /// verified predecessor leaves: the new projection at the target, the deleted
@@ -1772,7 +1723,6 @@ async fn a_failed_scratch_cleanup_is_settled_by_the_next_pass() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     let receipt_id = receipt_id_of_key(&env, "k-cleanup-delete").await;
 
-    // The crash instant: the body is still at the target, the tombstone in the
     // staged file. The failed install linked the tombstone at the target and
     // kept the body at its scratch name; the intent is still pending.
     let staged_path = root.join(format!("records/.{record_id}.md.{receipt_id}.staged"));
@@ -1802,8 +1752,6 @@ async fn a_failed_scratch_cleanup_is_settled_by_the_next_pass() {
     assert!(served["record"]["tombstone"].is_object(), "{served}");
 }
 
-// ── NF3: settlement never precedes authorization or the dedup probe ──────
-
 /// Predecessor settlement is not admission. A caller without `records_write`
 /// gets the same refusal it gets for a clear target — never another intent's
 /// receipt id and state, and never a settlement write it did not authorize.
@@ -1827,7 +1775,6 @@ async fn an_unauthorized_update_never_learns_of_the_unsettled_predecessor() {
     );
     let clear_id = record_id_of(receipt(&clear));
 
-    // An intent on A's own target that can never settle: the target holds bytes
     // no intent produced.
     provider.inject_commit_fault(true);
     let blocked_commit = wire(
@@ -1904,7 +1851,6 @@ async fn a_replay_reaches_its_own_receipt_past_a_later_unsettled_intent() {
         .to_string();
     assert_eq!(committed["result"]["revision"], 2);
 
-    // A later intent owns the same target and cannot settle there.
     provider.inject_commit_fault(true);
     let blocker = wire(
         &provider
@@ -1928,8 +1874,6 @@ async fn a_replay_reaches_its_own_receipt_past_a_later_unsettled_intent() {
     );
     assert_eq!(replayed["result"]["revision"], 2);
 }
-
-// ── F3: quarantine preserves recovery evidence and terminates ────────────
 
 /// Quarantine is not a dead end. The intent keeps the payload a re-drive
 /// republishes, its receipt records the failure terminally instead of answering
@@ -1962,7 +1906,6 @@ async fn quarantined_intent_keeps_its_payload_and_redrives_once_resolved() {
         "a quarantined intent keeps the projection it still owes"
     );
 
-    // No channel reports a quarantined intent as pending forever.
     let pool = store_pool(&env).await;
     let (status,): (String,) =
         sqlx::query_as("SELECT status FROM memory_receipts WHERE receipt_id = ?")
@@ -2010,7 +1953,6 @@ async fn quarantined_intent_keeps_its_payload_and_redrives_once_resolved() {
     );
     assert_eq!(error_code(&view), "INTERNAL_ERROR");
     assert_eq!(retry_class(&view), "terminal");
-    // Repeating the key cannot settle it; the journal re-drives without us.
     let replay = wire(
         &provider
             .create_record(&admin(), record_create_request("k-redrive", TEXT))
@@ -2019,7 +1961,6 @@ async fn quarantined_intent_keeps_its_payload_and_redrives_once_resolved() {
     assert_eq!(error_code(&replay), "INTERNAL_ERROR");
     assert_eq!(retry_class(&replay), "terminal");
 
-    // The operator resolves the conflict; the next pass republishes the intent.
     std::fs::remove_file(&target).unwrap();
     drop(provider);
     let provider = open_provider(&env).await;
@@ -2048,8 +1989,6 @@ async fn quarantined_intent_keeps_its_payload_and_redrives_once_resolved() {
     assert_eq!(served["record"]["content"]["text"], TEXT);
 }
 
-// ── F4: terminal states outrank a pending one for the same subject ───────
-
 /// A quarantined subject that later acquires another pending intent still reads
 /// terminally: the terminal diagnosis is never masked into silent absence.
 #[tokio::test]
@@ -2073,7 +2012,6 @@ async fn terminal_state_outranks_pending_for_the_same_subject() {
     let provider = open_provider(&env).await;
     assert_eq!(journal_states(&env).await, vec!["quarantined"]);
 
-    // Same subject, a second intent that stays pending (its file never lands).
     provider.inject_commit_fault(true);
     wire(
         &provider
@@ -2099,8 +2037,6 @@ async fn terminal_state_outranks_pending_for_the_same_subject() {
         assert_eq!(retry_class(&body), "terminal");
     }
 }
-
-// ── §7.21: the promotion crash window ───────────────────────────────────
 
 /// A committed placement change is projected on recovery: the target still holds
 /// the pre-promotion frame until then, and after it the file and the served row
@@ -2162,8 +2098,6 @@ async fn promote_crash_publishes_the_new_placement() {
     assert_eq!(served["record"]["revision"], 2);
 }
 
-// ── §5.2 step 2: one publication gate per workspace ─────────────────────
-
 /// The publication gate is keyed by workspace, not by provider instance: a second
 /// provider opened on the same workspace waits for the first one's
 /// settle-to-publish window instead of publishing concurrently.
@@ -2187,7 +2121,6 @@ async fn two_provider_instances_on_one_workspace_serialize_publication() {
             )
         }
     });
-    // Wait until that publication actually holds the workspace gate before the
     // second instance asks for it.
     tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
         .await
@@ -2203,7 +2136,6 @@ async fn two_provider_instances_on_one_workspace_serialize_publication() {
         }
     });
 
-    // The other instance cannot even reach its own publication while the first
     // holds the workspace gate.
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(200), &mut queued)
@@ -2256,7 +2188,6 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
             queued_on.push(Arc::new(open_provider(&env).await));
         }
 
-        // Every publication reports when it reaches its flock acquisition, and
         // all four providers feed one channel. The holder's own report lands
         // before it parks in the section, so consuming it first leaves the
         // channel empty for the queued callers.
@@ -2295,7 +2226,6 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
                 )
             }));
         }
-        // Gate first: a queued publication waits on the async gate and never
         // reaches the flock wait while the holder is parked. Under the previous
         // flock-first order each waiter reports here instead.
         assert!(
@@ -2353,7 +2283,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
         ensure(&provider).await;
         let files_root = provider.file_root();
 
-        // An exclusive flock this process's own descriptors cannot take either,
         // so every publication below really waits for it.
         let holder = std::fs::OpenOptions::new()
             .read(true)
@@ -2369,7 +2298,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
         let (report_tx, report_rx) = std::sync::mpsc::channel();
         provider.report_flock_waits(report_tx);
 
-        // The reports are read on this thread, never from the blocking pool the
         // test measures.
         for index in 0..3 {
             let caller = tokio::spawn({
@@ -2404,7 +2332,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
             );
         }
 
-        // One waiter holds one of the two workers; unrelated blocking work still
         // gets the other.
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
@@ -2418,7 +2345,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
         release_tx.send(()).expect("the probe is released");
         probe.await.expect("the probe completes");
 
-        // A later publication parks on the gate the waiter still owns — not on a
         // second waiter — and proceeds once the external holder lets go.
         let mut next = tokio::spawn({
             let provider = Arc::clone(&provider);
@@ -2493,7 +2419,6 @@ async fn another_process_holding_the_workspace_flock_blocks_publication() {
     );
     wait_for(|| held.exists(), "the child takes the workspace flock");
 
-    // The lease is the OS's, not this process's: a second descriptor cannot take
     // it either. Dropped before the publication asks for it.
     let probe = std::fs::OpenOptions::new()
         .read(true)
@@ -2581,8 +2506,6 @@ fn wait_for(ready: impl Fn() -> bool, what: &str) {
     }
 }
 
-// ── C-117: the journal migration ────────────────────────────────────────
-
 /// The journal migration applies once and the `DB_SCHEMA_VERSION` line advanced
 /// with it. Its writer admission and outbox behaviour are asserted where the
 /// behaviour happens: the per-table fence probe in `local_memory_provider.rs`
@@ -2645,7 +2568,6 @@ async fn journal_retention_prunes_only_applied_shells() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // A settled intent: the record create journals its projection, publishes
     // it and marks the entry `applied` (content scrubbed).
     let aged = wire(
         &provider
@@ -2657,7 +2579,6 @@ async fn journal_retention_prunes_only_applied_shells() {
         .expect("receipt id")
         .to_string();
 
-    // An unsettled intent at the same instant: the publish fails, so the entry
     // is `quarantined` and keeps the payload a recovery pass republishes.
     provider.inject_file_fault(false);
     let quarantined = wire(
@@ -2673,12 +2594,10 @@ async fn journal_retention_prunes_only_applied_shells() {
         "the injected publish failure is reported: {quarantined}"
     );
 
-    // Past the window: the next mutating entry's sweep reclaims the applied
     // shell and must leave the quarantined intent alone.
     provider.advance_clock(JOURNAL_RETENTION_SECONDS + 1);
     ensure(&provider).await;
 
-    // A settled intent written after the sweep is inside the window.
     let recent = wire(
         &provider
             .create_record(&admin(), record_create_request("k-journal-recent", UPDATED))

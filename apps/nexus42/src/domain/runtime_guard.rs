@@ -25,22 +25,18 @@ pub enum OperationCategory {
 /// This is the single source of truth for what requires platform.
 pub fn classify_operation(operation: &str) -> OperationCategory {
     match operation {
-        // Local-only operations (always available)
         "init" | "db" | "identity" | "daemon" | "agent" | "session" | "policy" | "runtime_mode" => {
             OperationCategory::LocalOnly
         }
 
-        // Platform-required operations (blocked in local_only)
         "sync" | "publish" | "auth_login" | "auth_register" | "context_assemble" | "explore" => {
             OperationCategory::PlatformRequired
         }
 
-        // Local with platform enhancement (available in local_only, enhanced in other modes)
         "creator" | "world" | "manuscript" | "research" => {
             OperationCategory::LocalWithPlatformEnhancement
         }
 
-        // V1.2 residual R4 (runtime, nit): fail-open default for unknown ops
         // Unknown operations fail-open (allow) as conservative default; log warning
         _ => OperationCategory::LocalOnly,
     }

@@ -52,7 +52,6 @@ fn a_judged_preset_imports_its_branch_edges_and_walks_them() {
         );
     }
 
-    // The export half closes the round trip, so the builder still sees the same outer edge.
     validate_ir_buildability(&document, IrTemplateSource::Embedded)
         .expect("the judged preset still builds from its own bundle");
 
@@ -90,7 +89,6 @@ fn the_essay_preset_ids_round_trip_and_simulate() {
     );
     assert_eq!(trajectory.stubbed_judges, Vec::<String>::new());
 
-    // The bundle answers for the id the document projects; a manufactured id could not.
     validate_ir_buildability(&document, IrTemplateSource::Embedded)
         .expect("the essay preset builds from its own bundle");
 }

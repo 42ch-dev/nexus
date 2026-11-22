@@ -52,10 +52,8 @@ async fn push_handles_version_mismatch_conflict() {
         .expect("bundle");
 
     let result = client.push_bundle(&bundle).await;
-    // Conflict response is returned as SyncError::SyncConflict
     match result {
         Ok(resp) => {
-            // If success=false is handled gracefully, bundle_apply_status would be set
             assert!(!resp.success || resp.bundle_apply_status.is_some());
         }
         Err(SyncError::SyncConflict { conflict_type, .. }) => {
@@ -208,7 +206,6 @@ async fn pull_empty_when_up_to_date() {
 async fn bidirectional_push_then_pull() {
     let mock_server = MockServer::start().await;
 
-    // Push response
     let push_json = json!({
         "success": true,
         "bundle_apply_status": "all_success",
@@ -221,7 +218,6 @@ async fn bidirectional_push_then_pull() {
         .mount(&mock_server)
         .await;
 
-    // Pull response with remote changes
     let pull_json = json!({
         "schema_version": 1,
         "world_revision": 9u64,
@@ -262,7 +258,6 @@ async fn bidirectional_push_then_pull() {
     let base = mock_server.uri();
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
-    // Push local delta
     let local_delta = LocalDelta {
         delta_type: "key_block".parse().unwrap(),
         operation: "create".parse().unwrap(),
@@ -283,7 +278,6 @@ async fn bidirectional_push_then_pull() {
     assert!(push_resp.success);
     assert_eq!(push_resp.world_revision, Some(8));
 
-    // Pull to get remote changes
     let pull_req = SyncPullRequest {
         schema_version: std::num::NonZeroU64::new(1).unwrap(),
         world_id: "wld_bidir".parse().unwrap(),
@@ -348,7 +342,6 @@ async fn push_rejected_with_version_mismatch_409() {
 async fn pull_after_rejection_refreshes_state() {
     let mock_server = MockServer::start().await;
 
-    // After rejection, pull gives fresh state
     let refresh_json = json!({
         "schema_version": 1,
         "world_revision": 11u64,
@@ -368,7 +361,7 @@ async fn pull_after_rejection_refreshes_state() {
     let req = SyncPullRequest {
         schema_version: std::num::NonZeroU64::new(1).unwrap(),
         world_id: "wld_refresh".parse().unwrap(),
-        after_confirmed_delta_sequence: None, // Full sync after rejection
+        after_confirmed_delta_sequence: None,
     };
 
     let resp = client.pull_bundles(&req).await.expect("pull");
@@ -382,8 +375,6 @@ async fn pull_after_rejection_refreshes_state() {
 async fn sequential_pushes_maintain_sequence() {
     let mock_server = MockServer::start().await;
 
-    // Track sequences with static responses (wiremock doesn't support mutable closures well)
-    // Instead, test individual pushes each succeed
     let push_json = json!({
         "success": true,
         "bundle_apply_status": "all_success",
@@ -426,7 +417,6 @@ async fn sequential_pushes_maintain_sequence() {
 async fn pull_response_indicates_more_bundles() {
     let mock_server = MockServer::start().await;
 
-    // First page with more data available
     let page1_json = json!({
         "schema_version": 1,
         "world_revision": 5u64,
@@ -466,7 +456,6 @@ async fn pull_response_indicates_more_bundles() {
     };
 
     let resp = client.pull_bundles(&req).await.expect("pull");
-    // is_up_to_date = false indicates more data is available
     assert_eq!(resp.is_up_to_date, Some(false));
     assert!(!resp.bundles.is_empty());
 }

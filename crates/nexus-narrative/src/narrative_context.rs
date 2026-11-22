@@ -4,7 +4,6 @@
 //! consumption by `NarrativeGateway`, `nexus-moment-context-assembly`, and
 //! CLI/daemon local APIs. They are projections from domain aggregates — not
 //! the authoritative domain types themselves.
-
 use serde::{Deserialize, Serialize};
 
 /// Aggregated narrative context for a given scope.

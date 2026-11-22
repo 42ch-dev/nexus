@@ -20,7 +20,6 @@ function makeOverview(
   total_worlds?: number,
 ): TimelineOverviewResponse {
   return {
-    // V1.138 codegen expands `worlds` (schema maxItems: 20) into a fixed-length
     // tuple union; this fixture builds a variable-length array by construction.
     worlds: worlds as TimelineOverviewResponse['worlds'],
     cursor: cursor ?? null,
@@ -177,7 +176,6 @@ describe('GlobalTimelineView — V1.126 P2 composite endpoint', () => {
     expect(activity).toBeInTheDocument();
   });
 
-  // V1.127 P0 T2 — cursor pagination (AC-V1127-2). The composite overview
   // response carries the NEXT cursor directly (no separate has_more flag); a
   // non-null cursor means another page exists.
   describe('Load More pagination (V1.127 P0 T2)', () => {
@@ -220,19 +218,16 @@ describe('GlobalTimelineView — V1.126 P2 composite endpoint', () => {
 
       renderInApp(<GlobalTimelineView />, { client });
 
-      // First page renders; Load More visible because cursor is non-null.
       expect(await screen.findByText('World One')).toBeInTheDocument();
       const loadMore = await screen.findByTestId('global-timeline-load-more');
       expect(loadMore).not.toBeDisabled();
 
       await user.click(loadMore);
 
-      // Second page fetched with the first page's cursor; both worlds visible.
       expect(await screen.findByText('World Two')).toBeInTheDocument();
       expect(screen.getByText('World One')).toBeInTheDocument();
       expect(getTimelineOverview).toHaveBeenNthCalledWith(2, 'next-cursor');
 
-      // Second page cursor is null → no more → Load More removed.
       await waitFor(() => {
         expect(screen.queryByTestId('global-timeline-load-more')).not.toBeInTheDocument();
       });

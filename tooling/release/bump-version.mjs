@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Bump the Nexus release version across every version surface.
  *
  * Files written (all in one step, never committed by this script):
  *   - `Cargo.toml` `[workspace.package].version`

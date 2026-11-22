@@ -1,5 +1,4 @@
 /**
- * AssemblyInspectorPanel — P1 T2 (DF-76) coverage.
  *
  * Fixture `MomentInspectResponse` covering the slot map (emit-order
  * grouping), the budget block (estimates + nullable cap/remaining), and the
@@ -47,7 +46,6 @@ describe('AssemblyInspectorPanel — slot map (T2)', () => {
 
     const block = screen.getByTestId('slot-map-block');
     const rows = within(block).getAllByTestId(/^slot-row-/);
-    // Emit order: world.before, default, kb.outlet.*, style.post_history, moment.directive.
     expect(rows.map((row) => row.getAttribute('data-testid'))).toEqual([
       'slot-row-before-entry',
       'slot-row-default-entry',

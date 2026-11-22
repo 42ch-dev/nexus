@@ -1,5 +1,4 @@
 /**
- * Chapter inspector — pure metadata-patch helpers (V1.76 B1 / `R-V175QC1-S001`).
  *
  * Extracted from `chapter-inspector.tsx` so that file stays ≤240 lines
  * (V1.73 split cap, `R-V172P0-QC1-002`). Behavior is unchanged: only fields

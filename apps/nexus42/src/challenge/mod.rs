@@ -84,19 +84,14 @@ pub fn solve_challenge(text: &str) -> Result<String> {
         return Err(ChallengeError::InvalidInput);
     }
 
-    // Step 1: Remove noise symbols
     let cleaned = noise::strip_noise(trimmed);
 
-    // Step 2: Normalize to lowercase
     let lower = cleaned.to_lowercase();
 
-    // Step 3: Convert English number words to digits
     let with_numbers = numbers::convert_number_words(&lower);
 
-    // Step 4: Extract math problem
     let problem = parser::extract_math_problem(&with_numbers).ok_or(ChallengeError::ParseError)?;
 
-    // Step 5: Evaluate
     let result = evaluate(&problem)?;
 
     Ok(result.to_string())

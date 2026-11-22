@@ -486,7 +486,6 @@ async fn outline_patch(
     target_chapter: Option<u64>,
     json: bool,
 ) -> Result<()> {
-    // CLI-side required-flag checks mirror the core's field errors so
     // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         OutlineOpArg::MoveChapter => {
@@ -538,7 +537,6 @@ async fn outline_patch(
         target_chapter_id: target_chapter
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
-        // Scene/beat authoring members are not exposed through the CLI yet;
         // the transport still requires the struct literal to name them.
         scene_id: None,
         beat_id: None,
@@ -552,7 +550,6 @@ async fn outline_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_outline_structure(
                 &principal,
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "outline",
                 work_ref.to_string(),
@@ -602,7 +599,6 @@ async fn chapter_patch(
     json: bool,
 ) -> Result<()> {
     let chapter = parse_positive(n, "--n")?;
-    // `--content` / `--content-file` are `conflicts_with` each other at clap
     // parse time, so at most one is set here.
     let content = if let Some(text) = content {
         Some(text.to_string())
@@ -652,7 +648,6 @@ async fn chapter_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_outline_chapter(
                 &principal,
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "chapter",
                 work_ref.to_string(),
@@ -697,7 +692,6 @@ async fn timeline_patch(
     foreshadows_event: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    // CLI-side required-flag checks mirror the core's field errors so
     // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         TimelineOpArg::AddEvent => {
@@ -773,7 +767,6 @@ async fn timeline_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_timeline_event(
                 &principal,
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "timeline",
                 work_ref.to_string(),

@@ -1,4 +1,3 @@
-// Native config publication through the real unsigned native binding.
 //
 // The Rust publisher proves probe/policy/staging semantics in
 // `crates/nexus-home-layout/src/config_lock.rs`; this suite proves the built
@@ -48,7 +47,6 @@ function wireCode(error) {
 }
 
 /**
- * A group this process may assign that differs from its effective gid, or null
  * when it belongs to no other group. Without one a staged-and-renamed file
  * always inherits the process egid, so a captured-group assertion cannot fail.
  */
@@ -73,11 +71,9 @@ describe('native config publication (real binding)', () => {
   });
 
   test('a relative target is refused as invalid_input on both sides', async () => {
-    // The facade check runs first (a plain programming-error guard) ...
     await assert.rejects(publishDocument('config.toml', 'name = "x"\n'), (error) =>
       /absolute path/.test(error.message),
     );
-    // ... and the native side re-checks, so a direct binding user gets the wire
     // `invalid_input` envelope rather than a filesystem guess.
     const binding = loadNativeBinding();
     const error = await binding.publishDocument('config.toml', 'name = "x"\n').then(
@@ -101,7 +97,6 @@ describe('native config publication (real binding)', () => {
 
       assert.ok(error, 'a write-denied target must be refused');
       assert.equal(wireCode(error), 'forbidden');
-      // The envelope is content-free by construction: an empty `details` is not
       // even serialised, and a message-only assertion would pass a regression
       // that moved the contents into it.
       assert.deepEqual(

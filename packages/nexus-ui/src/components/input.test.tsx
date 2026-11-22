@@ -5,8 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { Input } from './input';
 
 describe('Input', () => {
-  // --- base rendering ---
-
   it('renders an input element', () => {
     render(<Input data-testid="test-input" />);
     const input = screen.getByTestId('test-input');
@@ -14,7 +12,6 @@ describe('Input', () => {
   });
 
 
-  // --- className merge (cn integration) ---
 
   it('merges custom className with base classes', () => {
     render(<Input className="custom-class" data-testid="test-input" />);
@@ -22,7 +19,6 @@ describe('Input', () => {
     expect(input).toHaveClass('custom-class');
   });
 
-  // --- invalid prop → aria-invalid + visual state ---
 
   it('sets aria-invalid="true" when invalid is true', () => {
     render(<Input invalid data-testid="test-input" />);
@@ -44,7 +40,6 @@ describe('Input', () => {
 
 
 
-  // --- ref-as-prop ---
 
   it('passes the ref to the underlying input element', () => {
     let ref: HTMLInputElement | null = null;
@@ -57,7 +52,6 @@ describe('Input', () => {
     expect(ref).toBe(screen.getByTestId('test-input'));
   });
 
-  // --- accessibility-relevant attributes ---
 
   it('passes through standard aria-describedby', () => {
     render(<Input aria-describedby="helper-1 error-1" data-testid="test-input" />);

@@ -179,7 +179,6 @@ where
         }
     }
 
-    // If we exhausted all attempts, the last error was a VersionMismatch —
     // the for loop above falls through on the last iteration.
     unreachable!("with_cas_retry exhausted max_attempts — last iteration should have returned Err")
 }
@@ -189,12 +188,9 @@ mod tests {
     use super::*;
     use crate::test_support::fresh_engine_pool;
 
-    // ── cas_check ─────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn test_cas_check_success_on_rows_affected_1() {
         let (_dir, pool) = fresh_engine_pool().await;
-        // Insert a row with version=0 (migration default).
         let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
         sqlx::query(
             "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id) \
@@ -205,7 +201,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Simulate a successful CAS update: version was 0, now incremented.
         let result = sqlx::query(
             "UPDATE kb_extract_jobs SET status = 'running', version = version + 1 \
              WHERE job_id = ? AND version = ?",
@@ -227,9 +222,7 @@ mod tests {
         )
         .await
         .unwrap();
-        // Should not panic — success case.
 
-        // Verify the version was actually incremented.
         let (version,): (i64,) =
             sqlx::query_as("SELECT version FROM kb_extract_jobs WHERE job_id = ?")
                 .bind(&job_id)
@@ -253,14 +246,12 @@ mod tests {
         .await
         .unwrap();
 
-        // First writer increments version to 1.
         sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
             .bind(&job_id)
             .execute(&pool)
             .await
             .unwrap();
 
-        // Second writer tries CAS with expected_version=0 — mismatch.
         let result = sqlx::query(
             "UPDATE kb_extract_jobs SET version = version + 1 \
              WHERE job_id = ? AND version = ?",
@@ -298,8 +289,6 @@ mod tests {
         }
     }
 
-    // ── with_cas_retry ─────────────────────────────────────────────────
-
     #[tokio::test]
     async fn test_retry_succeeds_after_version_mismatch() {
         let (_dir, pool) = fresh_engine_pool().await;
@@ -314,7 +303,6 @@ mod tests {
         .await
         .unwrap();
 
-        // First writer increments version to 1 BEFORE our CAS.
         sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
             .bind(&job_id)
             .execute(&pool)
@@ -334,14 +322,12 @@ mod tests {
                 let pool = pool_clone.clone();
                 let jid = jid.clone();
                 async move {
-                    // Read current version.
                     let (version,): (i64,) =
                         sqlx::query_as("SELECT version FROM kb_extract_jobs WHERE job_id = ?")
                             .bind(&jid)
                             .fetch_one(&pool)
                             .await?;
 
-                    // Try CAS update.
                     let result = sqlx::query(
                         "UPDATE kb_extract_jobs SET version = version + 1 \
                          WHERE job_id = ? AND version = ?",
@@ -366,9 +352,7 @@ mod tests {
         )
         .await;
 
-        // Should succeed on retry (reads version=1, updates successfully).
         assert!(result.is_ok(), "retry should succeed: {result:?}");
-        // At least 2 attempts (first failed due to version mismatch on read of 0
         // vs actual 1, second succeeds after re-reading).
         assert!(attempts >= 1, "expected at least 1 attempt, got {attempts}");
     }
@@ -387,13 +371,11 @@ mod tests {
         .await
         .unwrap();
 
-        // Continuously bump the version so CAS always fails.
         sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
             .bind(&job_id)
             .execute(&pool)
             .await
             .unwrap();
-        // Now version=1. Our CAS will try with expected version 0 and fail.
         // On retry, it will read version=1 and try again. But we KEEP bumping it.
 
         let pool_clone = pool.clone();
@@ -403,7 +385,6 @@ mod tests {
             let pool = pool_clone.clone();
             let jid = jid.clone();
             async move {
-                // Always read then bump outside our CAS.
                 // First: read version.
                 let (version,): (i64,) =
                     sqlx::query_as("SELECT version FROM kb_extract_jobs WHERE job_id = ?")
@@ -411,13 +392,11 @@ mod tests {
                         .fetch_one(&pool)
                         .await?;
 
-                // Bump the version BEFORE our CAS update (simulating another writer).
                 sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
                     .bind(&jid)
                     .execute(&pool)
                     .await?;
 
-                // Now our CAS update with the stale version fails.
                 let result = sqlx::query(
                     "UPDATE kb_extract_jobs SET version = version + 1 \
                          WHERE job_id = ? AND version = ?",
@@ -441,7 +420,6 @@ mod tests {
         })
         .await;
 
-        // Should fail with VersionMismatch after exhausting retries.
         match result {
             Err(LocalDbError::VersionMismatch { .. }) => {}
             other => panic!("expected VersionMismatch after max retries, got {other:?}"),

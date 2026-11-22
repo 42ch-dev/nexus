@@ -19,8 +19,6 @@ use nexus_narrative::InMemoryNarrativeGateway;
 
 mod common;
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
 struct FixtureStores {
     narrative: InMemoryNarrativeGateway<InMemoryKbStore>,
     kb: InMemoryKbStore,
@@ -98,8 +96,6 @@ async fn seed_kb_block(stores: &FixtureStores, world_id: &str, block_type: Block
         .expect("insert key block");
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn creator_memory_fixtures_appear_in_stage0() {
     let stores = FixtureStores::empty();
@@ -107,32 +103,26 @@ async fn creator_memory_fixtures_appear_in_stage0() {
 
     let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
-    // Personality section is present
     assert!(
         ctx.stage0_context.contains("speculative fiction writer"),
         "stage0 must include personality"
     );
-    // Experience section is present
     assert!(
         ctx.stage0_context.contains("3 novels"),
         "stage0 must include experience"
     );
-    // Long-term memory is present (body content)
     assert!(
         ctx.stage0_context.contains("hero's journey"),
         "stage0 must include long-term memories"
     );
-    // Fragment keywords are present
     assert!(
         ctx.stage0_context.contains("magic system"),
         "stage0 must include fragment keywords"
     );
-    // System prefix is present
     assert!(
         ctx.stage0_context.contains("AI co-writer"),
         "stage0 must include system prefix"
     );
-    // User prompt is present
     assert!(
         ctx.stage0_context.contains("chapter 5"),
         "stage0 must include user prompt"
@@ -150,7 +140,6 @@ async fn narrative_context_provides_world_and_timeline() {
 
     let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
-    // World state
     let ws = ctx.world_state.expect("world state must be present");
     assert!(
         ws.contains("Narnia Chronicles"),
@@ -161,7 +150,6 @@ async fn narrative_context_provides_world_and_timeline() {
         "world state must include world_id"
     );
 
-    // Timeline
     let tl = ctx.timeline.expect("timeline must be present");
     assert!(
         tl.contains("The Wardrobe"),
@@ -210,7 +198,6 @@ async fn world_kb_assets_are_included_by_block_type() {
 async fn full_assembly_produces_correct_moment_context() {
     let stores = FixtureStores::empty();
 
-    // Seed all three domain sources
     seed_world(&stores, "wld_epic", "The Great Epic");
     seed_event(&stores, "wld_epic", "fbk_root", 1, "The Call to Adventure");
     seed_kb_block(&stores, "wld_epic", BlockType::Character, "Protagonist").await;
@@ -219,13 +206,11 @@ async fn full_assembly_produces_correct_moment_context() {
 
     let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
 
-    // All fields populated
     assert!(!ctx.stage0_context.is_empty(), "stage0 must be non-empty");
     assert!(ctx.world_state.is_some(), "world_state must be populated");
     assert!(ctx.timeline.is_some(), "timeline must be populated");
     assert!(ctx.world_kb.is_some(), "world_kb must be populated");
 
-    // Full context combines everything
     let full = ctx.to_full_context();
     assert!(
         full.contains("speculative fiction writer"),
@@ -255,8 +240,6 @@ async fn moment_context_default_is_all_none_except_stage0() {
 async fn missing_world_yields_no_narrative_or_kb() {
     let stores = FixtureStores::empty();
 
-    // Nonempty Stage-0: the missing-world path must drop the three narrative
-    // domains without dropping the creator context.
     let request = MomentRequest::new(stage0_with_soul_sections()).with_world("wld_ghost");
 
     let ctx = assemble_moment(&request, &stores.narrative, &stores.kb).await;
@@ -270,12 +253,6 @@ async fn missing_world_yields_no_narrative_or_kb() {
     assert!(ctx.world_kb.is_none(), "missing world → no KB");
 }
 
-// ── v1.191 P1 T11: ActorView-only model / inspect emission (durable §4.2) ──
-
-/// A store holding rows the actor's snapshot does not admit can only influence
-/// output through the admitted snapshot: neither the rendered World-KB section
-/// nor the inspector packet may carry an un-admitted id or name, and the
-/// inspector must not recompute a wider view of its own.
 #[tokio::test]
 async fn v1191_holder_context_model_and_inspect_emit_admitted_rows_only() {
     use nexus_moment_context_assembly::{
@@ -286,9 +263,6 @@ async fn v1191_holder_context_model_and_inspect_emit_admitted_rows_only() {
     seed_world(&stores, "wld_ctx", "Context World");
     seed_event(&stores, "wld_ctx", "fbk_root", 1, "The Harbor Standoff");
 
-    // Store rows: an admitted Character-global shared row plus two rows no
-    // admitted selection hands this actor (a binding-local row and another
-    // holder's owner-private row).
     let admitted = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         "wld_ctx",
         BlockType::Character,

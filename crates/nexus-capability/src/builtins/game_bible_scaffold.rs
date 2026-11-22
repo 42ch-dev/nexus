@@ -148,8 +148,6 @@ fn render_template(tmpl: &DesignTemplate) -> String {
     )
 }
 
-// ── ScaffoldTransaction (V1.55 P3 fix-wave: create/overwrite tracking + atomic writes) ──
-
 struct ScaffoldTransaction {
     created_files: Vec<PathBuf>,
     overwritten_files: Vec<(PathBuf, Vec<u8>)>,
@@ -344,7 +342,6 @@ impl Capability for GameBibleProjectScaffold {
             CapabilityError::InputInvalid(format!("game_bible.project_scaffold input: {e}"))
         })?;
 
-        // ── FIX (P3 fix-wave): validate work_ref against path traversal ──
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
         info!(
@@ -362,7 +359,6 @@ impl Capability for GameBibleProjectScaffold {
         let logs_design_dir = logs_dir.join("design");
         let logs_review_dir = logs_dir.join("review");
 
-        // The Work artifact port resolves `Works/<work_ref>` through the works
         // row, so the ref must already be there when the first byte lands — a
         // first scaffold still has it NULL. Only the ref is claimed here; the
         // profile lands with the finished scaffold, and a failure restores it.
@@ -377,7 +373,6 @@ impl Capability for GameBibleProjectScaffold {
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
             let mut tx = ScaffoldTransaction::new();
 
-            // Create directory structure (idempotent)
             for dir in [
                 &work_dir,
                 &design_dir,
@@ -388,7 +383,6 @@ impl Capability for GameBibleProjectScaffold {
                 tx.create_dir(dir)?;
             }
 
-            // Write README.md (through the Work artifact port; tracks create vs overwrite)
             let readme_content = format!(
         "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
         title = inp.title,
@@ -403,7 +397,6 @@ impl Capability for GameBibleProjectScaffold {
             )
             .await?;
 
-            // Write 12 Design/*.md template files
             for tmpl in DESIGN_TEMPLATES {
                 let content = render_template(tmpl);
                 let rel_child = Path::new("Design").join(tmpl.filename);
@@ -411,7 +404,6 @@ impl Capability for GameBibleProjectScaffold {
                     .await?;
             }
 
-            // Files landed — publish the profile identity, then commit the guard.
             publish_work_identity(
                 self.pool.as_ref(),
                 &inp.creator_id,
@@ -528,8 +520,6 @@ mod tests {
         assert_eq!(cap.name(), "game_bible.project_scaffold");
     }
 
-    // ── ScaffoldTransaction tests ──
-
     #[test]
     fn scaffold_transaction_rollback_cleans_up_created_files() {
         use tempfile::TempDir;
@@ -584,8 +574,6 @@ mod tests {
         assert!(file_path.exists(), "file should remain after commit");
     }
 
-    // ── Fix 1 regression: pre-existing user content survives rollback ──
-
     #[tokio::test]
     async fn rollback_preserves_pre_existing_user_content() {
         use tempfile::TempDir;
@@ -612,7 +600,6 @@ mod tests {
         .await
         .expect("write scaffold README");
 
-        // Rollback without commit
         drop(tx);
 
         let restored = std::fs::read_to_string(&readme_path).expect("read restored README");
@@ -622,8 +609,6 @@ mod tests {
         );
         assert!(!restored.contains("Overwritten"));
     }
-
-    // ── Fix 2 regression: path traversal rejection ──
 
     #[tokio::test]
     async fn game_bible_scaffold_rejects_path_traversal_in_work_ref() {
@@ -653,8 +638,6 @@ mod tests {
         );
     }
 
-    // ── Fix 4 regression: crash mid-transaction leaves no half-written file ──
-
     #[test]
     fn crash_mid_transaction_leaves_no_half_written_file() {
         use tempfile::TempDir;
@@ -678,8 +661,6 @@ mod tests {
         );
         assert!(!final_path.exists(), "final path must not exist");
     }
-
-    // ── Work artifact port seam ──
 
     #[tokio::test]
     async fn scaffold_writes_every_file_through_the_port() {

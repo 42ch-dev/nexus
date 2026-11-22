@@ -1,5 +1,4 @@
 /**
- * PendingReviewsSection — extracted from MemoryPage (R-V179P1-QC1-001).
  *
  * Pending-review list (cursor-paginated) with a live count badge + delete, plus
  * the "Review & Summarize" CTA and the side inspector (detail-panel + row-action

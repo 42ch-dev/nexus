@@ -32,16 +32,12 @@ fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
-        // Use the schedule ID as the label so each schedule has a unique
-        // identity for R2 duplicate detection (creator_id + preset_id + label).
         label: Some(id.to_string()),
         created_at: String::new(),
         updated_at: String::new(),
         terminated_at: None,
     }
 }
-
-// ── Admission unit tests ───────────────────────────────────────────────
 
 #[test]
 fn serial_blocks_behind_any_running() {
@@ -66,7 +62,6 @@ fn parallel_with_admits_when_all_running_are_whitelisted() {
 
 #[test]
 fn parallel_with_blocks_when_running_not_in_whitelist() {
-    // 01A can only run with 01B, but 01C is running (not whitelisted)
     let pending = sched(
         "01A",
         ScheduleConcurrency::ParallelWith(ParallelWithIds {
@@ -88,8 +83,8 @@ fn parallel_any_always_admits_subject_to_worker_cap() {
 #[test]
 fn dep_unsatisfied_blocks_start() {
     let pending = sched("01A", ScheduleConcurrency::Serial, vec!["01B"]);
-    let running = RunningSet::empty(); // 01B not completed → blocked
-    assert!(!admit(&pending, &running, &CompletedSet::empty())); // deps not satisfied
+    let running = RunningSet::empty();
+    assert!(!admit(&pending, &running, &CompletedSet::empty()));
 }
 
 #[test]
@@ -119,7 +114,6 @@ fn parallel_with_admits_when_nothing_running() {
         }),
         vec![],
     );
-    // Nothing running → admission passes (whitelist constraint is vacuously true)
     assert!(admit(
         &pending,
         &RunningSet::empty(),
@@ -129,20 +123,16 @@ fn parallel_with_admits_when_nothing_running() {
 
 #[test]
 fn dep_failed_blocks_start() {
-    // depends_on must be Completed or Cancelled; Failed does not satisfy.
     let pending = sched("01A", ScheduleConcurrency::Serial, vec!["01B"]);
     let running = RunningSet::empty();
-    let completed = CompletedSet::empty(); // 01B is Failed, not in completed set
+    let completed = CompletedSet::empty();
     assert!(!admit(&pending, &running, &completed));
 }
-
-// ── Integration test: two serial schedules hand-off ────────────────────
 
 #[tokio::test]
 async fn two_serial_schedules_hand_off_after_first_completes() {
     let (_dir, supervisor) = test_supervisor_with_inmemory_db().await;
 
-    // Add two serial schedules for the same creator
     supervisor
         .insert_pending(sched("01A", ScheduleConcurrency::Serial, vec![]))
         .await
@@ -152,7 +142,6 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
         .await
         .unwrap();
 
-    // Tick: 01A should start, 01B stays Pending (serial blocks behind running)
     supervisor.tick().await.unwrap();
     assert_eq!(
         supervisor.status_of("01A").await.unwrap(),
@@ -163,14 +152,11 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
         ScheduleStatus::Pending
     );
 
-    // Simulate 01A completing (no real session engine — direct status flip)
     supervisor
         .on_schedule_terminal("01A", ScheduleStatus::Completed)
         .await
         .unwrap();
 
-    // After terminal callback: tick is triggered internally.
-    // 01B should now be Running since nothing else is.
     assert_eq!(
         supervisor.status_of("01B").await.unwrap(),
         ScheduleStatus::Running

@@ -90,8 +90,6 @@ pub const MAX_PAGE_SIZE_BOUND: NonZeroU64 = match NonZeroU64::new(MAX_PAGE_SIZE)
     None => panic!("max_page_size must be positive"),
 };
 
-// ── Kind mapping, classification, recall ranking + budget ───────────────
-
 /// D-7: every Nexus `MemoryKind` keeps its own name inside a namespaced record
 /// kind, so the nine-value authoring taxonomy survives the protocol's open
 /// `RetainedRecord.kind` vocabulary instead of being collapsed into the core
@@ -148,7 +146,6 @@ pub(super) fn classify(text: &str, kind_hint: Option<&str>) -> Classification {
             rationale_codes: vec!["empty_content"],
         };
     }
-    // An explicit hint means the caller already knows what the capture is;
     // classification then only confirms it.
     if kind_hint.is_some_and(|hint| !hint.is_empty()) {
         return Classification {

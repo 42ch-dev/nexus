@@ -1,5 +1,4 @@
 /**
- * `useSteerStrategy` — Steer ordering and partial-failure truthfulness
  * (V1.195 P0-T7; spec `current-host-contracts.md` §3.3 / W5, S0-3).
  *
  * Steer is two sequential calls, not one transaction: the Idea is appended to
@@ -56,7 +55,6 @@ function listResponse(coreContextVersion: number) {
 }
 
 /**
- * Harness exposing the Steer trigger, the mutation state and the version the
  * schedule row shows (the surface the partial-failure refresh must not leave
  * stale).
  */
@@ -231,7 +229,6 @@ describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
 
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('success'));
-    // The append is the first request; the resume rides on a committed append.
     expect(order).toEqual(['append', 'resume']);
     expect(appendBody).toEqual({ op: 'append', body: IDEA });
     expect(signalBody).toEqual({ signal: 'resume' });
@@ -279,7 +276,6 @@ describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
       }),
       http.post(SIGNAL_PATH, () => {
         order.push('resume');
-        // The exact wire body the service returns for a lawful manual-wait
         // refusal: status 409, public `code` is the generic class, and the
         // coded conflict rides in `details.wire_code`.
         return HttpResponse.json(
@@ -302,18 +298,14 @@ describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
 
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('error'));
-    // Exactly one append and one resume: the durable append is never replayed.
     expect(order).toEqual(['append', 'resume']);
-    // A refused resume is never an overall success.
     expect(screen.queryByText('Idea sent to Preset')).not.toBeInTheDocument();
-    // The lawful manual-wait conflict is reported as a conflict, naming the
     // version the append actually committed.
     expect(
       await screen.findByText(
         (content) => content.includes('core context version 2') && content.includes('state conflict'),
       ),
     ).toBeInTheDocument();
-    // The visible row is refreshed, so the committed version is not stale.
     await waitFor(() => expect(screen.getByTestId('version')).toHaveTextContent('2'));
   });
 

@@ -6,7 +6,6 @@ import type { LocalePreference, ResolvedLocale } from '@/lib/i18n/config';
 export type { LocalePreference, ResolvedLocale } from '@/lib/i18n/config';
 
 /**
- * Locale provider — localStorage preference + system-locale resolution.
  *
  * Mirrors theme-provider.tsx: preference persists in localStorage, defaults to
  * the OS/browser language via the `'system'` state, and side effects update
@@ -68,7 +67,6 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
       resolvedLocale,
       setPreference: (next) => {
         if (!isLocalePreference(next)) {
-          // Invalid runtime value — fail closed (keep current state).
           return;
         }
         setPreferenceState(next);

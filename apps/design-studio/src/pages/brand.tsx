@@ -17,7 +17,6 @@ import {
   type LogoVariantTheme,
 } from '@42ch/nexus-ui';
 
-/* Consumer-resolved SVG assets — Vite processes these workspace-package imports
  * exactly as apps/web/src/components/brand/nexus-logo.tsx does. */
 import logoPrimarySrc from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 import logoPrimarySquareSrc from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
@@ -30,10 +29,6 @@ import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 import { StudioShellLogo } from '@/components/studio-shell-logo';
 import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 import { ViBrandAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
-
-/* ------------------------------------------------------------------ */
-/*  Static data                                                         */
-/* ------------------------------------------------------------------ */
 
 const LOGO_SOURCES: Record<LogoVariantName, string> = {
   primary: logoPrimarySrc,
@@ -51,7 +46,6 @@ interface LogoDisplay {
   /** Recommended surface per DESIGN.md §Logo Usage. */
   panelBgClass: string;
   /**
-   * When true, invert the img so currentColor wordmarks/marks read as white
    * on dark hero panels (img-embedded `currentColor` resolves to black).
    */
   invertForDark?: boolean;
@@ -193,10 +187,6 @@ const THEME_CSS_SWATCHES: ThemeCssSwatch[] = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
-/*  Sub-components                                                      */
-/* ------------------------------------------------------------------ */
-
 function SubNav() {
   const items = [
     { label: 'Logos', href: '#brand-logos' },
@@ -230,8 +220,6 @@ function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
     </h3>
   );
 }
-
-/* ---------- Logo grid ---------- */
 
 function LogoCard({ display }: { display: LogoDisplay }) {
   const src = LOGO_SOURCES[display.variant];
@@ -353,8 +341,6 @@ function LogoGrid() {
   );
 }
 
-/* ---------- Chronos Light / Dark mini context ---------- */
-
 function ChronosShellMini({
   mode,
   logo,
@@ -363,7 +349,6 @@ function ChronosShellMini({
   logo: ReactNode;
 }) {
   const isDark = mode === 'dark';
-  // The ink titlebar is a fixed-pigment plate in both themes (see the
   // brand-chronos note); only its label paint differs — white on light,
   // cobalt on dark — so the label names the titlebar treatment, never the
   // document (F-004). The content area below follows the document theme:
@@ -488,8 +473,6 @@ function ChronosContextSection() {
   );
 }
 
-/* ---------- Mark ---------- */
-
 function MarkSection() {
   return (
     <section>
@@ -543,8 +526,6 @@ function MarkSection() {
   );
 }
 
-/* ---------- Theme specimens ---------- */
-
 function SpecimensSection() {
   return (
     <section>
@@ -596,8 +577,6 @@ function SpecimensSection() {
   );
 }
 
-/* ---------- Theme CSS swatches ---------- */
-
 function ThemeCssSwatches() {
   const { resolvedTheme } = useTheme();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -640,8 +619,6 @@ function ThemeCssSwatches() {
     </section>
   );
 }
-
-/* ---------- Clear-space guidance ---------- */
 
 function ClearSpaceSection() {
   const markHeight = logoMinSizePx;
@@ -695,10 +672,6 @@ function ClearSpaceSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Page                                                                */
-/* ------------------------------------------------------------------ */
 
 export function BrandPage() {
   return (

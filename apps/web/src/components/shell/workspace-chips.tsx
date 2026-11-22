@@ -1,5 +1,4 @@
 /**
- * Workspace chip row (plan v1219 T3; create flow added by plan v1220 P3-T3;
  * prototype `developer-shell-v1.html` screen 3).
  *
  * One chip per workspace `display_name`; the active chip reflects
@@ -35,7 +34,6 @@ export function WorkspaceChips() {
         className="flex flex-wrap items-center gap-2"
       >
         {workspaces.map((workspace) => {
-          // creator_id + slug: `default` exists per creator, so a slug-only
           // comparison would light the wrong creator's chip (QC W).
           const active =
             activeWorkspace !== null &&

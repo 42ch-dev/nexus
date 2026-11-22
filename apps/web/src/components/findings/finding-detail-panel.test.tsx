@@ -1,5 +1,4 @@
 /**
- * FindingDetailPanel — V1.77 remediation surface coverage.
  *
  * Covers the three affordances against a mock NexusClient that captures
  * `updateFinding` calls: status-transition adjacency rendering (valid buttons
@@ -64,7 +63,6 @@ describe('FindingDetailPanel — status transitions', () => {
     renderInApp(<FindingDetailPanel workId="w1" finding={makeFinding({ status: 'open' })} />, {
       client,
     });
-    // open → triaged | in_review | resolved | wont_fix | duplicate
     expect(screen.getByRole('button', { name: /advance finding to triaged/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /advance finding to in review/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /advance finding to resolved/i })).toBeInTheDocument();
@@ -95,9 +93,7 @@ describe('FindingDetailPanel — status transitions', () => {
     renderInApp(<FindingDetailPanel workId="w1" finding={makeFinding({ status: 'triaged' })} />, {
       client,
     });
-    // triaged → open is not a valid adjacency.
     expect(screen.getByRole('button', { name: /advance finding to open/i })).toBeDisabled();
-    // triaged → in_review is valid and should be enabled.
     expect(screen.getByRole('button', { name: /advance finding to in review/i })).not.toBeDisabled();
   });
 
@@ -107,7 +103,6 @@ describe('FindingDetailPanel — status transitions', () => {
     renderInApp(<FindingDetailPanel workId="w1" finding={finding} />, { client });
 
     fireEvent.click(screen.getByRole('button', { name: /advance finding to triaged/i }));
-    // The panel reads its status from the parent finding prop, not from the
     // optimistic cache, so a failed mutation must not alter the displayed row.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /advance finding to triaged/i })).not.toBeDisabled(),

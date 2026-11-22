@@ -56,7 +56,6 @@ const ERROR_BODY_CAP: usize = 200;
 fn sanitize_error_body(body: &str) -> String {
     let mut s = body.to_string();
 
-    // Redact Bearer tokens: "Bearer <token>"
     if let Some(pos) = s.find("Bearer ") {
         let after_bearer = pos + 7; // len("Bearer ")
         let end = s[after_bearer..]
@@ -65,16 +64,13 @@ fn sanitize_error_body(body: &str) -> String {
         s.replace_range(pos..end, "Bearer [REDACTED]");
     }
 
-    // Redact sk- prefixed keys (case-insensitive)
     s = redact_prefixed_tokens(&s, "sk-");
     s = redact_prefixed_tokens(&s, "sk_");
     s = redact_prefixed_tokens(&s, "nexus_live_");
     s = redact_prefixed_tokens(&s, "nexus_test_");
 
-    // Redact long hex-like strings (32+ hex chars)
     s = redact_long_pattern(&s, |c: char| c.is_ascii_hexdigit(), 32, "[REDACTED_HEX]");
 
-    // Redact long base64-like strings (40+ alphanumeric+/= chars)
     s = redact_long_pattern(
         &s,
         |c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=',
@@ -82,7 +78,6 @@ fn sanitize_error_body(body: &str) -> String {
         "[REDACTED_B64]",
     );
 
-    // Cap length
     if s.len() > ERROR_BODY_CAP {
         s.truncate(ERROR_BODY_CAP);
         s.push('…');
@@ -101,12 +96,10 @@ fn redact_prefixed_tokens(s: &str, prefix: &str) -> String {
     while let Some(pos) = lower[offset..].find(&prefix_lower) {
         let abs_pos = offset + pos;
         let after_prefix = abs_pos + prefix.len();
-        // Token ends at next whitespace, comma, quote, or brace
         let end = result[after_prefix..]
             .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '}')
             .map_or(result.len(), |i| after_prefix + i);
         result.replace_range(abs_pos..end, "[REDACTED_KEY]");
-        // Advance past the replacement to avoid infinite loop
         offset = abs_pos + "[REDACTED_KEY]".len();
         if offset >= result.len() {
             break;
@@ -140,7 +133,6 @@ fn redact_long_pattern(
                 result.push(ch);
             }
         }
-        // Append non-matching character(s)
         if i < chars.len() && !is_valid(chars[i]) {
             result.push(chars[i]);
             i += 1;
@@ -184,7 +176,6 @@ pub fn classify_platform_error(err: SyncError) -> StagedPlatformError {
             body: sanitize_error_body(&body),
         },
         SyncError::HttpError(e) => {
-            // reqwest timeout errors surface as HttpError with is_timeout()
             if e.is_timeout() {
                 StagedPlatformError::Timeout
             } else {
@@ -476,8 +467,6 @@ impl PlatformClient {
 mod tests {
     use super::*;
 
-    // ── StagedPlatformError classification tests ──────────────────
-
     #[test]
     fn classify_timeout_maps_to_staged_timeout() {
         let err = SyncError::SyncTimeout { seconds: 30 };
@@ -562,7 +551,7 @@ mod tests {
 
     #[test]
     fn sanitize_redacts_long_hex_string() {
-        let body = format!("token={}", "deadbeef".repeat(8)); // 64 hex chars
+        let body = format!("token={}", "deadbeef".repeat(8));
         let sanitized = sanitize_error_body(&body);
         assert!(
             !sanitized.contains("deadbeef"),
@@ -634,8 +623,6 @@ mod tests {
         assert!(msg.contains("platform integration failed"));
     }
 
-    // ── Struct serialization/deserialization tests ──────────────────
-
     #[test]
     fn register_request_serialization() {
         let req = RegisterRequest {
@@ -646,7 +633,6 @@ mod tests {
         let json = serde_json::to_string(&req).expect("serialize");
         assert!(json.contains("Test Creator"));
         assert!(json.contains("cli"));
-        // When handle is None, the field should be omitted from JSON
         assert!(!json.contains("handle"));
     }
 
@@ -748,8 +734,6 @@ mod tests {
         }
     }
 
-    // ── PlatformClient construction tests ──────────────────────────
-
     #[test]
     fn client_creation_requires_base_url() {
         let result = PlatformClient::new("", "some_token", "dev_123");
@@ -782,8 +766,6 @@ mod tests {
         let client = result.expect("ok");
         assert_eq!(client.base_url(), "https://api.example.com");
     }
-
-    // ── Wiremock integration tests ─────────────────────────────────
 
     #[tokio::test]
     async fn register_creator_success() {

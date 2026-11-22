@@ -30,7 +30,6 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use thiserror::Error;
 
-// Re-export the generated ComputeInput types used in the public API.
 use nexus_contracts::generated::daemon_api::compute::compute_input::{
     ComputeInput, ComputeInputNarrativeState, ComputeInputWorldRef,
     ComputeInputWorldRefTimelineHeadEventId, ComputeInputWorldRefWorldId,
@@ -263,7 +262,6 @@ impl ComputeInputBuilder {
             .map(|entry| (entry.entry_id.clone(), entry))
             .collect();
 
-        // Reported per referenced id, in the caller's `*_id` key order, so the
         // refusal names exactly the parameter the module asked for.
         for ref_id in &referenced_entry_ids {
             let Some(ref_entry) = admitted.remove(ref_id) else {

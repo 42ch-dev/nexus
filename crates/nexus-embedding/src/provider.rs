@@ -1,4 +1,6 @@
 //! The `EmbeddingProvider` seam and the OSS `NoEmbeddings` posture.
+//!
+//! see docs/specs/runtime/embedding-readiness.md.
 
 use async_trait::async_trait;
 use thiserror::Error;
@@ -53,7 +55,6 @@ pub struct NoEmbeddings;
 #[async_trait]
 impl EmbeddingProvider for NoEmbeddings {
     fn identity(&self) -> &EmbeddingIdentity {
-        // No real serving identity exists without a platform provider. While
         // `NoEmbeddings` is the injected provider, the composition root must
         // pass `None` (no provider) to `verify_index` — this placeholder is
         // never a valid populate stamp.

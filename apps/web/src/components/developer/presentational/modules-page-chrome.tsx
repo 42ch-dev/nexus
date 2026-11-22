@@ -1,5 +1,4 @@
 /**
- * Presentational body of the `/modules` surface (plan v221-modules-rail T2).
  *
  * The product page (`components/developer/modules-page.tsx`) owns every hook,
  * query, router read and i18n lookup; this module owns the markup so the
@@ -114,7 +113,6 @@ export interface ModulesPageChromeProps {
   selectedId: string | null;
   onSelect: (moduleId: string) => void;
   /**
-   * Detail panel slot. Rendered only when a module is selected; `null` keeps
    * the "select a module" prompt. The wiring decides which studio fills the
    * panel's own `runStudio` slot.
    */

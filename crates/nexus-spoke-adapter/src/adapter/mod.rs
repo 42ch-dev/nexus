@@ -146,7 +146,6 @@ impl NexusAdapter<'static> {
         Self::with_read_scope(pool, None)
     }
 
-    // Clippy wants const, but the `compute` feature builds `Arc::new` here; suppress.
     #[allow(clippy::missing_const_for_fn)]
     fn with_read_scope(pool: SqlitePool, read_scope: Option<KnowledgeReadScope>) -> Self {
         NexusAdapter {
@@ -392,9 +391,6 @@ impl<'a> NexusAdapter<'a> {
     }
 }
 
-// ── Request-bound scope reject helpers (v1.191 P1 T8) ────────────────────
-
-/// Contents marker for the missing-scope reject, so hosts classify it by
 /// marker instead of sniffing the message (same pattern as
 /// `module_identity_missing` / `world_conflict`).
 const READ_SCOPE_MISSING_MARKER: &str = "read_scope_missing";
@@ -477,7 +473,6 @@ mod tests {
         accepts_rule_query_port(&adapter);
         accepts_host_manifest_port(&adapter);
 
-        // The metadata/tool families stay reachable without any knowledge
         // scope; the KE-bearing ones are compiled for the type but fail closed
         // at runtime (proved in `tests/adapter_surface.rs`).
         accepts_rule_query_port(&host);

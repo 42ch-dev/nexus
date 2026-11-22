@@ -162,13 +162,11 @@ export function resolveScalar(value, doc, index, sourcePath, seen = new Set(), t
         `[projectDesign] empty scalar at ${sourcePath} — a mapped token must resolve to a non-empty value (fail closed, no silent omission).`,
       );
     }
-    // Whole-value reference to a recipe/role (e.g. "{typography.label-14}") —
     // resolve the target; callers that need a sub-member pass the member path.
     if (/^\{[^}]+\}$/.test(value)) {
       const ref = value.slice(1, -1).trim();
       return resolveRef(ref, doc, index, sourcePath, seen, trace);
     }
-    // Compound SOUL recipe "{typography.X} @ {colors.Y}" -> color member.
     // Fresh (non-shared) regex each call so `lastIndex` never leaks across
     // invocations of this resolver; iterate matchAll (resets lastIndex) for
     // detection so a prior .test() cannot poison it.
@@ -179,7 +177,6 @@ export function resolveScalar(value, doc, index, sourcePath, seen = new Set(), t
         return resolveRef(colorRef, doc, index, `${sourcePath} (compound color)`, seen, trace);
       }
     }
-    // Embedded references (color-mix, borders, etc) — replace every {ref}.
     const matches = [...value.matchAll(/\{([^}]+)\}/g)];
     if (matches.length > 0) {
       let result = value;
@@ -191,7 +188,6 @@ export function resolveScalar(value, doc, index, sourcePath, seen = new Set(), t
     }
     return value;
   }
-  // Unexpected object leaf that is not a compound/string ref: reject rather
   // than serializing "[object Object]".
   throw new Error(
     `[projectDesign] non-scalar value at ${sourcePath}: ${JSON.stringify(value).slice(0, 120)} — ` +
@@ -221,7 +217,6 @@ function resolveRef(refPath, doc, index, sourcePath, seen, trace) {
 }
 
 /**
- * Projection registry: a single declarative source-path mapping carrying
  * DESIGN paths only (never a copied palette). Each entry:
  *   - cssVar : the exact existing CSS custom-property name to emit
  *   - source : dot-path into the parsed theme document
@@ -240,12 +235,10 @@ function buildProjection(doc) {
 
   const projections = [];
 
-  // ── Typography: family tokens ──
   projections.push(scalar('--font-sans', 'typography.heading-16.fontFamily'));
   projections.push(scalar('--font-mono', 'typography.copy-13-mono.fontFamily'));
   projections.push(scalar('--font-display', 'typography.font-display'));
 
-  // ── Typography roles → --text-* + metric tuples ──
   const TYPO_ROLES = [
     'display-32', 'display-24', 'display-20',
     'heading-32', 'heading-24', 'heading-20', 'heading-16',
@@ -265,12 +258,10 @@ function buildProjection(doc) {
     );
   }
 
-  // ── Reading prose ──
   projections.push(scalar('--reading-prose-measure', 'typography.reading-prose-measure'));
   projections.push(scalar('--reading-prose-line-height', 'typography.reading-prose-line-height'));
   projections.push(scalar('--reading-prose-paragraph-spacing', 'typography.reading-prose-paragraph-spacing'));
 
-  // ── Spacing / radius / motion ──
   const SPACING_STEPS = ['space-1', 'space-2', 'space-3', 'space-4', 'space-6', 'space-8', 'space-10', 'space-16', 'space-24'];
   for (const s of SPACING_STEPS) projections.push(scalar(`--${s}`, `spacing.${s}`));
 
@@ -282,21 +273,17 @@ function buildProjection(doc) {
   projections.push(scalar('--ease-standard', 'motion.ease-standard'));
   projections.push(scalar('--ease-emphasized', 'motion.ease-emphasized'));
 
-  // ── Elevation scale + legacy aliases ──
   for (let i = 0; i <= 4; i++) projections.push(scalar(`--shadow-elevation-${i}`, `elevation.elevation-${i}`));
   for (const alias of ['card', 'popover', 'modal']) {
     projections.push(scalar(`--shadow-${alias}`, `elevation.shadow-${alias}`));
   }
 
-  // ── Colors → --color-<name> ──
   const colors = doc.colors ?? {};
   for (const name of Object.keys(colors)) {
     projections.push(scalar(`--color-${name}`, `colors.${name}`));
   }
 
-  // ── Brand-specific numeric snapshot + theme.css handled separately ──
 
-  // ── Canvas surface ──
   const canvasFlat = [
     'canvas-surface', 'canvas-grid', 'canvas-grid-gap', 'canvas-grid-dot-size',
     'canvas-node-fill', 'canvas-node-fill-hover', 'canvas-node-border', 'canvas-node-border-selected',
@@ -324,13 +311,11 @@ function buildProjection(doc) {
   for (const k of canvasFlat) {
     projections.push(scalar(`--color-${k}`, `components.canvas.${k}`));
   }
-  // canvas.node-width -> structural --canvas-node-width-*
   const canvasWidths = ['strategy-root', 'strategy-primary', 'strategy-secondary', 'outline-scene-beat', 'default'];
   for (const w of canvasWidths) {
     projections.push(scalar(`--canvas-node-width-${w}`, `components.canvas.node-width.${w}`));
   }
 
-  // ── Dialog / sheet / sidebar / listbox structural ──
   projections.push(scalar('--color-dialog-max-width', 'components.dialog.maxWidth'));
   projections.push(scalar('--dialog-width', 'components.dialog.width'));
   projections.push(scalar('--dialog-max-height', 'components.dialog.maxHeight'));
@@ -340,7 +325,6 @@ function buildProjection(doc) {
   projections.push(scalar('--color-listbox-max-height', 'components.listbox.maxHeight'));
   projections.push(scalar('--color-states-disabled-opacity', 'components.states.disabled.opacity'));
 
-  // ── Status surface family ──
   for (const role of ['error', 'success', 'warning', 'info']) {
     projections.push(scalar(`--color-${role}-surface`, `components.states.${role}.backgroundColor`));
     projections.push(scalar(`--color-${role}-surface-border`, `components.states.${role}.borderColor`));
@@ -348,7 +332,6 @@ function buildProjection(doc) {
   projections.push(scalar('--color-data-table-row-protected', 'components.data-table.row-protected'));
   projections.push(scalar('--color-main-banner-background', 'components.launch-daemon.main-banner.backgroundColor'));
 
-  // ── Finding status pill: state(bg|text|border), underscore -> hyphen ──
   const FINDING_STATES = ['open', 'triaged', 'in_review', 'resolved', 'wont_fix', 'duplicate'];
   for (const state of FINDING_STATES) {
     const key = state.replace(/_/g, '-');
@@ -357,7 +340,6 @@ function buildProjection(doc) {
     projections.push(scalar(`--color-finding-status-${key}-border`, `components.finding-status-pill.${state}.borderColor`));
   }
 
-  // ── Memory task-kind chips ──
   const TASK_KINDS = ['brainstorm', 'outline', 'chapter', 'research', 'unknown'];
   for (const kind of TASK_KINDS) {
     const c = `components.memory-task-kind-${kind}`;
@@ -366,7 +348,6 @@ function buildProjection(doc) {
     projections.push(scalar(`--color-memory-task-kind-${kind}-border`, `${c}.borderColor`));
   }
 
-  // ── Reading maturation count badges ──
   for (const [src, out] of [
     ['world-kb-density-count', 'kb-density'],
     ['open-findings-count', 'open-findings'],
@@ -377,7 +358,6 @@ function buildProjection(doc) {
     projections.push(scalar(`--color-reading-maturation-${out}-border`, `${c}.borderColor`));
   }
 
-  // ── nexus-ui Badge soft variants ──
   const SOFT_VARIANTS = ['running', 'queued', 'warning', 'error', 'preset'];
   for (const v of SOFT_VARIANTS) {
     const c = `components.badge-status-pill.soft.${v}`;
@@ -386,7 +366,6 @@ function buildProjection(doc) {
     projections.push(scalar(`--color-nexus-ui-badge-soft-${v}-border`, `${c}.borderColor`));
   }
 
-  // ── SOUL viz + narrative ──
   projections.push(scalar('--color-soul-viz-keyword-cluster-node-fill', 'components.soul-viz-keyword-cluster-node.fill'));
   projections.push(scalar('--color-soul-viz-keyword-cluster-node-stroke', 'components.soul-viz-keyword-cluster-node.stroke'));
   projections.push(scalar('--color-soul-viz-keyword-cluster-node-label', 'components.soul-viz-keyword-cluster-node.label'));
@@ -404,7 +383,6 @@ function buildProjection(doc) {
   projections.push(scalar('--color-soul-narrative-prose', 'components.soul-narrative-prose', { compound: true }));
   projections.push(scalar('--color-soul-growth-curve-stroke', 'components.soul-growth-curve-stroke'));
 
-  // ── Reading annotation highlights ──
   for (const [color, suffix] of [
     ['yellow', 'yellow'], ['blue', 'blue'], ['green', 'green'], ['pink', 'pink'],
   ]) {
@@ -420,7 +398,6 @@ function buildProjection(doc) {
   projections.push(scalar('--color-reading-selection-toolbar-text', 'components.reading-selection-toolbar.textColor'));
   projections.push(scalar('--color-reading-selection-toolbar-shadow', 'components.reading-selection-toolbar.shadow'));
 
-  // ── Reading chrome (flatten component + nested member) ──
   // Explicit map: cssVar leaf -> DESIGN member
   const readingChrome = [
     ['novel', 'chapter-title', 'font-family', 'fontFamily'],
@@ -484,7 +461,6 @@ function buildProjection(doc) {
     projections.push(scalar(cssVar, source));
   }
 
-  // ── Footer profile ──
   const FP = {
     'avatar-size': 'avatar-size', 'avatar-rounded': 'avatar-rounded',
     'avatar-bg': 'avatar-bg', 'avatar-bg-hover': 'avatar-bg-hover', 'avatar-bg-active': 'avatar-bg-active',
@@ -499,7 +475,6 @@ function buildProjection(doc) {
     projections.push(scalar(`--color-footer-profile-${css}`, `components.footer-profile.${src}`));
   }
 
-  // ── Setup wizard step ──
   const SW_STEP = {
     'step-circle-size': 'step-circle-size',
     'step-circle-active-bg': 'step-circle-active-bg', 'step-circle-active-text': 'step-circle-active-text',
@@ -519,7 +494,6 @@ function buildProjection(doc) {
     });
   }
 
-  // ── Setup wizard surface ──
   const SW_SURFACE = new Map([
     ['card-bg', 'card-bg'], ['card-border', 'card-border'],
     ['step-panel-right-divider', 'step-panel-right-divider'], ['step-panel-width', 'step-panel-width'],
@@ -540,7 +514,6 @@ function buildProjection(doc) {
 }
 
 /**
- * Resolve a single projection entry to its final CSS value string.
  */
 function projectValue(doc, entry, index = indexPaths(doc)) {
   const { source } = entry;
@@ -549,7 +522,6 @@ function projectValue(doc, entry, index = indexPaths(doc)) {
   }
   const raw = index.get(source);
 
-  // fontSizeOf: whole-role ref -> .fontSize of the referenced role.
   if (entry.fontSizeOf) {
     if (typeof raw === 'string' && /^\{[^}]+\}$/.test(raw)) {
       const ref = raw.slice(1, -1).trim();
@@ -568,7 +540,6 @@ function projectValue(doc, entry, index = indexPaths(doc)) {
 }
 
 /**
- * Emit `:root { --name: value; ... }` block from a theme document.
  * Brand color entries in tokens.css forward to the package theme.css
  * `--nexus-brand-*` layer (public contract: tokens.css imports theme.css).
  */
@@ -577,14 +548,12 @@ function emitBlock(doc, entries, index, indent = '  ', brandAlias = false) {
   for (const entry of entries) {
     const cssVar = entry.cssVar;
     if (brandAlias && cssVar.startsWith('--color-brand-')) {
-      // Forward to theme.css brand variable: --color-brand-<n> -> var(--nexus-brand-<n>)
       const rest = cssVar.slice('--color-brand-'.length);
       lines.push(`${indent}${cssVar}: var(--nexus-brand-${rest});`);
       continue;
     }
     const value = projectValue(doc, entry, index);
     if (value === '') {
-      // resolveScalar already rejects empty/null; this is an unreachable
       // defensive guard so a future regression cannot silently drop a var.
       throw new Error(
         `[projectDesign] ${entry.cssVar} resolved to an empty value (${entry.source}) — fail closed, no silent omission.`,
@@ -602,7 +571,6 @@ function emitBlock(doc, entries, index, indent = '  ', brandAlias = false) {
  */
 export function projectDesign(pair) {
   const { light, dark } = pair;
-  // leaf parity already enforced by loadDesignPair; re-check defensively.
   const ll = collectLeafPaths(light);
   const dl = collectLeafPaths(dark);
   const onlyL = [...ll].filter((p) => !dl.has(p));
@@ -620,7 +588,6 @@ export function projectDesign(pair) {
   const lightIndex = lightRegistry.index;
   const darkIndex = darkRegistry.index;
 
-  // Sanity: both themes must project the identical CSS var surface.
   const lightVars = new Set(lightEntries.map((e) => e.cssVar));
   const darkVars = new Set(darkEntries.map((e) => e.cssVar));
   const onlyLV = [...lightVars].filter((v) => !darkVars.has(v));
@@ -631,7 +598,6 @@ export function projectDesign(pair) {
     );
   }
 
-  // ── tokens.css ──
   const cssHeader = [
     '/*',
     ' * @nexus/design-tokens — generated CSS variable layers.',
@@ -658,7 +624,6 @@ export function projectDesign(pair) {
     '',
   ].join('\n');
 
-  // ── theme.css (brand CSS custom properties, both themes) ──
   // Brand vars are the raw DESIGN color values under their public
   // --nexus-brand-<name> contract. tokens.css forwards --color-brand-* onto
   // these (see emitBlock brandAlias). Reuse the shared registry so the
@@ -689,7 +654,6 @@ export function projectDesign(pair) {
     '',
   ].join('\n');
 
-  // ── generated-brand.ts (numeric light/default snapshot) ──
   // Snapshot must consume resolved, validated light scalars (never an empty
   // or unresolved literal): resolve each brand key through the shared light
   // projection index, which fails closed on null/undefined/empty/missing.

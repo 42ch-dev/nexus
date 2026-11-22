@@ -30,7 +30,6 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   invalid_input: 400,
   forbidden: 403,
   not_found: 404,
-  // An operation this service does not serve is refused without side effects,
   // mirroring the 501 route_not_migrated semantics rather than fake success.
   not_supported: 501,
   world_kb_conflict: 409,
@@ -50,10 +49,8 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   compute_module_error: 422,
   outline_conflict: 409,
   outline_validation_failed: 422,
-  // A stale compose base is a compare-and-swap conflict, never a validation failure: the
   // client reloads the candidate and reapplies the operation.
   strategy_candidate_conflict: 409,
-  // A repeat approve freezes nothing: the existing snapshot for this exact content is the answer.
   strategy_already_approved: 409,
   workspace_conflict: 409,
   internal: 500,
@@ -62,7 +59,6 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
 const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
 
 /**
- * The apply refusals the stored state has already answered, published as 409 under a code that
  * names the conflict (their reason) so the envelope matches its status, mirroring
  * `strategy_already_approved`.
  *
@@ -116,7 +112,6 @@ export function mapNativeError(error: unknown): HttpError {
 
   const wire = parseNativeCoreError(error);
   if (wire) {
-    // `internal` is the sanitization boundary: the native detail (and any
     // path/SQL/config it carries in `details`) never reaches the client.
     if (wire.code === 'internal') {
       return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
@@ -135,7 +130,6 @@ export function mapNativeError(error: unknown): HttpError {
   }
 
   const message = error instanceof Error ? error.message : String(error);
-  // `@42ch/nexus-native` validates every value before it crosses the wire and
   // rejects with `invalid <field>: <reason>` — a client error, not a fault.
   if (message.startsWith('invalid ')) {
     return new HttpError(400, 'invalid_input', message);

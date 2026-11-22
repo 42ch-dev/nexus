@@ -1,5 +1,4 @@
 /**
- * ActivationTraceList — P1 T1 (DF-76) coverage.
  *
  * Fixture `MomentInspectResponse`-shaped trace entries covering: a fired entry
  * with a slot, a missed entry (no slot), and a hopped entry (forward-compatible
@@ -59,7 +58,6 @@ describe('ActivationTraceList — T1', () => {
     const row = screen.getByTestId('trace-entry-bandit-entry');
     expect(within(row).getByText(/Missed/)).toBeInTheDocument();
     expect(within(row).getByText('Bandit gang')).toBeInTheDocument();
-    // Missed entries carry no slot (post stage-gate routing only covers accepted entries).
     expect(within(row).queryByTestId('trace-slot-bandit-entry')).toBeNull();
     expect(within(row).getByTestId('trace-reason-bandit-entry')).toHaveTextContent('no matching keys');
   });

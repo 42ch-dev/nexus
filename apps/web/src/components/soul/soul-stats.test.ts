@@ -1,5 +1,4 @@
 /**
- * soul-stats — pure aggregation unit tests (V1.79 P1 SOUL §B/§C).
  *
  * Covers density branching, keyword-frequency aggregation (incl. malformed /
  * non-string keyword data degrading gracefully), and temporal bucketing (sparse
@@ -41,7 +40,6 @@ describe('fragmentKeywords', () => {
   it('degrades to empty for missing / malformed / non-string items', () => {
     expect(fragmentKeywords(frag())).toEqual([]);
     expect(fragmentKeywords(frag({ keywords: [] }))).toEqual([]);
-    // The daemon decodes the JSON server-side, but the client guards against
     // a non-array shape defensively.
     expect(fragmentKeywords(frag({ keywords: undefined }))).toEqual([]);
     expect(
@@ -111,14 +109,12 @@ describe('bucketByTime', () => {
     ]);
     const last = buckets[buckets.length - 1]!;
     const kws = last.keywords.map((k) => k.keyword);
-    // The later bucket should carry the "newcomer"/"fading" themes, proving the
     // composition shifts across the timeline.
     expect(kws).toContain('fading');
     expect(kws).toContain('newcomer');
   });
 
   it('caps the bucket count so sparse data does not fabricate empty buckets', () => {
-    // 3 distinct days → at most 3 buckets even if targetBuckets asks for more.
     const buckets = bucketByTime(
       [
         frag({ created_at: '2026-06-01T00:00:00Z' }),

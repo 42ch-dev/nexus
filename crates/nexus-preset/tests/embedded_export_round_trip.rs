@@ -126,7 +126,6 @@ fn every_embedded_preset_round_trips_the_contract_fields() {
         "embedded preset(s) whose export does not reproduce their source manifest:\n{}",
         failures.join("\n")
     );
-    // A corpus change that dropped both shapes would let this gate pass while comparing nothing
     // that ever failed; the two counts keep each half of the contract exercised.
     assert!(
         world_bound > 0,
@@ -208,7 +207,6 @@ states:
         "context_update payload shapes changed through the IR"
     );
 
-    // The equality above only proves as much as the fixture carries; name the four shapes so a
     // fixture edit cannot quietly drop the one that regressed.
     let op = |state: &str| {
         source[&format!("states.{state}.context_update")]
@@ -230,7 +228,6 @@ states:
         Some(&Value::Null),
         "explicit null patch"
     );
-    // The template-driven form: no `patch` key in the source, so none in the export. An
     // unconditional reverse map would invent `patch: null` here and the equality above would
     // still pass if the fixture echoed that null back.
     assert_eq!(

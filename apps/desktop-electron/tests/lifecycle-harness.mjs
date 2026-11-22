@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Lifecycle coordination harness (P0-T4 helpers).
  *
  * The proof shell's renderer-reattach/open-policy helpers
  * (resolveOpenProofPolicy and friends) were retired with the proof main that
@@ -70,7 +69,6 @@ test('service owner admission refuses work that races a live or unconfirmed owne
     code: 'busy',
     message: 'local-state reset requires the service to be closed first',
   });
-  // An unconfirmed close retains the owner: only a close retry may proceed.
   assert.equal(admitUtilityOperation('start', 'unconfirmed').code, 'interrupted');
   assert.equal(admitUtilityOperation('reset-local-state', 'unconfirmed').code, 'interrupted');
   assert.deepEqual(admitUtilityOperation('close', 'unconfirmed'), { ok: true });

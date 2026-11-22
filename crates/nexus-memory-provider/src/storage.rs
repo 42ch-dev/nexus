@@ -752,7 +752,6 @@ impl MemoryStore {
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
-        // A read-only store refuses before the retention sweep and before the
         // connection is touched (fix round 2, finding F3).
         self.require_writable()?;
         #[cfg(feature = "test-hooks")]
@@ -1213,7 +1212,6 @@ impl MemoryStore {
         };
         if let Some(rendezvous) = parked {
             rendezvous.entered.notify_one();
-            // Bounded: a vanished, cancelled or never-releasing test cannot park
             // this write forever, and expiry proceeds normally (the pause never
             // changes the operation's outcome).
             let _ = tokio::time::timeout(ADMISSION_HOLD_BOUND, rendezvous.release.wait()).await;
@@ -1301,12 +1299,10 @@ impl MemoryStore {
         now: DateTime<Utc>,
     ) -> StoreResult<()> {
         let at = timestamp(now);
-        // §5.2/D-10: a reopen settles whatever the previous process journaled
         // but did not publish, before provisioning makes anything else visible.
         // The pass is bounded and best-effort: an intent it cannot settle stays
         // quarantined and the subject's reads report that explicitly.
         self.recover_journal(space_id).await;
-        // N4-R: a reflection generate receipt a crash left `pending` between
         // the two transactions terminalizes here — a pending receipt can never
         // have a reflection row (its insert is transaction 2). Only leases
         // that are absent or already expired settle: a live lease is a
@@ -1314,7 +1310,6 @@ impl MemoryStore {
         // it would break that process's transaction 2 (§7.0.3, inspector
         // round 2). Its own open terminalizes it once its lease has expired.
         self.recover_reflections(space_id).await;
-        // §6.10 retention is durable even for a deployment that only reads:
         // opening the provider reclaims what has aged out, and does so in its
         // own committed transaction so a provisioning failure cannot put an
         // already-evicted body back either.
@@ -1370,7 +1365,6 @@ impl MemoryStore {
         space_id: &str,
         receipt_id: &str,
     ) -> StoreResult<ReceiptRow> {
-        // A workspace with no provider schema has no receipt and no space
         // (fix round 3, finding F3): the declared absence, not a driver error.
         self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
@@ -1385,7 +1379,6 @@ impl MemoryStore {
                     .as_deref()
                     .is_none_or(|expires_at| expires_at > at.as_str())
         });
-        // MEM-R018: the refusal is identical for an unknown id and for an
         // existing receipt this principal may not read, so receipt existence is
         // not enumerable without current participation.
         let refusal = || {
@@ -1431,7 +1424,6 @@ impl MemoryStore {
             Retention::Evicted => Err(StoreError::ReceiptExpired {
                 last_known_status: row.status,
             }),
-            // Past the dedup window even the tombstone is gone.
             Retention::Expired => Err(StoreError::NotFound(format!("receipt {receipt_id}"))),
         }
     }
@@ -1445,7 +1437,6 @@ impl MemoryStore {
         space_id: &str,
         subject_id: &str,
     ) -> StoreResult<SubjectRow> {
-        // Same absence policy as the other space-scoped reads (fix round 3,
         // finding F3): authorization is unchanged where the space exists.
         self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
@@ -1468,7 +1459,6 @@ impl MemoryStore {
     /// only grows while the set is unchanged and moves when a space drifts in or
     /// out of visibility.
     pub async fn visible_spaces(&self, principal_id: &str) -> StoreResult<(Vec<SpaceRow>, String)> {
-        // A workspace no writer ever provisioned carries no provider space
         // (fix round 2, finding F2): an empty listing, not a driver error. The
         // check re-probes while the cache says absent, so a later writer
         // provisioning is observed here (fix round 3, finding F2).
@@ -1563,7 +1553,6 @@ impl MemoryStore {
         let (created, status, revision) = if let Some(row) = existing {
             (false, row.status, row.revision)
         } else {
-            // §7/I-000149: one subject owns a bearer naming. Reads resolve a
             // bearer to the smallest subject naming it, so admitting a second
             // naming here would let a later, smaller ensure re-assign the
             // projection and resurrect a consumed legacy candidate. Refused in
@@ -1687,7 +1676,6 @@ impl MemoryStore {
         principal_filter: Option<&str>,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<GrantRow>, String, Option<String>, bool)> {
-        // The grants page is space-scoped too: a workspace with no provider
         // schema answers the space's absence (fix round 3, finding F3).
         self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
@@ -1710,7 +1698,6 @@ impl MemoryStore {
         } else {
             Some(principal_id)
         };
-        // Constant predicates only: the absent-filter variants are separate
         // statements so the (space_id, …) indexes stay usable.
         let mut where_sql = String::from(" WHERE space_id = ?");
         let mut binds: Vec<&str> = vec![space_id];
@@ -1761,7 +1748,6 @@ impl MemoryStore {
         new_grant: &NewGrant<'_>,
     ) -> StoreResult<ReceiptRow> {
         let (mut tx, now) = self.begin_admission().await?;
-        // §7.0.5/MEM-R021: handing back a committed receipt is a disclosure, so
         // it needs current coverage — but it never re-runs the issuance rules.
         // An applicable admin grant acquired after the original issuance can
         // tighten the §7.9 expiry bound, and the retry must still return its
@@ -1863,7 +1849,6 @@ impl MemoryStore {
         result: &Value,
         now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
-        // Candidate consumption writes the receipt id into the audit shell
         // before this runs (§6.7 `consumed_by`), so those ops pass their own.
         self.commit_receipt_with(tx, ctx, mint_receipt_id(), result, now)
             .await
@@ -1919,7 +1904,6 @@ impl MemoryStore {
             .publish_effects(publication, &receipt_id, effects)
             .await
         {
-            // §5.2 step 3/S-1: terminalize the intent now. Leaving it `pending`
             // silently withheld the subject from every read until the next open,
             // and a deterministic refusal was reported by no channel at all. The
             // payload is kept, which is the evidence a recovery pass re-drives;
@@ -1930,7 +1914,6 @@ impl MemoryStore {
                 .settle_journal(&receipt_id, Settlement::Quarantined(failure), now)
                 .await
             {
-                // The publish failure is the caller's outcome; a settle failure
                 // only means the intent is still `pending` and the next open
                 // (or the next same-key replay) recovers it.
                 tracing::warn!(
@@ -2136,7 +2119,6 @@ impl MemoryStore {
                 .execute(&mut *tx)
                 .await?;
             }
-            // The payload stays put: it is the recovery evidence a re-drive
             // republishes, and deleting it here is what stranded the intent.
             Settlement::Quarantined(_) => {
                 sqlx::query(
@@ -2153,7 +2135,6 @@ impl MemoryStore {
         }
         #[cfg(feature = "test-hooks")]
         if fault == SETTLE_FAULT_WRITE {
-            // The way a real settle write fails: the transaction opened and its
             // first write landed, then the receipt write did not.
             return Err(StoreError::Database(nexus_local_db::LocalDbError::Io(
                 "injected journal settle failure: write".to_string(),
@@ -2163,7 +2144,6 @@ impl MemoryStore {
             Settlement::Applied(result) => {
                 let result_json = serde_json::to_string(result)
                     .map_err(|e| StoreError::Corrupt(format!("receipt result: {e}")))?;
-                // A re-drive publishes an intent whose receipt already recorded
                 // the failure, so both unsettled shapes are replaceable.
                 sqlx::query(
                     "UPDATE memory_receipts SET status = 'committed', result_json = ?, \
@@ -2199,7 +2179,6 @@ impl MemoryStore {
         tx.commit()
             .await
             .map_err(|e| StoreError::CommitUnknown(format!("journal settle COMMIT: {e}")))?;
-        // The retention sweep may have reclaimed the receipt of an intent that
         // was still unsettled (the receipt's dedup window can end before the
         // target is resolved). The journal row is the recovery authority, so its
         // settlement still commits — only a caller that needs this receipt row
@@ -2269,7 +2248,6 @@ impl MemoryStore {
     /// that wait is still in flight — the task holds it until the lease is taken
     /// and hands both back.
     async fn begin_publication_section(&self) -> StoreResult<PublicationGuard> {
-        // The publication path refuses a read-only store before it takes this
         // process's gate or the workspace flock (fix round 2, finding F3).
         self.require_writable()?;
         #[cfg(feature = "test-hooks")]
@@ -2313,7 +2291,6 @@ impl MemoryStore {
     ) -> StoreResult<Option<ReceiptRow>> {
         let mut tx = begin_immediate(&self.pool).await?;
         let now = self.now();
-        // I-000305: a changed payload under a retained key conflicts before
         // the authorization resolves the request's target row, so a changed
         // target whose candidate is gone answers the key instead of
         // NOT_FOUND. The replay disclosure stays in `probe` below, behind
@@ -2378,7 +2355,6 @@ impl MemoryStore {
         for entry in &entries {
             self.settle_intent(publication, entry).await;
         }
-        // §5.2 step 5: what the bound did not reach is terminal until a later
         // pass settles it, never silently withheld.
         sqlx::query(
             "UPDATE memory_journal SET state = ?, updated_at = ? WHERE space_id = ? AND state = ?",
@@ -2391,7 +2367,6 @@ impl MemoryStore {
         .await?;
         if let Some(seq) = advance {
             if let Err(error) = self.record_recovery_cursor(space_id, seq).await {
-                // The pass did its work; only the rotation position is lost, and
                 // the next pass simply starts over from the oldest intent.
                 tracing::warn!(%space_id, ?error, "memory journal recovery cursor not recorded");
             }
@@ -2526,7 +2501,6 @@ impl MemoryStore {
         .bind(&row.receipt_id)
         .fetch_optional(&self.pool)
         .await?;
-        // Both rows commit in one transaction, so a pending receipt without its
         // intent is a store state this provider cannot produce.
         let entry = entry.ok_or_else(|| {
             StoreError::Corrupt(format!(
@@ -2534,7 +2508,6 @@ impl MemoryStore {
                 row.receipt_id
             ))
         })?;
-        // The receipt is already durable, so a settlement failure here is the
         // same uncertainty `commit_journalled` reports — never a retryable
         // `INTERNAL_ERROR` (§14.2/§14.3).
         self.settle_entry(publication, &entry)
@@ -2570,7 +2543,6 @@ impl MemoryStore {
         .fetch_all(&self.pool)
         .await?;
         for entry in &entries {
-            // A settle that cannot publish records its quarantine; the re-read
             // below decides whether the projection is still owed.
             self.settle_intent(publication, entry).await;
         }
@@ -2904,7 +2876,6 @@ async fn authorize(
                 now,
                 &requirements,
             ) {
-                // C-102/MEM-R026: a by-ID candidate op hides incomplete coverage
                 // exactly as it hides an id this store never held — the same
                 // code AND the same message the absent row produces — so no
                 // caller without coverage can learn that the candidate exists.
@@ -3006,7 +2977,6 @@ async fn gate(
             Some(subject) => {
                 require_write_allowed(&subject, admission.placement_gate.as_slice())?;
             }
-            // §7.24/S-3: a content/profile write over a never-ensured subject is
             // a `NOT_FOUND`, never an implicit creation — a space-wide grantee
             // must not mint records or a trusted `personality` profile for a
             // subject `subjects.get` cannot read. `memory.subjects.ensure` is
@@ -3061,7 +3031,6 @@ fn next_fence_state(
     let mut status = current.status.clone();
     let mut changed = false;
     match (target, action) {
-        // Already fenced is a no-op success (§7.0.4).
         (FenceTarget::Subject, FenceAction::Fence) => {
             if current.status == "active" {
                 status = "fenced".to_string();
@@ -3097,7 +3066,6 @@ fn next_fence_state(
             }
             changed = true;
         }
-        // §7.7: archive on a context target is INVALID_INPUT, refused by the
         // request validator before this layer.
         (FenceTarget::Context(_), FenceAction::Archive) => {
             return Err(StoreError::StatusTransition(
@@ -3301,7 +3269,6 @@ async fn probe(
             }
         }
         Retention::Expired => {
-            // The sweep in `begin_admission` normally cleared it already; the
             // delete stays here so a probe can never inherit a key the partial
             // unique index still holds.
             sqlx::query("DELETE FROM memory_receipts WHERE receipt_id = ?")
@@ -3445,7 +3412,6 @@ async fn pending_receipts(
     Ok(u64::try_from(pending).unwrap_or(0))
 }
 
-// ── The content families (§6.6/§6.7/§6.8, §7.11–§7.24) ──────────────────
 //
 // The content tables carry the same control metadata as the round-A control
 // tables: `revision` as the CAS surface (MEM-R007), a stable provider-minted
@@ -4201,7 +4167,6 @@ async fn adopt_in_tx(
         else {
             continue;
         };
-        // The bridge resolves the bearer's canonical subject; an id that
         // resolves under another subject is not this caller's to adopt.
         if row.subject_id != subject_id {
             continue;
@@ -4270,7 +4235,6 @@ async fn adopt_records_in_tx(
         let Some(row) = legacy::record_by_id_in_tx(tx, roots, space_id, id).await? else {
             continue;
         };
-        // The bridge resolves the bearer's canonical subject; an id that
         // resolves under another subject is not this caller's to adopt.
         if row.subject_id != subject_id {
             continue;
@@ -4487,7 +4451,6 @@ fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> St
         && stored.occurred_at == projected.occurred_at
         && stored.expires_at == projected.expires_at
         && stored.revision == projected.revision
-        // Adoption writes the provider's whole-second rendering into the
         // column, while the projection keeps the legacy precision, so the two
         // values compare at the precision the provider actually stores (F1:
         // the same creation instant, not the same text).
@@ -4549,7 +4512,6 @@ async fn resolve_legacy_snapshot(
         let Some(stored) = stored else {
             continue;
         };
-        // The stored profile of the subject's kind *is* that document: a
         // pre-migration `SOUL.md` write creates it without adopting a
         // projection, so its document and revision are the provider's own.
         *row = stored;
@@ -4671,7 +4633,6 @@ enum RecordMutation<'a> {
     },
 }
 
-// ── Reflections (§7.25–§7.27, N4-R) ─────────────────────────────────────
 //
 // One append-only envelope per generated reflection; the table is immutable by
 // design, so the family is an insert and an identity read and nothing else.
@@ -4695,7 +4656,6 @@ const REFLECTION_COLUMNS: &str =
 /// One generated reflection envelope as stored (§7.27).
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct ReflectionRow {
-    // The store-assigned insertion order: the read path orders by it (whole-
     // second `created_at` stamps cannot separate same-second envelopes); the
     // wire projection never serves it.
     #[allow(dead_code)]
@@ -4703,7 +4663,6 @@ pub struct ReflectionRow {
     pub reflection_id: String,
     pub space_id: String,
     pub subject_id: String,
-    // The generate flow (Task 4) pins this at insert; the §7.26 projection
     // never serves it, so it stays mapped for row fidelity only.
     #[allow(dead_code)]
     pub requester_principal_id: String,
@@ -4794,7 +4753,6 @@ async fn insert_reflection(
     Ok(())
 }
 
-// ── Reflection reads (§7.25–§7.26, N4-R Task 3) ─────────────────────────
 //
 // The read-time staleness mechanism (C-042): the provider recomposes its
 // canonical basis object over the *current* authorized set on every read and
@@ -4931,7 +4889,6 @@ fn pinned_staleness(
         .map_err(StoreError::Corrupt)?;
     let source_live = crate::reflection_source_set_digest(live).map_err(StoreError::Corrupt)?;
     let mut counting = live.to_vec();
-    // Undo the single delete-time revision bump; a tombstoned row has no
     // other revision history after the pin.
     counting.extend(
         tombstones
@@ -5015,7 +4972,6 @@ impl MemoryStore {
             return Ok((Vec::new(), marker, 0));
         }
         let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
-        // Every record identity of the subject, live and tombstoned: the
         // cursor marker must move on any basis-affecting change (MEM-R026).
         let (all_live, all_tombstones) =
             reflection_record_sets(&mut tx, &Selection::SubjectAll, None, space_id, subject_id)
@@ -5071,7 +5027,6 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grant_rows)?;
-        // §7.25: the request's own selection must hold current `reflect`
         // coverage before the basis publishes — the disclosure check
         // `reflection_basis` performs, at the same point of the read.
         if !covered(
@@ -5086,7 +5041,6 @@ impl MemoryStore {
             )));
         }
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        // §5.2/D-10: an unsettled file intent withholds the subject from
         // reads — both halves empty, exactly what the two separate reads
         // produced before.
         if withheld(unsettled.as_ref(), subject_id)? {
@@ -5158,13 +5112,11 @@ async fn visible_reflections_in_tx(
         .bind(subject_id)
         .fetch_all(&mut **tx)
         .await?;
-    // Per distinct pinned selection/filter, one recomputation of the
     // current record sets; each envelope's staleness/exclusion verdict is
     // then computed against that row's own pinned basis — envelopes
     // sharing a pin may pin different bases, so a verdict computed from a
     // sibling row's basis is never shared.
     let mut probes: ReflectionProbeMap = HashMap::new();
-    // The request filter matches a pinned filter as a set — the same
     // canonicalization the digest key renders — never by raw array order.
     let request_filter_set = request_filter.map(crate::canonical_ids);
     let mut visible = Vec::with_capacity(rows.len());
@@ -5213,8 +5165,6 @@ async fn visible_reflections_in_tx(
 }
 
 impl MemoryStore {
-    // ── Reflection generation (§7.27, N4-R Task 4) ──────────────────────
-
     /// §7.27 generate: the §7.0.3 two-transaction flow.
     ///
     /// Transaction 1 is the point of no return. Every refusal — the current
@@ -5247,9 +5197,7 @@ impl MemoryStore {
         filter_json: Option<&str>,
         expected_state_digest: &str,
     ) -> StoreResult<ReceiptRow> {
-        // ── Transaction 1: admission and the point of no return ──
         let (mut tx, now) = self.begin_admission().await?;
-        // §7.0.5/MEM-R021: handing back a receipt is a disclosure, so the
         // current-coverage recheck precedes the probe; the replay it returns
         // is exempt from every gate below (the fence included, C-036).
         let _grants = authorize(&mut tx, admission, now).await?;
@@ -5257,7 +5205,6 @@ impl MemoryStore {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
-        // §5.2/D-10: a withheld subject's `state` digest is the empty-basis
         // one, so refusing with the unsettled predecessor is the only honest
         // outcome — a stale-CAS or insufficient-data diagnosis would send the
         // caller re-reading a basis recovery still owes.
@@ -5267,7 +5214,6 @@ impl MemoryStore {
                 state: unsettled.state,
             });
         }
-        // §7.25 state CAS over the *current* authorized basis, recomputed
         // inside this transaction — the same composition the `state` op
         // publishes, so a matching token proves the caller read this basis.
         let snapshot =
@@ -5284,7 +5230,6 @@ impl MemoryStore {
                 current: current_digest,
             });
         }
-        // MEM-R005 then §7.27 sufficiency, both the same provider policy the
         // `state` op reports: the missing kinds are the ones
         // `missing_required_profile_kinds` names, and the verdict is exactly
         // `data_sufficiency`'s.
@@ -5300,7 +5245,6 @@ impl MemoryStore {
                 subject_id: subject_id.to_string(),
             });
         }
-        // The pending receipt is the point of no return: published before any
         // generation (C-015/C-070), carrying no payload, no terminal stamp and
         // no cost. The same transaction stamps this instance as the lease
         // owner with the generation deadline, so a concurrent reopen's
@@ -5322,11 +5266,9 @@ impl MemoryStore {
         .await?;
         self.commit_effect(tx).await?;
 
-        // ── The parked window: pending published, terminal not yet ──
         #[cfg(feature = "test-hooks")]
         self.generation_gate().await;
 
-        // ── Deterministic generation over the pinned basis ──
         // The one-shot fault (C-078 seam) fails the generation step so
         // transaction 2 commits the honest `failed` receipt; nothing else
         // fails here — the composition is pure over the pinned snapshot.
@@ -5341,7 +5283,6 @@ impl MemoryStore {
                 .await?;
         } else {
             let generation = compose_generation(&snapshot, selection, filter, subject_id)?;
-            // The pinned columns travel verbatim (the shapes Task 1 staged);
             // absent optionals stay SQL NULL — never null-substituted.
             let reflection = NewReflection {
                 reflection_id: &generation.reflection_id,
@@ -5394,7 +5335,6 @@ impl MemoryStore {
         .execute(&mut *tx)
         .await?;
         if updated.rows_affected() != 1 {
-            // The lease was lost, not the store: the envelope insert rolls back
             // with this error and the receipt stays replayable (§7.0.3).
             return Err(StoreError::GenerationLeaseLost {
                 receipt_id: row.receipt_id.clone(),
@@ -5433,7 +5373,6 @@ impl MemoryStore {
         .execute(&mut *tx)
         .await?;
         if updated.rows_affected() != 1 {
-            // Same lease-lost rule as the committed branch (§7.0.3).
             return Err(StoreError::GenerationLeaseLost {
                 receipt_id: receipt_id.to_string(),
             });
@@ -5463,7 +5402,6 @@ impl MemoryStore {
     /// bounded and best-effort: a receipt this pass cannot terminalize stays
     /// pending until the next open after its lease expires.
     async fn recover_reflections(&self, space_id: &str) {
-        // Held for the whole pass so recovery passes serialize; the pass only
         // touches the receipts table, but the section is the workspace-wide
         // recovery serialization point.
         let _publication = match self.begin_publication_section().await {
@@ -5581,7 +5519,6 @@ fn compose_generation(
         filter,
     )
     .map_err(StoreError::Corrupt)?;
-    // The basis object is served verbatim by every envelope projection; the
     // staleness probe reads exactly the two digest members below.
     let basis_json = json!({
         "profile_revisions": profile_revisions,
@@ -5929,7 +5866,6 @@ impl MemoryStore {
         let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
         let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        // §7.7: `archived` hides the subject from the *default* listing; a
         // status-filtered listing is an explicit audit query and stays readable.
         // §5.2/D-10: an unsettled intent withholds the subject either way.
         let archived = status.is_none() && subject_status.as_deref() == Some("archived");
@@ -5944,7 +5880,6 @@ impl MemoryStore {
             )?;
             return Ok((Vec::new(), marker, false));
         }
-        // Constant predicates, as separate statements rather than
         // `(? IS NULL OR status = ?)`: that shape defeats the status index, and
         // §6.7 expiry belongs to the read, not to a post-filter over every row
         // (S-10/S-9).
@@ -5955,7 +5890,6 @@ impl MemoryStore {
         where_sql.push_str(
             " AND NOT (status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?)",
         );
-        // Both statements run in the read's snapshot: the identity set (no
         // bodies) is filtered here, because `grant_covers` is the one
         // authorization authority and coverage needs each row's placement;
         // only the page's own ids then fetch their bodies.
@@ -5989,7 +5923,6 @@ impl MemoryStore {
             })
             .map(|row| (row.0.clone(), row.4, row.5.clone()))
             .collect();
-        // Legacy read bridge (NXM-5 Task 1): projected queue entries join the
         // same authorized identity set under the same coverage rule. A migrated
         // candidate carries the bridge's own external id, so the provider row
         // wins and the projection is dropped.
@@ -6033,7 +5966,6 @@ impl MemoryStore {
                 created_at_cmp(&left.2, &right.2).then_with(|| left.0.cmp(&right.0))
             });
         }
-        // Cursor offsets index the authorized set, never the predicate set: a
         // hidden candidate can neither consume a page nor skip a visible row
         // across a boundary (MEM-R006).
         let (start, take) = page.map_or((0, authorized.len()), |(limit, offset)| {
@@ -6085,7 +6017,6 @@ impl MemoryStore {
             authorized
                 .iter()
                 .map(|(candidate_id, revision, _)| (candidate_id.as_str(), *revision)),
-            // A pending-review row is insert-once, so a projected candidate keeps
             // one fixed identity for as long as it is pending; only records can
             // change content while keeping their id.
             std::iter::empty(),
@@ -6108,7 +6039,6 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = candidate_in_tx(&mut tx, space_id, candidate_id).await?;
-        // Legacy read bridge (NXM-5 Task 1): a projected id resolves to its
         // unmigrated queue entry; coverage below applies to the projection.
         let row = match row {
             Some(row) => Some(row),
@@ -6122,7 +6052,6 @@ impl MemoryStore {
             None => None,
         };
         tx.commit().await?;
-        // §5.2/D-10: the quarantine refusal is a disclosure of both existence
         // and subject, so coverage is decided first — an unauthorized probe gets
         // the same absence it gets for any candidate.
         let Some(row) = row.filter(|row| {
@@ -6201,7 +6130,6 @@ impl MemoryStore {
         expected_revision: Option<i64>,
         step: ConsumeStep<'_>,
     ) -> StoreResult<ReceiptRow> {
-        // Resolve what this consumption has to be authorized as BEFORE the
         // publication section (which evaluates the caller's admission): a row the
         // provider does not own yet is authorized exactly as the bridge projects
         // it, because the adopted row carries the same subject and immutable
@@ -6256,7 +6184,6 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
             // terminal failure) instead of `OUTCOME_UNCERTAIN`.
             tx.rollback().await?;
@@ -6275,7 +6202,6 @@ impl MemoryStore {
                 false,
             )
             .await?;
-            // The projection above was read before this transaction. Re-authorize
             // against the adopted row inside it, so the dismissal is admitted on
             // exactly the placement it consumes.
             let _ = authorize(&mut tx, admission, now).await?;
@@ -6283,7 +6209,6 @@ impl MemoryStore {
         gate(&mut tx, effective).await?;
         let candidate =
             consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
-        // A dismissal that names a bearer consumes only that bearer's row (fix
         // round 4, finding R4-F1): the entry point already resolved the owner
         // before taking its section, and this guard keeps the match where the
         // consumption happens, so no future caller can bypass it.
@@ -6446,7 +6371,6 @@ impl MemoryStore {
         let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
         let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        // §7.7: an archived subject's records leave recall; the listing and
         // by-id audit routes still serve them.
         // §5.2/D-10: an unsettled file intent withholds the subject from both.
         let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
@@ -6470,7 +6394,6 @@ impl MemoryStore {
             space_id,
             subject_id,
         );
-        // Legacy read bridge (NXM-5 Task 1): the subject's unmigrated content is
         // projected through the same predicate, so the page below is a slice of
         // one authorized set spanning both sources. A provider-only read skips
         // the projection entirely: resolving a provider-native slug must not
@@ -6491,7 +6414,6 @@ impl MemoryStore {
             Vec::new()
         };
         let projected = !legacy_rows.is_empty();
-        // A projected row inserts itself into the order, so the SQL half returns
         // a prefix that cannot omit a provider row of the merged page: a provider
         // row inside the merged prefix `[0, offset + limit)` ranks below
         // `offset + limit` in the table as well.
@@ -6500,7 +6422,6 @@ impl MemoryStore {
         } else {
             page
         };
-        // `Some((limit, offset))` cuts the page in SQL; `None` is recall, which
         // ranks the whole authorized set (§9.2) and so cannot page before it.
         let page_clause = if fetch.is_some() {
             " LIMIT ? OFFSET ?"
@@ -6521,7 +6442,6 @@ impl MemoryStore {
                 .bind(i64::try_from(offset).unwrap_or(i64::MAX));
         }
         let mut rows = rows_query.fetch_all(&mut *tx).await?;
-        // The authorized identity set: the marker and the count, never the
         // bodies of rows the page will not serve. A whole-set read already has
         // them.
         let mut visible: Vec<(String, i64)> = if page.is_some() {
@@ -6542,7 +6462,6 @@ impl MemoryStore {
         };
         let mut projected_versions: Vec<(String, String)> = Vec::new();
         if projected {
-            // A migrated object carries this projection's own external id, so
             // the provider row wins whatever the request predicate says about it
             // — a tombstoned migrated record must stay deleted, not reappear
             // through the bridge.
@@ -6569,7 +6488,6 @@ impl MemoryStore {
             }
         }
         tx.commit().await?;
-        // §6.5: the selection check above covers every row the selection admits
         // (a grant covering all of its named contexts covers each of them), so
         // the page is a slice of the authorized set and never needs a second
         // row-level refusal. This asserts that invariant in tests.
@@ -6615,7 +6533,6 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = record_in_tx(&mut tx, space_id, record_id).await?;
-        // Legacy read bridge (NXM-5 Task 1): a projected id resolves to its
         // unmigrated source; the coverage/tombstone/unsettled gates below apply
         // to the projected row exactly as they do to a provider row.
         let row = match row {
@@ -6627,7 +6544,6 @@ impl MemoryStore {
             None => None,
         };
         tx.commit().await?;
-        // §5.2/D-10: the quarantine refusal is a disclosure of both existence
         // and subject, so coverage is decided first — an unauthorized probe gets
         // the same absence it gets for any record.
         let Some(row) = row.filter(|row| {
@@ -6677,14 +6593,12 @@ impl MemoryStore {
         provenance: &Value,
     ) -> StoreResult<ReceiptRow> {
         let record_id = mint_record_id();
-        // A create owns a target nothing has ever written, so its predecessor
         // check is trivially clear — it still runs like every other publication.
         let targets = [journal::record_target(&record_id)];
         let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
             // terminal failure) instead of `OUTCOME_UNCERTAIN`.
             tx.rollback().await?;
@@ -6832,7 +6746,6 @@ impl MemoryStore {
         step: RecordMutation<'_>,
         adopt_subject: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
-        // Resolve what this mutation has to be authorized as BEFORE the
         // publication section (which evaluates the caller's admission): a row
         // the provider does not own yet is authorized exactly as the bridge
         // projects it, because the adopted row carries its subject and its
@@ -6885,7 +6798,6 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
             // terminal failure) instead of `OUTCOME_UNCERTAIN`.
             tx.rollback().await?;
@@ -6903,7 +6815,6 @@ impl MemoryStore {
                 now,
             )
             .await?;
-            // Re-authorize against the adopted row inside this transaction, so
             // the mutation is admitted on exactly the row it writes.
             let _ = authorize(&mut tx, admission, now).await?;
         }
@@ -6911,7 +6822,6 @@ impl MemoryStore {
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
-        // R4-F2's shape: the adapter speaks for one bearer, so a record owned by
         // another subject is refused where the mutation commits.
         if let Some(subject_id) = adopt_subject {
             if record.subject_id != subject_id {
@@ -6921,7 +6831,6 @@ impl MemoryStore {
                 )));
             }
         }
-        // §7.7/MEM-R014: deletion scrubs content irreversibly, so the subject
         // and placement gates apply exactly as they do to update and promote.
         require_subject_writable(
             &mut tx,
@@ -6930,7 +6839,6 @@ impl MemoryStore {
             &[record.scope()],
         )
         .await?;
-        // MEM-R014: deletion is terminal, so a tombstoned record is never edited
         // back to life nor deleted twice.
         if record.tombstoned() {
             return Err(StoreError::StatusTransition(match step {
@@ -6945,7 +6853,6 @@ impl MemoryStore {
                 current: record.revision,
             });
         }
-        // §7.0.4/MEM-R007: an update that carries no content and names only the
         // kind the row already has changes nothing observable, so the row keeps
         // its revision, kind, content and timestamps. The operation still
         // commits its content-free receipt — and therefore its idempotency
@@ -6961,7 +6868,6 @@ impl MemoryStore {
                 return self.commit_receipt(tx, ctx, &result, now).await;
             }
         }
-        // The content-bearing projection this mutation replaces: the provider's
         // own previous version of the row, never whatever bytes sit at the
         // target (a deletion journals only its digest).
         let prior = journal::record_effect(&record)?.digest;
@@ -7055,7 +6961,6 @@ impl MemoryStore {
         target: Placement<'_>,
         adopt_subject: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
-        // Resolve what this promotion has to be authorized as BEFORE the
         // publication section (which evaluates the caller's admission): a row
         // the provider does not own yet is authorized exactly as the bridge
         // projects it, because the adopted row carries its subject and its
@@ -7108,7 +7013,6 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
             // terminal failure) instead of `OUTCOME_UNCERTAIN`.
             tx.rollback().await?;
@@ -7126,7 +7030,6 @@ impl MemoryStore {
                 now,
             )
             .await?;
-            // Re-authorize against the adopted row inside this transaction, so
             // the promotion is admitted on exactly the row it mutates.
             let _ = authorize(&mut tx, admission, now).await?;
         }
@@ -7134,7 +7037,6 @@ impl MemoryStore {
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
-        // R4-F2: this seam promotes one bearer's own fragment, so the record the
         // lease names must be that bearer's and must be a `fact` fragment. The
         // check sits where the mutation commits, not at the caller's read, so no
         // caller can reach another Character's record through this path.
@@ -7168,12 +7070,10 @@ impl MemoryStore {
                 current: record.revision,
             });
         }
-        // The projection this promotion replaces (unused by a §7.0.4 no-op).
         let prior = journal::record_effect(&record)?.digest;
         let revision = if record.scope_visibility == target.visibility
             && record.scope_context_id.as_deref() == target.context_id
         {
-            // §7.0.4: a genuine no-op keeps the revision.
             record.revision
         } else {
             let updated = sqlx::query(
@@ -7196,7 +7096,6 @@ impl MemoryStore {
             }
             record.revision + 1
         };
-        // R4-F3 round 2: the placement this promotion leaves is in neither the
         // row (its scope is the target now) nor its provenance (a client claim
         // that need not name the placement at all), so a post-commit cache
         // invalidation could not recover it. The promotion's own transaction
@@ -7214,7 +7113,6 @@ impl MemoryStore {
         });
         let result = json!({ "record_id": record_id, "revision": revision, "scope": scope });
         if revision == record.revision {
-            // §7.0.4 no-op: the stored row is unchanged, so the projection is too.
             return self.commit_receipt(tx, ctx, &result, now).await;
         }
         let effect = record_effect_in_tx(&mut tx, ctx.space_id, record_id)
@@ -7269,7 +7167,6 @@ impl MemoryStore {
                 legacy::migration_snapshot(&mut tx, &self.legacy, ctx.space_id).await?;
             resolve_legacy_snapshot(&mut tx, ctx.space_id, &mut snapshot).await?;
             tx.rollback().await?;
-            // A committed marker can still owe its file publication: re-drive
             // whatever this op left unsettled before calling the space complete.
             self.settle_own_intents(&mut publication, ctx).await?;
             let recorded: Value = serde_json::from_str(&recorded)
@@ -7392,7 +7289,6 @@ impl MemoryStore {
             .bind(subject_id)
             .fetch_all(&mut *tx)
             .await?;
-        // Legacy read bridge (NXM-5 Task 1): `SOUL.md` is the subject's authored
         // personality document until it is migrated. A stored profile of the
         // same kind always wins, so a migrated document never appears twice.
         let projected = legacy::profiles_in_tx(
@@ -7414,7 +7310,6 @@ impl MemoryStore {
         }
         rows.sort_by(|left, right| left.profile_kind.cmp(&right.profile_kind));
         tx.commit().await?;
-        // §5.2/D-10: a subject whose file intent is unsettled has no readable
         // profile surface yet.
         if withheld(unsettled.as_ref(), subject_id)? {
             return Ok(None);
@@ -7439,7 +7334,6 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
             // terminal failure) instead of `OUTCOME_UNCERTAIN`.
             tx.rollback().await?;
@@ -7448,7 +7342,6 @@ impl MemoryStore {
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let existing = profile_in_tx(&mut tx, ctx.space_id, subject_id, profile_kind).await?;
-        // The projection this upsert replaces: the provider's own previous
         // profile document, absent on the first write.
         let prior = existing
             .as_ref()
@@ -7476,12 +7369,10 @@ impl MemoryStore {
                 1
             }
             (None, Some(_)) => {
-                // Create-only was not requested but the row does not exist: the
                 // expectation cannot be met.
                 return Err(StoreError::RevisionConflict { current: 0 });
             }
             (Some(current), None) => {
-                // `expected_revision: null` means create-only (§7.24).
                 return Err(StoreError::RevisionConflict { current });
             }
             (Some(current), Some(expected)) => {
@@ -7561,7 +7452,6 @@ fn record_predicate(
             include_shared,
         } => {
             if context_ids.is_empty() && !include_shared {
-                // Neither a named context nor shared placement is admitted.
                 sql.push_str(" AND 0");
             } else if context_ids.is_empty() {
                 sql.push_str(" AND scope_visibility = 'shared'");
@@ -7611,7 +7501,6 @@ fn profiles_grant_covers(
     now: DateTime<Utc>,
     subject_id: &str,
 ) -> bool {
-    // Every capability the grant lists is admitted by the same subject/space
     // filter, so probing the grant's own first capability keeps the §6.5
     // evaluator (expiry, revoke, subject scope) as the single source of truth.
     let Some(capability) = grant_capabilities(grant).first() else {

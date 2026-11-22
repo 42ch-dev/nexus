@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! # Spoke 0.4.1 timeline helper adoption (test-adoption, compass AC-I2)
 //!
 //! This is a **test-adoption**: it proves the spoke 0.4.1 timeline beat-assist

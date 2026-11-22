@@ -39,15 +39,12 @@ impl ModuleError {
 /// `out_ptr` must point into the module's own linear memory, reserved by the
 /// host via `alloc`; the input and output buffers are separate allocations,
 /// so the ranges never overlap.
-// The `Result<usize, ()>` signature is pinned by AR-5 (the error is a boolean
-// "buffer too small" signal, not a rich error); the caller maps it to the
 // `-2` sentinel.
 #[allow(clippy::result_unit_err)]
 pub fn write_output(out_ptr: u32, out_cap: u32, bytes: &[u8]) -> Result<usize, ()> {
     if bytes.len() > out_cap as usize {
         return Err(());
     }
-    // SAFETY: `out_ptr` points into our own linear memory, reserved by the
     // host via `alloc`. The ranges are non-overlapping (input and output
     // buffers are separate allocations).
     unsafe {
@@ -75,11 +72,9 @@ mod tests {
     fn write_output_rejects_oversized_payload_before_copy() {
         let mut buf = [0u8; 4];
         write_output(buf.as_mut_ptr() as u32, 4, b"too long").expect_err("must fail");
-        // Nothing was written.
         assert_eq!(&buf, &[0u8; 4]);
     }
 
-    // The copy path (`ptr::copy_nonoverlapping` into the module's linear
     // memory) is only meaningful on wasm32, where pointers ARE u32 linear
     // addresses — a host pointer truncated to u32 is invalid memory. The copy
     // itself is a std primitive; the interesting logic (capacity check before

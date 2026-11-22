@@ -14,16 +14,13 @@ describe('runCodegen run lock', () => {
     const previousDeref = process.env.NEXUS_DEREF_SCHEMAS_DIR;
     process.env.NEXUS_DEREF_SCHEMAS_DIR = deref;
 
-    // The run lock covers the shared localized scratch tree, not just the TS output
     // directory — prep clears it before either generator runs.
     const lockDir = `${resolvePrepPaths().localizedDir}.lock`;
     expect(fs.existsSync(lockDir)).toBe(false);
-    // A competing run already holds the whole-run lock.
     fs.mkdirSync(lockDir, { recursive: true });
     fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}:competing:0\n`);
     try {
       await expect(runCodegen()).rejects.toThrow(/another codegen run/);
-      // The refusal happens before prep, so the shared inputs a competing run would
       // clear are still intact.
       expect(fs.existsSync(path.join(deref, 'sentinel.schema.json'))).toBe(true);
     } finally {

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * P0-T7 product host integration tests.
  *
  * No GUI, no Electron, no E2E: `composeDesktopHost` receives injected
  * Electron surfaces (the T4/T6 harness pattern), so the whole composition —
@@ -62,7 +61,6 @@ function makeFakeElectron() {
   const forkCalls = [];
   let dialogResponse = 2;
   let openDialogResult = { canceled: true, filePaths: [] };
-  // Default null → the canned immediate response below. A test that needs a
   // pending or rejected native dialog installs its own responder.
   let messageBoxHandler = null;
 
@@ -220,7 +218,6 @@ function makeFakeElectron() {
     decryptString: (bytes) => new TextDecoder().decode(bytes).slice(4),
   };
 
-  // Runtime icon decoding surface: real Electron's `nativeImage` decodes
   // PNG/JPEG only. The default fake reports a decodable image so the identity
   // path reaches `dock.setIcon`; tests that own the failure case patch it.
   const nativeImage = { createFromPath: (path) => ({ isEmpty: () => false, path }) };
@@ -250,7 +247,6 @@ function makeFakeElectron() {
     setOpenDialogResult: (result) => {
       openDialogResult = result;
     },
-    // Replaces the canned showMessageBox result with a test-owned promise
     // (pending / rejected), keeping the dialogCalls recording above.
     setMessageBoxHandler: (handler) => {
       messageBoxHandler = handler;
@@ -259,7 +255,6 @@ function makeFakeElectron() {
 }
 
 const product = loadProductIdentity(RESOURCES_DIR);
-// The identity version must agree with the package manifest (the packaging
 // preflight enforces the same cross-file agreement); deriving it keeps the
 // suite green across version bumps instead of pinning a literal.
 const electronPackageVersion = JSON.parse(
@@ -275,7 +270,6 @@ async function makeHost(overrides = {}) {
     patchElectron,
     ...hostOverrides
   } = overrides;
-  // Applied before composeDesktopHost so a test can install its own dialog
   // responder (pending / rejected) on the injected Electron surface.
   if (typeof patchElectron === 'function') patchElectron(electron);
   const paths = {
@@ -296,7 +290,6 @@ async function makeHost(overrides = {}) {
   const disposedGenerations = [];
   const protocolCalls = [];
   const networkHooks = [];
-  // Registration-order evidence: the protocol handler must be installed
   // before any window is created (scheme privilege is bootstrap-only,
   // pre-ready — composeDesktopHost has no registerSchemes seam at all).
   electron.lifecycleEvents = [];
@@ -331,7 +324,6 @@ async function makeHost(overrides = {}) {
       attachNetworkHooks: (sessionArg, getActiveAuth) => {
         networkHooks.push({ session: sessionArg, getActiveAuth });
       },
-      // No test may touch the real OS keychain or the user's app-data: the
       // default legacy adapter has neither a source nor anything to remove.
       // Tests that own the migration pass their own adapter.
       legacyCredentials: {
@@ -364,9 +356,6 @@ const VALID_SENDER_VIEW = {
   frameUrl: 'nexus://app/index.html',
 };
 
-// ---------------------------------------------------------------------------
-// Identity and launch-time resolution
-// ---------------------------------------------------------------------------
 
 test('product identity loads from resources/product.json and applies to the app', () => {
   assert.deepEqual(product, {
@@ -404,7 +393,6 @@ test('product identity loads from resources/product.json and applies to the app'
   assert.equal(app.name, 'Nexus');
   assert.equal(app.paths.get('userData'), join(appData, 'io.nexus42.desktop'));
   if (process.platform === 'darwin') {
-    // The runtime icon is the decodable PNG; the packing-only `.icns` sibling
     // is never handed to `dock.setIcon` (nativeImage cannot decode it).
     assert.deepEqual(decoded, [join(RESOURCES_DIR, 'icons', 'app-icon.png')]);
     assert.deepEqual(app.dock.icons, [icon]);
@@ -484,9 +472,6 @@ test('trusted node executable: packaged layout preferred, PATH is the fallback',
   assert.ok(resolveTrustedNodeExecutable({ isPackaged: false, env: process.env }));
 });
 
-// ---------------------------------------------------------------------------
-// Composition: window chrome, handler map, runtime metadata, menu
-// ---------------------------------------------------------------------------
 
 test('production window policy and protocol registration', async () => {
   const { electron, host, ipcCalls, protocolCalls, networkHooks, paths } = await makeHost();
@@ -510,13 +495,11 @@ test('production window policy and protocol registration', async () => {
   assert.equal(win.loadedUrl, 'nexus://app/index.html');
   assert.equal(electron.app.name, 'Nexus');
 
-  // Full typed handler map — exactly the frozen operation union.
   assert.deepEqual(
     Object.keys(host.handlers).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
     [...DESKTOP_OPERATIONS].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
   );
 
-  // Protocol registered with the local service origin, BEFORE the first
   // window was created. Scheme privilege is registered exactly once,
   // pre-ready, by the bootstrap — composeDesktopHost exposes no
   // registerSchemes seam, so no second registration can happen after ready.
@@ -528,7 +511,6 @@ test('production window policy and protocol registration', async () => {
     },
   ]);
 
-  // Live generation source supplied to the IPC registration (P0-T1 round-2).
   assert.equal(ipcCalls.length, 1);
   assert.equal(typeof ipcCalls[0].options.getCurrentGeneration, 'function');
   assert.equal(ipcCalls[0].options.generation, 1);
@@ -536,16 +518,13 @@ test('production window policy and protocol registration', async () => {
   assert.equal(ipcCalls[0].options.dev, false);
   assert.doesNotThrow(() => assertDesktopEventSender(VALID_SENDER_VIEW, ipcCalls[0].options));
 
-  // Network hooks bound to the main session with the store's auth authority.
   assert.equal(networkHooks.length, 1);
   assert.equal(networkHooks[0].getActiveAuth(), null);
 
-  // Trusted runtime metadata answered synchronously for the preload.
   const event = { returnValue: undefined };
   electron.ipcMainListeners.get(DESKTOP_RUNTIME_CHANNEL)(event);
   assert.deepEqual(event.returnValue, { localEndpoint: LOCAL_ENDPOINT });
 
-  // Standard menu roles only — no native product menu.
   const template = electron.menuSet[0].template;
   assert.deepEqual(
     template.map((item) => item.role),
@@ -553,7 +532,6 @@ test('production window policy and protocol registration', async () => {
   );
   assert.ok(template.every((item) => Object.keys(item).length === 1));
 
-  // Fresh daemon status snapshot through the typed handler.
   assert.deepEqual(await host.handlers.get_daemon_status(), { state: 'stopped', port: 8420 });
 
   host.dispose();
@@ -576,9 +554,6 @@ test('maximize toggle is main-owned on the selected window', async () => {
   assert.equal(win.maximized, false);
 });
 
-// ---------------------------------------------------------------------------
-// Generation enforcement across window replacement
-// ---------------------------------------------------------------------------
 
 test('renderer crash replaces only the renderer: generation bumps, stale senders rejected, service owner untouched', async () => {
   const { electron, host, ipcCalls, disposedGenerations, forkCalls } = await makeHost();
@@ -593,7 +568,6 @@ test('renderer crash replaces only the renderer: generation bumps, stale senders
   assert.deepEqual(disposedGenerations, [1]);
   assert.equal(ipcCalls[1].options.generation, 2);
 
-  // The previous generation's binding now rejects its own senders.
   assert.throws(
     () => assertDesktopEventSender(VALID_SENDER_VIEW, ipcCalls[0].options),
     (err) => errorCode(err) === 'stale_sender',
@@ -602,13 +576,11 @@ test('renderer crash replaces only the renderer: generation bumps, stale senders
     assertDesktopEventSender({ ...VALID_SENDER_VIEW }, ipcCalls[1].options),
   );
 
-  // No service owner was spawned by a renderer crash.
   assert.equal(forkCalls.length, 0);
   host.dispose();
 });
 
 test('delayed registration race: the superseded in-flight registration loses and the active window owns the channel (QC1 F-001)', async () => {
-  // Generation 1's registration never resolves until the test releases it,
   // so a renderer-crash replacement starts (and would bind) while the stale
   // registration is still in flight — the exact interleaving QC1 F-001 flags.
   let releaseFirstRegistration;
@@ -630,7 +602,6 @@ test('delayed registration race: the superseded in-flight registration loses and
   assert.equal(calls.length, 1);
   assert.equal(events.length, 0, 'generation 1 registration is still in flight');
 
-  // Renderer crash: replacement selection begins while generation 1's
   // registration is unresolved. The replacement must NOT bind the sole
   // invoke channel while the stale registration is still in flight — it
   // waits, then the stale registration is disposed before the active one
@@ -669,7 +640,6 @@ test('second-instance focuses the sole window and never spawns a duplicate servi
   assert.equal(ipcCalls.length, 1);
   assert.equal(forkCalls.length, 0);
 
-  // No live window: the second-instance path is an explicit no-op — it
   // never recreates a window and never spawns a duplicate service.
   // (Window recreation is owned only by the guarded `activate` and
   // renderer-crash paths.)
@@ -683,9 +653,6 @@ test('second-instance focuses the sole window and never spawns a duplicate servi
   host.dispose();
 });
 
-// ---------------------------------------------------------------------------
-// Global content lockdown (app-level web-contents-created)
-// ---------------------------------------------------------------------------
 
 test('global web-contents-created lockdown denies window.open, non-app navigation and non-app redirects', async () => {
   const { electron } = await makeHost();
@@ -700,10 +667,8 @@ test('global web-contents-created lockdown denies window.open, non-app navigatio
   };
   lockdown({}, contents);
 
-  // window.open is denied everywhere.
   assert.deepEqual(windowOpenResult, { action: 'deny' });
 
-  // Non-app navigation and redirect are both prevented (production: no dev
   // origins); the app origin is allowed through for both events.
   for (const eventName of ['will-navigate', 'will-redirect']) {
     const denied = { preventDefault: () => (denied.prevented = true) };
@@ -716,9 +681,6 @@ test('global web-contents-created lockdown denies window.open, non-app navigatio
   }
 });
 
-// ---------------------------------------------------------------------------
-// Quit gate (parity row 21) wired into before-quit
-// ---------------------------------------------------------------------------
 
 function beforeQuit(electron) {
   return electron.appEvents.get('before-quit')[0];
@@ -820,9 +782,6 @@ test('reset_local_database only proceeds after explicit native confirmation', as
   host.dispose();
 });
 
-// ---------------------------------------------------------------------------
-// Connection config handlers + exact-origin network auth authority
-// ---------------------------------------------------------------------------
 
 test('connection config round-trips the public projection; the key never leaves main', async () => {
   const { host, networkHooks } = await makeHost();
@@ -849,7 +808,6 @@ test('connection config round-trips the public projection; the key never leaves 
   assert.ok(!('apiKey' in projection), 'public projection must never contain the key');
   assert.ok(!JSON.stringify(projection).includes('sk-test-key'));
 
-  // Main-only auth authority for the network hooks.
   assert.deepEqual(networkHooks[0].getActiveAuth(), {
     endpointOrigin: 'https://remote.example:9000',
     apiKey: 'sk-test-key',
@@ -901,7 +859,6 @@ test('set_connection_config refuses unsupported endpoint values without replacin
     'file:///etc/passwd',
     'https://*.example.com',
     'http://user:pass@remote.example:9000',
-    // Empty delimiters / dot-segment paths that WHATWG normalizes away.
     'https://remote.example:9000?',
     'https://remote.example:9000#',
     'http://@remote.example:9000',
@@ -923,7 +880,6 @@ test('set_connection_config refuses unsupported endpoint values without replacin
     );
   }
 
-  // The stored config and the live auth authority are exactly what they were.
   assert.deepEqual(await host.handlers.get_connection_config(), {
     endpointUrl: 'https://remote.example:9000',
     active: true,
@@ -950,12 +906,10 @@ test('a valid remote connection config projects its exact origin, auth and CSP, 
     config: { endpointUrl: 'https://remote.example:9000/', active: true, hasApiKey: true },
     credential: { action: 'replace', value: 'sk-remote' },
   });
-  // A root trailing slash is not part of the origin; auth pins the exact one.
   assert.deepEqual(networkHooks[0].getActiveAuth(), {
     endpointOrigin: 'https://remote.example:9000',
     apiKey: 'sk-remote',
   });
-  // Stored identity is preserved verbatim — never rewritten to normalize.
   assert.equal(
     (await host.handlers.get_connection_config()).endpointUrl,
     'https://remote.example:9000/',
@@ -965,7 +919,6 @@ test('a valid remote connection config projects its exact origin, auth and CSP, 
     /connect-src 'self' https:\/\/remote\.example:9000 https:\/\/remote\.example:9000/,
   );
 
-  // Bracketed IPv6 literal remotes stay exact.
   await host.handlers.set_connection_config({
     config: { endpointUrl: 'http://[::1]:8420', active: true, hasApiKey: false },
     credential: { action: 'keep' },
@@ -977,7 +930,6 @@ test('a valid remote connection config projects its exact origin, auth and CSP, 
 test('an invalid stored connection config can never omit the CSP', async () => {
   const userDataDir = mkdtempSync(join(root, 'corrupt-user-data-'));
   const storePath = join(userDataDir, 'connection-config.enc');
-  // An opaque stored endpoint: the old derivation `new URL(value).origin`
   // returned the literal "null" for it, and the CSP builder then threw inside
   // the header listener — leaving the response without any policy.
   writeFileSync(
@@ -986,11 +938,9 @@ test('an invalid stored connection config can never omit the CSP', async () => {
   );
   const { host, networkHooks, sessionHooks } = await makeHost({ paths: { userDataDir } });
 
-  // Not activated and no credential authority...
   assert.equal(await host.handlers.get_connection_config(), null);
   assert.equal(networkHooks[0].getActiveAuth(), null);
 
-  // ...and the header listener always ANSWERS (it never throws out of the
   // Electron callback) with the restrictive local-origin policy.
   const listener = sessionHooks.headersReceivedCalls[0][1];
   let response = null;
@@ -1007,15 +957,11 @@ test('an invalid stored connection config can never omit the CSP', async () => {
   assert.equal(csp.includes('default-src *'), false, 'the upstream policy is replaced, never merged');
   assert.match(csp, /connect-src 'self' http:\/\/127\.0\.0\.1:8420 http:\/\/127\.0\.0\.1:8420/);
 
-  // The invalid bytes stay on disk for recovery.
   assert.ok(readFileSync(storePath, 'utf8').includes('about:blank'));
   host.dispose();
 });
 
-// ---------------------------------------------------------------------------
-// Legacy credential removal (v1.194 P1-T3): the production targets, the
 // ordered host migration and the sanitized failure
-// ---------------------------------------------------------------------------
 
 test('legacy credential cleanup adapter targets exactly the old keychain item and app-data JSON, idempotently', async () => {
   const appData = mkdtempSync(join(root, 'legacy-appdata-'));
@@ -1027,7 +973,6 @@ test('legacy credential cleanup adapter targets exactly the old keychain item an
   writeFileSync(neighbour, '{"keep":true}');
 
   const commands = [];
-  // A capturing runner: the exact argv is asserted WITHOUT invoking the user's
   // keychain. `delete` reports the documented errSecItemNotFound (exit 44).
   const adapter = createLegacyCredentialAdapter(appData, {
     platform: 'darwin',
@@ -1068,7 +1013,6 @@ test('legacy credential cleanup adapter keeps only item-not-found and ENOENT as 
   mkdirSync(legacyDir, { recursive: true });
   writeFileSync(jsonPath, '{"apiKey":"sk-legacy"}');
 
-  // An unrelated keychain failure is NOT success.
   const denied = createLegacyCredentialAdapter(appData, {
     platform: 'darwin',
     runSecurity: async () => {
@@ -1077,7 +1021,6 @@ test('legacy credential cleanup adapter keeps only item-not-found and ENOENT as 
   });
   await assert.rejects(() => denied.cleanup(), (err) => err.code === 51);
 
-  // An already-absent item (exit 44) and an already-absent JSON (ENOENT) are.
   const gone = createLegacyCredentialAdapter(appData, {
     platform: 'darwin',
     runSecurity: async () => {
@@ -1089,7 +1032,6 @@ test('legacy credential cleanup adapter keeps only item-not-found and ENOENT as 
   });
   await gone.cleanup();
 
-  // A JSON removal failure that is not ENOENT is NOT success.
   const undeletable = createLegacyCredentialAdapter(appData, {
     platform: 'linux',
     removeFile: () => {
@@ -1098,7 +1040,6 @@ test('legacy credential cleanup adapter keeps only item-not-found and ENOENT as 
   });
   await assert.rejects(() => undeletable.cleanup(), (err) => err.code === 'EPERM');
 
-  // Off darwin the macOS keychain item is never targeted.
   const commands = [];
   const elsewhere = createLegacyCredentialAdapter(appData, {
     platform: 'linux',
@@ -1124,12 +1065,10 @@ test('host migration removes the legacy sources only after the encrypted store i
         read: async () =>
           JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
         cleanup: async () => {
-          // Observed from inside the removal: the encrypted bytes are already
           // on disk, carry no plaintext, and decrypt again.
           const onDisk = readFileSync(storePath, 'utf8');
           observed.push({
             plaintextOnDisk: onDisk.includes('sk-legacy'),
-            // The fixture safeStorage prefixes its ciphertext with `enc:`.
             decrypted: new TextDecoder()
               .decode(Buffer.from(JSON.parse(onDisk).credential, 'base64'))
               .slice(4),
@@ -1151,7 +1090,6 @@ test('host migration removes the legacy sources only after the encrypted store i
   });
   host.dispose();
 
-  // The next launch opens the authoritative encrypted store — never the legacy
   // source — and re-runs the idempotent removal.
   const cleanups = [];
   const { host: reopened } = await makeHost({
@@ -1198,7 +1136,6 @@ test('a refused legacy cleanup does not fail host startup and surfaces only the 
     },
   });
 
-  // The app boots and the migrated session works: cleanup is not a startup gate.
   assert.deepEqual(networkHooks[0].getActiveAuth(), {
     endpointOrigin: 'https://remote.example:9000',
     apiKey: 'sk-legacy',
@@ -1209,7 +1146,6 @@ test('a refused legacy cleanup does not fail host startup and surfaces only the 
     hasApiKey: true,
   });
 
-  // The sanitized signal is observable on the composed host, and the
   // migration is NOT reported as clean while the plaintext source remains.
   const failure = host.connectionStore.legacyCleanupFailure;
   assert.ok(failure !== null, 'the refused cleanup is observable');
@@ -1224,9 +1160,6 @@ test('a refused legacy cleanup does not fail host startup and surfaces only the 
   host.dispose();
 });
 
-// ---------------------------------------------------------------------------
-// Connection-store open failure (v1.202 P2-T2): stderr diagnostic + notice
-// ---------------------------------------------------------------------------
 
 test('a corrupt connection store surfaces the stderr diagnostic and one window-less warning notice', async () => {
   const dir = mkdtempSync(join(root, 'store-open-failure-'));
@@ -1248,7 +1181,6 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
   }
   const { host, dialogCalls } = composed;
 
-  // (a) durable diagnostic on the existing main-process channel: the typed
   // classification code plus the sanitized message, under the fixed prefix.
   assert.equal(stderr.length, 1);
   assert.match(
@@ -1256,7 +1188,6 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
     /^\[desktop\] secure_store_corrupt: connection store file is not valid JSON\n$/,
   );
 
-  // (b) exactly one non-blocking, window-less notice with the pinned copy.
   assert.equal(dialogCalls.length, 1);
   const notice = dialogCalls[0];
   assert.equal(notice.attachedToWindow, false, 'no window exists at the compose seam');
@@ -1265,18 +1196,13 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
   assert.deepEqual(notice.options.buttons, ['OK']);
   assert.equal(notice.options.noLink, true);
   const { message, detail } = notice.options;
-  // classification word (corrupt), never the raw code
   assert.match(message, /corrupt/i);
   assert.ok(!message.includes('unreadable'), 'the corrupt case must not claim unreadable');
-  // consequence
   assert.match(detail, /unavailable/i);
   assert.match(detail, /start without one/i);
-  // non-destructive assurance
   assert.match(detail, /[Nn]othing was deleted/);
   assert.match(detail, /left in place/);
-  // recovery guarantee is bounded by the location actually being writable
   assert.match(detail, /replaces it once the location is writable/);
-  // payload discipline: no raw code, no path, no store file name
   for (const surfaced of [message, detail]) {
     assert.ok(!surfaced.includes('secure_store_'), 'no raw classification code');
     assert.ok(!surfaced.includes(userDataDir), 'no path');
@@ -1319,18 +1245,13 @@ test('an unreadable store names the unreadable classification, and a fresh insta
   assert.deepEqual(notice.options.buttons, ['OK']);
   assert.equal(notice.options.noLink, true);
   const { message, detail } = notice.options;
-  // classification word (unreadable), never the corrupt wording nor the raw code
   assert.match(message, /unreadable/i);
   assert.ok(!message.includes('corrupt'), 'the unreadable case must not claim corrupt');
-  // consequence
   assert.match(detail, /unavailable/i);
   assert.match(detail, /start without one/i);
-  // non-destructive assurance
   assert.match(detail, /[Nn]othing was deleted/);
   assert.match(detail, /left in place/);
-  // recovery guarantee is bounded by the location actually being writable
   assert.match(detail, /replaces it once the location is writable/);
-  // payload discipline: no raw code, no path, no store file name
   for (const surfaced of [message, detail]) {
     assert.ok(!surfaced.includes('secure_store_'), 'no raw classification code');
     assert.ok(!surfaced.includes(composed.paths.userDataDir), 'no path');
@@ -1338,7 +1259,6 @@ test('an unreadable store names the unreadable classification, and a fresh insta
   }
   composed.host.dispose();
 
-  // Fresh install (ENOENT): no dialog, no diagnostic (acceptance criterion 4).
   const freshStderr = [];
   process.stderr.write = (chunk) => {
     freshStderr.push(String(chunk));
@@ -1361,7 +1281,6 @@ test('an unreadable store names the unreadable classification, and a fresh insta
   fresh.host.dispose();
 });
 
-// QC3-S001: the notice is fire-and-forget. Startup must finish while the user
 // has not answered the dialog, and a dialog failure must never fail boot.
 test('a pending warning dialog never blocks startup: the window is usable before the user dismisses it', async () => {
   const dir = mkdtempSync(join(root, 'store-pending-dialog-'));
@@ -1391,7 +1310,6 @@ test('a pending warning dialog never blocks startup: the window is usable before
           );
         },
       }),
-      // Bounded deadline: an accidental `await` on the notice would leave the
       // host uncomposed for as long as the user stays away from the dialog.
       new Promise((_, reject) => {
         deadline = setTimeout(
@@ -1406,14 +1324,12 @@ test('a pending warning dialog never blocks startup: the window is usable before
   }
   const { host, electron, dialogCalls } = composed;
 
-  // The notice is out and the user has not answered it…
   assert.equal(dialogCalls.length, 1, 'exactly one notice per launch');
   assert.equal(dialogCalls[0].attachedToWindow, false, 'no window exists at the compose seam');
   assert.equal(typeof settleNotice, 'function', 'the notice promise is still pending');
   assert.equal(stderr.length, 1, 'the durable diagnostic landed while the dialog waits');
   assert.match(stderr[0], /^\[desktop\] secure_store_corrupt: /);
 
-  // …yet startup finished and the host owns a real, usable window.
   assert.equal(electron.windows.length, 1);
   const win = electron.windows[0];
   assert.equal(win.destroyed, false);
@@ -1421,7 +1337,6 @@ test('a pending warning dialog never blocks startup: the window is usable before
   assert.equal(host.generation(), 1);
   assert.deepEqual(await host.handlers.get_daemon_status(), { state: 'stopped', port: 8420 });
 
-  // Settle the deferred dialog and clean up.
   settleNotice({ response: 0, checkboxChecked: false });
   await new Promise((resolve) => setImmediate(resolve));
   host.dispose();
@@ -1452,7 +1367,6 @@ test('a rejected warning dialog never fails startup and leaves no unhandled reje
         );
       },
     });
-    // Give an unhandled rejection the tick it needs to surface.
     await new Promise((resolve) => setImmediate(resolve));
   } finally {
     process.removeListener('unhandledRejection', onUnhandled);
@@ -1475,7 +1389,6 @@ test('a healthy existing store adds no surface (acceptance criterion 3)', async 
   const dir = mkdtempSync(join(root, 'store-healthy-'));
   const userDataDir = join(dir, 'userData');
   mkdirSync(userDataDir, { recursive: true });
-  // A store the real ConnectionStore opens cleanly: valid v1 shape plus a
   // credential the injected safeStorage stub can decrypt.
   writeFileSync(
     join(userDataDir, 'connection-config.enc'),
@@ -1505,9 +1418,6 @@ test('a healthy existing store adds no surface (acceptance criterion 3)', async 
   composed.host.dispose();
 });
 
-// ---------------------------------------------------------------------------
-// External URL policy (parity row 25) and navigation lockdown (row 26)
-// ---------------------------------------------------------------------------
 
 test('external URLs go through the shared predicate and shell.openExternal only', async () => {
   const { electron, host } = await makeHost();
@@ -1525,13 +1435,11 @@ test('external URLs go through the shared predicate and shell.openExternal only'
   );
   assert.deepEqual(electron.openExternalCalls, ['https://example.com/docs']);
 
-  // window.open is denied outright.
   const win = windows[0];
   assert.deepEqual(win.webContents.windowOpenHandler({ url: 'https://example.com' }), {
     action: 'deny',
   });
 
-  // Navigation outside the app origin is blocked and NEVER auto-opened.
   const willNavigate = win.webContents.listeners.get('will-navigate');
   const prevented = { hit: false };
   willNavigate({ preventDefault: () => (prevented.hit = true) }, 'https://evil.example/');
@@ -1541,7 +1449,6 @@ test('external URLs go through the shared predicate and shell.openExternal only'
   assert.equal(allowed.hit, false);
   assert.deepEqual(electron.openExternalCalls, ['https://example.com/docs']);
 
-  // app-level open-url passes the same predicate.
   const openUrl = electron.appEvents.get('open-url')[0];
   openUrl({ preventDefault: () => undefined }, 'https://github.com/nexus42');
   openUrl({ preventDefault: () => undefined }, 'file:///etc/passwd');
@@ -1552,14 +1459,12 @@ test('external URLs go through the shared predicate and shell.openExternal only'
 test('guarded OS actions and directory picker are composed', async () => {
   const { electron, host, paths } = await makeHost();
   const { dialogCalls } = electron;
-  // Directory picker: cancel → null, selection → path; defaultPath forwarded.
   electron.setOpenDialogResult({ canceled: true, filePaths: [] });
   assert.equal(await host.handlers.pick_directory({ defaultPath: '/tmp' }), null);
   electron.setOpenDialogResult({ canceled: false, filePaths: [join(paths.home, 'picked')] });
   assert.equal(await host.handlers.pick_directory({}), join(paths.home, 'picked'));
   assert.equal(dialogCalls.at(-1).options.properties.join(','), 'openDirectory,createDirectory');
 
-  // Guarded open: inside the workspace works, escape is denied before any OS call.
   const inside = join(paths.home, 'workspace', 'note.txt');
   mkdirSync(dirname(inside), { recursive: true });
   writeFileSync(inside, 'hi');
@@ -1570,9 +1475,6 @@ test('guarded OS actions and directory picker are composed', async () => {
   host.dispose();
 });
 
-// ---------------------------------------------------------------------------
-// No product proof IPC and no update route
-// ---------------------------------------------------------------------------
 
 test('no product proof IPC remains and no update route is introduced', () => {
   const runtimeModules = [
@@ -1608,10 +1510,8 @@ test('no product proof IPC remains and no update route is introduced', () => {
       assert.ok(!source.includes(token), `${module} still contains proof surface ${token}`);
     }
   }
-  // The proof IPC contract module is gone entirely.
   assert.equal(existsSync(join(DIST_DIR, 'ipc.js')), false);
 
-  // Parity row 29: no auto-update route.
   const mainSource = readFileSync(join(DIST_DIR, 'main.js'), 'utf8');
   assert.ok(!mainSource.includes('autoUpdater'));
   assert.ok(!mainSource.includes('electron-updater'));

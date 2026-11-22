@@ -168,7 +168,6 @@ impl DeviceFlowClient {
             return Err(SyncError::PlatformError { status, body: text });
         }
 
-        // Parse the platform envelope: { success: true, data: { ... } }
         let envelope: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
@@ -221,7 +220,6 @@ impl DeviceFlowClient {
             .unwrap_or_else(|e| format!("Failed to read response body: {e}"));
 
         if status == 400 {
-            // Parse the error envelope: { success: false, error: { code, details: { error } } }
             if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(error_code) = envelope
                     .get("error")
@@ -252,7 +250,6 @@ impl DeviceFlowClient {
             )));
         }
 
-        // Parse the success envelope: { success: true, data: { ... } }
         let envelope: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
             DeviceFlowError::Other(format!("Failed to parse success response as JSON: {e}"))
         })?;
@@ -525,7 +522,6 @@ mod tests {
 
     #[tokio::test]
     async fn device_token_response_backward_compat_without_refresh() {
-        // Pre-V1.11 response without refresh_token fields
         let json = serde_json::json!({
             "access_token": "tok_old",
             "token_type": "Bearer",

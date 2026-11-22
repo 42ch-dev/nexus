@@ -1,5 +1,4 @@
 /**
- * HighlightLayer — V1.89 Deeper Manuscript Reading.
  *
  * Renders persisted highlights over `ReadingProse` by wrapping the DOM ranges
  * that correspond to each annotation's character offsets in a `<mark>` element.
@@ -15,7 +14,6 @@ import { cn } from '@/lib/utils';
 import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 import { rangeFromOffsets } from './use-text-selection';
 
-// V1.138 codegen inlines the color enum; derive it from the canonical type.
 type ReadingAnnotationColor = ReadingAnnotation['color'];
 
 export interface HighlightLayerProps {
@@ -62,7 +60,6 @@ function wrapRange(range: Range, color: ReadingAnnotationColor) {
 function applyHighlights(container: HTMLElement, annotations: ReadingAnnotation[], bodyLength: number) {
   clearHighlights(container);
 
-  // Only render in-bounds highlights. Sort by start offset so nested/partial
   // overlaps are applied in document order.
   const inBounds = annotations
     .filter((a) => a.end_offset <= bodyLength)

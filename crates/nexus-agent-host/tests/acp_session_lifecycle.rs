@@ -1,4 +1,4 @@
-//! Hermetic ACP session lifecycle tests (v1.186 P1 T1).
+//! Hermetic ACP session lifecycle tests (v1.186 P1 T1). See docs/specs/agents/agent-host.md.
 //!
 //! Windows is excluded: these lifecycle assertions require Unix process-tree
 //! shutdown/reap semantics and verify signal-driven cancellation.
@@ -110,7 +110,6 @@ fn owner(creator_id: &str, workspace_root: PathBuf) -> SessionOwner {
 }
 
 fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
-    // The probe owner's workspace root must be the host boundary; the
     // per-session Creator workspaces live underneath it.
 
     HostStartConfig {
@@ -127,7 +126,6 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
         },
         host_config: None,
         admitted_catalog: None,
-        // Verified probe owner bound to this fixture's workspace root. The
         // ready-path tests below create real sessions; without an owner every
         // registered entry stays unavailable and admission would refuse.
         probe_owner: Some(owner("ctr_probe", ws.workspace_root.clone())),
@@ -237,18 +235,15 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
-    // No verified probe owner: this is the no-context case. The catalog must
     // still report the true recipe AND stay unavailable — readiness is never
     // claimed without a bounded probe.
     let (manager, _host) = build_host_with_owner(&ws, provider_cfg.clone(), None).await;
 
-    // No process may have been spawned at boot/catalog load.
     assert!(
         !ws.fixture_log.exists(),
         "fixture must not be spawned at boot/catalog load"
     );
 
-    // Truthful catalog: real command/args/env, available = configured recipe.
     let catalog = manager.provider_catalog().await.expect("catalog");
     let entry = catalog
         .find(&ProviderId::new("mock-acp"))
@@ -275,12 +270,10 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
         !entry.health.available,
         "without a verified probe owner the entry stays unavailable"
     );
-    // (The pre-existing assertion here pinned incidental diagnostic PROSE from
     // an earlier wording — removed rather than re-pinned. The observable
     // contract is covered by the unavailability assertion above and the
     // no-spawn assertion below.)
 
-    // Still no spawn after catalog read.
     assert!(
         !ws.fixture_log.exists(),
         "catalog read must not spawn the child"
@@ -295,7 +288,6 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
-    // Session A for creator-a, cwd under creator-a workspace.
     let session_a = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("mock-acp"),
@@ -309,7 +301,6 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
         .await
         .expect("session A created");
 
-    // The fixture must have been spawned with the Creator workspace cwd,
     // never the daemon cwd (the test process cwd).
     let log = read_fixture_log(&ws.fixture_log);
     let starts = session_start_events(&log, &ws);
@@ -327,7 +318,6 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     );
     let pid_a = starts[0]["pid"].as_u64().expect("pid recorded");
 
-    // Session B for creator-b, cwd under creator-b workspace → distinct PID.
     let session_b = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("mock-acp"),
@@ -357,7 +347,6 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
         .expect("canonical");
     assert_eq!(Path::new(cwd_b), expected_cwd_b);
 
-    // Cleanup: shutdown both sessions (reaps the exact owned children).
     host.shutdown_session(session_a.id.clone())
         .await
         .expect("shutdown A");
@@ -475,7 +464,6 @@ async fn assert_stop_reason_case(
         .as_u64()
         .expect("pid") as u32;
 
-    // Two serial prompts on the same session: the second one is the proof that
     // the first terminal returned the session to a usable state.
     for attempt in 1..=if survives { 2 } else { 1 } {
         let stream = host
@@ -543,7 +531,6 @@ async fn assert_stop_reason_case(
 async fn acp_stop_reason_wire_matrix() {
     let _lock = env_lock();
 
-    // `(case, fixture env, expected terminal, turn leaves the session usable)`.
     // Only the five real stop reasons arrive as a normal `session/prompt`
     // reply, so only they are expected to leave the session usable; a wire-level
     // prompt error breaks the transport instead.
@@ -581,7 +568,6 @@ async fn acp_stop_reason_wire_matrix() {
         (
             "protocol_error",
             &[("ACP_FIXTURE_PROMPT_ERROR", "1")],
-            // A wire-level prompt error is a failure either way: the SDK
             // `Failed` update, or the transport EOF that error causes first.
             ExpectedTerminal::Failed(&["protocol_error", "provider_eof", "protocol_eof"]),
             false,
@@ -592,7 +578,6 @@ async fn acp_stop_reason_wire_matrix() {
         assert_stop_reason_case(name, extra_env, &expect, survives).await;
     }
 
-    // The stop-reason knob is closed: an unknown value must fail fixture setup
     // instead of silently answering as `end_turn`, so a test typo can never read
     // as a successful turn. The real fixture is spawned directly here — the
     // fastest way to observe its own setup contract without a host.
@@ -628,7 +613,6 @@ async fn missing_and_disabled_providers_refuse() {
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
     let (manager, host) = build_host(&ws, provider_cfg).await;
 
-    // Missing provider → refusal, no echo fallback.
     let err = host
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("does-not-exist"),
@@ -643,7 +627,6 @@ async fn missing_and_disabled_providers_refuse() {
         .expect_err("unknown provider must refuse");
     assert_eq!(err.category(), "policy_denied");
 
-    // Disabled provider → construction refuses (never registered).
     let disabled = acp_provider_config("mock-disabled", &ws.fixture_log, &[], false);
     let err = AcpProvider::from_config(
         disabled,
@@ -657,7 +640,6 @@ async fn missing_and_disabled_providers_refuse() {
     .expect("disabled provider must refuse");
     assert_eq!(err.category(), "provider_unavailable");
 
-    // The disabled provider was never registered → catalog omits it.
     let catalog = manager.provider_catalog().await.expect("catalog");
     assert!(
         catalog.find(&ProviderId::new("mock-disabled")).is_none(),
@@ -694,7 +676,6 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
             .expect("pid") as u32
     };
 
-    // Start a blocked prompt in the background (the fixture never responds).
     let op_id = HostOperationId::new();
     let stream = host
         .exec(
@@ -714,7 +695,6 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     });
     wait_for_event(&ws.fixture_log, "prompt_blocked").await;
 
-    // Cancel targets the owned operation: the ACP session/cancel must reach
     // the fixture.
     tokio::time::timeout(std::time::Duration::from_secs(5), host.cancel(op_id))
         .await
@@ -726,7 +706,6 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
         "session/cancel must reach the owned fixture: {log:?}"
     );
 
-    // Shutdown drains and reaps the exact owned process tree.
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         host.shutdown_session(session.id.clone()),
@@ -739,7 +718,6 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
         .expect("stream drain must complete within bound")
         .expect("drain task");
 
-    // The exact owned PID must be gone (reaped), and we must never have
     // signalled a reused/unowned PID — the fixture's own child (if any)
     // is the only other process, and the owned child is the one we reaped.
     assert!(
@@ -770,7 +748,6 @@ async fn shutdown_reaps_owned_process_tree_descendants() {
         .await
         .expect("session created");
 
-    // The fixture spawned an outliving descendant; the owned process-tree
     // teardown must kill the whole group (leader + descendant).
     let log = read_fixture_log(&ws.fixture_log);
     let child_pid = session_start_events(&log, &ws)[0]["pid"]
@@ -805,14 +782,12 @@ async fn eof_after_initialize_is_typed_failure() {
     let provider_cfg = acp_provider_config(
         "mock-acp",
         &ws.fixture_log,
-        // Run 1 is the bounded readiness probe (passes); run 2 is the
         // session launch that must fail — post-ready launch failure.
         &[("EOF_AFTER_INIT_FROM_RUN", "2")],
         true,
     );
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
-    // The fixture exits right after initialize; session creation must fail
     // with a typed launch error — never a fake success.
     let err = host
         .create_session(CreateSessionRequest {
@@ -841,7 +816,6 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
     let provider_cfg = acp_provider_config(
         "mock-acp",
         &ws.fixture_log,
-        // Run 1 is the bounded readiness probe (passes); run 2 is the launch
         // that fails after initialize while a same-group descendant lives on.
         &[("DESCENDANT", "1"), ("EOF_AFTER_INIT_FROM_RUN", "2")],
         true,
@@ -860,7 +834,6 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
         })
         .await;
 
-    // Fixture-owned cleanup BEFORE any assertion that can fail: the failed
     // launch leaves the fixture's descendant alive (that is the state under
     // test), so kill it and await bounded disappearance first.
     let log = read_fixture_log(&ws.fixture_log);
@@ -886,7 +859,6 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    // The classification follows the teardown OUTCOME: with the fixture
     // owning its descendant's lifetime, the descendant is reaped before the
     // leader exits and stdio reaches EOF, so terminate() finds the group
     // quiescent (ESRCH) on every platform and the typed `launch_failed`
@@ -924,7 +896,6 @@ async fn eof_failure_with_surviving_descendant_classifies_teardown() {
 #[allow(clippy::await_holding_lock)] // env_lock() held process-wide
 async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
     let _lock = env_lock();
-    // (stage knob, the log event proving the leader exited at that stage; each
     // row also proves the request for that stage reached the leader)
     let scenarios = [
         (
@@ -936,7 +907,6 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
 
     for (stage_knob, exit_event) in scenarios {
         let ws = setup_workspace();
-        // Run 1 is the bounded readiness probe (passes); run 2 is the session
         // launch whose leader exits at the selected stage.
         let extra_env = [
             ("DESCENDANT", "1"),
@@ -958,7 +928,6 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
             })
             .await;
 
-        // Evidence and fixture-owned cleanup before any assertion that can
         // fail.
         let log = read_fixture_log(&ws.fixture_log);
         let descendant_pid = u32::try_from(
@@ -979,7 +948,6 @@ async fn exited_leader_with_live_descendant_classifies_confirmed_teardown() {
         )
         .expect("leader pid fits u32");
         let _guard = KillGroupOnDrop(leader_pid);
-        // The fixture logs the exit from inside the branch of the request it
         // received, so this event proves the selected stage request reached
         // the leader (the probe run never logs it).
         let exit_logged = log.iter().any(|e| e["event"] == exit_event);
@@ -1070,7 +1038,6 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
     let leader = child.id().expect("leader pid");
     let _guard = KillGroupOnDrop(leader);
 
-    // EOF ends the fixture's read loop: the leader exits while the descendant
     // it spawned keeps the owned process group alive.
     drop(stdin);
     let descendant = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1101,7 +1068,6 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
         .expect("the exit watch must report the leader's exit within bound")
         .expect("the leader's exit must be observable");
 
-    // The observation left the leader unreaped: a reaped leader has no start
     // tick, so this is exactly the identity the guarded teardown needs.
     let identity_kept = proc
         .birth()
@@ -1116,7 +1082,6 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
         teardown.is_ok(),
         "the guarded teardown must reach the surviving descendant: {teardown:?}"
     );
-    // Bounded disappearance: the killed orphan is reaped by init, so an
     // instantaneous `kill -0` sample would still see its zombie.
     await_process_gone(descendant).await;
     assert!(!process_alive(leader), "the leader must be reaped");
@@ -1124,7 +1089,6 @@ async fn handshake_exit_watch_keeps_leader_identity_for_group_teardown() {
 
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    // `kill -0 <pid>` returns Ok while the process exists (or is a zombie
     // awaiting reap); non-zero (ESRCH) means it is gone.
     std::process::Command::new("kill")
         .arg("-0")

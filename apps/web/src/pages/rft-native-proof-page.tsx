@@ -1,5 +1,4 @@
 /**
- * P4-T3 development-only proof page (RFT-M1 browser vertical).
  *
  * Mounts the **existing** {@link WorldKbCanvas} against a real seeded World and
  * exposes a stable page-level driver contract on `window.__RFT_NATIVE_PROOF__`
@@ -81,7 +80,6 @@ declare global {
 }
 
 /**
- * True when the compile-time proof gate is active. Kept non-exported: it has no
  * external consumers, and exporting a non-component value from this module
  * breaks React Fast Refresh (the 30-edit DX loop triggers full invalidation and
  * drops the proof handle).
@@ -96,7 +94,6 @@ const TERMINAL_EVENT_KEYS = ['OpFinished', 'OpFailed', 'SessionStopped'] as cons
 export function RftNativeProofPage() {
   const [searchParams] = useSearchParams();
   const worldId = searchParams.get('world') ?? '';
-  // A dedicated real BrowserClient (same class the app uses; same-origin via
   // the Vite `/v1/daemon` proxy → VITE_DAEMON_URL) so the runner drives the
   // transport directly and the canvas observes the resulting DB state.
   const client = useMemo(() => new BrowserClient(), []);

@@ -1,5 +1,4 @@
 /**
- * Outline canvas — Beat inspector (V1.109 C2 T3; FB-C2-002).
  *
  * Read-only Beat detail panel. The outline wire model carries no beat data
  * today (`wire_contracts_changed: false`), so there is no write wire — the

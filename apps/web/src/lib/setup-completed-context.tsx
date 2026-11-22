@@ -17,7 +17,6 @@ interface SetupCompletedContextValue {
   /** True while the first-run state is being resolved (IPC or service probe). */
   isLoading: boolean;
   /**
-   * Persist and sync setup-completed state (desktop IPC when available).
    *
    * - `true` (wizard finish): optimistic React state first so SetupGate does not
    *   bounce `/works` → `/setup` while IPC is in flight; IPC failure rolls back.
@@ -26,12 +25,10 @@ interface SetupCompletedContextValue {
    */
   setCompleted: (value: boolean) => Promise<void>;
   /**
-   * Mark setup as completed — fire-and-forget {@link setCompleted}(true).
    * Safe with SetupGate because `true` is applied optimistically.
    */
   markCompleted: () => void;
   /**
-   * Re-read the first-run state. The service-unavailable surface calls it after
    * a successful retry so a recovered service resolves the gate without a page
    * reload (v1219-onboarding T4).
    */
@@ -63,7 +60,6 @@ export function SetupCompletedProvider({
 }: SetupCompletedProviderProps) {
   const desktop = useDesktopCapabilities();
   const client = useNexusClient();
-  // Unresolved (no override) stays `false` + loading so SetupGate neither
   // paints the shell nor redirects to the wizard before the real answer lands.
   const [completed, setCompletedState] = useState(initialCompleted ?? false);
   const [isLoading, setIsLoading] = useState(initialCompleted === undefined);
@@ -77,7 +73,6 @@ export function SetupCompletedProvider({
         : await isWorkspaceInitialized(client);
       if (mounted.current) setCompletedState(value);
     } catch {
-      // Browser: the service could not be reached — the service-unavailable
       // surface owns this state (plan v1219-onboarding T4), so the gate stays
       // unresolved instead of silently claiming an initialized shell. Desktop:
       // a missing/refused IPC command is a host-contract break, not a service
@@ -99,14 +94,12 @@ export function SetupCompletedProvider({
   const setCompleted = useCallback(
     async (value: boolean) => {
       if (!desktop) {
-        // Browser: there is no marker to write — re-reading the service is
         // what flips the derived gate (compass D21). `false` only reflects the
         // always-reachable wizard route.
         setCompletedState(value ? await isWorkspaceInitialized(client) : false);
         return;
       }
       if (value) {
-        // Optimistic: wizard finish navigates to gated routes immediately.
         setCompletedState(true);
         try {
           await desktop.setSetupCompleted(true);
@@ -117,7 +110,6 @@ export function SetupCompletedProvider({
         return;
       }
 
-      // R1 clear: await IPC before React state so gated UI never sees stale true.
       await desktop.setSetupCompleted(false);
       setCompletedState(false);
     },
@@ -125,7 +117,6 @@ export function SetupCompletedProvider({
   );
 
   const markCompleted = useCallback(() => {
-    // Fire-and-forget by contract: a browser re-probe can reject (daemon
     // unreachable) and must not surface as an unhandled rejection — the gate
     // simply keeps its current value.
     void setCompleted(true).catch(() => undefined);

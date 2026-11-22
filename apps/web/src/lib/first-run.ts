@@ -1,5 +1,4 @@
 /**
- * Browser first-run gate (compass D21 / access spec §3.1).
  *
  * Derived from the unguarded `GET /v1/daemon/runtime/status` — never a
  * per-browser marker — so a fresh origin (including a LAN browser) lands on the

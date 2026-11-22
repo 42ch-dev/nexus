@@ -1,5 +1,4 @@
 /**
- * RuleForm state + client validation mirror (V1.169 P2 T1/T2, DF-82).
  *
  * The mirror validates the AR-2 carrier grammar (`constraint.rs`
  * member-aware parse) just enough to intercept obvious mistakes at submit
@@ -179,7 +178,6 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
       break;
     case 'required_field': {
       if (state.requiredFieldOperand === null) {
-        // Operand misuse: neither form chosen.
         errors['constraint.field'] = 'operandRequired';
       } else if (state.requiredFieldOperand === 'entry') {
         if (state.entryField.length === 0) errors['constraint.field'] = 'entryFieldRequired';
@@ -190,7 +188,6 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
         if (state.requiredModuleField.trim().length === 0) {
           errors['constraint.field'] = 'moduleFieldRequired';
         } else if ((ENTRY_FIELDS as readonly string[]).includes(state.requiredModuleField.trim())) {
-          // Operand misuse: entry-level value combined with a module row.
           errors['constraint.field'] = 'moduleFieldReserved';
         }
       }
@@ -214,7 +211,6 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
     }
   }
 
-  // observer_cardinality × target axis: mutually exclusive (locked; the UI
   // disables the axis, this guard keeps the mirror honest).
   if (state.family === 'observer_cardinality' && state.targetEntryTypes.length > 0) {
     errors.target_entry_types = 'targetTypesConflict';
@@ -349,7 +345,6 @@ export function ruleFormStateFromRule(rule: WorldRule): RuleFormState {
       state.min = typeof constraint.min === 'number' ? String(constraint.min) : '';
       state.max = typeof constraint.max === 'number' ? String(constraint.max) : '';
     }
-    // Unknown family → family stays null (explicit choice before replacement).
   }
   return state;
 }

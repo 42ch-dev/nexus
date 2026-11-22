@@ -1,5 +1,4 @@
 /**
- * ChapterPage render tests — V1.79 Author Reflection (Track A / P0).
  *
  * Covers the promoted reading surface: the V1.75-pivot residuals (canvas
  * redirect CTA, body read-only render + frontmatter strip, Copy Path, body
@@ -245,7 +244,6 @@ function selectTextInProse(startOffset: number, endOffset: number) {
     }
     offset += text.length;
   }
-  // jsdom does not implement Range#getBoundingClientRect; stub it for the
   // toolbar positioning hook.
   range.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => {} });
   const selection = window.getSelection();
@@ -279,7 +277,6 @@ function readingHandlers(opts?: { chapter?: number; status?: string; findings?: 
 }
 
 /**
- * Cursor-paginated chapter list fixture for nav-truncation regression tests.
  * The daemon clamps `limit` to `[1, 100]`, so a Work with >100 chapters is
  * served in pages. The opaque cursor is simulated as a page index so the
  * client's cursor-walk (`fetchNextPage`) resolves successive pages.
@@ -490,7 +487,6 @@ describe('ChapterPage (V1.79 reading surface)', () => {
     useHandlers(...readingHandlers({ chapter: 2 }));
 
     renderChapter('w-123', 2);
-    // Chapter 2 has prev=1 and next=3 in the 3-chapter fixture.
     expect(await screen.findByRole('link', { name: /Previous chapter: Chapter 1/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Next chapter: Chapter 3/i })).toBeInTheDocument();
   });
@@ -507,7 +503,6 @@ describe('ChapterPage (V1.79 reading surface)', () => {
 
     renderChapter();
     await screen.findByLabelText('Chapter maturation indicators');
-    // KB density count renders the entity count; open-findings renders the
     // non-terminal finding count. Both resolve async (counts load after the
     // container) so use async queries. Interpretable without tooltips.
     expect(await screen.findByLabelText('5 knowledge entries')).toBeInTheDocument();
@@ -527,7 +522,6 @@ describe('ChapterPage (V1.79 reading surface)', () => {
 
     renderChapter();
     await screen.findByText('Body prose.');
-    // The only edit affordance is the canvas redirect; no body-editor / save /
     // patch affordance exists on the reading surface.
     expect(screen.getByRole('link', { name: /Edit outline for Chapter 1/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Save body/i })).not.toBeInTheDocument();
@@ -542,7 +536,6 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
       bodyHandler(),
       workDetailHandler(),
       chaptersListHandler(),
-      // Page reports has_more: true — the count (2) is a lower bound, not exact.
       truncatedOpenFindingsHandler(1, 2),
       worldKbGraphHandler('world-1', 0),
       readingProgressHandler(),
@@ -553,12 +546,10 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
 
     renderChapter();
     await screen.findByLabelText('Chapter maturation indicators');
-    // Truncated count renders "2+" — honest lower bound, not a clipped exact integer.
     expect(await screen.findByLabelText('2+ open findings')).toBeInTheDocument();
   });
 
   it('resolves prev/next across the server page boundary by cursor-walking (qc3 W-QC3-001)', async () => {
-    // 150 chapters served in pages of 100 (daemon cap). Chapter 101 lives on
     // page 2; without the cursor-walk its prev/next would be silently lost and
     // the nav would degrade to "First/Last chapter" placeholders.
     useHandlers(
@@ -575,7 +566,6 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
     );
 
     renderChapter('w-123', 101);
-    // After the walk completes, chapter 101 has prev=100 and next=102 — proving
     // the nav no longer loses chapters past the first server page.
     expect(await screen.findByRole('link', { name: /Previous chapter: Chapter 100/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Next chapter: Chapter 102/i })).toBeInTheDocument();

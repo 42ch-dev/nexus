@@ -26,7 +26,6 @@ const AGENTS: AgentScanEntry[] = [
 ];
 
 /**
- * Transport double with a service-backed profile store: `getAgentProfile`
  * serves what `saveAgentProfile` persisted, so a remount reads it back.
  */
 function makeClient(
@@ -143,7 +142,6 @@ describe('StepAgent (creator AI partner)', () => {
         agents: [
           {
             name: 'Claude Code',
-            // Catalog override maps this key to the display name `Claude`;
             // the saved profile must keep the scan entry name so the badge
             // resolver matches it.
             registry_agent_id: 'claude-native',
@@ -190,7 +188,6 @@ describe('StepAgent (creator AI partner)', () => {
 
     renderStep(client);
 
-    // Scan settles first: no row is committed while the profile read is
     // pending, and Continue stays blocked (no intermediate default).
     expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute(
       'aria-checked',
@@ -212,7 +209,6 @@ describe('StepAgent (creator AI partner)', () => {
   });
 
   it('restores the daemon-global profile for any active creator', async () => {
-    // The service profile is daemon-global (architect decision): switching the
     // active creator does not scope or hide it.
     const client = makeClient(() => Promise.resolve({ agents: AGENTS }), {
       name: 'Codex CLI',
@@ -275,7 +271,6 @@ describe('StepAgent (creator AI partner)', () => {
 
     await user.click(screen.getByRole('button', { name: '下一步' }));
     expect(onNext).toHaveBeenCalledTimes(1);
-    // Manual-only profiles carry the command as the profile name.
     expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'my-cli --flag',
       launch_command: 'my-cli --flag',
@@ -295,7 +290,6 @@ describe('StepAgent (creator AI partner)', () => {
     await user.click(await screen.findByTestId('agent-row-codex'));
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
-    // The Toaster mounts per render; assert exactly one actionable toast.
     expect(await screen.findAllByText('Could not save agent profile.')).toHaveLength(1);
     expect(onNext).not.toHaveBeenCalled();
   });

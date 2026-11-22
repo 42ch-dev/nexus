@@ -1,5 +1,4 @@
 /**
- * Execution family HTTP surface (P5-T3 + v1.195 P0-T6): the durable schedule
  * control journey over the P3 `ExecutionHandle` authority — add/signal, the
  * durable schedule list/inspect reads, the durable run list/detail reads and
  * the core-context edit. The handle is the single execution owner established
@@ -78,7 +77,6 @@ export function editCoreContext(service: ServiceCore, scheduleId: string, body: 
 }
 
 /**
- * `ListSchedulesQuery` from query-string parameters.
  *
  * `creator_id`/`status`/`cursor`/`sort` are opaque strings forwarded verbatim —
  * the core owner validates `sort` and the pagination cursor, and the explicit

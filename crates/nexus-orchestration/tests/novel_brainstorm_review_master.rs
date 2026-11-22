@@ -36,7 +36,6 @@ fn novel_brainstorm_gather_references_open_findings() {
         .find(|s| s.id == "gather")
         .expect("gather state must exist");
 
-    // The enter action must inject a prompt that references open_findings
     let has_open_findings_var = gather.enter.iter().any(|action| {
         if let manifest::EnterAction::Capability {
             args: Some(args), ..
@@ -71,7 +70,6 @@ fn novel_review_master_present_references_open_findings() {
         .find(|s| s.id == "present")
         .expect("present state must exist");
 
-    // The enter action must inject a prompt that references open_findings
     let has_open_findings_var = present.enter.iter().any(|action| {
         if let manifest::EnterAction::Capability {
             args: Some(args), ..
@@ -90,7 +88,6 @@ fn novel_review_master_present_references_open_findings() {
         "present state enter action must reference open_findings in vars"
     );
 
-    // Verify await_decision state exists for recording human decisions
     let await_decision = loaded
         .manifest
         .states
@@ -110,7 +107,6 @@ fn novel_brainstorm_happy_path_state_flow() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-brainstorm", &caps).unwrap();
 
-    // Verify the graph is wired: gather → synthesize → done
     let gather = loaded
         .manifest
         .states
@@ -149,7 +145,6 @@ fn novel_review_master_happy_path_state_flow() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
-    // Verify the graph is wired: present → await_decision → sync_world_kb → done
     let present = loaded
         .manifest
         .states
@@ -199,7 +194,6 @@ fn novel_brainstorm_auto_chain_compatible() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-brainstorm", &caps).unwrap();
 
-    // gather and synthesize both use llm_judge for auto-chain
     for state_id in &["gather", "synthesize"] {
         let state = loaded
             .manifest
@@ -220,7 +214,6 @@ fn novel_review_master_human_in_loop() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
-    // present and await_decision both use manual for human-in-loop
     for state_id in &["present", "await_decision"] {
         let state = loaded
             .manifest

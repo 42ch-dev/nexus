@@ -3,7 +3,6 @@ import { type InputHTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Input — DESIGN.md §Component Primitives/Input.
  *
  * Height 40px, background-100, gray-1000 text, gray-500 border,
  * radius-control. Error variant uses red-700 border. Disabled (v0.4

@@ -20,7 +20,6 @@ async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
 async fn test_kb_extract_jobs_version_column_defaults_to_zero() {
     let (pool, _dir) = fresh_pool().await;
 
-    // Insert a row without specifying version — should default to 0.
     let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
     sqlx::query(
         "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id) \
@@ -38,7 +37,6 @@ async fn test_kb_extract_jobs_version_column_defaults_to_zero() {
         .unwrap();
     assert_eq!(version, 0);
 
-    // Verify the version column is NOT NULL (this would fail at runtime if NULL)
     let versions: Vec<i64> =
         sqlx::query_scalar("SELECT version FROM kb_extract_jobs WHERE job_id = ?")
             .bind(&job_id)
@@ -52,7 +50,6 @@ async fn test_kb_extract_jobs_version_column_defaults_to_zero() {
 async fn test_novel_pool_entries_version_column_defaults_to_zero() {
     let (pool, _dir) = fresh_pool().await;
 
-    // Seed a work row first (FK constraint).
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, \
@@ -69,7 +66,6 @@ async fn test_novel_pool_entries_version_column_defaults_to_zero() {
     .await
     .unwrap();
 
-    // Insert a pool entry without specifying version.
     sqlx::query(
         "INSERT INTO novel_pool_entries (entry_id, creator_id, work_id, status, promoted_at, title, updated_at) \
          VALUES ('npe_test_ver', 'ctr_test', 'wrk_test_version', 'queued', ?, 'Test', ?)",
@@ -102,7 +98,6 @@ async fn test_version_increments_on_cas_update() {
     .await
     .unwrap();
 
-    // Simulate a CAS update: version=0 → version=1.
     let result = sqlx::query(
         "UPDATE kb_extract_jobs SET status = 'running', version = version + 1 \
          WHERE job_id = ? AND version = 0",
@@ -120,7 +115,6 @@ async fn test_version_increments_on_cas_update() {
         .unwrap();
     assert_eq!(version, 1);
 
-    // A second CAS with expected_version=0 should fail (version is now 1).
     let result2 = sqlx::query(
         "UPDATE kb_extract_jobs SET version = version + 1 \
          WHERE job_id = ? AND version = 0",
@@ -135,7 +129,6 @@ async fn test_version_increments_on_cas_update() {
         "CAS should reject stale version=0"
     );
 
-    // Version should still be 1 (not incremented).
     let (version_after,): (i64,) =
         sqlx::query_as("SELECT version FROM kb_extract_jobs WHERE job_id = ?")
             .bind(&job_id)
@@ -149,7 +142,6 @@ async fn test_version_increments_on_cas_update() {
 async fn test_cas_marks_confirmed_with_version_guard() {
     let (pool, _dir) = fresh_pool().await;
 
-    // Insert a pending promotion row.
     let job_id = format!("xj_{}", uuid::Uuid::new_v4().simple());
     sqlx::query(
         "INSERT INTO kb_extract_jobs \
@@ -163,7 +155,6 @@ async fn test_cas_marks_confirmed_with_version_guard() {
     .await
     .unwrap();
 
-    // Call the CAS-aware confirm with correct version.
     let mut tx = pool.begin().await.unwrap();
     let result = nexus_local_db::kb_extract_job::mark_confirmed_in_tx_with_cas(&mut tx, &job_id, 0)
         .await
@@ -171,7 +162,6 @@ async fn test_cas_marks_confirmed_with_version_guard() {
     assert!(result, "should flip pending → confirmed");
     tx.commit().await.unwrap();
 
-    // Verify state.
     let (status, version): (String, i64) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
             .bind(&job_id)
@@ -199,14 +189,12 @@ async fn test_cas_marks_confirmed_rejects_stale_version() {
     .await
     .unwrap();
 
-    // Another writer bumps the version.
     sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
         .bind(&job_id)
         .execute(&pool)
         .await
         .unwrap();
 
-    // CAS with stale expected_version=0 should fail.
     let mut tx = pool.begin().await.unwrap();
     let err = nexus_local_db::kb_extract_job::mark_confirmed_in_tx_with_cas(&mut tx, &job_id, 0)
         .await

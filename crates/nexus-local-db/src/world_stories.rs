@@ -260,7 +260,6 @@ mod tests {
         assert!(story.latest_chapter_id.is_none());
         assert_eq!(story.status, "draft");
 
-        // Verify retrieval
         let fetched = get_by_id(&pool, &story.id).await.unwrap().unwrap();
         assert_eq!(fetched.id, story.id);
         assert_eq!(fetched.world_id, "wld_abc123");
@@ -273,17 +272,13 @@ mod tests {
             .await
             .unwrap();
 
-        // Insert same (world_id, story_ref) again — should upsert
         let story2 = create_world_story(&pool, "wld_abc", "novel-a", "/Stories/novel-a/")
             .await
             .unwrap();
 
-        // Same row ID (existing preserved on conflict)
         assert_eq!(story1.id, story2.id);
-        // Timestamp updated
         assert!(story2.updated_at >= story1.updated_at);
 
-        // Only one row in table
         let all = list_by_world(&pool, "wld_abc").await.unwrap();
         assert_eq!(all.len(), 1);
     }
@@ -397,7 +392,6 @@ mod tests {
         assert!(delete_world_story(&pool, &story.id).await.unwrap());
         assert!(get_by_id(&pool, &story.id).await.unwrap().is_none());
 
-        // Delete nonexistent returns false
         assert!(!delete_world_story(&pool, &story.id).await.unwrap());
     }
 
@@ -405,7 +399,6 @@ mod tests {
     async fn test_generate_id_format() {
         let id = generate_id();
         assert!(id.starts_with("wsr_"));
-        // UUID without hyphens: 32 hex chars
         let uuid_part = &id[4..];
         assert_eq!(uuid_part.len(), 32);
         assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));

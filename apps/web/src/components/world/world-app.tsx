@@ -1,5 +1,4 @@
 /**
- * World app surface (plan v1219-world-module T1) — route owner of
  * `/worlds/:worldId`. Header (name + `世界 · 时间线`) + layer tabs
  * (Brief / Narrative / Moment) riding the `?layer=` URL convention.
  *
@@ -56,12 +55,10 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
   const [searchParams] = useSearchParams();
   const layer = parseWorldLayer(searchParams.get('layer'));
 
-  // World read (name for the header; 404 not_found surfaces as the error state).
   const world = useQuery({
     queryKey: ['worlds', 'detail', worldId],
     queryFn: () => client.getWorld(worldId),
   });
-  // Brief-layer read model: era KnowledgeEntry projection over the KB graph.
   const graph = useWorldKbGraph(worldId);
 
   if (world.isPending || graph.isPending) {
@@ -108,7 +105,6 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
 }
 
 /**
- * Brief layer body (plan v1219-world-module T2 + QC fix wave): the guided
  * empty state → inline editor → saved card flow. The Brief read model is the
  * era KnowledgeEntry projection; an era with a non-empty `world_summary` is
  * the saved Brief (renders as {@link BriefCard}), otherwise the empty state
@@ -141,7 +137,6 @@ function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityPro
   const { t } = useTranslation('worlds');
   const { toast } = useToast();
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
-  // BriefReadyCard mounts only for the just-saved session (T2 review note) —
   // a revisit with an existing Brief, or an edit re-save after the unlock,
   // does not re-announce.
   const [justSaved, setJustSaved] = useState(false);

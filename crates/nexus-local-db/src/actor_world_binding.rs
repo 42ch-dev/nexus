@@ -716,7 +716,6 @@ async fn require_binding_removable_tx(
         });
     }
 
-    // v1.184 P3: binding-local Character memory is the final dependency gate.
     // The gate counts what is *served* for this binding, not the historical
     // legacy rows: a legacy row the provider owns under the bridge's
     // deterministic id is the provider's disposition — a dismissed pending
@@ -761,7 +760,6 @@ async fn require_binding_removable_tx(
         });
     }
 
-    // D18 (§5.1): a remote binding-local dependency keeps the binding until its
     // own evidence settles. Unknown admissions block even after later retries
     // succeed (the supervisor-selected conservative policy; owner confirmation
     // pending); known live references block until a positive
@@ -859,7 +857,6 @@ async fn remove_binding_tx(
     Ok(())
 }
 
-// ── Remote binding-memory dependency metadata (D18, binding spec §5.1) ─────
 //
 // Content-free Nexus bookkeeping for remote binding-local memory: the tables
 // carry provider-object identity plus the namespace it was recorded under,

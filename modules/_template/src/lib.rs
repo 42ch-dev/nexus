@@ -65,8 +65,6 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 /// Module entry (V1 fn form). [`nexus_entry!`] wires it to the `alloc` /
 /// `init` / `compute` exports.
 fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
-    // `required_key_block_types` selects what the host bundles; an empty
-    // snapshot means the module cannot tick anything.
     let block = input
         .key_blocks
         .first()
@@ -74,7 +72,6 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let block_type = block_type_of(block).unwrap_or("unknown");
     let block_id = entry_id_of(block).unwrap_or("block").to_string();
 
-    // Die sides: module-declared invocation param, default 6.
     let sides = input
         .invocation
         .get("sides")
@@ -82,9 +79,6 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
         .filter(|s| *s > 0)
         .unwrap_or(DEFAULT_SIDES);
 
-    // Prior tick count seeds the roll. Canonical spoke shape nests state by
-    // block type (`body.state.<block_type>.dice.ticks`); the legacy domain
-    // shape keeps it flat (`body.state.dice.ticks`).
     let ticks = read_int_f64(
         block,
         &["body", "state", block_type, DICE_STATE_KEY, "ticks"],
@@ -98,10 +92,6 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let seed = format!("{world_id}:{block_id}:{ticks}");
     let roll = (fnv1a64(seed.as_bytes()) % sides as u64) as i64 + 1;
 
-    // One `set` op on the computable state path `<block_type>.dice` — the
-    // whole dice state lands atomically and applies even on a first tick
-    // (the host rejects a delta into a missing intermediate object, so the
-    // module writes the object wholesale instead of a nested field).
     let state_delta = vec![StateDeltaOp {
         op: DeltaOp::Set,
         path: format!("{block_type}.{DICE_STATE_KEY}"),
@@ -112,8 +102,6 @@ fn dice_tick(input: ComputeInput) -> Result<ComputeOutput, ModuleError> {
         })),
     }];
 
-    // Timeline event mirroring basic-combat's state_update shape; the host
-    // stamps authoritative timestamps when it applies the event.
     let timeline_events = vec![json!({
         "schema_version": 1,
         "timeline_event_id": timeline_event_id("dice", &[&block_id]),
@@ -179,11 +167,8 @@ mod tests {
         let out1 = dice_tick(tick_input("wld_1", 3, None)).expect("tick succeeds");
         let out2 = dice_tick(tick_input("wld_1", 3, None)).expect("tick succeeds");
 
-        // Same input → same roll (deterministic module).
         assert_eq!(out1.battle_report["roll"], out2.battle_report["roll"]);
 
-        // The delta targets the computable state path and carries the new
-        // dice state.
         assert_eq!(out1.state_delta.len(), 1);
         assert_eq!(out1.state_delta[0].op, DeltaOp::Set);
         assert_eq!(out1.state_delta[0].path, "character.dice");
@@ -196,7 +181,6 @@ mod tests {
         let roll = dice["last_roll"].as_i64().expect("roll is an int");
         assert!((1..=6).contains(&roll));
 
-        // Timeline event + report.
         assert_eq!(out1.timeline_events.len(), 1);
         assert_eq!(out1.battle_report["kind"], "dice");
         assert_eq!(out1.battle_report["roll"], json!(roll));

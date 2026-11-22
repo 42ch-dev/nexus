@@ -6,6 +6,8 @@
  * adds/removes `.dark` on <html>.
  *
  * No duplicate theme.extend token block; app-specific overrides only.
+ *
+ * Contract: docs/specs/surfaces/design-studio.md §3.3.
  */
 import type { Config } from 'tailwindcss';
 import preset from '@nexus/design-tokens/tailwind.preset';

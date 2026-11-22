@@ -12,10 +12,6 @@
 
 use assert_cmd::Command;
 
-// =============================================================================
-// `creator works use` — CLI surface
-// =============================================================================
-
 /// `creator works use --help` documents the subcommand.
 #[test]
 fn works_use_help_shows_expected_text() {
@@ -54,10 +50,6 @@ fn works_use_requires_work_id() {
         .failure()
         .stderr(predicates::str::contains("WORK_ID"));
 }
-
-// =============================================================================
-// `creator works completion-lock` — CLI surface
-// =============================================================================
 
 /// `creator works completion-lock --help` shows subcommands.
 #[test]
@@ -114,10 +106,6 @@ fn works_completion_lock_release_requires_work_id() {
         .stderr(predicates::str::contains("WORK_ID"));
 }
 
-// =============================================================================
-// Cross-reference: `creator works` subcommand enumeration
-// =============================================================================
-
 /// The trimmed lines clap renders between `Commands:` and the blank line that
 /// ends the block.
 fn commands_block(help_text: &str) -> Vec<&str> {
@@ -156,10 +144,6 @@ fn works_help_lists_all_expected_subcommands() {
         );
     }
 }
-
-// =============================================================================
-// `creator works reconcile-chapters` — dry-run / --yes flags (V1.49 P2, R-V148P4-W2)
-// =============================================================================
 
 /// `creator works reconcile-chapters --help` documents the new safety flags.
 #[test]
@@ -205,22 +189,17 @@ fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // The over-promising phrase from qc1 W-1 must be gone.
     assert!(
         !help_text.contains("prints a preview"),
         "reconcile-chapters --help for --yes must not promise an inline preview: {help_text}"
     );
-    // The preview is accurately routed to --dry-run.
     assert!(
         help_text.contains("--dry-run") && help_text.contains("preview"),
         "reconcile-chapters --help must point to --dry-run for the preview: {help_text}"
     );
 }
 
-// =============================================================================
-// `creator workspace` init/list/use, `creator demo-seed` and `creator status`
 // — direct local path (v1.193 P0-T2)
-// =============================================================================
 
 /// Run the real `nexus42` binary against a hermetic `HOME` from a working
 /// directory that contains no workspace marker.
@@ -351,10 +330,8 @@ fn seed_selected_local_creator(home: &std::path::Path, cwd: &std::path::Path) {
 #[test]
 fn workspace_init_and_demo_seed_are_local_and_idempotent() {
     let home = tempfile::tempdir().expect("temp home");
-    // Initialization refuses a directory tree that already contains a
     // workspace marker (`.nexus42`), so the child runs from a clean tree.
     let cwd = tempfile::tempdir().expect("temp cwd");
-    // Explicit creative root: the whole flow stays inside the temp home on
     // every platform instead of resolving a documents directory.
     let creative_root = home.path().join("creative");
 
@@ -366,7 +343,6 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
     )
     .expect("seed config.toml");
 
-    // --- 1. A local creator selection, committed locally (no listener) ---
     let select_creator = hermetic_cli(home.path(), cwd.path(), &["creator", "use", "local"]);
     let select_creator_stdout = String::from_utf8_lossy(&select_creator.stdout);
     let select_creator_stderr = String::from_utf8_lossy(&select_creator.stderr);
@@ -381,7 +357,6 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "creator use must not consult a daemon (stdout+stderr): {select_creator_output}"
     );
 
-    // --- 2. Init: local materialization + committed selection, no listener ---
     let creative_arg = creative_root.to_str().expect("utf-8 creative root");
     let init = hermetic_cli(
         home.path(),
@@ -437,7 +412,6 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "init must commit the active creator locally: {config}"
     );
 
-    // --- 3. The committed selection stays usable ---
     let list = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", "list"]);
     let list_stdout = String::from_utf8_lossy(&list.stdout);
     let list_stderr = String::from_utf8_lossy(&list.stderr);
@@ -481,7 +455,6 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "selecting a workspace that was never materialized must fail"
     );
 
-    // --- 4. demo-seed is real work and idempotent without --force ---
     let seed = hermetic_cli(home.path(), cwd.path(), &["creator", "demo-seed"]);
     let seed_stdout = String::from_utf8_lossy(&seed.stdout);
     let seed_stderr = String::from_utf8_lossy(&seed.stderr);
@@ -528,7 +501,6 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
          {seeded_again_output}"
     );
 
-    // --- 5. The removed workspace leaves are unknown ---
     for leaf in ["clone", "link", "unlink", "status"] {
         let output = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", leaf]);
         let combined = combined_output(&output);
@@ -562,7 +534,6 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
     let home = tempfile::tempdir().expect("temp home");
     let cwd = tempfile::tempdir().expect("temp cwd");
 
-    // Counting loopback listener standing in for the configured daemon URL.
     // Accept-and-close: a probe is counted, never answered.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
     listener
@@ -605,10 +576,8 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
         combined_output(&select_creator)
     );
 
-    // Attribute every observed connection to `creator status` alone.
     probes.store(0, Ordering::SeqCst);
     let status = hermetic_cli(home.path(), cwd.path(), &["creator", "status"]);
-    // Drain window: a connection the child opened is queued and accepted here.
     std::thread::sleep(Duration::from_millis(100));
     stop.store(true, Ordering::SeqCst);
     accept_loop.join().expect("join probe listener");
@@ -666,7 +635,6 @@ fn creator_status_renders_core_owned_identity() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // The production writer the daemon PATCH route calls: the core owns the
     // identity cache, not the CLI.
     patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
 
@@ -730,12 +698,10 @@ fn creator_list_renders_core_owned_identity() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // The core owner's values: one overriding stale CLI metadata, one for a
     // creator the CLI metadata cache knows by id only.
     patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
     patch_core_identity(home.path(), "ctr_coreonly", CORE_ONLY_DISPLAY_NAME);
 
-    // The CLI metadata cache is the platform row source and the per-field
     // fallback. Seeded as JSON: its production writer resolves `HOME` from
     // this process's environment, which a shared test binary must not mutate.
     let cli_cache = serde_json::json!({
@@ -790,7 +756,6 @@ fn creator_list_renders_core_owned_identity() {
         "creator list must render a core-held identity the CLI cache lacks: {list_stdout}"
     );
 
-    // The pinned machine DTO carries the same projection with exact fields
     // (the human table above is asserted by content, not by column offsets).
     let json = hermetic_cli(home.path(), cwd.path(), &["creator", "list", "--json"]);
     let json_output = combined_output(&json);
@@ -826,10 +791,7 @@ fn creator_list_renders_core_owned_identity() {
     );
 }
 
-// =============================================================================
-// `creator works pool` / `creator works inspire` — separate stores, direct core
 // (v1.193 P0-T5)
-// =============================================================================
 
 /// Parse a `--json` child's stdout, failing the case with both streams when the
 /// payload is not the expected JSON document.
@@ -881,7 +843,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // Counting loopback listener standing in for the configured daemon URL:
     // accept-and-close, so a probe is counted and never answered. The accept
     // loop is deliberately local to this case — the frozen v1.193 P0-T2 case
     // keeps its own copy rather than being reworked.
@@ -911,7 +872,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         })
     };
 
-    // Re-point the seeded selection at the probe. `seed_selected_local_creator`
     // writes the dead-port literal below; re-reading the file keeps the
     // `active_creator_id` / workspace keys `workspace init` committed.
     let config_path = home.path().join(".nexus42").join("config.toml");
@@ -926,10 +886,8 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     )
     .expect("re-point daemon_url at the probe listener");
 
-    // Attribute every observed connection to the sequence below.
     probes.store(0, Ordering::SeqCst);
 
-    // --- 1. A pool inspiration item is a pool-store write only ------------
     let add = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1024,7 +982,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the pool wire shape must not leak the stored creator id: {idea_page}"
     );
 
-    // --- 2. Promotion creates the Work, and writes no Work note ----------
     let promote = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1097,7 +1054,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "a pool promotion must not append to the Work's inspiration_log: {promoted_work}"
     );
 
-    // --- 3. `works inspire` writes the Work store only -------------------
     let inspire = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1184,7 +1140,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the pool wire shape must not leak the stored creator id: {pool_entries}"
     );
 
-    // --- 4. `works use` writes the selection, still from the core --------
     let use_output = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1218,7 +1173,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "works use must leave the selected Work as the pool `active` row: {selected}"
     );
 
-    // The omitted `<work_id>` resolves that same pool `active` row. The
     // selection reads `novel_pool_entries` — which holds this Work as `active`
     // — and not the Work's own `works.status` column, which a promotion leaves
     // at `draft` (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE; the selector
@@ -1247,7 +1201,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the pool-active Work keeps its own draft status: {omitted_resolved}"
     );
 
-    // --- 5. No step of the sequence consulted the configured daemon ------
     // Drain window: a connection the child opened is queued and accepted here.
     std::thread::sleep(Duration::from_millis(100));
     let observed = probes.load(Ordering::SeqCst);
@@ -1266,10 +1219,7 @@ const POOL_ITEM_TITLE: &str = "Pool-only idea";
 /// Note appended to the Work's own `inspiration_log`.
 const WORK_NOTE: &str = "Work-side note";
 
-// =============================================================================
-// Omitted `<work_id>` → pool `active` Work
 // (v1.194 P2-T1 — R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE)
-// =============================================================================
 
 /// Title of the first Work promoted by [`omitted_work_id_uses_pool_active_entry`].
 const POOL_ACTIVE_ALPHA_TITLE: &str = "Alpha pool idea";
@@ -1442,12 +1392,10 @@ fn omitted_work_id_uses_pool_active_entry() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // --- 1. Two promoted Works; the pool holds the second one `active` ----
     let alpha = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_ALPHA_TITLE);
     let beta = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_BETA_TITLE);
     assert_ne!(alpha, beta, "each promotion must create its own Work");
 
-    // Promotion writes the pool row, never `works.status`: both Works stay
     // `draft`, so no Work in this fixture satisfies the retired selector.
     for work_id in [&alpha, &beta] {
         let work = work_status_json(home.path(), cwd.path(), work_id);
@@ -1486,7 +1434,6 @@ fn omitted_work_id_uses_pool_active_entry() {
         .expect("the pool entry carries its id")
         .to_string();
 
-    // Archive the *queued* Work's pool row: the archived, non-active entry
     // becomes the pool listing's newest row, which is what discriminates the
     // `status = 'active'` filter from a first-row read.
     let archive_queued = hermetic_cli(
@@ -1532,7 +1479,6 @@ fn omitted_work_id_uses_pool_active_entry() {
         "the first pool row is the archived entry: {pool_after_archive}"
     );
 
-    // --- 2. Omitted `works status` resolves the pool-active Work ----------
     let omitted_status = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1560,7 +1506,6 @@ fn omitted_work_id_uses_pool_active_entry() {
         "the resolved pool Work keeps its own draft status: {resolved}"
     );
 
-    // --- 3. Omitted `works inspire` writes the same Work -----------------
     let omitted_inspire = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1601,7 +1546,6 @@ fn omitted_work_id_uses_pool_active_entry() {
         "the omitted <work_id> must not append to the other Work"
     );
 
-    // --- 4. An explicit `<work_id>` still wins over the pool default -----
     let explicit = work_status_json(home.path(), cwd.path(), &alpha);
     assert_eq!(
         explicit.get("work_id").and_then(|v| v.as_str()),
@@ -1650,7 +1594,6 @@ fn omitted_work_id_uses_pool_active_entry() {
         "an explicit <work_id> must not append to the pool-active Work"
     );
 
-    // --- 5. No pool `active` entry: refuse, and write no Work -------------
     let works_before = listed_work_ids(home.path(), cwd.path());
     assert_eq!(
         works_before.len(),

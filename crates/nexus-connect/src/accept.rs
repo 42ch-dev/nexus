@@ -396,7 +396,6 @@ async fn handle_connection(
     sessions: Arc<PeerSessionManager>,
     options: PeerResponderOptions,
 ) {
-    // DF-92: ONE holder read per connection. The handshake (dialer
     // allowlist + keys) and the admission (negotiation hello + operator
     // allowlist) validate against THIS generation — grant-at-establish for
     // the session it establishes. A reload landing mid-handshake applies
@@ -422,7 +421,6 @@ async fn handle_connection(
         Ok(ws) => ws,
         Err(e) => {
             tracing::debug!(error = %e, "peer-tools WS upgrade failed");
-            // QC-fix W-A: the accept reservation is released — the
             // connection never reaches the handshake.
             sessions.release_in_flight();
             return;
@@ -434,7 +432,6 @@ async fn handle_connection(
         identity: RemoteIdentity {
             seed: options.identity_seed,
         },
-        // Handshake admission material from THIS connection's generation
         // (DF-92): a fresh snapshot's peer_ids + keys gate the dialer.
         manifest: (*generation.manifest).clone(),
         allowlist: generation.snapshot.config.peer_ids.clone(),
@@ -460,7 +457,6 @@ async fn monitor_session(
     generation: ConnectionGeneration,
     options: PeerResponderOptions,
 ) {
-    // Phase 1: bounded handshake outcome (a dialer that never sends its
     // hello is closed by us after the bound — the responder's own recv would
     // otherwise park forever).
     let handshake_timeout = Duration::from_millis(config.invoke_timeout_ms.max(1000));
@@ -469,7 +465,6 @@ async fn monitor_session(
         .ok()
         .flatten();
     let Some(peer_id) = established else {
-        // Handshake failed (rejection → responder closed itself) or timed
         // out: close the responder so the dialer fails fast. Zero session
         // state — the manager never saw this peer. The accept reservation
         // (QC-fix W-A) is released here.
@@ -488,7 +483,6 @@ async fn monitor_session(
         crate::table::ConnectResponderAdapter::new(Arc::clone(&responder), peer_id.clone()),
     );
 
-    // Phase 2: admit. T3 (AR-68): the authenticated manifest's tool ids run
     // the full admission chain inside the process-global PeerToolTable
     // (whole-manifest validation → grammar → reserved-ns → negotiated →
     // allowlist → duplicate-peer). The session manager records the
@@ -505,7 +499,6 @@ async fn monitor_session(
                 generation.manifest.capabilities.iter().cloned().collect();
             let allowlist: std::collections::HashSet<String> =
                 generation.snapshot.config.tool_allowlist.iter().cloned().collect();
-            // The decision is consistent with the reservation AT THE MOMENT
             // IT IS MADE (C3 fix round 2): the holder's reservation is held
             // exclusively across set derivation and registration, so a
             // concurrent hot swap serializes with the decision instead of
@@ -539,7 +532,6 @@ async fn monitor_session(
     let replaced = sessions.register(&peer_id, Arc::clone(&responder), &admitted_ids);
     tracing::info!(%peer_id, replaced, "peer session established");
 
-    // Phase 3: close observation (see `wait_for_close`).
     wait_for_close(&responder, &observed).await;
     crate::events::connect_event_registry().remove_session(&event_session_id);
     let evicted = sessions.evict(&peer_id, Some(&responder));
@@ -769,7 +761,6 @@ async fn drive_delivery<P, Fut, F>(
         if frames.is_empty() {
             break;
         }
-        // Send admission: interrupted by cancellation, so a replaced
         // generation never waits out another stream's send slot.
         let _guard = tokio::select! {
             biased;
@@ -855,7 +846,6 @@ where
     })
     .await;
     let Ok(result) = outcome else {
-        // Closing synchronously fences the responder before `invoke` is
         // dropped below; its allocated sequence can never be reused.
         fail_closed();
         return None;
@@ -1010,12 +1000,10 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
     builtin_tool_ids: HashSet<String, S>,
 ) -> ConnectResult<PeerToolsLaneHandle> {
     ensure_injected_roster(&builtin_tool_ids)?;
-    // DF-92: seed the digest baseline BEFORE the boot load — an edit
     // landing anywhere in the boot window diverges from the baseline and
     // the first poll reloads (never absorbed; the capability watcher's
     // W-B rule).
     let boot_digest = peer_config_digest(home);
-    // The effective `daemon.json` path for `home` (`--home` / `NEXUS42_HOME`
     // select it) — the lane-startup warnings must name THIS file, not a
     // hardcoded `~/.nexus42/...`, so the remedy points at the file the
     // operator can actually edit.
@@ -1025,7 +1013,6 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
             category: event_lane_config_warning(&config_path, &e),
         })?,
     );
-    // DF-91: wire the live config snapshot into the process-global table
     // so admission reads `collision_policy` + `peer_priority` at
     // admission time (live-derivation precedent: `live_reserved_tool_ids`
     // reads the capability holder the same way — p1's reload swaps the
@@ -1083,13 +1070,11 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
         identity_seed,
         host_id: device_id,
         config: PeerConfigHolder::clone(&config_holder),
-        // The field is lane-static and boot-only: one normalize into the
         // default hasher keeps `PeerResponderOptions` non-generic (a hasher
         // type parameter there would ripple through every handler).
         builtin_tool_ids: Arc::new(builtin_tool_ids.into_iter().collect()),
         capability_registry,
     };
-    // DF-92: the config watcher runs alongside the accept loop. The
     // caller's shutdown Notify stays SINGLE-consumer — `notify_one` stores
     // exactly one permit, so a second direct consumer (the watcher) could
     // steal it and leave the accept loop un-woken (a hung lane, observed
@@ -1107,7 +1092,6 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
             watch_shutdown.notify_one();
         }
     });
-    // DF-92 supervision: the supervisor awaits the watcher task; a watcher
     // panic surfaces as a JoinError, logs ONE `peer config reload degraded`
     // warn, and the lane keeps serving the last-good snapshot until a
     // restart restores reload. `handle.watch_task` is the supervisor.
@@ -1232,7 +1216,6 @@ mod tests {
         assert!(text.contains("non-loopback refusal"), "{text}");
         assert!(text.contains("0.0.0.0:8425"), "{text}");
         assert!(text.contains(&expected), "{text}");
-        // The remedy names the effective file, not the hardcoded default a
         // non-default home never reads.
         assert!(!text.contains("~/.nexus42/connect/daemon.json"), "{text}");
 
@@ -1262,7 +1245,6 @@ mod tests {
             .build()
             .expect("runtime");
         runtime.block_on(async {
-            // The peer close surfaces as a recv error on the wrapper.
             let observed_ref = Arc::clone(&observed);
             let recv = tokio::spawn(async move { observed_ref.recv().await });
             pair.server.close().await.expect("close");
@@ -1337,17 +1319,14 @@ mod tests {
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
 
-        // Arm a pending subscribe so a matching response reaches the
         // payload check rather than the earlier lifecycle returns.
         send_subscribe_request(&pair.server, &stream, "subscribe-1").await;
         observed.recv().await.unwrap();
         assert_eq!(observed.outbound_drops(), 0);
 
-        // (a) Unparseable response envelope.
         observed.send(b"{ not json").await.unwrap();
         assert_eq!(observed.outbound_drops(), 1, "unparseable drop must count");
 
-        // (b) Parseable response with a matching request_id but no
         // `/payload/result`.
         observed
             .send(
@@ -1386,15 +1365,12 @@ mod tests {
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
 
-        // Request A observed, then its generation registered (awaiting).
         send_subscribe_request(&pair.server, &stream, "subscribe-a").await;
         observed.recv().await.unwrap();
         let (_, _, mut first) = registry.subscribe(&session, &stream, None).await.unwrap();
-        // Request B observed while A's response is still outstanding.
         send_subscribe_request(&pair.server, &stream, "subscribe-b").await;
         observed.recv().await.unwrap();
 
-        // A's response write enables A's generation.
         send_subscribe_response(observed.as_ref(), &stream, "subscribe-a").await;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), first.next_batch())
@@ -1403,7 +1379,6 @@ mod tests {
             vec![first_frame]
         );
 
-        // B's generation can now register, but B's response is unwritten.
         let (_, _, mut replacement) = registry.subscribe(&session, &stream, None).await.unwrap();
         assert!(
             tokio::time::timeout(Duration::from_millis(20), replacement.next_batch())
@@ -1411,7 +1386,6 @@ mod tests {
                 .is_err(),
             "no replacement delivery may escape before B's own response"
         );
-        // B's own response write enables it.
         send_subscribe_response(observed.as_ref(), &stream, "subscribe-b").await;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), replacement.next_batch())
@@ -1491,7 +1465,6 @@ mod tests {
             },
         ));
 
-        // A holds the session slot inside its reverse invoke; B waits for it.
         invoke_started.notified().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -1499,7 +1472,6 @@ mod tests {
             "the second stream must wait for the session send slot"
         );
 
-        // Replacing A cancels it, but A's in-flight invoke must complete on
         // the wire rather than be abandoned (C3): the slot is not yet free.
         let _replacement = registry.subscribe(&session, &stream_a, None).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1508,7 +1480,6 @@ mod tests {
             "an in-flight reverse invoke must complete before the slot is handed over"
         );
 
-        // Complete the wire send: A finishes, stops, and releases the slot.
         release.notify_one();
         tokio::time::timeout(Duration::from_secs(1), async {
             while !second_pushed.load(Ordering::SeqCst) {
@@ -1561,7 +1532,6 @@ mod tests {
                 })
                 .and_then(|doc| doc.get("sequence").and_then(serde_json::Value::as_i64));
             if sequence.is_some() && self.armed.swap(false, Ordering::SeqCst) {
-                // Park after sequence allocation, before emission.
                 self.blocked.notify_one();
                 self.release.notified().await;
             }
@@ -1668,7 +1638,6 @@ mod tests {
         registry.activate(&session, &stream);
         let cancelled = subscription.cancellation();
 
-        // Arm the gate BEFORE the driver sends so the first delivery push
         // parks after allocation.
         gated.armed.store(true, Ordering::SeqCst);
         let fail_closed_called = Arc::new(AtomicBool::new(false));
@@ -1700,12 +1669,9 @@ mod tests {
             },
         ));
 
-        // The invoke holds an allocated sequence and is parked before emission.
         gated.blocked.notified().await;
-        // Replace the subscription while that send is outstanding.
         let _replacement = registry.subscribe(&session, &stream, None).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
-        // Completion is possible, so the session must not be torn down.
         assert!(!fail_closed_called.load(Ordering::SeqCst));
         gated.release.notify_one();
         driver.await.unwrap();
@@ -1719,7 +1685,6 @@ mod tests {
             ConnectResponderState::Established,
             "the session must remain usable after a completed in-flight send"
         );
-        // A subsequent reverse invoke must be accepted: the cancelled
         // generation's allocated sequence reached the wire.
         let follow_up = tokio::time::timeout(
             Duration::from_secs(2),
@@ -1843,7 +1808,6 @@ mod tests {
         ));
         gated.blocked.notified().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        // Replacement cancels the subscription while its allocated send is
         // still parked. The driver must consume only the original deadline.
         let replacement = registry.subscribe(&session, &stream, None).await;
         assert!(replacement.is_ok());
@@ -1926,7 +1890,6 @@ mod tests {
             Duration::from_millis(2_000),
             || {},
             move |frames| {
-                // Force the ordering under test: cancel after the retention
                 // check but before the request's first poll.
                 push_registry.remove_session(&push_session);
                 let responder = Arc::clone(&push_responder);
@@ -1951,7 +1914,6 @@ mod tests {
             "a request cancelled before its first poll must not reach the wire"
         );
         assert_eq!(responder.state(), ConnectResponderState::Established);
-        // The first outbound sequence is still available and accepted.
         let follow_up = tokio::time::timeout(
             Duration::from_secs(2),
             responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
@@ -2055,7 +2017,6 @@ mod tests {
 
     #[test]
     fn daemon_manifest_never_carries_collision_policy() {
-        // DF-91 (AR-69 derivation lock): the peer-visible hello derives
         // ONLY from the operator allowlist. The collision policy + peer
         // priority are operator config consumed by the admission table —
         // they must never leak into the hello.
@@ -2092,7 +2053,6 @@ mod tests {
         std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         let config = nexus_home_layout::connect_daemon_config_path(home.path());
         std::fs::write(&config, r#"{"host":"0.0.0.0","port":0}"#).expect("write daemon.json");
-        // No peer admission runs in this boot-gate case, so any non-empty
         // roster satisfies the reserved-set precondition (an empty one is
         // refused at the entry, before the bind gate this test exercises).
         let roster: HashSet<String> = HashSet::from(["nexus-test-builtin".to_owned()]);
@@ -2103,7 +2063,6 @@ mod tests {
         };
         assert!(matches!(err, ConnectError::Internal { .. }), "got {err:?}");
 
-        // Positive control: the same home on the loopback default passes the
         // plaintext gate and really binds, so the refusal above is the
         // non-loopback rule rather than a general lane-start failure.
         std::fs::write(&config, r#"{"host":"127.0.0.1","port":0}"#)
@@ -2113,7 +2072,6 @@ mod tests {
             .await
             .expect("the loopback plaintext bind starts");
         assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");
-        // Cooperative shutdown: `notify_one` retains a permit even when the
         // spawned relay has not registered yet, and both returned handles are
         // awaited so a live accept loop or supervised watcher is observed
         // settling instead of detaching with the test.
@@ -2185,7 +2143,6 @@ mod tests {
             "namespaces derive from allowlisted ids and fixed event capabilities"
         );
 
-        // An operator cannot allowlist a KE name: config load fails with the
         // truthful reason, so the hello above can never grow one.
         for entry in crate::config::KE_CAPABILITIES
             .iter()

@@ -22,7 +22,6 @@ describe('isWorkShellRoute', () => {
   });
 
   it('excludes all /works/chapters/* paths from work shell (I1 workId=collision)', () => {
-    // Reserved segment blocks layout detection for a hypothetical Work id `chapters`.
     expect(isWorkShellRoute('/works/chapters/outline')).toBe(false);
     expect(isWorkShellRoute('/works/chapters/chapters')).toBe(false);
   });

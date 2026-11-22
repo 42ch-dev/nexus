@@ -149,18 +149,12 @@ pub fn build_open_findings_block(findings: &[Finding], chapter_label: &str) -> S
             ),
         };
 
-        // Stop appending once the total block would exceed the cap.
-        // We never want to half-render a finding line, so the check is
-        // "would adding this line overflow?" rather than "trim to cap".
         if out.len() + line.len() > MAX_TOTAL_BLOCK_CHARS {
             break;
         }
         out.push_str(&line);
     }
 
-    // If after applying the total-char cap nothing got appended past the
-    // heading, return empty so the template guard omits the whole block
-    // (avoids rendering a heading with no body).
     let heading = format!("## Open findings (chapter {chapter_label})\n\n");
     if out.len() == heading.len() {
         return String::new();
@@ -236,14 +230,12 @@ mod tests {
             .collect();
         let block = build_open_findings_block(&findings, "01");
 
-        // Count cap (≤ MAX_FINDINGS) — total-char cap may further reduce.
         let bullet_count = block.lines().filter(|l| l.starts_with("- [")).count();
         assert!(
             bullet_count <= MAX_FINDINGS,
             "expected at most {MAX_FINDINGS} bullets when 20 findings seeded; got {bullet_count}"
         );
 
-        // Body truncation — every emitted bullet should carry an ellipsis.
         let bullets: Vec<&str> = block.lines().filter(|l| l.starts_with("- [")).collect();
         for b in &bullets {
             assert!(
@@ -252,7 +244,6 @@ mod tests {
             );
         }
 
-        // Total-char cap invariant.
         assert!(
             block.len() <= MAX_TOTAL_BLOCK_CHARS,
             "block must not exceed MAX_TOTAL_BLOCK_CHARS ({MAX_TOTAL_BLOCK_CHARS}); got {}",
@@ -268,13 +259,11 @@ mod tests {
         let findings = vec![make_finding("major", "craft", "t1", &long_body)];
         let block = build_open_findings_block(&findings, "01");
         assert!(block.contains('…'), "expected ellipsis on truncated body");
-        // The body line itself should be no longer than MAX_BODY_CHARS + ellipsis.
         let body_line = block
             .lines()
             .find(|l| l.starts_with("- ["))
             .expect("bullet line should exist");
         let body_part = body_line.split(": ").nth(1).unwrap_or_default();
-        // body_part may include `\n  Suggested rule: ...` if suggestion present,
         // but we set rule_suggestion=None above, so it's just the truncated body.
         assert!(
             body_part.chars().count() <= MAX_BODY_CHARS + 1, // +1 for ellipsis
@@ -288,7 +277,6 @@ mod tests {
     /// `MAX_TOTAL_BLOCK_CHARS` stops appending before the overflow.
     #[test]
     fn findings_block_builder_respects_total_block_cap() {
-        // 8 findings × 600-char body each → exceeds MAX_TOTAL_BLOCK_CHARS.
         let long_body = "y".repeat(600);
         let findings: Vec<Finding> = (0..MAX_FINDINGS)
             .map(|i| make_finding("major", "craft", &format!("t{i}"), &long_body))

@@ -1,5 +1,4 @@
 /**
- * Structural guards narrowing the generated `ModuleDetail.schemas.*` open
  * index signatures (V1.147 P1, qc1 W-003 fix) onto the `@42ch/nexus-ui`
  * primitive contracts.
  *
@@ -46,7 +45,6 @@ export function toInvocationSchema(raw: unknown): InvocationSchema | null {
     return null;
   }
 
-  // Narrowed copy: only the structural fields the primitive reads survive.
   return {
     ...(type !== undefined ? { type } : {}),
     ...(properties !== undefined ? { properties: properties as InvocationSchema['properties'] } : {}),

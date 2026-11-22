@@ -257,7 +257,6 @@ pub async fn update_relationship_in_tx(
     .await?;
 
     if result.rows_affected() == 0 {
-        // V1.154 P2 (R3 closure): disambiguate a world move from a version
         // mismatch before falling into the generic OCC classification. The
         // caller's revision may have been perfectly valid — the WORLD moved
         // (e.g. a second Connect process / the daemon on the same workspace
@@ -306,7 +305,6 @@ pub async fn update_relationship_in_tx(
         updated_at: params.updated_at.clone(),
         revision: new_revision,
         needs_review: needs_review_i64,
-        // source is immutable — preserved from the existing row.
         source: existing.source.clone(),
         extensions_nexus_json: params.extensions_nexus_json.clone(),
     })
@@ -412,7 +410,6 @@ pub async fn list_relationships_for_world(
     include_suggested: bool,
     limit: i64,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // Two compile-time-checked static queries (sqlx macros can't express a
     // conditional WHERE clause). The default (`false`) branch pushes
     // `needs_review = 0` into SQL so SQLite uses
     // `idx_kb_relationships_world_id_needs_review` and skips hidden rows. The
@@ -590,7 +587,6 @@ pub async fn list_confirmed_relationships_paginated(
     limit: i64,
     cursor: Option<&RelationshipCursor>,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // Two compile-time-checked `query_as!` branches: the cursor branch adds
     // the keyset predicate `(updated_at < ? OR (updated_at = ? AND
     // relationship_id < ?))`; the no-cursor branch omits it. Both use bind
     // params only — no string interpolation.
@@ -633,8 +629,6 @@ pub async fn list_confirmed_relationships_paginated(
     };
     Ok(rows)
 }
-
-// ── V1.76 extraction-suggestion support ───────────────────────────────
 
 /// Resolve a non-deleted `kb_key_blocks` id by `canonical_name` for one world.
 ///
@@ -748,7 +742,6 @@ pub async fn upsert_extraction_relationship(
     .await?;
 
     if existing_id.is_some() {
-        // Idempotent: the suggestion already exists; do not re-insert or bump
         // the revision (avoids churn on rescan).
         return Ok(false);
     }
@@ -857,7 +850,6 @@ mod tests {
 
         let row = get_relationship(&pool, &rel_id).await.unwrap();
         assert_eq!(row.world_id, world_id);
-        // symmetric was false -> stored integer should be 0
         assert!(!i64_to_bool(row.symmetric));
         assert_eq!(row.confidence, Some(0.75));
     }
@@ -984,7 +976,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_cas_rejects_row_in_foreign_world() {
-        // R3 regression (relate side, atomic source of truth): the caller's
         // world-verified preimage (wld_test) is stale — another writer moved
         // the row to wld_other without bumping the revision, so the pre-fix
         // id+revision CAS would have succeeded. The world-aware predicate
@@ -1024,7 +1015,6 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
-        // The caller's preimage: read BEFORE the interleaved writer moves the
         // row (the OCC `existing` snapshot the update path would carry).
         let existing = get_relationship(&pool, &rel_id).await.unwrap();
         assert_eq!(
@@ -1032,7 +1022,6 @@ mod tests {
             "gate-check precondition: row is in the claimed world"
         );
 
-        // "Other writer" (Connect process ∥ daemon) moves the row across
         // worlds between the gate-check and the CAS, revision untouched.
         sqlx::query!(
             "UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?",
@@ -1158,14 +1147,11 @@ mod tests {
         assert_eq!(rows.len(), 3);
     }
 
-    // ── V1.77: SQL LIMIT pushdown (qc3 W-QC3-P1-001) ─────────────────────
-
     #[tokio::test]
     async fn test_list_for_world_respects_sql_limit() {
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
-        // Seed 3 confirmed rows.
         let mut tx = pool.begin().await.unwrap();
         for i in 0..3 {
             insert_relationship_in_tx(
@@ -1193,7 +1179,6 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        // SQL LIMIT caps at the DB layer: pass `cap + 1 = 3` and observe 3
         // (no truncation), then pass `2` and observe the truncation sentinel
         // shape (rows.len() == limit).
         let rows = list_relationships_for_world(&pool, &world_id, true, 3)
@@ -1211,14 +1196,11 @@ mod tests {
         );
     }
 
-    // ── V1.158 P2 T3: keyset pagination (hop-edge walk, R-V1149P1-001) ──
-
     #[tokio::test]
     async fn list_confirmed_relationships_paginated_resumes_after_cursor() {
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
-        // Seed 5 confirmed rows with strictly increasing RFC3339 `updated_at`
         // (lexicographic order == chronological order for the fixed format).
         let mut tx = pool.begin().await.unwrap();
         for i in 0..5 {
@@ -1248,7 +1230,6 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        // Page 1 (page size 2 + overflow probe): the caller passes
         // `limit + 1` per the `list_relationships_for_world` convention; a
         // result of `limit + 1` rows means the graph continues past the page.
         let rows = list_confirmed_relationships_paginated(&pool, &world_id, 3, None)
@@ -1259,7 +1240,6 @@ mod tests {
         assert_eq!(rows[1].relationship_id, "rel_pg3");
         assert_eq!(rows[2].relationship_id, "rel_pg2", "probe row present");
 
-        // Resume after rel_pg3's keyset → the next two rows (plus the next
         // probe), strictly after the cursor (no overlap, no gap).
         let cursor = RelationshipCursor {
             updated_at: rows[1].updated_at.clone(),
@@ -1277,7 +1257,6 @@ mod tests {
             "keyset resumes strictly after the cursor row"
         );
 
-        // One row remains; the final page returns it without a probe row.
         let cursor2 = RelationshipCursor {
             updated_at: rows2[1].updated_at.clone(),
             relationship_id: rows2[1].relationship_id.clone(),
@@ -1295,12 +1274,9 @@ mod tests {
         );
     }
 
-    // ── V1.76: extraction resolve + idempotent upsert ─────────────────────
-
     #[tokio::test]
     async fn resolve_entity_by_canonical_name_with_block_type() {
         let (_dir, pool) = fresh_pool().await;
-        // seed_world_and_entities inserts kb_source + kb_target as 'character'
         // with canonical_name == id.
         let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
 
@@ -1339,7 +1315,6 @@ mod tests {
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
         let now = chrono::Utc::now().to_rfc3339();
 
-        // First call inserts a suggestion.
         let inserted = upsert_extraction_relationship(
             &mut pool.acquire().await.unwrap(),
             &world_id,
@@ -1356,7 +1331,6 @@ mod tests {
         .unwrap();
         assert!(inserted, "first call inserts a new suggestion");
 
-        // Second call with the same composite key is a no-op (dedup).
         let inserted_again = upsert_extraction_relationship(
             &mut pool.acquire().await.unwrap(),
             &world_id,
@@ -1376,7 +1350,6 @@ mod tests {
             "second call is idempotent (no duplicate, no revision bump)"
         );
 
-        // Only one row exists.
         let rows = list_relationships_for_world(&pool, &world_id, true, 100)
             .await
             .unwrap();

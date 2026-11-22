@@ -91,7 +91,6 @@ export function ConnectDaemonFormChrome({
   'data-testid': dataTestId,
 }: ConnectDaemonFormChromeProps) {
   const [showKey, setShowKey] = useState(false);
-  // Instance-unique: the Studio renders this chrome several times per page.
   const uid = useId();
   const daemonUrlId = `${uid}-studio-daemon-url`;
   const apiKeyId = `${uid}-studio-api-key`;

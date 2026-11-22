@@ -54,7 +54,6 @@ const REQUIRED_PROFILE_KINDS: [&str; 0] = [];
 /// advisory classifier emits at most one candidate per capture.
 const MAX_CANDIDATES_PER_CAPTURE: u64 = 1;
 
-// The transfer family is not served, so these three schema-required bounds back
 // no operation of this provider. They are positive only because
 // `memory.describe.limits` requires every member; nothing else reads them.
 const EXPORT_CHUNK_BYTES: u64 = 262_144;

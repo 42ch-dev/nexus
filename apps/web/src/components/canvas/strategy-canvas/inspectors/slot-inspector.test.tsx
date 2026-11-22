@@ -1,5 +1,4 @@
 /**
- * Slot inspector (v239-p3-canvas-compose-ui T3): bind_slot writes,
  * replace_subtree and unnest route to the compose interactions.
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
@@ -82,7 +81,6 @@ describe('SlotInspector', () => {
   });
 
   it('consumes a refused op instead of rethrowing it at the event boundary', async () => {
-    // The hook has already presented the refusal; a rethrown rejection here
     // would surface as an unhandled rejection and fail this file.
     const refused = vi.fn(() => Promise.reject(new Error('409 conflict')));
     renderInspector({ onBindSlot: refused, onReplaceSubtree: refused, onUnnest: refused });

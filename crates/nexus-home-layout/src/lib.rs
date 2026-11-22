@@ -44,10 +44,8 @@ const NEXUS_DIR: &str = ".nexus42";
 /// Returns an I/O error if directory creation or config publication fails. A
 /// failed publication is never swallowed and never reported as success.
 pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
-    // Create the nexus home root if missing
     std::fs::create_dir_all(nexus_home)?;
 
-    // System subdirectories
     std::fs::create_dir_all(nexus_home.join("skills"))?;
     std::fs::create_dir_all(nexus_home.join("presets"))?;
     std::fs::create_dir_all(nexus_home.join("modules"))?;
@@ -56,8 +54,6 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(nexus_home.join("acp").join("runs"))?;
     std::fs::create_dir_all(nexus_home.join("rules"))?;
 
-    // Write empty config.toml if it does not exist (no config.json either).
-    // I-000113: this is the fifth writer of the shared `config.toml` document,
     // so it takes the same `config.toml.lock` protocol as the CLI/service/
     // desktop/core writers. The existence check is repeated under the lock: a
     // writer that committed while this acquisition waited must not be
@@ -185,11 +181,9 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         .filter(|e| e.path().is_dir())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            // Skip system-prefixed and hidden dirs.
             if name.starts_with('_') || name.starts_with('.') {
                 return None;
             }
-            // Must contain a preset.yaml to be valid.
             if e.path().join("preset.yaml").exists() {
                 Some(name)
             } else {
@@ -572,8 +566,6 @@ pub fn acp_run_trace_file(home: &Path, run_id: &str) -> PathBuf {
     acp_run_dir(home, run_id).join("trace.jsonl")
 }
 
-// ── Workspace path validation (DF-31 skeleton) ─────────────────────────
-
 /// Validate that a workspace-relative `path` is safe to use.
 ///
 /// Rejects:
@@ -602,7 +594,6 @@ pub fn validate_workspace_path_safe(path: &str) -> std::result::Result<(), Strin
     if path.is_empty() {
         return Err("workspace path must not be empty".to_string());
     }
-    // Reject absolute paths — workspace.open only accepts relative paths
     if path.starts_with('/') || path.starts_with('\\') {
         return Err(format!(
             "workspace path must be relative, got absolute path: {path:?} — rejected for safety"
@@ -895,8 +886,6 @@ mod tests {
         let _ = creator_soul_md_path(&home, "ctr_\x00null");
     }
 
-    // ── validate_creator_id_safe tests ────────────────────────
-
     #[test]
     fn validate_creator_id_safe_accepts_valid() {
         assert!(validate_creator_id_safe("crt_abc123").is_ok());
@@ -925,8 +914,6 @@ mod tests {
         let err = validate_creator_id_safe("ctr_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
-
-    // ── sanitize_entry_id tests ──────────────────────────
 
     #[test]
     fn sanitize_entry_id_returns_valid_borrow() {
@@ -967,8 +954,6 @@ mod tests {
         assert!(err.contains("control characters"));
     }
 
-    // ── ACP trace path helpers ──────────────────────────────────────────
-
     #[test]
     fn acp_runs_dir_layout() {
         let home = PathBuf::from("/fake/home");
@@ -995,8 +980,6 @@ mod tests {
             PathBuf::from("/fake/home/.nexus42/acp/runs/run_abc/trace.jsonl")
         );
     }
-
-    // ── validate_run_id_safe tests ──────────────────────────────────────
 
     #[test]
     fn validate_run_id_safe_accepts_valid() {
@@ -1032,8 +1015,6 @@ mod tests {
         let err = validate_run_id_safe("run_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
-
-    // ── Workspace path validation (DF-31 skeleton) ────────────────────────
 
     #[test]
     fn validate_workspace_path_safe_accepts_valid() {
@@ -1071,8 +1052,6 @@ mod tests {
         let err = validate_workspace_path_safe("path_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
-
-    // ── Rules and Logs path helpers (V1.39 P3) ───────────────────────────
 
     #[test]
     fn user_writing_craft_rules_path_layout() {
@@ -1123,9 +1102,6 @@ mod tests {
         );
     }
 
-    // ── Character home layout (v1.184 P3 Task 2) ────────────────────────
-    //
-    // Canonical Character bearer paths (character-memory spec §2):
     //   $HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/SOUL.md
     //   $HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/<slug>.md
 
@@ -1185,7 +1161,6 @@ mod tests {
             mem.starts_with(&root),
             "memory dir must stay under the Character root"
         );
-        // Character files live under the OWNER's creator tree, never at the
         // creator root itself or in a sibling creator's tree.
         let owner_root = PathBuf::from("/h/.nexus42/creators/ctr_owner");
         assert!(root.starts_with(&owner_root));
@@ -1253,7 +1228,6 @@ mod tests {
 
     #[test]
     fn is_valid_character_id_matches_minted_format() {
-        // Minted by `nexus_local_db::character::mint_character_id` as
         // `chr_` + 32 lowercase hex.
         assert!(is_valid_character_id(
             "chr_0123456789abcdef0123456789abcdef"
@@ -1348,8 +1322,6 @@ mod tests {
             std::thread::spawn(move || ensure_system_layout(&home).expect("system layout"))
         };
 
-        // Startup is past its pre-lock existence check and cannot acquire
-        // until the foreign lock is released: no timing assumption.
         barrier.wait();
         std::fs::write(
             home.join("config.toml"),
@@ -1400,8 +1372,6 @@ mod tests {
         arrival
             .recv_timeout(Duration::from_secs(30))
             .expect("the startup writer reached the staging boundary");
-        // The staged file disappears under the publisher, so the rename is the
-        // failing operation: the skeleton is never published.
         let staging: Vec<_> = std::fs::read_dir(&home)
             .expect("home listing")
             .filter_map(Result::ok)

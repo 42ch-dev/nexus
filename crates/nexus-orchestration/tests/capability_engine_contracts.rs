@@ -6,7 +6,6 @@
 use nexus_capability::{Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder};
 use std::sync::Arc;
 
-// ─── v1.237 P2 preflight T1: per-run registry injection ────────────────
 //
 // The premise under test: a run can be driven by a registry the caller
 // owns (a fresh holder per run), so a simulation can observe every
@@ -111,7 +110,6 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
     use nexus_orchestration::GraphFlowEngine;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // Positive control: the counter is live, and the ONLY row the run can
     // resolve is the probe (the real builtins are absent from this
     // registry, so any bypass fails the run instead of passing silently).
     let first_hits = Arc::new(AtomicUsize::new(0));
@@ -133,7 +131,6 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
         "one reachable capability, one dispatch"
     );
 
-    // Second engine, same dispatching graph, its own registry: if this
     // engine resolved the first engine's registry instead, the dispatch
     // below would land in `first_hits` and leave `second_hits` at zero.
     let second_hits = Arc::new(AtomicUsize::new(0));
@@ -160,7 +157,6 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
         "the second run did not touch the first engine's counter"
     );
 
-    // Negative: a graph with no capability-reachable state records zero.
     let quiet_hits = Arc::new(AtomicUsize::new(0));
     let quiet_caps = recording_registry(&quiet_hits);
     let quiet_loaded = nexus_preset::load_preset_from_str(T1_QUIET_PRESET, quiet_caps.as_ref())
@@ -176,7 +172,6 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
         "no dispatch without a capability"
     );
 
-    // No two runs shared a registry, so nothing leaked between them.
     assert!(!Arc::ptr_eq(&first_caps, &second_caps));
     assert!(!Arc::ptr_eq(&first_caps, &quiet_caps));
     assert!(!Arc::ptr_eq(&second_caps, &quiet_caps));

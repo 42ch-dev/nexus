@@ -5,7 +5,6 @@ import { cn } from '../lib/cn';
 import { Badge } from './badge';
 
 /**
- * Structural mirror of the compute proposals envelope (state_delta,
  * timeline_events, new_key_blocks, battle_report). All-optional/subset
  * fields keep the primitive compatible with the generated DTOs via
  * structural typing — the package never imports wire contracts.
@@ -58,7 +57,6 @@ export interface ProposalSectionsProps {
   truncated?: boolean;
   copy: ProposalSectionsCopy;
   /**
-   * Optional per-event selection (behavior spec §2 opt-in): when
    * `onToggleEvent` is supplied, each timeline event renders a checkbox
    * keyed by its stable id `evt_<index>`; `selectedEventIds` drives state.
    */
@@ -73,7 +71,6 @@ function formatValue(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
-    // Circular structures only — module output is JSON by contract.
     return '[unserializable value]';
   }
 }

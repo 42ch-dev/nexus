@@ -68,7 +68,6 @@ fn test_version_conflict_distinct_from_locked() {
 
 #[test]
 fn test_exit_code_76_matches_version_conflict() {
-    // This test verifies the exit-code-mapping logic found in main.rs.
     // The mapping is:
     //   VersionConflict → 76
     //   Locked → 75

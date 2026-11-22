@@ -1,5 +1,4 @@
 /**
- * Timeline page — route entry for the Canvas Timeline hero surface
  * (V1.122 P1 T3). Default World entry: `/worlds/:worldId` redirects here.
  *
  * Reads the world id from the URL and renders {@link TimelineCanvas}. The

@@ -85,7 +85,6 @@ pub fn assert_warn_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str])
 }
 
 pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
-    // Clone the buffer out of the guard so the lock is released before the
     // assert scans/formats it (clippy::significant_drop_tightening).
     let msgs = messages.lock().unwrap().clone();
     assert!(
@@ -95,7 +94,6 @@ pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
 }
 
 fn assert_level_emitted(messages: &Arc<Mutex<Vec<String>>>, level: &str, needles: &[&str]) {
-    // Clone the buffer out of the guard so the lock is released before the
     // prefix build and the assert scan (clippy::significant_drop_tightening).
     let msgs = messages.lock().unwrap().clone();
     let prefix = format!("{level} ");

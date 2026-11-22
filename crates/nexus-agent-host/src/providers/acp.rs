@@ -1,4 +1,4 @@
-//! ACP provider adapter — wraps `nexus-acp-host` behind `ProviderAdapter`.
+//! ACP provider adapter — wraps `nexus-acp-host` behind `ProviderAdapter`. See docs/specs/agents/agent-host.md.
 //!
 //! Translates ACP SDK lifecycle into the normalized `ProviderAdapter` trait:
 //!
@@ -155,7 +155,6 @@ impl AcpProvider {
         let resolver = self.permission_resolver.clone();
         Arc::new(move |tool_name: &str| {
             let risk = classifier.classify_or_default(tool_name);
-            // A1: the orchestration scope narrows the Host configuration —
             // a tool outside the requested scope is denied before the
             // resolver is consulted (the scope can never elevate). The scope
             // read must NEVER fail open: if the lock cannot be acquired the
@@ -178,7 +177,6 @@ impl AcpProvider {
             let outcome = resolver.resolve(ProtocolKind::Acp, &pid.0, tool_name, Some(risk));
             match outcome {
                 PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
-                // In non-interactive host context, Ask defaults to Deny.
                 // Interactive prompting will be added in a future release.
                 PermissionOutcome::Ask | PermissionOutcome::Deny => AcpPermissionOutcome::Deny,
             }
@@ -198,7 +196,6 @@ impl AcpProvider {
     ) -> HostResult<ConnectedAcpSession> {
         let launch_dur = self.timeouts.launch_duration();
 
-        // Defense in depth: the cwd must belong to the verified Creator
         // workspace (HostManager already validated; re-check the canonical
         // cwd here so a profile switch can never retarget a session).
         let owner_workspace = crate::config::validate_workspace_path(&spec.owner.workspace_root)?;
@@ -214,7 +211,6 @@ impl AcpProvider {
             .collect();
 
         let spawner = AgentSpawner::new(cwd.clone());
-        // I-000359: `ManagedAcpProcess` owns this child's teardown, so the
         // managed path spawns with a NON-killing drop policy. A cleanup
         // refusal must never become an implicit kill — not even when the
         // runtime running the non-signalling reaper shuts down and drops the
@@ -230,7 +226,6 @@ impl AcpProvider {
             })?;
 
         let agent_path = std::path::PathBuf::from(&command);
-        // Capture the process birth identity immediately after spawn, before
         // the child can exit during initialize/session negotiation.
         let mut owned_process =
             ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path.clone());
@@ -242,7 +237,6 @@ impl AcpProvider {
             self.localset_bridge.clone(),
         );
 
-        // Await the handler registration — the provider is not usable until
         // the handler is installed (QC2 F-005, QC3 F-003). The handler reads
         // the active per-operation permission scope from the session slot
         // (A1); the slot is created before the client so the closure can
@@ -255,7 +249,6 @@ impl AcpProvider {
             .set_permission_handler(self.build_permission_handler(active_permission_scope.clone()))
             .await;
 
-        // Any handshake failure below must run the owned teardown/reap
         // sequence (A5): dropping a plain Child is not an awaited process-tree
         // reap.
         // I-000320: the launch classification reads the teardown OUTCOME —
@@ -270,7 +263,6 @@ impl AcpProvider {
         // identity that lets the teardown signal the survivor. Reaping here
         // would make that signal refuse and leak the descendant.
         let session_result: HostResult<NexusSessionCreated> = async {
-            // The SDK connection is established asynchronously by
             // `with_connection`; wait (bounded by the launch timeout) for it
             // before issuing the initialize handshake.
             let connected = tokio::time::timeout(launch_dur, async {
@@ -290,7 +282,6 @@ impl AcpProvider {
                 ));
             }
 
-            // Initialize handshake with launch timeout, watching for child
             // exit (EOF/crash is a launch failure, never a timeout).
             let init_request = NexusInitializeRequest::new().client_info(
                 nexus_contracts::local::acp::NexusAgentInfo {
@@ -331,7 +322,6 @@ impl AcpProvider {
             };
             let _ = init_result;
 
-            // Create the ACP session with session timeout, watching for child
             // exit.
             let acp_request = NexusNewSessionRequest::new(cwd);
             tokio::select! {
@@ -376,7 +366,6 @@ impl AcpProvider {
                 .terminate(self.timeouts.shutdown_duration())
                 .await
             {
-                // Teardown proved the owned group gone: the typed launch
                 // classification stands.
                 Ok(()) => return Err(error),
                 // Group liveness could not be proven (survivors, or an
@@ -395,7 +384,6 @@ impl AcpProvider {
                     ))
                     .with_provider(self.provider_id.clone()));
                 }
-                // Teardown noise that says nothing about group liveness
                 // (e.g. an already-consumed handle) keeps the launch
                 // classification.
                 Err(reap_err) => {
@@ -514,7 +502,6 @@ impl AcpProvider {
                 stop_reason: reason,
                 ..
             } => {
-                // The provider's own stop reason is this operation's terminal
                 // truth (A3 / R-V1196-ACP-INCOMPLETE-MAPPING). A genuine
                 // EndTurn is success; the two real resource limits are
                 // terminal-but-INCOMPLETE — the core terminal matrix reads
@@ -534,7 +521,6 @@ impl AcpProvider {
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::Cancelled => {
-                        // I-004: an acknowledged Cancelled is typed
                         // non-success — never EndTurn/succeeded. The
                         // operation-level cancel path (HostFacade::cancel)
                         // drives the actual cancellation; this event lets
@@ -547,7 +533,6 @@ impl AcpProvider {
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::Refusal => {
-                        // A3: the provider refused AFTER the run started, so
                         // this is not the pre-effect admission refusal
                         // (`remember:true` / binding refusal, which never
                         // dispatches an operation). It stays the failure it is.
@@ -559,7 +544,6 @@ impl AcpProvider {
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
-                        // The turn genuinely ended by exhausting the token
                         // budget; the core matrix classifies this terminal as
                         // `incomplete / max_tokens`.
                         HostEvent::OpFinished(OperationFinishedEvent {
@@ -569,7 +553,6 @@ impl AcpProvider {
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
-                        // The turn genuinely ended by exhausting the turn
                         // budget; the core matrix classifies this terminal as
                         // `incomplete / max_turn_requests`.
                         HostEvent::OpFinished(OperationFinishedEvent {
@@ -595,7 +578,6 @@ impl AcpProvider {
                 approved,
                 ..
             } => {
-                // Emit a ToolCallUpdate for the permission decision.
                 // This provides observability into tool permission evaluation.
                 HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
                     session_id: session_id.clone(),
@@ -638,7 +620,6 @@ impl AcpProvider {
             )
         })?;
 
-        // Emit a single OpFinished event to signal success.
         let op_id = HostOperationId::new();
         let stream =
             futures_util::stream::iter(vec![Ok(HostEvent::OpFinished(OperationFinishedEvent {
@@ -671,7 +652,6 @@ impl AcpProvider {
                 ))
             })?;
 
-            // Find the model config option by category
             let config_id = state.config_options.as_ref().and_then(|opts| {
                 opts.iter().find_map(|opt| {
                     if opt.category.as_ref()? == &NexusConfigOptionCategory::Model {
@@ -699,12 +679,10 @@ impl AcpProvider {
             ));
         };
 
-        // Attempt to set the model config option
         let request = NexusSetConfigOptionRequest::new(acp_session_id, config_id, model);
 
         match client.set_config_option(request).await {
             Ok(_) => {
-                // Emit a single OpFinished event to signal success.
                 let op_id = HostOperationId::new();
                 let stream = futures_util::stream::iter(vec![Ok(HostEvent::OpFinished(
                     OperationFinishedEvent {
@@ -718,7 +696,6 @@ impl AcpProvider {
                 Ok(stream)
             }
             Err(e) => {
-                // Graceful fallback: emit a Status warning and then OpFailed.
                 let op_id = HostOperationId::new();
                 let session_id = session.session_id.clone();
                 let provider_id = self.provider_id.clone();
@@ -782,7 +759,6 @@ impl ProviderAdapter for AcpProvider {
             owner: request.owner.clone(),
         };
 
-        // The bounded close must fit INSIDE the probe budget, so it uses the
         // configured SHUTDOWN grace — not the launch/initialize duration. The
         // owned close runs up to three granted windows (cooperative exit, then
         // group-quiescence checks), so passing the launch duration made the
@@ -831,11 +807,9 @@ impl ProviderAdapter for AcpProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // Lazy per-session spawn: the owned ACP child is created here, on
         // first use for this Host session — never at boot/catalog load.
         let connected = self.connect_session(&spec).await?;
 
-        // Capture the opaque owned-process identity (A5): PID + platform
         // birth token + owned group id. The birth token is re-validated
         // before every signal; a missing token means cleanup must be
         // reported unconfirmed. No transport handle crosses this boundary.
@@ -849,7 +823,6 @@ impl ProviderAdapter for AcpProvider {
 
         let host_session_id = HostSessionId::new();
 
-        // Track the session
         {
             let mut sessions = self.sessions.write().await;
             sessions.insert(host_session_id.clone(), connected);
@@ -863,7 +836,6 @@ impl ProviderAdapter for AcpProvider {
         })
     }
 
-    // execute() exceeds 100-line limit due to streaming timeout handling (D-004).
     // Splitting would reduce clarity of timeout/error path logic.
     #[allow(clippy::too_many_lines)]
     async fn execute(
@@ -885,7 +857,6 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
-        // Look up the connected ACP session (client + ACP session ID)
         let (client, acp_session_id, active_permission_scope, process) = {
             let sessions = self.sessions.read().await;
             match sessions.get(&session.session_id) {
@@ -896,7 +867,6 @@ impl ProviderAdapter for AcpProvider {
                     Arc::clone(&s.process),
                 ),
                 None => {
-                    // Session not found — emit OpStarted+OpFailed stream so the
                     // session state machine transitions back to Ready (QC3 F-001).
                     return Ok(Self::make_error_stream(
                         session.session_id.clone(),
@@ -908,28 +878,24 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
-        // A1: install the active per-operation permission scope before the
         // prompt streams; the permission handler reads it per tool call.
         // The Host enforces one active op per session, so the single slot is
         // race-free. The scope is cleared when the stream ends (terminal
         // event or error) so a later serial prompt starts from `None`.
         *active_permission_scope.write().await = permission_scope;
 
-        // Build the prompt request — clone acp_session_id for potential cancel.
         let acp_sid_for_cancel = acp_session_id.clone();
         let prompt_request = NexusPromptRequest {
             session_id: acp_session_id,
             prompt: Self::to_acp_content(&content_blocks),
         };
 
-        // Start streaming with prompt_ms timeout for the initial stream setup
         let prompt_dur = self.timeouts.prompt_duration();
 
         let rx = match tokio::time::timeout(prompt_dur, client.stream_prompt(prompt_request)).await
         {
             Ok(Ok(receiver)) => receiver,
             Ok(Err(e)) => {
-                // Protocol error — emit OpStarted+OpFailed so the manager's
                 // stream wrapper sees OpFailed and transitions back to Ready.
                 tracing::warn!(
                     provider_id = %self.provider_id,
@@ -998,7 +964,6 @@ impl ProviderAdapter for AcpProvider {
             }
         });
 
-        // Yield exactly one terminal event. A closed ACP channel is failure,
         // and a receive timeout cancels the remote operation before ending.
         let updates = futures_util::stream::unfold(
             Some((
@@ -1064,7 +1029,6 @@ impl ProviderAdapter for AcpProvider {
                         let terminal =
                             matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_));
                         if terminal {
-                            // A1: clear the active per-operation scope so a
                             // later serial prompt starts from `None`.
                             *scope.write().await = None;
                         }
@@ -1105,7 +1069,6 @@ impl ProviderAdapter for AcpProvider {
                             session_id = %session_id,
                             "ACP prompt stream timed out; sending best-effort cancel"
                         );
-                        // Bound the best-effort cancel by the configured
                         // shutdown deadline (A5: TimeoutConfig.shutdown_ms),
                         // never a hard-coded value: a stalled control
                         // connection must not block the promised terminal
@@ -1172,14 +1135,12 @@ impl ProviderAdapter for AcpProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Cooperative cancel/drain phase, bounded independently (A5): a
         // stalled control connection must not consume the whole shutdown
         // budget and skip owned process-tree termination. On timeout or
         // error, we still proceed to the owned cleanup phase and report
         // unconfirmed cancellation.
         let shutdown_dur = self.timeouts.shutdown_duration();
         let shutdown_deadline = Instant::now() + shutdown_dur;
-        // Cooperative cancel is capped so owned process-tree reap always
         // receives the remainder of the host's single shutdown budget.
         let cancel_budget = Duration::from_secs(2).min(shutdown_dur);
         {
@@ -1188,7 +1149,6 @@ impl ProviderAdapter for AcpProvider {
                 match sessions.get(&session.session_id) {
                     Some(s) => (Arc::clone(&s.client), s.acp_session_id.clone()),
                     None => {
-                        // No provider session — nothing to reap.
                         return Ok(());
                     }
                 }
@@ -1259,7 +1219,6 @@ impl ProviderAdapter for AcpProvider {
                     error = %e,
                     "ACP owned process-tree shutdown unconfirmed"
                 );
-                // Retain the connected session for later ownership-safe
                 // cleanup retry (the process handle must stay owned).
                 self.sessions
                     .write()
@@ -1294,12 +1253,10 @@ mod tests {
 
     #[test]
     fn descriptor_returns_acp_full() {
-        // We can't create a real AcpSdkAdapter without a subprocess,
         // but we can verify the type construction.
         let provider_id = test_provider_id();
         let display_name = test_display_name();
 
-        // Verify descriptor fields are correct
         let expected_descriptor = ProviderDescriptor {
             provider_id,
             display_name,
@@ -1606,7 +1563,6 @@ mod tests {
         }
     }
 
-    // ── DF-19 permission handling tests (AH1.1 / AH1.2) ──────────────
     //
     // The permission handler is wired in `AcpProvider::new()` and delegates
     // to `HostPermissionResolver::resolve()`. The handler is synchronous
@@ -1634,7 +1590,6 @@ mod tests {
         let config = PolicyConfig::default();
         let resolver = HostPermissionResolver::new_native_only(&config);
 
-        // Build the same handler closure that AcpProvider::new() creates
         let classifier = AutoToolRiskClassifier::new();
         let provider_id = ProviderId::new("test-acp");
         let handler: Box<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync> =
@@ -1648,7 +1603,6 @@ mod tests {
                 }
             });
 
-        // Verify the handler returns immediately for various tool names
         // (no async, no blocking, no timeout possible)
         assert_eq!(handler("file_read"), AcpPermissionOutcome::Deny); // no ACP policy → deny
         assert_eq!(handler("file_delete"), AcpPermissionOutcome::Deny); // destructive → deny
@@ -1667,7 +1621,6 @@ mod tests {
         let _classifier = AutoToolRiskClassifier::new(); // present for structural parity but not used in this test
         let provider_id = ProviderId::new("test-acp");
 
-        // Without ACP policy loaded, all ACP permission requests default to Deny
         let outcome = resolver.resolve(
             ProtocolKind::Acp,
             &provider_id.0,
@@ -1711,8 +1664,6 @@ mod tests {
         );
     }
 
-    // ── Recipe-based construction (A5) ─────────────────────────────────
-
     fn acp_config(id: &str, command: Option<&str>, enabled: bool) -> ProviderConfig {
         ProviderConfig {
             id: id.to_string(),
@@ -1735,7 +1686,6 @@ mod tests {
         .expect("valid recipe accepted");
         assert_eq!(provider.provider_id.0, "test-acp");
         assert_eq!(provider.display_name, "test-acp");
-        // Recipe only — no client/process at construction.
         assert!(provider.sessions.try_read().unwrap().is_empty());
     }
 

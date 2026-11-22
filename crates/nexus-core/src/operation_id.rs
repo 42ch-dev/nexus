@@ -213,7 +213,6 @@ pub struct OperationIdentity {
 pub fn resolve_operation_identity(
     scope: &OperationScope<'_>,
 ) -> Result<OperationIdentity, OperationIdError> {
-    // One canonical serialization, one digest: the id keeps its first 16 bytes
     // and the fingerprint the whole digest.
     let canonical = canonical_operation_json(scope);
     let digest = Sha256::digest(canonical.as_bytes());
@@ -365,7 +364,6 @@ mod tests {
         let args = json!({"operation_id": supplied, "k": "v"});
         let resolved = resolve_operation_id(&scope("creator-1", "session-1", "op", &args)).unwrap();
         assert_eq!(resolved, supplied);
-        // ...and it is not silently re-derived.
         let derived =
             derive_operation_id(&scope("creator-1", "session-1", "op", &json!({"k": "v"})));
         assert_ne!(resolved, derived);
@@ -500,7 +498,6 @@ mod tests {
             "89c4a8b6b29ced2ea04b424c46ec3e78b695ee019b5a05c1d8ab0c405422e6ce"
         );
 
-        // The single-pass identity resolves exactly those two projections.
         let identity = resolve_operation_identity(&fixed_scope).expect("derived identity");
         assert_eq!(identity.operation_id, derive_operation_id(&fixed_scope));
         assert_eq!(
@@ -508,7 +505,6 @@ mod tests {
             request_fingerprint(&fixed_scope)
         );
 
-        // A caller-supplied id is kept verbatim.
         let supplied = json!({"operation_id": format!("op_{}", "1".repeat(32))});
         let supplied_scope = scope("creator-1", "session-1", "op", &supplied);
         assert_eq!(
@@ -547,7 +543,6 @@ mod tests {
              fingerprint identically on every attempt"
         );
 
-        // Every scope component participates: two peers (or two grant actors)
         // that share a verbatim caller-supplied id but differ in scope must
         // NOT collide, or one would silently replay the other's receipt.
         for (label, other) in [

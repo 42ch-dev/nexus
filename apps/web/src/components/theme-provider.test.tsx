@@ -1,5 +1,4 @@
 /**
- * ThemeProvider coverage (R-V164-QC1-S1-P1 T2).
  *
  * DESIGN.md uses identical token names in both themes; only the CSS-variable
  * values swap under the `.dark` class on `<html>` (Tailwind `class` strategy).
@@ -73,8 +72,8 @@ describe('ThemeProvider mount', () => {
 
 describe('ThemeProvider default-theme detection', () => {
   it('prefers a stored light theme over the OS preference', () => {
-    mockMatchMedia(true); // OS says dark…
-    window.localStorage.setItem(STORAGE_KEY, 'light'); // …but stored says light.
+    mockMatchMedia(true);
+    window.localStorage.setItem(STORAGE_KEY, 'light');
     let current: Theme = 'system';
     renderWith(<ThemeProbe onTheme={(t) => (current = t)} />);
     expect(current).toBe('light');
@@ -136,7 +135,7 @@ describe('ThemeProvider token application (`.dark` swap)', () => {
   });
 
   it('removes the `.dark` class when switching back to light', () => {
-    mockMatchMedia(true); // start system/dark
+    mockMatchMedia(true);
     let setTheme: (t: Theme) => void = () => {};
     renderWith(
       <ThemeProbeOnAction onReady={(api) => (setTheme = api.setTheme)} />,
@@ -179,14 +178,11 @@ describe('useTheme outside provider', () => {
       useTheme();
       return null;
     }
-    // Silence the expected error noise in the test reporter.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => render(<Orphan />)).toThrow(/useTheme must be used within a ThemeProvider/);
     spy.mockRestore();
   });
 });
-
-// ── helpers ─────────────────────────────────────────────────────────────────
 
 function ThemeProbeOnAction({
   onReady,

@@ -183,7 +183,6 @@ states:
         .iter()
         .filter(|d| d.category == DiagnosticCategory::RunIntents)
         .collect();
-    // Expect both: Error for cross-claim + Warning for missing system_maintenance
     assert!(
         !diags.is_empty(),
         "expected at least 1 RunIntents diagnostic: {diags:?}",

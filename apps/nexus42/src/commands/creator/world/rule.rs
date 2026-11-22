@@ -176,7 +176,6 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // The leaves return their report; nothing reaches stdout until the shared
     // seam released the writer, so a refused or unsettleable write is never
     // reported as an added/listed/deactivated rule.
     if let Some(text) = finish_direct(&core, outcome).await? {
@@ -185,7 +184,6 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-// ── Leaf logic ────────────────────────────────────────────────────────
 //
 // These take the open `&CoreService` plus its admitted `&Principal` so
 // integration tests can drive them against a hermetic direct-core home
@@ -225,7 +223,6 @@ fn parse_constraint_object(constraint_json: &str) -> Result<Map<String, Value>> 
 /// carrier outside the closed grammar, the core's World-ownership refusal
 /// (403) or a storage error.
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors the flat `rule add` flag surface; grouping the
 // ten PD-1 flags into a struct would add indirection for the two callers
 // (CLI + tests).
 pub async fn rule_add(
@@ -307,7 +304,6 @@ pub async fn rule_list(
     include_archived: bool,
     json: bool,
 ) -> Result<Option<String>> {
-    // V1.198 §13: the caller selects inclusion once; the core omits archived
     // rows in SQL before the 501-row probe (`--include-archived` reveals them).
     let response = core
         .list_world_rules(principal, world_id.to_string(), include_archived)
@@ -377,7 +373,6 @@ pub async fn rule_deactivate(
         world_id.to_string(),
         rule_id.to_string(),
         request,
-        // A direct caller names the fields it authored: this leaf writes
         // `status` alone (the generated DTO cannot state that itself).
         RulePatchPresence::from_supplied_keys(&["status"]),
     )
@@ -422,7 +417,6 @@ pub async fn rule_archive(
         world_id.to_string(),
         rule_id.to_string(),
         request,
-        // Status-only presence: the archived tombstone accepts exactly this.
         RulePatchPresence::from_supplied_keys(&["status"]),
     )
     .await

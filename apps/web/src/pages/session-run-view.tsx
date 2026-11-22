@@ -1,5 +1,4 @@
 /**
- * Session run view — the acceptance-bearing observation surface of v1.201 P1
  * (compass D7; audit DIR-03): one orchestration root run's retained/live event
  * stream, rendered read-only from {@link useRunObservation}.
  *
@@ -78,7 +77,6 @@ const EVENT_LIST_CLASS =
   'flex flex-col divide-y divide-gray-alpha-400 rounded-control border border-gray-alpha-400';
 
 /**
- * One-line detail of a host event, when its variant carries one worth showing.
  * The wire vocabulary is the generated contract's; nothing is summarized away.
  */
 function hostEventDetail(event: ProviderHostEvent): string | null {
@@ -107,7 +105,6 @@ function observedRunId(frames: WorkflowObservationFrame[]): string | null {
 type ListedFrame = Exclude<WorkflowObservationFrame, { kind: 'history_unavailable' }>;
 
 /**
- * Drop the `history_unavailable` control frame from a slice — it is answered by
  * the history-unavailable notice above the list, not by a row. The predicate
  * keeps the narrowing at the call site instead of casting the frame shape.
  */
@@ -116,7 +113,6 @@ function listed(frames: WorkflowObservationFrame[]): ListedFrame[] {
 }
 
 /**
- * The lost-history notice — a `history_unavailable` close is not an ordinary
  * end: the server holds no history for this run (a restart, or an evicted event
  * ring), so the frames below are only what this view had already retained.
  * Warning surface, matching the shared inline-banner convention.
@@ -195,7 +191,6 @@ function EventRow({ frame }: { frame: ListedFrame }) {
 }
 
 /**
- * The observed stream: the failure/empty states, then the replayed span and the
  * live tail as two separately labeled sections.
  *
  * `historyUnavailable` (the hook recorded the server's `history_unavailable`
@@ -216,7 +211,6 @@ function RunStream({
   const streamOpen = phase !== 'terminal' && phase !== 'error';
 
   if (phase === 'error') {
-    // A typed refusal (>= 400: absent/foreign/child run, malformed cursor) is
     // deterministic — the hook never auto-retries it, so the view must not
     // offer to either. Transport failures do get the reconnect affordance.
     const retryable = !(error instanceof NexusClientError && error.status >= 400);
@@ -313,7 +307,6 @@ export function SessionRunViewPage() {
   if (!sessionId) return <NotFoundPage />;
 
   const runId = observedRunId(observation.events);
-  // The server's `history_unavailable` close is not an ordinary end: the retained
   // frames are only what this view already held, so the badge states the loss
   // instead of reporting a plain ending.
   const historyUnavailable = observation.events.some(

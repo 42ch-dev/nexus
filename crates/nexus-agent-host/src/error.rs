@@ -1,4 +1,4 @@
-//! Host error taxonomy and result type.
+//! Host error taxonomy and result type. See docs/specs/agents/agent-host.md.
 //!
 //! Maps all host-visible error categories from the delivery compass §Error handling.
 //! Each variant carries relevant context (`provider_id`, `session_id`, `op_id`) for

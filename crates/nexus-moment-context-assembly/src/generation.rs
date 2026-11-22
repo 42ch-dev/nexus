@@ -115,9 +115,7 @@ mod tests {
 
     #[test]
     fn unknown_stage_parses_to_none_safe_default() {
-        // T3: an unknown stage value must degrade to the safe default
         // (`None` ⇒ `Unspecified` ⇒ all slots on) at the caller — never a
-        // panic or hard error.
         for bad in ["draft", "revise", "continue", "summarize", "", "PRODUCE"] {
             assert_eq!(
                 GenerationStage::parse(bad),

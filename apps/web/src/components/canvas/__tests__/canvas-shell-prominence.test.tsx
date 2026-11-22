@@ -1,5 +1,4 @@
 /**
- * CanvasShell Timeline prominence — V1.123 P3 Task 2.
  *
  * Pins the visual prominence treatment locked by:
  *   - `iterations/v1.123/specs/three-layer-product-spec.md` (Timeline is the
@@ -33,8 +32,6 @@ import {
   getCommands,
 } from '@/lib/canvas/command-registry';
 
-// ─── Badge presentational (no React Flow mount) ────────────────────────────
-
 describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () => {
   it('renders the Timeline label with the accent color', () => {
     render(
@@ -48,7 +45,6 @@ describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () =
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent('Timeline');
     expect(badge).toHaveAttribute('aria-label', 'Timeline surface — central instrument');
-    // The accent color resolves to the Timeline accent CSS variable so the
     // badge reads as part of the Timeline surface family (mirrors the
     // per-surface accent pattern: strategy=purple, outline=amber,
     // worldkb=teal, timeline=blue).
@@ -61,7 +57,6 @@ describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () =
     );
 
     const badge = screen.getByTestId('canvas-shell-timeline-badge');
-    // The dot is the visual prominence cue; it carries the accent background
     // and aria-hidden so screen readers don't double-announce (the badge
     // label + aria-label are the SR surface).
     const dot = badge.querySelector('[aria-hidden="true"]');
@@ -76,13 +71,10 @@ describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () =
       <CanvasShellTimelineBadge label="Timeline" ariaLabel="Timeline surface" />,
     );
     const badge = screen.getByTestId('canvas-shell-timeline-badge');
-    // role="status" + aria-label lets SR users perceive the Timeline surface
     // context without sighted-only cues (the accent dot is aria-hidden).
     expect(badge).toHaveAttribute('role', 'status');
   });
 });
-
-// ─── Command palette registration (always-available global entry) ──────────
 
 function renderInRouter(ui: ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -106,7 +98,6 @@ describe('CanvasNavCommands — go.timeline registration (V1.123 P3 Task 2)', ()
   });
 
   it('keeps go.timeline always available (no workId / worldId gating)', () => {
-    // Unlike `go.outline` (workId-gated) and `go.world-kb` (worldId-gated),
     // `go.timeline` targets `/timeline` — a primary-nav route with no path
     // params. The command MUST be reachable from any route (one-click
     // reachability per AC-V1123-16).
@@ -114,12 +105,10 @@ describe('CanvasNavCommands — go.timeline registration (V1.123 P3 Task 2)', ()
 
     const cmd = getCommands().find((c) => c.id === 'go.timeline');
     expect(cmd).toBeDefined();
-    // `available` omitted → always available. If present, must return true.
     expect(cmd?.available?.() ?? true).toBe(true);
   });
 
   it('preserves existing canvas nav commands (additive only)', () => {
-    // V1.111 P0 T4 + V1.123 P2 T5 registrations MUST remain alongside the
     // new global Timeline entry (V1.122 / V1.123 P2 regression).
     renderInRouter(<CanvasNavCommands />);
 

@@ -277,28 +277,20 @@ pub fn precheck_bundle_with_auth(
 ) -> PrecheckResult {
     let mut report = PrecheckReport::new();
 
-    // 1. Check required string fields are non-empty
     check_required_fields(bundle, &mut report);
 
-    // 1b. Canonical hash (production bundles with deltas must carry a valid sha256: preimage id)
     check_canonical_hash(bundle, &mut report);
 
-    // 2. Check ID prefixes
     check_id_prefixes(bundle, &mut report);
 
-    // 3. Check delta sequence monotonicity
     check_sequence_monotonicity(bundle, local_state, &mut report);
 
-    // 4. Check world revision
     check_world_revision(bundle, local_state, &mut report);
 
-    // 5. Check command consistency
     check_command_consistency(bundle, &mut report);
 
-    // 6. Check schema compliance
     check_schema_compliance(bundle, &mut report);
 
-    // 7. Check auth match (SYNC-R6)
     check_auth_match(bundle, auth_context, &mut report);
 
     if report.has_errors() {
@@ -471,7 +463,6 @@ fn check_world_revision(bundle: &Bundle, local_state: &LocalState, report: &mut 
 }
 
 fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
-    // Check for duplicate create operations on the same target
     let mut seen_creates: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (i, delta) in bundle.deltas.iter().enumerate() {
@@ -479,7 +470,6 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
         let operation = Some(delta.operation.as_str());
         let target_id = delta.target_entity_id.as_deref();
 
-        // Check that delta_type and operation are present
         if delta_type.is_none() {
             report.add_issue(PrecheckIssue::error(&format!(
                 "delta[{i}] missing delta_type"
@@ -491,14 +481,12 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
             )));
         }
 
-        // Check for create with existing target_id (inconsistent)
         if operation == Some("create") && target_id.is_some() {
             report.add_issue(PrecheckIssue::warning(&format!(
                 "delta[{i}]: 'create' operation should not have target_entity_id"
             )));
         }
 
-        // Check for duplicate creates (only for creates WITH target_id to avoid hash collision)
         if operation == Some("create") {
             if let (Some(dt), Some(tid)) = (delta_type, target_id) {
                 let key = format!("{dt}:{tid}");
@@ -511,7 +499,6 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
             }
         }
 
-        // Warn about missing payload
         let has_payload = !delta.payload.is_empty();
         if !has_payload {
             report.add_issue(PrecheckIssue::warning(&format!(
@@ -522,7 +509,6 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
 }
 
 fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
-    // Check schema_version
     if bundle.schema_version != 1 {
         report.add_issue(PrecheckIssue::error_with_hint(
             &format!("unexpected schema_version: {}", bundle.schema_version),
@@ -530,14 +516,12 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
         ));
     }
 
-    // Warn if manuscript_phase is not set (recommended but optional)
     if bundle.manuscript_phase.is_none() {
         report.add_issue(PrecheckIssue::warning(
             "manuscript_phase is not set (recommended for downstream gate validation)",
         ));
     }
 
-    // Warn if base_versions is empty
     let bv = &bundle.base_versions;
     if bv.world_revision.is_none() && bv.timeline_head_id.is_none() && bv.canon_revision.is_none() {
         report.add_issue(PrecheckIssue::warning(
@@ -553,14 +537,11 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
 ///
 /// In single-creator worlds or when no auth context is available, this check is skipped.
 fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut PrecheckReport) {
-    // Skip validation if not multi-creator
     if !auth_context.is_multi_creator {
         return;
     }
 
-    // Skip validation if no authenticated creator ID (unauthenticated session)
     let Some(authenticated_id) = &auth_context.authenticated_creator_id else {
-        // In multi-creator world without auth, that's a configuration issue
         report.add_issue(PrecheckIssue::error_with_hint(
             "multi-creator world requires authentication, but no auth context provided",
             "Ensure the daemon has a valid auth token for the authenticated creator",
@@ -655,7 +636,7 @@ mod tests {
     #[test]
     fn precheck_sequence_not_monotonic() {
         let bundle = valid_bundle(); // has last_confirmed_delta_sequence: 10
-        let local_state = LocalState::new(5).with_delta_sequence(15); // local is ahead
+        let local_state = LocalState::new(5).with_delta_sequence(15);
 
         let result = precheck_bundle(&bundle, &local_state);
         assert!(matches!(result, PrecheckResult::Invalid(_)));
@@ -672,7 +653,7 @@ mod tests {
         let mut bundle = valid_bundle();
         bundle.base_versions =
             serde_json::from_value(serde_json::json!({"world_revision": 3})).unwrap();
-        let local_state = LocalState::new(5); // local is ahead
+        let local_state = LocalState::new(5);
 
         let result = precheck_bundle(&bundle, &local_state);
         assert!(matches!(result, PrecheckResult::Invalid(_)));
@@ -691,7 +672,6 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        // Warning-only doesn't block
         assert_eq!(result, PrecheckResult::Valid);
     }
 
@@ -703,7 +683,7 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        assert_eq!(result, PrecheckResult::Valid); // Warning only
+        assert_eq!(result, PrecheckResult::Valid);
     }
 
     #[test]
@@ -728,12 +708,9 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        // This is a warning, but there might be other errors from missing prefix on target_entity_id
         // Let's just verify the result
         match result {
-            PrecheckResult::Valid | PrecheckResult::Invalid(_) => {
-                // create with target_id is a warning, bundle should still be valid
-            }
+            PrecheckResult::Valid | PrecheckResult::Invalid(_) => {}
         }
     }
 
@@ -787,11 +764,9 @@ mod tests {
         assert_eq!(state.timeline_head_id, Some("evt_123".to_string()));
     }
 
-    // ── Auth match validation tests (SYNC-R6) ──────────────────
-
     #[test]
     fn precheck_auth_match_valid() {
-        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::multi_creator("ctr_test");
 
@@ -801,7 +776,7 @@ mod tests {
 
     #[test]
     fn precheck_auth_match_mismatch_rejects() {
-        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::multi_creator("ctr_other");
 
@@ -818,11 +793,10 @@ mod tests {
 
     #[test]
     fn precheck_auth_match_single_creator_skips() {
-        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::single_creator();
 
-        // Single-creator world should skip auth validation even though
         // there's no authenticated creator
         let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
         assert_eq!(result, PrecheckResult::Valid);
@@ -832,9 +806,8 @@ mod tests {
     fn precheck_auth_match_no_auth_in_multi_creator_rejects() {
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
-        let auth = AuthContext::unauthenticated(); // no auth, is_multi_creator=false
+        let auth = AuthContext::unauthenticated();
 
-        // unauthenticated() has is_multi_creator=false, so it skips
         let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
         assert_eq!(result, PrecheckResult::Valid);
     }
@@ -843,7 +816,6 @@ mod tests {
     fn precheck_auth_multi_creator_without_auth_context_rejects() {
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
-        // Multi-creator world but no authenticated creator ID
         let auth = AuthContext {
             authenticated_creator_id: None,
             is_multi_creator: true,
@@ -861,7 +833,6 @@ mod tests {
 
     #[test]
     fn precheck_without_auth_always_passes_auth_check() {
-        // Legacy precheck_bundle (no auth) should always pass regardless of
         // submitting_creator_id
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
@@ -906,7 +877,6 @@ mod tests {
         assert!(matches!(result, PrecheckResult::Invalid(_)));
         if let PrecheckResult::Invalid(report) = result {
             assert!(report.has_errors());
-            // Auth mismatch error should be present
             assert!(report
                 .issues
                 .iter()

@@ -8,11 +8,9 @@
 //! The daemon `POST /v1/daemon/context/assemble` route is retired; context
 //! assembly runs CLI in-process via `nexus-moment-context-assembly`.
 
-// Re-export generated types from nexus-contracts
 pub use nexus_contracts::generated::platform::http_bff::context_assembly_v1::ContextAssembleRequestV1;
 pub use nexus_contracts::generated::platform::http_bff::context_assembly_v1::ContextAssembleResponseV1;
 
-// Re-export MemoryKind from domain for CLI use
 #[cfg(test)]
 pub use nexus_creator_memory::memory_item::MemoryKind;
 
@@ -77,7 +75,6 @@ mod tests {
         }"#;
         let req: ContextAssembleRequestV1 =
             serde_json::from_str(json).expect("deserialization should succeed");
-        // Schema defaults: include_* flags default to true; memory_kinds has a non-empty default.
         assert!(req.include_memory);
         assert!(req.include_timeline);
         assert!(req.include_story_summaries);

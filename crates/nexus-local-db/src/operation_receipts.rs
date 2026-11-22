@@ -310,7 +310,6 @@ pub async fn begin_operation(
         )));
     }
 
-    // Read FIRST (QC1-C001): a receipt row is never re-inserted. The schema
     // refuses an insert over a TERMINAL id, so a replay after settlement must be
     // answered from the stored row here instead of attempting the insert the
     // store used to rely on being a no-op.
@@ -337,7 +336,6 @@ pub async fn begin_operation(
     .await
     {
         Ok(inserted) => inserted,
-        // QC1-C001 race: a racing winner inserted AND settled terminally between
         // our read and this insert, so the schema refused the insert over its
         // terminal id. The loser resolves to the stored row (the typed
         // `Existing` / `operation_id_conflict`), never a raw trigger abort.
@@ -350,7 +348,6 @@ pub async fn begin_operation(
         Err(err) => return Err(db_err(err)),
     };
 
-    // `changes()` distinguishes the two sides of the first-writer-wins race:
     // exactly one racer inserted the `running` row (and owns the effect), the
     // others inserted nothing and must answer from the stored receipt. Both
     // sides then read the same stored row back.
@@ -399,7 +396,6 @@ pub async fn settle_operation(
 ) -> Result<OperationReceipt, LocalDbError> {
     let (result_json, error_json) = match status {
         STATUS_FINISHED => (Some(payload), None),
-        // Non-success termination: the cancellation / interruption reason is
         // the terminal payload, so the contract's "exactly one set" holds for
         // every terminal settlement.
         STATUS_FAILED | STATUS_CANCELLED | STATUS_INTERRUPTED => (None, Some(payload)),
@@ -427,7 +423,6 @@ pub async fn settle_operation(
     .await
     .map_err(db_err)?;
 
-    // Whether this statement settled the row or lost to an earlier terminal
     // (or raced another settler), the stored row is the truth. A missing row
     // means `settle` was called without `begin` — a caller bug, surfaced as
     // `RowNotFound` rather than a fabricated receipt.
@@ -488,7 +483,6 @@ mod tests {
     use crate::test_support::fresh_engine_pool;
 
     fn op_id(suffix: &str) -> String {
-        // A wire-shaped id (`op_` + 32 lowercase hex), so the rows mirror
         // production receipts. The suffix must already be lowercase hex: the
         // helper refuses anything else rather than silently aliasing two
         // fixture ids onto one row (e.g. `7g` and `7a`).
@@ -561,13 +555,11 @@ mod tests {
         assert!(settled.terminal_at.is_some());
         assert_eq!(settled.result_json.as_deref(), Some(r#"{"ok":true}"#));
 
-        // First terminal wins for the direct writer too.
         let late = settle_operation(&direct, &id, STATUS_FAILED, r#"{"late":true}"#)
             .await
             .expect("a late settlement reads the stored terminal back");
         assert_eq!(late, settled, "the settled receipt is never rewritten");
 
-        // Terminal immutability fires for EVERY admitted writer, not just the
         // engine owner: a direct UPDATE of the settled row aborts.
         let err = sqlx::query!(
             "UPDATE operation_receipts SET status = 'running' WHERE operation_id = ?",
@@ -607,7 +599,6 @@ mod tests {
         assert_eq!(found, settled, "the subject lookup returns the stored row");
         assert_eq!(found.operation_id, begun.operation_id);
 
-        // The pair is consumer-scoped: the same subject under the other
         // consumer is a different receipt (and here, none).
         assert!(
             get_operation_receipt_by_subject(&pool, CONSUMER_CONNECT_INVOKE, "run-subject")
@@ -635,13 +626,11 @@ mod tests {
         assert_eq!(begun.status, STATUS_RUNNING);
         assert!(begun.terminal_at.is_none());
 
-        // The owner process is gone: replay must not re-apply.
         let decision = recover(&pool, &id, false).await.unwrap();
         match decision {
             RecoveryDecision::Uncertain(receipt) => assert_eq!(receipt.status, STATUS_RUNNING),
             other => panic!("crash ambiguity must be Uncertain, got {other:?}"),
         }
-        // A replayed begin does NOT re-acquire the effect.
         match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-1", "fp-1")
             .await
             .unwrap()
@@ -649,7 +638,6 @@ mod tests {
             BeginOutcome::Existing(receipt) => assert_eq!(receipt.status, STATUS_RUNNING),
             BeginOutcome::Acquired(receipt) => panic!("a replay must not re-acquire: {receipt:?}"),
         }
-        // The store fabricated no terminal for the orphaned receipt.
         assert_eq!(
             get_operation_receipt(&pool, &id)
                 .await
@@ -701,7 +689,6 @@ mod tests {
         .unwrap();
         assert_eq!(settled.status, STATUS_CANCELLED);
         assert!(settled.terminal_at.is_some());
-        // §B.2: a terminal settlement carries exactly one payload. This store
         // renders a non-success reason (cancel/interruption) in `error_json`.
         assert_eq!(settled.result_json, None);
         assert_eq!(
@@ -709,7 +696,6 @@ mod tests {
             Some("{\"reason\":\"cancel_requested\"}")
         );
 
-        // Even with the owner reported live, a terminal receipt wins.
         match recover(&pool, &id, true).await.unwrap() {
             RecoveryDecision::AnswerFromReceipt(receipt) => {
                 assert_eq!(receipt.status, STATUS_CANCELLED);
@@ -718,7 +704,6 @@ mod tests {
             other => panic!("a terminal receipt must answer, got {other:?}"),
         }
 
-        // Replaying the SAME logical call returns the same terminal row: one
         // receipt, sequence and created_at unchanged — no second apply.
         let replayed = match begin_operation(
             &pool,
@@ -789,7 +774,6 @@ mod tests {
         assert_eq!(settled.result_json.as_deref(), Some("{\"ok\":true}"));
         assert_eq!(settled.error_json, None);
 
-        // A second "first" attempt is answered by the receipt, not re-applied.
         assert!(matches!(
             recover(&pool, &id, false).await.unwrap(),
             RecoveryDecision::AnswerFromReceipt(_)
@@ -809,7 +793,6 @@ mod tests {
             .unwrap();
         assert_eq!(finished.status, STATUS_FINISHED);
 
-        // A late, conflicting terminal settlement loses to the first terminal.
         let late = settle_operation(&pool, &id, STATUS_FAILED, "{\"v\":2}")
             .await
             .unwrap();
@@ -818,7 +801,6 @@ mod tests {
         assert_eq!(late.error_json, None);
         assert_eq!(late.terminal_at, finished.terminal_at);
 
-        // A late `running` write (the crash-recovery shape) cannot resurrect
         // it, and it does not re-acquire the effect either.
         let late_begin = match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5")
             .await
@@ -852,7 +834,6 @@ mod tests {
             matches!(&err, LocalDbError::OperationIdConflict { operation_id } if operation_id == &id),
             "got {err:?}"
         );
-        // The refusal is about the fingerprint, not a generic storage fault,
         // and it is never a silent dedupe: the first writer's row is intact.
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored.request_fingerprint, "fp-first");
@@ -913,7 +894,6 @@ mod tests {
             );
         }
 
-        // Settling a receipt that was never begun is a caller bug, not a
         // fabricated receipt.
         let err = settle_operation(&pool, &op_id("7f0"), STATUS_CANCELLED, "{\"x\":1}")
             .await
@@ -950,7 +930,6 @@ mod tests {
     async fn schema_pins_terminal_payload_and_terminal_immutability() {
         let (_dir, pool) = fresh_engine_pool().await;
 
-        // Malformed terminal shapes: no payload, no terminal stamp, or two
         // payloads — all refused by the CHECK itself.
         for (suffix, result_json, error_json, terminal_at) in [
             ("ca", None, None, None),
@@ -978,7 +957,6 @@ mod tests {
             );
         }
 
-        // Every mutation of a settled receipt is refused.
         let id = op_id("cd");
         begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-check", "fp-cd").await;
         let settled = settle_operation(&pool, &id, STATUS_FINISHED, "{\"v\":1}")
@@ -1009,7 +987,6 @@ mod tests {
             );
         }
 
-        // The stored row is byte-identical to the settlement.
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled);
     }
@@ -1046,7 +1023,6 @@ mod tests {
             "expected the terminal-immutability abort, got: {err}"
         );
 
-        // The settled row survived byte-identically (the victim was not
         // deleted, and nothing was reinserted).
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled, "the settled row must be untouched");
@@ -1075,7 +1051,6 @@ mod tests {
             begin_acquired(&pool, &running_id, CONSUMER_COMPUTE_RUN, "run-e3", "fp-e3").await;
         assert_eq!(running.status, STATUS_RUNNING);
 
-        // `UPDATE OR REPLACE` from the running source onto the settled id.
         let err = sqlx::query!(
             "UPDATE OR REPLACE operation_receipts SET operation_id = ? WHERE operation_id = ?",
             &terminal_id,
@@ -1089,7 +1064,6 @@ mod tests {
             "expected the key-immutability abort, got: {err}"
         );
 
-        // A plain key mutation is refused the same way.
         let err = sqlx::query!(
             "UPDATE operation_receipts SET operation_id = ? WHERE operation_id = ?",
             &terminal_id,
@@ -1103,7 +1077,6 @@ mod tests {
             "expected the key-immutability abort, got: {err}"
         );
 
-        // Both rows are byte-identical to their pre-attack state.
         assert_eq!(
             get_operation_receipt(&pool, &terminal_id)
                 .await
@@ -1271,7 +1244,6 @@ mod tests {
                     begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", fingerprint).await
                 }
             });
-            // The loser's read misses (the winner is uncommitted) and its insert
             // parks on the write lock; then the winner commits.
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             winner.commit().await.expect("winner commits");
@@ -1408,7 +1380,6 @@ mod tests {
         .unwrap();
         assert_eq!(count, 1, "the race converges on exactly one receipt");
 
-        // A later replay is never an acquirer either.
         assert!(
             !begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", "fp-race")
                 .await

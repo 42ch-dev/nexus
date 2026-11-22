@@ -100,7 +100,6 @@ impl LongTermMemory {
                 "memory_kind must be non-empty".to_string(),
             ));
         }
-        // Validate memory_kind against known enum values
         if MemoryKind::from_str(&self.frontmatter.memory_kind).is_err() {
             return Err(MemoryError::ValidationError(format!(
                 "invalid memory_kind: '{}' (expected one of: {})",
@@ -113,7 +112,6 @@ impl LongTermMemory {
                 "updated_at must be non-empty".to_string(),
             ));
         }
-        // Validate slug safety if source_path is set
         if let Some(ref path) = self.source_path {
             if let Some(stem) = path.file_stem() {
                 if let Some(slug) = stem.to_str() {
@@ -133,9 +131,6 @@ impl LongTermMemory {
     /// Returns an empty string if `source_path` is not set or the stem
     /// cannot be extracted.
     #[must_use]
-    ///
-    /// # Errors
-    /// Returns `Err(MemoryError::...)` if validation fails.
     pub fn slug(&self) -> String {
         self.source_path
             .as_ref()
@@ -297,7 +292,6 @@ fn locate_spans(content: &str) -> Result<MemorySourceSpans, String> {
     if !trimmed.starts_with("---") {
         return Err("content does not start with frontmatter delimiter '---'".to_string());
     }
-    // Find closing ---
     let after_open = &trimmed[3..];
     let end_offset = after_open
         .find("\n---")
@@ -305,7 +299,6 @@ fn locate_spans(content: &str) -> Result<MemorySourceSpans, String> {
     let body = offset + 3 + end_offset + 4; // skip "---\n---"
     let frontmatter_end = offset + 3 + end_offset;
     Ok(MemorySourceSpans {
-        // An empty block (`---\n---`) has no line break to skip past.
         frontmatter: after_line_break(content, offset + 3).min(frontmatter_end)..frontmatter_end,
         body: after_line_break(content, body)..content.len(),
     })
@@ -422,7 +415,6 @@ mod tests {
     #[test]
     fn validate_rejects_unsafe_slug_from_source_path() {
         let mut mem = LongTermMemory::new("story_summary");
-        // Use a slug with '..' in the filename stem
         mem.source_path = Some(PathBuf::from("/path/to/memories/foo..bar.md"));
         assert!(mem.validate().is_err());
         assert!(mem
@@ -541,7 +533,6 @@ Character analysis: Alice is a determined protagonist.
             source_session_ids: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&fm).unwrap();
-        // Empty vec should be skipped by skip_serializing_if
         assert!(!yaml.contains("source_session_ids"));
     }
 
@@ -549,7 +540,6 @@ Character analysis: Alice is a determined protagonist.
     fn set_body_updates_timestamp() {
         let mut mem = LongTermMemory::new("story_summary");
         let original_ts = mem.frontmatter.updated_at.clone();
-        // Small delay to ensure different timestamp
         std::thread::sleep(std::time::Duration::from_millis(2));
         mem.set_body("new body");
         assert_ne!(mem.frontmatter.updated_at, original_ts);
@@ -573,8 +563,6 @@ Character analysis: Alice is a determined protagonist.
         mem.touch();
         assert_ne!(mem.frontmatter.updated_at, original_ts);
     }
-
-    // ── slug_is_safe tests ───────────────────────────────────────────
 
     #[test]
     fn slug_safe_valid() {
@@ -612,7 +600,6 @@ Character analysis: Alice is a determined protagonist.
 
     #[test]
     fn slug_from_memory_id_is_one_to_one_on_minted_ids() {
-        // The two ids a global replace folded into one slug stay distinct.
         assert_eq!(
             slug_from_memory_id("mem_a_mem_b").as_deref(),
             Some("memory-a_mem_b")
@@ -621,8 +608,6 @@ Character analysis: Alice is a determined protagonist.
             slug_from_memory_id("mem_a_memory-b").as_deref(),
             Some("memory-a_memory-b")
         );
-        // `mem_a` and `memory-a` must not address one file: the out-of-namespace
-        // id has no slug at all.
         assert_eq!(slug_from_memory_id("mem_a").as_deref(), Some("memory-a"));
         assert_eq!(slug_from_memory_id("memory-a"), None);
     }

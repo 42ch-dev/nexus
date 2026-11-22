@@ -45,7 +45,6 @@ export class IntlFormatterCache {
 const formatterCache = new IntlFormatterCache();
 
 /**
- * Formatting helpers for the Control Room + Setup screens.
  *
  * All times are formatted in the user's local timezone for display, with an
  * accompanying UTC label where the runtime emits UTC (schedule next-fire).

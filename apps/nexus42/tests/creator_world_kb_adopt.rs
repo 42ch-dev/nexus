@@ -58,7 +58,6 @@ async fn seed_llm_pending() -> (tempfile::TempDir, sqlx::SqlitePool, String) {
         "source_quote": "...the eastern gate groaned open...",
     })
     .to_string();
-    // v1.191 P1 fix round (mechanical): the DAO seam takes a caller-owned
     // connection (`&mut SqliteConnection`) since the T13 writer-protocol change.
     let mut conn = pool.acquire().await.expect("acquire workspace connection");
     let row = insert_pending_with_llm(
@@ -79,8 +78,6 @@ async fn seed_llm_pending() -> (tempfile::TempDir, sqlx::SqlitePool, String) {
     (dir, pool, row.job_id)
 }
 
-// ── AC4: adopt succeeds on an LLM-extracted candidate ──────────────────────
-
 /// `kb_adopt` accepts a candidate carrying LLM metadata (non-character
 /// `block_type` + confidence + `source_quote`), promotes it to a `confirmed`
 /// `KnowledgeEntryRecord`, and leaves the LLM columns intact on the promotion row.
@@ -88,12 +85,10 @@ async fn seed_llm_pending() -> (tempfile::TempDir, sqlx::SqlitePool, String) {
 async fn adopt_succeeds_on_llm_extracted_candidate() {
     let (_dir, pool, job_id) = seed_llm_pending().await;
 
-    // Adopt (non-JSON path exercises the confidence/source_quote display).
     kb_adopt(&pool, OWNER, &job_id, None, false)
         .await
         .expect("adopt should succeed on an LLM-extracted candidate");
 
-    // Promotion row is now confirmed; LLM metadata preserved.
     let row = get_promotion(&pool, &job_id).await.unwrap().unwrap();
     assert_eq!(row.promotion_status, "confirmed");
     assert_eq!(row.block_type_guess.as_deref(), Some("scene"));
@@ -103,7 +98,6 @@ async fn adopt_succeeds_on_llm_extracted_candidate() {
         Some("...the eastern gate groaned open...")
     );
 
-    // A confirmed KnowledgeEntryRecord exists with the LLM-judged block_type.
     let store = SqliteKbStore::new(pool.clone());
     let blocks = store.list_by_world(WORLD).await.unwrap();
     let adopted = blocks
@@ -118,13 +112,10 @@ async fn adopt_succeeds_on_llm_extracted_candidate() {
     );
 }
 
-// ── AC4: adopt --json includes the LLM metadata keys ───────────────────────
-
 /// The `--json` adopt output carries `llm_confidence` + `llm_source_quote` so
 /// machine consumers see the LLM extraction metadata (cli-spec §6.2G).
 #[tokio::test]
 async fn adopt_json_output_includes_llm_metadata() {
-    // This test exercises kb_adopt with json=true. Stdout capture is brittle
     // in integration tests; instead we verify the underlying data path: the
     // candidate carries the metadata and adopt promotes it cleanly. The
     // --json formatter reads the same KbExtractPromotion fields this test
@@ -142,15 +133,12 @@ async fn adopt_json_output_includes_llm_metadata() {
     );
 }
 
-// ── Heuristic candidate: LLM columns NULL, adopt still works ───────────────
-
 /// A V1.50-style heuristic candidate (no LLM metadata) still adopts cleanly;
 /// its LLM columns stay NULL (backward compat).
 #[tokio::test]
 async fn adopt_works_on_heuristic_candidate_with_null_llm_fields() {
     use nexus_local_db::kb_extract_job::insert_pending;
     let (_dir, pool) = fresh_pool().await;
-    // Valid novel-profile body (heuristic shape) so adopt-time Novel validation passes.
     let payload = serde_json::json!({
         "summary": "A heuristic hero",
         "attributes": {"novel_category": "character", "aliases": ["Heuristic Hero"]},

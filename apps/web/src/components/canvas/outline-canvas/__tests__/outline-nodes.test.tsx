@@ -1,5 +1,4 @@
 /**
- * Chapter card node — status pill AA text-step pins (v1.183 P0 QC2 F-002).
  *
  * Mirrors the scene-beat hue-1000 assertions in `scene-beat-nodes.test.tsx`
  * onto the chapter pill: `STATUS_TEXT_TOKEN_VAR` in `outline-nodes.tsx`
@@ -80,7 +79,6 @@ function statusPill(container: HTMLElement): HTMLElement {
 }
 
 describe('OutlineChapterNode status pill AA text step', () => {
-  // pending → gray-1000 (not_started + outlined both map to pending).
   it.each(['not_started', 'outlined'] as ChapterStatus[])(
     'renders %s pill text on the gray-1000 AA step',
     (status) => {
@@ -98,7 +96,6 @@ describe('OutlineChapterNode status pill AA text step', () => {
     expect(statusPill(container).style.color).toBe('var(--color-blue-1000)');
   });
 
-  // finalized → green-1000 (finalized + published both map to completed).
   it.each(['finalized', 'published'] as ChapterStatus[])(
     'renders %s pill text on the green-1000 AA step',
     (status) => {
@@ -119,6 +116,5 @@ describe('OutlineChapterNode status pill AA text step', () => {
   });
 });
 
-// Silence the unused-import lint for the Handle re-import (the mock above
 // stubs Handle to null; Position is used in the fixture props).
 void Handle;

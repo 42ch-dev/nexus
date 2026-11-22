@@ -1,5 +1,4 @@
 /**
- * NodeChromeShell — boundary + rendering tests.
  *
  * Boundary test (architect invariant, R-V1108P1QC1-S002): the extract module
  * MUST NOT import `@xyflow/react`. App RF node wrappers adapt `NodeProps` →
@@ -23,14 +22,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXTRACT_SOURCE_PATH = path.resolve(__dirname, 'node-chrome-shell.tsx');
 
-// ---------------------------------------------------------------------------
-// Boundary — no @xyflow/react import in the extract module
-// ---------------------------------------------------------------------------
-
 describe('NodeChromeShell presentational boundary', () => {
   it('does not import @xyflow/react (no RF types leak into the chrome extract)', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
-    // Assert no import/require of @xyflow/react. The docstring legitimately
     // *mentions* `@xyflow/react` to describe the boundary — that is fine; only
     // an actual import would violate the invariant.
     expect(source).not.toMatch(/(?:import|require)\s*[^'"]*['"]@xyflow\/react['"]/);
@@ -38,7 +32,6 @@ describe('NodeChromeShell presentational boundary', () => {
 
   it('does not import RF-specific symbols (NodeProps / Handle / Position)', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
-    // No import line should carry @xyflow/react (covers NodeProps/Handle/Position
     // which all come from that module).
     const importLines = source.split('\n').filter((l) => /^\s*import\b/.test(l));
     for (const line of importLines) {
@@ -47,10 +40,6 @@ describe('NodeChromeShell presentational boundary', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Rendering — structural chrome contract
-// ---------------------------------------------------------------------------
-
 describe('NodeChromeShell rendering', () => {
   it('renders the base canvas-node chrome classes', () => {
     const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
@@ -58,7 +47,6 @@ describe('NodeChromeShell rendering', () => {
     expect(shell.className).toContain('rounded-card');
     expect(shell.className).toContain('bg-canvas-node-fill');
     expect(shell.className).toContain('shadow-card');
-    // V1.121 P2 T4: default node width now consumes the registered P0
     // `min-w-canvas-node-default` utility (DESIGN.md
     // components.canvas.node-width.default) instead of the raw `min-w-[176px]`
     // arbitrary value — same rendered 176px, but token-named so P3 can lift
@@ -69,19 +57,14 @@ describe('NodeChromeShell rendering', () => {
   it('applies the v0.4 elevation hover + dragging tiers alongside the rest shadow-card', () => {
     const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
     const cls = container.firstElementChild!.className;
-    // Rest tier — shadow-card is the elevation-1 alias (DESIGN.md §Elevation).
     expect(cls).toContain('shadow-card');
-    // Hover tier — DESIGN.md §Elevation v0.4 recipe (rest 1 → hover 2 →
     // dragging 4).
     expect(cls).toContain('hover:shadow-elevation-2');
-    // Dragging tier — gated by the data-dragging attribute so the RF wrapper
     // forwards the dragging prop without a class-name branch.
     expect(cls).toContain('data-[dragging=true]:shadow-elevation-4');
-    // v1.183 P0 (R-V1121P3QC3-S001): the transition covers box-shadow AND
     // border-color so the selection border flip animates alongside the
     // elevation tiers (the old transition-shadow dropped border-color).
     expect(cls).toContain('transition-[box-shadow,border-color]');
-    // Duration/ease/motion-reduce stay pinned on the v0.4 motion scale.
     expect(cls).toContain('duration-state');
     expect(cls).toContain('ease-standard');
     expect(cls).toContain('motion-reduce:transition-none');
@@ -113,7 +96,6 @@ describe('NodeChromeShell rendering', () => {
   it('applies the two-layer selection ring when selected (no status)', () => {
     const { container } = render(<NodeChromeShell selected>body</NodeChromeShell>);
     const cls = container.firstElementChild!.className;
-    // V1.121 P3 T2 — selection is never color-only. A 2px selected-color
     // ring with a 2px background-color offset pairs the canvas-focus token
     // with the global focus-ring shape (DESIGN.md §Component Primitives).
     expect(cls).toContain('ring-2');
@@ -123,7 +105,6 @@ describe('NodeChromeShell rendering', () => {
   });
 
   it('omits the two-layer selection ring when a status overlay is active', () => {
-    // Status wins the ring slot — overlay rings are more specific than plain
     // selection. The selected border class still applies so selection state
     // stays legible alongside the status halo.
     const { container } = render(
@@ -158,7 +139,6 @@ describe('NodeChromeShell rendering', () => {
     const namedCls = render(<NodeChromeShell accent="strategy">body</NodeChromeShell>)
       .container.firstElementChild!.className;
     expect(namedCls).toContain('border-l-canvas-strategy-accent');
-    // Same spine class layer for both — boolean stays a synonym for the
     // strategy surface so existing call sites render unchanged.
     expect(trueCls).toContain('border-l-canvas-strategy-accent');
   });
@@ -190,7 +170,6 @@ describe('NodeChromeShell rendering', () => {
       <NodeChromeShell className="min-w-canvas-node-outline-scene-beat">body</NodeChromeShell>,
     );
     const cls = container.firstElementChild!.className;
-    // tailwind-merge deduplicates within the registered `min-w` class group
     // (packages/nexus-ui/src/lib/cn.ts): the caller's scene-beat utility wins,
     // the default `min-w-canvas-node-default` is dropped.
     expect(cls).toContain('min-w-canvas-node-outline-scene-beat');
@@ -220,10 +199,6 @@ describe('NodeChromeShell rendering', () => {
     expect(getByText('node content')).toBeInTheDocument();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Status maps — shared chrome contract (App header + Studio fixtures consume)
-// ---------------------------------------------------------------------------
 
 describe('NODE_STATUS ring + dot maps', () => {
   const STATUSES: NodeStatus[] = ['current', 'running', 'waiting', 'error', 'completed'];

@@ -33,21 +33,17 @@ pub async fn run(cmd: DbCommand, _config: &CliConfig) -> Result<()> {
 /// - Health check result
 /// - Existing tables
 async fn status() -> Result<()> {
-    // Get database path from config
     let db_path = crate::config::state_db_path()?;
 
-    // Initialize schema if needed (opens pool + runs migrations + seeds versions)
     let pool = crate::db::Schema::init(&db_path).await?;
 
     println!("Database Status");
     println!("===============");
     println!();
 
-    // Show database path
     println!("Path: {}", db_path.display());
     println!();
 
-    // Read and display versions
     match read_versions(&pool).await {
         Ok(versions) => {
             println!("Schema Versions:");
@@ -66,7 +62,6 @@ async fn status() -> Result<()> {
         }
     }
 
-    // Run health check
     match validate(&pool, RuntimeRole::Cli).await {
         Ok(()) => {
             println!("Health Check: OK");
@@ -79,7 +74,6 @@ async fn status() -> Result<()> {
         }
     }
 
-    // List existing tables
     println!("Tables:");
     let tables_raw: Vec<Option<String>> =
         sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -96,7 +90,6 @@ async fn status() -> Result<()> {
     }
     println!();
 
-    // Show pragmas
     println!("Pragmas:");
     // SAFETY: PRAGMA statement — no table schema to validate against.
     let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")

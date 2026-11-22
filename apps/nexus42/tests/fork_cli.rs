@@ -132,7 +132,6 @@ async fn fork_create_and_list_projection() {
     let fixture = DirectFixture::new().await;
     let (world_id, parent_branch, fork_point) = seed_world_with_fork_point(&fixture);
 
-    // Create a fork with an explicit label; the parent branch is derived
     // from the fork-point event's branch via the timeline-events read.
     let create = fork_cli(
         &fixture,
@@ -154,7 +153,6 @@ async fn fork_create_and_list_projection() {
     assert!(created.contains("Fork created"), "{created}");
     assert!(created.contains(&parent_branch), "{created}");
     assert!(created.contains(&fork_point), "{created}");
-    // The new fork branch id is printed by create — read it back.
     let branch_id = created
         .lines()
         .find_map(|line| line.trim().strip_prefix("branch_id:"))
@@ -163,7 +161,6 @@ async fn fork_create_and_list_projection() {
         .to_string();
     assert!(branch_id.starts_with("fbk_"), "{branch_id}");
 
-    // List with --branch = pure projection of the fork_created marker.
     let list = fork_cli(
         &fixture,
         &["list", &world_id, "--branch", &branch_id, "--json"],
@@ -178,7 +175,6 @@ async fn fork_create_and_list_projection() {
     assert_eq!(marker["forked_from_event_id"], fork_point);
     assert_eq!(marker["label"], "alt-ending");
 
-    // Human list renders the same projection.
     let human = fork_cli(&fixture, &["list", &world_id, "--branch", &branch_id]);
     assert!(human.status.success());
     let text = stdout(&human);
@@ -213,7 +209,6 @@ async fn fork_create_bad_fork_point_rejected_as_input_error() {
     let fixture = DirectFixture::new().await;
     let (world_id, parent_branch, _) = seed_world_with_fork_point(&fixture);
 
-    // Pass an explicit --parent-branch so the CLI derivation is skipped and
     // the core's fork-point validation rejects the unknown event.
     let out = fork_cli(
         &fixture,

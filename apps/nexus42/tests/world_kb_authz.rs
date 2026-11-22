@@ -60,7 +60,6 @@ async fn cross_author_edit_returns_403() {
         other => panic!("expected CliError::Api {{ status: 403, .. }}, got: {other:?}"),
     }
 
-    // Row must be unchanged.
     let block = SqliteKbStore::new(pool)
         .get_knowledge_entry(&block_id)
         .await
@@ -101,7 +100,6 @@ async fn cross_author_delete_returns_403() {
         other => panic!("expected CliError::Api {{ status: 403, .. }}, got: {other:?}"),
     }
 
-    // Block must still be listed (not soft-deleted).
     let blocks = SqliteKbStore::new(pool).list_by_world(WORLD).await.unwrap();
     assert_eq!(
         blocks.len(),
@@ -124,12 +122,10 @@ async fn owner_can_edit_and_delete() {
     )
     .await;
 
-    // Owner edit succeeds.
     kb_edit(&pool, OWNER, WORLD, &block_id, VALID_BODY, false)
         .await
         .unwrap();
 
-    // Owner delete succeeds.
     kb_delete(&pool, OWNER, WORLD, &block_id, true)
         .await
         .unwrap();

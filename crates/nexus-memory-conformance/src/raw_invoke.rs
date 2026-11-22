@@ -52,7 +52,6 @@ pub fn admission(
     op: &str,
     provider: &str,
 ) -> Result<Option<RequestScope>, SpokeReject> {
-    // The published §7 capability table is the single statement of which ops
     // mutate; it is the same table the receipt target uses, so no second op
     // classification exists here.
     if required_capabilities(op).is_none() {

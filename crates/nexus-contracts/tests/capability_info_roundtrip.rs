@@ -11,7 +11,6 @@ use nexus_contracts::CapabilityInfo;
 
 #[test]
 fn missing_origin_deserializes_with_default_builtin() {
-    // Legacy payload without the new field must keep working (AR-40
     // back-compat: `origin` defaults to "builtin").
     let json = r#"{"name":"sync.pull","input_schema":"{}","output_schema":"{}"}"#;
     let info: CapabilityInfo = serde_json::from_str(json).expect("deserialize CapabilityInfo");
@@ -53,8 +52,6 @@ fn origin_peer_roundtrips() {
 
 #[test]
 fn invalid_origin_value_is_rejected() {
-    // The schema enum is closed: ["builtin","user"] — anything else must not
-    // deserialize into the generated type.
     let json =
         r#"{"name":"demo.pull","input_schema":"{}","output_schema":"{}","origin":"marketplace"}"#;
     let err = serde_json::from_str::<CapabilityInfo>(json)

@@ -1,5 +1,4 @@
 /**
- * Settings modal primary — section registry, deep links, background restore.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -125,7 +124,6 @@ function healthHandler() {
 }
 
 function renderModalApp(initialRouterEntries: string[]) {
-  // The modal suite pins the full-Control-Room settings surface (modal →
   // agent, full rail, all sections). Post-entrance-split that surface is the
   // DEVELOP tree (plan QC W-2) — render on the developer entrance so the
   // pinned behavior stays valid; the Create variant (filtered rail + first
@@ -262,7 +260,6 @@ describe('Settings modal primary', () => {
     await waitFor(() =>
       expect(screen.getByTestId('settings-modal-body')).toBeInTheDocument(),
     );
-    // Background product route stays mounted.
     expect(screen.getByTestId('sessions-stub')).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
@@ -343,7 +340,6 @@ describe('Settings modal primary', () => {
   it('blocks dirty route leave to a non-settings path until discard confirms', async () => {
     const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler(), healthHandler());
-    // Develop-tree pin (gear → agent) — see renderModalApp's entrance note.
     window.localStorage.setItem('nexus-entrance', 'developer');
 
     let navigateAway: (() => void) | undefined;
@@ -351,7 +347,6 @@ describe('Settings modal primary', () => {
     function DirtySourceHost() {
       const { registerDirtySource } = useSettingsModal();
       useEffect(() => {
-        // Keep dirty asserted across the brief non-settings URL beat while RR7
         // applies a blocked leave (open flickers false before restore).
         registerDirtySource('test-dirty-route', true);
         return () => registerDirtySource('test-dirty-route', false);

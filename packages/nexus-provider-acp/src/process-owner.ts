@@ -102,7 +102,6 @@ function attachStderrGuard(
       try {
         child.kill('SIGTERM');
       } catch {
-        // already dead
       }
     }
   });
@@ -184,7 +183,6 @@ async function signalBoundProcessTree(
   }
   const pid = owned.boundIdentity.pid;
   if (isWindows()) {
-    // Windows has no process groups: the owned tree is terminated by the OS
     // parent/child relation via `taskkill /T /F`. The identity re-check above
     // gates it, so a recycled PID is never signalled. `signal` is not applicable
     // — `taskkill /F` is the forceful path both callers converge on.
@@ -196,7 +194,6 @@ async function signalBoundProcessTree(
   try {
     process.kill(pid, signal);
   } catch {
-    // already dead
   }
 }
 
@@ -211,7 +208,6 @@ export async function spawnOwnedConnection(
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   child.on('error', () => {
-    // ENOENT and similar spawn failures surface via initialize/cleanup paths.
   });
 
   const stdinWritable = child.stdin ?? new PassThrough();
@@ -414,7 +410,6 @@ export async function cleanupOwnedConnection(
   try {
     owned.stdinWritable.end();
   } catch {
-    // already closed
   }
   return await reapChild(owned.child, owned.boundIdentity, budgetMs);
 }

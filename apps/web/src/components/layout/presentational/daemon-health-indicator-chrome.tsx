@@ -13,7 +13,6 @@ export interface DaemonHealthIndicatorChromeProps {
   /** True when the active client is pointed at a remote endpoint. */
   isRemote?: boolean;
   /**
-   * Optional href for the link wrapper. When omitted, the indicator renders as
    * a plain badge without a hit target.
    */
   href?: string;

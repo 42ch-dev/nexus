@@ -52,7 +52,6 @@ pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<Cre
 
     let store = AuthStore::load()?;
 
-    // Path 1: Creator API key
     if let Some(api_key) = store.get_creator_api_key(creator_id)? {
         return Ok(CreatorAuthHeaders {
             authorization: format!("Bearer {api_key}"),
@@ -60,7 +59,6 @@ pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<Cre
         });
     }
 
-    // Path 2: User token + X-Creator-Id
     if store.is_user_authenticated() {
         if let Some(token_state) = &store.user_token {
             let token = token_state.access_token.clone();
@@ -71,7 +69,6 @@ pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<Cre
         }
     }
 
-    // Path 3: No credentials
     Err(CliError::Other(
         "Authentication required. Run `nexus42 platform auth login` or `nexus42 creator register`."
             .to_string(),
@@ -88,14 +85,10 @@ pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<Cre
 /// Returns `CliError::Other` if the platform API for credential rotation
 /// is not yet available or if the credential rotation fails.
 pub async fn rotate_credentials(config: &CliConfig, creator_id: &str) -> Result<()> {
-    // We need a user token to call the platform API
     let _user_token = get_user_token(config).await?;
 
     tracing::info!("Rotating credentials for creator {}", creator_id);
 
-    // Step 1: Request new credentials from platform (skeleton — needs real auth)
-    // In production, this would use the user token to authenticate.
-    // For now, return an error since the platform integration is not ready.
     Err(CliError::Other(
         "Platform API for credential rotation not yet available.".into(),
     ))
@@ -130,7 +123,6 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
         }
     }
 
-    // Token expired or missing — rotate
     rotate_credentials(config, creator_id).await?;
     let store = AuthStore::load()?;
     let creators = store.creators.as_ref().and_then(|c| c.get(creator_id));
@@ -185,7 +177,6 @@ mod tests {
 
     #[test]
     fn creator_key_auth_path() {
-        // Creator API key exists → Bearer <api_key>, no X-Creator-Id
         let store = store_with_creator_key("ctr_alpha", "nexus_live_alpha");
         let headers = build_headers_from_store(&store, "ctr_alpha").expect("headers");
         assert_eq!(headers.authorization, "Bearer nexus_live_alpha");
@@ -194,7 +185,6 @@ mod tests {
 
     #[test]
     fn user_token_fallback_path() {
-        // No creator key but valid user token → Bearer <user_token> + X-Creator-Id
         let store = store_with_user_token("user_tok_123");
         let headers = build_headers_from_store(&store, "ctr_alpha").expect("headers");
         assert_eq!(headers.authorization, "Bearer user_tok_123");
@@ -203,7 +193,6 @@ mod tests {
 
     #[test]
     fn no_credentials_errors() {
-        // Neither creator key nor user token → error
         let store = AuthStore::default();
         let result = build_headers_from_store(&store, "ctr_alpha");
         assert!(result.is_err());
@@ -213,7 +202,6 @@ mod tests {
 
     /// Test helper: build headers directly from an `AuthStore` without disk I/O.
     fn build_headers_from_store(store: &AuthStore, creator_id: &str) -> Result<CreatorAuthHeaders> {
-        // Path 1: Creator API key
         if let Some(creators) = &store.creators {
             if let Some(state) = creators.get(creator_id) {
                 if let Some(api_key) = &state.creator_api_key {
@@ -225,7 +213,6 @@ mod tests {
             }
         }
 
-        // Path 2: User token + X-Creator-Id
         if store.is_user_authenticated() {
             let token = store
                 .user_token
@@ -239,14 +226,11 @@ mod tests {
             });
         }
 
-        // Path 3: No credentials
         Err(CliError::Other(
             "Authentication required. Run `nexus42 platform auth login` or `nexus42 creator register`."
                 .to_string(),
         ))
     }
-
-    // ── R-CREATOR-003: creator_id validation tests ────────────────────
 
     #[test]
     fn empty_creator_id_returns_error() {
@@ -278,7 +262,6 @@ mod tests {
     fn valid_creator_id_proceeds_to_auth_check() {
         let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
-        // No credentials stored → should get "Authentication required", not "empty id"
         let result = creator_auth_headers(&config, "ctr_valid");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

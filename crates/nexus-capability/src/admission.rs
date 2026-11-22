@@ -81,12 +81,10 @@ pub fn admit(
     dir: &Path,
     builtin_names: &HashSet<&str>,
 ) -> Result<AdmittedCapability, AdmissionError> {
-    // Structural gate: an AR-34-invalid descriptor cannot be admitted (the
     // scan's `read_descriptor` already validates, but `admit` is the
     // standalone contract — defensive).
     descriptor.validate().map_err(AdmissionError::Descriptor)?;
 
-    // AR-43 gate 1: collision (builtin wins).
     if builtin_names.contains(descriptor.name.as_str()) {
         return Err(AdmissionError::NameCollision(format!(
             "user capability '{}' collides with a builtin (builtin wins)",
@@ -94,7 +92,6 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 2: module file pairing presence. The manifest types are the
     // shared `nexus-module-manifest` surface (pure metadata — no WASM engine),
     // so gates 2–4 run identically with the `wasm` feature off; only the
     // executable binding behind `run()` is gated (WorkerUnavailable).
@@ -114,7 +111,6 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 3: wasm_sha256 pairing (AR-39 — single hash path).
     // Read/parse failures here are pairing failures: the manifest's declared
     // hash is the only digest we can verify against.
     let manifest_json = std::fs::read(&manifest_path).map_err(|e| {
@@ -146,7 +142,6 @@ pub fn admit(
         )));
     }
 
-    // AR-43 gate 4: clamp sandbox overrides to the host maxima — never
     // rejects (AR-38). `clamp_sandbox` lives beside `SandboxOverrides` in
     // `user_capability.rs` (also re-applied at `UserCapability::new`, F1).
     let mut admitted_descriptor = descriptor.clone();
@@ -242,7 +237,6 @@ mod tests {
         );
         let admitted = admit(&descriptor, &tmp.path().join("demo.pull"), &builtins())
             .expect("valid trio admitted");
-        // Overrides inside the maxima pass through untouched (not raised).
         let sandbox = admitted
             .descriptor
             .sandbox
@@ -251,7 +245,6 @@ mod tests {
         assert_eq!(sandbox.fuel, Some(5_000_000));
         assert_eq!(sandbox.memory_mib, Some(32));
         assert_eq!(sandbox.wall_time_ms, Some(10_000));
-        // Everything else stays as authored.
         assert_eq!(admitted.descriptor.name, "demo.pull");
         assert_eq!(
             admitted.descriptor.wasm.wasm_sha256,
@@ -262,7 +255,6 @@ mod tests {
     #[test]
     fn admit_collision_rejects_builtin_name() {
         let tmp = tempfile::tempdir().unwrap();
-        // `sync.pull` is a builtin — rejected by gate 1 even with a complete
         // dir (builtin wins, AR-43 order: collision first).
         let descriptor = stage(tmp.path(), "sync.pull", None);
         let err = admit(&descriptor, &tmp.path().join("sync.pull"), &builtins())
@@ -282,7 +274,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("sync.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Empty dir: no manifest.json, no wasm. Gate 1 must still win.
         let descriptor = parse(&descriptor_json("sync.pull", FAKE_SHA, None));
         let err = admit(&descriptor, &dir, &builtins()).expect_err("collision first");
         assert!(
@@ -296,7 +287,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Only the wasm is present; manifest.json is missing.
         std::fs::write(dir.join("basic-mod.wasm"), b"fake module bytes").unwrap();
         let descriptor = descriptor_json("demo.pull", &sha256_hex(b"fake module bytes"), None);
         let descriptor = parse(&descriptor);
@@ -313,7 +303,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Only manifest.json is present (no `<module-id>.wasm`).
         let sha = sha256_hex(b"fake module bytes");
         let manifest = format!(
             r#"{{ "name": "Basic Mod", "version": "1.0.0",
@@ -360,7 +349,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
-        // Declare a hash that does NOT match the bytes actually written.
         let declared = sha256_hex(b"different bytes");
         let manifest = format!(
             r#"{{ "module_id": "basic-mod", "name": "Basic Mod", "version": "1.0.0",
@@ -459,7 +447,6 @@ mod tests {
         let dir = tmp.path().join("demo.pull");
         std::fs::create_dir_all(&dir).unwrap();
         let sha = write_module_pair(&dir);
-        // "BadName" parses but fails AR-34 validation (uppercase).
         let descriptor = parse(&descriptor_json("BadName", &sha, None));
         let err = admit(&descriptor, &dir, &builtins()).expect_err("invalid name");
         assert!(

@@ -1,5 +1,4 @@
 /**
- * Side checklist (plan v1219-world-module T3) — the `接下来可以` progress card
  * riding beside the Brief layer (prototype onboarding-v3 S4). Three
  * product-owned steps; only step ① (`写完 Brief`) is wired this iteration —
  * steps ②③ ship with their module rebuilds and stay pending. The first

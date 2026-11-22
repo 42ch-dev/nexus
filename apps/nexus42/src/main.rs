@@ -15,12 +15,10 @@ use std::path::Path;
 
 fn main() {
     let cli = Cli::parse();
-    // Data-output commands (`ops inspect`) print machine-readable JSON on
     // stdout — logging must go to stderr there, so the writer decision
     // happens before the subscriber is initialized.
     init_logging(cli.verbose(), cli.is_data_output());
 
-    // V1.101 Class B: enrich PATH *before* Tokio starts. GUI-launched desktop
     // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
     // `getenv` on a live multi-threaded runtime.
     // Logging is already initialized so join_paths failures surface as warnings.
@@ -33,7 +31,6 @@ fn main() {
         .expect("failed to build Tokio runtime");
     if let Err(e) = runtime.block_on(async_main(cli)) {
         eprintln!("Error: {e}");
-        // V1.51 T-B P0: exit code mapping for advisory lock errors.
         // - E_LOCK   (contention, temporary):  exit 75 (EX_TEMPFAIL)
         // - E_LOCK_IO (I/O failure, config):   exit 78 (EX_CONFIG)
         // V1.51 T-B P1: exit code mapping for OCC version conflicts.
@@ -53,13 +50,11 @@ fn main() {
         ) {
             76
         } else if let nexus42::errors::CliError::ComputeExit { code, .. } = e {
-            // V1.170 P0 (AR-9): the compute group owns its exit-code
             // vocabulary (1 build, 2 validation, 3 sha mismatch, 4 module).
             code
         } else {
             1
         };
-        // M4: flush stdout before exit — compute commands print status/JSON
         // to stdout, and `std::process::exit` skips the normal stdout
         // teardown; piped consumers would lose the buffered tail.
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -77,9 +72,7 @@ fn load_at(nexus: &Path) -> (CliConfig, Option<String>) {
     match CliConfig::load_from_nexus_root(nexus) {
         Ok(config) => (config, None),
         Err(error) => {
-            // `{:#}` keeps the cause chain (e.g. the TOML parser's reason).
             let mut message = format!("config unreadable — {error:#}");
-            // Non-parse failures (e.g. invalid UTF-8) carry no path.
             let path = CliConfig::path_in(nexus).display().to_string();
             if !message.contains(&path) {
                 message = format!("{message} ({path})");
@@ -105,19 +98,16 @@ fn load_startup_config() -> (CliConfig, Option<String>) {
 }
 
 async fn async_main(cli: Cli) -> Result<()> {
-    // Load configuration
     let (mut config, config_warning) = load_startup_config();
     if let Some(warning) = config_warning {
         eprintln!("nexus42: {warning}");
     }
 
-    // Resolve persistent device ID (UUID v4) for platform HTTP requests.
     if let (Ok(nexus_home), Some(raw_home)) = (nexus42::config::nexus_home(), dirs::home_dir()) {
         if nexus_home.exists() {
             match nexus_cloud_sync::device_id::get_or_create_device_id(&raw_home) {
                 Ok(device_id) => config.device_id = device_id,
                 Err(e) => {
-                    // Device ID failure is non-fatal: platform falls back to
                     // IP-based rate limiting when X-Device-ID is absent.
                     // Still visible to the user so they understand degraded mode.
                     eprintln!(
@@ -128,7 +118,6 @@ async fn async_main(cli: Cli) -> Result<()> {
         }
     }
 
-    // Execute command
     let output_format = cli.output_format().to_string();
     match cli.into_command() {
         Some(Commands::Creator { command }) => {
@@ -211,7 +200,6 @@ mod tests {
     fn unreadable_config_warning_still_names_the_path() {
         let nexus = tempfile::TempDir::new().expect("tempdir");
         let config_path = CliConfig::path_in(nexus.path());
-        // Invalid UTF-8 fails in `read_to_string` before any TOML context is
         // attached, so this exercises the path-less error class.
         std::fs::write(&config_path, [0xff, 0xfe]).expect("write config");
 

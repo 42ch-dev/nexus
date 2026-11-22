@@ -1,4 +1,6 @@
 //! Fail-closed derived-index protocol: verify before any vector read.
+//!
+//! see docs/specs/runtime/embedding-readiness.md.
 
 use crate::identity::{EmbeddingIdentity, IdentityComponent};
 
@@ -87,15 +89,12 @@ pub fn verify_index(
     expected: Option<&EmbeddingIdentity>,
     index: &DerivedIndexState,
 ) -> IndexVerdict {
-    // No provider → nothing can be verified against, never served.
     let Some(expected) = expected else {
         return IndexVerdict::Unavailable;
     };
-    // No populate stamp → index never built.
     let Some(stamp) = &index.populate_stamp else {
         return IndexVerdict::Unavailable;
     };
-    // Any identity component difference invalidates the index (fail-closed).
     if !expected.matches(&stamp.identity) {
         return IndexVerdict::RebuildRequired(RebuildReason::IdentityMismatch(IdentityMismatch {
             changed: expected.differing_components(&stamp.identity),
@@ -153,8 +152,6 @@ mod tests {
             populate_stamp,
         }
     }
-
-    // --- verify_index verdicts (locked, architect) ---
 
     #[test]
     fn empty_index_with_matching_complete_stamp_is_usable() {
@@ -282,8 +279,6 @@ mod tests {
             }))
         );
     }
-
-    // --- provider output shape (corruption, normative spec §4) ---
 
     #[test]
     fn vector_length_mismatch_is_corruption_requiring_rebuild() {

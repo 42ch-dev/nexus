@@ -151,8 +151,6 @@ impl LocalIdentity {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 use nexus_contracts::local::domain::local_identity::IdentityType as ContractIdentityType;
 
 impl TryFrom<nexus_contracts::local::domain::LocalIdentity> for LocalIdentity {
@@ -192,8 +190,6 @@ impl From<LocalIdentity> for nexus_contracts::local::domain::LocalIdentity {
         }
     }
 }
-
-// ── ID generation helpers ──────────────────────────────────────────────
 
 /// Generate an anonymous identity ID: `ctr_anon` + 12 random hex chars.
 ///

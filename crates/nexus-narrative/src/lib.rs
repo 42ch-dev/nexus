@@ -10,6 +10,7 @@
 //! API for querying narrative state (`NarrativeContext`, `WorldState`,
 //! `TimelinePosition`, `EventSnapshot`). This is the primary entry point for
 //! `nexus-moment-context-assembly` and CLI/daemon local APIs.
+// the crate boundary is locked in docs/specs/architecture/rust-core-service-boundary.md.
 
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::must_use_candidate)]

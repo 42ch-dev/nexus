@@ -200,8 +200,6 @@ async fn creator_memory_row_counts(pool: &SqlitePool) -> (i64, i64, i64, i64) {
     )
 }
 
-// ── Pending review family ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn pending_review_roundtrip_and_character_isolation() {
     let (pool, _dir) = fresh_pool().await;
@@ -229,7 +227,6 @@ async fn pending_review_roundtrip_and_character_isolation() {
         Some(s.binding_a1.as_str())
     );
 
-    // Shared scope lists only provenance-free rows.
     let list = list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10, 0)
         .await
         .unwrap();
@@ -241,7 +238,6 @@ async fn pending_review_roundtrip_and_character_isolation() {
             .unwrap(),
         1
     );
-    // Binding scope lists only that binding's rows.
     let list_b1 =
         list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10, 0)
             .await
@@ -255,7 +251,6 @@ async fn pending_review_roundtrip_and_character_isolation() {
         1
     );
 
-    // Character B is fully isolated.
     assert!(
         list_character_pending_reviews(&pool, OWNER, &s.char_b, None, 10, 0)
             .await
@@ -269,14 +264,12 @@ async fn pending_review_roundtrip_and_character_isolation() {
         0
     );
 
-    // Bounded list honors LIMIT.
     let bounded =
         list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 1, 0)
             .await
             .unwrap();
     assert_eq!(bounded.len(), 1);
 
-    // Delete is scoped to the owning Character.
     assert!(
         !delete_character_pending_review(&pool, OWNER, &s.char_b, "pend_1")
             .await
@@ -300,13 +293,11 @@ async fn pending_review_rejects_foreign_character_and_cross_character_binding() 
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Foreign owner cannot write to OWNER's Character.
     let err = create_character_pending_review(&pool, OTHER, &pending("pend_x", &s.char_a, None))
         .await
         .unwrap_err();
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
 
-    // A binding that belongs to Character B must not authorize Character A rows.
     let err = create_character_pending_review(
         &pool,
         OWNER,
@@ -316,7 +307,6 @@ async fn pending_review_rejects_foreign_character_and_cross_character_binding() 
     .unwrap_err();
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
 
-    // Both rejections happen before any row is written.
     assert_eq!(
         table_count(&pool, "character_memory_pending_review").await,
         0
@@ -328,7 +318,6 @@ async fn pending_review_rejects_foreign_world_and_inactive_binding() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Raw-insert bindings that the public APIs would never create: one whose
     // World belongs to another Creator, one inactive. Repository write
     // validation must still refuse them.
     for (binding_id, world_id, status) in [
@@ -383,7 +372,6 @@ async fn pending_review_session_unique_per_character() {
     create_character_pending_review(&pool, OWNER, &pending("pend_1", &s.char_a, None))
         .await
         .unwrap();
-    // Same session for the same Character is an idempotent no-op success
     // (Creator capture parity, `INSERT OR IGNORE`); no extra row is written.
     let dup = CharacterPendingReviewRecord {
         pending_id: "pend_dup".to_string(),
@@ -397,7 +385,6 @@ async fn pending_review_session_unique_per_character() {
         table_count(&pool, "character_memory_pending_review").await,
         1
     );
-    // Same session for Character B is a distinct unique key → OK.
     let shared_session = CharacterPendingReviewRecord {
         pending_id: "pend_b".to_string(),
         session_id: "sess_pend_1".to_string(),
@@ -412,14 +399,11 @@ async fn pending_review_session_unique_per_character() {
     );
 }
 
-// ── Restrictive foreign keys ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn foreign_keys_reject_unknown_character_and_cross_character_binding() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Unknown character_id violates the characters FK on every family.
     let err = sqlx::query(
         "INSERT INTO character_memory_pending_review \
          (pending_id, session_id, character_id, task_kind, raw_digest, created_at) \
@@ -430,7 +414,6 @@ async fn foreign_keys_reject_unknown_character_and_cross_character_binding() {
     .unwrap_err();
     assert!(err.to_string().contains("FOREIGN KEY"), "{err}");
 
-    // Composite FK backstop: B's binding with A's character id is rejected
     // even if the caller bypasses repository validation.
     let err = sqlx::query(
         "INSERT INTO character_memory_fragments \
@@ -456,8 +439,6 @@ async fn foreign_keys_reject_unknown_character_and_cross_character_binding() {
     .unwrap_err();
     assert!(err.to_string().contains("FOREIGN KEY"), "{err}");
 }
-
-// ── Fragment family ──────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn fragment_scope_isolation_between_shared_and_bindings() {
@@ -485,7 +466,6 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
         .await
         .unwrap();
 
-    // Shared scope holds only provenance-free fragments.
     let shared = list_character_fragments(&pool, OWNER, &s.char_a, None, 10, 0)
         .await
         .unwrap();
@@ -493,7 +473,6 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
     assert_eq!(shared[0].fragment_id, "frag_shared");
     assert_eq!(shared[0].revision, 0);
 
-    // Binding scopes are exact: each returns only its own provenance.
     let b1 = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10, 0)
         .await
         .unwrap();
@@ -505,14 +484,12 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
     assert_eq!(b2.len(), 1);
     assert_eq!(b2[0].fragment_id, "frag_b2");
 
-    // Character A/B isolation holds per scope.
     let b_shared = list_character_fragments(&pool, OWNER, &s.char_b, None, 10, 0)
         .await
         .unwrap();
     assert_eq!(b_shared.len(), 1);
     assert_eq!(b_shared[0].fragment_id, "frag_b_char");
 
-    // A fragment id owned by Character B is invisible through Character A.
     assert!(
         get_character_fragment(&pool, OWNER, &s.char_a, None, "frag_b_char")
             .await
@@ -520,7 +497,6 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
             .is_none()
     );
 
-    // Scoped delete: cannot delete through another Character.
     assert!(
         !delete_character_fragment(&pool, OWNER, &s.char_b, "frag_shared")
             .await
@@ -555,8 +531,6 @@ async fn fragment_write_rejects_foreign_character_and_binding() {
     assert_eq!(table_count(&pool, "character_memory_fragments").await, 0);
 }
 
-// ── SOUL meta family ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn soul_meta_roundtrip_isolation_and_foreign_hiding() {
     let (pool, _dir) = fresh_pool().await;
@@ -576,7 +550,6 @@ async fn soul_meta_roundtrip_isolation_and_foreign_hiding() {
     assert_eq!(fetched.character_id, s.char_a);
     assert_eq!(fetched.personality_hash.as_deref(), Some("ph"));
 
-    // Upsert updates in place; A/B rows stay independent.
     let mut updated = soul_meta(&s.char_a);
     updated.personality_hash = Some("ph2".to_string());
     upsert_character_soul_meta(&pool, OWNER, &updated)
@@ -593,7 +566,6 @@ async fn soul_meta_roundtrip_isolation_and_foreign_hiding() {
         Some("ph2")
     );
 
-    // Foreign owner is hidden, not leaked.
     let err = get_character_soul_meta(&pool, OTHER, &s.char_a)
         .await
         .unwrap_err();
@@ -611,8 +583,6 @@ async fn soul_meta_roundtrip_isolation_and_foreign_hiding() {
         .unwrap());
     assert_eq!(table_count(&pool, "character_soul_meta").await, 1);
 }
-
-// ── SOUL narrative cache family ──────────────────────────────────────────
 
 #[tokio::test]
 async fn narrative_cache_null_and_per_binding_key_uniqueness() {
@@ -637,7 +607,6 @@ async fn narrative_cache_null_and_per_binding_key_uniqueness() {
     .await
     .unwrap();
 
-    // The three scopes coexist as three distinct rows.
     assert_eq!(table_count(&pool, "character_soul_narratives").await, 3);
     assert_eq!(
         get_character_soul_narrative(&pool, OWNER, &s.char_a, None)
@@ -658,7 +627,6 @@ async fn narrative_cache_null_and_per_binding_key_uniqueness() {
         Some("b1")
     );
 
-    // Upserting the shared scope again replaces it (partial UNIQUE on NULL).
     upsert_character_soul_narrative(&pool, OWNER, &narrative(&s.char_a, None, "shared-v2"))
         .await
         .unwrap();
@@ -673,7 +641,6 @@ async fn narrative_cache_null_and_per_binding_key_uniqueness() {
         Some("shared-v2")
     );
 
-    // A raw second shared-scope insert violates the partial UNIQUE index.
     let err = sqlx::query(
         "INSERT INTO character_soul_narratives \
          (character_id, actor_world_binding_id, created_at, updated_at) \
@@ -685,7 +652,6 @@ async fn narrative_cache_null_and_per_binding_key_uniqueness() {
     .unwrap_err();
     assert!(err.to_string().contains("UNIQUE"), "{err}");
 
-    // A raw duplicate per-binding key violates the composite PK.
     let err = sqlx::query(
         "INSERT INTO character_soul_narratives \
          (character_id, actor_world_binding_id, created_at, updated_at) \
@@ -698,7 +664,6 @@ async fn narrative_cache_null_and_per_binding_key_uniqueness() {
     .unwrap_err();
     assert!(err.to_string().contains("UNIQUE"), "{err}");
 
-    // Binding-local reads refuse a binding owned by another Character.
     let err = get_character_soul_narrative(&pool, OWNER, &s.char_a, Some(&s.binding_b1))
         .await
         .unwrap_err();
@@ -724,18 +689,15 @@ async fn narrative_fragment_stats_are_scope_bounded() {
     let (shared, cached) = character_soul_narrative_fragment_stats(&pool, OWNER, &s.char_a, None)
         .await
         .unwrap();
-    // First compute persists a stats-only cache row and re-reads it, so the
     // returned cache row is present alongside the freshly computed stats.
     assert!(cached.is_some());
     assert_eq!(shared.fragment_count, 2);
-    // Shared scope: {alpha} ∪ {alpha, gamma} → 2 distinct keywords.
     assert_eq!(shared.distinct_keyword_count, 2);
     assert_eq!(
         shared.max_created_at.as_deref(),
         Some("2026-09-05T12:00:00Z")
     );
 
-    // Second call serves the fingerprint-cached distinct count.
     let (shared_again, cache_row) =
         character_soul_narrative_fragment_stats(&pool, OWNER, &s.char_a, None)
             .await
@@ -743,7 +705,6 @@ async fn narrative_fragment_stats_are_scope_bounded() {
     assert_eq!(shared_again.distinct_keyword_count, 2);
     assert!(cache_row.is_some());
 
-    // Binding scope only sees its own provenance.
     let (local, _) =
         character_soul_narrative_fragment_stats(&pool, OWNER, &s.char_a, Some(&s.binding_a1))
             .await
@@ -751,8 +712,6 @@ async fn narrative_fragment_stats_are_scope_bounded() {
     assert_eq!(local.fragment_count, 1);
     assert_eq!(local.distinct_keyword_count, 1);
 }
-
-// ── Revision-checked local→shared promotion ──────────────────────────────
 
 #[tokio::test]
 async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
@@ -767,7 +726,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     .await
     .unwrap();
 
-    // Seed cache rows in every nearby scope.
     upsert_character_soul_narrative(&pool, OWNER, &narrative(&s.char_a, None, "shared"))
         .await
         .unwrap();
@@ -789,7 +747,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .await
         .unwrap();
 
-    // Stale revision: zero mutation anywhere.
     let err = promote_character_fragment_to_shared(&pool, OWNER, &s.char_a, "frag_p", 7)
         .await
         .unwrap_err();
@@ -805,7 +762,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     assert_eq!(still.revision, 0);
     assert_eq!(table_count(&pool, "character_soul_narratives").await, 4);
 
-    // Correct revision: same fragment id, provenance cleared, revision bumped.
     let promoted = promote_character_fragment_to_shared(&pool, OWNER, &s.char_a, "frag_p", 0)
         .await
         .unwrap();
@@ -813,12 +769,10 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     assert_eq!(promoted.actor_world_binding_id, None);
     assert_eq!(promoted.revision, 1);
 
-    // Only the two affected cache scopes were invalidated.
     assert!(get_character_soul_narrative(&pool, OWNER, &s.char_a, None)
         .await
         .unwrap()
         .is_none());
-    // The invalidated binding-local row is gone at the storage level.
     let b1_rows: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM character_soul_narratives WHERE actor_world_binding_id = ?",
     )
@@ -827,7 +781,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     .await
     .unwrap();
     assert_eq!(b1_rows, 0);
-    // Unaffected scopes survive.
     assert!(
         get_character_soul_narrative(&pool, OWNER, &s.char_a, Some(&s.binding_a2))
             .await
@@ -839,7 +792,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .unwrap()
         .is_some());
 
-    // Re-promoting a shared fragment is a stable conflict, not a silent no-op.
     let err = promote_character_fragment_to_shared(&pool, OWNER, &s.char_a, "frag_p", 1)
         .await
         .unwrap_err();
@@ -850,7 +802,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         }
     ));
 
-    // Foreign owner cannot promote; nothing changes.
     let err = promote_character_fragment_to_shared(&pool, OTHER, &s.char_a, "frag_p", 1)
         .await
         .unwrap_err();
@@ -864,8 +815,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         1
     );
 }
-
-// ── Binding removal dependency precedence ────────────────────────────────
 
 async fn seed_binding_owned_ke(pool: &SqlitePool, binding_id: &str) {
     sqlx::query(
@@ -897,7 +846,6 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Precedence 1: last binding wins over local memory.
     create_character_pending_review(
         &pool,
         OWNER,
@@ -915,7 +863,6 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
         }
     ));
 
-    // Precedence 2: binding-owned KE wins over local memory.
     create_character_pending_review(
         &pool,
         OWNER,
@@ -938,7 +885,6 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
         .await
         .unwrap();
 
-    // Non-live binding-owned KE still blocks non-last removal.
     seed_binding_owned_ke_deleted(&pool, &s.binding_a2).await;
     let binds_before: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?")
@@ -967,7 +913,6 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
         .await
         .unwrap();
 
-    // Precedence 3: pending rows block with binding_has_local_memory, zero mutation.
     let err = remove_binding(&pool, OWNER, &s.char_a, &s.binding_a2)
         .await
         .unwrap_err();
@@ -983,7 +928,6 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
         2
     );
 
-    // Fragments and narrative cache rows block identically.
     assert!(
         delete_character_pending_review(&pool, OWNER, &s.char_a, "pend_a")
             .await
@@ -1069,7 +1013,6 @@ async fn binding_removal_succeeds_once_local_memory_is_gone() {
         }
     ));
 
-    // Promotion clears the fragment provenance; cache rows deleted directly.
     promote_character_fragment_to_shared(&pool, OWNER, &s.char_a, "frag_dep", 0)
         .await
         .unwrap();
@@ -1078,7 +1021,6 @@ async fn binding_removal_succeeds_once_local_memory_is_gone() {
         .unwrap();
     assert!(!list_bindings_still_present(&pool, &s.binding_a2).await);
 
-    // The promoted fragment survives as shared Character memory.
     let kept = get_character_fragment(&pool, OWNER, &s.char_a, None, "frag_dep")
         .await
         .unwrap()
@@ -1086,14 +1028,11 @@ async fn binding_removal_succeeds_once_local_memory_is_gone() {
     assert_eq!(kept.actor_world_binding_id, None);
 }
 
-// ── Creator non-mutation ─────────────────────────────────────────────────
-
 #[tokio::test]
 async fn character_memory_never_touches_creator_tables() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Exercise every Character family end to end.
     create_character_pending_review(
         &pool,
         OWNER,
@@ -1128,8 +1067,6 @@ async fn character_memory_never_touches_creator_tables() {
     assert_eq!(creator_memory_row_counts(&pool).await, (0, 0, 0, 0));
 }
 
-// ── Fix-1: exact active-binding read scope ───────────────────────────────
-
 #[tokio::test]
 async fn binding_local_reads_require_exact_binding_tuple() {
     let (pool, _dir) = fresh_pool().await;
@@ -1150,7 +1087,6 @@ async fn binding_local_reads_require_exact_binding_tuple() {
     .await
     .unwrap();
 
-    // A valid active binding of the SAME Character may not read another
     // binding's local scope.
     assert!(
         get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_a2), "pend_b1")
@@ -1170,7 +1106,6 @@ async fn binding_local_reads_require_exact_binding_tuple() {
             .unwrap(),
         0
     );
-    // The shared scope also cannot see binding-local rows.
     assert!(
         list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10, 0)
             .await
@@ -1190,7 +1125,6 @@ async fn binding_local_reads_require_exact_binding_tuple() {
             .is_none()
     );
 
-    // Another Character's binding is refused outright.
     let err = get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_b1), "pend_b1")
         .await
         .unwrap_err();
@@ -1204,7 +1138,6 @@ async fn binding_local_reads_require_exact_binding_tuple() {
         .unwrap_err();
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
 
-    // The exact owning binding reads the scope.
     assert!(
         get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_a1), "pend_b1")
             .await
@@ -1225,7 +1158,6 @@ async fn inactive_binding_rows_remain_readable_as_retained_data() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Raw-insert an inactive binding (public APIs never produce one), then
     // raw-insert a binding-local row under it. Retained reads tolerate the
     // inactive binding because the stored tuple still points at an existing
     // owned World; only mutators require liveness.
@@ -1263,7 +1195,6 @@ async fn inactive_binding_rows_remain_readable_as_retained_data() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].fragment_id, "frag_inactive");
 
-    // Mutators still require the active binding + active World provenance.
     let err = create_character_fragment(
         &pool,
         OWNER,
@@ -1278,15 +1209,12 @@ async fn inactive_binding_rows_remain_readable_as_retained_data() {
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
 }
 
-// ── Fix-1: owned active World provenance ─────────────────────────────────
-
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Seed an owned-but-archived World and a raw active binding to it (public
     // admission refuses cross-state worlds, so insert directly).
     sqlx::query(
         "INSERT INTO narrative_worlds \
@@ -1348,7 +1276,6 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     );
     assert_eq!(table_count(&pool, "character_memory_fragments").await, 0);
 
-    // Raw-insert a row under the archived-world binding: binding-scoped
     // retained reads still return it (World exists and is owned; liveness is
     // not part of the read rule).
     sqlx::query(
@@ -1384,7 +1311,6 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     .unwrap()
     .is_some());
 
-    // Removal of a binding onto a non-active World is refused with zero
     // mutation.
     let err = remove_binding(
         &pool,
@@ -1397,8 +1323,6 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
     assert!(list_bindings_still_present(&pool, "awb_ccccccccccccccccccccccccccccccc1").await);
 }
-
-// ── Fix-1: bounded limit normalization ───────────────────────────────────
 
 #[tokio::test]
 async fn list_limits_are_clamped_to_one_documented_bound() {
@@ -1414,7 +1338,6 @@ async fn list_limits_are_clamped_to_one_documented_bound() {
         create_character_fragment(&pool, OWNER, &f).await.unwrap();
     }
 
-    // Negative / zero clamp up to 1.
     for bad in [-1, 0] {
         assert_eq!(
             list_character_pending_reviews(&pool, OWNER, &s.char_a, None, bad, 0)
@@ -1431,7 +1354,6 @@ async fn list_limits_are_clamped_to_one_documented_bound() {
             1
         );
     }
-    // Very large clamps to the repository bound (still returns all 3 rows here
     // because 3 < MAX).
     assert_eq!(
         list_character_pending_reviews(
@@ -1448,8 +1370,6 @@ async fn list_limits_are_clamped_to_one_documented_bound() {
         3
     );
 }
-
-// ── Fix-1: promotion revalidates source binding in-transaction ───────────
 
 #[tokio::test]
 async fn promotion_revalidates_source_binding_inside_transaction() {
@@ -1474,7 +1394,6 @@ async fn promotion_revalidates_source_binding_inside_transaction() {
     .await
     .unwrap();
 
-    // Case 1: binding becomes inactive after the row exists.
     sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
         .bind(&s.binding_a1)
         .execute(&pool)
@@ -1492,7 +1411,6 @@ async fn promotion_revalidates_source_binding_inside_transaction() {
     );
     assert_eq!(table_count(&pool, "character_soul_narratives").await, 2);
 
-    // Case 2: binding active again, but its World archived.
     sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?")
         .bind(&s.binding_a1)
         .execute(&pool)
@@ -1612,7 +1530,6 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             .unwrap();
     archive_character(&pool, &seed.char_a, rev).await;
 
-    // Retained reads succeed with the archived Character + owned live World.
     assert!(get_character_pending_review(
         &pool,
         OWNER,
@@ -1671,7 +1588,6 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             .unwrap();
     assert_eq!(stats.fragment_count, 1);
 
-    // Every mutator rejects with `character_inactive` and leaves DB state
     // unchanged.
     let err = delete_character_pending_review(&pool, OWNER, &seed.char_a, pending_id)
         .await
@@ -1724,7 +1640,6 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Binding owned by char_a but pointing at a World owned by another
     // Creator (raw-inserted; public admission refuses this shape).
     sqlx::query(
         "INSERT INTO actor_world_bindings \
@@ -1736,7 +1651,6 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
     .execute(&pool)
     .await
     .unwrap();
-    // Binding whose World is later deleted behind the FK's back, simulating
     // a dangling tuple (drift/corruption); retained reads must fail closed.
     sqlx::query(
         "INSERT INTO narrative_worlds \

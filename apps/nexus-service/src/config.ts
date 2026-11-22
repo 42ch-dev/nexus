@@ -20,7 +20,6 @@ export interface ServiceOptions {
   /** Enable the embedded MCP lane for peers that request it. */
   embeddedMcp?: boolean;
   /**
-   * Absolute web-UI build directory to serve, `null` to force-disable, or
    * `undefined` for repo-anchored auto-discovery (`resolveWebDist`).
    */
   webDist?: string | null;
@@ -163,7 +162,6 @@ function resolvePositiveIntEnv(name: string, fallback: number): number {
 }
 
 /**
- * Env override that can only tighten a frozen ceiling. An absent, malformed, or
  * *larger* value resolves to the ceiling, so no environment variable can raise
  * the process-wide bound the proof is computed against.
  */
@@ -244,7 +242,6 @@ export function validateServiceHome(home: string): void {
 /** Blocklist ranges (private/loopback/link-local/metadata) for four IPv4 octets. */
 function isBlockedIpv4Octets(octets: readonly number[]): boolean {
   const [a, b] = [octets[0], octets[1]];
-  // Private, loopback, link-local ranges plus the 169.254.0.0/16 metadata
   // endpoint, mirroring the legacy `is_blocked_ip` V4 arm.
   return (
     a === 10 ||
@@ -259,7 +256,6 @@ function isBlockedIpv4Octets(octets: readonly number[]): boolean {
 function parseIpv6Groups(input: string): number[] | null {
   const zone = input.indexOf('%');
   const text = zone === -1 ? input : input.slice(0, zone);
-  // Embedded IPv4 tail: `::ffff:127.0.0.1` and friends become two groups.
   const v4Tail = text.match(/:(\d+\.\d+\.\d+\.\d+)$/);
   let head = text;
   const tailGroups: number[] = [];
@@ -286,14 +282,11 @@ function parseIpv6Groups(input: string): number[] | null {
 }
 
 function isBlockedIpv6(groups: readonly number[]): boolean {
-  // Loopback ::1 (longhand `0:0:0:0:0:0:0:1` included).
   if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
-  // IPv4-mapped ::ffff:0:0/96 — decimal or hexadecimal tail alike — and the
   // deprecated IPv4-compatible ::/96 all judge by the embedded IPv4 address.
   if (groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0)) {
     return isBlockedIpv4Octets([groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff]);
   }
-  // Unique-local fc00::/7 and link-local fe80::/10.
   const first = groups[0];
   return (first >= 0xfc00 && first <= 0xfdff) || (first >= 0xfe80 && first <= 0xfebf);
 }
@@ -304,7 +297,6 @@ function isBlockedCdnIp(ip: string): boolean {
     const groups = parseIpv6Groups(lowered);
     return groups !== null && isBlockedIpv6(groups);
   }
-  // WHATWG normalization: dotted-decimal, octal, hexadecimal, and packed
   // 32-bit IPv4 spellings all canonicalize here before classification, so
   // `0177.0.0.1` or `2130706433` can no longer smuggle a loopback past the
   // decimal-only matcher.
@@ -317,13 +309,11 @@ function isBlockedCdnIp(ip: string): boolean {
       return isBlockedIpv4Octets(octets);
     }
   } catch {
-    // Not a URL host: nothing address-like to block.
   }
   return false;
 }
 
 /**
- * Legacy CDN validation (registry.rs `validate_cdn_url_static`), preserved
  * in spirit: public HTTPS URLs only, literal-IP hosts in private, loopback,
  * link-local or metadata ranges are refused. Hosts go through real URL/IP
  * parsing — bracketed IPv6 (`[::1]`, ULA, link-local), both IPv4-mapped
@@ -338,7 +328,6 @@ export function validateCdnUrl(url: string): void {
   }
   let host: string;
   try {
-    // URL parsing strips IPv6 brackets and canonicalizes exotic IPv4 forms.
     host = new URL(url).hostname.replace(/^\[/, '').replace(/\]$/, '');
   } catch {
     throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
@@ -349,7 +338,6 @@ export function validateCdnUrl(url: string): void {
 }
 
 /**
- * Resolve the transport selection (architecture §7): `http` by default; a
  * unix socket requires an absolute `socketPath`, and the socket path conflicts
  * with an explicitly selected HTTP bind.
  */
@@ -495,7 +483,6 @@ export function parseCliArgs(argv: string[]): CliArgs {
   if ((tlsCert && !tlsKey) || (!tlsCert && tlsKey)) {
     throw new Error('--tls-cert and --tls-key must be supplied together');
   }
-  // `--socket` is required only for unix and conflicts with an explicitly
   // selected HTTP bind (architecture §7): an explicit --host/--port on the
   // unix transport has no meaning, and a socket path on http is ambiguous.
   if (transport === 'unix') {

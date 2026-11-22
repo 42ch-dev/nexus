@@ -117,7 +117,6 @@ impl PeerResponder for ConnectResponderAdapter {
                         _ => {}
                     }
                 }
-                // A peer-side deny keeps the peer's own lowercase code
                 // verbatim; it is never re-parsed from the message text.
                 let wire_code = reject
                     .details
@@ -183,7 +182,6 @@ pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
         builtin_tool_ids: &HashSet<String, S>,
         live_reservation: Option<&std::collections::HashSet<&'static str>>,
     ) -> AdmissionOutcome {
-        // The ONE allocation per decision (pre-existing in every shape of
         // this seam): the merged reserved set — builtin ∪ live — must be
         // materialized because `admit_and_register` takes it by reference.
         let mut reserved: HashSet<String> = builtin_tool_ids.iter().cloned().collect();

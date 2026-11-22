@@ -10,7 +10,6 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { HomePage } from '@/pages/home';
 
 /**
- * Route-level code splitting (S-002): the heavy gallery pages (tokens.tsx
  * ~2.3k lines, brand, components, surfaces subtree) are lazy-loaded so an
  * unrelated route does not eagerly parse every gallery module into the main
  * chunk. Each lazy route keeps the exact label/hash/fixture behavior; the

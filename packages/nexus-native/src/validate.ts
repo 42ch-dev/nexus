@@ -1,5 +1,4 @@
 /**
- * The single wire-validation seam for `@42ch/nexus-native`.
  *
  * Message shapes are bound to the generated contract types (`satisfies
  * ShapeOf<T>`), so a contract field added or renamed fails this build instead
@@ -57,7 +56,6 @@ export interface Shape {
 }
 
 /**
- * Binds a shape to a generated contract type: every key of `T` needs a spec
  * (add/rename drift fails this build) and `required` must name only keys of `T`.
  */
 type ShapeOf<T> = Omit<Shape, 'fields' | 'required'> & {
@@ -134,7 +132,6 @@ function checkField(value: unknown, spec: FieldSpec, path: string): void {
             matched = true;
             break;
           } catch {
-            // Try the next closed arm.
           }
         }
         if (!matched) throw new Error(`invalid ${path}: value does not match an allowed arm`);

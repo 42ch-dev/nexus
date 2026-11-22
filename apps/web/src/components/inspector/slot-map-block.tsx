@@ -1,5 +1,4 @@
 /**
- * Slot map block — P1 T2 (DF-76). Read-only.
  *
  * Renders `slot_map` (`entry_id` → slot id) grouped in prompt emit order:
  * `world.before` → `default` → `world.after` → `kb.outlet.<name>` →

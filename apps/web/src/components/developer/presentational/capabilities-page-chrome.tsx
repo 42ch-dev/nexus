@@ -1,5 +1,4 @@
 /**
- * Presentational body of the `/capabilities` surface (plan
  * v221-caps-sessions-rail T1).
  *
  * The product page (`components/developer/capabilities-page.tsx`) owns the

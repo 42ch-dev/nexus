@@ -44,9 +44,6 @@ pub enum HostError {
     Unknown(i64),
 }
 
-// Raw host imports, whitelisted by the ABI (compute-module-abi.md §3).
-// Declared in a private submodule so the safe wrappers below can use the
-// same names.
 mod raw {
     #[link(wasm_import_module = "nexus")]
     extern "C" {
@@ -143,7 +140,6 @@ mod tests {
 
     #[test]
     fn checked_written_rejects_ret_exceeding_out_cap() {
-        // qc2 S-2: a host return larger than the allocated out_cap must not
         // be trusted (from_raw_parts would read past the leaked buffer) —
         // rejected as OutputTooSmall, the same condition as the `-2`
         // sentinel. (Tested on the helper: call_host itself writes into

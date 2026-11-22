@@ -7,6 +7,8 @@ import { NavLink } from 'react-router';
  * Surfaces. Surfaces keeps nested Studio-only section routes under
  * `/surfaces/*` (V1.102 P2); the top-nav Surfaces link stays active for all
  * of them.
+ *
+ * Contract: docs/specs/surfaces/design-studio.md §6.
  */
 const NAV_ITEMS = [
   { label: 'Tokens', path: '/tokens' },

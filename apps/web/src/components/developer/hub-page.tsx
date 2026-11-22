@@ -1,5 +1,4 @@
 /**
- * 操作台 (Hub) — the developer entrance's landing surface (plan v1220 T1/T2).
  *
  * Read-only status aggregation: four cards (本地服务 / Agent / Harness 摘要 /
  * 已装模块), each reading existing daemon endpoints and linking into its rail

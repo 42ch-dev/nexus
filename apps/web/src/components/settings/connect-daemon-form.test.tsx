@@ -41,7 +41,6 @@ describe('ConnectDaemonForm', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-block')).toHaveTextContent('SHA256:aa:bb:cc');
     });
-    // V1.121 P2: fingerprint block size rides the copy-13 token (no arbitrary
     // text-[13px]).
     const fingerprintBlock = screen.getByTestId('fingerprint-block');
     expect(fingerprintBlock).toHaveClass('text-copy-13');
@@ -58,7 +57,6 @@ describe('ConnectDaemonForm', () => {
         }),
       );
     });
-    // Post-activate stays on Connection — no navigate away.
     expect(mockedNavigate).not.toHaveBeenCalled();
   });
 
@@ -94,7 +92,6 @@ describe('ConnectDaemonForm', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-match-hint')).toBeInTheDocument();
     });
-    // Security-note washes must stay deep ink (DESIGN connection-setup), not cyan signal.
     expect(screen.getByTestId('fingerprint-match-hint').className).toMatch(
       /\bborder-brand-deep-blue\/20\b/,
     );
@@ -110,7 +107,6 @@ describe('ConnectDaemonForm', () => {
   it('reconnects with the retained credential without re-entering the key (desktop redacted load)', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
-    // Desktop redacted load: the persisted key is never returned (D-18) —
     // only hasApiKey presence.
     const saved: ConnectionConfig = {
       endpointUrl: 'https://remote.example:8420',
@@ -340,14 +336,12 @@ describe('ConnectDaemonForm', () => {
     await user.type(input, 'secret-key');
     expect(input).toHaveAttribute('type', 'password');
 
-    // Hidden state: visible Verb-only "Show"; accessible name keeps the object.
     const showButton = screen.getByRole('button', { name: 'Show key' });
     expect(showButton).toHaveTextContent('Show');
     expect(showButton).toHaveAttribute('aria-pressed', 'false');
 
     await user.click(showButton);
 
-    // Revealed state: visible Verb-only "Hide"; accessible name keeps the object.
     const hideButton = await screen.findByRole('button', { name: 'Hide key' });
     expect(hideButton).toHaveTextContent('Hide');
     expect(hideButton).toHaveAttribute('aria-pressed', 'true');
@@ -372,7 +366,6 @@ describe('ConnectDaemonForm', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
-    // V1.129 P1: transport-classified failures (HttpResponse.error → kind=
     // network) render the promoted <TransportErrorBlock>. The classifier's
     // long-form diagnostic rides the primitive's detail line so actionable
     // text ("use the Nexus desktop app") survives.
@@ -382,7 +375,6 @@ describe('ConnectDaemonForm', () => {
       expect(block).toHaveTextContent('Could not connect to the daemon at this address');
       expect(block).toHaveTextContent('desktop app');
     });
-    // Legacy inline error region is hidden when kind is present.
     expect(screen.queryByTestId('fingerprint-error')).not.toBeInTheDocument();
   });
 
@@ -407,7 +399,6 @@ describe('ConnectDaemonForm', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
-    // V1.129 P1: HTTP 4xx/5xx errors carry no `kind` (transport classifier
     // only fires on status=0). Legacy inline region renders with the
     // daemon's error.message; the primitive is NOT mounted.
     await waitFor(() => {
@@ -436,7 +427,6 @@ describe('ConnectDaemonForm', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/The API key from the daemon machine/i)).toBeInTheDocument();
     expect(screen.getByText('nexus42 daemon api-key')).toBeInTheDocument();
-    // V1.121 P2: inline code helpers ride the copy-13 token (no arbitrary
     // text-[13px]).
     expect(screen.getByText('nexus42 daemon api-key')).toHaveClass('text-copy-13');
   });

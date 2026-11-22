@@ -31,11 +31,9 @@ pub mod error;
 
 pub use error::{ConnectError, ConnectResult};
 
-// The protocol-neutral peer tool registry (process-global, one per process).
 #[cfg(feature = "peer-tools")]
 pub mod peer_tools;
 
-// The message-oriented WS transport is the one surface the remote memory
 // client shares with the peer-tools stack. Everything below keeps its
 // existing Connect cohort gate.
 #[cfg(feature = "transport")]
@@ -49,7 +47,6 @@ pub mod config;
 pub mod events;
 #[cfg(feature = "connect-host")]
 pub mod identity;
-// The rmcp bridge is the reverse-invoke/operator surface; it compiles only
 // with the rmcp-bearing `connect-client` cohort, never in the Connect-host
 // product cohort.
 #[cfg(feature = "connect-client")]
@@ -78,17 +75,10 @@ pub use config::{load_peer_keys, CollisionPolicy, PeerToolsConfig, DEFAULT_CONNE
 pub use identity::load_or_create_identity;
 #[cfg(feature = "connect-host")]
 pub use identity::load_or_create_identity_at;
-#[cfg(feature = "connect-host")]
-pub use watch::{
-    peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
-    PeerConfigSnapshot,
-};
-// Shared MCP bridge core re-exports (rmcp-bearing `connect-client` cohort).
 #[cfg(feature = "connect-client")]
 pub use mcp_bridge::{
     is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };
-// Embedded MCP server shell re-exports (feature-gated).
 #[cfg(feature = "embedded-mcp")]
 pub use mcp_embedded::{
     start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession,
@@ -105,5 +95,10 @@ pub use table::{
 };
 #[cfg(feature = "connect-host")]
 pub use visibility::VisibilityPolicy;
+#[cfg(feature = "connect-host")]
+pub use watch::{
+    peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
+    PeerConfigSnapshot,
+};
 #[cfg(feature = "transport")]
 pub use ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};

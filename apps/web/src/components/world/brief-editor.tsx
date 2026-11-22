@@ -1,5 +1,4 @@
 /**
- * Brief inline editor (plan v1219-world-module T2) — a single textarea that
  * creates (or edits) the era KnowledgeEntry backing the Brief layer through
  * {@link useSaveBrief}. Product-owned behaviour:
  *
@@ -22,7 +21,6 @@ import { NexusClientError } from '@/lib/nexus';
 import { useSaveBrief } from './use-brief-mutation';
 
 /**
- * Extract `validation_summary.errors[]` from a World KB 422 error (shared
  * with the era-create dialog's copy of the same defensive narrowing).
  */
 function extractValidationErrors(err: unknown): string[] {
@@ -84,7 +82,6 @@ export function BriefEditor({
           : err instanceof Error
             ? err.message
             : String(err);
-      // Draft is caller-state (`text`) — untouched by the failure; the editor
       // stays mounted so the copy's "可直接重试" is literally true.
       setError(t('worldApp.briefEditor.saveFailure', { reason }));
     }

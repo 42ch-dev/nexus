@@ -70,9 +70,6 @@ where
 
 #[napi]
 impl NativeCore {
-    // ── World lifecycle (P0-T1 authority) ───────────────────────────────────
-
-    /// `GET /v1/daemon/narrative/worlds` — read-model World list.
     #[napi]
     pub async fn narrative_list_worlds(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -121,9 +118,6 @@ impl NativeCore {
         .await
     }
 
-    // ── World KB mutations + projection (P0-T1) ─────────────────────────────
-
-    /// `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate`.
     #[napi]
     pub async fn promote_world_kb_candidate(
         &self,
@@ -172,9 +166,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Fork, pack, rules, world findings (P0-T2) ───────────────────────────
-
-    /// `POST /v1/daemon/worlds/{world_id}/forks`.
     #[napi]
     pub async fn create_world_fork(
         &self,
@@ -198,7 +189,6 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackExportRequest = decode(request_json, "request")?;
-        // The explicit author intent for owned known-private material travels
         // with the request (v1.191 P1 T10, holder-governance.md §6).
         let include_owned_private = request.include_owned_private;
         self.json_call(principal_handle, async move |core, principal| {
@@ -317,9 +307,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Timeline reads (P0-T3) ──────────────────────────────────────────────
-
-    /// `GET /v1/daemon/timeline/overview?cursor=`.
     #[napi]
     pub async fn timeline_overview(
         &self,
@@ -327,7 +314,6 @@ impl NativeCore {
         query_json: Buffer,
     ) -> Result<Buffer> {
         let query: WireTimelineOverviewQuery = decode(query_json, "query")?;
-        // The wire cursor is a length-bounded newtype; the domain carrier is
         // the plain string. Re-serialize through `to_string` (never a lossy
         // debug print).
         let domain = CoreTimelineOverviewQuery {
@@ -366,9 +352,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Work lifecycle (P1-T1 authority) ────────────────────────────────────
-
-    /// `GET /v1/daemon/works` — generated list envelope straight through.
     #[napi]
     pub async fn list_works(&self, principal_handle: String, query_json: Buffer) -> Result<Buffer> {
         let query: ListWorksQuery = decode(query_json, "query")?;
@@ -434,7 +417,6 @@ impl NativeCore {
             creative_brief: request.creative_brief,
             intake_status: request.intake_status,
             status: request.status,
-            // Tri-state binding fields ride the shared carrier grammar
             // (`nexus_contracts::tristate`, `x-nexus-tri-state`); this boundary
             // only names the field in its own `invalid <field>: <reason>` refusal.
             world_id: presence_string(request.world_id)
@@ -448,7 +430,6 @@ impl NativeCore {
             auto_review_master_on_timeout: request.auto_review_master_on_timeout,
             auto_chain_interrupted: request.auto_chain_interrupted,
             work_profile: request.work_profile,
-            // The schedule-id list is the host-tool seam (`nexus.work.schedule.set`);
             // no HTTP caller supplies it, and the core treats `None` as "untouched".
             schedule_ids: None,
         };
@@ -557,9 +538,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Authoring pool + inspiration (P1-T1) ────────────────────────────────
-
-    /// `GET /v1/daemon/works/pool`.
     #[napi]
     pub async fn list_work_pool(
         &self,
@@ -767,9 +745,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Chapter / outline content (P1-T2) ───────────────────────────────────
-
-    /// `GET /v1/daemon/works/{work_id}/chapters/`.
     #[napi]
     pub async fn list_chapters(
         &self,
@@ -936,9 +911,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Findings (P1-T3) ────────────────────────────────────────────────────
-
-    /// Map a generated create-finding wire body onto the core carrier,
     /// applying the legacy wire defaults (`target_executor` = `none`,
     /// `kind` = `craft`).
     fn finding_create(
@@ -1012,7 +984,6 @@ impl NativeCore {
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_findings(&principal, work_id, domain).await?;
-            // The core page carries the same generated item/pagination types;
             // only the carrier struct is non-Serializable.
             Ok(serde_json::json!({
                 "items": page.items,
@@ -1121,7 +1092,6 @@ impl NativeCore {
             let report = core
                 .list_stale_findings(&principal, threshold_seconds)
                 .await?;
-            // StaleFindingEntry carries no Serialize: map field-wise.
             let findings: Vec<serde_json::Value> = report
                 .findings
                 .iter()
@@ -1167,9 +1137,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Reading depth (P1-T3) ───────────────────────────────────────────────
-
-    /// `GET /v1/daemon/reading/progress?work_id=&chapter=`.
     #[napi]
     pub async fn get_reading_progress(
         &self,

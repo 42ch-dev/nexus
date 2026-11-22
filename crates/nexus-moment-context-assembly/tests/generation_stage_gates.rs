@@ -108,7 +108,6 @@ async fn assemble_for(stage: Option<GenerationStage>) -> String {
 
 #[tokio::test]
 async fn style_post_history_fills_for_produce_and_review() {
-    // AC-I4 on-side: `style.post_history` present for `produce` + `review`.
     for stage in [GenerationStage::Produce, GenerationStage::Review] {
         let full = assemble_for(Some(stage)).await;
         assert!(
@@ -119,7 +118,6 @@ async fn style_post_history_fills_for_produce_and_review() {
             full.contains("- **PostStyle**"),
             "{stage}: style entry must render"
         );
-        // Every other slot still fills.
         for heading in [
             "### World (Before)",
             "### World (After)",
@@ -134,8 +132,6 @@ async fn style_post_history_fills_for_produce_and_review() {
 
 #[tokio::test]
 async fn style_post_history_absent_for_non_produce_review_stages() {
-    // AC-I4 off-side: absent for intake / research / persist /
-    // work_maintenance — while every other slot keeps filling.
     for stage in [
         GenerationStage::Intake,
         GenerationStage::Research,
@@ -165,8 +161,6 @@ async fn style_post_history_absent_for_non_produce_review_stages() {
 
 #[tokio::test]
 async fn system_maintenance_renders_no_lore_slots_at_all() {
-    // `system_maintenance`: the whole matrix row is off — no lore slots, no
-    // World-KB section (spec §4, `_system.*` isolation invariant).
     let full = assemble_for(Some(GenerationStage::SystemMaintenance)).await;
     assert!(
         !full.contains("## World Knowledge Base"),
@@ -181,8 +175,6 @@ async fn system_maintenance_renders_no_lore_slots_at_all() {
 
 #[tokio::test]
 async fn unspecified_keeps_all_slots_on() {
-    // `unspecified` (direct CLI / inspector path — the `None` default):
-    // every slot fills (spec §4 row; the neutral byte-equivalence anchor).
     for stage in [None, Some(GenerationStage::Unspecified)] {
         let full = assemble_for(stage).await;
         for marker in [
@@ -221,8 +213,6 @@ impl StubDirectiveStore {
     }
 }
 
-// `unused_async_trait_impl` (new in clippy 1.98): the stub performs no async
-// I/O; `async` is by `DirectiveStore` trait contract — toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl DirectiveStore for StubDirectiveStore {
     async fn load_active(
@@ -260,9 +250,6 @@ fn stub_directive() -> ActiveDirective {
 
 #[tokio::test]
 async fn directive_injects_regardless_of_stage() {
-    // spec §4: `moment.directive` is NOT stage-gated — it injects on every
-    // in-scope assemble (TTL governs lifetime, not stage). Verified here
-    // across a style-on stage, a style-off stage, and `system_maintenance`
     // (which gates ALL lore slots — the directive is not lore).
     for stage in [
         GenerationStage::Produce,
@@ -298,8 +285,6 @@ async fn directive_injects_regardless_of_stage() {
             "{stage}: exactly one lifecycle call per injecting assemble"
         );
 
-        // The stage gate still applies to lore independently of the
-        // directive: style off for persist, no lore at all for
         // system_maintenance.
         if stage == GenerationStage::Persist {
             assert!(

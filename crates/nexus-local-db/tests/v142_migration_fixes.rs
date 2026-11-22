@@ -13,7 +13,6 @@ async fn w01_v142_migration_idempotent() {
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Insert test data into work_chapters (requires a works row first).
     let now_ts = chrono::Utc::now().timestamp();
     // SAFETY: test-only — minimal works row for FK constraint.
     sqlx::query(
@@ -57,13 +56,11 @@ async fn w01_v142_migration_idempotent() {
     .await
     .unwrap();
 
-    // Now simulate re-running the V1.42 migration DDL manually.
     // This should succeed because of the DROP TABLE IF EXISTS guard.
     // We re-run each statement individually. Statements are extracted
     // by removing full-line comments and splitting on semicolons.
     let migration_sql = include_str!("../migrations/202606110001_v142_multi_volume_pk.sql");
 
-    // First, strip all full-line comments to avoid semicolons within comments
     // from splitting statements incorrectly.
     let sql_no_comments: String = migration_sql
         .lines()
@@ -74,13 +71,11 @@ async fn w01_v142_migration_idempotent() {
         .collect::<Vec<&str>>()
         .join("\n");
 
-    // Split by semicolons and execute each non-empty statement.
     for stmt in sql_no_comments.split(';') {
         let sql = stmt.trim();
         if sql.is_empty() {
             continue;
         }
-        // This should NOT fail — the DROP IF EXISTS guard ensures the
         // legacy table is cleaned up, and IF NOT EXISTS on indexes is safe.
         sqlx::query(sqlx::AssertSqlSafe(sql))
             .execute(&pool)
@@ -90,7 +85,6 @@ async fn w01_v142_migration_idempotent() {
             });
     }
 
-    // Verify data survived the re-run.
     let count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM work_chapters WHERE work_id = 'w01_work'")
             .fetch_one(&pool)
@@ -98,7 +92,6 @@ async fn w01_v142_migration_idempotent() {
             .unwrap();
     assert_eq!(count.0, 2, "data should survive migration re-run");
 
-    // Verify the composite PK is intact.
     let pk_check: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM pragma_table_info('work_chapters') WHERE pk > 0")
             .fetch_one(&pool)
@@ -123,7 +116,6 @@ async fn w02_volume_aware_index_coverage() {
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Check the index exists.
     let idx_count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_work_chapters_next_volume_aware'",
     )
@@ -155,7 +147,6 @@ async fn w02_volume_aware_index_coverage() {
         .collect::<Vec<String>>()
         .join("\n");
 
-    // A full table scan is the whole plan line "SCAN work_chapters". An index
     // scan keeps a USING clause — e.g. "SCAN work_chapters USING COVERING
     // INDEX …" — and is not a full table scan.
     let full_scan = plan_rows

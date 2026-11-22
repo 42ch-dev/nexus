@@ -41,21 +41,18 @@ fn reset_removes_exact_state_files_and_preserves_everything_else() {
     let home = TempDir::new().expect("home");
     let store = seed_store(home.path(), "ctr_alpha", "default", &STATE_FILES);
 
-    // Sibling workspace data and the store's stable admission locks stay.
     fs::write(store.join("workspace.toml"), "keep").expect("toml");
     fs::write(store.join("state.db.migration.lock"), "").expect("migration lock");
     fs::write(store.join("state.db.engine.lock"), "").expect("engine lock");
     fs::create_dir_all(store.join("kb").join("entries")).expect("kb dir");
     fs::write(store.join("kb").join("entries").join("note.md"), "keep").expect("kb note");
 
-    // A store holding only WAL/SHM siblings is an exact-file target too.
     let siblings_only = seed_store(
         home.path(),
         "ctr_beta",
         "ws2",
         &["state.db-wal", "state.db-shm"],
     );
-    // A non-workspace entry under `creators/` is not a store.
     fs::write(
         home.path()
             .join(".nexus42")
@@ -64,7 +61,6 @@ fn reset_removes_exact_state_files_and_preserves_everything_else() {
         "keep",
     )
     .expect("stray file");
-    // The creative user workspace is never a reset target.
     let user_doc = home.path().join("Documents").join("nexus").join("default");
     fs::create_dir_all(&user_doc).expect("user doc dir");
     fs::write(user_doc.join("state.db"), "user-document").expect("user doc db");
@@ -106,7 +102,6 @@ async fn live_writer_refuses_the_reset_before_any_deletion() {
     let live = seed_store(home.path(), "ctr_alpha", "default", &[]);
     let idle = seed_store(home.path(), "ctr_beta", "ws2", &STATE_FILES);
 
-    // A real admitted direct writer on `ctr_alpha`: shared migration fence plus
     // the retained in-process guard (the daemon/test shape). It owns a real
     // `state.db` (plus its WAL/SHM siblings while the pool is open).
     let guarded = init_guarded_pool(&live.join("state.db"))
@@ -133,7 +128,6 @@ async fn live_writer_refuses_the_reset_before_any_deletion() {
         );
     }
 
-    // Release the writer (cooperative pool closed, retained guard dropped) and
     // the same reset succeeds.
     guarded.pool().close().await;
     drop(guarded);
@@ -164,7 +158,6 @@ fn symlinked_state_file_refuses_the_reset() {
         matches!(&refused, Err(LocalDbError::PathEscape { path, .. }) if path.ends_with("state.db-wal")),
         "a symlinked state file must refuse the reset, got {refused:?}"
     );
-    // The refusal is a scan-time denial: nothing anywhere was deleted.
     for name in STATE_FILES {
         assert!(
             exists(&intact.join(name)),
@@ -270,7 +263,6 @@ fn a_state_file_swapped_for_a_symlink_after_fencing_is_refused() {
     let victim = outside.join("state.db");
     fs::write(&victim, "victim-payload").expect("victim file");
 
-    // The seam runs with every fence held and before the first deletion: it
     // swaps the admitted `state.db` for a symlink out of the store.
     let refused = reset_local_state_with_post_fence_hook(home.path(), &mut || {
         fs::remove_file(store.join("state.db")).expect("remove the admitted file");
@@ -310,7 +302,6 @@ fn a_store_directory_swapped_after_fencing_cannot_redirect_the_deletion() {
     let home = TempDir::new().expect("home");
     let store = seed_store(home.path(), "ctr_alpha", "default", &STATE_FILES);
     fs::write(store.join("workspace.toml"), "keep").expect("sibling data");
-    // A replacement directory put at the admitted path: a rival store whose
     // state files are not this reset's target.
     let replacement = home.path().join("replacement-workspace");
     fs::create_dir_all(&replacement).expect("replacement dir");
@@ -319,7 +310,6 @@ fn a_store_directory_swapped_after_fencing_cannot_redirect_the_deletion() {
     }
     let admitted_move = home.path().join("moved-admitted");
 
-    // The seam runs with every fence held: move the admitted directory aside and
     // point its path at the replacement.
     let reset = reset_local_state_with_post_fence_hook(home.path(), &mut || {
         fs::rename(&store, &admitted_move).expect("move the admitted directory");

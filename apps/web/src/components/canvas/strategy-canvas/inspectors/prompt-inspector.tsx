@@ -1,5 +1,4 @@
 /**
- * Prompt-template inspector section — displays the body of the state's prompt.
  *
  * The rendered document is never the preset YAML this section would write, so
  * the field states the route that does reach the template instead of a Save.

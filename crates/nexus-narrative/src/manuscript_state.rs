@@ -134,8 +134,6 @@ impl ManuscriptState {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 impl From<nexus_contracts::local::domain::ManuscriptState> for ManuscriptState {
     fn from(c: nexus_contracts::local::domain::ManuscriptState) -> Self {
         Self {
@@ -183,19 +181,15 @@ mod tests {
     fn test_full_phase_progression() {
         let mut ms = ManuscriptState::new("wrk_test", "wld_test", "ctr_author");
 
-        // brainstorm → draft
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Draft);
 
-        // draft → review
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Review);
 
-        // review → finalize
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Finalize);
 
-        // finalize → published
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Published);
     }
@@ -222,7 +216,6 @@ mod tests {
         for _ in 0..3 {
             ms.promote().unwrap();
         }
-        // ms is now finalize
         assert!(ms.validate_pre_gate_cleanup(5).is_err());
     }
 
@@ -232,7 +225,6 @@ mod tests {
         for _ in 0..4 {
             ms.promote().unwrap();
         }
-        // ms is now published
         assert!(ms.validate_pre_gate_cleanup(0).is_ok());
     }
 

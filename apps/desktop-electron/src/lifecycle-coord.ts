@@ -1,5 +1,4 @@
 /**
- * Lifecycle coordination for the app-managed service owner (v1.192 P0-T4).
  *
  * Shared by the service controller (main side) and the utility owner: the
  * crash-retry backoff schedule (parity row 10) and the frozen close-truth

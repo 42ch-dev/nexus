@@ -1,5 +1,4 @@
 /**
- * Simulate hook — the trajectory behind the Approve disclosure.
  *
  * `POST /v1/daemon/strategies/{strategy_id}/simulate` is non-mutating but it is
  * a POST, so the result is held as a per-surface snapshot instead of a query:
@@ -50,7 +49,6 @@ function canonicalJson(value: unknown): string {
 }
 
 /**
- * Identity of a document's content. `revision` and `content_hash` are left out
  * on purpose: they are the fields the route hardcodes.
  */
 function identityOf(doc: WorkflowDocument): string {
@@ -66,7 +64,6 @@ function sameDocument(snapshot: SimulationSnapshot, doc: WorkflowDocument): bool
 export interface SimulationState {
   status: SimulationStatus;
   /**
-   * Whether the held trajectory no longer describes the document. Read apart
    * from `status` so the stale banner survives a walk in flight (`running`) or
    * a failed re-read (`failed`).
    */
@@ -76,7 +73,6 @@ export interface SimulationState {
   error: unknown;
   run: (candidate: WorkflowDocument) => Promise<void>;
   /**
-   * Simulate the installed strategy: re-read its candidate IR and walk it only
    * when that IR no longer matches the trajectory in hand.
    */
   runStrategy: (strategyId: string) => Promise<void>;
@@ -88,7 +84,6 @@ export function useSimulationTrajectory(
 ): SimulationState {
   const client = useNexusClient();
   const [snapshot, setSnapshot] = useState<SimulationSnapshot | null>(null);
-  // Set when a re-read installed document moved on: the held trajectory is
   // superseded even though no candidate prop exists to compare against.
   const [movedOn, setMovedOn] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -96,14 +91,12 @@ export function useSimulationTrajectory(
 
   const isStale = useMemo(() => {
     if (!snapshot) return false;
-    // A fetched document has no live candidate prop; `runStrategy` decides.
     if (!candidate) return movedOn;
     return !sameDocument(snapshot, candidate);
   }, [candidate, snapshot, movedOn]);
 
   const simulate = useCallback(
     async (doc: WorkflowDocument) => {
-      // Taken before the request: a mutation while the POST is in flight must
       // not record an identity the server never walked.
       const identity = identityOf(doc);
       const trajectory = await client.simulateStrategy(doc.id, { document: doc });
@@ -116,10 +109,8 @@ export function useSimulationTrajectory(
   const inFlight = useRef(false);
 
   const walk = useCallback(
-    // A `null` load result means the held trajectory still describes the
     // document, so nothing is walked.
     async (load: () => Promise<WorkflowDocument | null>) => {
-      // One walk at a time. `status` cannot carry this alone: a stale snapshot
       // is re-walked while it is still held, so a second click would otherwise
       // start a second walk.
       if (inFlight.current) return;
@@ -130,7 +121,6 @@ export function useSimulationTrajectory(
         const doc = await load();
         if (doc) await simulate(doc);
       } catch (caught) {
-        // A refused read/walk must not discard a trajectory in hand: the
         // snapshot still records the document the server walked, so keep it.
         // Only the error is new, and the next open re-reads.
         setError(caught);
@@ -152,7 +142,6 @@ export function useSimulationTrajectory(
       walk(async () => {
         const doc = await client.getStrategyWorkflowIr(strategyId);
         if (snapshot && sameDocument(snapshot, doc)) {
-          // The document came back to what the held trajectory walked, so the
           // moved-on mark no longer applies and must not pin the surface stale.
           setMovedOn(false);
           return null;
@@ -169,7 +158,6 @@ export function useSimulationTrajectory(
     setError(null);
   }, []);
 
-  // A walk in flight outranks a stale snapshot so the surface shows progress;
   // the snapshot's own staleness (`isStale`) still drives the stale banner.
   // A failed walk outranks staleness too: the error is the newer fact.
   const status: SimulationStatus = isRunning

@@ -1,5 +1,4 @@
 /**
- * V1.75 A8 — chapter outline content editor accessibility contract.
  *
  * Locks the WCAG 2.1 AA surface of the in-inspector TipTap toolbar so a future
  * refactor cannot silently drop the toggle semantics, labels, or keyboard
@@ -13,7 +12,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { i18n } from '@/lib/i18n/config';
 
-// Mock the outline read so the editor mounts without a daemon round-trip.
 vi.mock('@/api/queries', () => {
   return {
     useChapterOutline: () => {
@@ -34,7 +32,6 @@ vi.mock('@/api/queries', () => {
   };
 });
 
-// Minimal TipTap mock: the toolbar reads `editor.isActive(...)` + drives toggles
 // through `editor.chain().focus().<toggle>().run()`. Provide just enough surface.
 const mockChainRun = vi.fn();
 const mockChain = {
@@ -110,7 +107,6 @@ describe('ChapterOutlineContentEditor — WCAG 2.1 AA toolbar contract (V1.75 A8
     for (const label of labels) {
       const btn = screen.getByRole('button', { name: label });
       expect(btn).toBeInTheDocument();
-      // aria-pressed must be present so screen readers announce toggle state.
       expect(btn).toHaveAttribute('aria-pressed');
     }
   });
@@ -134,7 +130,6 @@ describe('ChapterOutlineContentEditor — i18n (V1.129 P2 — R-P1-001)', () => 
     await i18n.changeLanguage('zh-CN');
     renderEditor();
 
-    // Sample: toolbar labels now resolve from canvas.chapterOutlineContentEditor.toolbar.*.
     expect(screen.getByRole('button', { name: '粗体' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '标题 1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '引用' })).toBeInTheDocument();

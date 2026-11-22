@@ -180,7 +180,6 @@ pub fn is_valid_transition(from: &str, to: &str) -> bool {
         ),
         "triaged" => matches!(to, "in_review" | "resolved" | "wont_fix" | "duplicate"),
         "in_review" => matches!(to, "resolved" | "wont_fix" | "duplicate"),
-        // Terminal states and (unreachable) unknowns both reject every
         // outbound transition. `is_valid_status` already filtered the
         // unknown `from` case above, so this arm is only reached for the
         // three terminal statuses.
@@ -471,7 +470,6 @@ pub async fn list_findings(
     let limit = filters.limit.unwrap_or(100);
     let offset = filters.offset.unwrap_or(0);
 
-    // R-V149P0-01: dispatch on the comma-separated status shape. Use a
     // match-guard rather than `if let … && …` so we hand the matched
     // status string straight to the helper without a follow-up `.expect`.
     match filters.status.as_ref() {
@@ -562,7 +560,6 @@ async fn list_findings_with_status_set(
         statuses.push(trimmed.to_string());
     }
     if statuses.is_empty() {
-        // Edge case: `?status=,` or `?status=,,` — treat as no filter so
         // the caller gets the unfiltered list rather than a confusing
         // empty page. The other filters (work_id / chapter / severity)
         // still apply via the no-status branch below.
@@ -877,7 +874,6 @@ async fn enforce_status_transition(
             .await?;
 
     let Some(from) = current_status else {
-        // Row not found — fall through to the UPDATE, which will report
         // `rows_affected = 0` and the caller surfaces NotFound.
         return Ok(());
     };
@@ -885,7 +881,6 @@ async fn enforce_status_transition(
     if is_valid_transition(&from, new_status) {
         Ok(())
     } else {
-        // V1.49 P0 W-1: typed variant so the PATCH handler maps this to
         // `INVALID_TRANSITION` without string-prefix sniffing.
         Err(LocalDbError::IllegalTransition {
             from,
@@ -931,7 +926,6 @@ pub async fn update_finding(
     patch: &FindingPatch,
     now_epoch: i64,
 ) -> Result<bool, LocalDbError> {
-    // R-V139P1-W-1: validate patch enum fields if provided.
     // V1.49 P0 W-1: PATCH-path enum failures emit the typed `InvalidEnum`
     // variant (mapped to `INVALID_INPUT` by the handler) so they are
     // distinguishable from illegal transitions (`INVALID_TRANSITION`). The
@@ -965,7 +959,6 @@ pub async fn update_finding(
         }
     }
 
-    // V1.49 F6: enforce the lifecycle transition table. When the caller
     // patches `status`, fetch the row's current status and reject illegal
     // transitions (e.g. resolved → open, terminal → anything) before any
     // write. The DAO already validates that the target string is a known
@@ -975,7 +968,6 @@ pub async fn update_finding(
         enforce_status_transition(pool, creator_id, finding_id, new_status).await?;
     }
 
-    // Build the SET clause dynamically so `rule_suggestion = ?` is only
     // included when the caller explicitly wants to touch the column.
     // This lets `Some(None)` bind SQL NULL (clear) rather than COALESCE
     // back to the existing value.
@@ -1029,7 +1021,6 @@ pub async fn update_finding(
     if let Some(ref v) = patch.kind {
         q = q.bind(v);
     }
-    // rule_suggestion is Option<Option<String>> — the if-guard unwraps the
     // outer Option; the inner &Option<String> binds directly (None → NULL).
     if let Some(ref v) = patch.rule_suggestion {
         q = q.bind(v);
@@ -1432,7 +1423,6 @@ pub async fn create_finding_from_review_tx(
 ) -> Result<String, LocalDbError> {
     validate_finding_enums(&verdict.severity, "open", &verdict.target_executor)?;
 
-    // V1.47 §8.2: `kind` defaults to `"craft"` when empty (defensive — callers
     // should set it explicitly, but the spec lists `craft` as a safe default).
     // V1.47 P0 fix (qc2 W-2): once non-empty, `kind` is validated against the
     // closed set [`FindingKind::ALL_STRS`]; unknown values are rejected with
@@ -1444,7 +1434,6 @@ pub async fn create_finding_from_review_tx(
     };
     let now = chrono::Utc::now().timestamp();
 
-    // V1.47 P0 fix (qc2 W-2): reject empty-after-trim and oversized
     // `rule_suggestion` payloads before any DB call.
     let rule_suggestion = normalize_rule_suggestion(verdict.rule_suggestion.as_deref())?;
 
@@ -1547,9 +1536,6 @@ mod tests {
     use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
 
-    // ── V1.47 P0 (qc2 W-2): closed `kind` set + `rule_suggestion` cap ───────
-
-    /// All enum variants in [`FindingKind::ALL_STRS`] validate successfully
     /// and return the input string unchanged.
     #[test]
     fn finding_kind_validate_accepts_known_values() {
@@ -1558,7 +1544,6 @@ mod tests {
                 .unwrap_or_else(|e| panic!("known kind '{known}' should validate: {e}"));
             assert_eq!(validated, known);
         }
-        // sanity: the enum variant count matches the const ALL_STRS slice
         // length. V1.48 P0 T4: expanded from 5 → 7 to include `plot_hole`
         // and `world_inconsistency` per `novel-writing/quality-loop.md` §2.1.
         assert_eq!(
@@ -1636,7 +1621,6 @@ mod tests {
             matches!(err, LocalDbError::ConstraintViolation { ref table, .. } if table == "findings"),
             "expected ConstraintViolation on findings, got {err:?}"
         );
-        // None stays None — no rejection, no normalization.
         assert!(
             normalize_rule_suggestion(None)
                 .expect("None should pass through")
@@ -1645,9 +1629,6 @@ mod tests {
         );
     }
 
-    // ── C-1 fix: index presence (existing) ──────────────────────────────────
-
-    /// C-1 fix: Verify the spec-required composite index on
     /// (`work_id`, chapter, status) exists after migration.
     /// Per novel-writing/quality-loop.md §2.1: chapter-scoped finding lookups
     /// (the review-stage hook's hot path) must use this index.
@@ -1676,9 +1657,6 @@ mod tests {
         );
     }
 
-    // ── V1.48 P1 (T4): chapter-scoped open-findings query ────────────────────
-
-    /// Build a minimal `Finding` row for insertion in tests.
     fn row(
         id: &str,
         work_id: &str,
@@ -1717,7 +1695,6 @@ mod tests {
         seed_minimal_work(&pool, WORK, CREATOR).await;
         seed_minimal_work(&pool, "wrk_other", CREATOR).await;
 
-        // Seed:
         //  - chapter=1 open (minor)
         //  - chapter=2 open (blocker)         ← must NOT appear for chapter=1
         //  - chapter=NULL open (major)        ← Work-level, must appear
@@ -1789,12 +1766,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Expect: f3 (work-level major), f1 (ch1 minor) in severity-desc order.
         let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
         assert_eq!(ids, vec!["f3", "f1"],
             "expected [work-level-major (severity major), ch1-minor (severity minor)] in that order; got {ids:?}");
 
-        // Verify chapter predicate explicitly.
         for f in &got {
             assert!(
                 f.chapter == Some(1) || f.chapter.is_none(),
@@ -1812,7 +1787,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, "ctr_test").await;
 
-        // Three minors on chapter 1, inserted with decreasing created_at.
         super::create_finding(
             &pool,
             &row("g1", WORK, Some(1), "minor", "newest", 5000, "open"),
@@ -1847,16 +1821,12 @@ mod tests {
     #[tokio::test]
     async fn list_open_findings_for_chapter_returns_empty_when_no_matches() {
         let (_dir, pool) = fresh_pool().await;
-        // No seed — table is empty.
         let got = list_open_findings_for_chapter(&pool, "ctr_test", "wrk_c", 1)
             .await
             .unwrap();
         assert!(got.is_empty(), "expected empty result on unseeded table");
     }
 
-    // ── V1.48 P3 T2: resolved-finding retention pruning ─────────────────────
-
-    /// V1.48 P3 T2 — old `resolved` rows past the retention window are purged;
     /// `open` and `wont_fix` rows are never touched.
     ///
     /// Seeds:
@@ -1872,7 +1842,7 @@ mod tests {
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 10_000_000;
-        let retention_seconds: i64 = 90 * 24 * 3_600; // 90 days
+        let retention_seconds: i64 = 90 * 24 * 3_600;
         let old_ts = now - retention_seconds - 1; // 1s past the cutoff
 
         super::create_finding(
@@ -1929,7 +1899,6 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, 1, "exactly one old resolved row should be pruned");
 
-        // Verify: pr1 gone; pr2, pr3, pr4 still present.
         let remaining: Vec<String> = sqlx::query_scalar(
             "SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id",
         )
@@ -1958,7 +1927,6 @@ mod tests {
         let retention_seconds: i64 = 90 * 24 * 3_600;
         let old_ts = now - retention_seconds - 100_000;
 
-        // cp1: old resolved (eligible). cp2: old open (skipped).
         // cp3: old wont_fix (skipped). cp4: recent resolved (skipped).
         super::create_finding(
             &pool,
@@ -2009,13 +1977,11 @@ mod tests {
         .await
         .unwrap();
 
-        // Preview must report exactly the old resolved count (1)...
         let preview = super::count_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
         assert_eq!(preview, 1, "count preview should report 1 old resolved row");
 
-        // ...and nothing was deleted yet.
         let total_before: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
                 .bind(WORK)
@@ -2024,7 +1990,6 @@ mod tests {
                 .unwrap();
         assert_eq!(total_before, 4, "count preview must not delete any rows");
 
-        // The actual prune deletes the same count the preview reported.
         let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
@@ -2044,7 +2009,6 @@ mod tests {
         let retention_seconds: i64 = 90 * 24 * 3_600;
         let old_ts = now - retention_seconds - 100_000;
 
-        // Only open rows — all old.
         super::create_finding(
             &pool,
             &row(
@@ -2091,9 +2055,7 @@ mod tests {
         let now: i64 = 30_000_000;
         let retention_seconds: i64 = 90 * 24 * 3_600;
 
-        // A resolved row exactly at the cutoff boundary (not older).
         let boundary_ts = now - retention_seconds;
-        // A resolved row 1 second inside the window.
         let inside_ts = now - retention_seconds + 1;
 
         super::create_finding(
@@ -2128,8 +2090,6 @@ mod tests {
         let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
-        // boundary_ts == cutoff → NOT < cutoff → kept.
-        // inside_ts  > cutoff   → kept.
         assert_eq!(deleted, 0, "boundary and inside-window rows must survive");
 
         let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
@@ -2140,9 +2100,6 @@ mod tests {
         assert_eq!(remaining, 2, "both recent resolved rows must survive");
     }
 
-    // ── V1.48 P3 T3: FindingPatch tri-state rule_suggestion (R-V147P0-03) ───
-
-    /// Helper: build a `FindingPatch` with only `rule_suggestion` set.
     // `Some(None)` deliberately clears the column to SQL NULL — the double
     // Option is the tri-state contract, not an accident.
     #[allow(clippy::option_option)]
@@ -2164,12 +2121,10 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed with a non-empty rule_suggestion.
         let mut f = row("cl1", WORK, Some(1), "major", "clear-test", 1000, "open");
         f.rule_suggestion = Some("original suggestion".to_string());
         super::create_finding(&pool, &f).await.unwrap();
 
-        // Verify seed.
         let before = super::get_finding(&pool, CREATOR, "cl1")
             .await
             .unwrap()
@@ -2179,7 +2134,6 @@ mod tests {
             Some("original suggestion")
         );
 
-        // Patch: Some(None) → clear to NULL.
         let updated = update_finding(
             &pool,
             CREATOR,
@@ -2210,7 +2164,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed with no rule_suggestion (NULL).
         super::create_finding(
             &pool,
             &row("st1", WORK, Some(1), "major", "set-test", 1000, "open"),
@@ -2218,7 +2171,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Patch: Some(Some("new value")) → set.
         let updated = update_finding(
             &pool,
             CREATOR,
@@ -2249,13 +2201,10 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed with a non-empty rule_suggestion.
         let mut f = row("om1", WORK, Some(1), "major", "omit-test", 1000, "open");
         f.rule_suggestion = Some("keep me".to_string());
         super::create_finding(&pool, &f).await.unwrap();
 
-        // Patch a DIFFERENT field (severity) while omitting rule_suggestion
-        // (None outer). The rule_suggestion must survive unchanged.
         let mut patch = FindingPatch {
             severity: Some("minor".to_string()),
             ..Default::default()
@@ -2278,9 +2227,6 @@ mod tests {
         );
     }
 
-    // ── V1.49 F6: status enum + lifecycle transitions ───────────────────────
-
-    /// V1.49 F6 — `VALID_STATUSES` carries the six-state lifecycle enum
     /// per `findings-lifecycle.md` §2.
     #[test]
     fn valid_statuses_carries_six_state_lifecycle() {
@@ -2336,28 +2282,24 @@ mod tests {
     /// is rejected (no-op refresh must omit the patch field).
     #[test]
     fn is_valid_transition_matches_lifecycle_diagram() {
-        // open → triaged | in_review | resolved | wont_fix | duplicate
         for to in ["triaged", "in_review", "resolved", "wont_fix", "duplicate"] {
             assert!(
                 is_valid_transition("open", to),
                 "open → {to} should be a valid transition"
             );
         }
-        // triaged → in_review | resolved | wont_fix | duplicate
         for to in ["in_review", "resolved", "wont_fix", "duplicate"] {
             assert!(
                 is_valid_transition("triaged", to),
                 "triaged → {to} should be a valid transition"
             );
         }
-        // in_review → resolved | wont_fix | duplicate
         for to in ["resolved", "wont_fix", "duplicate"] {
             assert!(
                 is_valid_transition("in_review", to),
                 "in_review → {to} should be a valid transition"
             );
         }
-        // Forbidden regressions: open/triaged are not reachable from in_review.
         assert!(
             !is_valid_transition("in_review", "open"),
             "in_review → open should be rejected"
@@ -2366,7 +2308,6 @@ mod tests {
             !is_valid_transition("in_review", "triaged"),
             "in_review → triaged should be rejected"
         );
-        // Terminal states: no outbound transitions.
         for terminal in ["resolved", "wont_fix", "duplicate"] {
             for target in [
                 "open",
@@ -2382,15 +2323,12 @@ mod tests {
                 );
             }
         }
-        // `from == to` is rejected (callers omit the patch field to refresh).
         for &s in VALID_STATUSES {
             assert!(
                 !is_valid_transition(s, s),
                 "self-transition {s} → {s} should be rejected; omit the patch field to refresh"
             );
         }
-        // Unknown endpoints are rejected even on the otherwise-permissive
-        // `open` source.
         assert!(
             !is_valid_transition("open", "closed"),
             "unknown target 'closed' should be rejected"
@@ -2518,7 +2456,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed a resolved row (terminal — no outbound transitions).
         super::create_finding(
             &pool,
             &row(
@@ -2534,7 +2471,6 @@ mod tests {
         .await
         .unwrap();
 
-        // (a) resolved → open: rejected (terminal state).
         let err = update_finding(
             &pool,
             CREATOR,
@@ -2555,8 +2491,6 @@ mod tests {
             other => panic!("expected IllegalTransition, got {other:?}"),
         }
 
-        // (b) self-loop resolved → resolved: rejected (callers must omit
-        // the patch field to refresh `updated_at`).
         let err = update_finding(
             &pool,
             CREATOR,
@@ -2574,8 +2508,6 @@ mod tests {
             "self-loop should surface as IllegalTransition, got {err:?}"
         );
 
-        // (c) reverse-edge in_review → open: rejected (in_review may only
-        // advance to terminal states per §2.1).
         super::create_finding(
             &pool,
             &row(
@@ -2607,7 +2539,6 @@ mod tests {
             "reverse-edge should surface as IllegalTransition, got {err:?}"
         );
 
-        // The rejected rows must be unchanged.
         assert_eq!(
             super::get_finding(&pool, CREATOR, "rj1")
                 .await
@@ -2676,7 +2607,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed one finding per status, all on chapter 1, all the same
         // severity so the ordering is by created_at ASC within the bucket.
         // Insert in lifecycle-enum order so created_at is monotonic.
         let statuses = [
@@ -2724,7 +2654,6 @@ mod tests {
             "actionable set must include only open + triaged; got {returned_statuses:?}"
         );
 
-        // Severity ordering within the actionable bucket is preserved
         // (severity DESC, then created_at ASC) — both seeds share `major`,
         // so created_at ASC wins; open (ts=1000) precedes triaged (ts=2000).
         let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();

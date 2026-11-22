@@ -170,8 +170,6 @@ impl ForkBranch {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 impl From<nexus_contracts::ForkBranch> for ForkBranch {
     fn from(c: nexus_contracts::ForkBranch) -> Self {
         Self {

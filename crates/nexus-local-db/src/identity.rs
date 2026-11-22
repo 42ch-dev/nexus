@@ -236,7 +236,6 @@ mod tests {
         assert_eq!(fetched.creator_id, "ctr_localTest123");
     }
 
-    // V1.176 P0 QC fix wave (qc3 S-002): the unique partial index on
     // persistent `display_name` rejects a second INSERT with the same name —
     // an honest failure instead of a silent duplicate. Two concurrent
     // 0-match reads can both mint; the index fences the second write.
@@ -263,7 +262,6 @@ mod tests {
         .await
         .expect_err("second same-name persistent INSERT must fail");
 
-        // Surface as a unique-constraint failure, not a silent duplicate row.
         let is_unique_violation = matches!(
             &err,
             LocalDbError::Sqlx(sqlx::Error::Database(db)) if db.is_unique_violation()
@@ -274,7 +272,6 @@ mod tests {
         );
     }
 
-    // qc3 S-002 companion: anonymous rows and nameless persistent rows are
     // NOT constrained — the index is partial (persistent + non-NULL name).
     #[tokio::test]
     async fn duplicate_nameless_persistent_rows_are_allowed() {
@@ -388,12 +385,10 @@ mod tests {
         .await
         .unwrap();
 
-        // First link succeeds
         link_to_platform(&pool, "ctr_localAlreadyLinked", "ctr_Platform123")
             .await
             .unwrap();
 
-        // Second link fails with IdentityAlreadyLinked
         let result = link_to_platform(&pool, "ctr_localAlreadyLinked", "ctr_Another456").await;
         assert!(result.is_err());
         assert!(matches!(

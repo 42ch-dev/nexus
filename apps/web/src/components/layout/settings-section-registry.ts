@@ -1,5 +1,4 @@
 /**
- * Typed Settings section registry + URL resolver (V1.131 P2).
  *
  * Single ordered **descriptor** SSOT for the Settings modal host and demoted
  * test shell: each entry carries `id`, i18n label key, icon, and content

@@ -1,5 +1,4 @@
 /**
- * P6-T10: one kernel, three surfaces — the drift guard.
  *
  * `CoreService::generate_strategy_candidate` has three transports: `nexus42 preset generate`, the
  * `POST /v1/daemon/strategies/{strategy_id}/generate` route, and the `nexus.strategy.generate`
@@ -98,7 +97,6 @@ states:
 }
 
 /**
- * A disposable home: the seeded wire fixture (creator + workspace + store), the four strategy
  * bundles this test addresses, and one mock ACP provider so the hosted profile can establish an
  * execution owner — the agent tool refuses without one.
  */
@@ -116,7 +114,6 @@ function seedHome() {
     writePreset(nexusHome, id);
   }
 
-  // The selected workspace's registered creative root — the one document
   // `nexus42 creator workspace create --creative-root <abs>` writes. Without it
   // the workspace composition refuses the hosted execution owner with
   // `uninitialized`, `startExecutionOwner` reports `engine_epoch: null`, and the
@@ -165,7 +162,6 @@ function assertCandidate(payload, strategyId, surface) {
   assert.ok(Array.isArray(payload.warnings), `warnings ride the output — ${detail}`);
 }
 
-// Three legs (CLI, route, agent tool) each boot a full core to prove they reach
 // one generate kernel; that is the point of the guard, so the cost stays. The
 // file needs headroom over the runner's global 180 s test timeout.
 describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () => {
@@ -202,11 +198,9 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
   }
 
   test('the CLI, the route and the agent tool reach one generate kernel', async () => {
-    // ── Leg 1: the CLI. Run before any service holds the home, so the child's direct writer opens
     // uncontended; the strategy is one of the seeded user bundles.
     const requestPath = join(home, 'legal-request.json');
     writeFileSync(requestPath, JSON.stringify(legalRequest(), null, 2));
-    // `HOME` must be the fixture's, so the CLI opens the fixture store; `RUSTUP_HOME`/`CARGO_HOME`
     // must stay the developer's, or rustup cannot resolve a toolchain under the overridden HOME.
     const cliEnv = {
       ...process.env,
@@ -230,7 +224,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
         CLI_STRATEGY,
         '--request',
         requestPath,
-        // The default output is a human summary since BUG-05; the machine
         // payload this assertion parses is behind the flag.
         '--json',
       ],
@@ -239,7 +232,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
     assert.equal(cli.status, 0, `preset generate must commit: ${cli.stderr}`);
     assertCandidate(JSON.parse(cli.stdout), CLI_STRATEGY, 'nexus42 preset generate');
 
-    // ── Leg 2: the daemon route, on the domain-only profile — no executor, so a lint-failing
     // request is exhaustion at round 1 and the D20 payload is observable as `details`.
     service = await startService(true);
     const exhausted = await post(service, generatePath(EXHAUST_STRATEGY), {
@@ -272,7 +264,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
     await service.close();
     service = null;
 
-    // ── Legs 2 and 3: the route and the agent tool, on the hosted profile the tool needs.
     service = await startService(false);
     const routed = await post(service, generatePath(ROUTE_STRATEGY), {
       base_revision: 0,
@@ -286,7 +277,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
     assertCandidate(routed.payload, ROUTE_STRATEGY, 'POST …/generate');
 
     const principal = await service.service.core.activePrincipal();
-    // The tool dispatches through the execution owner's `ToolContext`. The
     // fixture registers a creative root so the hosted owner is established —
     // the same seam `compute-http.test.mjs` uses — and there is no skip here: a
     // green run has to include this leg.

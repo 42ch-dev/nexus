@@ -1,5 +1,4 @@
 /**
- * `CharactersPage` (plan v240-actor-web-surfaces T6 + T7) — list, create,
  * bind and the per-character authoring surfaces.
  *
  * The list keeps the server's order; create posts `{ display_name, world_id }`
@@ -107,7 +106,6 @@ describe('CharactersPage', () => {
     useHandlers(
       http.get('/v1/daemon/characters', () =>
         HttpResponse.json({
-          // After create the list invalidates and re-fetches; serve the new row.
           items: posted?.display_name
             ? [character({ display_name: posted.display_name })]
             : [],
@@ -241,7 +239,6 @@ describe('CharactersPage', () => {
     }
 
     /**
-     * Register the page + per-test handlers; the baseline fills the remaining
      * artifact queries. msw picks the FIRST matching handler in a batch, so
      * per-test handlers must precede the baseline.
      */
@@ -421,13 +418,11 @@ describe('CharactersPage', () => {
       const user = userEvent.setup();
       await openArtifacts(user);
 
-      // The read path fires on mount with force_regenerate=false.
       await screen.findByText('Aria keeps to the road.');
       expect(seen).toEqual([false]);
 
       await user.click(screen.getByRole('button', { name: 'Regenerate' }));
       await screen.findByText('A new reflection.');
-      // Read on mount, explicit regenerate, then the cache-busting refetch.
       await waitFor(() => expect(seen).toEqual([false, true, false]));
     });
 
@@ -444,7 +439,6 @@ describe('CharactersPage', () => {
       await openArtifacts(user);
 
       await screen.findByText('Bind the character to a world before reading beliefs.');
-      // The list query is `enabled`-gated on the binding selection; with no
       // binding row and an empty selection there is no code path that fires it.
       expect(tomCalls).toBe(0);
     });
@@ -491,7 +485,6 @@ describe('CharactersPage', () => {
       const user = userEvent.setup();
       await openArtifacts(user);
 
-      // No binding pre-selected → still no list call.
       await screen.findByLabelText('Binding');
       expect(tomCalls).toBe(0);
 
@@ -522,7 +515,6 @@ describe('CharactersPage', () => {
 
     describe('knowledge surface (T8)', () => {
       const entryId = 'kne_11111111111111111111111111111111';
-      // revision 3 (not 0): proves expected_revision comes from the list row.
       const entry = {
         entry_id: entryId,
         owner: { kind: 'character', id: characterId },
@@ -574,7 +566,6 @@ describe('CharactersPage', () => {
         expect(detailCalls).toBe(0);
         await user.click(screen.getByRole('button', { name: 'Edit' }));
 
-        // The read fires only when a row is opened for editing, and the
         // returned summary prefills the form.
         const form = await screen.findByRole('form', { name: 'Edit entry' });
         await waitFor(() => expect(detailCalls).toBe(1));
@@ -624,7 +615,6 @@ describe('CharactersPage', () => {
         let createdBody: Record<string, unknown> | null = null;
         let characterPathPosts = 0;
         useArtifactsPage([
-          // The character knowledge path has no create; a POST there is the
           // address-split violation this test pins against.
           http.post(`/v1/daemon/characters/${characterId}/knowledge`, () => {
             characterPathPosts += 1;
@@ -685,7 +675,6 @@ describe('CharactersPage', () => {
     });
 
     it('drops per-character panel state and never reads the cross pair', async () => {
-      // Every knowledge detail read issued for character B. Without the panel
       // remount key, switching A → B carries `editingId` over and fires a
       // detail read for (B, A's entry) — the cross pair this test pins down.
       const bDetailReads: string[] = [];
@@ -751,12 +740,10 @@ describe('CharactersPage', () => {
       const bexRow = screen.getByText('Bex').closest('li') as HTMLElement | null;
       if (!ariaRow || !bexRow) throw new Error('character rows missing');
 
-      // Bindings panel for A: leave a draft in the form.
       await user.click(within(ariaRow).getByRole('button', { name: 'Bindings' }));
       await screen.findByText('World bindings — Aria');
       await user.type(screen.getByLabelText('World ID'), 'wld-from-aria');
 
-      // Artifacts panel for A: leave a pending digest draft and open the
       // knowledge edit form (selects A's entry).
       await user.click(within(ariaRow).getByRole('button', { name: 'Artifacts' }));
       await screen.findByText('Pending review — Aria');
@@ -766,20 +753,16 @@ describe('CharactersPage', () => {
       const editForm = await screen.findByRole('form', { name: 'Edit entry' });
       await within(editForm).findByDisplayValue('Mira');
 
-      // Switch both panels to B.
       await user.click(within(bexRow).getByRole('button', { name: 'Bindings' }));
       await screen.findByText('World bindings — Bex');
-      // The bindings draft must not survive the switch.
       expect(screen.getByLabelText('World ID')).toHaveValue('');
       await user.click(within(bexRow).getByRole('button', { name: 'Artifacts' }));
       await screen.findByText('Pending review — Bex');
 
-      // Nothing from A carries over: no draft, no open edit form, no entry.
       expect(screen.getByLabelText('Raw digest')).toHaveValue('');
       expect(screen.queryByRole('form', { name: 'Edit entry' })).toBeNull();
       expect(screen.queryByText('Mira')).toBeNull();
       await screen.findByText('No knowledge entries yet.');
-      // B's knowledge list resolving means B's panel queries have settled; by
       // then a cross-pair detail read (the F-001 leak) would have been issued.
       await waitFor(() => expect(bDetailReads).toEqual([]));
     });

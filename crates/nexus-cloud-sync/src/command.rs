@@ -129,7 +129,6 @@ impl SyncCommandVariant {
                 creator_id,
             }),
             "fork_world" => {
-                // Fork world requires target_world_id — check requested_by for V1.0
                 let target_world_id = cmd
                     .requested_by
                     .as_ref()

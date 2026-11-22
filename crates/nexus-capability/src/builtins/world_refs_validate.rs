@@ -95,7 +95,6 @@ pub fn validate_world_refs<S: BuildHasher>(
     for raw in world_refs {
         let trimmed = raw.trim().to_string();
 
-        // Reject duplicates after trimming
         if !seen.insert(trimmed.clone()) {
             findings.push(WorldRefFinding {
                 entry: raw.clone(),
@@ -105,7 +104,6 @@ pub fn validate_world_refs<S: BuildHasher>(
             continue;
         }
 
-        // Reject empty after trim
         if trimmed.is_empty() {
             findings.push(WorldRefFinding {
                 entry: raw.clone(),
@@ -115,11 +113,8 @@ pub fn validate_world_refs<S: BuildHasher>(
             continue;
         }
 
-        // Check existence in valid_ids
         if !valid_ids.contains(&trimmed) {
-            // Determine severity based on stage and world binding
             let (severity, message) = if !params.is_world_bound {
-                // Legacy V1.39 worldless Work: always warn-only (backward-compat read).
                 (
                     WorldRefSeverity::Warning,
                     format!(
@@ -128,7 +123,6 @@ pub fn validate_world_refs<S: BuildHasher>(
                     ),
                 )
             } else if params.stage == ValidationStage::Outline {
-                // Outline: warnings for World-bound Works
                 (
                     WorldRefSeverity::Warning,
                     format!(
@@ -137,7 +131,6 @@ pub fn validate_world_refs<S: BuildHasher>(
                     ),
                 )
             } else {
-                // Finalize: errors for World-bound Works
                 has_error = true;
                 (
                     WorldRefSeverity::Error,
@@ -155,7 +148,6 @@ pub fn validate_world_refs<S: BuildHasher>(
         }
     }
 
-    // Determine if validation blocks the transition
     let blocks = has_error && !params.force;
 
     WorldRefsValidationResult { findings, blocks }
@@ -248,7 +240,6 @@ mod tests {
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.findings[0].severity, WorldRefSeverity::Warning);
         assert!(!result.blocks);
-        // Legacy worldless Works produce advisory warnings mentioning legacy
         assert!(
             result.findings[0].message.contains("legacy V1.39"),
             "legacy worldless warning should mention V1.39 legacy"

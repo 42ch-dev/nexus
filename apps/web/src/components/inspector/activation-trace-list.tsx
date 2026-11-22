@@ -1,5 +1,4 @@
 /**
- * Activation trace list — P1 T1 (DF-76). Read-only.
  *
  * Renders one row per `activation_trace` entry: canonical name, a fired/missed
  * badge (from `accepted`), the human-readable reason, the slot the entry
@@ -48,7 +47,6 @@ export function ActivationTraceList({ trace, slotByEntry }: ActivationTraceListP
     <ol className="flex flex-col gap-2" data-testid="activation-trace">
       {trace.map((entry) => {
         const fired = entry.accepted;
-        // Slot is only meaningful for fired entries (the packet captures the
         // post stage-gate routing of accepted entries).
         const slot = fired ? slotByEntry.get(entry.entry_id) : undefined;
         return (

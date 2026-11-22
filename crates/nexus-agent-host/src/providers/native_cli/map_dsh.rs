@@ -5,6 +5,8 @@
 //! `assistant/message` units during `Session::run`, and reconciles the
 //! high-level `RunResult` with a boolean `emitted_root_text` (no cumulative
 //! transcript). Consumed by the dsh provider execute loop and producer.
+//!
+//! See docs/specs/agents/agent-host.md
 
 use deepseek_harness_sdk::api::extract_finish_reason;
 use deepseek_harness_sdk::{Error, Notification, RunResult};
@@ -129,7 +131,6 @@ fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, Ro
                 return Ok(DshNotificationClass::Ignore);
             }
         }
-        // Absent or non-string `type` is a malformed recognized envelope.
         None | Some(_) => return Err(RootEventFailure::Protocol),
     }
     let len = measure_assistant_message_text(event).map_err(|_| RootEventFailure::Protocol)?;
@@ -161,7 +162,6 @@ fn measure_assistant_message_text(event: &Value) -> Result<usize, DshProtocolFai
         }
         match block.get("text") {
             Some(Value::String(text)) => len += text.len(),
-            // Absent, null, or non-string text is a malformed block.
             None | Some(_) => return Err(DshProtocolFailure),
         }
     }
@@ -177,7 +177,6 @@ fn build_assistant_message_text(event: &Value) -> Result<String, DshProtocolFail
         }
         match block.get("text") {
             Some(Value::String(text)) => out.push_str(text),
-            // Absent, null, or non-string text is a malformed block.
             None | Some(_) => return Err(DshProtocolFailure),
         }
     }

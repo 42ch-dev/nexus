@@ -289,7 +289,6 @@ async fn describe_reports_the_served_surface() {
             .any(|flag| flag == "spoke-memory"),
         "the served family is advertised: {body}"
     );
-    // Matrix-aware (N4-R): the default open genuinely serves the reflection
     // family, so the honest advertisement names it; the unadvertised shape
     // keeps the base family alone. `spoke-memory-transfer` stays gated in both.
     assert!(
@@ -453,7 +452,6 @@ async fn space_freeze_is_revision_checked_and_key_idempotent() {
         "grants.grant is outside the §8.2 allowlist"
     );
 
-    // §8.2: revoke stays admissible while frozen, so an incident can be contained.
     let revoked = wire(
         &provider
             .revoke_grant(
@@ -686,7 +684,6 @@ async fn grants_grant_list_revoke_and_non_amplification() {
         "the revoked grant keeps its audit record with revoked_at: {after_revoke}"
     );
 
-    // Revocation is terminal for coverage, not for the ledger: the grantee can
     // no longer run a `capture`-gated op.
     let denied = wire(
         &provider
@@ -723,7 +720,6 @@ async fn refusals_travel_the_reject_channel() {
         LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
             .await
             .expect("unadvertised provider open");
-    // Matrix-aware (N4-R): the advertised open serves the reflection family,
     // so the unserved-op refusal is asserted through the
     // deliberately-unadvertised constructor.
     let unsupported = unsupported
@@ -746,7 +742,6 @@ async fn refusals_travel_the_reject_channel() {
         }
         SpokeResult::Ok(_) => panic!("an unserved op must be rejected: {unsupported:?}"),
     }
-    // The envelope carries the code as-is and nothing that restates a mapping
     // belonging to the receiving side.
     let envelope = wire(&unsupported);
     assert!(
@@ -763,7 +758,6 @@ async fn gated_families_refuse_with_the_unsupported_code() {
     let provider = open_provider(&env).await;
     let p = principal(CREATOR);
 
-    // Matrix-aware (N4-R): the advertised open genuinely serves the reflection
     // family, so the dispatch-deny refusal is asserted through the
     // deliberately-unadvertised constructor; the advertised leg asserts the
     // honest success class below.
@@ -988,7 +982,6 @@ async fn fenced_and_archived_subjects_reject_writes() {
     );
     assert_eq!(error_code(&grant_while_archived), "SUBJECT_FENCED");
 
-    // Space-wide issuance names no gated subject, so it still commits.
     let space_wide = wire(
         &provider
             .grant(&admin, grant_request("k-space-wide", "capture", OTHER))
@@ -1067,7 +1060,6 @@ async fn writes_over_an_un_ensured_subject_refuse_not_found() {
     );
     assert_eq!(receipt(&ensured)["result"]["created"], true);
 
-    // Same principal, same grant, subject now exists: the refusal was absence.
     let after = wire(
         &provider
             .capture(&writer, capture_request("k-capture-present", None, TEXT))
@@ -1218,7 +1210,6 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     let provider = open_provider(&env).await;
     let admin = principal(CREATOR);
 
-    // The provisioned admin grant never expires, so this non-expiring issuance
     // is admitted and committed.
     let issued = wire(
         &provider
@@ -1227,7 +1218,6 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     );
     let receipt_id = receipt(&issued)["receipt_id"].as_str().unwrap().to_owned();
 
-    // An additional, expiring admin grant for the same principal: the §7.9
     // applicable set now carries a finite earliest expiry.
     let expiring_admin = dto::<schemas::MemoryGrantsGrantRequest>(json!({
         "space_id": SPACE,
@@ -1239,7 +1229,6 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     let tightened = wire(&provider.grant(&admin, expiring_admin).await);
     assert_eq!(receipt(&tightened)["result"]["revision"], 1);
 
-    // A *fresh* non-expiring issuance is now refused under that bound ...
     let fresh = wire(
         &provider
             .grant(&admin, grant_request("k-bound-fresh", "capture", OTHER))
@@ -1251,7 +1240,6 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
         "the bound really did tighten: {fresh}"
     );
 
-    // ... while the identical retry still returns its committed receipt.
     let replay = wire(
         &provider
             .grant(&admin, grant_request("k-bound-replay", "capture", OTHER))
@@ -1317,7 +1305,6 @@ async fn a_grant_expiring_while_the_write_waits_does_not_authorize_it() {
     });
 
     entered.notified().await;
-    // The grant's 60s TTL elapses while the write is parked, before it reads the
     // authorization clock.
     provider.advance_clock(120);
     release.wait().await;
@@ -1431,7 +1418,6 @@ async fn cursors_bind_the_query_and_invalidate_on_change() {
         "a cursor is bound to the principal that minted it"
     );
 
-    // A grant write moves the marker, so the page-one cursor dies (§7.0.7).
     wire(
         &provider
             .grant(&admin, subject_grant("k-d", "capture", THIRD, SUBJECT))
@@ -1492,7 +1478,6 @@ async fn commit_boundary_failures_are_outcome_uncertain() {
     let provider = open_provider(&env).await;
     let admin = principal(CREATOR);
 
-    // The COMMIT succeeded but the response was lost: the effect is committed.
     provider.inject_commit_fault(true);
     let lost = wire(
         &provider
@@ -1524,7 +1509,6 @@ async fn commit_boundary_failures_are_outcome_uncertain() {
         "the committed effect exists exactly once"
     );
 
-    // The COMMIT itself failed: the outcome is unknown, so it is not reported as
     // a clean no-effect retryable either.
     provider.inject_commit_fault(false);
     let unknown = wire(
@@ -1552,7 +1536,6 @@ async fn pre_commit_storage_failures_are_retryable_and_leave_no_effect() {
     let admin = principal(CREATOR);
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
 
-    // A real storage error before COMMIT: the receipt insert always aborts.
     sqlx::query(
         "CREATE TRIGGER test_fail_receipt BEFORE INSERT ON memory_receipts \
          BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END",
@@ -1608,7 +1591,6 @@ async fn freeze_serializes_with_admitted_writes() {
     let provider = Arc::new(open_provider(&env).await);
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
 
-    // The uncommitted freeze holds the write lock for this whole block.
     let mut freeze = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query(
         "UPDATE memory_spaces SET status = 'frozen', revision = revision + 1 WHERE space_id = ?",
@@ -1628,7 +1610,6 @@ async fn freeze_serializes_with_admitted_writes() {
             .await
     });
 
-    // The freeze transaction holds the write lock, so the op's `BEGIN IMMEDIATE`
     // cannot complete until it commits: whenever the task is scheduled, the op is
     // admitted on the post-freeze state.
     freeze.commit().await.unwrap();
@@ -1673,7 +1654,6 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
             .await
     });
 
-    // The competing transaction holds the write lock, so the op's
     // `BEGIN IMMEDIATE` cannot complete before it ends. The committed receipt
     // below is only reachable through that wait, whatever the scheduling.
     competing.rollback().await.unwrap();
@@ -1692,7 +1672,6 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
     );
 }
 
-// C-117: every memory migration advanced the schema version line (25 → 26 → 27
 // → 28 → 29).
 const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 29);
 
@@ -1790,7 +1769,6 @@ async fn out_of_guard_writes_are_writer_fenced() {
             .ensure_subject(&principal(CREATOR), ensure_request(SUBJECT))
             .await,
     );
-    // One committed intent, so the journal probes below have a row to attack.
     let created = wire(
         &provider
             .create_record(
@@ -1806,7 +1784,6 @@ async fn out_of_guard_writes_are_writer_fenced() {
     );
     assert!(receipt(&created)["result"]["record_id"].is_string());
 
-    // A connection with the protocol scalar functions installed but NO
     // `core_writer_registration` row: exactly the "outside the guard" writer the
     // C-110 fence exists for.
     let mut raw = sqlx::SqliteConnection::connect_with(
@@ -1828,7 +1805,6 @@ async fn out_of_guard_writes_are_writer_fenced() {
     .await
     .unwrap();
 
-    // Every memory table admits writes through the writer protocol only. The
     // BEFORE INSERT guard runs ahead of the column constraints, so an
     // unregistered insert meets the fence on any of them.
     for table in MEMORY_TABLES {
@@ -1853,7 +1829,6 @@ async fn out_of_guard_writes_are_writer_fenced() {
         "expected WRITER_FENCED, got: {err}"
     );
 
-    // The journal carries the same admission, and its key is a real column:
     // without a rowid alias there is no `INSERT OR REPLACE …(seq, …)` /
     // `UPDATE … SET rowid` route around the delete guard (the must-fix).
     let err = sqlx::query("DELETE FROM memory_journal")
@@ -1873,7 +1848,6 @@ async fn out_of_guard_writes_are_writer_fenced() {
         "expected the journal to expose no rowid, got: {err}"
     );
 
-    // The outbox family publishes a change event for admitted mutations, on the
     // existing retention/drain channel.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
     for kind in ["memory_subjects", "memory_records"] {
@@ -1929,8 +1903,6 @@ fn creator_memory_dir(user_home: &Path) -> PathBuf {
         .join("memory")
         .join("long-term")
 }
-
-// ── The content families ───────────────────────────────────────────────
 
 const TEXT: &str = "Mira promised to return before the northern gate opens at dawn.";
 
@@ -2061,7 +2033,6 @@ async fn capture_review_promote_and_recall_round_trip() {
         "receipts are content-free (MEM-R022): {captured}"
     );
 
-    // §7.12: the pending candidate is listed with its body and advisory verdict.
     let listed = wire(
         &provider
             .list_candidates(&admin, candidates_list_request(Some("pending")))
@@ -2075,7 +2046,6 @@ async fn capture_review_promote_and_recall_round_trip() {
     assert_eq!(prompt["classification"]["disposition"], "promote");
     assert_eq!(prompt["capture_scope"]["visibility"], "shared");
 
-    // MEM-R004: a candidate is never a recall result, and nothing is retained yet.
     let before_review = wire(&provider.recall(&admin, recall_request(10)).await);
     assert_eq!(before_review["total_authorized"], 0);
     assert_eq!(before_review["records"], json!([]));
@@ -2092,7 +2062,6 @@ async fn capture_review_promote_and_recall_round_trip() {
         .expect("a promoted candidate names its record")
         .to_owned();
 
-    // §6.7 scrub: the shell keeps the digest and the outcome, never the body.
     let shell = wire(
         &provider
             .get_candidate(&admin, candidate_get_request(&candidate_id))
@@ -2110,7 +2079,6 @@ async fn capture_review_promote_and_recall_round_trip() {
     assert_eq!(shell["consumed_by"]["receipt_id"], reviewed["receipt_id"]);
     assert_eq!(shell["consumed_by"]["record_ids"][0], record_id);
 
-    // §7.17: the record exists with the placement the candidate was captured under.
     let record = wire(
         &provider
             .get_record(&admin, record_get_request(&record_id))
@@ -2212,7 +2180,6 @@ async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
             .await,
     );
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
-    // Two real captures (so content and provenance are the API's own shapes),
     // then one is aged out: `memory.capture` never mints an expiring candidate.
     let mut candidate_ids = Vec::new();
     for key in ["k-expiring", "k-live"] {
@@ -2256,7 +2223,6 @@ async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
         "an expired candidate leaves the list: {listed}"
     );
 
-    // Every mutating entry point runs the retention sweep in its own committed
     // transaction, which is where the expired row's body is dropped.
     wire(
         &provider
@@ -2721,7 +2687,6 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
         .unwrap()
         .to_owned();
 
-    // Only `review`, restricted to bnd_1.
     wire(
         &provider
             .grant(
@@ -2755,7 +2720,6 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
         "an uncovered candidate reads as absent"
     );
 
-    // §7.15 needs `records_write` over the same scope; this principal lacks it,
     // so the by-ID mutation hides the candidate exactly as an absent id does
     // (C-102/MEM-R026).
     let refused = wire(
@@ -2766,7 +2730,6 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
     assert_eq!(error_code(&refused), "NOT_FOUND");
     assert_eq!(retry_class(&refused), "terminal");
 
-    // A reader with no review grant sees nothing at all rather than an empty page.
     let unprivileged = wire(
         &provider
             .list_candidates(&principal(THIRD), candidates_list_request(None))
@@ -2803,7 +2766,6 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         .unwrap()
         .to_owned();
 
-    // `review` alone is not enough.
     wire(
         &provider
             .grant(
@@ -2823,7 +2785,6 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     assert_eq!(error_code(&review_only), "NOT_FOUND");
     assert_eq!(retry_class(&review_only), "terminal");
 
-    // A SECOND same-scope grant carrying `records_write` never unions in.
     wire(
         &provider
             .grant(
@@ -2844,7 +2805,6 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
     );
     assert_eq!(retry_class(&separate), "terminal");
 
-    // The refused reviews consumed nothing, and the shell is still pending.
     let shell = wire(
         &provider
             .get_candidate(&scoped, candidate_get_request(&candidate_id))
@@ -2856,7 +2816,6 @@ async fn review_requires_one_grant_and_hides_partial_coverage() {
         0
     );
 
-    // The existing-but-partially-covered id and an id this store never held are
     // the same refusal (C-102): no existence oracle.
     let missing = wire(
         &provider
@@ -2928,7 +2887,6 @@ async fn restricted_candidate_pages_are_dense_and_skip_no_visible_row() {
             .ensure_subject(&admin, ensure_request(SUBJECT))
             .await,
     );
-    // Hidden rows lead the listing order, which is what used to empty the first
     // page; `created_at` is pinned so the order is the same on every run.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
     let mut covered = Vec::new();
@@ -3080,7 +3038,6 @@ async fn recall_ranks_by_query_and_surfaces_budget_overflow() {
         "identical state + request + policy yields identical ordering (§9.2)"
     );
 
-    // One byte below the first item: the page is empty, so it is returned whole
     // and named as the overflow (§9.3).
     let oversized = wire(
         &provider
@@ -3252,7 +3209,6 @@ async fn profile_admission_and_honest_empty_reads() {
     let admitted = ok(provider.profile_admission(&admin, SPACE, SUBJECT).await);
     assert_eq!(admitted.present, vec!["personality".to_string()]);
 
-    // The other subject still lacks the required kind, and nothing was copied.
     let missing = provider
         .profile_admission(&admin, SPACE, OTHER_SUBJECT)
         .await;
@@ -3289,8 +3245,6 @@ async fn nexus_kinds_round_trip_through_the_namespaced_mapping() {
     assert_eq!(policy::memory_kind_of("event"), None);
     assert_eq!(policy::memory_kind_of("nexus.unknown_kind"), None);
 }
-
-// ── Round B conformance regressions (C1–C5) ────────────────────────────
 
 /// §7.22 (C1): execution-time recall demands the `recall` capability itself. A
 /// principal holding only `records_read` may list the very same records and is
@@ -3425,7 +3379,6 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
             .await,
     );
 
-    // ── recall ──────────────────────────────────────────────────────────
     wire(
         &provider
             .grant(
@@ -3457,7 +3410,6 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
         "a recall grant that expired during the wait cannot authorize: {refused}"
     );
 
-    // ── by-id record ────────────────────────────────────────────────────
     wire(
         &provider
             .grant(
@@ -3490,7 +3442,6 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
         "an expired grant reads as an absent record: {refused}"
     );
 
-    // ── profile ─────────────────────────────────────────────────────────
     wire(
         &provider
             .grant(
@@ -3596,7 +3547,6 @@ async fn context_fences_refuse_capture_and_create() {
     assert_eq!(error_code(&created), "SUBJECT_FENCED");
     assert_eq!(error_details(&created)["scope"], "context");
 
-    // MEM-R024: no collateral fencing — the sibling context and shared
     // placement stay writable.
     let sibling = wire(
         &provider
@@ -3725,7 +3675,6 @@ async fn context_fences_refuse_review_update_and_promotion() {
     );
     assert_eq!(error_code(&updated), "SUBJECT_FENCED");
 
-    // A placement move writes both sides: out of the fenced context…
     let moved_out = wire(
         &provider
             .promote_record(
@@ -3742,7 +3691,6 @@ async fn context_fences_refuse_review_update_and_promotion() {
     );
     assert_eq!(error_code(&moved_out), "SUBJECT_FENCED");
 
-    // …and into it.
     let moved_in = wire(
         &provider
             .promote_record(
@@ -3760,7 +3708,6 @@ async fn context_fences_refuse_review_update_and_promotion() {
     assert_eq!(error_code(&moved_in), "SUBJECT_FENCED");
     assert_eq!(error_details(&moved_in)["context_id"], "bnd_1");
 
-    // The sibling context keeps moving freely.
     let sibling_move = wire(
         &provider
             .promote_record(
@@ -3847,7 +3794,6 @@ async fn archived_subjects_leave_recall_and_default_candidate_lists() {
         "archive hides the subject from the default candidate listing (§7.7): {default_listing}"
     );
 
-    // §7.7 keeps the retained state readable: an explicit status filter is an
     // audit read, and by-id/listing reads are unchanged.
     let audit_listing = wire(
         &provider
@@ -3944,7 +3890,6 @@ async fn recall_cursors_bind_snapshot_and_query() {
         .unwrap()
         .to_owned();
 
-    // (a) A grant change that leaves every visible row untouched still changes
     //     the authorization the page was cut under.
     let page_one = wire(&provider.recall(&reader, recall_page(1, None, None)).await);
     assert_eq!(page_one["records"].as_array().unwrap().len(), 1);
@@ -3986,7 +3931,6 @@ async fn recall_cursors_bind_snapshot_and_query() {
         "a redundant grant revoke invalidates the cursor even though the rows are unchanged"
     );
 
-    // (b) Two revision-1 rows out, two revision-1 rows in: the visible revision
     //     sum stays 2 while the page would silently change identity.
     let page_one = wire(&provider.recall(&reader, recall_page(1, None, None)).await);
     let stale = page_one["next_cursor"]
@@ -4037,7 +3981,6 @@ async fn recall_cursors_bind_snapshot_and_query() {
         "equal visible revision sums do not identify the same page"
     );
 
-    // (c) The query orders the page, so it is part of the bound request.
     let ranked = wire(
         &provider
             .recall(&reader, recall_page(1, Some("eastern road"), None))
@@ -4165,7 +4108,6 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
     assert_eq!(error_code(&archived), "SUBJECT_FENCED");
     assert_eq!(error_details(&archived)["status"], "archived");
 
-    // Every refusal left the content untouched: no scrub, no tombstone.
     let record = wire(
         &provider
             .get_record(&admin, record_get_request(&record_id))
@@ -4186,7 +4128,6 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
 async fn a_read_only_open_refuses_writes_before_their_machinery() {
     let env = seed_env();
 
-    // The counter is live, not dead instrumentation: a writable instance counts
     // its admission attempt (fix round 3, finding F5). Probed on a throwaway
     // workspace so this test's rows stay untouched.
     {
@@ -4220,7 +4161,6 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
     );
     let admin = principal(CREATOR);
 
-    // The normal transaction path (`begin_admission`).
     let refused = wire(
         &read_only
             .ensure_subject(&admin, ensure_request(SUBJECT))
@@ -4236,7 +4176,6 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "the refusal names the read-only open: {refused}"
     );
 
-    // The publication path (`begin_publication` → gate → workspace flock).
     let refused = wire(
         &read_only
             .create_record(
@@ -4259,7 +4198,6 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "the refusal names the read-only open: {refused}"
     );
 
-    // Zero lock attempts, observed directly (fix round 3, finding F5): neither
     // refused write passed the read-only gate, so neither reached the admission
     // transaction, the retention sweep, the publication gate or the workspace
     // flock. The filename assertion below is corroboration, not the proof.
@@ -4269,7 +4207,6 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "a refused read-only write never reaches the admission/publication machinery"
     );
 
-    // No side effect: no subject, candidate, record, journal intent or receipt,
     // and no publication lock file or projection under the file root.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
     for table in [
@@ -4318,7 +4255,6 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
         .unwrap()
         .to_owned();
 
-    // Another decision on this bearer holds the section.
     let section = provider
         .review_disposition(SUBJECT)
         .await
@@ -4341,7 +4277,6 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
             provider.dismiss_candidate(&admin, request).await
         }
     });
-    // The wait signal fires from inside the lock attempt, after the non-blocking
     // probe found the section held (fix round 4, finding R4-F3): the dismissal
     // is really blocked on the lock, not merely unscheduled.
     waiting.notified().await;
@@ -4453,7 +4388,6 @@ async fn subject_ids_map_to_confined_unique_disposition_locks() {
     let provider = open_provider(&env).await;
     let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
 
-    // A traversing id is held under the encoded name, and it neither escapes
     // the directory nor aliases the plain id.
     let escaping = provider
         .review_disposition("../escape")
@@ -4473,7 +4407,6 @@ async fn subject_ids_map_to_confined_unique_disposition_locks() {
         "no lock file is created outside the disposition directory"
     );
 
-    // Distinct raw ids never share a lock.
     let dotted = provider
         .review_disposition("bearer.a")
         .await
@@ -4529,7 +4462,6 @@ async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
         .unwrap()
         .to_owned();
 
-    // Another bearer's section is held: a dismissal that named it would consume
     // this row behind the owner's back. It is refused instead, and nothing moves.
     let other = provider
         .review_disposition(OTHER_SUBJECT)
@@ -4569,7 +4501,6 @@ async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
     );
     drop(other);
 
-    // The owner's section is the one the dismissal really blocks on.
     let section = provider
         .review_disposition(SUBJECT)
         .await
@@ -4627,7 +4558,6 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
         .unwrap()
         .to_owned();
 
-    // The control answer: an id no row carries, from the same principal.
     let absent = wire(
         &provider
             .dismiss_legacy_candidate(
@@ -4642,7 +4572,6 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
     assert_eq!(error_code(&absent), "NOT_FOUND");
     let absent_message = absent["error"]["message"].as_str().unwrap();
 
-    // No grant at all, and the caller names the candidate: wrong subject, the
     // true owner's subject, and a principal that holds nothing anywhere. All
     // three get the control answer, byte for byte after the id.
     for (caller, subject, key) in [
@@ -4690,7 +4619,6 @@ async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
         "the refused dismissals consume nothing: {still_pending}"
     );
 
-    // The same wrong subject from a principal the coverage admits still gets the
     // informative mismatch refusal (round 4, R4-F1, unchanged).
     let informed = wire(
         &provider
@@ -4716,7 +4644,6 @@ async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
     let provider = open_provider(&env).await;
     let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
 
-    // Two bears that differ only by case are two bearers: both sections can be
     // held at once, which one shared file could not allow.
     let upper = provider
         .review_disposition("Bearer")
@@ -4734,7 +4661,6 @@ async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
     assert!(!provider.disposition_available("bearer"));
     drop((upper, lower));
 
-    // Far past the 255-byte component limit as a raw name, still one lock.
     let long = "x".repeat(4096);
     let held = provider
         .review_disposition(&long)
@@ -4798,7 +4724,6 @@ async fn content_bound_refusals_name_the_exceeded_limit() {
 
     oversized_capture_is_refused_without_a_candidate(&provider, &admin, &over_bound).await;
 
-    // create: the exact bound is admitted and stored whole; one more byte refuses.
     at_bound_create_and_oversize_update_bounds(&provider, &admin, &at_bound, &over_bound).await;
 
     page_recall_and_shape_refusals_name_their_own_limits(&provider, &admin).await;
@@ -5042,7 +4967,6 @@ async fn record_kind_only_update_is_a_replayable_noop() {
         "a no-op publishes no record file"
     );
 
-    // The no-op's receipt is committed and a same-key replay resolves to it.
     let receipt_id = no_op["receipt_id"].as_str().expect("receipt id").to_owned();
     let receipt_view = wire(
         &provider
@@ -5162,8 +5086,6 @@ async fn stale_and_unauthorized_updates_change_nothing(
     assert_eq!(final_state["content"]["text"], TEXT);
 }
 
-// ── BUG-01 regression: order-insensitive set keys ──────────────────────
-
 /// The bound-query keys and the list narrowing treat the selection/filter ids
 /// as a set (§7.25): a permuted or duplicate-containing request is the same
 /// state digest and the same page, and a digest read under one order
@@ -5191,7 +5113,6 @@ async fn selection_and_filter_sets_are_order_insensitive() {
         "duplicates do not change the authorized set: {straight} vs {duplicated}"
     );
 
-    // The digest read under one order authorizes a generate under the
     // reordered identical set: the CAS matches, so the refusal is a later
     // gate (the empty basis fails sufficiency), never the stale-CAS conflict.
     let digest = straight["state_digest"].as_str().expect("digest");
@@ -5219,7 +5140,6 @@ async fn selection_and_filter_sets_are_order_insensitive() {
         "a reordered identical set must not invalidate the state digest: {generated}"
     );
 
-    // A reordered provenance filter names the same page.
     assert_eq!(
         reflections_list_with_filter(&provider, &["ctx-a", "ctx-b"]).await,
         reflections_list_with_filter(&provider, &["ctx-b", "ctx-a"]).await,

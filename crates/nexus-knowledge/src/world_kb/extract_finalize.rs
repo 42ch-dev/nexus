@@ -86,15 +86,12 @@ pub struct PreparedExtractCandidate {
 pub fn prepare_extract(
     input: ExtractPrepareInput,
 ) -> Result<PreparedExtractCandidate, KbStoreError> {
-    // Step 1: Validate canonical name.
     validate_canonical_name(&input.canonical_name)
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 2: Validate body per mode.
     validate_body(input.block_type, Some(&input.body), input.validation_mode)
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 3: Validate the trusted policy before it can reach a wire
     // conversion or a store (durable §3).
     let KnowledgeGovernance {
         holder_entry_id,
@@ -103,7 +100,6 @@ pub fn prepare_extract(
     validate_native_governance(holder_entry_id.as_deref(), disclosure.as_deref())
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 4: Allocate the id once and attach the source anchor + governance.
     let mut record =
         KnowledgeEntryRecord::new(&input.world_id, input.block_type, &input.canonical_name);
     record.body = Some(input.body);
@@ -150,7 +146,6 @@ mod tests {
         }
     }
 
-    // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S4
     // — SourceAnchor::from_excerpt is overloaded (excerpt vs chapter locator);
     // acceptable while only one variant exists; refactor when multi-source anchors needed.
     fn chapter_anchor() -> SourceAnchor {
@@ -177,7 +172,6 @@ mod tests {
         assert_eq!(prepared.record.status, "provisional");
         assert_eq!(prepared.record.canonical_name, "char_lin_xia");
         assert!(prepared.record.source_anchor.is_some());
-        // Shared policy → both governance columns stay absent.
         assert!(prepared.record.holder_entry_id.is_none());
         assert!(prepared.record.disclosure.is_none());
     }
@@ -250,7 +244,6 @@ mod tests {
 
     #[test]
     fn test_prepare_extract_takes_holders_from_the_policy_not_the_model_output() {
-        // Model output rides body/name/block type only. Even a body whose
         // attributes carry governance-shaped keys cannot choose the holder.
         let mut input = prepare_input();
         input.body = KnowledgeEntryBody {
@@ -312,7 +305,6 @@ mod tests {
     async fn test_persist_prepared_extract_stores_the_exact_record_without_minting() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let mut prepared = prepare_extract(prepare_input()).unwrap();
-        // Provable no-mint: persist stores the record it is handed, including
         // an id it did not allocate and governance it did not rebuild.
         prepared.record.entry_id = "kb_t12_fixed".to_string();
         prepared.record.holder_entry_id = Some("hld_t12".to_string());

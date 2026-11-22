@@ -62,7 +62,6 @@ export function ValidatePresetDialog({
             : '',
       });
     } catch {
-      // The mutation hook already surfaced the transport failure as a toast;
       // the previous result (if any) stays on screen.
     }
   }

@@ -118,7 +118,6 @@ describe('DesktopClient', () => {
 
   beforeEach(() => {
     restoreBridge();
-    // Packaged / non-Vite origin — absolute localhost loopback.
     stubLocation({ hostname: 'localhost', port: '', protocol: 'http:' });
   });
 

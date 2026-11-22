@@ -42,11 +42,6 @@ const MAX_RETRIES: u64 = 5;
 /// Base delay for exponential backoff in seconds.
 const BASE_RETRY_DELAY_SECS: u64 = 2;
 
-// ---------------------------------------------------------------------------
-// Module-level FromRow structs (sqlx R2: avoid duplication)
-// ---------------------------------------------------------------------------
-
-/// Row mapping for `outbox_entries` queries (sqlx R2: module-level struct).
 #[derive(sqlx::FromRow)]
 struct OutboxRow {
     outbox_entry_id: String,
@@ -129,7 +124,6 @@ impl Outbox {
             .execute(pool.inner())
             .await?;
 
-        // WS8 R4: Tables are created via nexus-local-db migrations.
         // The migration runner creates all tables including outbox_entries.
         nexus_local_db::run_migrations(pool.inner())
             .await
@@ -269,7 +263,6 @@ impl Outbox {
 
         let mut tx = self.pool.inner().begin().await?;
 
-        // Check existence
         let exists: i64 = sqlx::query_scalar!(
             "SELECT EXISTS(SELECT 1 FROM outbox_entries WHERE bundle_id = ?) as \"exists!\"",
             bundle_id
@@ -382,7 +375,6 @@ impl Outbox {
         let next_retry_at = match retry_after {
             RetryAfterPolicy::AtTime(t) => Some(t.to_rfc3339()),
             RetryAfterPolicy::AfterSeconds(secs) => {
-                // Checked conversion: an impossibly large external delay must
                 // fail closed rather than wrap negative on the i64 timeline.
                 let secs_i64 = i64::try_from(*secs).map_err(|_| {
                     SyncError::InvalidInput(format!(
@@ -457,7 +449,6 @@ impl Outbox {
         .fetch_one(&mut *tx)
         .await?;
 
-        // Checked conversion: a corrupted negative retry_count must fail
         // closed (never become a huge u64).
         let retry_count = u64::try_from(retry_count_row).map_err(|_| {
             SyncError::InvalidInput(format!(
@@ -466,7 +457,6 @@ impl Outbox {
         })?;
 
         if retry_count >= MAX_RETRIES {
-            // Permanently mark as failed without retry
             let now = chrono::Utc::now();
             sqlx::query!(
                 "UPDATE outbox_entries
@@ -486,10 +476,8 @@ impl Outbox {
             });
         }
 
-        // Calculate exponential backoff
         let delay_secs =
             BASE_RETRY_DELAY_SECS.saturating_mul(2u64.saturating_pow(retry_count.min(30) as u32));
-        // Checked conversion: `delay_secs` is bounded by the `min(30)` exponent
         // cap, but a corrupted/externally-injected value must fail closed
         // rather than wrap negative.
         let delay_secs_i64 = i64::try_from(delay_secs).map_err(|_| {
@@ -614,14 +602,12 @@ impl Outbox {
     /// page must be bounded), and the specific error type if the operation
     /// fails.
     pub async fn list_page(&self, limit: i64) -> SyncResult<Vec<OutboxEntry>> {
-        // A page must be bounded: SQLite treats a negative LIMIT as
         // unbounded, so non-positive limits are rejected up front.
         if limit <= 0 {
             return Err(SyncError::InvalidInput(format!(
                 "outbox page limit must be positive: {limit}"
             )));
         }
-        // sqlx R2: Uses module-level OutboxRow struct.
         let rows = sqlx::query_as!(
             OutboxRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
@@ -673,7 +659,6 @@ impl Outbox {
     pub async fn replay(&self) -> SyncResult<Vec<OutboxEntry>> {
         let now = chrono::Utc::now();
 
-        // sqlx R2: Uses module-level OutboxRow struct.
         let rows = sqlx::query_as!(
             OutboxRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
@@ -724,7 +709,6 @@ impl Outbox {
     /// # Errors
     /// Returns the specific error type if the operation fails.
     pub async fn get(&self, outbox_entry_id: &str) -> SyncResult<OutboxEntry> {
-        // sqlx R2: Uses module-level OutboxRow struct.
         let row = sqlx::query_as!(
             OutboxRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
@@ -795,8 +779,6 @@ impl Outbox {
         let count = usize::try_from(count).unwrap_or_default();
         Ok(count)
     }
-
-    // ── Partial apply state persistence (SYNC-R12) ──────────────
 
     /// Persist partial apply state for an outbox entry (SYNC-R12).
     ///
@@ -898,7 +880,6 @@ impl Outbox {
     pub async fn list_partial_apply_states(
         &self,
     ) -> SyncResult<Vec<(String, crate::partial_apply::PartialApplyState)>> {
-        // sqlx R2: Uses module-level PartialApplyRow struct.
         let rows = sqlx::query_as!(
             PartialApplyRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", state_json as \"state_json!\"
@@ -992,7 +973,6 @@ mod tests {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
-        // A delay beyond the i64 seconds timeline must fail closed, not wrap
         // negative on the chrono timeline.
         let err = outbox
             .mark_conflicted_with_retry(
@@ -1011,7 +991,6 @@ mod tests {
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
 
-        // First failure
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
         outbox
             .mark_failed(&entry_id, "transient error")
@@ -1032,12 +1011,10 @@ mod tests {
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
-        // Fail MAX_RETRIES times
         for _ in 0..MAX_RETRIES {
             outbox.mark_failed(&entry_id, "persistent error").await.ok();
         }
 
-        // Next failure should error
         let result = outbox.mark_failed(&entry_id, "persistent error").await;
         assert!(matches!(
             result,
@@ -1052,7 +1029,6 @@ mod tests {
         let entry_id = outbox.append(&cmd).await.expect("append");
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
-        // Burn the whole budget: the next failure takes the max-retry path.
         for _ in 0..MAX_RETRIES {
             outbox.mark_failed(&entry_id, "persistent error").await.ok();
         }
@@ -1061,13 +1037,11 @@ mod tests {
             Err(SyncError::OutboxMaxRetriesExceeded { .. })
         ));
 
-        // Requeue clears the retry accounting ...
         outbox.requeue_stuck(&entry_id).await.expect("requeue");
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Ready);
         assert_eq!(entry.retry_count, Some(0));
 
-        // ... so the next failure gets a fresh explicit budget instead of
         // instantly exceeding max retries again.
         outbox
             .mark_failed(&entry_id, "persistent error")
@@ -1083,7 +1057,6 @@ mod tests {
         let cmd = make_test_command();
         outbox.append(&cmd).await.expect("append");
 
-        // SQLite treats a negative LIMIT as unbounded; the primitive must
         // guarantee a bounded page by rejecting non-positive limits.
         for limit in [0, -1, -100] {
             assert!(
@@ -1119,7 +1092,6 @@ mod tests {
         let entry1 = outbox.append(&cmd).await.expect("append 1");
         let _entry2 = outbox.append(&cmd).await.expect("append 2");
 
-        // Mark one as sent (not in replay)
         outbox.mark_sent(&entry1).await.expect("mark_sent");
 
         let entries = outbox.replay().await.expect("replay");
@@ -1202,7 +1174,6 @@ mod tests {
         assert_eq!(purged, 1);
 
         let entries = outbox.replay().await.expect("replay");
-        // entry2 is in 'sent' state, not replayable, so replay is empty
         assert_eq!(entries.len(), 0);
     }
 
@@ -1212,11 +1183,9 @@ mod tests {
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
 
-        // Mark sent, then try to mark acked (skip acked — try mark_acked on 'acked')
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
         outbox.mark_acked(&entry_id).await.expect("mark_acked");
 
-        // Trying to mark sent again should fail (state is 'acked', not in allowed set)
         let result = outbox.mark_sent(&entry_id).await;
         assert!(result.is_err());
     }
@@ -1245,8 +1214,6 @@ mod tests {
         assert!(DeliveryState::from_str("bogus").is_err());
     }
 
-    // ── retry_after tests (SYNC-R11) ────────────────────────────
-
     #[tokio::test]
     async fn outbox_conflicted_retry_none_equivalent_to_no_retry() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
@@ -1263,8 +1230,6 @@ mod tests {
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert!(entry.next_retry_at.is_none());
     }
-
-    // ── Partial apply state persistence tests (SYNC-R12) ───────
 
     #[tokio::test]
     async fn outbox_persist_and_load_partial_apply_state() {
@@ -1467,7 +1432,6 @@ mod tests {
             .await
             .expect("persist v1");
 
-        // Persist again (upsert) with updated retry count
         let mut state_v2 = state_v1;
         state_v2.increment_retry();
 
@@ -1493,7 +1457,6 @@ mod tests {
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
-        // Set retry_after to 1 second ago
         let past = chrono::Utc::now() - chrono::Duration::seconds(1);
         outbox
             .mark_conflicted_with_retry(
@@ -1507,7 +1470,6 @@ mod tests {
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
 
-        // Entry SHOULD appear in replay since retry_after has passed
         let entries = outbox.replay().await.expect("replay");
         assert!(entries.iter().any(|e| e.outbox_entry_id == entry_id));
     }
@@ -1519,7 +1481,6 @@ mod tests {
         let entry_id = outbox.append(&cmd).await.expect("append");
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
-        // Legacy mark_conflicted without retry policy
         outbox
             .mark_conflicted(&entry_id, "hard conflict")
             .await
@@ -1529,22 +1490,17 @@ mod tests {
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert!(entry.next_retry_at.is_none());
 
-        // Entry should NOT appear in replay (no retry_after set)
         let entries = outbox.replay().await.expect("replay");
         assert!(entries.iter().all(|e| e.outbox_entry_id != entry_id));
     }
-
-    // ── Pool lifecycle tests ────────────────────────────────────
 
     #[tokio::test]
     async fn outbox_pool_lifecycle() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
 
-        // Pool should be created and usable
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
 
-        // Get should work
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.outbox_entry_id, entry_id);
     }
@@ -1554,7 +1510,6 @@ mod tests {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
         let outbox_clone = outbox.clone(); // Outbox is Clone through pool
 
-        // Spawn multiple concurrent operations
         let handles: Vec<_> = (0..4)
             .map(|_| {
                 let o = outbox_clone.clone();
@@ -1574,20 +1529,16 @@ mod tests {
 
         assert_eq!(results.len(), 4);
 
-        // All entries should exist
         for entry_id in results {
             let entry = outbox.get(&entry_id).await.expect("get");
             assert_eq!(entry.delivery_state, DeliveryState::Sent);
         }
     }
 
-    // ── Transaction atomicity tests (SYNC-R4) ─────────────────────
-
     #[tokio::test]
     async fn outbox_concurrent_append_multiple_connections() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
 
-        // Create 10 concurrent append operations
         let handles: Vec<_> = (0..10)
             .map(|_| {
                 let o = outbox.clone();
@@ -1603,10 +1554,8 @@ mod tests {
             entry_ids.push(handle.await.expect("join"));
         }
 
-        // All 10 entries should be persisted
         assert_eq!(entry_ids.len(), 10);
 
-        // Verify all entries exist and are unique
         let mut seen = std::collections::HashSet::new();
         for entry_id in &entry_ids {
             let entry = outbox.get(entry_id).await.expect("get");
@@ -1614,7 +1563,6 @@ mod tests {
             assert!(seen.insert(entry_id.clone()));
         }
 
-        // Verify count
         assert_eq!(outbox.count_by_state("staged").await.expect("count"), 10);
     }
 
@@ -1625,17 +1573,13 @@ mod tests {
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
 
-        // Mark as sent
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
-        // Try to mark as acked with invalid state (should fail if we simulate an error)
         // For this test, we verify that the state remains consistent after a failed operation
 
-        // Attempt invalid transition (already sent, can't send again)
         let result = outbox.mark_sent(&entry_id).await;
         assert!(result.is_err());
 
-        // State should remain 'sent' (transaction rolled back)
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Sent);
     }
@@ -1647,26 +1591,22 @@ mod tests {
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
 
-        // Verify initial state
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Staged);
         assert_eq!(entry.retry_count, Some(0));
 
-        // Transition: staged -> sent (should be atomic)
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Sent);
         assert_eq!(entry.retry_count, Some(0));
 
-        // Transition: sent -> acked (should be atomic)
         outbox.mark_acked(&entry_id).await.expect("mark_acked");
 
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Acked);
         assert_eq!(entry.retry_count, Some(0));
 
-        // Verify all fields updated atomically
         assert!(entry.updated_at.is_some());
     }
 
@@ -1679,7 +1619,6 @@ mod tests {
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
-        // Mark conflicted with retry_after
         let retry_time = chrono::Utc::now() + chrono::Duration::seconds(300);
         outbox
             .mark_conflicted_with_retry(
@@ -1690,14 +1629,12 @@ mod tests {
             .await
             .expect("mark_conflicted");
 
-        // Verify all fields persisted atomically
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert_eq!(entry.last_error, Some("transient conflict".to_string()));
         assert!(entry.next_retry_at.is_some());
         assert!(entry.updated_at.is_some());
 
-        // Verify retry_after time matches
         let stored_retry =
             chrono::DateTime::parse_from_rfc3339(entry.next_retry_at.as_ref().unwrap())
                 .expect("parse retry_after");
@@ -1714,7 +1651,6 @@ mod tests {
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
-        // Fail multiple times and verify retry_count and next_retry_at are atomic
         for i in 1..=3 {
             outbox
                 .mark_failed(&entry_id, &format!("error {i}"))
@@ -1737,7 +1673,6 @@ mod tests {
     async fn outbox_bundle_payload_integrity() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
 
-        // Create a bundle with specific content
         let bundle: Bundle = serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "bundle_id": "bdl_test",
@@ -1759,13 +1694,10 @@ mod tests {
 
         let entry_id = outbox.stage(&bundle).await.expect("stage");
 
-        // Retrieve and verify all bundle metadata persisted atomically
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.bundle_id, "bdl_test");
         assert_eq!(entry.delivery_state, DeliveryState::Ready);
 
-        // Verify bundle can be reconstructed from stored payload
-        // (this tests that the bundle_payload column was written correctly)
         let count = outbox.count_by_state("ready").await.expect("count");
         assert_eq!(count, 1);
     }
@@ -1778,7 +1710,6 @@ mod tests {
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
 
-        // Create complex partial apply state
         let state = PartialApplyState::new(
             "bdl_complex",
             "wld_test",
@@ -1826,13 +1757,11 @@ mod tests {
             },
         );
 
-        // Persist state
         outbox
             .persist_partial_apply_state(&entry_id, &state)
             .await
             .expect("persist");
 
-        // Retrieve and verify atomicity
         let loaded = outbox
             .load_partial_apply_state(&entry_id)
             .await
@@ -1848,7 +1777,6 @@ mod tests {
         assert_eq!(loaded.result.failed_deltas.len(), 2);
         assert_eq!(loaded.retry_count, 0);
 
-        // Increment retry and verify atomicity
         let mut updated = loaded;
         updated.increment_retry();
 
@@ -1864,12 +1792,9 @@ mod tests {
             .expect("state exists");
 
         assert_eq!(reloaded.retry_count, 1);
-        // All other fields should remain unchanged
         assert_eq!(reloaded.bundle_id, "bdl_complex");
         assert_eq!(reloaded.result.total_count, 5);
     }
-
-    // ── V1.59 P1 T5: Sync CLI regression with migration-managed schema ──
 
     /// Verify that the outbox works with a migration-managed schema
     /// (the path used by `nexus42 sync *` CLI commands via
@@ -1879,14 +1804,12 @@ mod tests {
     /// initialized and usable by the sync CLI path.
     #[tokio::test]
     async fn outbox_with_migration_managed_schema_roundtrip() {
-        // Simulate the CLI path: init pool with migrations, then use Outbox.
         let tmp = tempfile::TempDir::new().expect("TempDir");
         let db_path = tmp.path().join("state.db");
         let pool = nexus_local_db::init_pool(&db_path)
             .await
             .expect("init pool with migrations");
 
-        // Verify outbox_entries table exists (created by migration 20260420_outbox_tables).
         let tables: Vec<(String,)> = sqlx::query_as(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='outbox_entries'",
         )
@@ -1899,13 +1822,11 @@ mod tests {
             "outbox_entries table should exist after migrations"
         );
 
-        // Create Outbox using the migration-initialized pool.
         let pool_wrapper = crate::pool::OutboxPool::from(pool.clone());
         let outbox = Outbox::with_pool(pool_wrapper)
             .await
             .expect("create outbox with migration-managed pool");
 
-        // Full lifecycle roundtrip: append → sent → acked.
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
         let entry = outbox.get(&entry_id).await.expect("get");

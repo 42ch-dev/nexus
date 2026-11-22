@@ -1,5 +1,4 @@
 /**
- * `useAutoLayout` — dagre-powered auto-layout with manual-override semantics.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
@@ -44,7 +43,6 @@ describe('useAutoLayout — dagre integration', () => {
 
     const positions = result.current.nodes.map((n) => n.position);
     expect(positions.some((p) => p.x !== 0 || p.y !== 0)).toBe(true);
-    // Top-to-bottom layout should place nodes on different y ranks.
     const yValues = new Set(positions.map((p) => p.y));
     expect(yValues.size).toBeGreaterThanOrEqual(2);
   });
@@ -60,7 +58,6 @@ describe('useAutoLayout — dagre integration', () => {
     const laidOut = result.current.nodes.map((n) => ({ id: n.id, position: n.position }));
     const laidOutB = laidOut.find((n) => n.id === 'b')!.position;
 
-    // Simulate a manual drag of node 'b'.
     const draggedNodes = result.current.nodes.map((n) =>
       n.id === 'b' ? { ...n, position: { x: 999, y: 999 } } : n,
     );
@@ -69,7 +66,6 @@ describe('useAutoLayout — dagre integration', () => {
     const b = result.current.nodes.find((n) => n.id === 'b')!;
     expect(b.position).toEqual({ x: 999, y: 999 });
 
-    // Other nodes should keep their last laid-out positions.
     const a = result.current.nodes.find((n) => n.id === 'a')!;
     const c = result.current.nodes.find((n) => n.id === 'c')!;
     expect(a.position).toEqual(laidOut.find((n) => n.id === 'a')!.position);
@@ -132,12 +128,10 @@ describe('useAutoLayout — dagre integration', () => {
 
     expect(laidOutParent.position.x).toBeDefined();
     expect(laidOutParent.position.y).toBeDefined();
-    // Children should be positioned relative to the parent origin.
     expect(laidOutChild1.position.x).toBeGreaterThanOrEqual(0);
     expect(laidOutChild1.position.y).toBeGreaterThanOrEqual(0);
     expect(laidOutChild2.position.x).toBeGreaterThanOrEqual(0);
     expect(laidOutChild2.position.y).toBeGreaterThanOrEqual(0);
-    // Parent should have explicit dimensions so the relative child coordinates
     // are contained.
     expect(laidOutParent.style).toMatchObject({
       width: expect.any(Number),
@@ -197,7 +191,6 @@ describe('useAutoLayout — supplied-positions mode (W003)', () => {
       useAutoLayout(nodes, edges, { direction: 'TB', hasSuppliedPositions: true }),
     );
 
-    // Positions must be preserved exactly — dagre must not override them.
     expect(result.current.nodes.find((n) => n.id === 'a')!.position).toEqual({ x: 100, y: 200 });
     expect(result.current.nodes.find((n) => n.id === 'b')!.position).toEqual({ x: 300, y: 400 });
     expect(result.current.nodes.find((n) => n.id === 'c')!.position).toEqual({ x: 500, y: 600 });
@@ -215,7 +208,6 @@ describe('useAutoLayout — supplied-positions mode (W003)', () => {
       { initialProps: { nodes: initialNodes, edges } },
     );
 
-    // Re-render with the same positions (e.g. a graph refresh). The hook must
     // not classify the supplied positions as manual drags and must continue to
     // preserve them.
     rerender({ nodes: initialNodes, edges });
@@ -235,14 +227,12 @@ describe('useAutoLayout — supplied-positions mode (W003)', () => {
       useAutoLayout(nodes, edges, { direction: 'TB', hasSuppliedPositions: true }),
     );
 
-    // First open: positions preserved.
     expect(result.current.nodes.find((n) => n.id === 'a')!.position).toEqual({ x: 100, y: 200 });
 
     act(() => {
       result.current.relayout();
     });
 
-    // After explicit relayout: dagre takes over and repositions.
     const aAfter = result.current.nodes.find((n) => n.id === 'a')!.position;
     const bAfter = result.current.nodes.find((n) => n.id === 'b')!.position;
     expect(aAfter).not.toEqual({ x: 100, y: 200 });
@@ -257,7 +247,6 @@ describe('useAutoLayout — defensive dagre label fallback (M001)', () => {
   });
 
   it('does not crash and falls back to finite positions when a dagre label is missing', async () => {
-    // Mock @dagrejs/dagre so that Graph.node('ghost') returns undefined,
     // simulating a dagre compound-graph edge case where layout does not assign
     // coordinates to every setNode'd node.
     vi.doMock('@dagrejs/dagre', async (importOriginal) => {
@@ -284,17 +273,14 @@ describe('useAutoLayout — defensive dagre label fallback (M001)', () => {
     ];
     const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'ghost' }];
 
-    // Must not throw — the defensive fallback handles the missing label.
     const { result } = renderHookMocked(() =>
       useAutoLayoutMocked(nodes, edges, { direction: 'TB' }),
     );
 
-    // The ghost node's position must be a finite number, not NaN or a crash.
     const ghost = result.current.nodes.find((n) => n.id === 'ghost')!;
     expect(Number.isFinite(ghost.position.x)).toBe(true);
     expect(Number.isFinite(ghost.position.y)).toBe(true);
 
-    // The normal node still gets a real dagre position.
     const a = result.current.nodes.find((n) => n.id === 'a')!;
     expect(Number.isFinite(a.position.x)).toBe(true);
     expect(Number.isFinite(a.position.y)).toBe(true);

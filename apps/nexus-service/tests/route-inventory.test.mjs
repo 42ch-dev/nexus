@@ -10,7 +10,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
 /**
- * P5-T5 bounded integration target: routes.ts is the SOLE route composer and
  * the retained route inventory is reconciled against the daemon create_router
  * surface. The mounted set must exactly match the normalized live inventory,
  * and dispatch security classes must be observed through REAL handler
@@ -68,7 +67,6 @@ describe('route-inventory (P5-T5)', () => {
   test('retained routes dispatch to their security tier', async () => {
     const { DOMAIN_ROUTES } = await import(join(serviceRoot, 'dist/routes.js'));
 
-    // ── Mounted set exactly matches the normalized live inventory. ──────────
     // Independent authority: a hardcoded normalized snapshot of the daemon
     // create_router + P0–P4 family identities plus the v1.195 P2-T3 Compute
     // family (NOT derived from the composer under test). Divergence is a real
@@ -152,7 +150,6 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/works/([^/]+)/outline', 'tier2', 'content'],
   ['GET', '/v1/daemon/works/pool', 'tier2', 'works'],
   ['GET', '/v1/daemon/works/pool/inspiration', 'tier2', 'works'],
-  // plan v1219 shell Task 4: home-level workspace family (create stays absent).
   ['GET', '/v1/daemon/workspace', 'tier1', 'workspaces'],
   ['GET', '/v1/daemon/workspaces', 'tier1', 'workspaces'],
   ['GET', '/v1/daemon/worlds/([^/]+)/findings', 'tier2', 'worlds'],
@@ -247,7 +244,6 @@ describe('route-inventory (P5-T5)', () => {
       LIVE_INVENTORY.map(([m, p, tier, family]) => `${m} ${p} ${tier} ${family}`),
     );
 
-    // Normalized live inventory: the retained daemon route identities the
     // standalone service owns, derived from create_router + the P0–P4 family
     // producers. Every mounted identity must be in the set and vice versa.
     const mounted = DOMAIN_ROUTES.map((route) => ({
@@ -260,7 +256,6 @@ describe('route-inventory (P5-T5)', () => {
       mounted.map((r) => `${r.method} ${r.path} ${r.tier} ${r.family}`),
     );
 
-    // Handler dispatch is total: every /v1/daemon identity must be composer-
     // routed (family), so a hand-written branch leaking outside the composer
     // would show up as a mounted-but-not-dispatched identity. Probe: a
     // composer-routed tier2 identity 404s on a missing resource (reached the
@@ -269,7 +264,6 @@ describe('route-inventory (P5-T5)', () => {
     assert.equal(probeMissing.status, 404, probeMissing.text);
     assert.notEqual(probeMissing.payload.error.code, 'route_not_migrated');
 
-    // The v1.241 apply pair is the only place `strategyApplied` / `applyStrategy`
     // are crossed from the composed route through `wrapDomainSurface` into the
     // napi export. A drifted export name is a TypeError at handler time (a 500),
     // so these two probes — and not a suite that replaces `service.core` — are
@@ -280,19 +274,16 @@ describe('route-inventory (P5-T5)', () => {
     assert.deepEqual(appliedStatus.payload, {
       current_apply: null,
       newest_approval: null,
-      // Schema v2 (D18): the applied document and its typed refusal are always present, and are
       // both null for a strategy with no apply.
       applied_document: null,
       applied_document_refusal: null,
     });
 
-    // The same cross for the rollback read: `strategyApprovals` is the napi
     // export the Apply target list mounts.
     const approvals = await jsonFetch(`${baseUrl}${missingStrategy}/approvals`);
     assert.equal(approvals.status, 200, approvals.text);
     assert.deepEqual(approvals.payload, { items: [] });
 
-    // Apply checks its user-preset guard before any read, so the probe needs a
     // real user preset to reach the approval lookup: the scaffold surface writes
     // that bundle, and the unknown hash is then the handler's own refusal. An
     // unknown hash needs a different request, so it is a client error and keeps
@@ -313,7 +304,6 @@ describe('route-inventory (P5-T5)', () => {
     assert.equal(applyRefusal.payload.error.code, 'invalid_input', applyRefusal.text);
     assert.equal(applyRefusal.payload.error.details.reason, 'approval_not_found');
 
-    // No duplicate mounted identities, and mounted == authoritative inventory.
     assert.equal(mountedKeys.size, mounted.length, 'duplicate mounted route identity');
     const missingFromMounted = [...liveKeys].filter((k) => !mountedKeys.has(k));
     const extraMounted = [...mountedKeys].filter((k) => !liveKeys.has(k));
@@ -323,7 +313,6 @@ describe('route-inventory (P5-T5)', () => {
       `inventory drift\nmissing:\n${missingFromMounted.join('\n')}\nextra:\n${extraMounted.join('\n')}`,
     );
 
-    // ── Dispatch security classes through REAL handler behavior. ────────────
     // Unguarded: reachable with no API key at all.
     const health = await jsonFetch(`${baseUrl}/v1/daemon/runtime/health`);
     assert.equal(health.status, 200, health.text);
@@ -331,18 +320,15 @@ describe('route-inventory (P5-T5)', () => {
     const status = await jsonFetch(`${baseUrl}/v1/daemon/runtime/status`);
     assert.equal(status.status, 200, status.text);
 
-    // Guarded (tier1/tier2/provider_stream): the API-key gate rejects a
     // missing key BEFORE any handler runs — a real transport denial, and the
     // same identity succeeds once the request is admitted (domainOnly shell
     // still answers guarded reads).
     const guardedIdentity = ['GET', '/v1/daemon/works'];
 
-    // The dev service has no key configured: transport admission lets it
     // through and the creator-tier handler runs.
     const guardedOk = await jsonFetch(`${baseUrl}${guardedIdentity[1]}`);
     assert.equal(guardedOk.status, 200, guardedOk.text);
 
-    // With a key required (restart with one configured), a keyless request
     // must be denied by transport admission — verified against the same
     // composer, so the tier field is behavior, not a string.
     await service.close();

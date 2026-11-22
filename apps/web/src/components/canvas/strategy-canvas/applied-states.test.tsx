@@ -1,5 +1,4 @@
 /**
- * The Canvas's applied presentations (D16) and the no-parse guarantee.
  *
  * One `getStrategyApplied` read resolves four distinct states: never applied,
  * approved-but-unapplied, an apply whose document no longer verifies, and the
@@ -142,7 +141,6 @@ describe('StrategyCanvas — applied states', () => {
       within(state).getByRole('heading', { name: 'The running preset cannot be read' }),
     ).toBeInTheDocument();
     expect(within(state).getByText(/no longer verifies against app_3/)).toBeInTheDocument();
-    // Not an empty state: no "not yet applied" invitation, and no import/apply.
     expect(screen.queryByTestId('applied-state-never-applied')).toBeNull();
     expect(within(state).queryByRole('button', { name: /apply|compose|import/i })).toBeNull();
     const actions = within(state).getAllByRole('button');

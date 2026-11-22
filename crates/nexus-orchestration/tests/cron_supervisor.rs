@@ -11,8 +11,6 @@ use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::schedule::cron_supervisor::{self, CronFireSummary};
 use sqlx::SqlitePool;
 
-// ── Test helpers ───────────────────────────────────────────────────────────
-
 mod common;
 
 use common::test_pool;
@@ -98,15 +96,12 @@ async fn count_schedules(pool: &SqlitePool, work_id: &str, preset_id: &str) -> i
     n
 }
 
-// ── AC1 + AC3: fire on cron match; no-match → no enqueue ───────────────────
-
 /// A brainstorm role whose cron matches the current minute enqueues a pending
 /// schedule with `preset_id = novel-brainstorm`.
 #[tokio::test]
 async fn cron_fires_on_match_enqueues_brainstorm() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_fire_brain");
-    // `* * * * *` matches every minute, so any `now` fires.
     seed_work(
         &pool,
         &work,
@@ -154,7 +149,6 @@ async fn cron_fires_on_match_enqueues_write() {
 async fn cron_no_match_does_not_enqueue() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_nomatch");
-    // `0 3 * * *` fires only at 03:00 UTC.
     seed_work(
         &pool,
         &work,
@@ -162,7 +156,6 @@ async fn cron_no_match_does_not_enqueue() {
     )
     .await;
 
-    // Pick a `now` that does NOT match either cron (e.g. 2026-06-19 05:30 UTC).
     let now = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 5, 30, 0).unwrap();
     let summary =
         cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
@@ -225,21 +218,17 @@ async fn cron_skips_disabled_role() {
         summary.fired, 0,
         "disabled roles must not fire: {summary:?}"
     );
-    // Three roles evaluated (V1.50 T-A P2 adds `review`): brainstorm + write
     // are disabled above, and `review` is absent from this two-role blob so it
     // deserialises to `None`. All three are clean no-match skips — the test's
     // intent ("disabled roles don't fire") still holds via `fired == 0`.
     assert_eq!(summary.skipped_no_match, 3);
 }
 
-// ── AC1 + AC4: per-Work gating (3 negative cases) ──────────────────────────
-
 /// Gating: incomplete intake → skip (spec §4.3).
 #[tokio::test]
 async fn cron_skips_intake_incomplete() {
     let (_dir, pool) = test_pool().await;
     let mut work = test_work("wrk_intake");
-    // Use a valid non-complete intake_status (CHECK constraint:
     // pending/in_progress/complete/skipped).
     work.intake_status = "in_progress".to_string();
     seed_work(
@@ -268,7 +257,6 @@ async fn cron_skips_runtime_locked() {
         &schedule_blob("* * * * *", "* * * * *", true, true),
     )
     .await;
-    // create_work hardcodes runtime_lock_holder = NULL; set it via a direct
     // UPDATE to simulate an in-progress FL-E driver holding the lock.
     sqlx::query("UPDATE works SET runtime_lock_holder = ? WHERE work_id = ?")
         .bind("daemon:schedule:ACH123")
@@ -296,7 +284,6 @@ async fn cron_skips_completion_locked() {
         &schedule_blob("* * * * *", "* * * * *", true, true),
     )
     .await;
-    // create_work hardcodes completion_locked_at = NULL; set it via a direct
     // UPDATE to simulate a finalized Work.
     sqlx::query("UPDATE works SET completion_locked_at = ? WHERE work_id = ?")
         .bind("2026-06-18T12:00:00Z")
@@ -313,8 +300,6 @@ async fn cron_skips_completion_locked() {
     assert_eq!(summary.skipped_gated, 2);
 }
 
-// ── AC4: idempotency — same-minute double fire → second skipped ────────────
-
 /// Two cron evaluations within the same minute for the same role+work: the
 /// second is skipped because a prior schedule is still active (pending).
 #[tokio::test]
@@ -330,7 +315,6 @@ async fn cron_idempotent_skip_second_fire_same_minute() {
 
     let now = chrono::Utc::now();
 
-    // First evaluation: brainstorm fires (no prior active schedule).
     let s1 = cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
     assert_eq!(s1.fired, 1, "first sweep should fire: {s1:?}");
     assert_eq!(
@@ -338,14 +322,12 @@ async fn cron_idempotent_skip_second_fire_same_minute() {
         1
     );
 
-    // Second evaluation same minute: brainstorm skip (prior pending schedule).
     let s2 = cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
     assert_eq!(s2.fired, 0, "second sweep must not fire: {s2:?}");
     assert_eq!(
         s2.skipped_idempotent, 1,
         "second brainstorm should be skipped by idempotency"
     );
-    // Still only one schedule — no duplicate.
     assert_eq!(
         count_schedules(&pool, "wrk_idem", "novel-brainstorm").await,
         1
@@ -369,7 +351,6 @@ async fn cron_refires_after_prior_schedule_terminal() {
     let s1 = cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
     assert_eq!(s1.fired, 1);
 
-    // Simulate the prior schedule completing.
     let schedule_id: String = sqlx::query_scalar(
         "SELECT schedule_id FROM creator_schedules \
          WHERE work_id = 'wrk_refire' AND preset_id = 'novel-brainstorm'",
@@ -383,7 +364,6 @@ async fn cron_refires_after_prior_schedule_terminal() {
         .await
         .unwrap();
 
-    // Next evaluation: fires again (prior is terminal, not active).
     let s2 = cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
     assert_eq!(s2.fired, 1, "should re-fire after prior completed: {s2:?}");
     assert_eq!(
@@ -393,8 +373,6 @@ async fn cron_refires_after_prior_schedule_terminal() {
     );
 }
 
-// ── AC5: TOCTOU — set_schedule_json_tx CAS ──────────────────────────────────
-
 /// The CAS rejects a write when the stored value changed between read and
 /// write (lost-update prevention). Closes R-V150P0-W5.
 #[tokio::test]
@@ -403,10 +381,8 @@ async fn set_schedule_json_tx_rejects_stale_preimage() {
     let work = test_work("wrk_cas");
     works::create_work(&pool, &work).await.unwrap();
 
-    // Writer B writes first.
     set_schedule(&pool, "wrk_cas", "{\"v\":\"B\"}").await;
 
-    // Writer A (which read None earlier) attempts a CAS with the stale
     // pre-image None → must fail because the row now holds "{\"v\":\"B\"}".
     let mut tx = pool.begin().await.unwrap();
     let applied = works::set_schedule_json_tx(
@@ -424,7 +400,6 @@ async fn set_schedule_json_tx_rejects_stale_preimage() {
     );
     tx.rollback().await.unwrap();
 
-    // The stored value is B's, not A's — no lost update.
     let stored = works::get_schedule_json(&pool, "wrk_cas").await.unwrap();
     assert_eq!(stored.as_deref(), Some("{\"v\":\"B\"}"));
 }
@@ -463,15 +438,12 @@ async fn set_schedule_json_tx_concurrent_writers_serialise() {
     let work = test_work("wrk_cas_race");
     works::create_work(&pool, &work).await.unwrap();
 
-    // A reads (sees None).
     let a_read = works::get_schedule_json(&pool, "wrk_cas_race")
         .await
         .unwrap();
 
-    // B races ahead and writes its config.
     set_schedule(&pool, "wrk_cas_race", "{\"v\":\"B\"}").await;
 
-    // A's first CAS attempt with the stale pre-image fails.
     let mut tx = pool.begin().await.unwrap();
     let applied_a1 = works::set_schedule_json_tx(
         &mut tx,
@@ -485,7 +457,6 @@ async fn set_schedule_json_tx_concurrent_writers_serialise() {
     assert!(!applied_a1, "A's stale CAS must fail");
     tx.rollback().await.unwrap();
 
-    // A re-reads, retries with the fresh pre-image → succeeds.
     let a_reread = works::get_schedule_json(&pool, "wrk_cas_race")
         .await
         .unwrap();
@@ -531,15 +502,12 @@ async fn set_schedule_json_tx_missing_work_errors() {
     tx.rollback().await.unwrap();
 }
 
-// ── AC6: partial index used in scan ─────────────────────────────────────────
-
 /// The scan query (`list_works_with_schedule_json`) uses the partial index
 /// `idx_works_schedule_json_nonempty` (S-001). Verified via EXPLAIN QUERY PLAN.
 #[tokio::test]
 async fn partial_index_used_in_schedule_json_scan() {
     let (_dir, pool) = test_pool().await;
 
-    // EXPLAIN QUERY PLAN returns 4 columns per step: (id, parent, notused,
     // detail) — the first three are INTEGER, the fourth is TEXT. We decode
     // all four and inspect the `detail` column for the index name.
     let rows: Vec<(i64, i64, i64, String)> = sqlx::query_as(
@@ -561,8 +529,6 @@ async fn partial_index_used_in_schedule_json_scan() {
         "scan must use the partial index; plan was:\n{plan}"
     );
 }
-
-// ── Empty / malformed schedule_json edge cases ──────────────────────────────
 
 /// A Work with unparseable `schedule_json` is skipped (counted as parse error),
 /// not crashed.
@@ -590,7 +556,6 @@ async fn cron_ignores_works_without_schedule_json() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_nosched");
     works::create_work(&pool, &work).await.unwrap();
-    // No set_schedule call → schedule_json is NULL.
 
     let now = chrono::Utc::now();
     let summary =
@@ -603,8 +568,6 @@ async fn cron_ignores_works_without_schedule_json() {
     );
     assert_eq!(summary, CronFireSummary::default());
 }
-
-// ── AC2: enqueue → admit (auto-chain step advanced) ─────────────────────────
 
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 
@@ -627,13 +590,11 @@ async fn cron_fire_then_tick_admits_schedule() {
 
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Step 1: cron evaluator enqueues a pending brainstorm schedule.
     let now = chrono::Utc::now();
     let summary =
         cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
     assert_eq!(summary.fired, 1);
 
-    // Step 2: supervisor tick admits it (status → running).
     supervisor.tick_clocked(now.timestamp()).await.unwrap();
 
     let status: String = sqlx::query_scalar(
@@ -649,7 +610,6 @@ async fn cron_fire_then_tick_admits_schedule() {
     );
 }
 
-// ── Review role (V1.50 T-A P2) ──────────────────────────────────────────────
 //
 // Spec: `cron-staggering.md` §2.1 / §4.1 / §4.3. The `review` role enqueues a
 // `novel-review-master` schedule (spec §2.1 table). These four tests extend
@@ -690,7 +650,6 @@ fn schedule_blob_review(
 async fn cron_fires_review_role_enqueues_review_master() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_fire_review");
-    // Only review enabled; brainstorm/write crons set to a non-matching slot
     // and disabled so the single fire is unambiguously the review role.
     seed_work(
         &pool,
@@ -699,7 +658,6 @@ async fn cron_fires_review_role_enqueues_review_master() {
     )
     .await;
 
-    // 14:00 UTC matches the `:00` slot of `0,30 * * * *`.
     let now = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 14, 0, 0).unwrap();
     let summary =
         cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
@@ -711,7 +669,6 @@ async fn cron_fires_review_role_enqueues_review_master() {
         "one novel-review-master schedule should be enqueued"
     );
 
-    // Provenance: the cron-fired review-master schedule carries the `CRON`
     // prefix and `cron:review:<work>` label (NOT the stale-findings `RVM` /
     // `auto-review-master:` shape). This is the Option A contract: one uniform
     // enqueue path preserves the trigger origin in the schedule row.
@@ -731,7 +688,6 @@ async fn cron_fires_review_role_enqueues_review_master() {
         "cron-fired review must carry the cron:review label"
     );
 
-    // Non-matching minute (:15) does not enqueue a second review schedule.
     let now_off = chrono::Utc
         .with_ymd_and_hms(2026, 6, 19, 14, 15, 0)
         .unwrap();
@@ -754,14 +710,12 @@ async fn cron_fires_review_role_enqueues_review_master() {
 async fn cron_review_respects_per_work_gating() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_review_gated");
-    // Only review enabled with an always-matching cron.
     seed_work(
         &pool,
         &work,
         &schedule_blob_review("0 3 * * *", "0 4 * * *", "* * * * *", false, false, true),
     )
     .await;
-    // create_work hardcodes completion_locked_at = NULL; set it via a direct
     // UPDATE to simulate a finalized Work (mirrors `cron_skips_completion_locked`).
     sqlx::query("UPDATE works SET completion_locked_at = ? WHERE work_id = ?")
         .bind("2026-06-18T12:00:00Z")
@@ -801,7 +755,6 @@ async fn cron_review_respects_idempotency() {
         &schedule_blob_review("0 3 * * *", "0 4 * * *", "* * * * *", false, false, true),
     )
     .await;
-    // Pre-insert an ACTIVE novel-review-master schedule for this Work so the
     // idempotency guard (`has_active_role_schedule`) sees it.
     let now_ts = chrono::Utc::now().timestamp();
     sqlx::query(
@@ -830,7 +783,6 @@ async fn cron_review_respects_idempotency() {
         summary.skipped_idempotent, 1,
         "review should be skipped by idempotency: {summary:?}"
     );
-    // Exactly one review-master schedule (the pre-existing one); no duplicate.
     assert_eq!(
         count_schedules(&pool, "wrk_review_idem", "novel-review-master").await,
         1,
@@ -845,7 +797,6 @@ async fn cron_review_respects_idempotency() {
 async fn cron_review_graceful_when_no_review_role_configured() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_no_review");
-    // Two-role blob (no `review` key) — the `review` field deserialises to
     // `None` via `#[serde(default)]`, so the evaluator no-ops it cleanly.
     seed_work(
         &pool,
@@ -858,8 +809,6 @@ async fn cron_review_graceful_when_no_review_role_configured() {
     let summary =
         cron_supervisor::evaluate_cron_fires(&pool, None, now, Some("test-provider")).await;
 
-    // Brainstorm fires (its cron matches every minute); review is absent →
-    // one fire (brainstorm) and one graceful review skip (skipped_no_match).
     assert_eq!(summary.fired, 1, "brainstorm should fire: {summary:?}");
     assert_eq!(
         summary.skipped_parse_error, 0,

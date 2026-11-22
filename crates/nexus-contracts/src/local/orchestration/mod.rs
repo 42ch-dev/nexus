@@ -11,10 +11,6 @@ pub mod preset_gate;
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Sync capabilities
-// ---------------------------------------------------------------------------
-
 /// Input for `sync.pull` — pull remote deltas for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,10 +46,6 @@ pub struct SyncPushOutput {
     /// Number of outbox entries pushed.
     pub entries_pushed: u64,
 }
-
-// ---------------------------------------------------------------------------
-// Outbox capabilities
-// ---------------------------------------------------------------------------
 
 /// Input for `outbox.flush` — flush pending outbox entries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,10 +86,6 @@ pub struct OutboxCompactOutput {
     /// Number of entries retained.
     pub retained: u64,
 }
-
-// ---------------------------------------------------------------------------
-// Workspace capabilities (v1.188 P3 — recoverable content commit)
-// ---------------------------------------------------------------------------
 
 /// Input for `workspace.open` — open a scope-relative path within the bound workspace.
 ///
@@ -214,10 +202,6 @@ pub struct WorkArtifactCommitOutput {
     pub committed: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Registry capability
-// ---------------------------------------------------------------------------
-
 /// Input for `registry.refresh` — refresh ACP registry cache.
 ///
 /// V1.58 P0 fix-wave (QC2 M-1): the `force` field was removed — it was a
@@ -258,10 +242,6 @@ pub struct RegistryRefreshOutput {
     /// Human-readable error description when fallback occurred (empty if success).
     pub fallback_reason: String,
 }
-
-// ---------------------------------------------------------------------------
-// Creator capabilities
-// ---------------------------------------------------------------------------
 
 /// Input for `creator.read_memory` — read entries from creator memory store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,10 +303,6 @@ pub struct CreatorInjectPromptOutput {
     pub queued: bool,
 }
 
-// ---------------------------------------------------------------------------
-// creator.write_brief — validate and persist creative brief on Work
-// ---------------------------------------------------------------------------
-
 /// Input for `creator.write_brief` — validate and persist a creative brief.
 ///
 /// The `brief_text` is the raw text output from the synthesizing state,
@@ -351,10 +327,6 @@ pub struct CreatorWriteBriefOutput {
     pub intake_status: String,
 }
 
-// ---------------------------------------------------------------------------
-// Judge capabilities
-// ---------------------------------------------------------------------------
-
 /// Input for `judge.rule` — evaluate a pure rule (no LLM).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -375,14 +347,6 @@ pub struct JudgeRuleOutput {
     pub reason: String,
 }
 
-// ---------------------------------------------------------------------------
-// FL-E stages (V1.34 creator-workflow §3.1)
-// ---------------------------------------------------------------------------
-
-// FL-E stages (V1.34 creator-workflow §3.1)
-// ---------------------------------------------------------------------------
-
-/// Ordered FL-E stages — single source of truth (V1.34 creator-workflow §3.1).
 ///
 /// All crates that need the canonical stage list or stage-to-index mapping
 /// must `use` this constant and the associated functions rather than

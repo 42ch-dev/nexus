@@ -145,7 +145,6 @@ fn schema_type_name(file_name: &str) -> String {
 /// never reach here (they are filtered by `SKIP_SCHEMAS`).
 fn export_mode_for_schema(src_schema_path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(src_schema_path) else {
-        // Source schema unreadable — default to the safe glob (re-exports everything).
         return true;
     };
     let Ok(raw) = serde_json::from_str::<Value>(&content) else {
@@ -332,7 +331,6 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         return rust.to_string();
     };
     let open = start + open;
-    // Walk to the matching close brace of the root struct.
     let mut depth = 0i32;
     let mut close = open;
     for (offset, ch) in rust[open..].char_indices() {
@@ -362,7 +360,6 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         let Some(attr_at) = body[..at].rfind("# [") else {
             continue;
         };
-        // typify 0.8 no longer emits `default` for an optional `Option` field;
         // a field that carries `deserialize_with` makes serde reject omission,
         // so the presence-preserving attribute must carry `default` itself.
         let attribute = concat!(
@@ -827,7 +824,6 @@ fn dedupe_ref_targets(
     let names: BTreeSet<String> = duplicates.keys().cloned().collect();
     prune_duplicate_items(&mut file.items, &names);
 
-    // A removed copy can be referenced only from another removed item (a nested
     // helper of the copy); import just the names the pruned module still uses.
     let pruned = prettyplease::unparse(file);
     let mut imports: Vec<syn::Item> = Vec::new();
@@ -1040,7 +1036,6 @@ fn restore_primitive_newtype_try_from(file: &mut syn::File) -> Result<(), String
         let Some(name) = local_self_type(&block.self_ty) else {
             continue;
         };
-        // Only a local tuple newtype whose field is the same primitive the
         // `FromStr` impl parses into qualifies; everything else is skipped.
         let Some(inner) = from_str_err_primitive(&block.items) else {
             continue;
@@ -1109,7 +1104,6 @@ fn generate_schema_rust(
     let mut schema: Schema = serde_json::from_str(&content)
         .map_err(|err| format!("invalid JSON Schema in {}: {err}", schema_path.display()))?;
 
-    // Override the schema `title` to the basename-derived PascalCase name BEFORE
     // handing it to `typify`. Without this, `typify` names the root type from the
     // raw title (e.g. `"Nexus World Entity"` → `NexusWorldEntity`, `"Nexus Delta"`
     // → `NexusDelta`) or emits no root type at all when the title is absent
@@ -1129,7 +1123,6 @@ fn generate_schema_rust(
         .ok_or_else(|| format!("root schema must be an object: {}", schema_path.display()))?
         .insert("title".to_owned(), Value::String(type_name.clone()));
 
-    // Root-level `allOf` wrappers (alias schemas sharing a single underlying
     // definition): the prep stage inlines the referenced schema verbatim, so
     // typify names the merged root type from the REFERENCED member's `title`
     // (e.g. `NexusCharacterDetail`), drifting from the basename-derived TS
@@ -1145,7 +1138,6 @@ fn generate_schema_rust(
         .and_then(|title| title.as_str())
         .map(title_to_type_name);
 
-    // Cross the schemars schema through JSON rather than coupling to typify's
     // own schema representation.
     let typify_schema = serde_json::from_value(schema.to_value())
         .map_err(|err| format!("invalid typify input in {}: {err}", schema_path.display()))?;
@@ -1236,7 +1228,6 @@ fn write_mod_rs(
             "//! Scope submodule names can collide (e.g. `domain::memory` vs `daemon_api::memory`);".into(),
             "//! the flat TYPE re-exports are all unique, so the module-name ambiguity is benign.".into(),
             "#![allow(ambiguous_glob_reexports)]".into(),
-            // The clippy allows below are emitted into the generated file as
             // `//` *string* lines (not Rust comments here) so the justification
             // travels with the generated code. See plan v1.138 T4 (architect Q4).
             "// Clippy: typify-generated code is machine output. The allows below are the".into(),
@@ -1315,7 +1306,6 @@ fn write_mod_rs(
 /// gets a barrel iff it directly contains `.rs` schema files or a subdirectory that
 /// (transitively) does — every ancestor of a generated file up to the output root.
 fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: &[(String, u32)]) {
-    // Directories that directly contain a generated `.rs` file.
     let mut file_dirs: BTreeSet<PathBuf> = BTreeSet::new();
     for m in modules {
         let abs = out_root.join(&m.out_rel);
@@ -1324,7 +1314,6 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
         }
     }
 
-    // Every ancestor up to (and including) the output root needs a barrel too.
     let mut all_dirs: BTreeSet<PathBuf> = BTreeSet::new();
     all_dirs.insert(out_root.to_path_buf());
     for dir in &file_dirs {
@@ -1341,7 +1330,6 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
     for dir in &all_dirs {
         let is_root = dir == out_root;
 
-        // Immediate subdirectories of `dir` that participate in the tree.
         let mut child_dirs: Vec<String> = all_dirs
             .iter()
             .filter(|other| other.parent() == Some(dir.as_path()))
@@ -1349,7 +1337,6 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
             .collect();
         child_dirs.sort();
 
-        // Modules directly inside `dir`.
         let mut dir_modules: Vec<&GeneratedModule> = modules
             .iter()
             .filter(|m| out_root.join(&m.out_rel).parent() == Some(dir.as_path()))
@@ -1394,7 +1381,6 @@ fn run() -> Result<(), String> {
         );
     }
 
-    // Stage-and-swap: generate the tree under a sibling staging dir and replace the
     // committed tree (bespoke, stale or partial) only once every write succeeded. A
     // failed or aborted run therefore leaves the previous generated tree intact instead
     // of pruning it mid-window; stray files from a previous generator (e.g. a
@@ -1435,7 +1421,6 @@ fn generate_tree(
         body: String,
     }
     let mut pending: Vec<PendingModule> = Vec::new();
-    // `(type_name, schema_version)` pairs in filesystem-walk order (the loop iterates
     // sorted schema paths), matching the committed `SCHEMA_VERSIONS` ordering.
     let mut schema_versions: Vec<(String, u32)> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
@@ -1469,7 +1454,6 @@ fn generate_tree(
             }
         }
 
-        // Export mode + schema_version are read from the SOURCE schema (the deref
         // tree loses the top-level `schema_version` stamp and keeps the raw title).
         let src_path = src_dir.join(rel);
         let export_all = export_mode_for_schema(&src_path);
@@ -1516,7 +1500,6 @@ fn generate_tree(
         ));
     }
 
-    // Formatting pass + `$ref` dedupe, then write. Every module is parsed before the
     // first write, so the owner index sees the type names modules actually declare
     // and a render failure cannot leave a partially written tree.
     let mut parsed: Vec<(PathBuf, PathBuf, String, syn::File)> = Vec::new();
@@ -1609,7 +1592,6 @@ fn generate_tree(
         );
     }
 
-    // Write the barrel `mod.rs` for every directory in the tree (root gets the
     // `#![allow(...)]` attr + `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION`).
     write_barrels(stage_root, &generated_modules, &schema_versions);
 
@@ -1694,7 +1676,6 @@ where
 {
     let _lock = acquire_publication_lock(out_root)?;
     let stage_root = staging_root(out_root);
-    // Recover (or clear) whatever a previous interrupted publication left behind before
     // this run could overwrite the recovery material.
     recover_interrupted_publication(out_root)?;
     if stage_root.exists() {
@@ -1720,11 +1701,9 @@ fn recover_interrupted_publication(out_root: &Path) -> Result<(), String> {
         return Ok(());
     }
     if out_root.exists() {
-        // The replacement landed; the retired tree is stale litter.
         return fs::remove_dir_all(&backup_root)
             .map_err(|err| format!("remove retired generated tree: {err}"));
     }
-    // Killed before the replacement landed; the retired tree is the committed one.
     fs::rename(&backup_root, out_root).map_err(|err| {
         format!(
             "restore previous generated tree from {}: {err}",
@@ -1779,7 +1758,6 @@ mod tests {
         fs::write(out_root.join("kept.rs"), "// committed").unwrap();
 
         let err = stage_and_swap(&out_root, |stage_root| {
-            // A build that dies mid-write must not prune the committed tree.
             fs::write(stage_root.join("half.rs"), "// partial").unwrap();
             Err("boom".to_string())
         })
@@ -1826,7 +1804,6 @@ mod tests {
         fs::create_dir_all(&out_root).unwrap();
         fs::write(out_root.join("kept.rs"), "// committed").unwrap();
 
-        // Force the swap rename to fail: the staged tree is absent when publication runs.
         let err = publish(&staging_root(&out_root), &out_root).unwrap_err();
         assert!(
             err.contains("swap staging tree into place"),
@@ -1844,7 +1821,6 @@ mod tests {
     fn recovers_an_interrupted_publication() {
         let sandbox = scratch("recover");
         let out_root = sandbox.join("generated");
-        // Simulate a kill after the old tree was retired but before the swap landed.
         fs::create_dir_all(backup_root(&out_root)).unwrap();
         fs::write(backup_root(&out_root).join("kept.rs"), "// committed").unwrap();
 
@@ -1877,7 +1853,6 @@ mod tests {
             })
         });
 
-        // The first run holds the lock across its whole build; the second must fail
         // rather than clear the staging tree out from under it.
         locked_rx.recv().unwrap();
         let err = stage_and_swap(&out_root, |_| Ok(())).unwrap_err();
@@ -1890,7 +1865,6 @@ mod tests {
         holder.join().unwrap().unwrap();
         assert!(out_root.join("first.rs").exists());
 
-        // The lock is released with its holder, so the next run proceeds normally.
         stage_and_swap(&out_root, |stage_root| {
             fs::write(stage_root.join("second.rs"), "// second").unwrap();
             Ok(())

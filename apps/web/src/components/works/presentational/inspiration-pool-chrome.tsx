@@ -1,5 +1,4 @@
 /**
- * Inspiration Pool chrome — presentational extract (v1.222 P1 T2).
  *
  * Props-driven Card: header copy, the single-field add form (the add request
  * carries `title` and nothing else) and the pool rows with their status-driven
@@ -86,7 +85,6 @@ export interface InspirationPoolChromeProps {
   onAdd: (title: string) => void;
   adding?: boolean;
   /**
-   * The row whose promote is in flight (drives the pending label and
    * `aria-busy`). Non-null locks every promote button in the pool: the server
    * checks status once, so one idea must never have two creates in flight.
    */
@@ -95,7 +93,6 @@ export interface InspirationPoolChromeProps {
   onPromote?: (row: InspirationPoolRow) => void;
   onArchive?: (row: InspirationPoolRow) => void;
   /**
-   * Host-owned Work link — the App injects a router `Link`. Must return a
    * single element (or null): the result is rendered inside `<Button
    * asChild>` (Radix Slot), which throws on fragments/multi-element output.
    */
@@ -281,7 +278,6 @@ export function InspirationPoolChrome({
           <>
             <ul
               className="flex flex-col gap-2"
-              // One announcement: the pooled count string already carries the
               // pool name, so it replaces the list label (see the aria-hidden
               // count paragraph below) instead of repeating it.
               aria-label={copy.countLabel ?? copy.listAriaLabel}

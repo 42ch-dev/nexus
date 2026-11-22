@@ -295,7 +295,6 @@ async fn store_count(db: &Path, sql: &'static str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// C-112: the local layout and `kind` frontmatter survive a normal operation
 // ---------------------------------------------------------------------------
 
 /// Seed the author-visible legacy artifacts the preservation contract names:
@@ -335,7 +334,6 @@ fn seed_legacy_artifacts(env: &Env) -> (PathBuf, PathBuf) {
 
 /// The same workspace's capture → review → promote pipeline.
 async fn c112_promote_candidate(provider: &LocalMemoryProvider) {
-    // The capture → review → promote pipeline on the same workspace.
     let captured = wire(
         &provider
             .capture(
@@ -382,7 +380,6 @@ async fn c112_verify_legacy_untouched(
     soul_before: &[u8],
     memory_before: &[u8],
 ) {
-    // The protected author-visible bytes are untouched by every operation.
     assert_eq!(
         std::fs::read(soul_path).expect("SOUL.md bytes").as_slice(),
         soul_before,
@@ -403,7 +400,6 @@ async fn c112_verify_legacy_untouched(
         "no new file was written into the legacy layout"
     );
 
-    // The consumer-visible bridge still serves the authored legacy memory with
     // its kind and body: the bytes above are live, not orphaned.
     let creator_subject = legacy::creator_subject_id(CREATOR);
     let ensured = wire(
@@ -453,7 +449,6 @@ async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
     let provider = open_provider(&env).await;
     ensure(&provider, &admin()).await;
 
-    // A normal provider create + update (the current C-112 operation).
     let created = wire(
         &provider
             .create_record(&admin(), create_request("c112-create", KIND, TEXT))
@@ -540,7 +535,6 @@ async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
 }
 
 // ---------------------------------------------------------------------------
-// C-113 addition: a recovering object is withheld until it is resolved
 // ---------------------------------------------------------------------------
 
 /// After the journal commit, the object's SQL effect is durable but its file
@@ -554,7 +548,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     let provider = open_provider(&env).await;
     ensure(&provider, &admin()).await;
 
-    // A crash after the journal COMMIT: the intent committed, no file effect.
     provider.inject_commit_fault(true);
     let lost = wire(
         &provider
@@ -563,7 +556,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     );
     assert_eq!(lost["error"]["code"], "OUTCOME_UNCERTAIN", "{lost}");
 
-    // D-10 isolation: the recovering object is excluded from every normal read
     // and nothing was published.
     let listed = wire(&provider.list_records(&admin(), list_request(SUBJECT)).await);
     assert_eq!(listed["total_authorized"], 0, "{listed}");
@@ -575,7 +567,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "a recovering intent has no published projection"
     );
 
-    // The original identity at the supported local test/operator boundary:
     // the pending receipt and the intended record this commit created, read
     // from the released store before anything reopens it.
     let db = workspace_state_db_path(&env.user_home, CREATOR, WORKSPACE);
@@ -595,7 +586,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     .await;
     assert_eq!(pending_status, "pending", "the original receipt is pending");
 
-    // The reopen runs the bounded recovery: the original object becomes
     // readable once, with its exact body and settlement.
     drop(provider);
     let provider = open_provider(&env).await;
@@ -632,7 +622,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "the recovered projection carries the body: {published}"
     );
 
-    // One effect: a same-key replay of the settled intent neither re-publishes
     // nor duplicates it, and answers the original identity.
     let replay = wire(
         &provider
@@ -663,7 +652,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
 }
 
 // ---------------------------------------------------------------------------
-// C-115: `remember: true` stays refused on both arms
 // ---------------------------------------------------------------------------
 
 const PROVIDER: &str = "n3-local-mind-fixture";
@@ -943,7 +931,6 @@ async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, Stri
         .await
         .expect("select the fixture workspace");
 
-    // Create the real World/Character first, then release the writer so the
     // provider fixtures can seed the ACTUAL admitted subjects.
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.to_path_buf(),
@@ -974,7 +961,6 @@ async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, Stri
         .await
         .expect("the seed core releases its writer");
 
-    // Seed one record under each REAL subject the Core memory paths address.
     let creator_subject = legacy::creator_subject_id(&creator_id);
     let character_subject = legacy::character_subject_id(&character_id);
     let seeded = LocalMemoryProvider::open(user_home.to_path_buf(), &creator_id, WORKSPACE)
@@ -1033,7 +1019,6 @@ struct C115Admitted<'a> {
 /// Every refusal is typed, precedes agent execution, leaves the admitted
 /// subjects unchanged, and a plain Character prompt still executes.
 async fn c115_refuse_and_control(admitted: &C115Admitted<'_>) {
-    // BEFORE / AFTER each refusal, the REAL admitted subjects are unchanged.
     observe_actual_subjects(
         admitted.user_home,
         admitted.creator_id,
@@ -1081,7 +1066,6 @@ async fn c115_refuse_and_control(admitted: &C115Admitted<'_>) {
         "no operation completed on a refusal"
     );
 
-    // A plain Character prompt is the positive control: the adapter really
     // executes and completes one operation. The Host's public response is
     // `started`; no per-operation terminal status is claimed beyond the
     // adapter execution/completion this fixture observes.
@@ -1140,7 +1124,6 @@ async fn c_115_remember_true_refusal_unchanged_local() {
     .expect("reopen the local core");
     let principal: Principal = core.active_principal().await.expect("principal");
 
-    // Deterministic local agent host: no process, no model, no network.
     let adapter = Arc::new(MindFixtureAdapter::default());
     let manager = Arc::new(HostManager::new());
     manager
@@ -1190,7 +1173,6 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .await
         .expect("the admitted Character session is created");
 
-    // A real admitted non-Character Host session (the legacy no-Actor pair).
     let legacy_session = handle
         .create_session(
             &principal,

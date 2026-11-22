@@ -1,5 +1,4 @@
 /**
- * brief-era-tree — V1.159 P1 Task 1 unit tests.
  *
  * Covers the SDD task brief's six required cases:
  *   1. flat_eras_no_relationships        → all depth-0 roots
@@ -22,8 +21,6 @@ import type {
 
 import { buildEraTree, type EraTreeNode } from '../brief-era-tree';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function eraEntity(
   overrides: Partial<WorldKbEntityProjection> &
     Pick<WorldKbEntityProjection, 'key_block_id' | 'canonical_name'>,
@@ -36,7 +33,6 @@ function eraEntity(
     version: 1,
     key_block_id,
     canonical_name,
-    // Default era body shape per architect §2.3: markers ride in
     // `body.attributes`. era_type is added per-fixture when needed.
     body:
       body ??
@@ -74,9 +70,6 @@ function parentEraRel(
   };
 }
 
-// ─── Test helpers ──────────────────────────────────────────────────────────
-
-/** Collect every node in a forest (breadth-first) for structural assertions. */
 function flattenTree(tree: EraTreeNode[]): EraTreeNode[] {
   const all: EraTreeNode[] = [];
   const queue = [...tree];
@@ -101,8 +94,6 @@ function captureWarnings() {
   return warn;
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 describe('buildEraTree', () => {
   it('flat_eras_no_relationships → all eras are depth-0 roots', () => {
     const entities = [
@@ -113,7 +104,6 @@ describe('buildEraTree', () => {
 
     const tree = buildEraTree(entities, []);
 
-    // 3 roots, one per era, all at depth 0 with no children.
     expect(tree).toHaveLength(3);
     expect(tree.every((n) => n.depth === 0)).toBe(true);
     expect(tree.every((n) => n.children.length === 0)).toBe(true);
@@ -185,8 +175,6 @@ describe('buildEraTree', () => {
 
     const tree = buildEraTree(entities, relationships);
 
-    // Both eras are placed exactly once; A (smallest id) is the depth-0 root
-    // with B nested beneath it; the A→B→A back-edge is skipped, not re-rendered.
     const all = flattenTree(tree);
     expect(all.map((n) => n.era.key_block_id).sort()).toEqual([
       'era-a',
@@ -197,7 +185,6 @@ describe('buildEraTree', () => {
     expect(tree[0].children).toHaveLength(1);
     expect(tree[0].children[0].era.key_block_id).toBe('era-b');
     expect(tree[0].children[0].depth).toBe(1);
-    // The back-edge (B → A) must have been detected and logged.
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain('era-b" -> "era-a');
     expect(warn.mock.calls[0][0]).toContain('cycle detected');
@@ -209,9 +196,7 @@ describe('buildEraTree', () => {
       eraEntity({ key_block_id: 'era-parent', canonical_name: 'Only Era' }),
     ];
     const relationships = [
-      // Target `era-missing` is not in the entities set — the edge is orphaned.
       parentEraRel('era-parent', 'era-missing', 0),
-      // Source `era-ghost` is also not in the entities set — no valid edge.
       parentEraRel('era-ghost', 'era-parent', 1),
     ];
 
@@ -221,7 +206,6 @@ describe('buildEraTree', () => {
     expect(tree[0].era.key_block_id).toBe('era-parent');
     expect(tree[0].depth).toBe(0);
     expect(tree[0].children).toHaveLength(0);
-    // Orphan edges are skipped silently — no crash, no warning noise.
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -235,13 +219,11 @@ describe('buildEraTree', () => {
       eraEntity({
         key_block_id: 'era-untyped',
         canonical_name: 'Silent Age',
-        // No era_type attribute at all (legacy flat-era data).
         body: { attributes: {} },
       }),
       eraEntity({
         key_block_id: 'era-empty',
         canonical_name: 'Empty-Typed Age',
-        // Empty string era_type is treated as absent (mirrors adapter
         // readString convention).
         body: { attributes: { era_type: '' } },
       }),
@@ -256,21 +238,16 @@ describe('buildEraTree', () => {
     const tree = buildEraTree(entities, relationships);
 
     const byId = new Map(flattenTree(tree).map((n) => [n.era.key_block_id, n]));
-    // All four eras render (typed, untyped, empty-typed, nested child).
     expect(byId.size).toBe(4);
     expect(byId.get('era-typed')?.era_type).toBe('kingdom');
     expect(byId.get('era-sub')?.era_type).toBe('sub-age');
     expect(byId.get('era-untyped')?.era_type).toBeUndefined();
     expect(byId.get('era-empty')?.era_type).toBeUndefined();
-    // Untyped eras are depth-0 roots; the typed parent nests its typed child.
     expect(idsAtDepth(tree, 0)).toEqual(['era-empty', 'era-typed', 'era-untyped']);
     expect(idsAtDepth(tree, 1)).toEqual(['era-sub']);
   });
 
   it('multi_parent_dag → era with two parents appears under both (no data loss)', () => {
-    // Greptile P1: two parent_era edges targeting the same child must NOT
-    // silently vanish. The tree builder renders a DAG forest — the child
-    // appears under BOTH parents. No warnings (multi-parent is valid data).
     const entities = [
       eraEntity({ key_block_id: 'era-a', canonical_name: 'Parent A' }),
       eraEntity({ key_block_id: 'era-b', canonical_name: 'Parent B' }),
@@ -284,13 +261,11 @@ describe('buildEraTree', () => {
     const warn = captureWarnings();
     const tree = buildEraTree(entities, relationships);
 
-    // C appears TWICE — once under A, once under B (DAG forest, no loss).
     const all = flattenTree(tree);
     const cNodes = all.filter((n) => n.era.key_block_id === 'era-c');
     expect(cNodes).toHaveLength(2);
     expect(cNodes.every((n) => n.depth === 1)).toBe(true);
 
-    // A and B are depth-0 roots, each with C as child.
     expect(tree).toHaveLength(2);
     expect(tree[0].era.key_block_id).toBe('era-a');
     expect(tree[0].children).toHaveLength(1);
@@ -299,7 +274,6 @@ describe('buildEraTree', () => {
     expect(tree[1].children).toHaveLength(1);
     expect(tree[1].children[0].era.key_block_id).toBe('era-c');
 
-    // No warnings — multi-parent is valid data in a DAG.
     expect(warn).not.toHaveBeenCalled();
   });
 });

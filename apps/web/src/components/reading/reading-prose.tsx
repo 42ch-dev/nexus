@@ -1,5 +1,4 @@
 /**
- * ReadingProse — V1.79 Author Reflection (Track A / P0) + V1.91 Profile-specific
  * Reading Chrome (P0 headline).
  *
  * The prose reading surface: applies reading typography (measure, line-height,

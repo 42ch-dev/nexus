@@ -106,7 +106,6 @@ impl WorkspaceExecutor for FailOnChild {
 /// was built for, the unrelated cwd, and the engine pool both halves share.
 struct Fixture {
     pool: Arc<SqlitePool>,
-    // Held so the config the port resolves its active creator from outlives the run.
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
     root: tempfile::TempDir,
@@ -206,7 +205,6 @@ fn work_record(work_id: &str) -> WorkRecord {
         current_stage: "intake".to_string(),
         stage_status: "pending".to_string(),
         work_profile: None,
-        // A work row is created without a ref; the scaffold claims it.
         work_ref: None,
         total_planned_chapters: None,
         current_chapter: 0,
@@ -254,7 +252,6 @@ async fn assert_first_scaffold_lands(
 
     cap.run(input).await.expect("scaffold runs on a first Work");
 
-    // The port's target: `<canonical root>/Works/<work_ref>/<child>`.
     let landed = fixture
         .root
         .path()
@@ -266,7 +263,6 @@ async fn assert_first_scaffold_lands(
         "bytes must land under the canonical root: {}",
         landed.display()
     );
-    // Nothing landed beside the cwd-relative `Works` tree instead.
     let leaked = fixture
         .cwd
         .path()
@@ -320,7 +316,6 @@ fn tree_snapshot(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
 #[serial_test::serial]
 async fn first_scaffolds_land_bytes_through_the_real_port() {
     let fx = fixture().await;
-    // The scaffolds resolve their `Works` tree from the executor; keep the
     // cwd elsewhere so a non-port write cannot masquerade as a hit.
     let _cwd = CwdGuard::enter(fx.cwd.path());
 
@@ -334,7 +329,6 @@ async fn first_scaffolds_land_bytes_through_the_real_port() {
             .expect("works row");
     }
 
-    // The default constructor path: `with_pool` ⇒ relative `Works` root, which
     // is exactly what the production registry arms use.
     let essay = EssayProjectScaffold::with_pool((*fx.pool).clone())
         .with_workspace_executor(Some(Arc::clone(&fx.executor)));
@@ -419,7 +413,6 @@ async fn a_reinit_preserves_an_existing_canonical_novel_file() {
         .await
         .expect("works row");
 
-    // A user-authored file already sits at the port's target. The scaffold's
     // idempotency check must see THIS tree, not a cwd-relative one.
     let work_dir = fx.root.path().join("Works").join("prod-novel-keep");
     std::fs::create_dir_all(&work_dir).expect("work dir");
@@ -462,7 +455,6 @@ async fn a_later_port_refusal_restores_the_canonical_tree() {
         .await
         .expect("works row");
 
-    // The README lands first (overwriting this original), then the outline
     // commit refuses: rollback must restore/remove the same canonical tree.
     let work_dir = fx.root.path().join("Works").join("prod-essay-rollback");
     std::fs::create_dir_all(&work_dir).expect("work dir");
@@ -524,7 +516,6 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
         .await
         .expect("works row with a stored ref");
 
-    // The selection excludes `work_ref`, so the requested ref must not become
     // the port's lookup key: only the stored ref resolves this Work's row.
     let novel = NovelProjectScaffold::with_pool((*fx.pool).clone())
         .with_workspace_executor(Some(Arc::clone(&fx.executor)));
@@ -570,7 +561,6 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
 #[serial_test::serial]
 async fn simulated_scaffold_records_without_touching_work_tree() {
     let fx = simulated_fixture().await;
-    // The scaffold resolves its `Works` tree from the executor; keep the cwd
     // elsewhere so a cwd-relative write cannot masquerade as a hit.
     let _cwd = CwdGuard::enter(fx.cwd.path());
 
@@ -579,7 +569,6 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         .await
         .expect("works row with a stored ref");
 
-    // Existing project tree: the Work directory plus a real chapter file.
     let work_dir = fx.root.path().join("Works").join("sim-novel");
     let chapter = work_dir.join("Stories/chapter-01.md");
     std::fs::create_dir_all(chapter.parent().expect("chapter dir")).expect("chapter dir");
@@ -602,7 +591,6 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         .await
         .expect("the simulated scaffold runs on a real workspace");
 
-    // The whole tree — every directory, every file, every byte — is unchanged.
     assert_eq!(
         tree_snapshot(fx.root.path()),
         before,
@@ -614,7 +602,6 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         "the existing chapter bytes are untouched"
     );
 
-    // The run was not a no-op: every Work write it intended is in the log, in
     // commit order.
     let recorded = fx
         .executor
@@ -685,7 +672,6 @@ impl WorkspaceExecutor for RecordingThenDbLoss {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        // `AGENTS.md` is the scaffold's last Work write; the database steps
         // follow it.
         let last = input.rel_child == "AGENTS.md";
         let recorded = self.inner.commit_work_artifact(input).await?;

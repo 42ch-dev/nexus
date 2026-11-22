@@ -1,5 +1,4 @@
 /**
- * Lifecycle admission for the app-managed service owner (v1.192 P0-T4).
  *
  * The utility process owns at most one service handle and answers at most one
  * lifecycle request at a time, so every operation is admitted against the
@@ -33,7 +32,6 @@ export function admitUtilityOperation(
       return { ok: true };
     }
     case 'close':
-      // Idempotent join and retry path: a confirmed close is final, an
       // unconfirmed one may be retried until cleanup is confirmed.
       return { ok: true };
     case 'reset-local-state': {

@@ -29,7 +29,6 @@ fn build_neutral_fixture() -> (
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
 
-    // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
         "wld_golden_neutral",
         "ctr_golden",
@@ -41,7 +40,6 @@ fn build_neutral_fixture() -> (
     world.created_at = "2026-01-01T00:00:00Z".to_string();
     narrative.insert_world(world);
 
-    // ── Timeline event (frozen id + created_at) ──
     let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
         "wld_golden_neutral",
         "fbk_root",
@@ -53,7 +51,6 @@ fn build_neutral_fixture() -> (
     event.title = Some("The Beginning".to_string());
     narrative.insert_event(event);
 
-    // ── Stage0 (no wall-clock dep) ──
     let stage0 = Stage0Assembly {
         personality: "A creative writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels and 20 short stories.".to_string(),
@@ -75,7 +72,6 @@ fn build_neutral_fixture() -> (
 async fn seed_neutral_stores(kb: &InMemoryKbStore) {
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
-    // Entry with NO modules map at all.
     let mut kb_plain =
         KnowledgeEntryRecord::new("wld_golden_neutral", BlockType::Character, "Hero");
     kb_plain.entry_id = "kb_neutral_001".to_string();
@@ -105,7 +101,6 @@ async fn neutral_only_default_on_golden() {
     let (narrative, kb, stage0) = build_neutral_fixture();
     seed_neutral_stores(&kb).await;
 
-    // Hard guarantee: default-on == explicit-off (V1.146 flag-off semantics).
     let default_on = assemble_with_flag(stage0.clone(), &narrative, &kb, true).await;
     let explicit_off = assemble_with_flag(stage0, &narrative, &kb, false).await;
     assert_eq!(
@@ -114,7 +109,6 @@ async fn neutral_only_default_on_golden() {
          to explicit-off (V1.146 flag-off) output"
     );
 
-    // Frozen guarantee: default-on output matches the checked-in golden.
     let golden = include_str!("fixtures/assemble_moment_neutral_only_default_on.golden");
     assert_eq!(
         default_on, golden,

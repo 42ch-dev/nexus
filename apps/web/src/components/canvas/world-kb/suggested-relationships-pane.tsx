@@ -1,5 +1,4 @@
 /**
- * World KB Suggested relationships pane (V1.76 γ).
  *
  * The author's primary triage surface for extraction-suggested relationships
  * (`needs_review = 1`, `source = 'extraction'`). A sortable table with
@@ -96,7 +95,6 @@ export function SuggestedRelationshipsPane({
     entities.find((e) => e.key_block_id === id)?.canonical_name ?? id;
 
   const sorted = useMemo(() => {
-    // Only stored-direction rows (avoid double-counting symmetric reverses).
     const stored = suggestions.filter((r) => r.projection_direction === 'stored');
     stored.sort((a, b) => {
       let cmp = 0;
@@ -112,7 +110,6 @@ export function SuggestedRelationshipsPane({
           break;
         case 'confidence':
         default:
-          // Suggestions without confidence sort last (treat as -1).
           cmp = (a.confidence ?? -1) - (b.confidence ?? -1);
           break;
       }
@@ -127,7 +124,6 @@ export function SuggestedRelationshipsPane({
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortKey(key);
-      // Confidence defaults to desc (triage highest first); others asc.
       setSortDir(key === 'confidence' ? 'desc' : 'asc');
     }
   }
@@ -161,7 +157,6 @@ export function SuggestedRelationshipsPane({
       const result = await onPromoteAll(sorted);
       setPromoteAllStatus({ kind: 'done', result });
     } catch {
-      // If the parent handler throws instead of returning counts, treat every
       // item as failed so the user sees a failure message.
       setPromoteAllStatus({ kind: 'done', result: { succeeded: 0, failed: sorted.length } });
     }

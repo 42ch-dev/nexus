@@ -16,9 +16,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// ── Newtype wrappers ────────────────────────────────────────────────
-
-/// Nexus-owned session identifier.
 ///
 /// Wraps an opaque string. The inner value is opaque to consumers — it is
 /// only produced by the SDK adapter and passed back to it for protocol
@@ -87,9 +84,6 @@ impl std::fmt::Display for NexusProtocolVersion {
     }
 }
 
-// ── Stop reason ─────────────────────────────────────────────────────
-
-/// Why the agent stopped processing a prompt turn.
 ///
 /// Mirrors the ACP spec `StopReason` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,9 +101,6 @@ pub enum NexusStopReason {
     Cancelled,
 }
 
-// ── Auth method ─────────────────────────────────────────────────────
-
-/// An authentication method reported by the agent during initialization.
 ///
 /// This is a simplified view — only the fields consumers actually inspect
 /// (id, name) are exposed.
@@ -125,9 +116,6 @@ pub struct NexusAuthMethod {
     pub description: Option<String>,
 }
 
-// ── Agent info ──────────────────────────────────────────────────────
-
-/// Metadata about the agent implementation (name, version).
 ///
 /// Mirrors SDK `Implementation` — consumers read `name` and `version`
 /// for display and logging.
@@ -143,9 +131,6 @@ pub struct NexusAgentInfo {
     pub version: String,
 }
 
-// ── Agent capabilities ──────────────────────────────────────────────
-
-/// Capabilities reported by the agent during initialization.
 ///
 /// This is a simplified view exposing only the fields Nexus consumers use.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,9 +141,6 @@ pub struct NexusAgentCapabilities {
     pub load_session: bool,
 }
 
-// ── Session mode ────────────────────────────────────────────────────
-
-/// A mode the agent can operate in (e.g. "act" / "ask").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSessionMode {
@@ -181,9 +163,6 @@ pub struct NexusSessionModeState {
     pub available_modes: Vec<NexusSessionMode>,
 }
 
-// ── Content block ───────────────────────────────────────────────────
-
-/// A content block in a prompt or response.
 ///
 /// This is a simplified view — only `Text` and `ResourceLink` variants
 /// are needed by Nexus consumers today. New variants can be added as
@@ -215,9 +194,6 @@ pub struct NexusResourceLink {
     pub name: Option<String>,
 }
 
-// ── MCP server ──────────────────────────────────────────────────────
-
-/// An MCP server configuration for a new session.
 ///
 /// Mirrors the SDK `McpServer` enum — consumers construct these for
 /// `NexusNewSessionRequest`.
@@ -268,9 +244,6 @@ pub struct NexusMcpServerStdio {
     pub args: Vec<String>,
 }
 
-// ── Request DTOs ────────────────────────────────────────────────────
-
-/// Request for the ACP `initialize` handshake.
 ///
 /// This replaces the SDK `InitializeRequest` in trait signatures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,9 +327,6 @@ impl NexusPromptRequest {
     }
 }
 
-// ── Response DTOs ───────────────────────────────────────────────────
-
-/// Response from the ACP `initialize` handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusInitializeResponse {
@@ -403,9 +373,6 @@ pub struct NexusCancelResult {
     pub session_id: NexusSessionId,
 }
 
-// ── Session config option ─────────────────────────────────────────────
-
-/// Request to set a session configuration option.
 ///
 /// Mirrors the SDK `SetSessionConfigOptionRequest` — identifies the session,
 /// the config key, and the new value (a string newtype for value IDs).
@@ -545,9 +512,6 @@ impl NexusSetConfigOptionResponse {
     }
 }
 
-// ── Session list ───────────────────────────────────────────────────────
-
-/// Request to list sessions from the agent.
 ///
 /// Mirrors the SDK `ListSessionsRequest` — supports filtering by cwd
 /// and cursor-based pagination.
@@ -685,8 +649,6 @@ impl NexusListSessionsResponse {
     }
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,7 +695,6 @@ mod tests {
         assert_eq!(req.protocol_version, NexusProtocolVersion::latest());
         assert!(req.client_info.is_none());
 
-        // Default trait
         let req2 = NexusInitializeRequest::default();
         assert_eq!(req.protocol_version, req2.protocol_version);
     }
@@ -833,8 +794,6 @@ mod tests {
         }
     }
 
-    // ── Config option DTO tests ─────────────────────────────────────────────
-
     #[test]
     fn nexus_set_config_option_request_new() {
         let req = NexusSetConfigOptionRequest::new(
@@ -894,7 +853,6 @@ mod tests {
         let deserialized: NexusConfigSelectOption = serde_json::from_str(&json).unwrap();
         assert_eq!(opt, deserialized);
 
-        // Without description
         let opt_no_desc = NexusConfigSelectOption {
             value: "opt-2".to_string(),
             name: "Two".to_string(),
@@ -1040,7 +998,6 @@ mod tests {
     fn nexus_list_sessions_request_skip_serializing_none() {
         let req = NexusListSessionsRequest::new();
         let json = serde_json::to_string(&req).unwrap();
-        // Should not contain cwd or cursor fields when None
         assert!(!json.contains("cwd"));
         assert!(!json.contains("cursor"));
     }

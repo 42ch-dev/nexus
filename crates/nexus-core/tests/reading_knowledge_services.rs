@@ -211,7 +211,6 @@ async fn annotation_create_list_patch_delete_round_trip() {
         .unwrap();
     assert!(list.items.is_empty());
 
-    // Unknown annotation keeps the legacy not-found resource string.
     assert!(matches!(
         core.delete_annotation(&principal, "ann_unknown".into()).await,
         Err(CoreError::NotFound { resource }) if resource == "annotation ann_unknown"
@@ -228,7 +227,6 @@ async fn annotation_note_clear_and_scope_isolation() {
     let temp = tempfile::tempdir().unwrap();
     let (core, principal, work_id) = core_with_work(temp.path()).await;
 
-    // Progress upsert/get/delete over the same Work proves the progress half.
     core.put_reading_progress(
         &principal,
         work_id.clone(),
@@ -266,7 +264,6 @@ async fn annotation_note_clear_and_scope_isolation() {
         .unwrap();
     assert_eq!(cleared.note, None);
 
-    // Unknown Work stays NotFound with the legacy resource string.
     assert!(matches!(
         core.get_reading_progress(&principal, ReadingProgressQuery {
             work_id: "wrk_unknown".into(), chapter: 1.try_into().unwrap(), volume: None
@@ -274,7 +271,6 @@ async fn annotation_note_clear_and_scope_isolation() {
         Err(CoreError::NotFound { resource }) if resource == "work wrk_unknown"
     ));
 
-    // A foreign-creator annotation row is Forbidden, not silently editable.
     let tamper = nexus_local_db::open_pool(&nexus_home_layout::workspace_state_db_path(
         temp.path(),
         "author",
@@ -360,7 +356,6 @@ async fn findings_list_pagination_and_filter_parity() {
     assert_eq!(second.items.len(), 1);
     assert!(!second.pagination.has_more);
 
-    // Status-filter parity (R-V149P0-01): a lone unknown status matches no
     // rows (legacy quirk — the SQL `status = ?` filter simply never hits),
     // while the comma-separated set form validates each token and rejects
     // unknown ones with the verbatim legacy invalid_input message.
@@ -400,7 +395,6 @@ async fn findings_list_pagination_and_filter_parity() {
         "invalid status value 'bogus'; allowed: open, resolved, wont_fix, triaged, in_review, duplicate"
     ));
 
-    // The `v1:` cursor grammar rejects malformed tokens verbatim.
     let Err(CoreError::InvalidInput { reason, .. }) = core
         .list_findings(
             &principal,
@@ -448,7 +442,6 @@ async fn findings_update_and_batch_triage_semantics() {
         .await
         .unwrap();
 
-    // Empty ID list.
     let Err(CoreError::InvalidInput { field, reason }) = core
         .batch_update_findings(
             &principal,
@@ -466,7 +459,6 @@ async fn findings_update_and_batch_triage_semantics() {
         ("invalid_input", "finding_ids must not be empty")
     );
 
-    // Duplicates.
     let Err(CoreError::InvalidInput { reason, .. }) = core
         .batch_update_findings(
             &principal,
@@ -481,7 +473,6 @@ async fn findings_update_and_batch_triage_semantics() {
     };
     assert_eq!(reason, "finding_ids must not contain duplicates");
 
-    // Cap.
     let ids = (0..101).map(|i| format!("fnd_{i}")).collect();
     let Err(CoreError::InvalidInput { field, reason }) = core
         .batch_update_findings(
@@ -503,7 +494,6 @@ async fn findings_update_and_batch_triage_semantics() {
         )
     );
 
-    // Absent patch reports updated: 0 per the contract.
     let no_patch = core
         .batch_update_findings(
             &principal,
@@ -516,7 +506,6 @@ async fn findings_update_and_batch_triage_semantics() {
         .unwrap();
     assert_eq!(no_patch.updated, 0);
 
-    // Partial success: one updated, one unknown; a terminal-state finding is
     // reported in the conflict bucket instead of failing the batch.
     core.update_finding(
         &principal,
@@ -559,7 +548,6 @@ async fn findings_update_and_batch_triage_semantics() {
     assert_eq!(report.not_found, vec!["fnd_unknown".to_string()]);
     assert_eq!(report.conflict, vec![second.finding_id.clone()]);
 
-    // Tri-state rule_suggestion: null clears, absent keeps, value sets (R-V147P0-03).
     // The carrier is the generated presence-aware one, so the three states are
     // written as the wire JSON value they represent.
     let set = core
@@ -575,7 +563,6 @@ async fn findings_update_and_batch_triage_semantics() {
         .unwrap();
     assert_eq!(set.rule_suggestion.as_deref(), Some("prefer active voice"));
 
-    // Absent keeps the stored column: a patch touching another field must not
     // clear it. (`description` rather than `status`, whose self-loop is an
     // illegal transition.)
     let kept = core
@@ -656,13 +643,11 @@ async fn create_finding_rejects_foreign_or_missing_work() {
         rule_suggestion: None,
     };
 
-    // Missing Work.
     assert!(matches!(
         core.create_finding(&principal, "missing".into(), make("t")).await,
         Err(CoreError::NotFound { resource }) if resource == "work missing"
     ));
 
-    // Foreign Work (row moved to another creator in the same database).
     let home = temp.path();
     let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
     let seed = nexus_local_db::writer_protocol::init_guarded_pool(&db, "author")
@@ -731,7 +716,6 @@ async fn get_work_finding_binds_row_to_path_work() {
         .await
         .unwrap();
 
-    // Own route still resolves.
     assert_eq!(
         core.get_work_finding(&principal, work_a.clone(), finding.finding_id.clone())
             .await
@@ -739,7 +723,6 @@ async fn get_work_finding_binds_row_to_path_work() {
             .finding_id,
         finding.finding_id
     );
-    // Cross-work route: legacy 404 shape, indistinguishable from absence.
     assert!(matches!(
         core.get_work_finding(&principal, work_b.clone(), finding.finding_id.clone()).await,
         Err(CoreError::NotFound { resource }) if resource == format!("finding {}", finding.finding_id)
@@ -747,7 +730,6 @@ async fn get_work_finding_binds_row_to_path_work() {
     core.close().await.unwrap();
 }
 
-// ─── Reading progress + annotation bounds: retained domain assertions migrated
 // from the retired daemon runtime `reading_api.rs` fixture. ─────────────────
 
 /// Reading progress defaults to zero with a fresh timestamp, round-trips an
@@ -764,7 +746,6 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
         volume: None,
     };
 
-    // Default: zero progress with a fresh timestamp.
     let default = core
         .get_reading_progress(&principal, query(work_id.clone()))
         .await
@@ -777,7 +758,6 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
         "the default carries a timestamp"
     );
 
-    // Upsert round trip; `updated_at` is the stored value on both surfaces.
     let put = core
         .put_reading_progress(
             &principal,
@@ -802,7 +782,6 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
         "the read serves the stored timestamp"
     );
 
-    // Delete clears the row → the next read is the default again.
     core.delete_reading_progress(&principal, query(work_id.clone()))
         .await
         .unwrap();
@@ -812,7 +791,6 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
         .unwrap();
     assert_eq!(after.scroll_progress, 0, "delete clears stored progress");
 
-    // Offsets: an end at or before the start is refused before any write.
     let mut request = annotation_request(&work_id);
     request.start_offset = 10;
     request.end_offset = 5;
@@ -834,7 +812,6 @@ async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
         .unwrap();
     assert!(list.items.is_empty(), "the refused create wrote nothing");
 
-    // A foreign-creator annotation row is Forbidden on delete too.
     let created = core
         .create_annotation(&principal, annotation_request(&work_id))
         .await

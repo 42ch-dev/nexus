@@ -253,8 +253,6 @@ impl Owner {
     }
 }
 
-// ── Read-path entry points ───────────────────────────────────────────────
-
 /// The subject's projected records, filtered by exactly the §6.13/§7.20
 /// predicate the provider's own page uses ([`Selection`], provenance filter,
 /// kind filter). Tombstoned rows are not a legacy state: a legacy object is
@@ -276,7 +274,6 @@ pub(super) async fn records_in_tx(
     let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    // An authored long-term memory always carries an `nexus.<MemoryKind>` kind
     // (D-7), so a request for other kinds cannot serve one: the files stay
     // unopened and a malformed one cannot break the read.
     let long_term = if kinds.is_empty()
@@ -325,7 +322,6 @@ pub(super) async fn record_by_id_in_tx(
     let Some(owner) = id_owner(tx, roots, &family, &components).await? else {
         return Ok(None);
     };
-    // A bearer no writer ever ensured still projects under the deterministic
     // identity a writer open would have created (fix round 2, finding F2):
     // when a subject already names the bearer, that canonical subject wins and
     // this absent one projects nothing.
@@ -342,7 +338,6 @@ pub(super) async fn record_by_id_in_tx(
         }
         _ => LongTerm::None,
     };
-    // The requested row is selected before its keywords are parsed, so a
     // damaged sibling fragment cannot fail a read of another memory.
     let fragments = match family.as_str() {
         FAMILY_MEMORY_FRAGMENTS | FAMILY_CHARACTER_FRAGMENTS => {
@@ -472,8 +467,6 @@ fn profile_of(
         updated_at: at,
     }))
 }
-
-// ── Owner resolution ────────────────────────────────────────────────────
 
 /// Whether P5's completion marker is present, read on the caller's read
 /// transaction so the marker and the projection it decides see one snapshot.
@@ -685,8 +678,6 @@ async fn subject_of(
         .map_err(StoreError::from)
 }
 
-// ── Predicate parity with the provider's own page ───────────────────────
-
 /// The Rust rendering of [`crate::storage`]'s `record_predicate` selection
 /// term, so a projected row is admitted or excluded by exactly the rule the
 /// SQL page applies to a provider row.
@@ -736,8 +727,6 @@ fn provenance_admits(filter: Option<&[String]>, row: &RecordRow) -> bool {
 fn kind_admits(kinds: &[String], row: &RecordRow) -> bool {
     kinds.is_empty() || kinds.iter().any(|kind| kind == &row.kind)
 }
-
-// ── Record projections ──────────────────────────────────────────────────
 
 /// Which bearer long-term memory files a projection may open.
 ///
@@ -896,7 +885,6 @@ async fn creator_fragments(
                     "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
                     "world_id": world_id,
-                    // The E4 DTO serves the legacy column verbatim (D5); the
                     // row's `created_at` above only carries its time for order.
                     "created_at": raw_created_at,
                 }},
@@ -976,7 +964,6 @@ async fn character_fragments(
                     "actor_world_binding_id": actor_world_binding_id,
                     "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
-                    // The E4 DTO serves the legacy column verbatim (D5).
                     "created_at": raw_created_at,
                 }},
             });
@@ -993,7 +980,6 @@ async fn character_fragments(
                     occurred_at: None,
                     created_at: created_at.clone(),
                     updated_at: created_at,
-                    // Legacy revision 0 is the provider's revision 1, so the
                     // 0→1 promotion step the DTOs expose survives the bridge.
                     revision: revision.saturating_add(1),
                 },
@@ -1039,7 +1025,6 @@ async fn creator_narratives(
                 FAMILY_MEMORY_NARRATIVES,
                 &[scope_id.as_deref().unwrap_or(NULL_COMPONENT)],
                 row,
-                // A per-World narrative is World-scoped exactly like a
                 // Character's binding-scoped one: the provider's placement
                 // invariant is "context visibility iff a context id", so a
                 // shared row could not carry the World it belongs to.
@@ -1237,7 +1222,6 @@ fn long_term_records(
     for slug in slugs {
         let (memory, document) = memory_io::load_memory_source(&roots.home, bearer, &slug)
             .map_err(|error| legacy_error(&error))?;
-        // The exact source framing: the parsed view trims the body and keeps
         // only the known frontmatter fields, so the file's own bytes travel with
         // the projection and a rewrite of bytes the view drops still changes the
         // migration manifest (P5-F3). The served text is the file's body, while
@@ -1250,7 +1234,6 @@ fn long_term_records(
         let updated_at = normalize_timestamp(&memory.frontmatter.updated_at);
         let record_id = external_id(family, &[owner_key, slug.as_str()]);
         let content = json!({
-            // The served text is the file's own body, not the parsed view: the
             // parser trims a leading blank line or indentation the author wrote,
             // and the migration preserves the authored body exactly (R2-C1).
             "text": body,
@@ -1287,8 +1270,6 @@ fn long_term_records(
     Ok(rows)
 }
 
-// ── Cursor versions ─────────────────────────────────────────────────────
-
 /// The MEM-R026 version token of a projected record. A projection has no
 /// provider revision to bump, so a digest over every value a merged read serves
 /// stands in for one: a rewritten bearer file, an updated narrative or a changed
@@ -1309,8 +1290,6 @@ pub(super) fn record_version(row: &RecordRow) -> StoreResult<String> {
         SpokeResult::Reject(reject) => Err(StoreError::Corrupt(reject.message)),
     }
 }
-
-// ── Candidate projections ───────────────────────────────────────────────
 
 async fn candidates_for_owner(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -1371,7 +1350,6 @@ async fn creator_pending_reviews(
                     "world_id": world_id,
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
-                    // The E4 DTO serves the legacy column verbatim (D5); the
                     // row's `created_at` only carries its time for order.
                     "created_at": created_at,
                 }},
@@ -1439,7 +1417,6 @@ async fn character_pending_reviews(
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
                     "source_operation_id": source_operation_id,
-                    // The E4 DTO serves the legacy column verbatim (D5).
                     "created_at": created_at,
                 }},
             });
@@ -1495,8 +1472,6 @@ fn candidate_row(
     })
 }
 
-// ── Bearer files ────────────────────────────────────────────────────────
-
 /// The `SOUL.md` bytes of a bearer, or `None` when the file is absent (an
 /// honest-empty profile, never an error).
 fn soul_document(roots: &LegacyRoots, owner: &Owner) -> StoreResult<Option<String>> {
@@ -1525,8 +1500,6 @@ fn soul_timestamp(roots: &LegacyRoots, owner: &Owner) -> String {
 fn legacy_error(error: &MemoryError) -> StoreError {
     StoreError::Corrupt(format!("legacy bearer file: {error}"))
 }
-
-// ── Migration snapshot (P5) ─────────────────────────────────────────────
 
 /// One provider subject the migration pass writes under.
 pub(super) struct MigrationSubject {
@@ -1595,7 +1568,6 @@ pub(super) async fn migration_snapshot(
         candidates.extend(owner_candidates);
         profiles.extend(owner_profile);
     }
-    // One order for every read of the same snapshot, so the manifest digest and
     // the rows a re-run compares are stable however the source rows are paged.
     records.sort_by(|left, right| left.record_id.cmp(&right.record_id));
     candidates.sort_by(|left, right| left.candidate_id.cmp(&right.candidate_id));
@@ -1755,8 +1727,6 @@ pub(super) fn migration_manifest(
     }))
 }
 
-// ── Projection helpers ──────────────────────────────────────────────────
-
 struct RecordDraft {
     record_id: String,
     kind: String,
@@ -1872,8 +1842,6 @@ fn serialize(value: &Value, what: &str) -> StoreResult<String> {
     serde_json::to_string(value).map_err(|error| StoreError::Corrupt(format!("{what}: {error}")))
 }
 
-// ── External identity ───────────────────────────────────────────────────
-
 /// `lgc:<family>:<component>[:<component>…]`, each component percent-escaped so
 /// the id is both reversible and safe to store as one opaque string.
 fn external_id(family: &str, components: &[&str]) -> String {
@@ -1953,7 +1921,6 @@ mod tests {
 
     #[test]
     fn external_id_escapes_separators_and_null_components() {
-        // A slug may contain ':' (only '/', '\\', '..' and control chars are
         // rejected), so the separator must be escaped for the id to parse back.
         let id = external_id(
             "character_long_term",
@@ -1981,7 +1948,6 @@ mod tests {
             normalize_timestamp("2026-11-02 08:05:00"),
             "2026-11-02T08:05:00Z"
         );
-        // Sub-second precision survives: two rows in one second stay ordered by
         // their real times (NXM-5 QC1-F1).
         assert_eq!(
             normalize_timestamp("2026-11-02T08:05:00.123+02:00"),
@@ -1992,7 +1958,6 @@ mod tests {
             "2026-11-02T08:05:00.900Z"
         );
         assert_eq!(normalize_timestamp("not a time"), "not a time");
-        // A written provider column keeps the one provider rendering.
         assert_eq!(
             provider_timestamp("2026-11-02T08:05:00.900Z"),
             "2026-11-02T08:05:00Z"

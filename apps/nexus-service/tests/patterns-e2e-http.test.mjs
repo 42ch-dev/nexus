@@ -1,5 +1,4 @@
 /**
- * v1.239 P3-T6: `GET /v1/daemon/patterns` over the real core path.
  *
  * The T4 suite drives the handler over a stubbed `ServiceCore.core` seam, so
  * nothing there proves the native reader is wired to the route. This suite
@@ -60,7 +59,6 @@ describe('patterns end-to-end (v1.239 P3-T6)', () => {
     service = await startService({
       home,
       host: '127.0.0.1',
-      // Port 0: the OS picks a free port, so parallel suites never collide.
       port: 0,
       allowRemote: false,
       domainOnly: true,

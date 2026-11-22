@@ -1,5 +1,4 @@
 /**
- * WorkTimelineCanvasAdapter — V1.123 P2 Task 3 (Moment layer projection).
  *
  * Verifies the Moment projection contract locked by
  *   - `iterations/v1.123/specs/three-layer-architecture.md` §3 (Moment-
@@ -50,8 +49,6 @@ import {
   type WorkTimelineNodeData,
 } from '../work-timeline-canvas-adapter';
 import { WorkTimelineCanvas } from '../work-timeline-canvas';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
@@ -109,8 +106,6 @@ function makeContext(
     ...overrides,
   };
 }
-
-// ─── Moment projection (architect §3 + §7 + §8) ───────────────────────────
 
 describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (Scene/Beat fixture)', () => {
   it('emits zero nodes when the scene/beat fixture is absent (honest empty-state)', () => {
@@ -214,18 +209,14 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
 
     const { nodes } = projectWorkTimelineGraph(g, 'moment', fx);
 
-    // Chapter 1 scenes share X; chapter 2 scenes share X (different from ch1).
     const ch1A = nodes.find((n) => n.id === 'wt-scene:sc-c1-a')!;
     const ch1B = nodes.find((n) => n.id === 'wt-scene:sc-c1-b')!;
     const ch2A = nodes.find((n) => n.id === 'wt-scene:sc-c2-a')!;
     const ch2B = nodes.find((n) => n.id === 'wt-scene:sc-c2-b')!;
 
-    // Same chapter → same X.
     expect(ch1A.position.x).toBe(ch1B.position.x);
     expect(ch2A.position.x).toBe(ch2B.position.x);
-    // Different chapters → different X (ch2 is to the right of ch1).
     expect(ch2A.position.x).toBeGreaterThan(ch1A.position.x);
-    // Within a chapter, scenes stack vertically (Y differs by sceneId sort).
     expect(ch1A.position.y).not.toBe(ch1B.position.y);
   });
 
@@ -256,7 +247,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
 
     const { nodes } = projectWorkTimelineGraph(g, 'moment');
 
-    // chapter 1 before chapter 2, then the derived spine node.
     expect(nodes.filter((n) => n.type === 'work-timeline-moment-scene').map((n) => n.id)).toEqual([
       'wt-scene:scn_a',
       'wt-scene:scn_b',
@@ -278,7 +268,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
   });
 
   it('projects an explicitly injected empty fixture verbatim even when the canonical arrays carry data', () => {
-    // Explicit injection mode: a supplied payload (populated OR deliberately
     // empty) wins; it is never an automatic empty-data fallback.
     const g = outline({
       scenes: [{ scene_id: 'scn_a', chapter_id: 1, title: 'Opening', status: 'drafted' }],
@@ -299,14 +288,11 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
 
     const { edges } = projectWorkTimelineGraph(g, 'moment', fx);
 
-    // Architect §6.2 + layer-feel §2.4: beat succession is encoded
     // spatially by the vertical stack; explicit realizes_event light links
     // (beat → Narrative event) are P4 polish.
     expect(edges).toEqual([]);
   });
 });
-
-// ─── Adapter context wiring (Moment reads fixture from ctxRef) ────────────
 
 describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctxRef', () => {
   it("projectGraph delegates to Moment projection using ctxRef.current.sceneBeatFixture", () => {
@@ -320,7 +306,6 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
     );
     const { nodes } = adapter.projectGraph(g);
 
-    // V1.126 P1: directed-axis spine node is also added.
     expect(nodes).toHaveLength(2);
     expect(nodes[0].type).toBe('work-timeline-moment-scene');
     expect(nodes[0].id).toBe('wt-scene:sc-1');
@@ -329,7 +314,6 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
   it('registers Moment scene + beat node types alongside the Narrative event node (Task 3 registry extension)', () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
-    // Task 2 registered only the Narrative event node; Task 3 adds the
     // Moment scene + beat nodes. V1.126 P1 adds directedAxisSpine.
     // V1.156 P2 T1 adds the reused World Timeline `timeline-brief-era` node
     // (Work-Brief layer — no new node component family).
@@ -357,8 +341,6 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
   });
 });
 
-// ─── Orchestrator — the canonical carrier arrives after mount ──────────────
-
 function makeWorkClient(outlineData: WorkOutline): NexusClient {
   return {
     getWorkOutline: vi.fn().mockResolvedValue(outlineData),
@@ -372,7 +354,6 @@ function makeWorkClient(outlineData: WorkOutline): NexusClient {
 }
 
 describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () => {
-  // The global empty-state branch owns zero-event outlines, so the fixture
   // carries one Narrative event (a real Work with scenes has a populated
   // outline); the Moment layer then owns the scene/beat projection.
   const baseOutline = outline({
@@ -388,12 +369,10 @@ describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () =>
       initialRouterEntries: ['/works/work-1/timeline?layer=moment'],
     });
 
-    // Canonical arrays are empty → honest Moment empty-state (real emptiness).
     await waitFor(() => {
       expect(screen.getByTestId('work-timeline-moment-empty-state')).toBeInTheDocument();
     });
 
-    // The canonical carrier changes (an outline write anywhere → the existing
     // outline-mutation invalidation / refetch). No `sceneBeatFixture` prop is
     // ever passed from production.
     vi.mocked(client.getWorkOutline).mockResolvedValue(
@@ -407,7 +386,6 @@ describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () =>
       await queryClient.invalidateQueries({ queryKey: ['outline'] });
     });
 
-    // Re-projected in place: the empty-state panel is gone and the scene card
     // carries the persisted title — still on the Moment layer.
     await waitFor(() => {
       expect(screen.queryByTestId('work-timeline-moment-empty-state')).toBeNull();

@@ -97,7 +97,6 @@ fn unified_diff(from: &str, to: &str) -> String {
 /// [`DIFF_INSERT`] (in `to_lines`).
 fn build_edit_script<'a>(from_lines: &'a [&'a str], to_lines: &'a [&'a str]) -> Vec<(u8, &'a str)> {
     let (from_len, to_len) = (from_lines.len(), to_lines.len());
-    // LCS length table: `dp[i][j]` = LCS length of `from_lines[i..]` / `to_lines[j..]`.
     let mut dp = vec![vec![0u32; to_len + 1]; from_len + 1];
     for i in (0..from_len).rev() {
         for j in (0..to_len).rev() {
@@ -139,7 +138,6 @@ fn build_edit_script<'a>(from_lines: &'a [&'a str], to_lines: &'a [&'a str]) -> 
 /// `---` / `+++` headers.
 fn emit_hunks(script: &[(u8, &str)]) -> String {
     let len = script.len();
-    // Prefix counts of from/to lines consumed up to each index → hunk headers.
     let mut a_prefix = vec![0usize; len + 1];
     let mut b_prefix = vec![0usize; len + 1];
     for (idx, &(tag, _)) in script.iter().enumerate() {
@@ -147,7 +145,6 @@ fn emit_hunks(script: &[(u8, &str)]) -> String {
         b_prefix[idx + 1] = b_prefix[idx] + usize::from(tag != DIFF_DELETE);
     }
 
-    // Dilate each change by `DIFF_CONTEXT` and merge overlapping runs → hunks.
     let mut in_hunk = vec![false; len];
     for (idx, &(tag, _)) in script.iter().enumerate() {
         if tag != DIFF_EQUAL {
@@ -174,7 +171,6 @@ fn emit_hunks(script: &[(u8, &str)]) -> String {
 
         let a_count = a_prefix[hunk_end_excl] - a_prefix[hunk_start];
         let b_count = b_prefix[hunk_end_excl] - b_prefix[hunk_start];
-        // 1-based start; when a side contributes 0 lines, anchor at the line
         // before the hunk per diff convention.
         let a_start = if a_count == 0 {
             a_prefix[hunk_start]
@@ -262,7 +258,6 @@ pub async fn append_rule_suggestion(
     timestamp_rfc3339: &str,
 ) -> Result<AppendOutcome, CapabilityError> {
     let agents_md_path = agents_md_path(workspace_root, work_ref);
-    // A missing file is seeded from the scaffold; any other read fault is a
     // real error, not an absent file.
     let existing = match std::fs::read_to_string(&agents_md_path) {
         Ok(text) => text,
@@ -334,7 +329,6 @@ async fn commit_agents_md(
 
 /// Build the markdown entry for one accepted rule suggestion.
 fn format_accepted_entry(finding_id: &str, rule_text: &str, timestamp_rfc3339: &str) -> String {
-    // Trim and normalize newlines so the entry renders as a tight block.
     let body = rule_text.trim();
     format!(
         "<!-- finding_id: {finding_id} -->\n**Accepted {timestamp_rfc3339}** (finding `{finding_id}`)\n\n{body}\n",
@@ -353,10 +347,6 @@ fn ensure_accepted_section(content: &str) -> String {
         )
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -381,7 +371,6 @@ mod tests {
         let rendered = render_default_agents_md("neon-river");
         assert!(rendered.contains("# AGENTS.md — neon-river"));
         assert!(rendered.contains("## Accepted rule suggestions"));
-        // Template placeholder must be fully replaced.
         assert!(!rendered.contains("{{work_ref}}"));
     }
 
@@ -434,7 +423,6 @@ mod tests {
 
         assert_eq!(out2, AppendOutcome::AlreadyPresent);
         let content = std::fs::read_to_string(agents_md(root.path(), "neon-river")).expect("read");
-        // The marker appears exactly once.
         assert_eq!(
             content
                 .matches(&format!("<!-- finding_id: {fid} -->"))
@@ -461,7 +449,6 @@ mod tests {
         assert_eq!(out, AppendOutcome::Appended);
         let content =
             std::fs::read_to_string(agents_md(root.path(), "ghost-novel")).expect("seeded file");
-        // Seeded header carries the work_ref.
         assert!(content.contains("# AGENTS.md — ghost-novel"));
         assert!(content.contains("## Accepted rule suggestions"));
         assert!(content.contains("<!-- finding_id: fnd_seed -->"));
@@ -471,7 +458,6 @@ mod tests {
     async fn rules_layers_append_adds_section_when_missing() {
         let (root, exec) = workspace();
         let path = agents_md(root.path(), "legacy");
-        // Pre-existing file without the accepted section (e.g. legacy file).
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(&path, "# AGENTS.md — legacy\n\n- POV: first\n").expect("write");
 
@@ -490,7 +476,6 @@ mod tests {
         let content = std::fs::read_to_string(&path).expect("read");
         assert!(content.contains("## Accepted rule suggestions"));
         assert!(content.contains("<!-- finding_id: fnd_legacy -->"));
-        // Original content preserved.
         assert!(content.contains("POV: first"));
     }
 
@@ -498,7 +483,6 @@ mod tests {
     async fn rules_layers_reset_restores_default_scaffold() {
         let (root, exec) = workspace();
         let path = agents_md(root.path(), "neon-river");
-        // File with user edits + accepted entries.
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(
             &path,
@@ -538,7 +522,6 @@ mod tests {
 
     #[tokio::test]
     async fn rules_layers_write_is_refused_when_the_port_refuses() {
-        // A Work with no `works` row is refused by the port; nothing lands.
         let (root, _) = workspace();
         let err = append_rule_suggestion(
             RecordingExecutor::refusing("AGENTS.md").as_ref(),
@@ -554,8 +537,6 @@ mod tests {
         assert!(!agents_md(root.path(), "orphan").exists());
     }
 
-    // ── V1.48 P2-fix1: diff_agents_md_vs_scaffold ──────────────────────
-
     #[test]
     fn rules_layers_diff_empty_when_current_equals_scaffold() {
         let scaffold = render_default_agents_md("neon-river");
@@ -568,7 +549,6 @@ mod tests {
 
     #[test]
     fn rules_layers_diff_marks_accepted_entries_as_removed() {
-        // Current file = scaffold + one accepted entry (what `findings accept` produced).
         let mut current = render_default_agents_md("neon-river");
         current.push_str("\n<!-- finding_id: fnd_01HMV -->\n");
         current.push_str("**Accepted 2026-06-16T12:00:00Z** (finding `fnd_01HMV`)\n");
@@ -576,7 +556,6 @@ mod tests {
 
         let diff = diff_agents_md_vs_scaffold(&current, "neon-river");
 
-        // The accepted entry lines are in `current` but NOT the scaffold, so
         // reset would discard them → they must appear as `-` (removed) lines.
         assert!(
             diff.contains("-<!-- finding_id: fnd_01HMV -->"),
@@ -586,7 +565,6 @@ mod tests {
             diff.contains("-Prefer first-person POV in dialogue scenes."),
             "diff:\n{diff}"
         );
-        // The scaffold lines are unchanged context, not added.
         assert!(
             !diff.contains("+Prefer first-person POV"),
             "added (+) lines should not include current-only content"
@@ -595,7 +573,6 @@ mod tests {
 
     #[test]
     fn rules_layers_diff_has_unified_format_headers() {
-        // A file missing some scaffold lines → those lines appear as `+`.
         let current = "# AGENTS.md — neon-river\n\n- POV: first\n";
         let diff = diff_agents_md_vs_scaffold(current, "neon-river");
 
@@ -604,7 +581,6 @@ mod tests {
             diff.contains("@@ -"),
             "expected at least one @@ hunk header:\n{diff}"
         );
-        // Scaffold-only content (e.g. the accepted-section header) is added.
         assert!(
             diff.contains("+## Accepted rule suggestions") || diff.contains("+## Style"),
             "expected an added scaffold section header; diff:\n{diff}"

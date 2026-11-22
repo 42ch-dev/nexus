@@ -308,7 +308,6 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
             .await?;
     }
 
-    // 1. Cheap SQL aggregates — O(1) index scan, no row materialization.
     let fragment_count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM character_memory_fragments
            WHERE character_id = ? AND actor_world_binding_id IS ?"#,
@@ -327,10 +326,8 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
     .fetch_one(pool)
     .await?;
 
-    // 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache for this Character scope.
     let cached = load_narrative(pool, character_id, binding_id).await?;
 
     if let Some(ref c) = cached {
@@ -347,7 +344,6 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
         }
     }
 
-    // 4. Fingerprint mismatch or no cache row: compute soundly, persist nothing.
     let distinct_keyword_count =
         compute_distinct_keyword_count(pool, character_id, binding_id).await?;
 
@@ -383,7 +379,6 @@ pub async fn character_soul_narrative_fragment_stats(
             .await?;
     }
 
-    // 1. Cheap SQL aggregates — O(1) index scan, no row materialization.
     let fragment_count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM character_memory_fragments
            WHERE character_id = ? AND actor_world_binding_id IS ?"#,
@@ -402,10 +397,8 @@ pub async fn character_soul_narrative_fragment_stats(
     .fetch_one(pool)
     .await?;
 
-    // 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache for this Character scope.
     let cached = load_narrative(pool, character_id, binding_id).await?;
 
     if let Some(ref c) = cached {
@@ -422,11 +415,9 @@ pub async fn character_soul_narrative_fragment_stats(
         }
     }
 
-    // 4. Fingerprint mismatch or no cache row → compute soundly.
     let distinct_keyword_count =
         compute_distinct_keyword_count(pool, character_id, binding_id).await?;
 
-    // 5. Persist stats cache.
     update_stats_cache(
         pool,
         character_id,

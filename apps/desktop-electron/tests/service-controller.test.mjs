@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * P0-T4 controller tests.
  *
  * The controller drives a real HTTP service boundary (an in-process stub that
  * answers the guarded discovery/health/stop routes exactly as the standalone
@@ -21,7 +20,6 @@ import { DESKTOP_SERVICE_PORT, buildDesktopServiceOptions, resolveDesktopService
 import { DesktopServiceController, SERVICE_CLOSE_BUDGET_MS } from '../dist/service-controller.js';
 
 /**
- * The version the governed service reports on `GET /v1/daemon/runtime/health`
  * (T1: `apps/nexus-service/package.json`). The stub below mirrors it and the
  * controller is asserted to surface exactly it, so the fixture tracks the real
  * release version instead of a drifting literal.
@@ -109,13 +107,11 @@ async function startStubService({ lazy = false, bindPort = 0 } = {}) {
       }
       if (req.method === 'GET' && req.url === '/v1/daemon/runtime/discovery') {
         if (stopMode === 'error_after_stop') {
-          // A live service that answers a transient/guard error instead of its
           // record: not proof that the instance released the port.
           send(503, { error: { code: 'busy', message: 'service is shutting down' } });
           return;
         }
         if (stopMode === 'successor' && successor) {
-          // The stopped instance released the port and a successor owns it.
           send(200, successor);
           return;
         }
@@ -225,7 +221,6 @@ function reply(child, message, ok, payload) {
 }
 
 /**
- * Utility behaviour mirroring `startService`: publish the record, serve, close
  * the handle, reset. Replies are emitted on the request's own microtask turn;
  * listener/teardown work that needs real I/O runs behind it, exactly as a real
  * process boundary would.
@@ -282,7 +277,6 @@ function testClock() {
         parked.push({ resolve });
       } else {
         now += ms;
-        // One virtual tick per macrotask: the timeout cannot overtake a reply
         // that is already queued, and real I/O still progresses.
         setImmediate(() => resolve());
       }
@@ -397,7 +391,6 @@ test('start spawns one owner and reports running from authenticated discovery + 
     domainOnly: false,
   });
 
-  // Every emitted frame is the frozen status shape, on the frozen channel.
   for (const frame of status.frames) {
     assert.equal(frame.channel, DESKTOP_STATUS_CHANNEL);
     assertDesktopStatusFrame(frame.status);
@@ -456,7 +449,6 @@ test('attach: a matching independent owner is adopted without spawning', async (
 test('a stale record never attaches: identity must match the live listener', async () => {
   const home = tempHome();
   const service = await startStubService();
-  // The published record names one instance; the listener answers as another.
   const stale = makeRecord({ home, origin: service.url, instanceId: 'inst-replaced' });
   writeRecord(home, stale);
   service.setRecord(makeRecord({ home, origin: service.url, instanceId: 'inst-live' }));
@@ -481,7 +473,6 @@ test('a legacy listener without matching discovery is a conflict, never killed (
   const home = tempHome();
   const service = await startStubService();
   service.setRecord(makeRecord({ home, origin: service.url, instanceId: 'inst-other' }));
-  // No record for this home: nothing identifies the listener as our service.
   const clock = testClock();
   const recorded = spawnRecorder(() => {});
   const controller = makeController({
@@ -548,7 +539,6 @@ test('stop closes the owned service cooperatively and the retained owner restart
     ['start', 'close'],
   );
 
-  // A confirmed close releases the record, so the next start is a real start.
   await controller.start();
   assert.equal(controller.getStatus().state, 'running');
   assert.equal(child.requests.filter((request) => request.operation === 'start').length, 2);
@@ -614,7 +604,6 @@ test('a close that exceeds the 5s budget never reports success', async () => {
       reply(child, message, true, { discovery: record });
       return;
     }
-    // close is never answered
   };
   const clock = testClock();
   const recorded = spawnRecorder(behaviour);
@@ -637,7 +626,6 @@ test('unexpected owner exits back off 500/1000/2000/4000/8000 and stop at exhaus
   const controller = makeController({ home, port: 18_425, spawnUtility: recorded.spawn, clock });
 
   await assert.rejects(controller.start(), /exited/);
-  // Let the recovery loop run to exhaustion.
   for (let i = 0; i < 64; i += 1) await new Promise((resolve) => setImmediate(resolve));
 
   const backoff = clock.sleeps.filter((ms) => [500, 1_000, 2_000, 4_000, 8_000].includes(ms));
@@ -668,19 +656,16 @@ test('an unexpected exit recovers automatically, and a manual start recovers aft
   const recorded = spawnRecorder((child, message) => behaviour.current(child, message));
   const controller = makeController({ home, port: 18_426, spawnUtility: recorded.spawn, clock });
 
-  // First attempt dies; the automatic restart (attempt 1) comes up healthy.
   await assert.rejects(controller.start(), /exited/);
   assert.equal(await waitForStatus(controller, 'running'), true, 'automatic recovery reaches running');
   assert.equal(recorded.children.length, 2);
 
-  // Exhaustion: every attempt fails, so the schedule ends in stopped.
   await controller.stop();
   behaviour.current = (child) => queueMicrotask(() => child.emit('exit', 5));
   await assert.rejects(controller.start(), /exited/);
   assert.equal(await waitForStatus(controller, 'stopped'), true, 'exhausted recovery stops the service');
   assert.match(controller.getStatus().detail, /start the service manually/);
 
-  // Manual start resets the budget and recovers for real.
   behaviour.current = healthy;
   await controller.start();
   assert.equal(controller.getStatus().state, 'running');
@@ -753,7 +738,6 @@ test('an attached service that acknowledges without releasing keeps the fence', 
   service.setStopMode('ack_only');
   await assert.rejects(controller.restart(), /did not release/);
   assert.equal(controller.getStatus().state, 'error');
-  // A running independent owner is retained: no second owner may be spawned.
   await assert.rejects(controller.start(), /retained service owner must be released/);
   assert.equal(recorded.children.length, 0);
 
@@ -777,7 +761,6 @@ test('an owner lost after an unconfirmed close keeps the interrupted diagnostic'
       return;
     }
     if (message.operation === 'close') {
-      // Unconfirmed close, then the whole owner process dies with its service.
       service.setRecord(null);
       rmSync(recordPath(home), { force: true });
       void service.close();
@@ -797,7 +780,6 @@ test('an owner lost after an unconfirmed close keeps the interrupted diagnostic'
     'the lost owner keeps an interrupted diagnostic',
   );
 
-  // The owner is gone, so nothing is retained: a later start is attempted for
   // real instead of being refused by the retained-close fence.
   const failure = await controller.start().then(
     () => null,
@@ -873,7 +855,6 @@ test('a failed reset shows the concrete error and never claims recovery', async 
 
 test('keepForQuit hands an owned service to an independent owner after a confirmed close', async () => {
   const home = tempHome();
-  // The service binds the resolved port (as the real entry does when it is
   // given `ServiceOptions.port`), so the owned start and the detached handoff
   // both publish this session's trusted endpoint.
   const port = await freePort();
@@ -980,7 +961,6 @@ test('a record published for another home is never adopted, and is never probed'
   const home = tempHome();
   const foreignHome = tempHome();
   const service = await startStubService();
-  // The listener answers exactly as the planted record names it (same
   // instance/home/endpoint/epoch) on this session's trusted port: the identity
   // check alone would pass, so only the trusted-home binding can refuse it.
   const record = makeRecord({ home: foreignHome, origin: service.url, instanceId: 'inst-foreign', readiness: 'ready' });
@@ -1030,7 +1010,6 @@ test('a record naming another endpoint is a conflict, not an attach', async () =
 test('a record that does not name exactly this session endpoint is never probed', async () => {
   const home = tempHome();
   const service = await startStubService();
-  // Same loopback host and port, decorated URL: not this session's endpoint.
   const record = makeRecord({
     home,
     origin: `${service.url}/decoy`,
@@ -1055,7 +1034,6 @@ test('a symlinked discovery record leaf is refused, not followed', async () => {
   const home = tempHome();
   const linked = tempHome();
   const service = await startStubService();
-  // A record that would attach if its leaf were followed: this home, this
   // instance, this session's endpoint — planted behind a symlink.
   const record = makeRecord({ home, origin: service.url, instanceId: 'inst-linked', readiness: 'ready' });
   service.setRecord(record);
@@ -1067,7 +1045,6 @@ test('a symlinked discovery record leaf is refused, not followed', async () => {
   const recorded = spawnRecorder(() => {});
   const controller = makeController({ home, port: service.port, spawnUtility: recorded.spawn, clock });
 
-  // The leaf is refused at open, so the record is never adopted and no second
   // owner is spawned: the listener on this session's endpoint cannot prove the
   // identity a planted record would claim.
   await assert.rejects(
@@ -1093,18 +1070,15 @@ test('an unrelated discovery error after the stop ack never counts as port relea
   await controller.start();
   assert.equal(controller.getStatus().detail, 'attached to an independent service');
 
-  // The service acknowledges the stop but keeps listening and answers its
   // guarded route with a transient error instead of its record.
   service.setStopMode('error_after_stop');
   await assert.rejects(controller.stopExplicit(), /did not release/);
   const failed = controller.getStatus();
   assert.equal(failed.state, 'error');
   assert.equal(service.stopping, false, 'the unrelated listener is still running');
-  // The independent owner is retained: a second owner is refused.
   await assert.rejects(controller.start(), /retained service owner must be released/);
   assert.equal(recorded.children.length, 0);
 
-  // A real release (the listener disappears) still succeeds.
   service.setStopMode('release');
   await controller.stopExplicit();
   assert.equal(controller.getStatus().state, 'stopped');
@@ -1125,14 +1099,12 @@ test('frozen stop() takes no arguments and leaves an attached service running; s
   await controller.start();
   assert.equal(controller.getStatus().detail, 'attached to an independent service');
 
-  // The frozen method signature is `stop(): Promise<void>`: an ordinary stop
   // leaves the independent owner running and sends it nothing (row 8).
   await controller.stop();
   assert.equal(service.requests.some((entry) => entry.url === '/v1/daemon/runtime/stop'), false);
   assert.equal(service.stopping, false);
   assert.equal(controller.getStatus().state, 'running');
 
-  // The authenticated explicit path is the separate internal method.
   assert.equal(typeof controller.stopExplicit, 'function');
   await controller.stopExplicit();
   const stops = service.requests.filter((entry) => entry.url === '/v1/daemon/runtime/stop');
@@ -1156,7 +1128,6 @@ test('a guarded answer from a different instance counts as release (successor ow
   await controller.start();
   assert.equal(controller.getStatus().detail, 'attached to an independent service');
 
-  // The stopped instance is gone and a successor answers the guarded route on
   // the same endpoint: that positively proves the stopped instance released it.
   service.setSuccessor(makeRecord({ home, origin: service.url, instanceId: 'inst-successor', readiness: 'ready' }));
   service.setStopMode('successor');

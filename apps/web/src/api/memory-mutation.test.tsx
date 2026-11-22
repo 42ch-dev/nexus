@@ -1,5 +1,4 @@
 /**
- * useDeletePendingReview + useReviewMemory — optimistic update, invalidation,
  * and result-toast contract for the V1.78 Creator Memory review-loop.
  *
  * Against a real BrowserClient + msw:
@@ -73,7 +72,6 @@ describe('useDeletePendingReview — optimistic remove + count decrement + inval
       }),
     );
     const countSpy = vi.fn(() => HttpResponse.json({ count: 3 }));
-    // Deferred gate so the optimistic window is observable (not racy).
     let releaseDelete!: () => void;
     const deleteGate = new Promise<void>((resolve) => {
       releaseDelete = resolve;
@@ -92,20 +90,16 @@ describe('useDeletePendingReview — optimistic remove + count decrement + inval
     const client = new BrowserClient();
     renderInApp(<DeleteHarness onMutate={() => {}} />, { client });
 
-    // Initial load: count=3, row p1 present.
     await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('3'));
     await waitFor(() => expect(screen.getByTestId('first-id')).toHaveTextContent('p1'));
 
-    // Trigger delete. The optimistic update drops the row and decrements the
     // count (3 → 2) while the DELETE is still in-flight.
     fireEvent.click(screen.getByRole('button', { name: /delete/i }));
     await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('2'));
     await waitFor(() => expect(screen.getByTestId('first-id')).toHaveTextContent('none'));
 
-    // The DELETE carried creator_id as a query param (creator-scoped).
     await waitFor(() => expect(deleteQuery).toBe(CREATOR));
 
-    // Release the server response. onSettled invalidates pending-list + count,
     // triggering refetches.
     releaseDelete();
     await waitFor(() => expect(listSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -139,11 +133,9 @@ describe('useDeletePendingReview — optimistic remove + count decrement + inval
 
     fireEvent.click(screen.getByRole('button', { name: /delete/i }));
 
-    // The optimistic drop flashes, then onError restores the row + count once
     // the 404 lands.
     await waitFor(() => expect(screen.getByTestId('first-id')).toHaveTextContent('p1'));
     await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('1'));
-    // onSettled also invalidates → refetch.
     await waitFor(() => expect(listCount).toBeGreaterThanOrEqual(2));
   });
 });
@@ -171,7 +163,6 @@ describe('useReviewMemory — result counters + invalidation', () => {
       const count = usePendingReviewCount(CREATOR);
       const fragments = useMemoryFragments(CREATOR);
       const reviewMemory = useReviewMemory();
-      // Touch all three queries so they subscribe (mount) before the mutation.
       void reviews.data;
       void count.data;
       void fragments.data;
@@ -185,26 +176,21 @@ describe('useReviewMemory — result counters + invalidation', () => {
     const client = new BrowserClient();
     renderInApp(<ReviewHarness />, { client });
 
-    // Wait for the initial fetches to land.
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(fragmentsSpy).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
 
-    // The POST carried { creator_id } in the body.
     await waitFor(() => expect(reviewBody).toEqual({ creator_id: CREATOR }));
 
-    // onSuccess invalidates pending-list + count + fragments → all refetch.
     await waitFor(() => expect(listSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(countSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(fragmentsSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
 
-    // The result-counters toast surfaces the promoted/fragmented/dropped counts.
     await screen.findByText(/2 promoted to long-term memory/);
   });
 
   it('invalidates pending-list + count + fragments even when the review POST fails', async () => {
-    // Regression for the Greptile V1.78 finding: if the network fails AFTER the
     // server already processed/deleted the pending queue, the client must still
     // refetch so it does not keep showing rows that no longer exist.
     const listSpy = vi.fn(() =>
@@ -248,18 +234,15 @@ describe('useReviewMemory — result counters + invalidation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
 
-    // onSettled invalidates pending-list + count + fragments even though the
     // POST 500'd → all refetch (the whole point: the server may have already
     // processed the queue before the error reached the client).
     await waitFor(() => expect(listSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(countSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(fragmentsSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
 
-    // The error toast surfaces.
     await screen.findByText(/could not complete review/i);
   });
 
-  // ─── V1.80 REL-01: drain loop + aggregation + cap/zero-progress guards ──
 
   it('drains multiple calls aggregating counters until has_more is false', async () => {
     const reviewSpy = vi.fn();
@@ -271,7 +254,6 @@ describe('useReviewMemory — result counters + invalidation', () => {
       http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
       http.post('/v1/daemon/memory/review', () => {
         reviewSpy();
-        // First call: server has more; second call: drained.
         if (reviewSpy.mock.calls.length === 1) {
           return HttpResponse.json({
             promoted: 3,
@@ -305,10 +287,8 @@ describe('useReviewMemory — result counters + invalidation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
 
-    // Two drain calls were issued (has_more true → false).
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(2));
 
-    // The success toast shows the AGGREGATED counters across both calls.
     await screen.findByText(/5 promoted to long-term memory, 1 saved as fragments/);
   });
 
@@ -320,7 +300,6 @@ describe('useReviewMemory — result counters + invalidation', () => {
       ),
       http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
       http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
-      // Server always reports has_more = true (pathological large queue) — the
       // client cap (REVIEW_DRAIN_MAX_CALLS = 20) must stop the drain.
       http.post('/v1/daemon/memory/review', () => {
         reviewSpy();
@@ -348,10 +327,8 @@ describe('useReviewMemory — result counters + invalidation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
 
-    // The drain cap (20 calls) stops the loop.
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(20));
 
-    // Non-error informational toast (not "Review complete").
     await screen.findByText(/review still draining/i);
   });
 
@@ -363,7 +340,6 @@ describe('useReviewMemory — result counters + invalidation', () => {
       ),
       http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
       http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
-      // Server reports has_more = true but processed = 0 (unprocessable head
       // row) — the zero-progress guard must break after one call.
       http.post('/v1/daemon/memory/review', () => {
         reviewSpy();
@@ -391,10 +367,8 @@ describe('useReviewMemory — result counters + invalidation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
 
-    // Exactly one call — the zero-progress guard stops the drain immediately.
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(1));
 
-    // Still-draining informational toast.
     await screen.findByText(/review still draining/i);
   });
 });

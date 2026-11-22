@@ -1,5 +1,4 @@
 /**
- * Settings Profiles section — mount, desktop persist, browser-only branch.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';

@@ -1,5 +1,4 @@
 /**
- * Real React Flow integration test harness (V1.109 P2 T3; FB-GS-002).
  *
  * CanvasShell was fully mocked in the outline-canvas orchestrator tests
  * (`R-V1108P0QC3-S003`), so the graph-click → inspector selection wiring — the

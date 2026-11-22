@@ -37,7 +37,6 @@ fn validate_initialized_prerequisites(
     access: CoreAccess,
 ) -> Result<(), CoreError> {
     let nexus_home = nexus_root_from_home(user_home);
-    // Same split as `CoreService::open_impl`: a read-only prerequisite check
     // reads a legacy `config.json` in place and writes nothing; every writer
     // keeps the locked migration.
     let read_only = access == CoreAccess::ReadOnly;
@@ -173,7 +172,6 @@ async fn abort_failed_open(
         abort_opening(state, core, host, js_port).await;
         return;
     }
-    // Promotion: release only the candidate owners. The shell keeps its
     // service-only mark and its `Open` phase, so home control stays reachable
     // and the caller can retry after the underlying refusal is fixed.
     if core.is_none() && host.is_none() {
@@ -418,7 +416,6 @@ impl Drop for RestoreHost {
                     }
                 }
                 HostOwner::Unattached(manager) => {
-                    // A manager the open never adopted has no Actor side and no
                     // published session, and there is no second slot that could
                     // retry it (that would be a second close owner). Its single
                     // settlement ran here; a thread it could not join is already
@@ -528,7 +525,6 @@ async fn release_js_provider_sessions(state: &Arc<EnvState>, deadline: Instant) 
     let mut unconfirmed = Vec::new();
     let total = sessions.len();
     for (index, (session_id, operation_id)) in sessions.iter().enumerate() {
-        // Share the remaining drain budget across the sessions still to release.
         let outstanding = u32::try_from(total - index).unwrap_or(1);
         let slice = deadline.saturating_duration_since(Instant::now()) / outstanding;
         if slice.is_zero() {
@@ -536,7 +532,6 @@ async fn release_js_provider_sessions(state: &Arc<EnvState>, deadline: Instant) 
             continue;
         }
 
-        // 1. Ask the adapter to cancel a live operation. For a busy session this
         //    is what makes the blocked prompt settle so the reap can proceed; a
         //    failure is not fatal because the shutdown below is the authority.
         if let Some(operation_id) = operation_id {
@@ -551,7 +546,6 @@ async fn release_js_provider_sessions(state: &Arc<EnvState>, deadline: Instant) 
             let _ = tokio::time::timeout(slice / 2, port.call(request)).await;
         }
 
-        // 2. Release the session and require the adapter to confirm the owned
         //    child is gone.
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -597,7 +591,6 @@ async fn cleanup_owners(
     let forced = forced_unconfirmed();
     let mut pending: Vec<String> = Vec::new();
 
-    // Claim the Host lifetime first: the Actor quiesce runs BEFORE the core
     // owner closes, so the authority is still open while it joins its drains.
     let host_taken = match inject_host {
         Some(host) => Some(host),
@@ -609,12 +602,10 @@ async fn cleanup_owners(
         disarmed: false,
     };
 
-    // An Actor quiesce that did not confirm — an error, or the deadline above —
     // leaves an admitted Actor operation that may still register the drain the
     // quiesce's join bounds, so core storage must not close ahead of it.
     let mut actor_quiesce_confirmed = true;
     if let Some(HostOwner::Attached(authority)) = host_guard.value.as_ref() {
-        // Bounded by the close's outer deadline: the join itself is deliberately
         // unbounded (the authority retains its drain ownership), so an expired
         // budget cancels this caller and keeps the whole authority instead of
         // detaching live work.
@@ -637,7 +628,6 @@ async fn cleanup_owners(
                 pending.push("actor-quiesce-deadline".to_string());
             }
         }
-        // Test-only: the node fixture carries no Actor lane (an unconfirmed
         // verdict needs a supported cancel that failed, or an expired join, on a
         // real Actor operation), so the verdict is injected here to drive the
         // composition below. Everything else in this path stays production.
@@ -657,7 +647,6 @@ async fn cleanup_owners(
         disarmed: false,
     };
 
-    // The guard keeps its own reference for the WHOLE close, and the async work
     // borrows a clone of it: a cleanup cancelled inside the budget (the only way
     // out of a held close) then still hands its owner back through the guard's
     // `Drop` instead of dropping the retained core on the floor.
@@ -709,7 +698,6 @@ async fn cleanup_owners(
 
     let host_released = match host_guard.value.as_ref() {
         Some(HostOwner::Attached(authority)) if !ordered_close_unconfirmed => {
-            // ONE settlement of the attached manager + `LocalSet`, inside the
             // close's deadline, reporting its own unsettled work.
             //
             // Not wrapped in an inner timeout: `close_before` honors this same
@@ -738,7 +726,6 @@ async fn cleanup_owners(
             }
         }
         Some(HostOwner::Attached(_)) => {
-            // The ordered close has not reached this authority's settlement, so
             // the manager/`LocalSet` is not settled and the authority is not
             // discarded: it owns the Actor drains the retry must re-join, and the
             // guard hands it back when this attempt ends.
@@ -746,7 +733,6 @@ async fn cleanup_owners(
             false
         }
         Some(HostOwner::Unattached(manager)) => {
-            // A failed open's manager: never adopted, so there is no authority
             // to quiesce and no Actor drain to settle. Freeze and settle the
             // `LocalSet` it started, then shut the manager down.
             manager.localset_bridge().begin_drain();
@@ -755,7 +741,6 @@ async fn cleanup_owners(
             pending.extend(host_pending);
             let shutdown_ok = manager.shutdown().await.is_ok();
             let bridge_evidence = manager.localset_bridge().shutdown_before(deadline).await;
-            // Settlement is a clean join with no live work — never `!thread_alive`
             // alone, which a panicked thread also satisfies.
             let bridge_settled = bridge_evidence.is_settled();
             let bridge_entries = manager
@@ -766,7 +751,6 @@ async fn cleanup_owners(
                 host_guard.disarm();
                 true
             } else {
-                // A join that could not settle inside the budget hands its
                 // handle to tracked cleanup; a failed join has none to retain
                 // but is still never released.
                 retain_unsettled_localset_thread(manager, &state);
@@ -810,7 +794,6 @@ async fn cleanup_owners(
         state
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // A promotion rollback releases its candidate owners without ending the
         // environment: the shell stays `Open` and keeps its service-only mark so
         // home control still works and a retry can promote again.
         if release_environment {
@@ -857,7 +840,6 @@ async fn settle_retained(state: Arc<EnvState>) -> (bool, CoreCloseReport) {
     if !state.js_session_ids().is_empty() {
         release_js_provider_sessions(&state, started + CLOSE_CANCEL_PHASE).await;
     }
-    // Bound the retry with the SAME outer budget as the first close, and bind
     // the result so the cancelled cleanup future (and the owner hand-back its
     // guards perform) is dropped before the retained-owner claim is read.
     let settled = tokio::time::timeout_at(
@@ -889,7 +871,6 @@ pub async fn open_core(
         return Err("dead_env".to_string());
     }
     if state.is_interrupted() {
-        // A retained Interrupted environment is settled through the SAME close
         // owner a close uses. A rival settle here could read the emptied owner
         // slot of an in-flight close as "already closed" and publish a new
         // owner over a cleanup that is still running.
@@ -918,7 +899,6 @@ pub async fn open_core(
         NativeOpenOptionsAccess::EngineOwner => CoreAccess::EngineOwner,
     };
     let user_home = PathBuf::from(options.user_home);
-    // Home control (creator + workspace families) must stay reachable on the
     // service-only shell: the first-run flow creates the creator and selects
     // the pre-created workspace before any full core can be published. Record
     // the opened home before either admission branch so the home entry never
@@ -1048,7 +1028,6 @@ async fn publish_full_core(
     };
 
     let host = Arc::new(HostManager::new());
-    // Only the execution-owner profile carries the runtime edges: it binds the
     // ONE Host to the selected Creator's canonical creative workspace and runs
     // the bounded owner-bound readiness probes (the ordinary+sealed no-model
     // recipes) there. A domain-only / read-only open acquires neither that
@@ -1134,7 +1113,6 @@ async fn publish_full_core(
         }
     };
 
-    // Settle any operation orphaned by the predecessor process's exit as
     // `interrupted` (LIFE-3) through the CoreService-owned journal before the
     // host accepts new work, so a restarted process never re-dispatches a
     // journaled op and the prior active op is queryable immediately. A failed
@@ -1189,7 +1167,6 @@ async fn publish_full_core(
         .lock()
         .expect("port mutex poisoned")
         .replace(provider_port);
-    // The service-only marker means "no full core is published", so it may
     // only be cleared once every owner slot holds the published core. A failed
     // publication (e.g. a settlement refusal) therefore keeps the shell marked
     // and a retry re-runs the promotion instead of no-oping to Ok while the
@@ -1247,7 +1224,6 @@ async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
     let started = Instant::now();
     let deadline = started + close_budget();
 
-    // 0-2s: cancel/drain while the JS environment still lives. The JS adapter
     // owns its ACP children, so their release must run before the admission
     // fence rises: a release call the fence rejects leaks a child, exactly like
     // a shutdown a full LocalSet data queue would otherwise block. The registry
@@ -1274,7 +1250,6 @@ async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
             .await;
     }
 
-    // The `let` binds the timeout result so the cancelled cleanup future — and
     // with it the guards that hand every claimed owner back — is dropped BEFORE
     // the retained-owner claim below is evaluated.
     let settled = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
@@ -1304,10 +1279,8 @@ async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
 async fn settle_claimed(state: Arc<EnvState>) -> CoreCloseReport {
     let retained = state.settled_close.lock().await.clone();
     match retained {
-        // A settlement landed while this close acquired ownership: report it
         // rather than re-run cleanup over an already settled environment.
         Some(settled) if settled.cleanup_confirmed => settled,
-        // A previously interrupted close retained owners and possibly live JS
         // sessions. Retry the retained cleanup on this later close instead of
         // replaying the cached Interrupted verdict forever.
         Some(retained) => {
@@ -1381,20 +1354,17 @@ async fn claim_close(state: &Arc<EnvState>) {
 /// Requires a Tokio runtime context: the claimed settlement is owned by a
 /// retained task rather than by this caller.
 pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
-    // A confirmed close is idempotent: nothing is left to retry.
     let cached = state.settled_close.lock().await.clone();
     if let Some(report) = cached {
         if report.cleanup_confirmed {
             return report;
         }
     }
-    // ONE close owner at a time — for a fresh close AND for a retry of a
     // retained Interrupted verdict. A rival retry running concurrently could
     // find the core slot already emptied by the owner and read that absence as
     // "already closed", publishing a confirmed report over a settlement that is
     // still running.
     claim_close(&state).await;
-    // Every caller — the one that claimed the settlement and every waiter that
     // arrived while it was in flight — is handed the report its owner published.
     await_settled_close(&state).await
 }
@@ -1603,7 +1573,6 @@ mod tests {
         .expect("service-only shell opens");
         assert!(state.is_service_only_uninitialized());
 
-        // The selection makes the home initialized; the process is still the
         // shell until a promotion publishes the core.
         nexus_core::CoreHomeService::open(user_home.clone())
             .expect("home entry")
@@ -1655,13 +1624,11 @@ mod tests {
         use nexus_contracts::NativeOpenOptions;
         use tempfile::tempdir;
 
-        // The forcing seams are process-global: hold their lock for the whole
         // case so no concurrent close test can reset the block mid-phase.
         let _seams = forcing::seam_lock::acquire().await;
         let dir = tempdir().expect("tempdir");
         seed_wire_home(dir.path()).await;
         let state = Arc::new(EnvState::new());
-        // A short deterministic budget (the production value stays 5 s) with a
         // cleanup block far past it keeps this timeout check fast.
         set_force_close_budget_ms(300);
         set_force_cleanup_delay_ms(10_000);
@@ -1678,7 +1645,6 @@ mod tests {
         .expect("open");
         assert!(state.owner_slots_present());
 
-        // First close: expiry inside its budget keeps the owners retained.
         let first = close_core(state.clone()).await;
         assert_eq!(first.state, CoreCloseReportState::Interrupted);
         assert!(!first.cleanup_confirmed);
@@ -1691,7 +1657,6 @@ mod tests {
         );
         assert!(state.owner_slots_present(), "expiry must retain the owners");
 
-        // The retried settlement (the cached-interrupted path): still blocked,
         // so it must return interrupted inside ITS OWN budget — not wait out
         // the block — and keep the owners and the lease retained.
         let retried_at = Instant::now();
@@ -1708,7 +1673,6 @@ mod tests {
             "the retry must be bounded by its own budget, took {retried_in:?}"
         );
 
-        // With the block gone the retry confirms only the real settlement.
         set_force_cleanup_delay_ms(0);
         set_force_close_budget_ms(0);
         let third = close_core(state.clone()).await;
@@ -1716,7 +1680,6 @@ mod tests {
         assert!(third.cleanup_confirmed);
         assert!(!state.owner_slots_present());
 
-        // The settled environment admits a real owner again.
         open_core(
             state.clone(),
             NativeOpenOptions {
@@ -1749,7 +1712,6 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         seed_wire_home(dir.path()).await;
         let state = Arc::new(EnvState::new());
-        // A budget wide enough for a legitimate cleanup to run, and a block far
         // past it: a rival that helped itself to an already-claimed core could
         // then complete the remaining legs and confirm.
         set_force_close_budget_ms(1_200);
@@ -1766,12 +1728,10 @@ mod tests {
         .await
         .expect("open");
 
-        // A first close that expires inside its budget retains the owners.
         let first = close_core(state.clone()).await;
         assert!(!first.cleanup_confirmed, "{first:?}");
         assert!(state.owner_slots_present());
 
-        // Three concurrent callers over the retained, STILL BLOCKED cleanup.
         // Exactly one owns the settlement; the others must be handed its real
         // report. None may upgrade an emptied owner slot into a confirmation.
         let joined_at = Instant::now();
@@ -1809,7 +1769,6 @@ mod tests {
             "every caller must return inside the close budget, took {joined_in:?}"
         );
 
-        // Only a settlement that really ran may confirm.
         set_force_cleanup_delay_ms(0);
         set_force_close_budget_ms(0);
         let settled = close_core(state.clone()).await;
@@ -1836,7 +1795,6 @@ mod tests {
         use nexus_contracts::NativeOpenOptions;
         use tempfile::tempdir;
 
-        // The forcing seams are process-global: hold their lock for the whole
         // case so no concurrent close test can reset the block mid-phase.
         let _seams = forcing::seam_lock::acquire().await;
         let dir = tempdir().expect("tempdir");
@@ -1847,7 +1805,6 @@ mod tests {
             access: NativeOpenOptionsAccess::EngineOwner,
             allow_uninitialized: false,
         };
-        // A short deterministic budget (the production value stays 5 s) with a
         // cleanup block far past it: the claimed close cannot finish by itself.
         set_force_close_budget_ms(300);
         set_force_cleanup_delay_ms(10_000);
@@ -1856,7 +1813,6 @@ mod tests {
             .expect("open");
         assert!(state.owner_slots_present());
 
-        // Claim, then cancel the OUTER caller. The rendezvous is the claim
         // itself, so the cancellation lands with the boundary already taken and
         // no report published yet.
         let caller = tokio::spawn(close_core(state.clone()));
@@ -1874,7 +1830,6 @@ mod tests {
             "the outer caller must really have been cancelled, not completed"
         );
 
-        // The settlement owner publishes on its own: the boundary is released
         // without the cancelled caller.
         let settle_deadline = Instant::now() + Duration::from_secs(2);
         while *state.close_in_flight.lock().await {
@@ -1905,7 +1860,6 @@ mod tests {
             "and it retains the ATTACHED authority, never a bare manager"
         );
 
-        // A later closer is handed that report inside its own budget instead of
         // waiting on a boundary nobody will ever release.
         let second = tokio::time::timeout(Duration::from_secs(3), close_core(state.clone()))
             .await
@@ -1921,7 +1875,6 @@ mod tests {
         );
         assert!(state.owner_slots_present());
 
-        // An interrupted open routes through the same settlement owner and is
         // released with the verdict rather than hung on the boundary.
         let interrupted_open = tokio::time::timeout(
             Duration::from_secs(3),
@@ -1934,7 +1887,6 @@ mod tests {
             "an unconfirmed cleanup must not admit a new owner"
         );
 
-        // Only the settlement that really ran may confirm, and the settled
         // environment admits a new owner again.
         set_force_cleanup_delay_ms(0);
         set_force_close_budget_ms(0);
@@ -2046,7 +1998,6 @@ mod tests {
             "the session whose release panicked stays registered"
         );
 
-        // Disarm the port: only the cleanup that really runs may confirm.
         port.armed.store(false, AtomicOrdering::SeqCst);
         let settled = tokio::time::timeout(Duration::from_secs(5), close_core(state.clone()))
             .await
@@ -2068,7 +2019,6 @@ mod tests {
         use nexus_contracts::NativeOpenOptions;
         use tempfile::tempdir;
 
-        // The cleanup forcing seams are process-global: hold their lock so a
         // concurrent close test cannot reset the injected block mid-phase.
         let _seams = forcing::seam_lock::acquire().await;
         let dir = tempdir().expect("tempdir");
@@ -2136,7 +2086,6 @@ mod tests {
         use nexus_contracts::NativeOpenOptions;
         use tempfile::tempdir;
 
-        // The forcing seams are process-global: hold their lock for the whole
         // case so no concurrent close test can reset the injected verdict.
         let _seams = forcing::seam_lock::acquire().await;
         let dir = tempdir().expect("tempdir");
@@ -2153,7 +2102,6 @@ mod tests {
         assert!(state.owner_slots_present());
         set_force_actor_quiesce_unconfirmed(true);
 
-        // The unconfirmed quiesce withholds the core close, keeps the authority
         // for the retry, and reports the interruption.
         let first = close_core(state.clone()).await;
         assert_eq!(first.state, CoreCloseReportState::Interrupted, "{first:?}");
@@ -2163,7 +2111,6 @@ mod tests {
             "the withheld core stays in its slot"
         );
 
-        // The retry MUST re-enter the quiesce: an independent owner discard in
         // the first attempt is exactly what let a retry with no attached
         // authority close core here, confirming a close whose Actor side was
         // never proven.
@@ -2190,7 +2137,6 @@ mod tests {
             "the first attempt names the authority it withheld: {first:?}"
         );
 
-        // With the Actor side provable again the SAME retained state completes
         // as one coherent teardown: quiesce, core close, manager settlement.
         set_force_actor_quiesce_unconfirmed(false);
         let settled = close_core(state.clone()).await;
@@ -2300,18 +2246,15 @@ mod tests {
         .await
         .expect("open");
 
-        // A live JS session whose operation is still in flight.
         state.record_js_session("sess-retained".to_string(), "mock-provider".to_string());
         state.record_js_session_operation("sess-retained", "op-live".to_string());
 
-        // First close: the release attempt fails, so cleanup cannot be confirmed.
         let first = close_core(state.clone()).await;
         assert!(
             !first.cleanup_confirmed,
             "a failed release must not confirm cleanup: {first:?}"
         );
 
-        // Later close: the retained session is retried and this time released.
         let second = close_core(state.clone()).await;
         assert!(
             second.cleanup_confirmed,
@@ -2331,13 +2274,6 @@ mod tests {
         );
     }
 
-    // ── `native_actor_owner_`: native adoption of the attached Host authority.
-    //
-    // One manager/epoch, rollback on a failed attach, Actor + provider-only
-    // close, a timed-out close retained then retried, and the dropped-waiter /
-    // environment-finalizer guards — all over the REAL native open/close paths.
-
-    /// A JS-provider fixture that records every adapter call and acknowledges
     /// each one — the shape of a live TS adapter at the native boundary.
     #[derive(Default)]
     struct RecordingJsPort {
@@ -2410,7 +2346,6 @@ mod tests {
         let _seams = forcing::seam_lock::acquire().await;
         let dir = tempdir().expect("tempdir");
         seed_wire_home(dir.path()).await;
-        // A distinctive ADMITTED document: the manager in the slot must be the
         // one this open started and configured, never a second, defaulted Host.
         let config_path = agent_host_config_path(dir.path());
         std::fs::create_dir_all(config_path.parent().expect("config dir")).expect("agent-host dir");
@@ -2444,7 +2379,6 @@ mod tests {
             "the adopted manager is the started one"
         );
 
-        // ONE owner and ONE settlement: a confirmed close releases the Host slot
         // and stops that manager; a repeated close replays the settled verdict.
         let first = close_core(state.clone()).await;
         assert_eq!(first.state, CoreCloseReportState::Closed, "{first:?}");
@@ -2474,7 +2408,6 @@ mod tests {
         seed_wire_home(dir.path()).await;
         let state = Arc::new(EnvState::new());
 
-        // The attach is the open's one adoption step; force it to fail so the
         // rollback owner runs over the manager the open already started.
         set_force_attach_failure(true);
         let failed = open_seeded(&state, dir.path(), None).await;
@@ -2495,7 +2428,6 @@ mod tests {
             "the rolled-back manager leaves no tracked LocalSet thread"
         );
 
-        // The rolled-back environment admits a real owner again.
         open_seeded(&state, dir.path(), None)
             .await
             .expect("reopen after a rolled-back attach");
@@ -2528,7 +2460,6 @@ mod tests {
             .await
             .expect("principal");
 
-        // Provider-only tracking: a launched JS session with a live operation,
         // recorded at the one seam the admitting port writes.
         state.record_js_session("sess-js".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-js", "op-js".to_string());
@@ -2538,7 +2469,6 @@ mod tests {
         assert_eq!(report.state, CoreCloseReportState::Closed, "{report:?}");
         assert!(report.cleanup_confirmed, "{report:?}");
 
-        // Provider-only half: the adapter was driven (cancel for the live
         // operation, then the release) and the session is forgotten.
         let calls = js.calls();
         assert!(
@@ -2558,7 +2488,6 @@ mod tests {
             "the provider-only owner is released"
         );
 
-        // Actor half: the Host authority slot is released, its manager settled,
         // and no Actor effect is admitted any more.
         assert!(
             state.host_authority().is_none(),
@@ -2614,7 +2543,6 @@ mod tests {
             "the retained authority keeps its manager running"
         );
 
-        // Only the settlement that really ran may confirm.
         set_force_cleanup_delay_ms(0);
         set_force_close_budget_ms(0);
         let settled = close_core(state.clone()).await;
@@ -2633,7 +2561,6 @@ mod tests {
     fn native_actor_owner_finalizer_retains_guards_without_invoking_js() {
         use crate::cleanup_registry;
 
-        // The registry is process-global; hold the test lock for the whole
         // test. The guard lives on this synchronous frame, so it never spans
         // an await point.
         let _lock = cleanup_registry::registry_test_lock();
@@ -2660,12 +2587,10 @@ mod tests {
         open_seeded(&state, dir.path(), Some(js.clone()))
             .await
             .expect("open");
-        // The finalize must carry the ATTACHED authority, so the blocked
         // `LocalSet` is the one the authority's manager owns.
         let authority = state.host_authority().expect("attached authority");
         let bridge = authority.manager().localset_bridge();
 
-        // Block the LocalSet thread *synchronously* past the finalize budget:
         // the bounded inner join cannot settle inside the deadline, so the
         // owner must be retained and handed to tracked cleanup.
         let blocked = bridge.clone();
@@ -2673,7 +2598,6 @@ mod tests {
             let _ = blocked
                 .execute(4, || {
                     Box::pin(async {
-                        // Just past FINALIZE_BUDGET (5s): the bounded join cannot
                         // settle inside the deadline, but the thread does exit
                         // afterwards so tracked cleanup can join it.
                         std::thread::sleep(Duration::from_millis(6_500));
@@ -2691,7 +2615,6 @@ mod tests {
         .await
         .expect("finalize call");
 
-        // The finalize worker is itself a tracked cleanup owner when it cannot
         // finish inside the budget; wait for it to settle so the assertions see
         // the post-finalize state, not a mid-flight one.
         let settle_deadline = Instant::now() + Duration::from_secs(10);
@@ -2725,7 +2648,6 @@ mod tests {
             tracked >= 1,
             "the retained LocalSet thread must be tracked by the cleanup registry"
         );
-        // No false Closed: the interrupted environment publishes no confirmed
         // close report, and the actionable reason is retained for the report.
         assert!(
             state.settled_close.lock().await.is_none(),
@@ -2739,7 +2661,6 @@ mod tests {
 
         blocker.abort();
         let _ = blocker.await;
-        // The retained entry is reaped once the thread actually exits.
         let reap_deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < reap_deadline {
             cleanup_registry::reap_completed();

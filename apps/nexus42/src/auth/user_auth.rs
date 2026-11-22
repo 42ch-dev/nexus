@@ -31,7 +31,6 @@ const REFRESH_BUFFER_SECS: i64 = 60;
 pub async fn login(config: &CliConfig) -> Result<()> {
     let client = DeviceFlowClient::new(&config.platform_url, &config.device_id)?;
 
-    // Step 1: Request device authorization from platform
     let auth_response = client.request_device_code(None, None).await?;
 
     println!("To authenticate, visit:");
@@ -44,7 +43,6 @@ pub async fn login(config: &CliConfig) -> Result<()> {
     println!("  Enter code: {}", auth_response.user_code);
     println!();
 
-    // Step 2: Poll for token exchange
     println!("Waiting for authorization...");
 
     let mut interval = std::time::Duration::from_secs(auth_response.interval.max(3));
@@ -58,13 +56,11 @@ pub async fn login(config: &CliConfig) -> Result<()> {
             .await
         {
             Ok(token_response) => {
-                // Success — compute expires_at and store in AuthStore
                 let expires_at = chrono::Utc::now()
                     + chrono::Duration::seconds(
                         i64::try_from(token_response.expires_in).unwrap_or(0),
                     );
 
-                // Extract user_id from JWT claims (decode without verification
                 // — the token came from the platform over HTTPS).
                 let user_id = extract_user_id_from_jwt(&token_response.access_token)
                     .unwrap_or_else(|| {
@@ -101,7 +97,6 @@ pub async fn login(config: &CliConfig) -> Result<()> {
                 }
             }
             Err(DeviceFlowError::SlowDown) => {
-                // Increase interval by 5 seconds (RFC 8628 §3.4)
                 interval = std::time::Duration::from_secs(interval.as_secs() + 5);
                 if attempt % 6 == 0 {
                     println!(
@@ -153,7 +148,6 @@ pub fn login_with_token(
         token_type: "Bearer".to_string(),
         expires_at: expires_at.to_rfc3339(),
         user_id,
-        // Dev mode login doesn't provide refresh tokens
         refresh_token: None,
         refresh_expires_at: None,
     };
@@ -201,7 +195,6 @@ pub fn status(_config: &CliConfig) -> Result<()> {
         println!("  Token type: {}", token.token_type);
         println!("  Expires: {}", token.expires_at);
 
-        // V1.11: Show refresh token state
         match &token.refresh_token {
             Some(_rt) => {
                 println!("  Refresh token: present");
@@ -251,7 +244,6 @@ pub fn status(_config: &CliConfig) -> Result<()> {
 /// Returns `CliError::Api` on HTTP error responses from the platform.
 /// Returns I/O errors on network failures.
 pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
-    // Load once — reuse for reading refresh_token and user_id.
     let initial_store = AuthStore::load()?;
     let refresh_token = initial_store
         .user_token
@@ -259,7 +251,6 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
         .and_then(|t| t.refresh_token.as_ref())
         .ok_or_else(|| CliError::Other("No refresh token available".into()))?;
 
-    // Capture user_id up front from the same load.
     let user_id = initial_store
         .user_token
         .as_ref()
@@ -289,7 +280,6 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
     let text = response.text().await?;
 
     if status == 400 {
-        // Check for invalid_grant error
         if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
             let error_code = envelope
                 .get("error")
@@ -304,7 +294,6 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
                 .unwrap_or("");
 
             if error_code == "invalid_grant" {
-                // Refresh token is revoked/expired — clear all tokens
                 let mut store = AuthStore::load()?;
                 store.clear_user_token()?;
                 return Err(CliError::Other(
@@ -312,7 +301,6 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
                 ));
             }
         }
-        // Sanitize: don't leak upstream error details for non-invalid_grant 400s.
         return Err(CliError::Other(
             "Token refresh failed (400 Bad Request). Please try `nexus42 platform auth login` again.".into(),
         ));
@@ -325,12 +313,10 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
         });
     }
 
-    // Parse success response
     let envelope: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| CliError::Other(format!("Parse error: {e}")))?;
     let data = envelope.get("data").cloned().unwrap_or(envelope);
 
-    // Reuse DeviceTokenResponse for parsing (it now has refresh fields)
     let token_response: nexus_cloud_sync::device_flow_client::DeviceTokenResponse =
         serde_json::from_value(data)
             .map_err(|e| CliError::Other(format!("Failed to parse token response: {e}")))?;
@@ -373,7 +359,6 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
         CliError::Other("Not authenticated. Run `nexus42 platform auth login` first.".into())
     })?;
 
-    // Check if access token is still valid (with 60s buffer)
     let expires_at = chrono::DateTime::parse_from_rfc3339(&token.expires_at)
         .map_err(|e| CliError::Other(format!("Invalid expires_at: {e}")))?;
 
@@ -381,15 +366,12 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
     let buffer = chrono::Duration::seconds(REFRESH_BUFFER_SECS);
 
     if expires_at > now + buffer {
-        // Token is still valid — return it as-is
         return Ok(token.access_token.clone());
     }
 
-    // Token is expiring or expired — try refresh
     if token.refresh_token.is_some() {
         refresh_access_token(config).await?;
 
-        // Reload store after refresh and return the new token
         let store = AuthStore::load()?;
         return store
             .user_token
@@ -398,7 +380,6 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
             .ok_or_else(|| CliError::Other("Token refresh succeeded but token is missing".into()));
     }
 
-    // No refresh token available
     if expires_at <= now {
         return Err(CliError::Other(
             "Access token expired and no refresh token available. \
@@ -407,7 +388,6 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
         ));
     }
 
-    // Token is within buffer but not yet expired — return it anyway
     Ok(token.access_token.clone())
 }
 
@@ -422,12 +402,10 @@ fn extract_user_id_from_jwt(token: &str) -> Option<String> {
         return None;
     }
 
-    // Decode the payload (middle part) — base64url without padding
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let payload_bytes = engine.decode(parts[1]).ok()?;
     let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
 
-    // Try userId first (platform-specific claim), then sub (standard JWT claim)
     payload
         .get("userId")
         .or_else(|| payload.get("sub"))
@@ -442,7 +420,6 @@ mod tests {
 
     #[test]
     fn extract_user_id_from_valid_jwt() {
-        // Create a minimal JWT with userId claim
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(r#"{"alg":"HS256","typ":"JWT"}"#);
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -480,7 +457,6 @@ mod tests {
 
         let mock_server = MockServer::start().await;
 
-        // Mock device code endpoint
         Mock::given(method("POST"))
             .and(path("/api/v1/auth/device/code"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -496,7 +472,6 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        // Mock token endpoint — succeed immediately
         Mock::given(method("POST"))
             .and(path("/api/v1/auth/device/token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -515,7 +490,6 @@ mod tests {
             ..Default::default()
         };
 
-        // login() writes to auth.json on disk, which needs a home directory.
         // We test the function but accept that file I/O may fail in sandboxed test env.
         // JSON errors can occur when auth.json has stale content from other tests.
         let result = login(&config).await;
@@ -549,7 +523,6 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        // Mock token endpoint — expired
         Mock::given(method("POST"))
             .and(path("/api/v1/auth/device/token"))
             .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
@@ -634,8 +607,6 @@ mod tests {
         }
     }
 
-    // ── T3: refresh_access_token tests ────────────────────────────────
-
     #[tokio::test]
     async fn refresh_access_token_success() {
         use wiremock::matchers::{method, path};
@@ -665,7 +636,6 @@ mod tests {
             ..Default::default()
         };
 
-        // Setup: store a token with refresh_token
         let token = UserTokenState {
             access_token: "old_access_tok".to_string(),
             token_type: "Bearer".to_string(),
@@ -676,7 +646,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // Skip if disk I/O fails
+            return;
         }
 
         let result = refresh_access_token(&config).await;
@@ -723,7 +693,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // Skip if disk I/O fails
+            return;
         }
 
         let result = refresh_access_token(&config).await;
@@ -740,7 +710,6 @@ mod tests {
         let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
-        // Setup: store a token WITHOUT refresh_token
         let token = UserTokenState {
             access_token: "tok_no_rt".to_string(),
             token_type: "Bearer".to_string(),
@@ -751,11 +720,10 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // Skip if disk I/O fails
+            return;
         }
 
         let result = refresh_access_token(&config).await;
-        // May succeed storing to disk but fail with "No refresh token"
         // or get an error from a concurrent test's stale auth.json
         if let Err(CliError::Other(msg)) = result {
             assert!(
@@ -775,7 +743,6 @@ mod tests {
         let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
-        // Token expires far in the future
         let expires_at = (chrono::Utc::now() + chrono::Duration::hours(2)).to_rfc3339();
         let token = UserTokenState {
             access_token: "valid_tok".to_string(),
@@ -808,7 +775,6 @@ mod tests {
         let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
-        // Token already expired, no refresh_token
         let token = UserTokenState {
             access_token: "expired_no_rt".to_string(),
             token_type: "Bearer".to_string(),
@@ -819,7 +785,6 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            // Skip test if disk I/O fails (sandboxed env or stale auth.json)
             return;
         }
 
@@ -839,7 +804,6 @@ mod tests {
         let config = CliConfig::default();
         let mut store = AuthStore::load().unwrap_or_default();
         if store.clear_user_token().is_err() {
-            // Skip test if disk I/O fails
             return;
         }
 
@@ -851,8 +815,6 @@ mod tests {
             );
         }
     }
-
-    // ── T7: logout clears full token state ────────────────────────────
 
     #[tokio::test]
     async fn logout_clears_refresh_token_fields() {
@@ -869,7 +831,7 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         if store.store_user_token(token).is_err() {
-            return; // Skip if disk I/O fails
+            return;
         }
 
         match logout(&config) {

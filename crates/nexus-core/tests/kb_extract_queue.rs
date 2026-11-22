@@ -117,7 +117,6 @@ async fn queue_get_and_list_round_trip() {
     assert!(job.job_id.starts_with("xj_"), "{}", job.job_id);
     assert_eq!(job.status, "queued");
     assert_eq!(job.creator_id, CREATOR);
-    // The operational workspace binding is the admitted principal's slug.
     assert_eq!(job.workspace_id, SLUG);
     assert_eq!(job.work_entry_id, "kb_alpha");
     assert_eq!(job.world_id, "wld_1");
@@ -127,7 +126,6 @@ async fn queue_get_and_list_round_trip() {
     assert!(job.work_id.is_none());
     assert_ne!(job.created_at, "");
 
-    // Idempotent on `(creator, work_entry_id, world_id)`: the existing
     // non-failed job comes back unchanged.
     let again = core
         .queue_kb_extract(&principal, params("kb_alpha", "wld_1"))
@@ -152,7 +150,6 @@ async fn queue_get_and_list_round_trip() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].job_id, job.job_id);
 
-    // The bound is the caller's, as the CLI's 100-job default is.
     assert_eq!(
         core.list_kb_extract_jobs(&principal, 1)
             .await

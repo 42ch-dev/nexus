@@ -1,5 +1,4 @@
 /**
- * Presentational session card for the `/sessions` rail (plan
  * v221-caps-sessions-rail T2).
  *
  * The product page (`components/developer/sessions-page.tsx`) owns the query,

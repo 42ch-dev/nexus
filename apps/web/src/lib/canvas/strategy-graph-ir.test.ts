@@ -1,5 +1,4 @@
 /**
- * Strategy IR projection (v239-p3-canvas-compose-ui T1, T8).
  *
  * The composition path projects workflow-ir DTOs — no YAML round-trip. The
  * three-level nesting proof (T8): group → expanded slot group → nested slot /
@@ -105,7 +104,6 @@ describe('buildStrategyGraphFromIr', () => {
 
   it('emits parents before children at three nesting levels with relative child positions (T8)', () => {
     const document = composedDocument();
-    // A second slot nested inside the expanded 'collect' slot (authored chrome).
     document.nodes.push({
       id: 'collect/judge',
       kind: 'pattern_slot',
@@ -120,12 +118,10 @@ describe('buildStrategyGraphFromIr', () => {
     const order = graph.nodes.map((node) => node.id);
     const byId = new Map(graph.nodes.map((node) => [node.id, node]));
 
-    // Parents-first ordering: React Flow requires the parent earlier in the array.
     expect(order.indexOf('workshop')).toBeLessThan(order.indexOf('workshop-graph/describe'));
     expect(order.indexOf('collect')).toBeLessThan(order.indexOf('collect::slot-row::topic'));
     expect(order.indexOf('collect')).toBeLessThan(order.indexOf('collect/judge'));
 
-    // Level 1 group, level 2 expanded slot group, level 3 nested slot — all
     // children carry parent-relative positions, never manual absolute ones.
     const nested = byId.get('collect/judge');
     expect(nested?.parentId).toBe('collect');
@@ -158,7 +154,6 @@ describe('buildStrategyGraphFromIr', () => {
       containment: new Map([['collect/judge', 'collect']]),
     });
 
-    // Without a nest id the slot inspector returns null and the region cannot be bound at all.
     expect(graph.nodes.find((node) => node.id === 'collect/judge')?.data.nestId).toBe(
       'judge-region',
     );
@@ -188,14 +183,12 @@ describe('buildStrategyGraphFromIr', () => {
       return edges.every((edge) => ids.has(edge.source) && ids.has(edge.target));
     };
 
-    // Collapsed parent: the child stays in the node set as a hidden node, so the
     // edge that names it keeps a source.
     const collapsed = buildStrategyGraphFromIr(document, chrome);
     const hiddenChild = collapsed.nodes.find((node) => node.id === 'collect/judge');
     expect(hiddenChild?.hidden).toBe(true);
     expect(endpointsResolve(collapsed.nodes, collapsed.edges)).toBe(true);
 
-    // Expanded parent: the parent emits the child, and the endpoints still resolve.
     const expanded = buildStrategyGraphFromIr(document, {
       ...chrome,
       expandedSlots: new Set(['collect']),

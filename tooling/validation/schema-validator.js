@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 /**
- * Nexus Schema Validator
  *
  * Validates all JSON Schema files in schemas/ directory against:
  * 1. JSON Schema Draft-07 specification
@@ -13,11 +12,9 @@ const addFormats = require('ajv-formats');
 const fs = require('fs');
 const path = require('path');
 
-// Initialize AJV validator
 const ajv = new Ajv({ strict: true, allErrors: true });
 addFormats(ajv);
 
-// Meta schema requirements
 const META_SCHEMA = {
   type: 'object',
   required: ['$schema', '$id', 'schema_version', 'title', 'type'],
@@ -54,7 +51,6 @@ function validateSchema(filePath) {
     const content = fs.readFileSync(filePath, 'utf8');
     const schema = JSON.parse(content);
     
-    // Check meta requirements
     const metaValid = ajv.validate(META_SCHEMA, schema);
     if (!metaValid) {
       console.error(`  ❌ Meta validation failed:`);
@@ -62,7 +58,6 @@ function validateSchema(filePath) {
       return false;
     }
     
-    // Validate against JSON Schema Draft-07
     const valid = ajv.validateSchema(schema);
     if (!valid) {
       console.error(`  ❌ Schema syntax validation failed:`);

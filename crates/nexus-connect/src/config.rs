@@ -245,7 +245,6 @@ impl PeerToolsConfig {
                 for entry in &parsed.tool_allowlist {
                     validate_allowlist_entry(entry)?;
                 }
-                // DF-91: `peer_priority` is an ordered rank — a peer id may
                 // appear at most once (a duplicate would make the rank
                 // ambiguous). Fail-closed, never silently deduped.
                 let mut seen_peers: HashSet<&str> = HashSet::new();
@@ -257,7 +256,6 @@ impl PeerToolsConfig {
                         )));
                     }
                 }
-                // V1.180 P1 (RN-OGA-2): visibility entries are exact
                 // catalog ids — umbrella / malformed entries fail the
                 // whole load (fail-closed, never silently dropped).
                 for entry in &parsed.mcp_visibility {
@@ -280,7 +278,6 @@ impl PeerToolsConfig {
 /// `InvalidAllowlist` error; an invalid entry fails the whole config load
 /// (never silently dropped).
 fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
-    // Umbrella: `tools`, `tools.*`, `tools.<ns>` (namespace-level), or any
     // wildcard — an allowlist entry must name ONE exact tool id.
     if entry.contains('*') || entry.split('.').count() < 3 {
         return Err(ConnectConfigError::InvalidAllowlist {
@@ -297,7 +294,6 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
             reason: "reserved namespace (tools.nexus.* is daemon-owned)".to_owned(),
         });
     }
-    // KE names are not tool ids (v1.191 P1 T14, durable §9): the responder
     // this allowlist feeds is tools-only, so a capability name or an
     // operation family name can never be admitted — declaring one would
     // advertise unenforced KE capability.
@@ -309,7 +305,6 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
                 .to_owned(),
         });
     }
-    // Grammar: `^tools\.[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`.
     if !matches!(parse_tool_capability_id(entry), SpokeResult::Ok(_)) {
         return Err(ConnectConfigError::InvalidAllowlist {
             entry: entry.to_owned(),
@@ -494,8 +489,6 @@ mod tests {
         );
     }
 
-    // ── DF-91: collision policy + peer priority grammar ──────────────────
-
     #[test]
     fn absent_policy_keys_default_to_first_stays_empty_rank() {
         // DF-91: a `daemon.json` without the new keys must parse as
@@ -534,7 +527,6 @@ mod tests {
 
     #[test]
     fn unknown_collision_policy_value_fails_load() {
-        // DF-91: an unknown policy value is a HARD config-load error
         // (fail-closed) — never a silent fallback to first_stays.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
@@ -551,7 +543,6 @@ mod tests {
 
     #[test]
     fn duplicate_peer_priority_entries_fail_load() {
-        // DF-91: `peer_priority` is an ordered rank — a duplicate entry
         // makes the rank ambiguous and fails load (fail-closed, never
         // silently deduped).
         let home = isolated_home();
@@ -615,8 +606,6 @@ mod tests {
             Err(ConnectConfigError::Invalid(_))
         ));
     }
-
-    // ── AR-69 derivation lock: allowlist negatives ────────────────────────
 
     #[test]
     fn authz_hello_allowlist_umbrella_rejected() {
@@ -703,8 +692,6 @@ mod tests {
         assert_eq!(config.peer_ids, vec!["peer-1".to_owned()]);
     }
 
-    // ── AR-69 Layer 0: peer_keys.json reader ─────────────────────────────
-
     #[test]
     fn authz_hello_peer_keys_missing_file_is_empty() {
         let home = isolated_home();
@@ -774,11 +761,8 @@ mod tests {
         ));
     }
 
-    // ── V1.180 P1 (RN-OGA-2): MCP visibility subset ─────────────────────
-
     #[test]
     fn absent_mcp_visibility_defaults_to_empty() {
-        // The additive default: a `daemon.json` without the new key parses
         // as an empty subset ⇒ absent policy (all tools visible —
         // byte-identical current behavior).
         let home = isolated_home();
@@ -791,7 +775,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_parses_exact_ids() {
-        // Heterogeneous catalog ids all load: builtin `nexus.*`, peer
         // `tools.*`, and user-capability ids.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
@@ -812,7 +795,6 @@ mod tests {
     }
     #[test]
     fn mcp_visibility_parses_slash_separated_ids() {
-        // QC W-001: slash-separated builtin family ids (`fs/*`) are exact
         // catalog ids — the operator config surface must express them
         // (the `fs/*` family is part of the real spine catalog).
         let home = isolated_home();
@@ -834,7 +816,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_umbrella_rejected() {
-        // Wildcards can never match a catalog id — fail-closed, never
         // silently dropped. (Single-segment ids like `tools` are accepted:
         // they can never match a catalog row, so they simply hide nothing.)
         for entry in ["tools.*", "tools.t4.*", "*"] {
@@ -864,7 +845,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_malformed_rejected() {
-        // Whitespace can never match a catalog id — the entry passes JSON
         // parsing (so the named validator catches it) and fails the whole
         // load with `InvalidVisibility`.
         let home = isolated_home();
@@ -885,7 +865,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_json_hostile_entries_fail_closed() {
-        // Control characters are rejected by the JSON parser itself
         // (serde) — still a hard load failure, just at the parse layer.
         // Both layers fail closed; the named validator only sees entries
         // that survive JSON parsing.
@@ -906,7 +885,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_allows_reserved_namespace() {
-        // Unlike `tool_allowlist`, the reserved `tools.nexus.*` namespace
         // IS a valid visibility entry: hiding a daemon-owned tool from a
         // consumer is legitimate (visibility never grants execute).
         let home = isolated_home();

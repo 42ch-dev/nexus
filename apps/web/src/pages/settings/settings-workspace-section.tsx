@@ -1,5 +1,4 @@
 /**
- * Settings Profiles section — V1.117 P0 workspace path change (W2).
  *
  * View/change the workspace folder for the active Profile via desktop capabilities. Browser build
  * shows honest desktop-only copy and disables the picker.

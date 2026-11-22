@@ -255,8 +255,6 @@ impl StoryManifest {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 impl From<nexus_contracts::StoryManifest> for StoryManifest {
     fn from(c: nexus_contracts::StoryManifest) -> Self {
         Self {

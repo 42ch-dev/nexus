@@ -59,10 +59,6 @@ async fn seed_cli_entry(actor: &DirectActor, world_id: &str) {
         .await;
 }
 
-// =============================================================================
-// CLI surface (assert_cmd)
-// =============================================================================
-
 /// `creator world kb adopt --help` pins the full Usage command path and the
 /// exact `--auto` option token (clap renders options as trimmed indented
 /// lines).
@@ -99,10 +95,6 @@ fn creator_world_kb_adopt_help_is_reachable() {
         "adopt --help must list the exact --auto option token:\n{help_text}"
     );
 }
-
-// =============================================================================
-// Canonical World KB read leaves (the real binary over a direct-core home)
-// =============================================================================
 
 /// `creator world kb list --json` prints the entry seeded through the core.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -178,10 +170,6 @@ async fn canonical_kb_show_shows_seeded_block() {
     assert_eq!(shown["body"]["summary"], CLI_SUMMARY);
 }
 
-// =============================================================================
-// Canonical World KB functions (the owners the retired alias merely forwarded to)
-// =============================================================================
-
 /// `kb_delete` soft-deletes the seeded block.
 #[tokio::test]
 async fn canonical_kb_delete_soft_deletes_block() {
@@ -199,7 +187,6 @@ async fn canonical_kb_delete_soft_deletes_block() {
     let result = kb_delete(&pool, OWNER, WORLD, &key_block_id, true).await;
     assert!(result.is_ok(), "kb_delete should succeed: {result:?}");
 
-    // Verify the block is soft-deleted (status = "deleted")
     let store = SqliteKbStore::new(pool.clone());
     let block = store.get_knowledge_entry(&key_block_id).await.unwrap();
     assert_eq!(block.status, "deleted", "block should be soft-deleted");
@@ -219,7 +206,6 @@ async fn canonical_kb_delete_cross_author_rejects() {
     )
     .await;
 
-    // A different creator should not be able to delete.
     let result = kb_delete(&pool, "ctr_stranger", WORLD, &key_block_id, true).await;
     assert!(result.is_err(), "cross-author delete should fail");
     if let Err(e) = result {

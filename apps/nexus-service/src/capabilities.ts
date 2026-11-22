@@ -1,6 +1,4 @@
 /**
- * Capabilities family (CAP-001 / I-000125): the live orchestration capability
- * registry.
  *
  * The wire shape is the hand-coded local DTO (`camelCase` schemas, origin) the
  * web capability browser already mirrors in
@@ -35,7 +33,6 @@ export async function listCapabilities(service: ServiceCore, search: URLSearchPa
   const cursor = search.get('cursor');
   if (cursor !== null) {
     const position = items.findIndex((item) => item.name === cursor);
-    // An unknown cursor must not silently re-serve page one.
     if (position < 0) {
       throw new HttpError(400, 'invalid_input', `cursor '${cursor}' does not match any capability`, {
         field: 'cursor',
@@ -63,8 +60,6 @@ export const CAPABILITY_ROUTES: readonly DomainRoute[] = [
     tier: 'tier2',
     family: 'execution',
     handle: async (service, _params, search) => {
-      // A domain-only profile owns no provider lane: the capability registry
-      // is outside that profile, not an unmigrated route.
       if (service.domainOnly) {
         throw new HttpError(
           501,

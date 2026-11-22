@@ -59,7 +59,6 @@ fn sample_context() -> serde_json::Value {
 }
 
 fn bench_simple_field_truthy(c: &mut Criterion) {
-    // Leaf fast-path: field access + truthy coercion.
     // Target: < 1 µs.
     let expr = parse("_context.user.is_admin").expect("parse simple field");
     let ctx = sample_context();
@@ -72,7 +71,6 @@ fn bench_simple_field_truthy(c: &mut Criterion) {
 }
 
 fn bench_comparison_numeric(c: &mut Criterion) {
-    // Canonical routing condition: numeric comparison.
     // Target: < 5 µs.
     let expr = parse("_context.score >= 0.8").expect("parse comparison");
     let ctx = sample_context();
@@ -85,7 +83,6 @@ fn bench_comparison_numeric(c: &mut Criterion) {
 }
 
 fn bench_complex_boolean_nested(c: &mut Criterion) {
-    // 4-deep mixed boolean: exercises recursive descent + short-circuit.
     // Target: < 10 µs.
     let expr = parse(
         "(_context.user.is_admin && _context.score >= 0.8) \

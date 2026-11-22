@@ -1,5 +1,4 @@
 /**
- * World Rules section tests — V1.166 P2 T2 (DR-64 surfacing half).
  *
  * Covers the three section states (populated / empty / truncated) plus the
  * spoke-vocabulary contract (PD-1/PD-2 locked):
@@ -122,19 +121,15 @@ describe('renderConstraintSummary — defensive carrier rendering (AR-2/AR-3)', 
   });
 
   it('tolerates odd shapes: non-scalar operands skipped, partial fields honest', () => {
-    // Non-scalar members are skipped in the generic path (no crash, no [object Object]).
     expect(
       renderConstraintSummary({ family: 'custom_family', nested: { a: 1 }, list: [1, 2] }),
     ).toBe('custom_family');
-    // String-typed numeric bounds fall through to the generic operand path.
     expect(renderConstraintSummary({ family: 'observer_cardinality', min: '3' })).toBe(
       'observer_cardinality: min: 3',
     );
-    // required_field with only the module key renders the module row honestly.
     expect(renderConstraintSummary({ family: 'required_field', module_key: 'journal' })).toBe(
       'required_field: journal',
     );
-    // Known family with no usable operands falls back to the family string.
     expect(renderConstraintSummary({ family: 'module_presence' })).toBe('module_presence');
   });
 });
@@ -162,19 +157,15 @@ describe('WorldRulesSection — populated', () => {
     renderSection();
     await waitFor(() => expect(screen.getByText('Live rule')).toBeInTheDocument());
 
-    // Status strings render verbatim — never coerced to another vocabulary.
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.getByText('draft')).toBeInTheDocument();
     expect(screen.getByText('deprecated')).toBeInTheDocument();
     expect(screen.getByText('paused')).toBeInTheDocument();
 
-    // Open-string `kind` renders verbatim too.
     expect(screen.getByText('prohibition')).toBeInTheDocument();
 
-    // Count reflects the returned rows.
     expect(screen.getByTestId('world-rules-count')).toHaveTextContent('4');
 
-    // Structural-note copy (PD-1) renders under the header in en.
     expect(screen.getByTestId('world-rules-structural-note')).toHaveTextContent(
       'Each rule carries a structural constraint — module presence/absence, required fields, observer counts — not narrative quality.',
     );
@@ -201,7 +192,6 @@ describe('WorldRulesSection — populated', () => {
 
     renderSection();
     const row = await screen.findByTestId('world-rule-row');
-    // Severity hint reuses T1's token mapping and renders verbatim.
     expect(within(row).getByText('error')).toBeInTheDocument();
 
     fireEvent.click(row);
@@ -214,7 +204,6 @@ describe('WorldRulesSection — populated', () => {
     );
     expect(screen.getByTestId('world-rule-target-types')).toHaveTextContent('timeline_event');
 
-    // Expand toggles back.
     fireEvent.click(row);
     await waitFor(() => expect(screen.queryByTestId('world-rule-detail')).not.toBeInTheDocument());
   });
@@ -294,11 +283,9 @@ describe('WorldRulesSection — populated', () => {
     );
     fireEvent.click(rows[4]);
 
-    // Absent constraint → no summary row for the last rule.
     fireEvent.click(rows[5]);
     const detail = await screen.findByTestId('world-rule-detail');
     expect(within(detail).queryByTestId('world-rule-constraint')).not.toBeInTheDocument();
-    // Empty target_entry_types renders the honest "all entry types" copy.
     expect(within(detail).getByTestId('world-rule-target-types')).toHaveTextContent(
       'All entry types',
     );
@@ -320,15 +307,12 @@ describe('WorldRulesSection — populated', () => {
     renderSection();
     await waitFor(() => expect(screen.getByText('Read-only rule')).toBeInTheDocument());
 
-    // The V1.169 P2 create entry (CardHeader CTA) is present.
     expect(screen.getByTestId('world-rules-add-rule')).toHaveTextContent('Add rule');
 
-    // Collapsed rows expose no per-row authoring controls — the row click
     // stays expand-only (T2 lock: Edit lives inside the expanded row).
     expect(screen.queryByTestId('world-rule-edit')).not.toBeInTheDocument();
     expect(screen.queryByTestId('world-rule-deactivate')).not.toBeInTheDocument();
 
-    // Every non-CTA button is a read-only expand/collapse toggle.
     const addRule = screen.getByTestId('world-rules-add-rule');
     const buttons = screen.getAllByRole('button').filter((button) => button !== addRule);
     expect(buttons.length).toBeGreaterThanOrEqual(2);
@@ -336,7 +320,6 @@ describe('WorldRulesSection — populated', () => {
       expect(button).toHaveAttribute('aria-expanded');
     }
 
-    // Expanding a row reveals the authoring controls (T2).
     fireEvent.click(buttons[0]);
     await waitFor(() => expect(screen.getByTestId('world-rule-edit')).toBeInTheDocument());
     expect(screen.getByTestId('world-rule-deactivate')).toBeInTheDocument();
@@ -352,17 +335,14 @@ describe('WorldRulesSection — empty state', () => {
     );
 
     renderSection();
-    // Locked copy (plan clarify): title / description / CTA.
     await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
     expect(
       screen.getByText(/Add a structural rule so Check can evaluate this World's entries and timeline\./),
     ).toBeInTheDocument();
-    // The CLI pointer is gone (DF-82 blocker).
     expect(screen.queryByText(/creator world rule add/)).not.toBeInTheDocument();
     expect(screen.queryByText(/CLI/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
 
-    // The empty-state CTA opens the inline create form.
     fireEvent.click(screen.getByTestId('world-rules-empty-add-rule'));
     await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
     expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Constraint family');
@@ -403,7 +383,6 @@ describe('WorldRulesSection — empty state', () => {
     fireEvent.click(screen.getByTestId('world-rules-empty-add-rule'));
     await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
 
-    // Fill the module_presence happy path.
     fireEvent.change(screen.getByLabelText('Constraint family'), {
       target: { value: 'module_presence' },
     });
@@ -414,7 +393,6 @@ describe('WorldRulesSection — empty state', () => {
     fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
     fireEvent.click(screen.getByTestId('rule-form-submit'));
 
-    // The form closes and the refreshed list shows the new row.
     await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
     expect(await screen.findByText('Belief module required')).toBeInTheDocument();
     expect(screen.getByTestId('world-rules-count')).toHaveTextContent('1');
@@ -455,7 +433,6 @@ describe('WorldRulesSection — truncated honesty', () => {
 
 describe('WorldRulesSection — loading', () => {
   it('renders LoadingState while the rules request is in flight', async () => {
-    // Hold the MSW response open until the assertion has observed the
     // in-flight state (deferred-promise resolver, deterministic — no timing).
     let resolveRules!: (value: WorldRulesListResponse) => void;
     useHandlers(
@@ -470,11 +447,9 @@ describe('WorldRulesSection — loading', () => {
     );
 
     renderSection();
-    // In-flight request → LoadingState; neither the count nor the rows flash.
     expect(screen.getByText('Loading rules…')).toBeInTheDocument();
     expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
 
-    // Wait until the request has reached the handler, then resolve it — the
     // deferred promise only exists once MSW invokes the resolver.
     await waitFor(() => expect(resolveRules).toBeTypeOf('function'));
     resolveRules(rulesResponse([makeRule({ rule_id: 'rul_load', canonical_name: 'Loaded rule' })]));
@@ -501,12 +476,10 @@ describe('WorldRulesSection — error + retry', () => {
     );
 
     renderSection();
-    // 500 → ErrorState with the retry affordance; no rows/count render.
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load rules');
     expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
 
-    // Retry re-queries → the second attempt resolves → the list renders.
     fireEvent.click(within(alert).getByRole('button'));
     await waitFor(() => expect(screen.getByText('Retried rule')).toBeInTheDocument());
     expect(screen.getByTestId('world-rules-count')).toHaveTextContent('1');
@@ -529,7 +502,6 @@ describe('WorldRulesSection — zh-CN locale parity', () => {
       screen.getByText(/结构性约束（模块存在\/缺失、必填字段、观察者数量）/),
     ).toBeInTheDocument();
 
-    // Clean up the persisted preference so later tests render in en again
     // (setup.ts only resets the i18next language, not localStorage).
     window.localStorage.removeItem('nexus-web-locale');
   });
@@ -580,7 +552,6 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     renderSection();
     await screen.findByTestId('world-rule-row');
 
-    // Create first, then edit: the create form closes.
     fireEvent.click(screen.getByTestId('world-rules-add-rule'));
     await waitFor(() => expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Add rule'));
     const row = screen.getByTestId('world-rule-row');
@@ -588,7 +559,6 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     fireEvent.click(await screen.findByTestId('world-rule-edit'));
     await waitFor(() => expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Edit rule'));
 
-    // Edit first, then create: the edit form closes.
     fireEvent.click(screen.getByTestId('world-rules-add-rule'));
     await waitFor(() => expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Add rule'));
   });
@@ -616,14 +586,12 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     renderSection();
     const row = await screen.findByTestId('world-rule-row');
     fireEvent.click(row);
-    // Locked Deactivate helper copy (plan clarify, verbatim).
     expect(screen.getByTestId('world-rule-deactivate-help')).toHaveTextContent(
       'Stops Check from auto-including this rule. The rule stays in the list.',
     );
     fireEvent.click(screen.getByTestId('world-rule-deactivate'));
 
     await waitFor(() => expect(patch.body).toEqual({ status: 'deprecated' }));
-    // The row stays visible with the deprecated badge; Deactivate is gone.
     expect(await screen.findByText('Doomed rule')).toBeInTheDocument();
     expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated');
     expect(screen.queryByTestId('world-rule-deactivate')).not.toBeInTheDocument();
@@ -675,7 +643,6 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(patch.body?.status).toBe('active'));
-    // The form closes and the refreshed list shows the active badge.
     await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
     expect(await screen.findByTestId('world-rule-status')).toHaveTextContent('active');
   });
@@ -722,14 +689,11 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     await screen.findByTestId('world-rule-form');
     expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('active');
 
-    // Deactivate the rule whose edit form is open.
     fireEvent.click(screen.getByTestId('world-rule-deactivate'));
 
-    // The form closes once deactivation succeeds: the stale form state
     // (status: 'active') can never be saved to silently reactivate the rule.
     await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
     expect(patches).toEqual([{ status: 'deprecated' }]);
-    // msw v3 delivers the invalidated list refetch a turn later than v2, so the
     // refreshed badge is awaited rather than read synchronously after the close.
     await waitFor(() =>
       expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated'),
@@ -755,7 +719,6 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
       http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
         const body = (await request.json()) as WorldRuleUpdateRequest;
         patch.body = body;
-        // The read route re-sorts: the renamed rule moves to its new position.
         list = rulesResponse([
           makeRule({
             rule_id: 'rul_b',

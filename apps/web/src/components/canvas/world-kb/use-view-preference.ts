@@ -1,5 +1,4 @@
 /**
- * View-preference helpers for the World KB canvas (V1.73 P0 A6/A8).
  *
  * Detects whether the user prefers reduced motion (WCAG 2.3.3) so the
  * non-spatial alternate view can default to list mode for keyboard-only /

@@ -260,7 +260,6 @@ pub async fn get_all_keywords(
     .fetch_all(pool)
     .await?;
 
-    // Parse each JSON array and collect unique keywords
     let mut all_keywords: Vec<String> = Vec::new();
     for row in keywords_rows {
         if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row) {
@@ -541,7 +540,6 @@ mod tests {
     async fn test_get_all_keywords_handles_invalid_json() {
         let (_dir, pool) = fresh_pool().await;
 
-        // Insert with valid JSON
         let fragment1 = sample_fragment("frag_001");
         create_fragment(&pool, &fragment1).await.unwrap();
 
@@ -556,7 +554,6 @@ mod tests {
         .unwrap();
 
         let keywords = get_all_keywords(&pool, "ctr_test").await.unwrap();
-        // Should still return keywords from valid fragment
         assert!(keywords.contains(&"keyword1".to_string()));
         assert!(keywords.contains(&"keyword2".to_string()));
     }
@@ -611,27 +608,23 @@ mod tests {
         create_fragment(&pool, &frag_world_b).await.unwrap();
         create_fragment(&pool, &frag_null_world).await.unwrap();
 
-        // Filter by world_a — should return exactly 1
         let filtered = list_fragments_filtered(&pool, "ctr_test", None, Some("world_a"), 10)
             .await
             .unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].fragment_id, "frag_a");
 
-        // Filter by world_b
         let filtered_b = list_fragments_filtered(&pool, "ctr_test", None, Some("world_b"), 10)
             .await
             .unwrap();
         assert_eq!(filtered_b.len(), 1);
         assert_eq!(filtered_b[0].fragment_id, "frag_b");
 
-        // No world filter → all 3
         let all = list_fragments_filtered(&pool, "ctr_test", None, None, 10)
             .await
             .unwrap();
         assert_eq!(all.len(), 3);
 
-        // keyword + world filter combination
         let both =
             list_fragments_filtered(&pool, "ctr_test", Some("keyword1"), Some("world_a"), 10)
                 .await

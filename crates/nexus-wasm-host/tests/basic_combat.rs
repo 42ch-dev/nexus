@@ -68,14 +68,12 @@ fn basic_combat_resolves_attack_into_four_part_output() {
         .compute(&module, &manifest, &combat_input())
         .expect("compute succeeds");
 
-    // 1) battle_report carries the combat discriminator (typed surface is
     // `kind` only; module-specific fields are validated pre-deserialize).
     assert!(
         output.battle_report.kind.is_some(),
         "battle_report.kind must be present"
     );
 
-    // Combat math is asserted via state_delta + timeline_events below.
     let delta = output
         .state_delta
         .iter()
@@ -85,7 +83,6 @@ fn basic_combat_resolves_attack_into_four_part_output() {
     assert_eq!(delta.path.to_string(), "character.current_hp");
     assert_eq!(delta.value, Some(serde_json::json!(15)));
 
-    // 3) timeline_events: one state_update event recording the outcome.
     assert_eq!(output.timeline_events.len(), 1);
     let ev = &output.timeline_events[0];
     assert_eq!(ev.event_type.to_string(), "state_update");
@@ -104,13 +101,11 @@ fn basic_combat_resolves_attack_into_four_part_output() {
         &["kb_atk", "kb_def"]
     );
 
-    // 4) new_key_blocks empty for basic combat.
     assert_eq!(
         output.new_key_blocks,
         [] as [serde_json::Map<std::string::String, serde_json::Value>; 0]
     );
 
-    // The whole envelope must round-trip through serde (already did; sanity-check size).
     let json = serde_json::to_string(&output).unwrap();
     assert!(json.contains("state_delta"));
     assert!(json.contains("battle_report"));

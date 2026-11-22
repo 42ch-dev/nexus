@@ -1,5 +1,4 @@
 /**
- * 操作台 Hub page (plan v1220 T1) — route skeleton + developer rail wiring.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';

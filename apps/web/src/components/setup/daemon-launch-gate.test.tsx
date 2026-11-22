@@ -212,22 +212,18 @@ describe('DaemonLaunchGate', () => {
       await vi.advanceTimersByTimeAsync(25_000);
     });
 
-    // V1.129 P1: the timeout path now renders the promoted
     // <TransportErrorBlock> for kind=timeout. Headline + body come from the
     // primitive; the diagnostic message rides the detail line.
     const block = await screen.findByTestId('transport-error-block');
     expect(block).toHaveAttribute('data-kind', 'timeout');
     expect(block).toHaveTextContent('The daemon took too long to respond');
-    // Diagnostic detail (the existing setup-locale string) still surfaces.
     expect(screen.getByText(/taking longer than expected/i)).toBeInTheDocument();
-    // Retry CTA from the primitive (no Open Settings — desktop launch gate
     // runs before the router mounts).
     expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
       'data-cta',
       'retry',
     );
     expect(screen.queryByTestId('transport-error-secondary')).not.toBeInTheDocument();
-    // Reset Local Database stays composed alongside the primitive.
     expect(screen.getByRole('button', { name: /^Reset$/i })).toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
   });
@@ -258,7 +254,6 @@ describe('DaemonLaunchGate', () => {
       await vi.advanceTimersByTimeAsync(25_000);
     });
 
-    // Retry CTA is the primitive's primary button for kind=timeout.
     const retryButton = await waitFor(() =>
       screen.getByTestId('transport-error-primary'),
     );
@@ -278,7 +273,6 @@ describe('DaemonLaunchGate', () => {
       value: { ...window.location, reload: reloadSpy },
       writable: true,
     });
-    // Controller truth: error before the reset, running once recovery proceeds.
     let status: DaemonStatus = { state: 'error', port: 8420, detail: 'sidecar crashed' };
     const getDaemonStatus = vi.fn(() => Promise.resolve(status));
     let emit: ((status: DaemonStatus) => void) | undefined;
@@ -296,24 +290,19 @@ describe('DaemonLaunchGate', () => {
       }),
     });
 
-    // V1.129 P1: daemon-error path renders kind=daemon_down.
     const block = await screen.findByTestId('transport-error-block');
     expect(block).toHaveAttribute('data-kind', 'daemon_down');
-    // The daemon's last detail string rides the primitive's detail line.
     expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
-    // No post-reset startDaemon, and no success reload — a renderer reload
     // would not rerun main; recovery consumes the controller's readiness.
     expect(startDaemon).not.toHaveBeenCalled();
     expect(reloadSpy).not.toHaveBeenCalled();
 
-    // The confirmed reset re-entered the wait (fresh subscription against the
     // live controller).
     await waitFor(() => expect(onDaemonStatusChanged.mock.calls.length).toBeGreaterThanOrEqual(2));
 
-    // Controller emits real readiness → the gate unlocks.
     status = { state: 'running', port: 8420, version: 'test' };
     act(() => {
       emit?.({ state: 'running', port: 8420, version: 'test' });
@@ -359,7 +348,6 @@ describe('DaemonLaunchGate', () => {
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
 
-    // Declined native dialog: the recovery error survives, the wait effect
     // does not re-run, and no success reload happens.
     await waitFor(() => expect(screen.getByText('sidecar crashed')).toBeInTheDocument());
     expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
@@ -403,10 +391,8 @@ describe('DaemonLaunchGate', () => {
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText('reset denied')).toBeInTheDocument());
 
-    // Failure must not re-run the wait effect (which would clear the error via applyStatus).
     expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
     expect(startDaemon).not.toHaveBeenCalled();
-    // Primitive's Retry CTA still present alongside the failed reset state.
     expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
       'data-cta',
       'retry',

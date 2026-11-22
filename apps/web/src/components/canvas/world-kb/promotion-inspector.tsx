@@ -1,5 +1,4 @@
 /**
- * World KB promotion inspector — adopts / rejects / merges a pending promotion
  * candidate via `world_kb.promote_candidate` (V1.73 P0 A6).
  *
  * Per-row OCC on `kb_extract_jobs.version`. Conflicts (409) are handed to the
@@ -59,9 +58,8 @@ export function PromotionInspector({
     setAction('adopt');
     setMergeTargetId('');
     setValidationErrors([]);
-  }, [candidate.candidate_id, reseedSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [candidate.candidate_id, reseedSignal]);
 
-  // Backend `promote_merge` only accepts `confirmed` or `manual` targets
   // (world_kb.rs promote_merge status guard); any other status that has leaked
   // into `confirmedEntities` (e.g. `merged`/`rejected`/`deprecated`/`deleted`)
   // would 422 at submit with no client-side hint. Filter the dropdown to the
@@ -105,7 +103,6 @@ export function PromotionInspector({
             };
           };
           if (details.status === 409) {
-            // Infer the canonical promotion action from the recovery hint /
             // conflicting path when available; default to the user's action tense.
             const hint = details.details?.recovery_hint ?? '';
             const newStatus: WorldKbCanonicalStatus = inferCanonicalStatus(hint, action);
@@ -230,6 +227,5 @@ function inferCanonicalStatus(hint: string, action: WorldKbPromoteAction): World
   if (h.includes('adopt') || h.includes('confirm')) return 'adopted';
   if (h.includes('reject')) return 'rejected';
   if (h.includes('merge')) return 'merged';
-  // Fallback: mirror the user's pending action as the canonical tense.
   return action === 'adopt' ? 'adopted' : action === 'reject' ? 'rejected' : 'merged';
 }

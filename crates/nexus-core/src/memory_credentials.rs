@@ -86,7 +86,6 @@ impl MemoryCredential {
     }
 }
 
-// A credential must never be printable: even a refactor that adds `{:?}` to a
 // log line cannot leak the seed.
 impl std::fmt::Debug for MemoryCredential {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -171,7 +170,6 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         }
     }
 
-    // Windows carries no Unix mode bit, so the privacy policy is the DACL of
     // the already-open handle (§3.1): only the file's owner, SYSTEM and the
     // Administrators group may hold any grant — read or nonread — and an
     // unverifiable policy refuses before any byte is accepted.
@@ -182,7 +180,6 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         )
     })?;
 
-    // Bound the read itself: a file that grows after the metadata check still
     // cannot make this loader allocate past the declared limit.
     let mut bytes = Vec::new();
     file.take(MAX_CREDENTIAL_FILE_BYTES + 1)
@@ -281,7 +278,6 @@ fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
 
 #[cfg(all(test, feature = "memory-remote"))]
 mod token_equivalence_tests {
-    // I-000332 drift guard: the mirror (`validate_capability_token`) must
     // accept/reject exactly what the published `spoke_connect` 0.16.0
     // `CapabilityTokenProof` accepts/rejects on every shared vector. The
     // vectors enumerate the declared shape — including each declared
@@ -324,10 +320,8 @@ mod token_equivalence_tests {
 
     #[test]
     fn mirror_matches_published_capability_token() {
-        // Shared accept vector.
         assert_equivalent(valid_token(), "valid");
 
-        // Shared reject vectors (representative malformed shapes).
         let mut unknown_claim = valid_token();
         unknown_claim["claims"]["unknown_field"] = serde_json::json!(1);
         assert_equivalent(unknown_claim, "unknown claim field");
@@ -348,7 +342,6 @@ mod token_equivalence_tests {
         bad_capabilities["claims"]["capabilities"] = serde_json::json!("memory.describe");
         assert_equivalent(bad_capabilities, "bad capabilities type");
 
-        // The coded refusal surface stays stable for every reject.
         let err = validate_capability_token(&serde_json::json!({}))
             .expect_err("empty object is rejected");
         assert!(
@@ -364,15 +357,12 @@ mod token_equivalence_tests {
     #[test]
     fn declared_optional_members_agree_across_presence_states() {
         for member in ["iat", "jti"] {
-            // Present: the full-shape vector already carries both.
             assert_equivalent(valid_token(), &format!("{member} present"));
 
-            // Absent: `#[serde(default)]` fills `None` on both sides.
             let mut absent = valid_token();
             absent["claims"].as_object_mut().unwrap().remove(member);
             assert_equivalent(absent, &format!("{member} absent"));
 
-            // Null: `Option` deserializes it to `None` on both sides.
             let mut null = valid_token();
             null["claims"][member] = serde_json::Value::Null;
             assert_equivalent(null, &format!("{member} null"));
@@ -393,7 +383,6 @@ mod token_equivalence_tests {
         let mut additive = valid_token();
         additive["claims"]["nbf"] = serde_json::json!(1_700_000_000_u64);
 
-        // The mirror's coded refusal surface for the extra field.
         let err = validate_capability_token(&additive)
             .expect_err("the mirror refuses a claim field it does not declare");
         assert!(
@@ -401,7 +390,6 @@ mod token_equivalence_tests {
             "the refusal stays the coded credential failure: {err:?}"
         );
 
-        // And that refusal is exactly the published refusal today — which is
         // precisely the equivalence a future additive member breaks.
         assert_equivalent(additive, "hypothetical additive member");
     }

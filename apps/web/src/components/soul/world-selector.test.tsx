@@ -1,5 +1,4 @@
 /**
- * WorldSelector tests (V1.82 SP-2 — web-ui.md §26.1).
  *
  * Covers the pure `countFragmentsByWorld` helper and the rendered control:
  * "All worlds" default, world options rendered with titles + fragment counts,

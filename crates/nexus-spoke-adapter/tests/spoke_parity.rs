@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! V1.139 P1 T6 — Parity: spoke-operations delegation (T3) respects the
 //! transition cross-product the pre-refactor nexus hand-rolled rules relied on.
 //!
@@ -18,9 +19,6 @@ use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, KnowledgeEntryR
 use nexus_spoke_adapter::ops::transition_status;
 use nexus_spoke_adapter::KnowledgeEntry;
 
-// ── Fixtures ───────────────────────────────────────────────────────────────
-
-/// Build a `KnowledgeEntryRecord` seeded directly into `status` (bypassing the lifecycle
 /// methods) so parity cases can start from any state.
 fn entry_in(status: &str) -> KnowledgeEntryRecord {
     let mut e = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Test Hero");
@@ -35,11 +33,8 @@ fn spoke_allows(from: &str, to: &str) -> bool {
     transition_status(&spoke, to).is_ok()
 }
 
-// ── 1. Pure spoke cross-product conformance ────────────────────────────────
-
 #[test]
 fn spoke_allows_the_six_edges_nexus_uses() {
-    // The 6 allowed transitions the prior nexus hand-rolled rules relied on.
     assert!(
         spoke_allows("provisional", "confirmed"),
         "provisional → confirmed"
@@ -62,7 +57,6 @@ fn spoke_allows_the_six_edges_nexus_uses() {
 
 #[test]
 fn spoke_excludes_deprecated_to_merged() {
-    // Architect review §5.2: spoke's table correctly excludes this edge (a
     // deprecated entry cannot be merged directly — it must be restored first).
     assert!(
         !spoke_allows("deprecated", "merged"),
@@ -72,12 +66,10 @@ fn spoke_excludes_deprecated_to_merged() {
 
 #[test]
 fn spoke_rejects_terminal_outbound_except_self_loop() {
-    // merged / deleted are terminal: only self-loops are permitted.
     assert!(!spoke_allows("merged", "confirmed"));
     assert!(!spoke_allows("merged", "deleted"));
     assert!(!spoke_allows("deleted", "confirmed"));
     assert!(!spoke_allows("deleted", "deprecated"));
-    // Idempotent self-loops on terminal states are accepted by spoke:
     assert!(spoke_allows("merged", "merged"));
     assert!(spoke_allows("deleted", "deleted"));
 }
@@ -88,11 +80,8 @@ fn spoke_rejects_unknown_status() {
     assert!(!spoke_allows("frobnicated", "confirmed"));
 }
 
-// ── 2. nexus guard preserved across the delegation ─────────────────────────
-
 #[test]
 fn already_in_state_guard_is_preserved_for_self_transition() {
-    // nexus keeps the AlreadyInState guard (spoke would self-loop accept); the
     // guard preserves the pre-refactor UX of rejecting a redundant deprecate.
     let mut e = entry_in("deprecated");
     let err = e

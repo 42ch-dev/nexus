@@ -1,4 +1,5 @@
-//! ABI export shims (AR-2): `alloc`, `init`, `compute`.
+//! see docs/specs/compute/compute-module-abi.md — ABI export shims (AR-2):
+//! `alloc`, `init`, `compute`.
 //!
 //! These are the bodies behind the exports [`nexus_entry!`](crate::nexus_entry)
 //! generates. Module authors never call them directly.

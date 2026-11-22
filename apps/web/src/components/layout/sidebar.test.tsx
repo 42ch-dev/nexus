@@ -66,7 +66,6 @@ describe('Sidebar', () => {
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
-    // Default entrance (content-creator) → Create tree: works/worlds/memory
     // groups only; the EL §3 hide-table surfaces stay out of the nav.
     expect(screen.getByRole('link', { name: 'Works' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Timeline' })).toBeInTheDocument();
@@ -104,7 +103,6 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    // Preset manager, sessions, schedule, capability browser, modules rail,
     // Connect operator chrome, and the Develop hub are absent from Create.
     expect(screen.queryByRole('link', { name: 'Harness' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sessions' })).not.toBeInTheDocument();
@@ -112,7 +110,6 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('link', { name: 'Capabilities' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Modules' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Develop' })).not.toBeInTheDocument();
-    // Memory stays reachable on Create (EL-8).
     expect(screen.getByRole('link', { name: 'Memory' })).toHaveAttribute('href', '/memory');
   });
 
@@ -124,7 +121,6 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    // Develop hub + full config surface: works/worlds, strategies, runtime,
     // compute (capability browser), memory.
     expect(screen.getByRole('link', { name: 'Develop' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Works' })).toBeInTheDocument();
@@ -136,7 +132,6 @@ describe('Sidebar', () => {
       'href',
       '/capabilities',
     );
-    // Modules is a rail app (/modules), not a legacy sidebar link.
     expect(screen.queryByRole('link', { name: 'Modules' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Memory' })).toBeInTheDocument();
   });
@@ -231,9 +226,7 @@ describe('Sidebar', () => {
 
     const control = screen.getByTestId('entrance-switch-control');
     expect(control).toHaveTextContent('Switch entrance');
-    // Default entrance is content-creator → chrome layout label "Create".
     expect(control).toHaveTextContent('Create');
-    // Not a third tab: the Creator|Orchestrator tablist stays the only tablist
     // in the mode-switch chrome.
     expect(screen.getByTestId('shell-mode-switch').querySelectorAll('[role="tab"]')).toHaveLength(2);
   });
@@ -328,7 +321,6 @@ describe('Sidebar', () => {
   });
 
   it('selects Orchestrator tab on /strategies deep link (V1.125 P1)', async () => {
-    // Strategies live in the Develop nav — switch the entrance so the
     // harness group renders (V1.170 P1).
     window.localStorage.setItem('nexus-entrance', 'developer');
     useSidebarHandlers();
@@ -345,7 +337,6 @@ describe('Sidebar', () => {
 
   it('nests Strategy under the Orchestration tab (AC-P2-4)', async () => {
     const user = userEvent.setup();
-    // Strategy surfaces are Develop-tree nav — switch the entrance (V1.170 P1).
     window.localStorage.setItem('nexus-entrance', 'developer');
     useSidebarHandlers();
 
@@ -636,7 +627,6 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
     await user.type(screen.getByLabelText('Long-term goal'), 'Finish arc one');
     await user.type(screen.getByLabelText('Initial idea'), 'A heist in the sky');
 
-    // Single-world preselect (F-01 W1): the only World is chosen
     // automatically; the author is not forced through a one-option selector.
     const worldSelect = screen.getByLabelText('World');
     await waitFor(() => expect(worldSelect).toHaveValue('world-1'));

@@ -56,10 +56,8 @@ describe('unrestricted JSON values', () => {
       required: ['result'],
       additionalProperties: false,
       properties: {
-        // Annotation-only subschema — an unrestricted "any JSON value" field
         // (mirrors core-tool-execute-response.result / serde_json::Value).
         result: { description: 'Tool-produced JSON result; any JSON value.' },
-        // Constraint-bearing subschemas must stay untouched.
         typed: { type: 'object', description: 'still an object' },
         nested: { type: 'array', items: { description: 'element is any JSON' } },
       },
@@ -77,10 +75,8 @@ describe('unrestricted JSON values', () => {
 
   it('leaves annotation example data and property names alone', () => {
     const schema: Record<string, unknown> = {
-      // `default`/`examples` values are opaque data, not schemas.
       default: {},
       examples: [{ a: 1 }],
-      // `properties` keys are property names — a "title" property is not the
       // title annotation keyword.
       properties: { title: { type: 'string' } },
     };
@@ -137,7 +133,6 @@ describe('$ref target dedupe', () => {
   });
 
   it('prefixes a descendant-directory import with ./', () => {
-    // `path.posix.relative('core', 'core/works')` is a bare `works`; emitting
     // `works/work-pool-entry` would resolve as a package specifier.
     const parent = schemaModule('core', 'WorkPoolListResponse', [
       'WorkPoolListResponse',
@@ -160,7 +155,6 @@ describe('$ref target dedupe', () => {
   });
 
   it('keeps a declaration whose canonical module does not declare it', () => {
-    // `Character` prefixes `CharacterActorRef`, but `character.ts` never declares it,
     // so it must not be treated as the canonical home.
     const character = schemaModule('domain', 'Character', ['Character']);
     const actorRef = schemaModule('domain', 'CharacterActorRef', ['CharacterActorRef']);
@@ -170,7 +164,6 @@ describe('$ref target dedupe', () => {
   });
 
   it('removes a declaration whose body holds a nested template literal', () => {
-    // The nested template's backtick must not close the outer one; otherwise the
     // literal `/*` reads as a block comment and the declaration end is missed.
     const pattern = schemaModule('core/works', 'Pattern', ['Pattern']);
     const listResponse = schemaModule('core/works', 'PatternListResponse', [
@@ -190,7 +183,6 @@ describe('$ref target dedupe', () => {
     const out = dedupeRefTargets(source, listResponse, [listResponse, pattern]);
 
     expect(out).toContain("import type { Pattern } from './pattern';");
-    // The complete declaration is gone and the next declaration survives.
     expect(out).not.toContain('export interface Pattern {');
     expect(out).not.toContain('raw: `outer${`/*`}`;');
     expect(out).toContain('export interface PatternListResponse {');
@@ -208,7 +200,6 @@ describe('declarationEnd brace scan', () => {
       'export interface Next {',
       '}',
     ];
-    // A naive counter takes the `}` in `"}"` as the declaration close (line 1).
     expect(declarationEnd(lines, 0)).toBe(3);
   });
 
@@ -281,7 +272,6 @@ describe('stage-and-swap tree write', () => {
     fs.mkdirSync(outDir);
     fs.writeFileSync(path.join(outDir, 'kept.ts'), '// committed');
 
-    // Force the publish rename to fail by dropping the built tree before the swap.
     await expect(
       stageAndSwap(outDir, stageDir => {
         fs.rmSync(stageDir, { recursive: true, force: true });
@@ -296,7 +286,6 @@ describe('stage-and-swap tree write', () => {
   it('recovers an interrupted publication before another run publishes', async () => {
     const root = scratch('recover');
     const outDir = path.join(root, 'generated');
-    // Simulate a kill after the old tree was retired but before the swap landed.
     fs.mkdirSync(`${outDir}.backup`, { recursive: true });
     fs.writeFileSync(path.join(`${outDir}.backup`, 'kept.ts'), '// committed');
 
@@ -321,7 +310,6 @@ describe('stage-and-swap tree write', () => {
       releaseFirst = resolve;
     });
     const first = stageAndSwap(outDir, () => firstBuild);
-    // The first run holds the output lock for its whole build, so the second run must
     // fail visibly rather than clear the staging tree out from under it.
     await expect(stageAndSwap(outDir, () => {})).rejects.toThrow(/another codegen run/);
 
@@ -329,7 +317,6 @@ describe('stage-and-swap tree write', () => {
     await first;
     expect(fs.existsSync(`${outDir}.lock`)).toBe(false);
 
-    // The lock is released with the first run: a follow-up run proceeds normally.
     await stageAndSwap(outDir, stageDir => {
       fs.writeFileSync(path.join(stageDir, 'second.ts'), '// second');
     });
@@ -366,7 +353,6 @@ describe('publication lock acquisition', () => {
     const release = acquirePublicationLock(outDir);
     const ownerBefore = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8');
 
-    // The competitor fails visibly and must not touch the holder's lock or its record.
     expect(() => acquirePublicationLock(outDir)).toThrow(/another codegen run/);
     expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8')).toBe(ownerBefore);
     expect(fs.existsSync(lockDir)).toBe(true);
@@ -383,7 +369,6 @@ describe('publication lock acquisition', () => {
     const token = `${deadPid()}:stale:0`;
     seedLock(lockDir, token);
 
-    // A dead owner is never probed or reclaimed: the run fails visibly instead.
     expect(() => acquirePublicationLock(outDir)).toThrow(/another codegen run/);
     expect(() => acquirePublicationLock(outDir)).toThrow(`remove ${lockDir} manually`);
     expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(token);
@@ -398,7 +383,6 @@ describe('CoreSliceClient staging', () => {
     const outDir = path.join(root, 'generated');
     const coreDir = path.join(outDir, 'core');
     fs.mkdirSync(coreDir, { recursive: true });
-    // The ts-gen barrel pass writes this file before the client is built into the same
     // staged tree; the client re-export is appended to it.
     fs.writeFileSync(path.join(coreDir, 'index.ts'), "export type { Foo } from './foo';\n");
 

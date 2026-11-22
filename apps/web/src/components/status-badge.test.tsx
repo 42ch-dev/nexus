@@ -4,7 +4,6 @@ import { render } from '@testing-library/react';
 import { FindingStatusBadge } from './status-badge';
 
 /**
- * V1.121 P1 T3 — FindingStatusBadge tokenization (DESIGN.md
  * components.finding-status-pill).
  *
  * Pins: each of the 6 finding statuses consumes the projected

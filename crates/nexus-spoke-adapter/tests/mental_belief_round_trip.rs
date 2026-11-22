@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Round-trip + typed-parse tests for the `modules.mental` / `modules.belief`
 //! dialect (V1.164 P2 T1, l5-mind).
 //!
@@ -92,10 +93,8 @@ fn mental_and_belief_survive_spoke_roundtrip_verbatim() {
 
     let roundtripped = roundtrip(&entry);
 
-    // All fields verbatim + unknown keys preserved (AC-V1164-6).
     assert_eq!(roundtripped.modules, Some(original_modules));
 
-    // Typed parse lens reads the handbook fields off the round-tripped
     // modules_json.
     let mental: MentalFieldsRaw = roundtripped
         .parse_mental_fields()
@@ -149,7 +148,6 @@ fn world_state_info_point_roundtrips_with_world_row() {
 
 #[test]
 fn paper_alias_row_is_not_produced_and_does_not_round_trip_as_is() {
-    // AC-V1164-7: `actor` / `knowledge_access` / `mental_source` are
     // OmniToM paper aliases, not handbook fields (TL-5 / PD-5). The parse
     // type has no fields for them, so a paper-alias row never round-trips
     // through the typed form.
@@ -172,7 +170,6 @@ fn paper_alias_row_is_not_produced_and_does_not_round_trip_as_is() {
         parsed.source, None,
         "`mental_source` must not map to `source`"
     );
-    // Re-emission is handbook-names only — the aliases are gone, so the row
     // does not round-trip as-is.
     let emitted: Value = serde_json::to_value(&parsed).unwrap();
     assert_ne!(emitted, alias_row);
@@ -180,7 +177,6 @@ fn paper_alias_row_is_not_produced_and_does_not_round_trip_as_is() {
     assert!(emitted.get("knowledge_access").is_none());
     assert!(emitted.get("mental_source").is_none());
 
-    // Same through the entry path: an entry carrying a paper-alias row
     // parses to handbook fields unpopulated and never re-emits the aliases.
     let mut entry = bo_entry();
     entry.modules = Some(json!({ "belief": [alias_row] }));

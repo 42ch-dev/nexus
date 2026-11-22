@@ -59,7 +59,6 @@ fn extract_state_machine_load_chapter_to_extract_sync() {
         .find(|s| s.id == "load_chapter")
         .expect("load_chapter state must exist");
 
-    // R-V144P0-001 fix: load_chapter now transitions to extract_sync (not review_report)
     assert_eq!(
         load_chapter.next,
         Some(manifest::NextTarget::Linear("extract_sync".into())),
@@ -214,7 +213,6 @@ fn extract_done_is_terminal() {
     );
 }
 
-// R-V144P0-002: verify that the extract preset does NOT contain review_report state
 // (which would be reachable via review_report if the wrong preset was dispatched)
 // The world_binding: required in YAML provides a hint to daemon, but the actual
 // enforcement is at the CLI level + preset gate evaluation.
@@ -223,7 +221,6 @@ fn extract_preset_has_no_review_state() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-manuscript-audit-extract", &caps).unwrap();
 
-    // The extract preset only has: load_chapter, extract_sync, done
     let state_ids: Vec<&str> = loaded
         .manifest
         .states

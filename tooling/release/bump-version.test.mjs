@@ -50,7 +50,6 @@ test("bumpVersion writes every version surface and reports the change", () => {
     const lock = readRepoFile(dir, CARGO_LOCK_PATH);
     const members = readWorkspaceMemberPackages(dir);
     assert.ok(members.length > 20, `expected > 20 members, got ${members.length}`);
-    // Two brackets: inherited members followed the product bump, contract
     // crates kept the literal their manifest still declares.
     const expected = expectedMemberLockVersions(dir, FIXTURE_TARGET_VERSION);
     for (const [name, version] of expected) {
@@ -58,7 +57,6 @@ test("bumpVersion writes every version surface and reports the change", () => {
     }
     assert.equal(report.changed.at(-1).members, members.length);
 
-    // Cargo, not a text edit, produced the lockfile: only the inherited-bracket
     // version lines moved, and nothing was added or dropped.
     const before = lockBefore.split("\n");
     const after = lock.split("\n");
@@ -72,7 +70,6 @@ test("bumpVersion writes every version surface and reports the change", () => {
       assert.equal(line, `version = "${FIXTURE_TARGET_VERSION}"`);
     }
 
-    // The standalone (non-workspace) module crate must not be dragged along.
     assert.equal(
       parseCargoLockPackageVersion(lock, "nexus-module-manifest"),
       parseCargoLockPackageVersion(lockBefore, "nexus-module-manifest"),
@@ -100,7 +97,6 @@ test("a product bump leaves every independent package literal and lock row alone
         `${entry.name}: a product bump must not rewrite an independent package manifest`,
       );
     }
-    // A green lockstep after the bump proves each literal still equals the row
     // of the lockfile that owns the crate: the root workspace for a member, the
     // standalone crate's own lock otherwise.
     const lockstep = checkLockstep(dir);
@@ -130,7 +126,6 @@ test("bumpVersion refuses malformed, equal, and decreasing versions", () => {
       assert.equal(report.ok, false, target);
       assert.deepEqual(report.changed, [], target);
     }
-    // Nothing was written by the refused attempts.
     for (const surface of readSurfaceVersions(dir)) {
       assert.equal(surface.version, FIXTURE_BASELINE_VERSION, surface.path);
     }
@@ -160,7 +155,6 @@ test("bumpVersion walks the clean→alpha→rc→stable ladder and refuses a dow
       assertSurfacesAt(target);
     }
 
-    // A downgrade within the core (alpha sorts below rc) leaves everything untouched.
     const downgrade = bumpVersion({ repoRoot: dir, target: "9.8.8-alpha.4" });
     assert.equal(downgrade.ok, false);
     assert.deepEqual(downgrade.changed, []);
@@ -172,7 +166,6 @@ test("bumpVersion walks the clean→alpha→rc→stable ladder and refuses a dow
     );
     assertSurfacesAt("9.8.8-rc.2");
 
-    // Promotion to the stable of the same core completes the ladder.
     const stable = bumpVersion({ repoRoot: dir, target: "9.8.8" });
     assert.equal(stable.ok, true, stable.problems.join("; "));
     assertSurfacesAt("9.8.8");
@@ -192,7 +185,6 @@ test("bumpVersion reports a broken Cargo.lock instead of writing a partial bump"
       report.problems.some((problem) => problem.includes("missing [[package]] entry for nexus42")),
       report.problems.join("; "),
     );
-    // All-or-nothing: no version surface was written.
     assert.deepEqual(report.changed, []);
     for (const surface of readSurfaceVersions(dir)) {
       assert.equal(surface.version, FIXTURE_BASELINE_VERSION, surface.path);
@@ -233,7 +225,6 @@ test("CLI fails loudly and restores the surfaces when cargo is unavailable", () 
     assert.equal(run.status, 1);
     assert.match(run.stderr, /could not run/);
     assert.ok(run.stderr.includes(CARGO_LOCK_REGEN_COMMAND), run.stderr);
-    // Rolled back: a failed regeneration never leaves a half-bumped repo.
     for (const [path, contents] of before) {
       assert.equal(readRepoFile(dir, path), contents, path);
     }

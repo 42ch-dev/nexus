@@ -1,5 +1,4 @@
 /**
- * Strategy IR projection — the composition path's read projection from
  * `workflow-ir` DTOs to the React Flow graph the Strategy Canvas renders
  * (v239-p3-canvas-compose-ui T1).
  *
@@ -58,7 +57,6 @@ export interface StrategyIrProjectionOptions {
   /** Pattern registry listing; supplies declared slots for the pinned pattern. */
   patterns?: readonly SlotPatternSummary[];
   /**
-   * Authored nest-into-slot containment: child slot node id → parent slot node id.
    * The compose wire records no graph position for a nested region (the fragment
    * owns it), so the canvas keeps the spatial choice the author made and re-applies
    * it after every committed op.
@@ -89,7 +87,6 @@ function slotRowsFor(
     kind: slot.kind,
     value: node.bind?.[slot.name],
   }));
-  // A binding the manifest does not declare still renders (reported, never hidden).
   for (const [name, value] of Object.entries(node.bind ?? {})) {
     if (!rows.some((row) => row.name === name)) {
       rows.push({ name, required: false, kind: 'unknown', value });
@@ -109,7 +106,6 @@ export function buildStrategyGraphFromIr(
   const nodes = document.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
-  // ── Layers (BFS from entry over document edges) ──────────────────────────
   const layerOf = new Map<string, number>();
   if (byId.has(document.entry)) {
     const queue: string[] = [document.entry];
@@ -171,7 +167,6 @@ export function buildStrategyGraphFromIr(
     });
   };
 
-  // ── Outer-level nodes (parents before children) ──────────────────────────
   const innerOwners = new Map<string, string>(); // inner graph name → owning outer state id
   for (const node of nodes) {
     const graphName = innerGraphNameOf(node);
@@ -182,7 +177,6 @@ export function buildStrategyGraphFromIr(
   for (const nest of document.nests) slotNestId.set(nest.parent_node, nest.id);
 
   /**
-   * A contained slot is hidden exactly while no expanded ancestor emits it: a
    * collapsed parent must keep it in the node set (hidden) so the edges naming
    * it keep both endpoints, and an expanded parent emits it as its own child.
    */
@@ -197,7 +191,6 @@ export function buildStrategyGraphFromIr(
   for (const node of nodes) {
     if (node.kind === 'inner_step') continue;
     const contained = node.kind === 'pattern_slot' && containment.has(node.id);
-    // An expanded parent emits this slot as its child (parents-first); otherwise
     // it stays here as a hidden node rather than dropping out of the graph.
     const hidden = contained && hiddenSlot(node.id);
     if (contained && !hidden) continue;
@@ -252,7 +245,6 @@ export function buildStrategyGraphFromIr(
       focusable: true,
     });
 
-    // Expanded slot: materialise the fragment inline — declared slots as child
     // binding rows and authored nested slots as child slot groups (three
     // levels deep at most, matching the IR nest policy).
     if (isSlot && expanded) {
@@ -262,7 +254,6 @@ export function buildStrategyGraphFromIr(
     }
   }
 
-  // Inner steps as children of their owning outer state (parents-first: owners emitted above).
   const innerByGraph = new Map<string, IrNode[]>();
   for (const node of nodes) {
     if (node.kind !== 'inner_step') continue;
@@ -297,7 +288,6 @@ export function buildStrategyGraphFromIr(
     });
   }
 
-  // ── Document edges ───────────────────────────────────────────────────────
   for (const edge of document.edges) {
     const data: StrategyEdgeData =
       edge.kind === 'linear'
@@ -310,7 +300,6 @@ export function buildStrategyGraphFromIr(
     pushEdge(`e-${edge.id}`, edge.from, edge.to, data, edge.label ?? edge.when);
   }
 
-  // Inner-step depends_on edges (IR carries them on the node, not as edges).
   for (const node of nodes) {
     if (node.kind !== 'inner_step') continue;
     for (const dep of node.depends_on ?? []) {
@@ -340,7 +329,6 @@ interface SlotChild {
 }
 
 /**
- * Children of an expanded slot: declared slot binding rows, then authored
  * nested slots. Nested slots that are themselves expanded recurse (the
  * parents-first push order is preserved: each parent lands before its
  * children), bounded by the IR nest policy's three levels.
@@ -390,7 +378,6 @@ function pushSlotSubtree(
         patternId: child.pattern?.registry_id ?? '',
         patternVersion: child.pattern?.version ?? '',
         patternEffectClass: child.effect_class,
-        // The nested slot is editable exactly like a top-level one: its binding
         // op addresses the nest whose `parent_node` names it.
         nestId: slotNestId.get(child.id),
         slotRows: rows,

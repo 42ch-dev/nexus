@@ -67,7 +67,6 @@ describe('RunsTable', () => {
     ]);
     expect(badges.map((b) => b.textContent)).toEqual(['Needs review', 'Applied', 'Failed']);
 
-    // Missing finished timestamp renders an em dash.
     expect(screen.getByTestId('runs-table-row-run_0003')).toHaveTextContent('—');
   });
 

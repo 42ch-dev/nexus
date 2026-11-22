@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Adapter-owned production extraction wrapper (v1.191 P1 T12, durable §8).
 //!
 //! `spoke_operations::adapter::orchestrate_extract` is the sole gate/assembly
@@ -88,7 +89,6 @@ impl ResolvedExtractionPort {
 #[async_trait]
 impl ExtractionPort for ResolvedExtractionPort {
     async fn load_extraction_input(&self, request: &ExtractRequest) -> SpokeResult<Value> {
-        // The bundle belongs to exactly one run. A request for another run is a
         // caller wiring error, not something to paper over with the bundle at
         // hand.
         if request.run_id.as_str() != self.input.run_id {
@@ -182,7 +182,6 @@ where
 {
     let request_run_id = request.run_id.as_str().to_owned();
 
-    // The native output is produced inside the callback and must survive
     // upstream's fixed `SpokeResult<ExtractionResult>` callback shape, so the
     // callback hands it back through this slot.
     let native_output: Arc<Mutex<Option<NativeExtractionOutput>>> = Arc::new(Mutex::new(None));
@@ -220,7 +219,6 @@ where
         SpokeResult::Reject(reject) => return SpokeResult::Reject(reject),
     };
 
-    // Success upstream means the callback ran and stored its native output.
     let native = native_output
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -267,7 +265,6 @@ where
     Fut: Future<Output = SpokeResult<ExtractionResult>> + Send + 'static,
 {
     let (result_tx, result_rx) = tokio::sync::oneshot::channel::<SpokeResult<ExtractResponse>>();
-    // Held for the whole call, never read: dropping it is the cancellation
     // signal the driver's `select!` observes, so the orchestrator future (and
     // the native callback) is dropped when this future is.
     let (_cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
@@ -293,7 +290,6 @@ where
             let driven = runtime.block_on(async move {
                 tokio::select! {
                     response = orchestrate_extract(&port, request, extractor) => Some(response),
-                    // Resolves only when the caller's future was dropped.
                     _ = cancel_rx => None,
                 }
             });
@@ -452,7 +448,6 @@ mod tests {
             request(RUN_ID),
             admitted_bundle(RUN_ID),
             |run_input| async move {
-                // The admitted bundle (and only it) reaches the callback.
                 assert_eq!(run_input.input["chapters"][0]["path"], "03.md");
                 let prepared =
                     prepare_extract(prepare_input("char_lin_xia", KnowledgeGovernance::shared()))
@@ -483,13 +478,11 @@ mod tests {
             Some("novel-chapter")
         );
         assert_eq!(run.coverage_hint, Some(json!({ "chapters": 1 })));
-        // Identical candidates: same id, same order, none reconstructed.
         assert_eq!(candidates.len(), 1);
         assert_eq!(
             candidates[0].entry_id,
             outcome.candidates[0].record.entry_id
         );
-        // Relationship sidecar retained beside SPOKE's KE-only success arm.
         assert_eq!(outcome.relationships, expected_relationships);
 
         persist_outcome(&store, outcome).await;
@@ -525,7 +518,6 @@ mod tests {
             SpokeResult::Reject(reject) => panic!("expected success, got reject: {reject:?}"),
         };
 
-        // The trusted policy reaches the wire unchanged (holder → owner).
         let ExtractResponse::Variant0 { candidates, .. } = &outcome.response else {
             panic!("expected the success variant");
         };
@@ -598,7 +590,6 @@ mod tests {
                 let mut prepared =
                     prepare_extract(prepare_input("char_lin_xia", KnowledgeGovernance::shared()))
                         .expect("prepare");
-                // A callback that rewrites the candidate's status must not be able
                 // to hand back a success carrying a non-provisional entry.
                 prepared.record.status = "confirmed".to_string();
                 spoke_ok(NativeExtractionOutput {
@@ -652,7 +643,6 @@ mod tests {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let started = Arc::new(AtomicUsize::new(0));
 
-        // Cancellation is the caller dropping the run future; nothing here
         // spawns a task, so a dropped future stops before any persist.
         let cancelled = tokio::time::timeout(
             Duration::from_millis(20),

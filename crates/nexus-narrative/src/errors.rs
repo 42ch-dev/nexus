@@ -1,5 +1,4 @@
 //! Narrative-domain error types.
-
 use thiserror::Error;
 
 /// Error type for Narrative aggregate operations.

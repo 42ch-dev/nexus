@@ -22,7 +22,6 @@ export interface LayerBreadcrumbSegment<L extends string> {
 
 export interface LayerBreadcrumbProps<L extends string> {
   /**
-   * Stable surface discriminator used in test ids — e.g. `timeline` or
    * `work-timeline`. Test ids are `${surfaceKey}-layer-breadcrumb` and
    * `${surfaceKey}-layer-breadcrumb-segment-${layer}`.
    */
@@ -53,7 +52,6 @@ export function LayerBreadcrumb<L extends string>({
   const isCoarseActive = activeLayer === coarseSegment.layer;
   const isFineActive = activeLayer === fineSegment.layer;
 
-  // The breadcrumb always renders the active segment; the parent segment
   // renders only when the user has drilled into the fine layer. When the
   // coarse layer is active, the breadcrumb shows just the coarse label.
   return (

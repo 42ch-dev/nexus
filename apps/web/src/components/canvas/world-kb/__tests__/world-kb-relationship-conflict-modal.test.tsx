@@ -70,7 +70,6 @@ describe('WorldKbRelationshipConflictModal', () => {
     render(<WorldKbRelationshipConflictModal {...baseProps} />);
     await user.click(screen.getByRole('button', { name: /Review side-by-side/i }));
     expect(screen.getByText('Changed by another session')).toBeInTheDocument();
-    // The review panel exposes the user's pending edit value in the draft cell.
     const draftCell = screen.getByText('Your edit: Relation type').closest('div')!;
     expect(draftCell.textContent).toMatch(/Aria Stormwind.*Elena Vale/);
   });

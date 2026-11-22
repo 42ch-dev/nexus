@@ -7,7 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Simulate route (`POST /v1/daemon/strategies/{strategy_id}/simulate`): the preset family
  * mounts it, admits it at the Strategy tier and hands the whole candidate body to the core
  * authority. The core's own static walk is proven in
  * `crates/nexus-orchestration/tests/sample_trajectory.rs`; this target proves the HTTP

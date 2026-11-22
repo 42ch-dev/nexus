@@ -111,10 +111,6 @@ pub struct ForceGatesAuditRow {
     pub forced_at: String,
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,7 +121,6 @@ mod tests {
             .await
             .expect("in-memory pool");
 
-        // Create the table
         sqlx::query(
             "CREATE TABLE force_gates_audit (
                 audit_id   TEXT PRIMARY KEY,

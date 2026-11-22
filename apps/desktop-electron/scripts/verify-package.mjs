@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Read-only verifier for one published unsigned Electron architecture directory.
  * It inspects receipts, archive digests, app metadata, Mach-O headers, and the
  * compiled host policy. It never mounts, rewrites, signs, or launches an app.
  */

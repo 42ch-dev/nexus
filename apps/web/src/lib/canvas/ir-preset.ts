@@ -1,5 +1,4 @@
 /**
- * The editing surface's view of the document the Canvas renders.
  *
  * The Canvas reads the applied document from `getStrategyApplied` (or the
  * candidate it is composing) and never parses preset YAML. The inspectors, the
@@ -27,7 +26,6 @@ function enterOf(node: IrNode): PresetEnterTask[] {
     name: action.name ?? action.tool_name ?? undefined,
     args: action.args as Record<string, unknown> | undefined,
   }));
-  // A node with no enter action still names its own kind, so the list view's
   // kind column reads `judge` or `manual_wait` instead of `unknown`.
   return actions.length > 0 ? actions : [{ kind: node.kind }];
 }
@@ -37,7 +35,6 @@ function nextOf(outgoing: IrEdge[]): PresetState['next'] {
   if (outgoing.length === 0) return undefined;
   if (outgoing.length === 1) {
     const [edge] = outgoing;
-    // A lone fallback edge is unconditional; a lone guarded edge keeps its guard.
     if (edge.kind === 'default' || (edge.when ?? edge.label) === undefined) return edge.to;
   }
   const fallback = outgoing.find((edge) => edge.kind === 'default');
@@ -51,7 +48,6 @@ function nextOf(outgoing: IrEdge[]): PresetState['next'] {
 }
 
 export function parsedPresetFromIr(document: WorkflowDocument): ParsedPreset {
-  // `depends_on` is an inner-step dependency carried as an edge, never a
   // state transition.
   const transitions = document.edges.filter((edge) => edge.kind !== 'depends_on');
   const states: PresetState[] = document.nodes
@@ -75,7 +71,6 @@ export function parsedPresetFromIr(document: WorkflowDocument): ParsedPreset {
       states,
     },
     revision: document.revision,
-    // The wire document is already parsed and validated; nothing to report.
     problems: [],
   };
 }

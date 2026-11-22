@@ -125,17 +125,14 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     force: bool,
     synthesizer: impl FnOnce() -> Option<S>,
 ) -> CoreResult<ReflectOutcome> {
-    // A forced reflect is a mutation request (persist a synthesized
     // narrative), so a read-only context is rejected up-front — before the
     // insufficient-data early return, which would otherwise let a read ctx
     // "succeed" on a forced request.
     if force {
         ctx.bearer_for_write()?;
     }
-    // 1. fragment stats (served fragments) + retained cache row.
     let (fragment_stats, cached) = bearer_fragment_stats(pool, memory, ctx).await?;
 
-    // 2. insufficient-data gate (before any ACP call).
     let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
     let insufficient = fragment_stats.fragment_count < MIN_SOUL_NARRATIVE_FRAGMENTS
         || fragment_stats.distinct_keyword_count < min_distinct;
@@ -154,7 +151,6 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
         });
     }
 
-    // 3. stale detection (stats-only rows = ungenerated, not stale).
     let has_narrative = cached.as_ref().and_then(|c| c.narrative.as_ref()).is_some();
     let stale = cached.as_ref().is_some_and(|c| {
         has_narrative
@@ -163,7 +159,6 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
                     != fragment_stats.max_created_at.as_deref())
     });
 
-    // 4. read/poll path (force=false): never calls the LLM.
     if !force {
         if let Some(c) = &cached {
             if !has_narrative {
@@ -177,7 +172,6 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
         return Ok(outcome_ungenerated(&fragment_stats));
     }
 
-    // 5. force=true → synthesize (explicit CTA, on-demand only). The write
     //    gate was taken up-front (a read-only context never reaches here) and
     //    the provider factory is invoked only NOW — after the ownership /
     //    activity admission and the insufficient-data gate — so an
@@ -189,7 +183,6 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
 
     let top_keywords = input.top_keywords.clone();
 
-    // Bind the owned Option first so the constructed provider lives across
     // the synthesis await and its consumption below.
     let synth = synthesizer();
     let synth = synth.as_ref().ok_or_else(|| {
@@ -283,12 +276,10 @@ async fn bearer_fragment_records(
     ctx: &MemoryPipelineCtx,
 ) -> CoreResult<Vec<serde_json::Value>> {
     let (selection, filter) = match ctx.bearer_ref() {
-        // The Creator's scope is a World provenance filter on shared fragments.
         MemoryBearerRef::Creator(_) => (
             json!({ "mode": "shared_only" }),
             ctx.scope().map(|world| vec![world.to_string()]),
         ),
-        // A Character's scope is the binding placement of its local fragments.
         MemoryBearerRef::Character { .. } => (
             ctx.scope().map_or_else(
                 || json!({ "mode": "shared_only" }),
@@ -361,7 +352,6 @@ async fn bearer_fragment_stats(
             )
             .await
             .map_err(map_local_db_error)?;
-            // Same record shape — the creator cache uses `SoulNarrativeRecord`.
             cached.map(|c| nexus_local_db::SoulNarrativeRecord {
                 creator_id: character_id.to_string(),
                 world_id: c.actor_world_binding_id,
@@ -466,8 +456,6 @@ async fn bearer_persist_narrative(
         }
     }
 }
-
-// ── Synthesis input building (arm-agnostic; V1.81 G2 caps preserved) ──────
 
 fn build_soul_narrative_synthesis_input(
     signals: &[FragmentSignal],
@@ -631,8 +619,6 @@ fn has_forward_looking_suffix(narrative: &str) -> bool {
     })
 }
 
-// ── Character mind projection (v1.184 P3; core-owned since v1.190 P2-T2) ──
-
 /// Fragments the shared scope and the selected binding scope each contribute
 /// to the merged projection — the legacy per-scope `LIMIT`.
 const MIND_PROJECTION_FETCH_LIMIT: usize = 100;
@@ -705,7 +691,6 @@ pub async fn load_character_mind_projection(
         owner_creator_id,
         character_id,
     };
-    // The bearer id remains the projection's subject key: a malformed id names
     // no bearer and is refused before it reaches the provider.
     bearer.validate().map_err(|e| CoreError::InvalidInput {
         field: "character_id".to_string(),
@@ -722,11 +707,9 @@ pub async fn load_character_mind_projection(
     )
     .await?;
 
-    // SOUL: the `personality` profile — the bridge projects SOUL.md as exactly
     // that document, and the provider serves a migrated one the same way.
     let soul = read.personality().await?;
 
-    // The promoted-memory read's admitted scope: the Character-shared records
     // plus, when a binding is selected, that binding's own records.
     let selection = binding_id.map_or_else(
         || serde_json::json!({ "mode": "shared_only" }),
@@ -739,7 +722,6 @@ pub async fn load_character_mind_projection(
         },
     );
 
-    // Fragments: the shared scope and, when selected, the binding-local scope
     // are read independently at the legacy per-scope `LIMIT` — the same pair of
     // legacy reads, so neither scope's content is traded against the other's.
     // Each read is kind-filtered, so unrelated kinds (events, the derived
@@ -762,7 +744,6 @@ pub async fn load_character_mind_projection(
         None => Vec::new(),
     };
 
-    // Deterministic merge: the legacy per-scope selection key across both
     // admitted scopes — the RAW `created_at` TEXT (`created_at DESC`) then
     // `fragment_id DESC` — rendered with the keywords the legacy column carried.
     // The text key, not the parsed instant, is what the legacy query ordered by
@@ -788,7 +769,6 @@ pub async fn load_character_mind_projection(
         )
         .collect();
 
-    // Promoted memories: the complete authored set ranked by the bearer's slug
     // order — the order the legacy file listing served — BEFORE the projection's
     // 20-entry bound, so provider recency can never decide which memories the
     // legacy slug-head selection kept. They join below the fragment block and
@@ -875,7 +855,6 @@ pub async fn load_character_mind_projection_with_tom(
     )
     .await?;
     let service = CharacterTomService::new(pool.clone());
-    // Independent bounded fill per order through the same query service: an
     // L1-heavy corpus can never crowd the L2 rows out of a mixed page.
     let mut tom_l1 = Vec::new();
     let mut tom_l2 = Vec::new();
@@ -984,9 +963,6 @@ impl CoreCharacterMind {
     }
 }
 
-// ── CoreService SOUL commands ────────────────────────────────────────────
-
-/// Wire-mapping failure carrier (same retained code the daemon emitted).
 fn wire_err(err: impl std::fmt::Display) -> CoreError {
     internal_err("character_tom_wire_invalid", err)
 }
@@ -1077,7 +1053,6 @@ impl CoreService {
         self.verify_principal(principal)?;
         let binding_id = request.binding_id.as_ref().map(|id| id.as_str());
         let pool = &self.inner.pool;
-        // A non-regenerating reflect is an observational retained read and
         // must never create a cache/file or call the synthesizer (§11.2). A
         // forced reflect persists a synthesized narrative: it requires
         // activity, held across every effect.

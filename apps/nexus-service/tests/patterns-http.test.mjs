@@ -7,7 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * v1.239 P3-T4: `GET /v1/daemon/patterns` serves the read-only package registry
  * listing. The reader's own fixtures prove the scan and the fragment pin; this
  * suite drives the route over the `ServiceCore.core` seam it reads, so the
  * pagination, the typed refusals and the isolation of an unavailable package
@@ -132,7 +131,6 @@ describe('patterns route (v1.239 P3-T4)', () => {
   });
 
   test('two lossy-identical names page apart and reach their trailing peer', async () => {
-    // APFS rejects non-UTF-8 directory names, so the identities a Linux registry produces are
     // seeded directly: the reader escapes each name's own bytes, so a one-item walk can address
     // both of them and still reach the valid package after them.
     const items = ['lossy-%FE', 'lossy-%FF', 'prompt-step'].map((package_dir, index) =>
@@ -160,7 +158,6 @@ describe('patterns route (v1.239 P3-T4)', () => {
   });
 
   test('orders by UTF-8 bytes, not by host locale', async () => {
-    // `localeCompare` puts `a` before `B`; the reader's byte order puts `B` first.
     const items = ['a', 'B'].map((package_dir) => ({ ...ITEMS[0], package_dir }));
     const response = await handle(new URLSearchParams(), serviceWith(items));
     assert.deepEqual(

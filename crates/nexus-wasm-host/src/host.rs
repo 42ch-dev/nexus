@@ -76,7 +76,6 @@ impl HostContext {
     pub fn from_input(input: &crate::ComputeInput) -> Self {
         let mut blocks = HashMap::with_capacity(input.key_blocks.len());
         for kb in &input.key_blocks {
-            // Re-serialize each entry so the module receives canonical JSON.
             // V1.139 P0 fallback: ComputeInput.key_blocks is an opaque JSON-map
             // Vec (spoke $ref unresolved at codegen), so the id is read from the
             // serialized spoke KnowledgeEntry's `entry_id` field.
@@ -88,7 +87,6 @@ impl HostContext {
                 blocks.insert(id.to_string(), json);
             }
         }
-        // `narrative_state` is a generated struct; serialize it back to the
         // freeform JSON the module's `narrative_query` host import returns.
         let narrative_state = serde_json::to_value(&input.narrative_state).unwrap_or_default();
         Self {
@@ -111,11 +109,6 @@ impl HostContext {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Linker wiring
-// ---------------------------------------------------------------------------
-
-/// Register the whitelisted host imports on a [`Linker`].
 ///
 /// Only the functions listed in `manifest.host_functions` are linked. A module
 /// that imports a non-registered `nexus::*` function fails instantiation — the
@@ -137,7 +130,6 @@ pub fn register_host_imports(
                 let Some(mem) = current_memory(&mut caller) else {
                     return Ok(RET_NOT_FOUND);
                 };
-                // Read the requested key_block_id.
                 let Some(id_bytes) = read_bytes(&caller, &mem, id_ptr, id_len) else {
                     return Ok(RET_NOT_FOUND);
                 };
@@ -261,7 +253,6 @@ mod tests {
         cfg.consume_fuel(true);
         let engine = Engine::new(&cfg).unwrap();
 
-        // The probe module: places the id "kb-a" at offset 0 and exports a
         // function that calls the imported `kb_read` to fetch that block.
         let probe_wat = r#"(module
             (import "nexus" "kb_read"
@@ -309,7 +300,6 @@ mod tests {
             .get_typed_func::<(u32, u32), i64>(&mut store, "probe_kb_read")
             .unwrap();
 
-        // out buffer well clear of the "kb-a" data segment at offset 0.
         let out_ptr: u32 = 32;
         let written = probe.call(&mut store, (out_ptr, 60_000)).unwrap();
         assert!(written > 0, "kb_read must find kb-a; got {written}");
@@ -350,7 +340,6 @@ mod tests {
         );
         store.limiter(|s| &mut s.limits);
 
-        // Manifest does NOT whitelist kb_read -> import is left undefined.
         let manifest: ModuleManifest = serde_json::from_str(
             r#"{"module_id":"m","name":"M","version":"0.1.0","nexus_abi_version":1,
                "required_key_block_types":[],"compute_export":"compute","init_export":""}"#,

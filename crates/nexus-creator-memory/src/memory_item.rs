@@ -250,15 +250,11 @@ impl MemoryItem {
     /// Validate creator/world scope and quota.
     /// Per consistency-rules-v1.md §3.6.
     pub fn validate_scope(&self, _creator_quota: &CreatorQuota) -> Result<(), MemoryError> {
-        // Domain-level validation: ensure active status allows operations
         if self.status == MemoryStatus::Archived.as_str() {
             return Err(MemoryError::ValidationError(
                 "archived memory cannot be used".to_string(),
             ));
         }
-        // Full quota validation would require a repository query
-        // (how many active memories of this type exist for this creator/world)
-        // Here we validate structural correctness only.
         Ok(())
     }
 
@@ -280,8 +276,6 @@ impl MemoryItem {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::Memory> for MemoryItem {
     fn from(c: nexus_contracts::Memory) -> Self {
@@ -468,8 +462,6 @@ mod tests {
         let deserialized: MemoryItem = serde_json::from_str(&json).unwrap();
         assert_eq!(mi, deserialized);
     }
-
-    // ── MemoryKind Enum Tests ──────────────────────────────────────
 
     #[test]
     fn test_memory_kind_all_variants() {

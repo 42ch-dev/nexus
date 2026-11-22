@@ -1,5 +1,4 @@
 /**
- * World KB conflict modal hosts (V1.74 A10 split + A6 relationship variant).
  *
  * Bridges the canvas conflict state to the KB-flavored entity, promotion, and
  * relationship conflict modals. The "Reapply" path rebuilds the patch from the

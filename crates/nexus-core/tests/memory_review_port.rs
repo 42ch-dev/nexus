@@ -203,7 +203,6 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // The candidate was written by the capture under the bridge's deterministic
     // id and then consumed by the drain: the legacy queue is never written at
     // all (fix round 5, B1 — the capture is one provider write).
     let pool = db_pool(&env).await;
@@ -229,7 +228,6 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     );
     pool.close().await;
 
-    // The fragment is the retained `fact` DTO: binding scope, legacy 0→1
     // numbering, existing summary/keywords/TTL/session/pending provenance.
     let scoped = core
         .list_character_memory_fragments(
@@ -269,7 +267,6 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
         .expect("list shared fragments");
     assert!(shared.fragments.is_empty(), "nothing was shared implicitly");
 
-    // The record carries the pending provenance the reroute names.
     let pool = db_pool(&env).await;
     let (kind, content) = provider_record(&pool, fragment.fragment_id.as_str())
         .await
@@ -324,7 +321,6 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
         .as_str()
         .to_string();
 
-    // Stale DTO revision → the retained `version_mismatch`, zero mutation.
     let stale = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id.clone(), 7)
         .await
@@ -348,7 +344,6 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
         "no mutation on conflict"
     );
 
-    // DTO 0 → provider revision 1 → promote → provider revision 2 → DTO 1.
     let promoted = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id.clone(), 0)
         .await
@@ -370,7 +365,6 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
     );
     pool.close().await;
 
-    // Already shared → the retained stable conflict.
     let again = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id, 1)
         .await
@@ -380,7 +374,6 @@ async fn explicit_promotion_uses_provider_cas_and_keeps_the_0_to_1_sequence() {
         "got {again:?}"
     );
 
-    // The fragment now lives in the shared scope only.
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
         .await
@@ -463,7 +456,6 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
             .is_some_and(|text| text.starts_with("# UNTRUSTED:")),
         "the promoted body keeps the passthrough UNTRUSTED header: {content}"
     );
-    // The promoted record keeps the authored identity the CLI addresses it by:
     // the slug it derives from the pending row, so list/show/edit/delete reach
     // it instead of a blank-slug row (fix round 1, Greptile
     // `memory_pipeline.rs:441`).
@@ -491,7 +483,6 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
         "the promoted memory is addressable by its slug"
     );
 
-    // The promoted record is not listed as a fragment (same retained split).
     let fragments = core
         .list_memory_fragments(&principal, None, None, 50)
         .await
@@ -499,7 +490,6 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
     assert!(fragments.fragments.is_empty());
 }
 
-// ═══ Fix round 1: R4-F1, R4-F2, R4-F3 ════════════════════════════════════
 //
 // The explicit promotion is addressed by the id the fragment DTO served, so it
 // resolves a legacy-projected id through the bridge and adopts the projection
@@ -719,7 +709,6 @@ async fn a_listed_legacy_fragment_promotes_through_its_bridge_id() {
     );
     pool.close().await;
 
-    // The shared scope serves it once; the binding scope no longer does (the
     // adopted record wins over the projection).
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
@@ -746,7 +735,6 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
 
-    // Character B owns a binding-local fragment of its own.
     let other = core
         .create_character(
             &principal,
@@ -786,7 +774,6 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
         .as_str()
         .to_string();
 
-    // A's lease must not reach B's record.
     let crossed = core
         .promote_character_fragment(&principal, character_id.clone(), other_fragment.clone(), 0)
         .await
@@ -806,7 +793,6 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
     );
     pool.close().await;
 
-    // A provider-native non-fragment record under A's own subject is refused by
     // kind, not promoted.
     let pool = db_pool(&env).await;
     sqlx::query(
@@ -843,7 +829,6 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
         "got {wrong_kind:?}"
     );
 
-    // The owner-exact path still promotes what the lease names.
     core.capture_character_pending_review(
         &principal,
         character_id.clone(),
@@ -903,7 +888,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
 
-    // An unrelated real binding of the same Character: a scope the promotion
     // must leave alone.
     let unrelated_binding = core
         .add_binding(
@@ -950,7 +934,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         .as_str()
         .to_string();
 
-    // Pre-existing cache rows: the two scopes the promotion invalidates and one
     // it must leave alone.
     let pool = db_pool(&env).await;
     for binding in [
@@ -975,7 +958,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
     stale.sort();
     assert_eq!(soul_narrative_scopes(&env, &character_id).await, stale);
 
-    // The invalidation fails after the promotion already committed.
     core.fail_next_soul_narrative_invalidation();
     let failed = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id.clone(), 0)
@@ -986,7 +968,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         "got {failed:?}"
     );
 
-    // The promotion itself committed; only the cache is stale.
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
         .await
@@ -1003,7 +984,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         "the failed invalidation left the cache stale"
     );
 
-    // The retry reaches the retained conflict AND finishes the invalidation.
     let retried = core
         .promote_character_fragment(&principal, character_id.clone(), fragment_id, 1)
         .await

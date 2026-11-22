@@ -12,7 +12,6 @@ pub mod errors;
 pub mod runtime_guard;
 pub mod runtime_mode;
 
-// Re-export primary types for convenience.
 //
 // `degradation` is `cli`-only (v1.193 P2-T13): it is the sole
 // module in the crate that pulls in `chrono`, and the Connect cohort keeps

@@ -184,7 +184,6 @@ mod tests {
             Some("/abs/path/issuer.key")
         );
 
-        // Serialize → reparse: the on-disk shape round-trips exactly.
         let serialized = serde_json::to_string(&config).expect("serialize");
         let reparsed: ConnectTokenConfig = serde_json::from_str(&serialized).expect("reparse");
         assert_eq!(reparsed, config);
@@ -260,17 +259,14 @@ mod tests {
         let default = resolve_issuer_key_path(home, None);
         assert_eq!(default, nexus_home_layout::connect_issuer_key_path(home));
 
-        // Absolute path used as-is.
         assert_eq!(
             resolve_issuer_key_path(home, Some("/etc/issuer.key")),
             PathBuf::from("/etc/issuer.key")
         );
-        // Relative path resolves against ~/.nexus42/connect/.
         assert_eq!(
             resolve_issuer_key_path(home, Some("keys/issuer.key")),
             PathBuf::from("/fake/home/.nexus42/connect/keys/issuer.key")
         );
-        // Empty / whitespace-only values fall back to the default.
         assert_eq!(resolve_issuer_key_path(home, Some("")), default);
         assert_eq!(resolve_issuer_key_path(home, Some("   ")), default);
     }

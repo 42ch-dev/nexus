@@ -46,11 +46,6 @@ use nexus_module_sdk::{
     nexus_entry, ComputeInput, ComputeOutput, DeltaOp, ModuleError, StateDeltaOp,
 };
 
-// ===========================================================================
-// Combat logic
-// ===========================================================================
-
-/// Resolve a single attack between two characters and build the output envelope.
 fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let key_blocks = &input.key_blocks;
     if key_blocks.is_empty() {
@@ -68,7 +63,6 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let def = read_attr_int(defender, "base_def")
         .or_else(|| read_int(defender, &["body", "base_def"]))
         .unwrap_or(0);
-    // current_hp: nested by block_type (compass Q5) -> body.state.character.current_hp
     let hp_before = read_int(defender, &["body", "state", "character", "current_hp"])
         .or_else(|| read_int(defender, &["body", "state", "current_hp"]))
         .or_else(|| read_attr_int(defender, "max_hp"))
@@ -77,7 +71,6 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
     let damage = (atk - def).max(0);
     let hp_after = (hp_before - damage).max(0);
 
-    // --- state_delta -----------------------------------------------------
     let mut state_delta = Vec::new();
     state_delta.push(StateDeltaOp {
         op: DeltaOp::Sub,
@@ -94,13 +87,9 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
         });
     }
 
-    // world_ref inner fields are optional on the wire (schema requires
-    // `world_ref` itself, not its properties); keep the legacy fallbacks so
-    // domain-shaped fixtures keep producing the same timeline event.
     let world_id = input.world_ref.world_id.as_deref().unwrap_or("world");
     let branch_id = input.world_ref.branch_id.as_deref().unwrap_or("root");
 
-    // --- timeline_events -------------------------------------------------
     let summary = format!(
         "{attacker} struck {defender} for {damage} ({hp_before} -> {hp_after} hp)",
         attacker = attacker_id,
@@ -120,12 +109,9 @@ fn run_combat(input: &ComputeInput) -> Result<ComputeOutput, ModuleError> {
         "title": "Combat resolved",
         "summary": summary,
         "affected_key_block_ids": [attacker_id.clone(), defender_id.clone()],
-        // Modules cannot read a wall clock on wasm32-unknown-unknown; the host
-        // owns authoritative timestamps when it applies the event.
         "created_at": "1970-01-01T00:00:00Z",
     })];
 
-    // --- battle_report ---------------------------------------------------
     let battle_report = json!({
         "kind": "combat",
         "attacker_id": attacker_id,
@@ -176,7 +162,6 @@ fn select_combatants<'a>(
         };
     }
 
-    // Fallback: first two character blocks.
     let mut chars = key_blocks.iter().filter(|kb| is_kind(kb, "character"));
     let attacker = chars.next().ok_or(ModuleError::InputMalformed)?;
     let defender = chars.next().ok_or(ModuleError::InputMalformed)?;

@@ -1,4 +1,4 @@
-//! Policy and admission gates.
+//! Policy and admission gates. See docs/specs/agents/agent-host.md.
 //!
 //! ACP provider permissions delegate to `nexus-acp-host::PermissionPolicy` (R-003).
 //! Native CLI providers use host-level risk classification only.

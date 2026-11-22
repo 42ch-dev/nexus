@@ -214,8 +214,6 @@ impl nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer for Unavaila
     }
 }
 
-// ── Knowledge wire projections (mirror handlers/actor_knowledge.rs) ────────
-
 fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<KnowledgeViewItem> {
     let created_at =
         parse_stored_created_at(&record.created_at).map_err(|error| CoreError::Internal {
@@ -229,7 +227,6 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<Knowled
         serde_json::to_value(record.block_type).map_err(|error| CoreError::Internal {
             category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {error}"),
         })?;
-    // v1.191 P1 T9 (durable §7): the bridge projection mirrors the daemon item
     // family — native `holder_entry_id` / `disclosure`, no `creator_only`, and
     // `owner` staying the narrative `KnowledgeOwnerRef` container. Both
     // governance members are absent for an in-scope shared entry.
@@ -264,7 +261,6 @@ mod v1191_holder_public_tests {
     use super::{knowledge_item_from_record, KnowledgeEntryRecord};
     use nexus_contracts::BlockType;
 
-    // v1.191 P1 T9 (durable §7): the NAPI bridge item projection must match the
     // daemon item family exactly — native governance pair, no legacy boolean.
 
     #[test]
@@ -437,9 +433,6 @@ fn build_binding_sheet_patch<'a>(
 
 #[napi]
 impl NativeCore {
-    // ── Character identity + bindings (P2-T1 authority) ─────────────────────
-
-    /// `GET /v1/daemon/characters` — read-model Character list.
     #[napi]
     pub async fn list_characters(
         &self,
@@ -552,7 +545,6 @@ impl NativeCore {
         .map_err(|error| Error::from_reason(error.to_string()))?;
         self.json_call(principal_handle, async move |core, principal| {
             let response = core.transition_character(&principal, request).await?;
-            // The retained archive/restore envelope is `CharacterDetail`.
             let detail: CharacterDetail = wire_map(serde_json::json!({
                 "character": response.character,
             }))?;
@@ -666,9 +658,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Actor KnowledgeView (P2-T1 authority) ───────────────────────────────
-
-    /// `POST /v1/daemon/actor-knowledge/view` — the admitted-actor context
     /// read: a foreign/unknown actor ref rejects before any storage effect.
     #[napi]
     pub async fn actor_knowledge_view(
@@ -706,7 +695,6 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let (req, raw) = decode_with_raw::<AddKnowledgeEntryRequest>(request_json, "request")?;
-        // The retained wire distinction between an absent and a null `summary`
         // member is a request-shape concern, so it stays at the adapter.
         let summary_present = raw.contains_key("summary");
         self.json_call(principal_handle, async move |core, principal| {
@@ -805,7 +793,6 @@ impl NativeCore {
             None
         };
         let summary_patch = knowledge_summary_patch(&raw, &req)?;
-        // v1.191 P1 T7 (durable §3): the closed `audience` member rides the
         // same expected_revision CAS; the core owns admission of the identity
         // it names.
         let audience = nexus_core::authored_patch_audience(req.audience.as_ref())
@@ -850,9 +837,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Creator identity family (CoreHomeService; Tier-1 — no principal) ────
-
-    /// Open the pre-selection home-control entry against the raw user home this
     /// environment was opened with.
     ///
     /// Home control is admitted on the service-only shell as well: the first-run
@@ -956,9 +940,6 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    // ── Workspace home family (plan v1219 shell Task 4) ─────────────────────
-
-    /// `GET /v1/daemon/workspaces` — workspace discovery over the home entry.
     #[napi]
     pub async fn list_workspaces(&self) -> Result<Buffer> {
         let home = self.home_service()?;
@@ -994,7 +975,6 @@ impl NativeCore {
             .iter()
             .find(|item| item.creator_id == creator_id && item.workspace_slug == workspace_slug)
             .map(|item| item.creative_root.clone())
-            // A workspace registered without `local_root` has no creative
             // root; the retained response omits the field instead of naming
             // an empty path.
             .filter(|root| !root.is_empty());
@@ -1040,9 +1020,6 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
-    // ── Character memory / SOUL / ToM (P2-T2 authority) ─────────────────────
-
-    /// `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
     #[napi]
     pub async fn capture_character_pending_review(
         &self,
@@ -1227,9 +1204,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Creator-scope memory family (active-creator equality kept here) ─────
-
-    /// `POST /v1/daemon/memory/pending-review` — 201. The wire `creator_id`
     /// must be the natively minted active creator; a mismatch is the retained
     /// 403 (the same equality guard the Creator list/count routes keep).
     #[napi]
@@ -1426,9 +1400,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Moment inspector + directive (P2-T2 authority) ──────────────────────
-
-    /// `POST /v1/daemon/inspector/moment` — observational read-only assembly.
     #[napi]
     pub async fn inspect_moment(
         &self,

@@ -32,11 +32,6 @@ use nexus_workflow_ir::{
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
-// ---------------------------------------------------------------------------
-// Diagnostic types
-// ---------------------------------------------------------------------------
-
-/// Severity of a validation diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticSeverity {
@@ -134,11 +129,6 @@ impl ValidationResult {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public validation entry points
-// ---------------------------------------------------------------------------
-
-/// Run all semantic validation checks (A1–A4) against a workflow IR document.
 ///
 /// This is the single semantic surface for every input format: the `PresetManifest` entries
 /// import and delegate here.
@@ -159,20 +149,16 @@ pub fn validate_workflow_ir(
 ) -> ValidationResult {
     let mut result = ValidationResult::default();
 
-    // A2: Logical completeness checks
     check_initial_to_terminal_reachability(document, &mut result);
     check_terminal_marker_consistency(document, &mut result);
     check_inner_graph_references(document, &mut result);
     check_labeled_edge_duplicates(document, &mut result);
     check_merge_node_integrity(document, &mut result);
 
-    // A4: Capability compatibility checks
     check_capability_arg_compatibility(document, caps, &mut result);
 
-    // A5: Run intents checks (V1.33 §5)
     check_run_intents(document, &mut result);
 
-    // A6: CLI args checks (V1.45 §3.3)
     check_cli_args(document, &mut result);
 
     result
@@ -268,11 +254,6 @@ fn projection_refusal(error: &crate::workflow_ir::WorkflowIrError) -> Validation
     }
 }
 
-// ---------------------------------------------------------------------------
-// IR view helpers
-// ---------------------------------------------------------------------------
-
-/// Outer-state nodes with the `states[i]` index every diagnostic path uses.
 fn outer_states(document: &WorkflowDocument) -> impl Iterator<Item = (usize, &WorkflowNode)> {
     document
         .nodes
@@ -300,7 +281,6 @@ fn labeled_edges<'a>(
         .filter(move |edge| edge.from == from && edge.label.is_some())
 }
 
-// ---------------------------------------------------------------------------
 // A2: Logical completeness checks
 // ---------------------------------------------------------------------------
 
@@ -313,7 +293,6 @@ fn check_initial_to_terminal_reachability(
         .map(|(_, node)| node.id.as_str())
         .collect();
 
-    // Outer transitions only: inner-step dependency edges never leave/enter a state.
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for edge in &document.edges {
         if state_ids.contains(edge.from.as_str()) && state_ids.contains(edge.to.as_str()) {
@@ -323,7 +302,6 @@ fn check_initial_to_terminal_reachability(
         }
     }
 
-    // A state is terminal when the document marks it, or when it has no outgoing edge.
     let terminal_states: HashSet<&str> = outer_states(document)
         .filter(|(_, node)| {
             node.kind == WorkflowNodeKind::Terminal || !has_outgoing_edge(document, &node.id)
@@ -341,10 +319,8 @@ fn check_initial_to_terminal_reachability(
         return;
     }
 
-    // BFS from the entry node to any terminal state.
     let initial = document.entry.as_str();
     if !state_ids.contains(initial) {
-        // Already caught by loader validation; skip here to avoid duplicate.
         return;
     }
 
@@ -414,7 +390,6 @@ fn check_terminal_marker_consistency(document: &WorkflowDocument, result: &mut V
                 category: DiagnosticCategory::TerminalConsistency,
             });
         }
-        // States marked terminal that are NOT the declared terminal: warning only.
         // They won't cause a runtime error, but may indicate authoring confusion.
         if marked && node.id != declared {
             result.diagnostics.push(ValidationDiagnostic {
@@ -437,7 +412,7 @@ fn check_terminal_marker_consistency(document: &WorkflowDocument, result: &mut V
 fn check_inner_graph_references(document: &WorkflowDocument, result: &mut ValidationResult) {
     // An inner graph exists as the `<graph>/<node>` prefix of its inner-step nodes.
     // shortcut: a graph with zero nodes has no IR carrier and a reference to it reads as missing,
-    // upgrade when the IR gains a graph record.
+    // upgrade: when the IR gains a graph record.
     let inner_graph_names: BTreeSet<&str> = document
         .nodes
         .iter()
@@ -445,7 +420,6 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
         .filter_map(|node| node.id.split_once('/').map(|(graph, _)| graph))
         .collect();
 
-    // Collect all referenced inner graph names from enter actions.
     let mut referenced: BTreeSet<&str> = BTreeSet::new();
     for (_, node) in outer_states(document) {
         for enter in &node.enter {
@@ -457,7 +431,6 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
         }
     }
 
-    // Find missing references: referenced but not defined.
     for name in &referenced {
         if !inner_graph_names.contains(name) {
             result.diagnostics.push(ValidationDiagnostic {
@@ -469,15 +442,12 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
         }
     }
 
-    // Short-circuit: no inner graphs defined => nothing more to check for orphans.
     if inner_graph_names.is_empty() {
         return;
     }
 
-    // Find orphans: defined but not referenced.
     for name in &inner_graph_names {
         if !referenced.contains(name) {
-            // Architect decision: orphan inner graphs = WARNING, not error.
             // Allows presets to define utility graphs for future use.
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("inner_graphs.{name}"),
@@ -500,7 +470,6 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
 ///    duplicates from different sources would prevent `arrived_count` from
 ///    ever reaching `expected_incoming` — a silent session stall.
 fn check_labeled_edge_duplicates(document: &WorkflowDocument, result: &mut ValidationResult) {
-    // Within-state check.
     for (i, node) in outer_states(document) {
         let mut seen_labels: HashSet<&str> = HashSet::new();
         for (k, edge) in labeled_edges(document, &node.id).enumerate() {
@@ -519,7 +488,6 @@ fn check_labeled_edge_duplicates(document: &WorkflowDocument, result: &mut Valid
         }
     }
 
-    // W-QC3-1: Cross-state check — for each (target, label) pair, verify
     // no two source states share the same label targeting the same merge node.
     let mut merge_labels: HashMap<(&str, &str), &str> = HashMap::new();
     for (i, node) in outer_states(document) {
@@ -552,7 +520,6 @@ fn check_labeled_edge_duplicates(document: &WorkflowDocument, result: &mut Valid
 /// - M must equal the count of incoming labeled edges.
 /// - Merge nodes must have at least one outgoing edge.
 fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut ValidationResult) {
-    // Count incoming labeled edges per state; Go/nogo edges converge on merge nodes too.
     let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
     for edge in &document.edges {
         if edge.label.is_some()
@@ -570,7 +537,6 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
         let state_path = format!("states[{i}]");
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
 
-        // Must have ≥2 incoming labeled edges.
         if incoming < 2 {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("{state_path}.merge"),
@@ -584,7 +550,6 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
             continue;
         }
 
-        // Quorum: validate N/M bounds.
         if merge.kind == WorkflowMergeKind::Quorum {
             let n = merge.n.unwrap_or_default();
             let m = merge.m.unwrap_or_default();
@@ -620,7 +585,6 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
             }
         }
 
-        // Merge nodes must have at least one outgoing edge (not terminal without next).
         if !has_outgoing_edge(document, &state.id) && state.kind != WorkflowNodeKind::Terminal {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("{state_path}.merge"),
@@ -635,7 +599,6 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
     }
 }
 
-// ---------------------------------------------------------------------------
 // A3: Asset and path safety checks
 // ---------------------------------------------------------------------------
 
@@ -646,11 +609,9 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
 pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(String, String)> {
     let mut refs: Vec<(String, String)> = Vec::new();
 
-    // Template file references (exit_when, context_update, inner_graph nodes, initial_action)
     // are already collected by loader::collect_template_file_entries, but that's private.
     // We re-collect here for independence.
 
-    // ExitWhen template_file
     for (i, state) in manifest.states.iter().enumerate() {
         if let Some(ExitWhen::LlmJudge {
             template_file: Some(ref tf),
@@ -660,7 +621,6 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
             refs.push((format!("states[{i}].exit_when.template_file"), tf.clone()));
         }
 
-        // context_update template_file
         if let Some(ref hook) = state.context_update {
             refs.push((
                 format!("states[{i}].context_update.template_file"),
@@ -668,7 +628,6 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
             ));
         }
 
-        // Enter action prompt_file / system_prompt_file
         for (j, enter) in state.enter.iter().enumerate() {
             if let EnterAction::Capability {
                 args: Some(args_val),
@@ -691,7 +650,6 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
         }
     }
 
-    // Inner graph node template_file
     if let Some(ref inner_graphs) = manifest.inner_graphs {
         for (ig_name, ig) in inner_graphs {
             for (k, node) in ig.nodes.iter().enumerate() {
@@ -705,7 +663,6 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
         }
     }
 
-    // initial_action template_file
     if let Some(InitialAction::SeedExpansion {
         template_file: Some(tf),
         ..
@@ -717,7 +674,6 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
         ));
     }
 
-    // Role system_prompt_file
     for (i, role) in manifest.roles.iter().enumerate() {
         refs.push((
             format!("roles[{i}].system_prompt_file"),
@@ -740,7 +696,6 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
     let mut refs: Vec<(String, String)> = Vec::new();
 
     for (i, node) in outer_states(document) {
-        // exit_when template_file
         if let Some(template) = node
             .exit_when
             .as_ref()
@@ -752,7 +707,6 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
             ));
         }
 
-        // context_update template_file
         if let Some(template) = node
             .context_update
             .as_ref()
@@ -764,7 +718,6 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
             ));
         }
 
-        // Enter action prompt_file / system_prompt_file
         for (j, enter) in node.enter.iter().enumerate() {
             let Some(args) = enter.args.as_ref().and_then(|args| args.as_object()) else {
                 continue;
@@ -780,7 +733,6 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
         }
     }
 
-    // Inner graph node template_file; `k` keeps its index within the graph.
     let mut inner_index: HashMap<&str, usize> = HashMap::new();
     for node in document
         .nodes
@@ -800,7 +752,6 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
         *k += 1;
     }
 
-    // initial_action template_file
     if let Some(template) = document
         .initial_action
         .as_ref()
@@ -812,7 +763,6 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
         ));
     }
 
-    // Role system_prompt_file
     for (i, role) in document.roles.iter().enumerate() {
         refs.push((
             format!("roles[{i}].system_prompt_file"),
@@ -830,7 +780,6 @@ fn check_asset_file_existence(
     result: &mut ValidationResult,
 ) {
     for (dot_path, rel_path) in collect_ir_asset_references(document) {
-        // Skip structural checks (already done by assert_template_file_safe in loader).
         // Only check existence here.
         let full_path = bundle_root.join(&rel_path);
         if !full_path.exists() {
@@ -856,7 +805,7 @@ fn check_symlink_escapes(
     result: &mut ValidationResult,
 ) {
     let Ok(canonical_root) = bundle_root.canonicalize() else {
-        return; // Bundle root doesn't exist; not our problem here.
+        return;
     };
 
     for (dot_path, rel_path) in collect_ir_asset_references(document) {
@@ -918,7 +867,6 @@ fn check_path_safety(document: &WorkflowDocument, result: &mut ValidationResult)
     }
 }
 
-// ---------------------------------------------------------------------------
 // A4: Capability compatibility checks
 // ---------------------------------------------------------------------------
 
@@ -935,7 +883,6 @@ fn check_capability_arg_compatibility(
     caps: &dyn CapabilityCatalog,
     result: &mut ValidationResult,
 ) {
-    // Also check requires_capabilities (already done by loader, but we produce
     // richer diagnostics).
     for (i, req_cap) in document.meta.requires_capabilities.iter().enumerate() {
         if caps.input_schema(req_cap).is_none() {
@@ -948,7 +895,6 @@ fn check_capability_arg_compatibility(
         }
     }
 
-    // Check enter action capabilities.
     for (i, node) in outer_states(document) {
         for (j, enter) in node.enter.iter().enumerate() {
             if enter.kind != WorkflowEnterActionKind::Capability {
@@ -968,7 +914,6 @@ fn check_capability_arg_compatibility(
                     });
                 }
                 Some(schema_str) => {
-                    // Try to parse the capability's input_schema to detect drift.
                     if let Ok(schema_value) = serde_json::from_str::<serde_json::Value>(schema_str)
                     {
                         check_args_against_schema(
@@ -979,7 +924,6 @@ fn check_capability_arg_compatibility(
                             result,
                         );
                     } else {
-                        // Schema is not valid JSON — cannot check args.
                         result.diagnostics.push(ValidationDiagnostic {
                             path: format!("{enter_path}.args"),
                             message: format!(
@@ -1020,7 +964,6 @@ fn check_args_against_schema(
 
     let args_map = args.and_then(|a| a.as_object());
 
-    // Check required args are present (top-level `required` field).
     if let Some(ref required_set) = required {
         if let Some(amap) = args_map {
             for req_arg in required_set {
@@ -1037,7 +980,6 @@ fn check_args_against_schema(
                 }
             }
         } else if !required_set.is_empty() {
-            // Required args exist but no args provided at all.
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("{base_path}.args"),
                 message: format!(
@@ -1049,12 +991,10 @@ fn check_args_against_schema(
         }
     }
 
-    // Check anyOf semantics: at least one alternative must be fully satisfied.
     if let Some(any_of) = schema.get("anyOf").and_then(|a| a.as_array()) {
         check_any_of_semantics(base_path, cap_name, args_map, any_of, result);
     }
 
-    // Check for unknown args not in schema properties.
     if let (Some(props), Some(amap)) = (properties, args_map) {
         for key in amap.keys() {
             if !props.contains_key(key) {
@@ -1133,7 +1073,6 @@ fn check_any_of_semantics(
     }
 }
 
-// ---------------------------------------------------------------------------
 // A5: Run intents checks (V1.33 §5)
 // ---------------------------------------------------------------------------
 
@@ -1148,7 +1087,6 @@ fn check_run_intents(document: &WorkflowDocument, result: &mut ValidationResult)
 
     match document.meta.kind {
         WorkflowMetaKind::Creator => {
-            // R-V133P1-05: Creator presets must declare at least one run_intent.
             // Promoted from Warning to Error — the engine requires at least one
             // intent to schedule a run; surfacing at load time prevents runtime failures.
             if intents.is_empty() {
@@ -1162,7 +1100,6 @@ fn check_run_intents(document: &WorkflowDocument, result: &mut ValidationResult)
                 });
             }
 
-            // R-V133P1-05: Creator presets must not claim system-only intents.
             // Per work-experience-model §5.1, cross-claim (creator claiming
             // system_maintenance) is an Error, not a Warning.
             if intents.contains(&WorkflowMetaRunIntentsItem::SystemMaintenance) {
@@ -1177,7 +1114,6 @@ fn check_run_intents(document: &WorkflowDocument, result: &mut ValidationResult)
             }
         }
         WorkflowMetaKind::System => {
-            // R-V133P1-05: System presets must not claim creator-only intents.
             // Per work-experience-model §5.1, cross-claim (system claiming
             // work_init/work_continue) is an Error.
             let creator_only_intents = [
@@ -1201,7 +1137,6 @@ fn check_run_intents(document: &WorkflowDocument, result: &mut ValidationResult)
                 });
             }
 
-            // System presets with run_intents should include system_maintenance.
             if !intents.is_empty()
                 && !intents.contains(&WorkflowMetaRunIntentsItem::SystemMaintenance)
             {
@@ -1218,7 +1153,6 @@ fn check_run_intents(document: &WorkflowDocument, result: &mut ValidationResult)
     }
 }
 
-// ---------------------------------------------------------------------------
 // A6: CLI args checks (V1.45 §3.3)
 // ---------------------------------------------------------------------------
 
@@ -1237,7 +1171,6 @@ fn check_cli_args(document: &WorkflowDocument, result: &mut ValidationResult) {
     let mut seen: HashSet<&str> = HashSet::new();
 
     for arg in cli_args {
-        // Name format check
         let name_valid = arg
             .name
             .chars()
@@ -1260,7 +1193,6 @@ fn check_cli_args(document: &WorkflowDocument, result: &mut ValidationResult) {
             });
         }
 
-        // Duplicate name check
         if !seen.insert(arg.name.as_str()) {
             result.diagnostics.push(ValidationDiagnostic {
                 path: "preset.cli_args".to_string(),
@@ -1270,7 +1202,6 @@ fn check_cli_args(document: &WorkflowDocument, result: &mut ValidationResult) {
             });
         }
 
-        // required + default conflict
         if arg.required.unwrap_or(false) && arg.default.is_some() {
             result.diagnostics.push(ValidationDiagnostic {
                 path: "preset.cli_args".to_string(),
@@ -1312,8 +1243,6 @@ states:
         serde_yaml::from_str(yaml).unwrap()
     }
 
-    // ── A2: Logical completeness ────────────────────────────────────────
-
     #[test]
     fn valid_preset_passes_semantic_validation() {
         let manifest = minimal_manifest();
@@ -1328,7 +1257,6 @@ states:
 
     #[test]
     fn initial_cannot_reach_terminal() {
-        // State a → b, b loops back to a, c is terminal but unreachable.
         let yaml = r"
 preset:
   id: stuck
@@ -1467,7 +1395,6 @@ states:
             "expected warning for extra terminal 'c': {:?}",
             result.diagnostics
         );
-        // Should NOT have errors (b is the declared terminal and is terminal: true)
         assert!(
             !result.has_errors(),
             "expected no errors (only warnings): {:?}",
@@ -1582,7 +1509,6 @@ inner_graphs:
             "expected orphan warning: {:?}",
             result.diagnostics
         );
-        // Should not have errors (orphan is just a warning)
         assert!(
             !result.has_errors(),
             "expected no errors: {:?}",
@@ -1625,8 +1551,6 @@ states:
             result.diagnostics
         );
     }
-
-    // ── A3: Asset and path safety ───────────────────────────────────────
 
     #[test]
     fn missing_template_file_in_bundle_is_error() {
@@ -1703,8 +1627,6 @@ states:
             result.diagnostics
         );
     }
-
-    // ── A4: Capability compatibility ────────────────────────────────────
 
     #[test]
     fn unknown_requires_capabilities_is_error() {
@@ -1787,13 +1709,11 @@ states:
         );
     }
 
-    // ── C4: Bundle dir id vs manifest id ────────────────────────────────
-
     #[test]
     fn c4_bundle_id_matches_directory() {
-        let manifest = minimal_manifest(); // id = "tiny"
+        let manifest = minimal_manifest();
         let tmp = tempfile::tempdir().unwrap();
-        let bundle_root = tmp.path().join("tiny"); // matches id
+        let bundle_root = tmp.path().join("tiny");
         std::fs::create_dir_all(&bundle_root).unwrap();
         let result = validate_assets_in_bundle(&manifest, &bundle_root);
         assert!(
@@ -1805,9 +1725,9 @@ states:
 
     #[test]
     fn c4_bundle_id_mismatch_directory_is_error() {
-        let manifest = minimal_manifest(); // id = "tiny"
+        let manifest = minimal_manifest();
         let tmp = tempfile::tempdir().unwrap();
-        let bundle_root = tmp.path().join("other-name"); // does NOT match id
+        let bundle_root = tmp.path().join("other-name");
         std::fs::create_dir_all(&bundle_root).unwrap();
         let result = validate_assets_in_bundle(&manifest, &bundle_root);
         assert!(
@@ -1819,8 +1739,6 @@ states:
             result.diagnostics
         );
     }
-
-    // ── W2: Path safety regression tests ────────────────────────────────
 
     #[test]
     fn w2_dotdot_in_template_file_is_error() {
@@ -1899,7 +1817,6 @@ states:
     }
 }
 
-// ---------------------------------------------------------------------------
 // A6: FL-E stage→preset allowlist (V1.34 §4)
 // ---------------------------------------------------------------------------
 
@@ -1915,14 +1832,12 @@ pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
     ("intake", &["creative-brief-intake"]),
     ("research", &["research"]),
     ("produce", &["novel-writing"]),
-    // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT — shares the
     // single definition with the supervisor terminal guard and the
     // `persist_review_findings_for_schedule` findings hook.
     (
         "review",
         &[crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID],
     ),
-    // R-FL-E-06: persist stage default is kb-extract (via queue)
     ("persist", &["kb-extract"]),
 ];
 
@@ -2051,7 +1966,6 @@ mod stage_tests {
 
     #[test]
     fn persist_allowlist_accepts_kb_extract_only() {
-        // BL-13: memory-review was listed but no preset exists; removed.
         assert!(
             validate_preset_for_stage("persist", "kb-extract").is_ok(),
             "persist should accept kb-extract"
@@ -2060,11 +1974,8 @@ mod stage_tests {
             validate_preset_for_stage("persist", "memory-review").is_err(),
             "persist should NOT accept memory-review (no such preset)"
         );
-        // Default should still be kb-extract (first entry)
         assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
     }
-
-    // ── V1.52 T-B P1: merge node integrity tests ───────────────────────────
 
     #[test]
     fn merge_node_valid_all_with_2_incoming() {
@@ -2240,8 +2151,6 @@ states:
         );
     }
 
-    // ── W-QC3-1: cross-state label duplicate check ────────────────────
-
     #[test]
     fn cross_state_label_duplicate_errors() {
         let yaml = r"
@@ -2334,8 +2243,6 @@ states:
             result.diagnostics
         );
     }
-
-    // ── IR parity: YAML and IR share one semantic path ──────────────────
 
     fn diagnostic_shape(
         result: &ValidationResult,
@@ -2647,7 +2554,6 @@ states:
 
     #[test]
     fn unregistered_asset_reference_still_fails_safety_checks() {
-        // A reference the document does not register in `assets` must not bypass A3.
         let yaml = r"
 preset:
   id: unregistered-asset

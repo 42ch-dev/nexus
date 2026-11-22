@@ -1,4 +1,4 @@
-//! Provider adapters: ACP and native CLI.
+//! Provider adapters: ACP and native CLI. See docs/specs/agents/agent-host.md.
 //!
 //! The ACP provider adapter wraps [`nexus_acp_host::AcpSdkAdapter`] behind the
 //! [`ProviderAdapter`] trait. Native CLI adapters manage subprocess lifecycles.
@@ -59,7 +59,6 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.protocol, pc.id
         )));
     }
-    // A command is an executable name, not a shell line: whitespace-only input
     // is empty input.
     if pc
         .command
@@ -71,7 +70,6 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.id
         )));
     }
-    // The built-in trio plus every plain native-CLI row the detection
     // roster can emit (`opencode`, `kimi`, …): a configured provider that
     // came from a scan row must pass the same validation at boot.
     if protocol == "native_cli"
@@ -159,7 +157,6 @@ pub fn adapter_from_catalog_entry(
     let provider_config = provider_config_from_entry(entry)?;
     validate_provider_config(&provider_config)?;
 
-    // The entry's DECLARED protocol must match the protocol its launch
     // strategy implies. Dispatch below selects the adapter from
     // `entry.protocol_kind`, while `provider_config_from_entry` derives
     // validation from the launch strategy — so an inconsistent pair (for

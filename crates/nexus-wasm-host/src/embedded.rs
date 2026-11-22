@@ -45,7 +45,6 @@ mod real {
             .dirs()
             .filter_map(|d| {
                 let name = d.path().file_name()?.to_str()?;
-                // A module dir is one that ships a `<name>.wasm`.
                 d.get_file(format!("{name}/{name}.wasm"))
                     .is_some()
                     .then_some(name)
@@ -84,7 +83,6 @@ mod tests {
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn basic_combat_is_embedded() {
-        // Populated by build.rs, which compiles modules/basic-combat/ into
         // embedded-modules/basic-combat/basic-combat.wasm at build time.
         assert!(
             embedded_module_bytes("basic-combat").is_some(),
@@ -95,9 +93,6 @@ mod tests {
 
     #[test]
     fn no_wasm_target_stubs_return_nothing() {
-        // When cfg is active, stubs always return None/empty. This test is
-        // trivially true on real builds too (the functions exist and compile);
-        // on stub builds it asserts the stub contract.
         let ids = embedded_module_ids();
         for id in ids {
             assert!(

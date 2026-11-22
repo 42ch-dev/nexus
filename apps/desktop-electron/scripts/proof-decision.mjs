@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * P3-T3 decision generator.
  *
  * The row set is declarative: every criterion the proof matrix requires is
  * materialised per architecture, and each verdict is *derived* from the evidence
@@ -34,7 +33,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
 
 /**
- * The harness tree lives in the primary worktree, not in a feature worktree
  * (`.mstar/**` is gitignored). Resolve the evidence root against the repository
  * that actually holds the documents; `--evidence-root` overrides it.
  */
@@ -90,7 +88,6 @@ const RUNTIME_CRITERIA = [
   ['LIFECYCLE-fault', 'LIFECYCLE-fault owner-loss fence and explicit reopen'],
 ];
 
-// --- identity and evidence access -------------------------------------------
 
 function sourceIdentity() {
   const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
@@ -135,7 +132,6 @@ function pinnedVersion(pkgName) {
 }
 
 /**
- * Derive a row verdict from one evidence document.
  *
  * `identity` selects which fields must match; `predicates` returns the required
  * named checks and their outcomes. The resulting state maps to the decision
@@ -178,7 +174,6 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
       const failedChecks = [...missing.map((name) => `${name} missing`), ...failures];
       const declaredStatus = doc.status;
       if (declaredStatus === 'fail') {
-        // A status field is not a measurement. `fail` becomes FAIL — and can
         // therefore drive the whole decision to no-go — only when the row
         // names a row-specific, explicitly measured failure predicate.
         // Absent required checks and structural gaps stay blocking evidence:
@@ -212,12 +207,10 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
         state = 'blocked';
         problems.push(`status ${declaredStatus ?? 'absent'} is neither pass nor fail`);
       } else if (failedChecks.length > 0) {
-        // status: pass with a false predicate is an inconsistency, not a
         // measured failure — fail closed rather than guess (I10).
         state = 'blocked';
         problems.push(...notes, `status is pass but predicates failed: ${failedChecks.join('; ')}`);
       } else {
-        // Informational context only; a passing row has no problems.
         info = notes;
       }
     }
@@ -251,7 +244,6 @@ function unavailableRow({ id, row, verdict, summary, raw_evidence = [], reason, 
   rows.push({ id, row, verdict, gating, raw_evidence, summary, verification: { derived: false, reason } });
 }
 
-// --- PKG-1: native install/load, package receipt, binary inspection ----------
 
 /** Predicates every install-proof document must satisfy (I10). */
 const INSTALL_REQUIRED_CHECKS = [
@@ -295,7 +287,6 @@ for (const arch of ARCHES) {
         }
         const negativeNames = (doc.checks ?? []).filter((c) => String(c.name).startsWith('negative:'));
         if (negativeNames.length < 10) failed.push('fewer than 10 pre-open negative checks');
-        // A `status: pass` document with any false check is inconsistent evidence.
         for (const check of doc.checks ?? []) {
           if (check.ok !== true) failed.push(`check ${check.name} is not ok`);
         }
@@ -311,7 +302,6 @@ for (const arch of ARCHES) {
           required: INSTALL_REQUIRED_CHECKS,
           failures: failed,
           notes: [`${okCount}/${(doc.checks ?? []).length} checks pass`],
-          // Only row-defined install predicates are measurements. Unknown false
           // checks are unsupported evidence and must block rather than no-go.
           measuredFailure: falseChecks,
         };
@@ -371,7 +361,6 @@ for (const arch of ARCHES) {
     evidence: EV(`native-binary-${arch.suffix}/binary-inspection.json`),
     schema: 'rft-p3-t1-binary-inspection/v1',
     target: arch.target,
-    // This schema records no source_sha; it is bound transitively through the
     // artifact digest it shares with the source-verified package receipt.
     sourceSha: null,
     predicates: (doc) => {
@@ -397,7 +386,6 @@ for (const arch of ARCHES) {
   });
 }
 
-// --- PKG-2: native npm payload, per target ----------------------------------
 
 for (const arch of ARCHES) {
   const evidence = EV(`native-packages/${arch.suffix}/package-receipt.json`);
@@ -437,14 +425,12 @@ for (const arch of ARCHES) {
   });
 }
 
-// --- runtime criteria, per GUI architecture ---------------------------------
 
 for (const arch of GUI_ARCHES) {
   const evidence = EV(`electron-${arch.key}/runtime-lifecycle.json`);
   const loaded = readEvidence(evidence);
   const bundlePath = absoluteFor(APP_BUNDLE(arch.key));
   const expectations = {
-    // The runtime records the realpath of the bundle it measured, so the
     // expectation must be canonicalised the same way (a /tmp symlink would
     // otherwise make every match look stale).
     app_path: existsSync(bundlePath) ? realpathSync(bundlePath) : undefined,
@@ -489,7 +475,6 @@ for (const arch of GUI_ARCHES) {
   }
 }
 
-// --- PKG-2 Electron size, per GUI architecture ------------------------------
 
 for (const arch of GUI_ARCHES) {
   deriveRow({
@@ -525,10 +510,8 @@ for (const arch of GUI_ARCHES) {
   });
 }
 
-// --- SEC-1 signed execution, per GUI architecture (C4, I12, C7) -------------
 
 /**
- * Every raw predicate the package gate records for one architecture, validated
  * against its actual field names (read from the gate document, not invented).
  *
  * A decision row may not be satisfied by the gate's `status` alone: each of
@@ -536,7 +519,6 @@ for (const arch of GUI_ARCHES) {
  * runtime evidence must describe the artifact that is on disk right now.
  */
 /**
- * Canonicalise a path for identity comparison.
  *
  * Path identity is decided by resolved real paths only — never by a substring
  * such as an architecture marker, which a forged document can trivially copy
@@ -553,7 +535,6 @@ function canonicalPath(value) {
 }
 
 /**
- * True when `candidate` resolves to `root` or to a path inside it.
  *
  * Used for the native payload path: a recorded relative path must resolve
  * inside the app bundle currently under review, so neither `..` traversal nor a
@@ -573,11 +554,9 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     if (!condition) problems.push(message);
   };
 
-  // --- structural identity ---------------------------------------------------
   add(gate.schema === 'rft-p3-t3-package-gate/v2', `schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
   add(gate.bundle_id === 'com.nexus42.rft-electron-proof', `bundle_id ${gate.bundle_id ?? 'absent'} != com.nexus42.rft-electron-proof`);
   add(gate.arch === arch.key, `arch ${gate.arch ?? 'absent'} != ${arch.key}`);
-  // Path identity is exact and canonical. An architecture marker inside the
   // string proves nothing: a forged gate can point at another bundle that
   // happens to live under a `darwin-${arch}` path and copy the real hashes.
   const expectedAppPath = artifact.present ? artifact.app_path : null;
@@ -603,7 +582,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   const boundTo = runtime.bound_to ?? {};
   const nativeLoad = runtime.native_utility_load ?? {};
 
-  // --- raw signature predicates ----------------------------------------------
   add(gate.signed_required === true, `signed_required is ${gate.signed_required ?? 'absent'}, not true`);
   add(inputs.signature_predicates_pass === true, 'decision_inputs.signature_predicates_pass is not true');
   add(signaturePredicates.pass === true, `checks.signature_predicates.pass is ${signaturePredicates.pass ?? 'absent'}`);
@@ -628,7 +606,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     Array.isArray(codesign.authority) && codesign.authority.length > 0,
     `checks.codesign.authority ${JSON.stringify(codesign.authority ?? null)} is empty`,
   );
-  // Hardened runtime, from the raw flags as well as the derived boolean.
   add(codesign.hardened_runtime === true, `checks.codesign.hardened_runtime is ${codesign.hardened_runtime ?? 'absent'}, not true`);
   add(
     typeof codesign.flags === 'string' && codesign.flags.split(',').includes('runtime'),
@@ -641,13 +618,11 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   );
   add(inputs.hardened_runtime === true, 'decision_inputs.hardened_runtime is not true');
 
-  // --- gatekeeper / notarization / stapling ----------------------------------
   add(checks.spctl_execute?.status === 0, `checks.spctl_execute.status is ${checks.spctl_execute?.status ?? 'absent'}, not 0`);
   add(checks.notary?.status === 0, `checks.notary.status is ${checks.notary?.status ?? 'absent'}, not 0`);
   add(checks.stapler_validate?.status === 0, `checks.stapler_validate.status is ${checks.stapler_validate?.status ?? 'absent'}, not 0`);
   add(inputs.stapler_ok === true, 'decision_inputs.stapler_ok is not true');
 
-  // --- bundle identifier, from the signed bundle ------------------------------
   add(
     checks.bundle_identifier?.actual === gate.bundle_id,
     `checks.bundle_identifier.actual ${checks.bundle_identifier?.actual ?? 'absent'} != ${gate.bundle_id}`,
@@ -657,7 +632,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     `checks.bundle_identifier.expected ${checks.bundle_identifier?.expected ?? 'absent'} != ${gate.bundle_id}`,
   );
 
-  // --- entitlements: parse/status success and canonical value equality ---------
   add(entitlements.pass === true, `checks.entitlements.pass is ${entitlements.pass ?? 'absent'}, not true`);
   add(entitlements.values_match === true, `checks.entitlements.values_match is ${entitlements.values_match ?? 'absent'}, not true`);
   add(entitlements.keys_match === true, `checks.entitlements.keys_match is ${entitlements.keys_match ?? 'absent'}, not true`);
@@ -692,7 +666,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     );
   }
 
-  // --- nested runtime: state agreement ----------------------------------------
   const nestedState = runtime.contract_state;
   add(
     nestedState === inputs.runtime_contract_state,
@@ -701,7 +674,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(runtime.present === true, 'nested runtime evidence is not present');
   add(inputs.native_load_check_id === NATIVE_LOAD_CHECK_ID, `decision_inputs.native_load_check_id ${inputs.native_load_check_id ?? 'absent'} != ${NATIVE_LOAD_CHECK_ID}`);
 
-  // --- nested runtime: provenance bound to the current artifact ---------------
   add(
     canonicalPath(runtimeProvenance.app_path) === expectedAppPath,
     `nested runtime provenance app_path ${runtimeProvenance.app_path ?? 'absent'} != canonical app path ${expectedAppPath ?? 'unavailable'}`,
@@ -712,7 +684,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(runtimeProvenance.tree_digest === sourceNow.tree_digest, `nested runtime provenance tree_digest ${runtimeProvenance.tree_digest ?? 'absent'} != head ${sourceNow.tree_digest}`);
   add(runtimeProvenance.tree_dirty === sourceNow.tree_dirty, `nested runtime provenance tree_dirty ${runtimeProvenance.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
 
-  // The gate's own binding record must agree with the document it bound.
   add(
     canonicalPath(boundTo.app_path) === expectedAppPath,
     `checks.runtime_lifecycle.bound_to.app_path ${boundTo.app_path ?? 'absent'} != canonical app path ${expectedAppPath ?? 'unavailable'}`,
@@ -723,7 +694,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(boundTo.tree_digest === sourceNow.tree_digest, `checks.runtime_lifecycle.bound_to.tree_digest ${boundTo.tree_digest ?? 'absent'} != head ${sourceNow.tree_digest}`);
   add(boundTo.tree_dirty === sourceNow.tree_dirty, `checks.runtime_lifecycle.bound_to.tree_dirty ${boundTo.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
 
-  // --- nested runtime: native load, present and internally consistent ---------
   // Whether the load *succeeded* is branch-dependent (a no-go is a signed
   // package whose runtime measurement failed), but the gate must not claim one
   // thing in `decision_inputs` and another in the nested evidence.
@@ -736,7 +706,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     `decision_inputs.native_utility_load_proven ${inputs.native_utility_load_proven ?? 'absent'} contradicts nested native_utility_load.ok ${nativeLoad.ok ?? 'absent'}`,
   );
 
-  // --- app bundle / native payload hashes vs the current on-disk artifact ------
   if (!artifact.present) {
     problems.push(`cannot verify the ${arch.key} app bundle on disk: ${artifact.reason}`);
   } else {
@@ -748,7 +717,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     if (typeof recordedRelative !== 'string' || recordedRelative.length === 0) {
       problems.push('nested runtime provenance native_node_path_relative is absent');
     } else {
-      // The recorded relative path must name the same payload the bundle
       // actually contains, and it must resolve inside that bundle: a copied
       // hash with a rewritten or traversing path is a substitution, not proof.
       add(
@@ -777,7 +745,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     }
   }
 
-  // --- status mapping, only after every predicate above is known --------------
   let status;
   let summary;
   if (gate.status === 'go') {
@@ -800,7 +767,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     }
     problems.splice(0, problems.length, ...goProblems);
   } else if (gate.status === 'no-go') {
-    // A genuine no-go is a *signed* package whose unconfounded runtime
     // measurement failed: the security predicates must still hold, and the
     // runtime must record that failure consistently.
     const noGoProblems = [];
@@ -837,7 +803,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
 }
 
 /**
- * Identity of the app bundle currently on disk for one architecture, recomputed
  * with the shared digest so the gate's claims can be checked against reality.
  */
 function currentArtifact(arch) {
@@ -845,7 +810,6 @@ function currentArtifact(arch) {
   if (!existsSync(bundlePath)) {
     return { present: false, reason: `app bundle absent: ${bundlePath}` };
   }
-  // One canonical root drives every derived field, so the digest, the relative
   // native path and the recorded app path can never disagree about which bundle
   // is under review (a `/tmp` -> `/private/tmp` alias would otherwise produce a
   // native path that is not relative to the canonical root).
@@ -913,7 +877,6 @@ for (const arch of GUI_ARCHES) {
   });
 }
 
-// --- MAINT-1 ----------------------------------------------------------------
 
 deriveRow({
   id: 'MAINT-1',
@@ -953,10 +916,8 @@ deriveRow({
       : null,
 });
 
-// --- missing inputs ---------------------------------------------------------
 
 /**
- * Missing inputs derived from the row array rather than asserted.
  *
  * A hardcoded list drifts from the evidence: it once claimed no Electron size
  * document existed while `PKG2-electron-arm64` was a current PASS (F-002). Every
@@ -1006,7 +967,6 @@ const RUNTIME_FIXES = [
   ['P3-T3 per-arch Electron size', 'apps/desktop-electron/scripts/proof-decision.mjs and proof-runtime.mjs', 'the size criterion was permanently PARTIAL; it is now derived per architecture from electron-size.json'],
 ];
 
-// --- emit -------------------------------------------------------------------
 
 function countBy(list, key) {
   return list.reduce((acc, entry) => {
@@ -1030,7 +990,6 @@ function main() {
   const missingRows = gatingRows.length - passRows - measuredFailures;
   const allRequiredRowsPass = gatingRows.length > 0 && gatingRows.every((row) => row.verdict === 'PASS');
 
-  // Development GO only depends on development rows. Signing/notarization is a
   // release gate and remains visible as non-gating evidence; platform-native
   // rows are produced by the GitHub Actions matrix.
   let status = 'blocked';

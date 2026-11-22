@@ -3,7 +3,6 @@
 //! Tests that `lock_holder` info is correctly read from filesystem.
 //! Full status JSON integration deferred to QA (requires daemon).
 
-// The advisory lock + its holder file are unix-only (flock; V1.153 P2 T2).
 #![cfg(unix)]
 
 use std::path::PathBuf;
@@ -19,7 +18,6 @@ fn test_work_dir() -> (tempfile::TempDir, PathBuf) {
 fn lock_holder_json_serialises_correctly() {
     let (_dir, work_dir) = test_work_dir();
 
-    // Write a lock file with known metadata.
     let lock_path = work_dir.join(".lock");
     let now_ms = u64::try_from(
         std::time::SystemTime::now()

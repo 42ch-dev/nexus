@@ -1,5 +1,4 @@
 /**
- * World KB entity node context menu (V1.74 A6).
  *
  * Right-click on a canvas entity opens this menu. The only browser-available
  * action in this slice is "Connect to…", which opens the relationship inspector

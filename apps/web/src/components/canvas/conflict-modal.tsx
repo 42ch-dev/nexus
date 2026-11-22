@@ -1,5 +1,4 @@
 /**
- * Conflict resolution modal for the Strategy canvas write boundary.
  *
  * Implements the acceptance UX from canvas-strategy-surface.md §3.5:
  * - Headline: "This state changed while you were editing."
@@ -86,7 +85,6 @@ export function ConflictModal({
       serverValue: canonicalNext,
     });
   }
-  // Prompt body changes are not reflected in the manifest; we cannot detect
   // server-side prompt edits without a separate template-read contract.
   // Only treat the prompt as conflicted when the user actually changed it AND
   // the changedFields list confirms the conflict was on the prompt path.

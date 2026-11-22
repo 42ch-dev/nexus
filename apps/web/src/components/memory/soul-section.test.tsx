@@ -1,5 +1,4 @@
 /**
- * SoulSection integration tests (V1.82 SP-2).
  *
  * Renders SoulSection against msw handlers to assert the selector→narrative
  * scope linkage: "All worlds" sends no `world_id`; selecting a world sends that

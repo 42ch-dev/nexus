@@ -118,8 +118,6 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
         }
     }
 
-    // Replace the inherited ACL/extended policy *before* restoring group bits:
-    // widening the mode first would reopen a named ACE inherited from the
     // target directory for the rest of the window.
     for (name, value) in &policy.xattrs {
         if read_xattr(descriptor, name)?.is_some_and(|existing| existing == *value) {
@@ -130,7 +128,6 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        // A directory default ACL is inherited by the staging file. Drop it when
         // the target had no access ACL, so the replacement cannot grant more
         // than the document it replaces.
         let acl = c"system.posix_acl_access";
@@ -151,13 +148,11 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
                     return Err(io::Error::last_os_error());
                 }
             }
-            // The target had no extended ACL: clear any ACL the staging file
             // inherited so the replacement cannot grant more.
             None => clear_acl(descriptor)?,
         }
     }
 
-    // The mode is applied last: on Linux this records the captured ACL mask,
     // on macOS it records the captured mode beside the explicit ACL entries.
     file.set_permissions(Permissions::from_mode(policy.mode))
 }
@@ -221,7 +216,6 @@ fn read_xattrs(descriptor: RawFd) -> io::Result<Vec<(CString, Vec<u8>)>> {
         }
         let name = CString::new(name.to_vec())
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        // A name that disappeared between the list and the read is simply gone.
         if let Some(value) = read_xattr(descriptor, &name)? {
             xattrs.push((name, value));
         }
@@ -290,7 +284,6 @@ fn checked_len(length: libc::ssize_t, what: &str) -> io::Result<usize> {
 /// Whether the filesystem does not support extended attributes at all.
 fn is_unsupported(error: &io::Error) -> bool {
     let code = error.raw_os_error();
-    // Written as one expression per platform: clippy 1.100 rejects an
     // early-return `if` followed by a bool tail, and on Linux the macOS-only
     // branch below is compiled away, exposing exactly that shape.
     #[cfg(target_os = "macos")]

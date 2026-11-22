@@ -74,7 +74,6 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         .clone()
         .expect("an embedded load carries its identity");
 
-    // A directory bundle — even one whose id collides with this embedded preset.
     loaded.source_identity = Some(PresetSourceIdentity::Directory {
         root: PathBuf::from("/tmp/not-an-embedded-bundle"),
         content_hash: [0u8; 32],
@@ -86,14 +85,12 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         "the refusal is a projection refusal: {error}"
     );
 
-    // A raw-YAML load carries no identity at all.
     loaded.source_identity = None;
     assert!(
         embedded_workflow_document(&loaded).is_err(),
         "a load with no source identity is refused"
     );
 
-    // An embedded identity naming a different preset.
     loaded.source_identity = Some(PresetSourceIdentity::Embedded {
         preset_id: "novel-write".to_string(),
         content_hash: [0u8; 32],
@@ -105,7 +102,6 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         "the refusal names the mismatch: {error}"
     );
 
-    // The unmodified identity still constructs, so the refusals above are about
     // the identity and not about the manifest.
     loaded.source_identity = Some(embedded_identity);
     embedded_workflow_document(&loaded).expect("the embedded identity constructs");

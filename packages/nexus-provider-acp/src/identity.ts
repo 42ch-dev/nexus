@@ -84,7 +84,6 @@ function queryDarwinIdentity(pid: number): ProcessIdentity | null {
 }
 
 /**
- * Normalize a WMI `CreationDate` into a stable birth string.
  *
  * `ConvertTo-Json` renders a WMI datetime as `/Date(<epoch-ms>)/`; a raw ISO/date
  * string is also accepted. A value that carries no time information yields
@@ -100,7 +99,6 @@ function normalizeWmiCreationDate(value: unknown): string | null {
 }
 
 /**
- * Windows identity: PID + process creation time + parent PID.
  *
  * Creation time is the reuse-safe birth token. The parent PID is recorded as the
  * owned-group analogue (Windows has no process group): comparing it can only make
@@ -173,7 +171,6 @@ export function identityStillMatches(
   bound: ProcessIdentity,
 ): boolean {
   if (child.pid !== bound.pid) return false;
-  // Already exited: pid match is sufficient; OS tables may be gone.
   if (child.exitCode !== null || child.signalCode !== null) return true;
   const current = queryOsProcessIdentity(bound.pid);
   if (!current) return false;

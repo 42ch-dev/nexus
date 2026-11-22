@@ -1,4 +1,4 @@
-//! Structured telemetry event helpers for all `HostEvent` variants.
+//! Structured telemetry event helpers for all `HostEvent` variants. See docs/specs/agents/agent-host.md.
 //!
 //! Each event carries: `run_id` (Option), `session_id`, `provider_id`,
 //! `protocol_kind`, `timestamp`. Provides serialization helpers for JSON output
@@ -49,8 +49,6 @@ impl TelemetryContext {
         self
     }
 }
-
-// ── Event creation helpers ──────────────────────────────────────────
 
 /// Create a `SessionCreated` event.
 #[must_use]
@@ -174,8 +172,6 @@ pub const fn op_failed(
 pub const fn session_stopped(session_id: HostSessionId, reason: SessionStopReason) -> HostEvent {
     HostEvent::SessionStopped(SessionStoppedEvent { session_id, reason })
 }
-
-// ── Serialization helpers ───────────────────────────────────────────
 
 /// A telemetry event enriched with context for JSONL output.
 #[derive(Debug, Clone, Serialize, Deserialize)]

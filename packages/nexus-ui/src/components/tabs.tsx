@@ -27,7 +27,6 @@ function useTabs() {
   return ctx;
 }
 
-// Escape the escape marker too, keeping arbitrary string values distinct and IDREF-safe.
 function tabValueId(value: string) {
   return value.replace(/[^a-zA-Z0-9]/gu, (character) => `_${character.codePointAt(0)!.toString(16)}_`);
 }
@@ -85,8 +84,6 @@ export function TabsList({ children, className }: { children: ReactNode; classNa
   useLayoutEffect(() => {
     const list = listRef.current!;
     const sync = () => updateTabStops(list);
-    // Descendants can reorder independently of this component. Observe only membership
-    // and selection, not the tabindex writes, to keep the fallback entry current.
     const observer = new MutationObserver(sync);
     observer.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] });
     return () => observer.disconnect();

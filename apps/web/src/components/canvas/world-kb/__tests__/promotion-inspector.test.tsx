@@ -1,5 +1,4 @@
 /**
- * World KB promotion inspector tests — merge-target dropdown filter (V1.73 P0 A6).
  *
  * Regression for V1.73 greploop iter 4 (greptile 4→5): the merge-target
  * dropdown must only offer entities the backend `promote_merge` handler
@@ -84,34 +83,29 @@ describe('PromotionInspector — merge-target dropdown filter', () => {
           entity('kb-deprecated', 'Elspeth Moor', 'deprecated'),
           entity('kb-deleted', 'Fenwick Ash', 'deleted'),
           entity('kb-pending', 'Greta Wells', 'pending'),
-          // Different block_type — must never appear regardless of status.
           entity('kb-scene', 'Stonebridge', 'confirmed', 'scene'),
         ]}
         onConflict={vi.fn()}
       />,
     );
 
-    // Switch to the merge action so the target dropdown mounts.
     await user.click(screen.getByRole('radio', { name: /Merge candidate/i }));
 
     const select = screen.getByRole('combobox');
     const options = Array.from(select.querySelectorAll('option'));
     const offered = options.map((o) => o.textContent ?? '');
 
-    // Allowed targets present.
     expect(offered).toEqual(
       expect.arrayContaining([
         expect.stringContaining('Aria Stormwind'),
         expect.stringContaining('Bram Hollow'),
       ]),
     );
-    // Terminal / non-allowed statuses absent.
     expect(offered.some((t) => t.includes('Cassia Reed'))).toBe(false);
     expect(offered.some((t) => t.includes('Dorin Vael'))).toBe(false);
     expect(offered.some((t) => t.includes('Elspeth Moor'))).toBe(false);
     expect(offered.some((t) => t.includes('Fenwick Ash'))).toBe(false);
     expect(offered.some((t) => t.includes('Greta Wells'))).toBe(false);
-    // Wrong block_type absent.
     expect(offered.some((t) => t.includes('Stonebridge'))).toBe(false);
   });
 
@@ -122,7 +116,6 @@ describe('PromotionInspector — merge-target dropdown filter', () => {
         worldId="w-1"
         node={node}
         candidate={candidate}
-        // Same block_type, but every status is terminal / non-allowed.
         confirmedEntities={[
           entity('kb-merged', 'Cassia Reed', 'merged'),
           entity('kb-deleted', 'Fenwick Ash', 'deleted'),
@@ -133,9 +126,7 @@ describe('PromotionInspector — merge-target dropdown filter', () => {
 
     await user.click(screen.getByRole('radio', { name: /Merge candidate/i }));
 
-    // No combobox (the list is empty after filtering)…
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    // …and the "no confirmed entities" hint is shown instead.
     expect(
       screen.getByText(/No confirmed .*entities to merge into/i),
     ).toBeInTheDocument();

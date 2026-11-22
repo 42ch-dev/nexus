@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * I-000062 — the CLI launcher (dist/main.js) prints the tokenized bootstrap URL
  * at boot, and auto-opens it only when this process serves the SPA.
  *
  * Boot-level: the service is spawned as a real process (never a browser). The
@@ -47,7 +46,6 @@ function tempDir(prefix) {
 }
 
 before(() => {
-  // The suite normally runs after `pnpm -F @42ch/nexus-service build`; build on
   // demand so the file also runs standalone.
   if (existsSync(join(serviceRoot, 'dist', 'main.js'))) return;
   const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
@@ -72,7 +70,6 @@ async function waitFor(produce, describe, timeoutMs = 20_000) {
 }
 
 /**
- * Absence proof for the opener marker. Polling the whole window (instead of one
  * fixed-delay sample) keeps a reverted build red even when the shim write lands
  * late under load; a fixed 500 ms sample let it pass ~50% of runs.
  */
@@ -98,7 +95,6 @@ function freePort() {
 }
 
 function webDistFixture() {
-  // resolveWebDist requires <root>/index.html to exist.
   const root = join(tempDir('nexus-boot-webdist-'), 'dist');
   mkdirSync(root);
   writeFileSync(join(root, 'index.html'), '<!doctype html><html><body>nexus-boot-fixture</body></html>');
@@ -217,7 +213,6 @@ test('--no-open prints the bootstrap URL without opening it, and its token mints
     assert.equal(stdoutLines.length, 1, `stdout must be the single ready line, got: ${JSON.stringify(stdoutLines)}`);
     assert.match(stdoutLines[0], /^NEXUS_SERVICE_READY \{/);
     assert.ok(!service.stdout.includes('[nexus-service]'), 'human logs must stay on stderr');
-    // I-000062 stdout contract: the machine line is the discovery record, never
     // the tokenized URL — a token in captured logs mints an 8-hour session.
     const token = new URL(url).searchParams.get('token');
     assert.ok(token, 'the bootstrap URL must carry a token');
@@ -271,7 +266,6 @@ test('without --web-dist the URL is still printed but never opened', { skip: isW
   } finally {
     await service.stop();
   }
-  // Stop first, then observe: a build missing the `args.webDist` conjunct calls
   // the opener synchronously right after the `open:` print, so the shim must
   // have written by now — but its shell write can trail under load. Poll the
   // full absence window rather than trusting one sample.

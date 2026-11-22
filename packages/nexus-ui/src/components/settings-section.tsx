@@ -4,7 +4,6 @@ import { cn } from '../lib/cn';
 import { Label } from './label';
 
 /**
- * SettingsSection — DESIGN.md §Component Primitives (settings-section family).
  *
  * V1.150 P2 — L2 pattern component: the section chrome behind settings
  * surfaces (appearance/connection/workspace/…). Parallel to V1.149
@@ -37,7 +36,6 @@ export function SettingsSection({
 }
 
 /**
- * SettingRow — label/control/hint row inside a SettingsSection card.
  *
  * `htmlFor` wires the promoted Label to the caller's control (the app
  * useId pattern); `hint` renders the helper copy under the control — the

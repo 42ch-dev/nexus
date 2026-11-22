@@ -5,7 +5,6 @@ import { SERVICE_READY_PREFIX } from './discovery.js';
 import { startService } from './index.js';
 
 /**
- * Open the default browser at `url` without holding the service process: a
  * detached, unref'd child, and a failure is a stderr warning only (access spec
  * §3.1 — the printed URL remains the recovery path).
  */
@@ -30,7 +29,6 @@ function openDefaultBrowser(url: string): void {
 }
 
 /**
- * Service process boot (architecture §7): the transport host owns the boot
  * signal/server-task responsibilities moved here from the former Rust daemon
  * boot path. Exactly ONE stdout line is the machine-readable ready contract —
  * `NEXUS_SERVICE_READY <discovery-json>` after the record is published; every
@@ -75,7 +73,6 @@ async function main(): Promise<void> {
   console.error(`[nexus-service] listening on ${where}`);
   if (running.bootstrapUrl) {
     console.error(`[nexus-service] open: ${running.bootstrapUrl}`);
-    // Auto-open only when this process actually serves the SPA; `--no-open`
     // (used by the desktop host's detached restart) suppresses it.
     if (!args.noOpen && args.webDist) openDefaultBrowser(running.bootstrapUrl);
   }

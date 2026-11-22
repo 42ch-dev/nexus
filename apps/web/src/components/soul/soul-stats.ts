@@ -1,5 +1,4 @@
 /**
- * SOUL personality visualization — pure aggregation helpers.
  *
  * V1.79 P1: these functions turn the read-only `MemoryFragmentInfo` list
  * (carrying `keywords` + `created_at` as of the additive DTO extension) into the
@@ -110,7 +109,6 @@ export function bucketByTime(
   const maxMs = stamped[stamped.length - 1]!.ms;
   if (maxMs < minMs) return [];
 
-  // Collapse to a single bucket when all fragments share one moment or the span
   // is too small to divide meaningfully — avoids div-by-zero and empty buckets.
   const span = maxMs - minMs;
   const bucketCount = span === 0 ? 1 : Math.max(1, Math.min(targetBuckets, distinctDays(stamped)));
@@ -168,7 +166,6 @@ function bucketLabel(ms: number): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(ms);
 }
 
-// ── Growth-curve helpers (V1.81 SP-3) ────────────────────────────────────────
 
 /**
  * Growth-curve density thresholds (plan §2.3). These are deliberately tighter

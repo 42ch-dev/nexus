@@ -48,7 +48,7 @@ pub struct ProfileAdmission {
 /// A stored body outside the `{ body, format }` shape authors nothing.
 ///
 /// shortcut: only the top level is inspected, so `{"a":{}}` counts as content;
-/// upgrade when nested-empty JSON bodies must also fail admission closed.
+/// upgrade: when nested-empty JSON bodies must also fail admission closed.
 fn has_content(row: &ProfileRow) -> bool {
     let Ok(document) = serde_json::from_str::<Value>(&row.document_json) else {
         return false;

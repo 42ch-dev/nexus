@@ -25,8 +25,6 @@ use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_module_manifest::ModuleManifest;
 use serde_json::{json, Map, Value};
 
-// ── Helpers ────────────────────────────────────────────────────────────
-
 /// The holder the admitted `ActorView` selection resolves to in these cases.
 const READER_HOLDER: &str = "hld_test_reader";
 
@@ -158,14 +156,11 @@ fn basic_manifest(required_types: Vec<&str>) -> ModuleManifest {
     }
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────
-
 /// Step 1: Empty computable set → `NoComputableEntries`.
 #[tokio::test]
 async fn empty_computable_set_returns_no_computable_entries() {
     let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_abc123").await;
-    // No KB entries seeded → query returns empty set.
 
     let manifest = basic_manifest(vec!["character"]);
     let builder = ComputeInputBuilder::new(
@@ -178,7 +173,7 @@ async fn empty_computable_set_returns_no_computable_entries() {
 
     let result = builder.build().await;
     match result {
-        Err(ComputeBuildError::NoComputableEntries) => {} // expected
+        Err(ComputeBuildError::NoComputableEntries) => {}
         other => panic!("expected NoComputableEntries, got {other:?}"),
     }
 }
@@ -189,11 +184,9 @@ async fn filters_by_required_key_block_types() {
     let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    // Seed a character (computable) and an item (computable).
     let char_entry = seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
     seed_kb_entry(&pool, "wld_test", BlockType::Item, "potion", true).await;
 
-    // Manifest only wants characters.
     let manifest = basic_manifest(vec!["character"]);
     let builder = ComputeInputBuilder::new(
         pool,
@@ -205,7 +198,6 @@ async fn filters_by_required_key_block_types() {
 
     let input = builder.build().await.expect("build should succeed");
 
-    // Only the character entry should be in key_blocks.
     assert_eq!(input.key_blocks.len(), 1, "only character should be passed");
     let entry_id = input.key_blocks[0]
         .get("entry_id")
@@ -220,7 +212,6 @@ async fn non_computable_entries_excluded() {
     let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    // Seed a character: one computable, one not.
     let computable = seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "npc", false).await;
 
@@ -256,9 +247,7 @@ async fn referenced_id_entries_loaded() {
     let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    // Attacker: computable, in manifest filter → comes from initial query.
     let attacker = seed_kb_entry(&pool, "wld_test", BlockType::Character, "swordsman", true).await;
-    // Defender: non-computable → must be loaded via the `_id` reference path.
     let defender = seed_kb_entry(&pool, "wld_test", BlockType::Character, "archer", false).await;
 
     let mut params = Map::new();
@@ -270,10 +259,8 @@ async fn referenced_id_entries_loaded() {
         "defender_id".to_string(),
         Value::String(defender.entry_id.clone()),
     );
-    // Also pass a non-_id key — should be ignored for entry loading.
     params.insert("difficulty".to_string(), Value::String("hard".to_string()));
 
-    // Manifest only wants characters; only the attacker will be in the
     // initial computable query — the defender is loaded via `_id`.
     let manifest = basic_manifest(vec!["character"]);
     let builder =
@@ -281,7 +268,6 @@ async fn referenced_id_entries_loaded() {
 
     let input = builder.build().await.expect("build should succeed");
 
-    // Both characters should be present (no duplicates).
     let entry_ids: Vec<&str> = input
         .key_blocks
         .iter()
@@ -310,9 +296,7 @@ async fn cross_world_reference_is_not_admitted() {
     seed_world(&pool, "wld_test").await;
     seed_world(&pool, "wld_other").await;
 
-    // Seed a character in the primary world.
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
-    // Seed a character in a DIFFERENT world.
     let other_entry =
         seed_kb_entry(&pool, "wld_other", BlockType::Character, "stranger", true).await;
 
@@ -342,7 +326,6 @@ async fn cross_world_reference_is_not_admitted() {
         other => panic!("expected ReferencedEntryNotFound, got {other:?}"),
     }
 
-    // The refusal is the selection's, not an absent row.
     let unscoped = SqliteKbStore::new(pool)
         .query(&nexus_knowledge::world_kb::KbQuery::new("wld_other"))
         .await
@@ -381,7 +364,6 @@ async fn holder_private_rows_excluded_from_the_admitted_scope() {
     )
     .await;
 
-    // Differential: the unscoped World listing holds all three rows, so the
     // exclusion below is the selection's policy rather than an empty store.
     let unscoped = SqliteKbStore::new(pool.clone())
         .query(&nexus_knowledge::world_kb::KbQuery::new("wld_test"))
@@ -444,7 +426,6 @@ async fn referenced_private_entry_of_another_holder_is_not_admitted() {
     )
     .await;
 
-    // Own private row: admitted through the by-id read.
     let mut own_params = Map::new();
     own_params.insert(
         "ally_id".to_string(),
@@ -465,7 +446,6 @@ async fn referenced_private_entry_of_another_holder_is_not_admitted() {
         "the reader's own private row loads by id"
     );
 
-    // Another holder's private row: hidden and absent are indistinguishable.
     let mut other_params = Map::new();
     other_params.insert(
         "ally_id".to_string(),
@@ -510,7 +490,6 @@ async fn selection_without_the_world_container_reads_nothing() {
         other => panic!("expected NoComputableEntries, got {other:?}"),
     }
 
-    // The row is still there for the listing the selection refused to fall back on.
     let unscoped = SqliteKbStore::new(pool)
         .query(&nexus_knowledge::world_kb::KbQuery::new("wld_test"))
         .await
@@ -524,10 +503,8 @@ async fn referenced_entry_not_found_error() {
     let (_dir, pool) = test_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    // Seed one computable entry (so the initial query is non-empty).
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
-    // Reference a non-existent entry ID.
     let mut params = Map::new();
     params.insert(
         "ally_id".to_string(),
@@ -583,7 +560,6 @@ async fn narrative_state_shape() {
 async fn world_ref_contains_expected_fields() {
     let (_dir, pool) = test_pool().await;
 
-    // Use an event ID format matching the canonical generate_event_id
     // pattern (evt_ + hex) to satisfy the newtype regex guard.
     let head_id = "evt_0";
     seed_world_with_head(&pool, "wld_test", head_id).await;
@@ -605,11 +581,9 @@ async fn world_ref_contains_expected_fields() {
     let wid = world_ref.world_id.as_ref().expect("world_id present");
     assert_eq!(wid.as_str(), "wld_test");
 
-    // Default branch is "fbk_root" when no fork branch exists.
     let bid = world_ref.branch_id.as_deref().expect("branch_id present");
     assert_eq!(bid, "fbk_root");
 
-    // Timeline head should be present when seeded.
     let head = world_ref
         .timeline_head_event_id
         .as_ref()
@@ -673,7 +647,7 @@ async fn empty_required_types_passes_all_computable() {
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
     seed_kb_entry(&pool, "wld_test", BlockType::Item, "sword", true).await;
 
-    let manifest = basic_manifest(vec![]); // no type filter
+    let manifest = basic_manifest(vec![]);
     let builder = ComputeInputBuilder::new(
         pool,
         "wld_test",

@@ -1,5 +1,4 @@
 /**
- * Outline+Timeline canvas data hooks — TanStack Query bindings for V1.72 P0.
  *
  * Read the canonical `WorkOutline` via `getWorkOutline` and expose the three
  * patch mutations. Mutations invalidate the outline detail so the canvas stays
@@ -75,7 +74,6 @@ export function usePatchOutlineChapter(workId: string | undefined) {
       void qc.invalidateQueries({
         queryKey: queryKeys.chapters.detail(workId ?? '', variables.chapter),
       });
-      // Invalidate the chapter's outline read so the content editor's
       // useChapterOutline cache refetches after a content patch. Without this,
       // the stale cache reverts the editor to the pre-save content once the
       // local save state settles to 'clean'. Use the chapter-specific prefix

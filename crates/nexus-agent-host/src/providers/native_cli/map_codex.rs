@@ -5,6 +5,8 @@
 //! keeping the wire parser owned by the crate and Nexus owning only the
 //! event normalization. Consumed by the Codex provider execute loop
 //! (v1.168 P1 T2).
+//!
+//! See docs/specs/agents/agent-host.md
 
 use codex_codes::messages::Notification;
 use codex_codes::protocol::{Turn, TurnStatus};
@@ -39,7 +41,6 @@ pub fn map_codex(
     for message in messages {
         match message {
             ServerMessage::Request { .. } => {
-                // AR-4: approvals are answered by the execute loop, never
                 // surfaced to the author.
                 tracing::debug!(
                     target: "nexus_agent_host::providers::native_cli::map_codex",
@@ -53,7 +54,6 @@ pub fn map_codex(
                         op_id: op_id.clone(),
                     }));
                 }
-                // AR-1: incremental deltas.
                 Notification::AgentMessageDelta(delta) => {
                     events.push(HostEvent::MessageDelta(TextDeltaEvent {
                         session_id: session_id.clone(),
@@ -83,7 +83,6 @@ pub fn map_codex(
                         break;
                     }
                 }
-                // AR-1: non-terminal; the terminal comes from `TurnCompleted`
                 // or the stream-abort backstop.
                 Notification::Error(err) => events.push(HostEvent::Status(StatusEvent {
                     session_id: Some(session_id.clone()),
@@ -116,7 +115,6 @@ pub fn map_codex(
                         message: notice.summary.clone(),
                     }));
                 }
-                // AR-1: ItemStarted/ItemCompleted/CmdOutputDelta/
                 // FileChangeOutputDelta/PlanDelta/TurnPlanUpdated/token-usage/
                 // thread-lifecycle/realtime/every other modeled method — no
                 // host event this iteration (structured_tool_calls stays
@@ -194,9 +192,7 @@ pub fn classify_stream_error(
     let category = match error {
         CodexError::Deserialization(_) => "decode_error",
         CodexError::ConnectionClosed | CodexError::ServerClosed => "stream_closed",
-        // AR-7: io_error covers spawn/stdio failures.
         CodexError::Io(_) | CodexError::BinaryNotFound { .. } => "io_error",
-        // Json originates on the outgoing serialization path (incoming
         // decode failures surface as Deserialization); everything else is a
         // provider-side failure (server exit, JSON-RPC error response, …).
         _ => "provider_error",
@@ -205,7 +201,6 @@ pub fn classify_stream_error(
         session_id: session_id.clone(),
         op_id: op_id.clone(),
         error_category: category.to_string(),
-        // AR-7: the crate error's Display — capped so the raw wire line the
         // Deserialization Display embeds is not echoed unboundedly (N-2).
         error_message: crate::providers::native_cli::truncate_error_message(&error.to_string()),
     })
@@ -473,7 +468,6 @@ mod tests {
                 CodexError::JsonRpc {
                     code: -32000,
                     message: "server error".to_string(),
-                    // codex-codes 0.167.4 added the structured `data` payload.
                     data: None,
                 },
                 "provider_error",
@@ -489,7 +483,6 @@ mod tests {
             let failed = classify_stream_error(&error, &session_id, &op_id)
                 .unwrap_or_else(|| panic!("{expected} must classify: {error}"));
             assert_eq!(failed.error_category, expected, "for error {error}");
-            // N-2: error_message is the crate Display, capped at 512 bytes.
             let full = error.to_string();
             let prefix = failed
                 .error_message

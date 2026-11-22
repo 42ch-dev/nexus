@@ -1,5 +1,4 @@
 /**
- * Live apply state and the Apply target list on the compose surface
  * (v241 P3.5 T3/T4) — one test per row of the plan's state table:
  *
  * - no apply yet           → Apply is offered on a listed approval; no live block
@@ -67,7 +66,6 @@ function appliedStatus(overrides: Partial<StrategyAppliedStatus> = {}): Strategy
       candidate_revision: 3,
       approved_at: '2026-11-13T00:00:00Z',
     },
-    // T1 added the document half of the read; these rows are about identity.
     applied_document: null,
     applied_document_refusal: null,
     ...overrides,
@@ -117,14 +115,12 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     const live = screen.getByTestId('apply-live');
     expect(live).toHaveTextContent('apr_123');
     expect(live).toHaveTextContent('2026-11-13T01:00:00Z');
-    // Ids match → the badge is absent.
     expect(screen.queryByTestId('apply-newer-available')).toBeNull();
   });
 
   it('live apply is not the newest approval: shows the non-blocking badge and keeps Apply enabled', () => {
     renderDisclosure({
       onApply: vi.fn(),
-      // Newest first, as the read orders it; the default target is that newest row.
       approvals: [approvalRow('apr_456', 4), approvalRow()],
       appliedStatus: appliedStatus({
         newest_approval: {
@@ -139,7 +135,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     expect(screen.getByTestId('apply-newer-available')).toHaveTextContent(
       'Newer approval available',
     );
-    // Non-blocking: the badge neither hides nor demotes the live identity,
     // and Apply stays enabled.
     expect(screen.getByTestId('apply-live')).toHaveTextContent('apr_123');
     expect(applyButton()).toBeEnabled();
@@ -149,7 +144,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     renderDisclosure({
       onApply: vi.fn(),
       approvals: [approvalRow('apr_456', 4), approvalRow()],
-      // The post-approve happy path: the dialog holds the newest approval while
       // the live apply is older. Applying it moves forward, not back.
       appliedStatus: appliedStatus({
         newest_approval: {
@@ -204,7 +198,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
 
     expect(targetSelect()).toHaveValue('apr_000');
     expect(screen.getByTestId('apply-rollback-note')).toHaveTextContent('append-only');
-    // One control, no second button and nothing that reads as deletion.
     expect(screen.getAllByRole('button', { name: 'Apply snapshot' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /delete|remove|rollback/i })).toBeNull();
     fireEvent.click(applyButton());
@@ -270,7 +263,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
       appliedStatus: appliedStatus(),
     });
 
-    // Intended: one Apply control, and it lives inside the target list (QC S4). With no approvals
     // there is no target to aim it at, so a failed read removes the control — naming the failure
     // is the whole answer rather than offering an apply that cannot name an approval.
     expect(screen.getByTestId('apply-targets-error')).toHaveTextContent('daemon unreachable');

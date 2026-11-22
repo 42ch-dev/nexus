@@ -64,7 +64,6 @@ impl CoreHomeService {
         }
         let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
 
-        // Versions + health: collected honestly (no error→default fallback);
         // a failing check is reported with its reason, not swallowed.
         let (versions, health_error) = match read_versions(&pool).await {
             Ok(v) => {

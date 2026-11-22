@@ -17,6 +17,8 @@
 //! Only a regular `pattern.toml` and `workflow.ir.json` no larger than [`MAX_MEMBER_BYTES`] are
 //! read, so a FIFO, a device node or an oversized member is reported as one unavailable package
 //! instead of stalling or exhausting the scan.
+//!
+//! see docs/specs/orchestration/strategy-composition.md.
 
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
@@ -162,7 +164,6 @@ impl From<&PatternPackage> for PatternSummary {
         let manifest = package.manifest.as_ref();
         Self {
             available: package.available(),
-            // The fragment's canonical hash: content identity, so a manifest-only edit keeps it.
             content_hash: package.content_hash.clone(),
             description: manifest.map(|manifest| manifest.description.as_str().to_owned()),
             effect_class: manifest.map(|manifest| summary_effect(manifest.effect_class)),
@@ -220,15 +221,12 @@ pub fn scan_pattern_packages(
 
 /// Classify one scanned directory entry; `None` when the discovery convention skips it.
 fn package_entry(directory: &Path, file_name: OsString, ir_version: u64) -> Option<PatternPackage> {
-    // Lossy conversion preserves a leading ASCII byte, so the skip prefix is judged on it either way.
     let lossy = file_name.to_string_lossy();
     if lossy.starts_with('.') || lossy.starts_with('_') {
         return None;
     }
     let package_dir = package_dir_name(&file_name);
     if file_name.to_str().is_none() {
-        // The directory cannot be loaded under a name that is not UTF-8; its escaped identity keeps
-        // it addressable instead of colliding with a sibling that renders the same way.
         return Some(PatternPackage {
             package_dir,
             manifest: None,
@@ -305,7 +303,6 @@ fn load(
 
     let fragment: WorkflowDocument = serde_json::from_str(&read_text(directory, FRAGMENT_FILE)?)
         .map_err(Unavailable::Fragment)?;
-    // The rollup covers this document's nodes; a v0 fragment resolves no nest children.
     let rollup = effect_summary(&fragment.nodes);
     if document_effect(manifest.effect_class) != rollup {
         return Err(Unavailable::EffectMismatch {
@@ -313,7 +310,6 @@ fn load(
             rollup,
         });
     }
-    // The pin is the fragment document's own canonical hash, never the preset import path's
     // `content_hash` field (which is a constant `None` there).
     let content_hash = nexus_workflow_ir::content_hash(&fragment).map_err(Unavailable::Hash)?;
     Ok((fragment, content_hash))
@@ -369,11 +365,6 @@ fn check_manifest(
 
 fn read_text(directory: &Path, file: &'static str) -> Result<String, Unavailable> {
     let path = directory.join(file);
-    // Metadata is taken through symlinks, so a link to a FIFO or a device node is refused here too.
-    // The gate is what keeps this synchronous scan from blocking on a member that never reaches EOF
-    // or from loading a runaway file. A writer that swaps the member between this call and the open
-    // below can still stall it; who may write the registry is undefined in P3, so the gate guards
-    // the accidental member a scan actually meets, not a hostile one.
     let metadata = std::fs::metadata(&path).map_err(|source| Unavailable::Read { file, source })?;
     if !metadata.is_file() {
         return Err(Unavailable::NotRegularFile { file });
@@ -412,7 +403,6 @@ fn summary_slots(manifest: &PatternManifest) -> Vec<SummarySlot> {
         .slots
         .iter()
         .map(|slot| SummarySlot {
-            // Both DTOs validate the name as non-empty only; re-parse into the summary's newtype.
             name: slot
                 .name
                 .as_str()

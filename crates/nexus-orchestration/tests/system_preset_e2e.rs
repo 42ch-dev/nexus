@@ -24,7 +24,6 @@ async fn system_preset_runs_to_terminal_state() {
         .await
         .expect("start_session");
 
-    // Step until Completed or a reasonable cap (4 tasks + 1 buffer).
     for _ in 0..16 {
         let outcome = engine.run_step(&sid).await.expect("run_step");
         if let nexus_orchestration::engine::StepOutcome::Completed { .. } = outcome {
@@ -47,11 +46,9 @@ async fn system_preset_runs_to_terminal_state() {
 /// can read the session back.
 #[tokio::test]
 async fn restart_durability_e2e() {
-    // Create a temp database.
     let db = tempfile::NamedTempFile::new().expect("tempfile");
     let db_path = db.path().to_path_buf();
 
-    // Phase 1: Create engine, start session, run one step.
     let sid = {
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
@@ -71,7 +68,6 @@ async fn restart_durability_e2e() {
             .await
             .expect("start_session");
 
-        // Run one step.
         let outcome = engine.run_step(&sid).await.expect("run_step");
         assert!(
             matches!(
@@ -84,9 +80,7 @@ async fn restart_durability_e2e() {
 
         sid
     };
-    // Phase 1 ends — pool drops, simulating daemon shutdown.
 
-    // Phase 2: Create a fresh engine with a new pool over the same DB.
     {
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
@@ -96,15 +90,12 @@ async fn restart_durability_e2e() {
             std::sync::Arc::new(pool),
         ));
 
-        // Verify the session is still in the storage.
         let session = storage
             .get(&sid.0)
             .await
             .expect("storage get")
             .expect("session should exist after restart");
 
-        // The session should have a valid current_task_id (not the initial
-        // empty value), proving that the step was persisted.
         assert!(
             !session.current_task_id.is_empty(),
             "session should have a current_task_id after a step, got: '{}'",

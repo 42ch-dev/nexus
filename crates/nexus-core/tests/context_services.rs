@@ -230,7 +230,6 @@ async fn seed_view_fixture(env: &Env) -> ViewFixture {
     ] {
         store.insert_knowledge_entry(row).await.unwrap();
     }
-    // Release the engine writer before the core opens.
     drop(store);
     drop(pool);
     drop(guarded);
@@ -276,7 +275,6 @@ async fn work_world_binding_rejects_cross_context() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // Owned World A + the Work bound to World B: rejected before assembly.
     let err = core
         .inspect_moment(
             &principal,
@@ -298,7 +296,6 @@ async fn work_world_binding_rejects_cross_context() {
         other => panic!("expected InvalidInput, got {other:?}"),
     }
 
-    // Directive precedence stays intact across the rejected pairing's scopes.
     // 1. World overrides on both owned worlds.
     core.moment_directive(
         &principal,
@@ -313,7 +310,6 @@ async fn work_world_binding_rejects_cross_context() {
     .await
     .expect("world B directive");
 
-    // 2. The Work's own directive wins over the bound World's override.
     core.moment_directive(
         &principal,
         directive_request("set", "work", WORK_IN_B, Some(WORK_DIRECTIVE_BODY)),
@@ -334,7 +330,6 @@ async fn work_world_binding_rejects_cross_context() {
         "no world leak: {shown}"
     );
 
-    // 3. Clearing the Work directive inherits the bound World's override.
     core.moment_directive(
         &principal,
         directive_request("clear", "work", WORK_IN_B, None),
@@ -354,7 +349,6 @@ async fn work_world_binding_rejects_cross_context() {
         "inherit: {inherited}"
     );
 
-    // 4. The rejected cross-context pairing still rejects afterwards —
     //    precedence never routes World B's override into World A's assembly.
     let err = core
         .inspect_moment(
@@ -377,7 +371,6 @@ async fn inspect_and_directives_stay_owner_scoped() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // Foreign world inspect → retained 403 shape.
     let err = core
         .inspect_moment(
             &principal,
@@ -393,7 +386,6 @@ async fn inspect_and_directives_stay_owner_scoped() {
         other => panic!("expected ForbiddenReason, got {other:?}"),
     }
 
-    // Foreign world directive → retained 403 shape.
     let err = core
         .moment_directive(
             &principal,
@@ -406,7 +398,6 @@ async fn inspect_and_directives_stay_owner_scoped() {
         "got {err:?}"
     );
 
-    // An owned World assembles a bounded inspector packet.
     let packet = core
         .inspect_moment(&principal, dto(serde_json::json!({ "world_id": WORLD_A })))
         .await
@@ -414,7 +405,6 @@ async fn inspect_and_directives_stay_owner_scoped() {
     let packet = serde_json::to_string(&packet).unwrap();
     assert!(!packet.is_empty(), "packet renders");
 
-    // A foreign creator's world directive set (via a foreign scope id that
     // exists but is owned by nobody here) stays 403 — never 404 — so scope
     // existence is unobservable.
     let err = core
@@ -439,7 +429,6 @@ async fn inspect_is_read_only_and_never_renders_the_directive_body() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // Distinctive TTL so the metadata assertion is unambiguous.
     core.moment_directive(
         &principal,
         dto(serde_json::json!({
@@ -523,14 +512,12 @@ async fn read_only_directive_store_after_injection_is_a_noop() {
     let pool = plain_pool(&env).await;
     let read_only = ReadOnlyDirectiveStore::new(pool.clone());
 
-    // A read still resolves the active directive …
     let loaded = read_only
         .load_active(Some(CREATOR), None, Some(WORLD_A))
         .await
         .expect("read-only store resolves the active directive");
     assert_eq!(loaded.directive_id, directive_id);
 
-    // … while the write half changes nothing.
     read_only
         .after_injection(&directive_id, Some("evt_new_scene"), Some(WORK_IN_B))
         .await;
@@ -542,7 +529,6 @@ async fn read_only_directive_store_after_injection_is_a_noop() {
         "ReadOnlyDirectiveStore::after_injection must not mutate the row"
     );
 
-    // Differential: the lifecycle store DOES burn TTL through the same call.
     LocalDirectiveStore::new(pool.clone())
         .after_injection(&directive_id, Some("evt_new_scene"), Some(WORK_IN_B))
         .await;
@@ -634,7 +620,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
     let fixture = seed_view_fixture(&env).await;
     let (core, principal) = open_core(&env).await;
 
-    // ── The inspect packet is the admitted ActorView, not management ─────
     let packet = core
         .inspect_moment(&principal, dto(serde_json::json!({ "world_id": WORLD_A })))
         .await
@@ -658,7 +643,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "a binding-local row must not reach the model input: {packet_json}"
     );
 
-    // Differential: the Creator *management* selection over the same World does
     // hold the Character's private row — the exclusion above is the ActorView
     // policy, not an empty store. Management review is never model input.
     let pool = plain_pool(&env).await;
@@ -683,7 +667,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "the binding container is not a World-container row"
     );
 
-    // ── Revision binding: a stale snapshot is retired, not reused ────────
     let chr = env.character_id.clone();
     let character_actor = nexus_core::AdmittedActor::Character {
         character_id: chr.clone(),
@@ -712,7 +695,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         shared_before.disclosure, None,
         "a shared row carries no disclosure"
     );
-    // Release the shared leases before the exclusive governance edit.
     drop(before);
 
     core.patch_actor_knowledge_entry(
@@ -759,7 +741,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "the fresh read carries the new governance — no stale private text is reused"
     );
 
-    // Once private to the Character, the row leaves the Creator's ActorView
     // (the model-input policy), while it stays in the Character's own.
     let creator_scope = core
         .creator_view_read_scope(&principal, WORLD_A)
@@ -776,7 +757,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "a Character-private fact is excluded from the Creator's model input"
     );
 
-    // The Creator's own holder keeps its World rows readable (the exact-holder
     // half of ActorView), and the Character-global shared row stays visible.
     let creator_world_rows = SqliteKbStore::new(pool)
         .list_by_owner_complete(&KnowledgeOwnerRef::world(WORLD_A), &creator_scope)
@@ -800,7 +780,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
     );
 }
 
-// ─── Moment Directive + inspector packet: retained domain assertions migrated
 // from the retired daemon runtime fixtures (`directive_api.rs`,
 // `inspector_api.rs`). ──────────────────────────────────────────────────────
 
@@ -818,7 +797,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     let (core, principal) = open_core(&env).await;
     let pool = plain_pool(&env).await;
 
-    // Nothing active yet → the empty `{}` response.
     let shown = core
         .moment_directive(
             &principal,
@@ -832,7 +810,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         "no active directive renders empty"
     );
 
-    // set → the whole stored row (status/scope/body/insert depth/TTL triple).
     let set = core
         .moment_directive(
             &principal,
@@ -871,7 +848,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         .expect("directive_id")
         .to_string();
 
-    // show → the same row incl. the body (the author surface).
     let shown = core
         .moment_directive(
             &principal,
@@ -883,7 +859,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     assert_eq!(shown["directive_id"], first_id.as_str(), "{shown}");
     assert_eq!(shown["body"], WORK_DIRECTIVE_BODY, "{shown}");
 
-    // A second `set` without `replace` is refused and changes nothing.
     let refused = core
         .moment_directive(
             &principal,
@@ -916,7 +891,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         "no replaced_by without replace"
     );
 
-    // `replace: true` supersedes: the old row is soft-deleted and chained.
     let second = core
         .moment_directive(
             &principal,
@@ -963,7 +937,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         "show reflects the replacement"
     );
 
-    // World-scope round trip (an override lives on the World, not a Work).
     let world_set = core
         .moment_directive(
             &principal,
@@ -995,7 +968,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     assert_eq!(world_shown["body"], WORLD_DIRECTIVE_BODY, "{world_shown}");
     assert_eq!(world_shown["ttl_kind"], "chapters", "{world_shown}");
 
-    // clear → the empty response; the row is retained soft-deleted.
     let cleared = core
         .moment_directive(
             &principal,
@@ -1014,7 +986,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     assert_eq!(expired.status, "expired", "clear soft-deletes (retention)");
     assert!(expired.expires_at.is_some(), "clear stamps expires_at");
 
-    // The Work's own directive is gone and WORLD_B carries no override.
     let after = core
         .moment_directive(
             &principal,
@@ -1028,7 +999,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         "show after clear renders empty"
     );
 
-    // Validation: an empty/whitespace-only body is refused before any write.
     let invalid = core
         .moment_directive(
             &principal,
@@ -1042,7 +1012,6 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     assert_eq!(field, "body");
     assert!(reason.contains("non-empty"), "reason: {reason}");
 
-    // A Work owned by another creator is a 403 scope — never a state leak.
     sqlx::query("UPDATE works SET creator_id = ? WHERE work_id = ?")
         .bind(OTHER)
         .bind(WORK_IN_B)
@@ -1111,7 +1080,6 @@ async fn seed_activation_fixture(env: &Env) {
     .execute(&pool)
     .await
     .unwrap();
-    // Release the engine writer before the core opens.
     drop(pool);
     drop(guarded);
 }
@@ -1135,7 +1103,6 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
     )
     .unwrap();
 
-    // The constant seed is placed; its activation trace row is accepted with the
     // constant-band reason.
     let placement = packet["modules"]["placement"]
         .as_array()
@@ -1162,7 +1129,6 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
         "the fire reason names the constant band: {packet}"
     );
 
-    // The confirmed relation edge pulls the key-only neighbour in at depth 1.
     let hop = placement
         .iter()
         .find(|row| row["entry_id"] == "kb_act_hop")
@@ -1174,7 +1140,6 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
         "the hop reason names the relation hop: {packet}"
     );
 
-    // Both entries route to the `default` slot (neither carries a position hint).
     let mut slots = std::collections::HashMap::new();
     for row in packet["slot_map"].as_array().expect("slot_map array") {
         slots.insert(
@@ -1185,7 +1150,6 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
     assert_eq!(slots.get("kb_act_seed"), Some(&"default"), "{packet}");
     assert_eq!(slots.get("kb_act_hop"), Some(&"default"), "{packet}");
 
-    // Budget: the activation-token accounting, with the hop pass having run.
     let budget = packet["budget"].as_object().expect("budget object");
     for key in ["primary_tokens_est", "hop_tokens_est", "cap", "remaining"] {
         assert!(
@@ -1198,7 +1162,6 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
         "the relation hop must spend hop budget: {packet}"
     );
 
-    // The directive section is status/metadata only (AC-I3).
     assert_eq!(packet["moment_directive"]["status"], "none", "{packet}");
     assert!(
         packet["moment_directive"].get("body").is_none(),

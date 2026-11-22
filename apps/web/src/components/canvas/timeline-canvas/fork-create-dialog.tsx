@@ -1,5 +1,4 @@
 /**
- * Fork create dialog — V1.162 P2 T1 (fork creation flow + PD-6 landing).
  *
  * The author-facing create step of the fork authoring loop: opened from a
  * World Timeline compute node's "Branch this world's timeline from here"
@@ -36,7 +35,6 @@ export interface ForkCreateDialogProps {
   onOpenChange: (open: boolean) => void;
   worldId: string;
   /**
-   * The branch the fork diverges from — the current branch context
    * (`undefined` → the World's root branch; a `fbk_…` id → the fork branch
    * the canvas is showing). The daemon requires it; the orchestrator
    * derives it from the picked event's own `branch_id`, so it is always
@@ -48,7 +46,6 @@ export interface ForkCreateDialogProps {
   /** Event title of the fork point, shown as a read-only reference line. */
   forkPointLabel?: string;
   /**
-   * Fired with the create response once the fork commits (carries the new
    * `branch_id` + parent + fork-point + `created_at`; the response does NOT
    * echo the label) plus the trimmed label the author typed (undefined when
    * the label was omitted). The orchestrator lands on the forked branch
@@ -72,7 +69,6 @@ export function ForkCreateDialog({
   const [label, setLabel] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // Reset the form each time the dialog opens.
   useEffect(() => {
     if (open) {
       setLabel('');
@@ -84,7 +80,6 @@ export function ForkCreateDialog({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    // W-3 fix (qc3): in-handler pending guard. The submit button is
     // disabled while pending, but Enter-key implicit submission (the label
     // Input) and a fast double-click before the isPending re-render
     // commits can still fire `submit` — this guarantees exactly ONE POST
@@ -95,7 +90,6 @@ export function ForkCreateDialog({
       return;
     }
     if (!parentBranchId) {
-      // Defensive — a fork point is picked from a rendered event, which
       // carries its branch_id; this branch is unreachable in practice.
       setError(t('timeline.forkCreateDialog.missingBranchContext'));
       return;
@@ -116,11 +110,9 @@ export function ForkCreateDialog({
       onSuccess?.(response, trimmedLabel.length > 0 ? trimmedLabel : undefined);
     } catch (err) {
       if (isForkInvalidInputError(err)) {
-        // 422 — bad / non-existent fork point. Stay on the parent Timeline
         // (no branch switch); the author can pick another fork point.
         setError(t('timeline.forkCreateDialog.invalidForkPoint'));
       } else {
-        // 403 / 5xx / network are already surfaced by the hook's global
         // error toast; mirror a generic inline message so the dialog never
         // closes silently on failure (era-create-dialog convention).
         setError(t('timeline.forkCreateDialog.genericError'));

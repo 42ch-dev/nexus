@@ -32,7 +32,6 @@ describe('real OS identity fencing', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
     }
   });
 
@@ -50,7 +49,6 @@ describe('real OS identity fencing', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
     }
   });
 });

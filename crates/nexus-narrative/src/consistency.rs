@@ -105,13 +105,11 @@ pub fn validate_kb_confirm_gate(
     base_revision: u64,
     has_conflicts: bool,
 ) -> Result<(), NarrativeError> {
-    // Gate 1: Permission
     if !has_permission {
         return Err(NarrativeError::PermissionDenied(
             "can_confirm_canon permission required".to_string(),
         ));
     }
-    // Gate 2: Version match
     let current_rev = kb.revision.unwrap_or(0);
     if current_rev != base_revision {
         return Err(NarrativeError::RevisionMismatch {
@@ -119,13 +117,11 @@ pub fn validate_kb_confirm_gate(
             actual: current_rev,
         });
     }
-    // Gate 3: Required fields
     if kb.canonical_name.trim().is_empty() {
         return Err(NarrativeError::ValidationError(
             "canonical_name is required".to_string(),
         ));
     }
-    // Gate 5: No conflicts
     if has_conflicts {
         return Err(NarrativeError::UnresolvedConflict(
             "unresolved hard conflict".to_string(),
@@ -324,11 +320,9 @@ mod tests {
 
     #[test]
     fn test_provisional_ttl() {
-        // Recent timestamp — not expired
         let recent = chrono::Utc::now().to_rfc3339();
         assert!(!is_provisional_expired(&recent));
 
-        // Old timestamp (31 days ago) — expired
         let old = (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339();
         assert!(is_provisional_expired(&old));
     }

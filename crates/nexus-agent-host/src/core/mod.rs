@@ -1,4 +1,4 @@
-//! Core host management: session registry, operation registry, lifecycle.
+//! Core host management: session registry, operation registry, lifecycle. See docs/specs/agents/agent-host.md.
 
 pub mod manager;
 pub mod readiness;

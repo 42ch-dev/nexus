@@ -4,7 +4,6 @@ import { cn } from '../lib/cn';
 import { EmptyState, ErrorState, LoadingState } from './states';
 
 /**
- * ListStateContainer — DESIGN.md §Component Primitives/ListStateContainer.
  *
  * V1.149 P1 — L2 pattern component: the single four-branch container behind
  * list/query surfaces (loading / error / empty / ready). Composes the

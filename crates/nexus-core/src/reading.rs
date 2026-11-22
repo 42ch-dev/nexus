@@ -327,7 +327,6 @@ impl CoreService {
             validate_color(&color.to_string())?;
         }
 
-        // Translate empty-string note to None (clear note); missing field stays None
         // on the request, which we interpret as "do not change" via `note: None` below.
         let note_change = request.note.as_ref().map(|n| {
             let trimmed = n.trim();

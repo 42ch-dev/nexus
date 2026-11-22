@@ -49,7 +49,6 @@ async fn seed_pending(pool: &sqlx::SqlitePool) -> String {
         "canonical_name": "CAS Test Character",
     })
     .to_string();
-    // v1.191 P1 T14 fix round (mechanical): the DAO seam takes a caller-owned
     // connection (`&mut SqliteConnection`) since the T13 writer-protocol change.
     let mut conn = pool.acquire().await.expect("acquire workspace connection");
     let row = insert_pending_with_llm(
@@ -90,7 +89,6 @@ async fn test_kb_adopt_stale_preimage_returns_version_conflict() {
     let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
-    // Spawn concurrent writer: bump version during kb_adopt's critical section.
     let bump_pool = pool.clone();
     let bump_jid = job_id.clone();
     let bump_handle = tokio::spawn(async move {
@@ -113,7 +111,6 @@ async fn test_kb_adopt_stale_preimage_returns_version_conflict() {
                 "expected E_VERSION in error: {display}"
             );
         }
-        // On very fast machines, the bump may happen after the CAS flip
         // (adopt succeeds first). That's acceptable — this is a best-effort
         // race test. The deterministic DAO-level test below covers the
         // version-conflict path exhaustively.
@@ -127,14 +124,12 @@ async fn test_kb_adopt_succeeds_when_version_consistent() {
     let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
-    // No concurrent modification — version is 0 from insert.
     let result = kb_adopt(&pool, OWNER, &job_id, None, false).await;
     assert!(
         result.is_ok(),
         "adopt should succeed when version is consistent: {result:?}"
     );
 
-    // Verify the row is now confirmed.
     let row = nexus_local_db::kb_extract_job::get_promotion(&pool, &job_id)
         .await
         .unwrap()
@@ -151,10 +146,8 @@ async fn test_kb_adopt_already_confirmed_returns_error() {
     let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
-    // First adopt succeeds.
     kb_adopt(&pool, OWNER, &job_id, None, false).await.unwrap();
 
-    // Second adopt on already-confirmed row should fail with a clear error.
     let result = kb_adopt(&pool, OWNER, &job_id, None, false).await;
     assert!(result.is_err(), "second adopt on confirmed row should fail");
     let err_msg = format!("{}", result.unwrap_err());
@@ -166,12 +159,10 @@ async fn test_kb_adopt_already_confirmed_returns_error() {
 
 #[tokio::test]
 async fn test_cas_version_mismatch_direct() {
-    // Direct test of mark_confirmed_in_tx_with_cas — the underlying function
     // that kb_adopt calls. This is the pure CAS unit test at the DAO level.
     let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 
-    // Bump version between read and CAS write.
     sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
         .bind(&job_id)
         .execute(&pool)
@@ -201,8 +192,6 @@ async fn test_cas_version_mismatch_direct() {
         other => panic!("expected VersionMismatch, got {other:?}"),
     }
 }
-
-// ── Hermetic CLI-level tests ───────────────────────────────────────────
 
 /// Verifies that `VersionConflict` with `actual_version: Some(N)` surfaces
 /// the actual version number in the user-visible error message (not "?").

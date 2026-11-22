@@ -119,10 +119,8 @@ impl Capability for ScriptSectionStatusUpdate {
             CapabilityError::InputInvalid(format!("script.section_status.update input: {e}"))
         })?;
 
-        // Validate work_ref against path traversal
         let work_ref = validate_work_ref(&inp.work_ref)?;
 
-        // Resolve the one absolute `Works/` tree this run reads and writes.
         let works_root = inp
             .works_root
             .as_deref()
@@ -134,7 +132,6 @@ impl Capability for ScriptSectionStatusUpdate {
         let scripts_dir = work_dir.join("Scripts");
         let section_full_path = scripts_dir.join(&inp.section_path);
 
-        // Guard against path-traversal in section_path (e.g. "../../.ssh/authorized_keys").
         // canonicalize resolves symlinks + ".." segments; the starts_with check ensures
         // the resolved path is within Scripts/. This also subsumes the existence check
         // (canonicalize fails on non-existent paths).
@@ -154,7 +151,6 @@ impl Capability for ScriptSectionStatusUpdate {
             )));
         }
 
-        // Acquire the per-Work advisory file lock to serialize this
         // read-modify-write against concurrent manual edits or other CLI
         // processes (R-V167P2-QC3-S1). On non-Unix platforms the lock is a
         // no-op at compile time because the crate is macOS-only in V1.66+.
@@ -178,7 +174,6 @@ impl Capability for ScriptSectionStatusUpdate {
             "script.section_status.update: start"
         );
 
-        // Read current content (use canonical path to close TOCTOU)
         let content = std::fs::read_to_string(&section_canonical).map_err(|e| {
             CapabilityError::Internal(format!(
                 "read section file {}: {e}",
@@ -186,17 +181,13 @@ impl Capability for ScriptSectionStatusUpdate {
             ))
         })?;
 
-        // Parse frontmatter to extract current section_status
         let current_status = extract_frontmatter_field(&content, "section_status")?;
 
-        // Validate transition
         validate_transition(&current_status, &inp.new_status)?;
 
-        // Replace the section_status field
         let updated_content =
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
-        // Commit through the Work artifact port (canonical path → Work-relative child)
         let work_dir_canonical = scripts_dir_canonical
             .parent()
             .ok_or_else(|| CapabilityError::Internal(format!("missing work dir for {work_ref}")))?;
@@ -236,10 +227,6 @@ impl Capability for ScriptSectionStatusUpdate {
         })
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -292,7 +279,6 @@ mod tests {
         assert!(updated.contains("section_status: reviewed"));
         assert!(!updated.contains("section_status: draft"));
 
-        // R-V167P2-QC3-S1: the update must acquire the per-Work advisory lock.
         #[cfg(unix)]
         assert!(
             works_root.join("my-screenplay").join(".lock").exists(),

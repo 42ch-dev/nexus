@@ -222,7 +222,6 @@ pub fn apply_after_write(
     if let Some(policy) = policy {
         return unix::apply(&policy.policy, file, path);
     }
-    // The Windows transition works from the open handle alone; the portable
     // fallback refuses, so neither needs the staged path.
     #[cfg(not(unix))]
     let _ = path;

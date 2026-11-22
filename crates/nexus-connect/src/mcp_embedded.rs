@@ -244,13 +244,11 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
     /// Returns [`EmbeddedMcpError::Shutdown`] when shutdown was requested,
     /// and [`EmbeddedMcpError::SessionLimit`] when the budget is exhausted.
     pub fn establish(&self) -> Result<EmbeddedSession, EmbeddedMcpError> {
-        // Check the shutdown gate BEFORE acquiring a slot: a refused
         // establish must not consume budget it can never hold a session in.
         if self.shutdown.requested() {
             return Err(EmbeddedMcpError::Shutdown);
         }
         let slot = process_registry().try_acquire()?;
-        // Channel A: client→server (the client's sink, the server's stream).
         // Channel B: server→client (the server's sink, the client's stream).
         // Both carry the concrete JSON-RPC wire message types of their
         // direction.

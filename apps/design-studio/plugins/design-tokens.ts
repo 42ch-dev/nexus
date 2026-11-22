@@ -30,6 +30,8 @@
  *    Vite source/dependency watcher for apps/design-studio is left intact, so
  *    ordinary React/CSS source edits keep triggering normal HMR.
  *  - Malformed DESIGN frontmatter throws inside load/transform → Vite overlay.
+ *
+ * Contract: docs/specs/surfaces/design-studio.md §3.5.
  */
 import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
@@ -61,7 +63,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
   const designFile = join(designRoot, 'DESIGN.md');
   const darkFile = join(designRoot, 'DESIGN.dark.md');
 
-  // Memoize one compiled pair so a single page (load + transform + nested
   // imports) compiles at most once (W-001). The cache is reset explicitly on
   // DESIGN watcher events and on document-request (manual-navigation) refresh,
   // so a reload always re-reads the current pair without a stat per request.
@@ -106,7 +107,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
 
     configureServer(server) {
       const invalidateCssGraph = () => {
-        // Invalidate every CSS module in the graph by id — including the two
         // virtual shared-CSS modules (keyed by virtual id, not a real file,
         // so getModulesByFile/filesById miss them) and the Studio entry
         // src/index.css whose cached transform output embeds the compiled
@@ -129,7 +129,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
         server.ws.send({ type: 'full-reload' });
       };
 
-      // Re-read the pair on any document (HTML) navigation: invalidate the CSS
       // graph and the compile cache WITHOUT a full-reload (sending one from
       // this request path would loop — the reload that already happened is the
       // refresh). This is the missed-watch safety net: a manual reload picks
@@ -145,7 +144,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
         next();
       });
 
-      // DESIGN.md / DESIGN.dark.md live at the repo root, which is outside
       // Vite's watch root (apps/design-studio). The server.watcher only
       // reports changes it is configured to watch; add the DESIGN pair
       // explicitly so edits to them invalidate the CSS graphs and trigger a

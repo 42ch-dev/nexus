@@ -36,7 +36,6 @@ export function parseNativeCoreError(error: unknown): CoreError | null {
       return parsed;
     }
   } catch {
-    // not JSON
   }
   return null;
 }

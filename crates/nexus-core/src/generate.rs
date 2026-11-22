@@ -177,7 +177,6 @@ impl CoreService {
         corrector: Option<&dyn PromptExecutor>,
     ) -> CoreResult<GenerateOutcome> {
         self.verify_principal(principal)?;
-        // A stale base is refused from the row alone: three model rounds must not run for a write
         // the CAS refuses anyway.
         let current = self.read_strategy_candidate(principal, strategy_id).await?;
         if current.revision != base_revision {
@@ -188,7 +187,6 @@ impl CoreService {
         let mut round = 1;
         let warnings = loop {
             let (bodies, pin_diagnostics) = crate::compose::document_bodies(&document, &packages);
-            // The rollup is derived from the bytes under lint, never trusted from the request or
             // the corrector: an under-declared fence would hide a write from Simulate and Approve.
             let summary = document_summary(&document, &bodies);
             let linted = lint(&document, &bodies, &pin_diagnostics, &packages);
@@ -389,7 +387,6 @@ async fn correct(
              parse is an executor failure, not an exhaustion"
         ))
     })?;
-    // A corrected document is still this generation's candidate. Identity is the kernel's:
     // provenance is this generation's origin (the drift guard asserts it), the hash is bound at
     // approval, and the IR and authored versions come from the contract. The field space stays the
     // request's (D8): assets, signals, roles and initial_action are not a generate request's to add.

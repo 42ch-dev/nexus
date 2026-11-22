@@ -14,11 +14,6 @@ use serde_json::Value;
 const CLOUD_LINE_DISABLED: &str =
     "cloud line disabled: sync requires nexus-cloud-sync (enable legacy-sync feature)";
 
-// ---------------------------------------------------------------------------
-// sync.pull
-// ---------------------------------------------------------------------------
-
-/// Pull remote deltas for a workspace.
 ///
 /// **Stub**: returns `PermanentExternal` error in local-only builds.
 /// The real implementation lives in `nexus-cloud-sync`.
@@ -43,11 +38,6 @@ impl Capability for SyncPull {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sync.push
-// ---------------------------------------------------------------------------
-
-/// Push local outbox to remote.
 ///
 /// **Stub**: returns `PermanentExternal` error in local-only builds.
 /// The real implementation lives in `nexus-cloud-sync`.

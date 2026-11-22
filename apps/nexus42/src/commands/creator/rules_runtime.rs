@@ -83,7 +83,6 @@ pub async fn handle_findings(config: &CliConfig, command: FindingsCommand) -> Re
         }
     }
     .await;
-    // The arms return their report; nothing reaches stdout until the shared
     // seam released the writer, so an accepted/pruned/listed finding is never
     // reported ahead of a close that did not settle.
     if let Some(text) = finish_direct(&core, outcome).await? {
@@ -147,13 +146,11 @@ async fn handle_findings_accept(
     finding_id: &str,
     json: bool,
 ) -> Result<Option<String>> {
-    // 1. Read the finding (creator-scoped, V1.48 P2).
     let finding = core
         .get_finding(principal, finding_id.to_string())
         .await
         .map_err(map_core_error)?;
 
-    // 2. Validate rule_suggestion is present and non-empty.
     let rule_text = finding
         .rule_suggestion
         .as_deref()
@@ -166,7 +163,6 @@ async fn handle_findings_accept(
             ))
         })?;
 
-    // 3. Resolve work_ref from the Work record (ownership included).
     let work = core
         .get_work(principal, finding.work_id.clone())
         .await
@@ -179,7 +175,6 @@ async fn handle_findings_accept(
         ))
     })?;
 
-    // 4. Resolve the ONE root this executor commits under. The Work artifact
     //    port pins the registered creative root and refuses any other, so the
     //    read path, the reported path and the port input must all name it —
     //    the operational workspace dir (`~/.nexus42/.../workspaces/<slug>`)
@@ -188,7 +183,6 @@ async fn handle_findings_accept(
     let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
 
-    // 5. Append (idempotent on finding_id) through the Work artifact port, so
     //    the bytes land under the Work lock and the shared durability path.
     let timestamp = chrono::Utc::now().to_rfc3339();
     let outcome = nexus_capability::rules_layers::append_rule_suggestion(
@@ -207,7 +201,6 @@ async fn handle_findings_accept(
         ))
     })?;
 
-    // 6. Mark the finding `resolved` (idempotent — skip the write when it is
     //    already resolved).
     let already_resolved = finding.status == "resolved";
     let resolved_now = if already_resolved {
@@ -370,7 +363,6 @@ async fn handle_findings_list(
         .await
         .map_err(map_core_error)?;
     if json {
-        // `ListFindingsResponse` DTO verbatim: `items` are the findings list
         // elements and `pagination` the cursor envelope. The core carriers are
         // the same shapes the generated wrapper nests (its element/pagination
         // types are re-declared per schema file and are not constructible from
@@ -428,7 +420,6 @@ async fn handle_findings_set_status(
     target_executor: Option<&str>,
     json: bool,
 ) -> Result<Option<String>> {
-    // Work ownership on the work-scoped route: the core's creator-scoped
     // `update_finding` deliberately leaves that check to its caller, so the
     // read the retired route performed happens here — before any write.
     core.get_work(principal, work_id.to_string())
@@ -502,9 +493,6 @@ fn workspace_root_or_error(executor: &dyn WorkspaceExecutor) -> Result<std::path
     })
 }
 
-// T4: rules reset handler below.
-
-/// `creator works rules reset [<work_id>]` (overlay §4).
 ///
 /// Restores `Works/<work_ref>/AGENTS.md` to the default scaffold. Does NOT
 /// delete the Work or any chapter artifacts.
@@ -546,7 +534,6 @@ async fn handle_rules_reset(
         None => active_work_id_core(core, principal).await?,
     };
 
-    // Resolve work_ref from the Work record (ownership included).
     let work = core
         .get_work(principal, resolved_work_id.clone())
         .await
@@ -557,7 +544,6 @@ async fn handle_rules_reset(
         ))
     })?;
 
-    // The Work artifact executor pins the registered creative root; the read,
     // the diff, the dry-run report and the port write must all name that tree.
     let executor = work_artifact_executor_or_error(core).await?;
     let ws_dir = workspace_root_or_error(executor.as_ref())?;
@@ -566,7 +552,6 @@ async fn handle_rules_reset(
         .join(work_ref)
         .join("AGENTS.md");
 
-    // Snapshot current content. `None` ⇒ the file is absent, so reset would
     // create it. A read failure for an existing-but-corrupt file is also
     // treated as "absent" so the atomic reset can still recover it.
     let current: Option<String> = std::fs::read_to_string(&agents_md_path).ok();
@@ -580,7 +565,6 @@ async fn handle_rules_reset(
         String::new()
     };
 
-    // ── `--dry-run`: preview only, never write, never prompt. ──────────
     if dry_run {
         if json {
             let diff_value = if diff.is_empty() {
@@ -621,7 +605,6 @@ async fn handle_rules_reset(
         }));
     }
 
-    // ── Nothing to do: file already matches the scaffold. ──────────────
     if !would_change {
         return Ok(Some(if json {
             serde_json::to_string_pretty(&serde_json::json!({
@@ -640,10 +623,8 @@ async fn handle_rules_reset(
         }));
     }
 
-    // ── Pending changes. Confirm unless `--yes`. ───────────────────────
     if !yes {
         if json {
-            // Machine-readable mode cannot host an interactive prompt; report
             // that confirmation is required and exit without writing.
             return Ok(Some(
                 serde_json::to_string_pretty(&serde_json::json!({
@@ -665,7 +646,6 @@ async fn handle_rules_reset(
         }
     }
 
-    // ── Perform the reset through the Work artifact port. ──────────────
     nexus_capability::rules_layers::reset_agents_md(executor.as_ref(), &ws_dir, work_ref)
         .await
         .map_err(|e| {

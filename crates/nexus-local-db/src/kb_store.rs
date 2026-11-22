@@ -30,7 +30,6 @@ use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
 use nexus_knowledge::world_kb::KbStore;
-// V1.145 P1b — `build_extensions_nexus` + `is_known_nexus_key` inlined as
 // private local fns so `nexus-local-db` no longer depends on
 // `nexus-spoke-adapter` (spec §8 dep-graph reversal). The production adapter
 // (now in `nexus-spoke-adapter`) still calls the spoke-adapter
@@ -135,7 +134,6 @@ fn build_extensions_nexus(
         .cloned()
         .unwrap_or_default();
 
-    // Canonical owner keys: exactly the owner's key is set; the other two
     // (and their stale extras) are removed so the projection is unambiguous.
     nexus.remove("world_id");
     nexus.remove("character_id");
@@ -157,7 +155,6 @@ fn build_extensions_nexus(
         );
     }
 
-    // The retired legacy World-only visibility flag is never written and is
     // dropped from any carried namespace (durable §5: not unknown passthrough).
     nexus.remove("creator_only");
 
@@ -238,7 +235,6 @@ pub(crate) fn selection_visibility_conjunct(
 ) -> (String, Vec<String>) {
     match selection.policy() {
         KnowledgeReadPolicy::ActorView => {
-            // `KnowledgeReadScope::actor_view` refuses an empty holder, so the
             // `None` arm is unreachable by construction; it fails closed
             // (shared rows only) rather than admitting every private row.
             let holders: Vec<String> = selection
@@ -483,10 +479,8 @@ impl SqliteKbStore {
         kb: &KnowledgeEntryRecord,
         extensions_nexus_json: Option<&str>,
     ) -> Result<(), KbStoreError> {
-        // Validate canonical_name format/safety (same as trait impl).
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
-        // v1.191 P1 T3 (durable §5.4): a caller-supplied extension document may
         // not re-introduce the retired legacy visibility key. The wrapper path
         // builds the document itself (and never emits the key); the opaque
         // primitive is the raw-input boundary and refuses it explicitly. Kept
@@ -496,11 +490,9 @@ impl SqliteKbStore {
             reject_legacy_creator_only_extension(extensions_nexus_json)?;
         }
 
-        // Validate body semantics before persisting (same as trait impl).
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
-        // v1.191 P1 T3: the native governance pair is validated with the domain
         // rule (durable §3): a disclosure requires its nonempty holder, empty
         // strings are invalid, and only `owner-private` is native. The SQLite
         // CHECK/FK are defense in depth; the explicit check keeps the invariant
@@ -548,7 +540,6 @@ impl SqliteKbStore {
         match occupant {
             None => Ok(()),
             Some(row) if row.is_owned_by(&kb.owner) => Err(duplicate_refusal(kb)),
-            // A foreign container's occupant is not this owner's duplicate; the
             // INSERT reports the same collision, with the same silence about
             // whose row it is, as a generic storage conflict.
             Some(_) => Err(KbStoreError::Storage(format!(
@@ -584,7 +575,6 @@ impl SqliteKbStore {
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         kb: KnowledgeEntryRecord,
     ) -> Result<KbInsertResult, KbStoreError> {
-        // V1.145 P0: legacy compat wrapper. Builds the `extensions.nexus` JSON
         // internally (keeps the `build_extensions_nexus` import) then delegates
         // to the spoke-unaware primitive [`insert_key_block_with_extensions_in_tx`].
         // Retained for the 5+ external callers (`apps/nexus42`,
@@ -649,19 +639,15 @@ impl SqliteKbStore {
             .source_anchor
             .as_ref()
             .map(|a| serde_json::to_string(a).unwrap_or_default());
-        // V1.146 P4 T1: serialize modules to JSON for the modules_json column.
         let modules_json = kb
             .modules
             .as_ref()
             .map(|m| serde_json::to_string(m).unwrap_or_default());
-        // Stable snake_case serialization matching wire format (not Debug)
         let block_type_str = serde_json::to_string(&kb.block_type)
             .unwrap_or_else(|_| format!("{:?}", kb.block_type));
-        // Strip surrounding quotes from serde_json string output
         let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
 
-        // V1.52 T-A P2 + v1.184 P1: provenance/owner columns are new; sqlx
         // compile-time verification can't resolve them until migration is
         // applied. SAFETY: static SQL with vetted column names; the owner
         // columns come from the closed [`KnowledgeOwnerRef`] (exactly one is
@@ -708,7 +694,6 @@ impl SqliteKbStore {
         .await;
 
         if let Err(e) = insert_outcome {
-            // Duplicate-key violations on this INSERT are one domain fact —
             // `owner` already holds a colliding `kb_key_blocks` row — on either
             // guard:
             //   * `2067` (SQLITE_CONSTRAINT_UNIQUE) — the owner-scoped
@@ -776,7 +761,6 @@ impl SqliteKbStore {
         binding_id: Option<&str>,
         kb: KnowledgeEntryRecord,
     ) -> Result<KbInsertResult, LocalDbError> {
-        // The ordinary create lane authors no governance of its own: the
         // record's stored pair is written verbatim.
         self.apply_actor_owned_create(
             owner_creator_id,
@@ -827,7 +811,6 @@ impl SqliteKbStore {
     ) -> Result<KbInsertResult, LocalDbError> {
         let mut tx = crate::begin_immediate(&self.pool).await?;
         let result = async {
-            // Stored live revalidation in the same write transaction as the
             // INSERT (Task 1's canonical active gate).
             crate::character::require_active_owned_character_tx(
                 &mut tx,
@@ -908,7 +891,6 @@ pub(crate) fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
         },
         KbStoreError::Validation(e) => LocalDbError::ValidationError(e.to_string()),
         KbStoreError::ValidationLegacy(e) => LocalDbError::ValidationError(e),
-        // v1.191 P1 T7 (durable §3): a write that would strip a linked
         // WorldSheet of its eligibility keeps the stable contract conflict the
         // link-time rule already uses, so both directions refuse identically.
         KbStoreError::LinkedWorldSheet(_) => LocalDbError::ActorContractConflict {
@@ -917,8 +899,6 @@ pub(crate) fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
         other => LocalDbError::Sqlx(sqlx::Error::Protocol(format!("kb store error: {other}"))),
     }
 }
-
-// ── Native knowledge revisions + admitted World authoring (v1.191 P1 T7) ──
 
 /// Bump the owning World's `knowledge_revision` once inside `tx` (durable
 /// §4.3).
@@ -1059,7 +1039,6 @@ pub async fn resolve_authored_audience_tx(
             private(holder)
         }
         AuthoredAudience::Character { character_id } => {
-            // The identity gate comes first: the named Character must be a
             // stored, owned, **active** Character (the order durable §3 states
             // the rule in), so an archived or foreign subject is refused as
             // such rather than as a binding mismatch.
@@ -1070,7 +1049,6 @@ pub async fn resolve_authored_audience_tx(
             )
             .await?;
             if let Some(owning) = container.owning_character_id {
-                // A Character/binding container authorizes only its own
                 // owning Character.
                 if owning != character_id {
                     return Err(LocalDbError::ActorNotFound {
@@ -1187,7 +1165,6 @@ pub async fn author_world_knowledge_governance_tx(
         });
     }
     if let Some(governance) = governance {
-        // The pair was resolved from stored state in this same transaction by
         // [`resolve_authored_audience_tx`]; validate the domain shape as the
         // fail-closed last gate before the columns are written.
         validate_authored_governance(governance)?;
@@ -1245,7 +1222,6 @@ pub async fn author_world_knowledge_entry(
         .to_string();
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        // In-transaction stored owner recheck (durable §3).
         let stored: Option<String> =
             sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
                 .bind(&world_id)
@@ -1291,16 +1267,13 @@ pub async fn author_world_knowledge_entry(
     }
 }
 
-// Row type matching the kb_key_blocks DDL.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(crate) struct KeyBlockRow {
     pub(crate) key_block_id: String,
-    // v1.184 P1 owner union — `world_id` is nullable now (non-World owners).
     pub(crate) owner_kind: String,
     pub(crate) world_id: Option<String>,
     pub(crate) character_id: Option<String>,
     pub(crate) actor_world_binding_id: Option<String>,
-    // v1.191 P1 T3 native governance (durable §3): the resolved holder of an
     // `owner-private` row and the disclosure marker. Both NULL = shared; the
     // legacy `creator_only` column is gone.
     pub(crate) holder_entry_id: Option<String>,
@@ -1314,16 +1287,13 @@ pub(crate) struct KeyBlockRow {
     pub(crate) created_from_command_id: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: Option<String>,
-    // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance columns
     pub(crate) source_work_id: Option<String>,
     pub(crate) source_chapter: Option<i64>,
     pub(crate) source_provenance_kind: Option<String>,
-    // V1.139 P1 T4: full serialized `extensions.nexus` namespace (Q7 round-trip).
     // Known identity/owner fields stay authoritative in their typed columns
     // above; this column preserves unknown keys when a spoke KnowledgeEntry
     // transits SQLite.
     pub(crate) extensions_nexus_json: Option<String>,
-    // V1.146 P4 T1: full serialized `modules` namespace (modules durability).
     // Carries per-entry functional dialects (activation, pack, etc.) as a JSON
     // object. NULL for legacy rows; backfilled on next write cycle.
     pub(crate) modules_json: Option<String>,
@@ -1341,7 +1311,6 @@ impl KeyBlockRow {
             .as_ref()
             .and_then(|s| serde_json::from_str::<SourceAnchor>(s).ok());
 
-        // v1.184 P1: reconstruct the closed canonical owner from the owner
         // union columns. An unknown `owner_kind`, or a missing/extra id
         // column, fails closed rather than fabricating an owner (malformed
         // owner data at the storage boundary → error, never a default World).
@@ -1377,14 +1346,12 @@ impl KeyBlockRow {
             }
         };
 
-        // V1.139 P1 T4: activate the extensions.nexus round-trip (spec §2.2
         // rule 2). The 8 typed identity/owner columns below stay authoritative;
         // any *unknown* keys carried in `extensions_nexus_json` are surfaced on
         // `KnowledgeEntryRecord::extensions_nexus_extras` so they survive the
         // read-modify-write cycle and the spoke conversion seam.
         let extensions_nexus_extras = extract_nexus_extras(&self.build_merged_extensions_nexus());
 
-        // V1.146 P4 T1: surface modules_json as KnowledgeEntryRecord.modules.
         let modules = self
             .modules_json
             .as_ref()
@@ -1394,7 +1361,6 @@ impl KeyBlockRow {
             schema_version: 1,
             entry_id: self.key_block_id.clone(),
             owner,
-            // v1.191 P1 T3 — the native governance projection. These two lines
             // are this task's load-bearing change: while they carried the T2
             // placeholder (`None` / `None`), every migrated `owner-private` row
             // would read back as shared.
@@ -1434,7 +1400,6 @@ impl KeyBlockRow {
                 existing.insert("nexus".to_string(), map);
             }
         }
-        // Recover the canonical owner from the typed columns (the same closed
         // `KnowledgeOwnerRef` [to_record] builds) so the merged namespace
         // carries the correct owner keys for the round-trip.
         let owner = match self.owner_kind.as_str() {
@@ -1446,7 +1411,6 @@ impl KeyBlockRow {
                 self.actor_world_binding_id.clone().unwrap_or_default(),
             ),
             other => {
-                // Fail toward a World owner of an empty id is never correct;
                 // but the extras merge only needs the namespace keys — a
                 // malformed kind rejects later in `to_record`. Use an empty
                 // World id so the merge is deterministic (never a fabricated
@@ -1506,11 +1470,9 @@ fn block_type_to_sql(block_type: BlockType) -> String {
 ///
 /// Accepts both `snake_case` (wire format via serde) and `PascalCase` (legacy DB).
 fn parse_block_type(s: &str) -> Result<BlockType, KbStoreError> {
-    // Try serde (snake_case) first — matches wire format
     if let Ok(bt) = serde_json::from_value::<BlockType>(serde_json::Value::String(s.to_string())) {
         return Ok(bt);
     }
-    // Fallback: legacy PascalCase stored by prior versions via Debug format
     match s {
         "Character" => Ok(BlockType::Character),
         "Ability" => Ok(BlockType::Ability),
@@ -1520,7 +1482,6 @@ fn parse_block_type(s: &str) -> Result<BlockType, KbStoreError> {
         "Conflict" => Ok(BlockType::Conflict),
         "InfoPoint" => Ok(BlockType::InfoPoint),
         "Event" => Ok(BlockType::Event),
-        // V1.54 P1: game-bible BlockType variants (legacy PascalCase fallback)
         "Species" => Ok(BlockType::Species),
         "Faction" => Ok(BlockType::Faction),
         "MagicSystem" => Ok(BlockType::MagicSystem),
@@ -1704,8 +1665,6 @@ pub async fn list_by_world_in_tx(
     rows.iter().map(KeyBlockRow::to_record).collect()
 }
 
-// ── Query filtering (v1.184) ────────────────────────────────────────────────
-
 /// The retained in-memory `KbQuery` filter/score/offset body.
 ///
 /// Shared by the trait [`KbStore::query`] (unscoped World listing, retained for
@@ -1749,7 +1708,6 @@ fn apply_kb_query_filters(all_active: Vec<KnowledgeEntryRecord>, query: &KbQuery
                     return false;
                 }
             }
-            // V1.61 P1: filter by computable flag
             if let Some(want) = query.computable {
                 let is_computable = kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
                 if is_computable != want {
@@ -1856,14 +1814,12 @@ impl KbStore for SqliteKbStore {
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
 
-    // v1.191 P1 T6 — UNSCOPED retained read (trait shape owned by
     // `nexus-knowledge`): transitional state equals the pre-T6 behaviour, so
     // it adds no exposure. Its production callers (adapter MCA read, MCA/
     // moment assembly, orchestration compute input) migrate to
     // `query_with_scope` under T8/T11; T15 verifies no public unscoped
     // reader remains. Do not add new callers.
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError> {
-        // Strategy: fetch all active blocks for the world, then apply
         // optional filters in-memory. This avoids complex dynamic SQL
         // and is efficient for per-world datasets (typically small).
         //
@@ -1897,7 +1853,6 @@ impl KbStore for SqliteKbStore {
         key_block_id: &str,
         anchor: SourceAnchor,
     ) -> Result<(), KbStoreError> {
-        // Verify block exists
         let exists: i64 = sqlx::query_scalar!(
             r#"SELECT EXISTS(SELECT 1 FROM kb_key_blocks WHERE key_block_id = ?) as "exists!""#,
             key_block_id
@@ -1910,7 +1865,6 @@ impl KbStore for SqliteKbStore {
             return Err(KbStoreError::NotFound(key_block_id.to_string()));
         }
 
-        // Get next ordinal
         let max_ordinal: Option<i64> = sqlx::query_scalar!(
             r#"SELECT MAX(anchor_ordinal) as "max_ordinal: _" FROM kb_source_anchors WHERE key_block_id = ?"#,
             key_block_id
@@ -1956,14 +1910,11 @@ impl KbStore for SqliteKbStore {
     }
 
     async fn update_knowledge_entry(&self, kb: KnowledgeEntryRecord) -> Result<(), KbStoreError> {
-        // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
-        // Validate body semantics before persisting
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
-        // v1.191 P1 T7 (durable §3): one `BEGIN IMMEDIATE` transaction so the
         // reverse `WorldSheet` rule can be re-asserted against the stored row
         // after the write and the whole edit rolls back when a linked sheet
         // would become ineligible. Dropping the transaction on any early
@@ -1972,10 +1923,8 @@ impl KbStore for SqliteKbStore {
             .await
             .map_err(|e| KbStoreError::Storage(e.to_string()))?;
 
-        // Verify exists
         let existing = get_knowledge_entry_in_tx(&mut tx, &kb.entry_id).await?;
 
-        // v1.184 P1 / v1.191 P1 T3: owner and the native governance pair are
         // immutable through patch APIs — moving ownership or governance is
         // explicit create/copy work (durable §3: the ordinary store path is not
         // a transfer mechanism). Rejected here (and in the in-memory store)
@@ -1987,7 +1936,6 @@ impl KbStore for SqliteKbStore {
             return Err(KbStoreError::ImmutableGovernance(kb.entry_id.clone()));
         }
 
-        // If name or type changed, check owner-scoped uniqueness.
         if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type {
             assert_owner_scoped_name_unique_tx(&mut tx, &kb).await?;
         }
@@ -2000,12 +1948,10 @@ impl KbStore for SqliteKbStore {
             .source_anchor
             .as_ref()
             .map(|a| serde_json::to_string(a).unwrap_or_default());
-        // Stable snake_case serialization matching wire format (not Debug)
         let block_type_str = serde_json::to_string(&kb.block_type)
             .unwrap_or_else(|_| format!("{:?}", kb.block_type));
         let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
-        // V1.139 P1 T4: re-serialize the full `extensions.nexus` namespace on
         // UPDATE too, so unknown keys survive the read-modify-write cycle
         // (spec §2.3 write path; mirrors the INSERT path).
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
@@ -2017,7 +1963,6 @@ impl KbStore for SqliteKbStore {
             &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
         ))
         .unwrap_or_default();
-        // V1.146 P4 T1: serialize modules_json on UPDATE too.
         let modules_json = kb
             .modules
             .as_ref()
@@ -2053,7 +1998,6 @@ impl KbStore for SqliteKbStore {
         .await
         .map_err(|e| db_err(&e))?;
 
-        // v1.191 P1 T7 (durable §3): a status/type edit may not strip an entry
         // that a binding links as its `WorldSheet` of its eligibility —
         // `invalid_world_sheet` instead of silently unlinking.
         crate::actor_world_binding::assert_linked_world_sheets_remain_eligible_tx(
@@ -2075,7 +2019,6 @@ impl KbStore for SqliteKbStore {
     async fn delete_knowledge_entry(&self, key_block_id: &str) -> Result<(), KbStoreError> {
         let now = chrono::Utc::now().to_rfc3339();
 
-        // v1.191 P1 T7 (durable §3): the soft delete is a status change, so a
         // row linked as a binding's `WorldSheet` refuses with
         // `invalid_world_sheet` (mapped from `LinkedWorldSheet`) rather than
         // leaving the binding pointing at a non-live sheet.
@@ -2129,7 +2072,6 @@ async fn assert_owner_scoped_name_unique_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     kb: &KnowledgeEntryRecord,
 ) -> Result<(), KbStoreError> {
-    // Stable snake_case serialization matching wire format
     let block_type_str =
         serde_json::to_string(&kb.block_type).unwrap_or_else(|_| format!("{:?}", kb.block_type));
     let block_type_str = block_type_str.trim_matches('"').to_string();
@@ -2165,8 +2107,6 @@ async fn assert_owner_scoped_name_unique_tx(
     Ok(())
 }
 
-// ── V1.146 P3: pack-IO widened list methods (inherent, not trait) ─────────
-
 impl SqliteKbStore {
     /// List the **admitted** rows of one World under an explicit read selection
     /// (v1.191 P1 T10, durable §4.2/§6).
@@ -2193,7 +2133,6 @@ impl SqliteKbStore {
     }
 }
 
-// ── Import quarantine store (v1.191 P1 T10, durable §6) ────────────────────
 //
 // `knowledge_import_quarantine` is T3's table; this is its single storage API.
 // A quarantined atom is a foreign-governed pack entry the import boundary
@@ -2437,9 +2376,9 @@ impl SqliteKbStore {
     /// **inside** the `WHERE`, so the [`LIST_BY_WORLD_LIMIT`] window counts only
     /// eligible rows.
     ///
-    /// simplify: `selection` stays `Option<&KnowledgeReadScope>` only until
-    /// signature cleanup is authorized; then take `&KnowledgeReadScope` and drop
-    /// the unreachable empty-visibility branch from the shared body.
+    /// simplify: `selection` stays `Option<&KnowledgeReadScope>` to keep the
+    /// unreachable empty-visibility arm, upgrade: after signature cleanup, take
+    /// `&KnowledgeReadScope` and drop that arm from the shared body.
     async fn list_by_world_with_status_filter(
         &self,
         world_id: &str,
@@ -2774,7 +2713,6 @@ impl SqliteKbStore {
         );
         let (visibility, holders) = selection_visibility_conjunct(selection);
         let cursor_sql = if after.is_some() {
-            // Row-value comparison: `(key, id) > (cursor_key, cursor_id)` is the
             // `>`/`=`/`>` expansion without repeating the cursor key.
             format!(" AND ({created_key}, key_block_id) > ({cursor_key}, ?)")
         } else {
@@ -2846,8 +2784,6 @@ fn fraction_millis(expr: &str) -> String {
          ELSE CAST(substr(substr({expr}, instr({expr}, '.') + 1) || '000', 1, 3) AS INTEGER) END)"
     )
 }
-
-// ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────
 
 /// Column payload for [`cas_update_key_block_fields`]: every column one CAS
 /// patch may rewrite.
@@ -2924,14 +2860,12 @@ pub async fn cas_update_key_block_fields(
     world_id: &str,
     fields: &CasKeyBlockFieldUpdate<'_>,
 ) -> Result<u64, LocalDbError> {
-    // v1.191 P1 T3 (durable §5.4): the CAS lane carries the raw extension
     // document, so it refuses the retired legacy visibility key like the INSERT
     // primitive does.
     if let Some(json) = fields.extensions_nexus_json {
         reject_legacy_creator_only_extension(json)
             .map_err(|err| LocalDbError::ValidationError(err.to_string()))?;
     }
-    // Build a dynamic SET clause from the supplied fields. revision is always
     // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
     // field whitelist (not user-controlled SQL); all values are bind params.
     let mut sets = vec!["revision = ?".to_string(), "updated_at = ?".to_string()];
@@ -3011,7 +2945,6 @@ pub async fn cas_update_key_block_fields(
         return Ok(u64::try_from(new_revision).unwrap_or(0));
     }
 
-    // rows_affected == 0 — disambiguate world move vs not-found vs version
     // mismatch by re-reading the row. `world_id` is NULL for non-World
     // owners (v1.184 P1), so a Character/binding row (or a row moved to
     // another world) fails the `owner_kind='world' AND world_id = ?`
@@ -3025,7 +2958,6 @@ pub async fn cas_update_key_block_fields(
             .await?;
     if let Some((_, stored_world)) = current.as_ref() {
         if stored_world.as_deref() != Some(world_id) {
-            // The caller's revision was valid; the WORLD moved (a cross-
             // process writer) or the row is non-World-owned. Surfaced as a
             // world_conflict, not a generic OCC version mismatch (spec §3.2).
             return Err(LocalDbError::WorldConflict {
@@ -3071,7 +3003,6 @@ pub async fn cas_update_key_block_modules_in_tx(
     owner_binding_id: &str,
 ) -> Result<u64, LocalDbError> {
     let now = chrono::Utc::now().to_rfc3339();
-    // Checked increment (v1.184 P4 T2 fix): an `i64::MAX` expected revision
     // must reject deterministically instead of overflowing the bump.
     let new_revision = expected_revision.checked_add(1).ok_or_else(|| {
         LocalDbError::ValidationError("expected_revision overflow: cannot bump revision".into())
@@ -3102,7 +3033,6 @@ pub async fn cas_update_key_block_modules_in_tx(
     )
     .fetch_optional(&mut **tx)
     .await?;
-    // NULL revision normalizes to 0, matching the COALESCE(revision, 0)
     // predicate and the established cas_update_key_block_fields reporting;
     // `None` means the row itself is absent.
     let actual = current.map(|rev| rev.unwrap_or(0));
@@ -3139,7 +3069,6 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
     modules_json: Option<&str>,
     source_provenance_kind: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    // v1.191 P1 T3 (durable §5.4): raw extension input may not re-introduce the
     // retired legacy visibility key. This primitive reports storage-level
     // errors (`sqlx::Error`), so the refusal rides the crate's established
     // `Protocol` vehicle for an invalid boundary value and names the stable
@@ -3233,7 +3162,6 @@ pub async fn update_key_block_status_in_tx(
     Ok(result.rows_affected())
 }
 
-// ── v1.233 P1 T4: Character-owned knowledge CAS patch / delete ─────────────
 // The Character-scoped knowledge maintenance surface keeps its policy
 // (read preimage, referent guard, conflict mapping) in
 // `actor_knowledge_store.rs`; the two statements live here so every
@@ -3334,7 +3262,6 @@ pub async fn delete_actor_knowledge_in_tx(
     character_id: &str,
     expected_revision: i64,
 ) -> Result<u64, LocalDbError> {
-    // Statement text kept byte-identical to its previous home so the committed
     // `.sqlx` offline cache entry still resolves (whitespace is part of the
     // query hash).
     let deleted = sqlx::query!(
@@ -3363,7 +3290,6 @@ pub async fn delete_actor_knowledge_in_tx(
     Ok(deleted)
 }
 
-// ── V1.147 W3: TX-aware state read/write primitives (state-delta lane) ─────
 // The Accept lane's state-delta path reads/writes `kb_key_blocks` through
 // these primitives so ALL SQL against the table lives in `nexus-local-db`
 // (one storage write-path family). `nexus-orchestration::state_delta` owns
@@ -3397,7 +3323,6 @@ pub async fn read_kb_state_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     key_block_id: &str,
 ) -> Result<Option<KbStateRow>, LocalDbError> {
-    // v1.184 P1: `world_id` is nullable since migration
     // 20260905000002_actor_knowledge_owners.sql (non-World owners store NULL).
     // The state-delta lane is World-only by construction
     // (`update_kb_state_in_tx` is world-scoped), so the `!` override asserts
@@ -3475,8 +3400,6 @@ pub async fn read_key_block_revision(
     Ok(row.map(|rev| rev.unwrap_or(0).max(0).cast_unsigned()))
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3526,8 +3449,6 @@ mod tests {
             "rolled-back insert must not persist: {err:?}"
         );
     }
-
-    // ── V1.147 W3: TX-aware state read/write primitives ──────────────────────
 
     fn kb_with_state(world_id: &str, canonical_name: &str, hp: i64) -> KnowledgeEntryRecord {
         let mut kb = KnowledgeEntryRecord::new(world_id, BlockType::Character, canonical_name);
@@ -3582,7 +3503,6 @@ mod tests {
     async fn update_kb_state_in_tx_world_scope_rejects_foreign_world() {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
-        // Second world for the foreign-target case.
         seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool.clone());
@@ -3597,7 +3517,6 @@ mod tests {
         tx.rollback().await.unwrap();
         assert_eq!(affected, 0, "foreign-world update must affect no rows");
 
-        // Body unchanged.
         let body_json = stored_body_json(&pool, &entry_id)
             .await
             .expect("row still has body");
@@ -3615,7 +3534,6 @@ mod tests {
         let entry_id = kb.entry_id.clone();
         store.insert_knowledge_entry(kb).await.unwrap();
 
-        // Write a new body inside a TX, then roll back — the primitive's
         // write must be rolled back with the caller's transaction.
         let new_body = json!({"state": {"character": {"current_hp": 7}}});
         let mut tx = pool.begin().await.unwrap();
@@ -3656,7 +3574,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
-        // Fill the list_by_world window (500 oldest rows) so a newer entry is
         // absent from the scan — the retry-safe promote path must not rely on it.
         for i in 0..LIST_BY_WORLD_LIMIT {
             seed::knowledge_entry(
@@ -3874,7 +3791,6 @@ mod tests {
         let entry_id = kb1.entry_id.clone();
         store.insert_knowledge_entry(kb1).await.unwrap();
 
-        // Different canonical_name (no unique-index collision) + the same
         // entry id ⇒ the primary key is the only violated guard.
         let mut kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Villain");
         kb2.entry_id = entry_id;
@@ -3894,7 +3810,6 @@ mod tests {
     async fn test_foreign_container_entry_id_collision_is_not_duplicate() {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
-        // Second container for the FK (`kb_key_blocks.world_id`).
         seed_world_row(&pool, "wld_2", "Other World", "other-world").await;
 
         let store = SqliteKbStore::new(pool);
@@ -3902,7 +3817,6 @@ mod tests {
         let entry_id = kb1.entry_id.clone();
         store.insert_knowledge_entry(kb1).await.unwrap();
 
-        // Same entry id, different world (and name) ⇒ only the primary key
         // collides, and it collides with a foreign container's row.
         let mut kb2 = KnowledgeEntryRecord::new("wld_2", BlockType::Character, "Villain");
         kb2.entry_id = entry_id;
@@ -3972,7 +3886,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
-        // FK target for the malformed row's extra owner column.
         let character_id = format!("chr_{}", "0".repeat(32));
         sqlx::query!(
             "INSERT INTO characters \
@@ -3993,7 +3906,6 @@ mod tests {
             .execute(&mut *tx)
             .await
             .unwrap();
-        // owner_kind='world' AND character_id set ⇒ two owner arms populated.
         sqlx::query!(
             "INSERT INTO kb_key_blocks \
                 (key_block_id, owner_kind, world_id, character_id, block_type, canonical_name) \
@@ -4004,7 +3916,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Same id, same (World) container arm, different canonical name ⇒ the
         // primary key is the only violated guard, and the occupying row is
         // malformed — the arm matches, the union does not.
         let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Other");
@@ -4066,7 +3977,6 @@ mod tests {
 
         store.delete_knowledge_entry(&id).await.unwrap();
 
-        // Re-insert with same canonical_name + type should succeed
         let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
         assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
@@ -4115,7 +4025,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
-        // Seed second world
         seed_world_row(&pool, "wld_2", "World Two", "world-two").await;
 
         let store = SqliteKbStore::new(pool);
@@ -4131,8 +4040,6 @@ mod tests {
         let result = store.query(&KbQuery::new("wld_2")).await.unwrap();
         assert_eq!(result.items, Vec::<KnowledgeEntryRecord>::new());
     }
-
-    // ── Validation tests (QC1 C-001 / QC2 C1 + QC2 W2 + QC2 W3) ──
 
     fn make_novel_block_sql(
         world_id: &str,
@@ -4271,7 +4178,7 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let store = SqliteKbStore::new(pool); // Generic mode by default
+        let store = SqliteKbStore::new(pool);
         let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "char_generic");
         kb.body = Some(KnowledgeEntryBody {
             summary: Some("A generic character".to_string()),
@@ -4292,7 +4199,6 @@ mod tests {
         let mut kb = kb;
         store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
-        // Update to body missing novel_category should fail
         kb.body = Some(KnowledgeEntryBody {
             summary: Some("updated".to_string()),
             attributes: Some(serde_json::json!({"traits": ["old"]})),
@@ -4320,7 +4226,6 @@ mod tests {
         let id = kb.entry_id.clone();
         store.insert_knowledge_entry(kb).await.unwrap();
 
-        // Verify DB contains snake_case "info_point" (not Debug "InfoPoint")
         let row: (String,) =
             sqlx::query_as("SELECT block_type FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind(&id)
@@ -4329,8 +4234,6 @@ mod tests {
                 .unwrap();
         assert_eq!(row.0, "info_point");
     }
-
-    // ── Computable query filter (V1.61 P1) ─────────────────────────
 
     fn make_computable_kb(
         world_id: &str,
@@ -4448,7 +4351,6 @@ mod tests {
             .await
             .unwrap();
 
-        // No computable filter → should return both
         let q = KbQuery::new("wld_1");
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 2);
@@ -4460,7 +4362,6 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool.clone());
-        // Legacy block with no computable field
         let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Legacy");
         kb.body = Some(KnowledgeEntryBody {
             summary: Some("legacy".to_string()),
@@ -4470,18 +4371,15 @@ mod tests {
         });
         store.insert_knowledge_entry(kb).await.unwrap();
 
-        // computable=true should exclude it
         let q = KbQuery::new("wld_1").with_computable(Some(true));
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 0);
 
-        // computable=false should include it
         let q = KbQuery::new("wld_1").with_computable(Some(false));
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 1);
     }
 
-    // ── V1.139 P1 T4: extensions.nexus round-trip (Greptile P2) ──────
     //
     // Proves unknown `extensions.nexus` keys survive the SQLite
     // read-modify-write cycle: INSERT writes them into `extensions_nexus_json`,
@@ -4508,13 +4406,11 @@ mod tests {
             .expect("unknown extensions.nexus keys survive INSERT→GET");
         assert_eq!(extras["custom_label"], "villain-arc");
         assert_eq!(extras["priority"], 7);
-        // Typed identity fields remain authoritative on their own columns.
         assert_eq!(fetched.world_id(), Some("wld_1"));
     }
 
     #[tokio::test]
     async fn test_insert_key_block_with_extensions_in_tx_round_trip() {
-        // V1.145 P0 T3: the new opaque-JSON INSERT primitive round-trips
         // `extensions.nexus` identical to the legacy wrapper. Verifies the
         // storage primitive is behavior-equivalent when the caller owns the
         // serialization boundary (spec §7.4) — the same shape the spoke
@@ -4529,7 +4425,6 @@ mod tests {
         kb.extensions_nexus_extras = Some(serde_json::json!({"edition": "alpha", "priority": 7}));
         let id = kb.entry_id.clone();
 
-        // Build the opaque JSON the way the spoke adapter does (T2 path).
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
             &kb.owner,
             kb.created_from_command_id.as_deref(),
@@ -4591,7 +4486,6 @@ mod tests {
             "the extension refusal outranks the body gate, got: {err:?}"
         );
 
-        // The canonical-name gate still runs first: an empty name is reported
         // without the extension document being read.
         let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "");
         kb.body = Some(invalid_body);
@@ -4616,7 +4510,6 @@ mod tests {
         let id = kb.entry_id.clone();
         store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
-        // RMW: read, modify the extras, write back via UPDATE.
         let mut fetched = store.get_knowledge_entry(&id).await.unwrap();
         fetched.extensions_nexus_extras =
             Some(serde_json::json!({"edition": "beta", "reviewer": "qc"}));
@@ -4635,7 +4528,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_extensions_nexus_extras_none_when_absent() {
-        // An entry inserted without extras has extensions_nexus_extras = None
         // on read (only the typed keys are serialized; no unknown keys present).
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
@@ -4651,8 +4543,6 @@ mod tests {
             "no unknown keys → extras is None"
         );
     }
-
-    // ── V1.154 P2 (R3 closure): world-aware CAS ──────────────────────────
 
     /// Seed a second world row so a test can FK-move a `kb_key_blocks` row
     /// across worlds (`world_id` is a NOT NULL FK to `narrative_worlds`).
@@ -4674,7 +4564,6 @@ mod tests {
 
     #[tokio::test]
     async fn cas_update_key_block_fields_same_world_matching_revision_succeeds() {
-        // World-aware CAS happy path: the world bind matches the stored row,
         // so the CAS bumps revision exactly like the pre-R3 predicate.
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
@@ -4699,7 +4588,6 @@ mod tests {
 
     #[tokio::test]
     async fn cas_update_key_block_fields_rejects_row_in_foreign_world() {
-        // R3 regression (atomic source of truth): the caller's world-verified
         // preimage (wld_1) is stale — a cross-process writer moved the row to
         // wld_2 without bumping the revision, so the pre-fix id+revision CAS
         // would have succeeded. The world-aware predicate must deny with
@@ -4710,8 +4598,6 @@ mod tests {
         seed_second_world(&pool).await;
         let id = seed_key_block(&pool, "CasForeign").await;
 
-        // "Other writer" (Connect process ∥ daemon) moves the row across
-        // worlds between the gate-check and the CAS.
         sqlx::query!(
             "UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?",
             "wld_2",
@@ -4751,7 +4637,6 @@ mod tests {
     }
 
     async fn seed_character_key_block(pool: &SqlitePool, canonical_name: &str) -> String {
-        // ToM-scoped CAS requires an admitted Character/binding owner.
         crate::ensure_creator_row(pool, "ctr_cas", "Cas")
             .await
             .unwrap();
@@ -4780,14 +4665,12 @@ mod tests {
 
     #[tokio::test]
     async fn cas_update_key_block_modules_in_tx_null_revision_reports_actual_zero() {
-        // v1.184 P4 T1 fix (review I1): an existing row whose revision is
         // NULL (pre-bump legacy/seed shape) must report `actual: Some(0)` on
         // a stale CAS — matching the COALESCE(revision, 0) predicate and the
         // established cas_update_key_block_fields normalization — never the
         // `actual: None` "row absent" classification.
         let (_dir, pool) = fresh_pool().await;
         let id = seed_character_key_block(&pool, "NullRev").await;
-        // Seed path leaves revision NULL (V1.73 NULL-normalization rule).
         let raw: Option<i64> =
             sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind(&id)
@@ -4818,7 +4701,6 @@ mod tests {
             other => panic!("expected VersionMismatch, got {other:?}"),
         }
 
-        // Happy path from the normalized 0 preimage succeeds.
         let mut tx = pool.begin().await.unwrap();
         let new_rev = cas_update_key_block_modules_in_tx(
             &mut tx,
@@ -4836,7 +4718,6 @@ mod tests {
 
     #[tokio::test]
     async fn cas_update_key_block_fields_same_world_stale_revision_stays_version_mismatch() {
-        // A same-world stale revision keeps the existing OCC classification —
         // the world-aware predicate must not widen the WorldConflict bucket.
         let (_dir, pool) = fresh_pool().await;
         seed_world(&pool).await;
@@ -4895,7 +4776,6 @@ mod tests {
         assert_ne!(inserted.entry_id, "");
         assert!(inserted.entry_id.starts_with("kb_"));
 
-        // Archive the Character: the guarded insert now refuses character_inactive
         // and leaves the KB untouched.
         sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
             .bind("chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab")

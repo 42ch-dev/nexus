@@ -44,7 +44,6 @@ describe('queryKeys', () => {
         const keyA = build(charA);
         const keyB = build(charB);
         expect(keyA, name).not.toEqual(keyB);
-        // Fails loudly if the character id is ever dropped from the key.
         expect(keyA, name).toContain(charA);
       }
     });

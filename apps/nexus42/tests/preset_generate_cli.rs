@@ -134,7 +134,6 @@ async fn chain_core(fixture: &DirectFixture) -> (CoreService, nexus_core::Princi
 
 #[tokio::test]
 async fn generate_prints_a_summary_and_reserves_json_for_the_flag() {
-    // Two independent homes: each commits revision 1, so neither run can be the other's conflict.
     let plain = fixture().await;
     let request = write_request(&plain, "request.json", &legal_request());
     let output = plain
@@ -196,7 +195,6 @@ async fn generate_prints_a_summary_and_reserves_json_for_the_flag() {
         serde_json::from_str(&stdout(&output)).expect("--json prints one JSON object");
     assert_eq!(printed["new_revision"], 1, "a first candidate inserts at 1");
     assert_eq!(printed["document"]["id"], STRATEGY);
-    // Success means structurally legal and nothing more: the document is still a candidate, never
     // a live strategy, and the semantic warnings travel with it.
     assert_eq!(printed["document"]["state"], "candidate");
     assert_eq!(printed["document"]["revision"], 1);
@@ -229,7 +227,6 @@ async fn generate_renders_the_whole_lint_exhausted_payload() {
         "a lint-failing request is a non-zero exit"
     );
     let rendered = stderr(&output);
-    // Every field the payload carries reaches the human: the code, the round count, the
     // `persisted` flag, each violation's kind/location/observed/correction, and the message.
     for fragment in [
         "lint_exhausted",
@@ -250,7 +247,6 @@ async fn generate_renders_the_whole_lint_exhausted_payload() {
         "no bare generation-failed summary: {rendered}"
     );
 
-    // `--json` is the same object the HTTP `details` and the agent tool result carry.
     let json_output = fixture
         .command()
         .args([
@@ -283,7 +279,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     let fixture = fixture().await;
     let request = write_request(&fixture, "request.json", &legal_request());
 
-    // 1. generate — the CLI commits the candidate the rest of the chain reads. `--json` is what
     // carries the document forward; without it the verb prints the summary for a human.
     let output = fixture
         .command()
@@ -305,7 +300,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     let generated: Value = serde_json::from_str(&stdout(&output)).expect("one JSON object");
     assert_eq!(generated["new_revision"], 1);
 
-    // 2. validate — the generated document through the local IR validator.
     let document_path = fixture.home.path().join("generated.ir.json");
     std::fs::write(
         &document_path,
@@ -328,7 +322,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
         stderr(&validated)
     );
 
-    // 3. simulate → approve → apply over the same store, through the core the transports call.
     let (core, principal) = chain_core(&fixture).await;
     let document: NexusWorkflowDocument = serde_json::from_value(generated["document"].clone())
         .expect("the printed document is the wire document");
@@ -347,7 +340,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     assert_eq!(approved.candidate_revision, 1);
     let approved_hash = approved.content_hash.to_string();
 
-    // The schedule whose `preset_id` is the strategy identity the apply admits against.
     sqlx::query(
         "INSERT INTO creator_schedules \
          (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
@@ -367,7 +359,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
         .expect("the approved snapshot applies");
     assert_eq!(applied.content_hash, approved_hash);
 
-    // The chain is only complete if a CURRENT apply exists afterwards and reads back the frozen
     // document the generation produced.
     let status = core
         .strategy_applied(&principal, STRATEGY)

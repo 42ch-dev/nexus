@@ -5,7 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { FormSection } from './form-section';
 
 /**
- * V1.149 P1 — L2 pattern component (DESIGN.md components.form-section).
  *
  * Pins: the field-group layout (stacked, space-4 rhythm), native fieldset/
  * legend group semantics, caller-owned description, and the inline error

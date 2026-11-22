@@ -211,18 +211,15 @@ fn acp_registry_list_explicit_text_format() {
 fn acp_agent_use_success() {
     let tmp = TempDir::new().expect("Failed to create temp dir");
 
-    // Set up a creator and workspace in the config
     let nexus_home = tmp.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_home).expect("create nexus home");
 
-    // Write a config.toml with active creator
     let config_content = r#"active_creator_id = "ctr_test"
 [active_workspace_slug_by_creator]
 ctr_test = "default"
 "#;
     std::fs::write(nexus_home.join("config.toml"), config_content).expect("write config");
 
-    // Create the workspace directory so the config path is valid
     let ws_dir = nexus_home
         .join("creators")
         .join("ctr_test")
@@ -241,7 +238,6 @@ ctr_test = "default"
         .success()
         .stdout(predicate::str::contains("Default agent set to: claude-acp"));
 
-    // Verify the config file was written
     let config_file = ws_dir.join("acp-default-agent.toml");
     assert!(config_file.exists(), "Config file should exist");
     let content = std::fs::read_to_string(&config_file).expect("read config");
@@ -282,7 +278,6 @@ ctr_persist = "default"
         .join("default");
     std::fs::create_dir_all(&ws_dir).expect("create workspace dir");
 
-    // Set agent
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("acp")
@@ -293,12 +288,10 @@ ctr_persist = "default"
         .assert()
         .success();
 
-    // Verify file persists
     let config_file = ws_dir.join("acp-default-agent.toml");
     let content = std::fs::read_to_string(&config_file).expect("read config");
     assert!(content.contains("my-test-agent@1.0"));
 
-    // Set a different agent (overwrite)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("acp")
@@ -312,7 +305,6 @@ ctr_persist = "default"
             "Default agent set to: other-agent",
         ));
 
-    // Verify overwrite
     let content_after = std::fs::read_to_string(&config_file).expect("read config after");
     assert!(content_after.contains("other-agent"));
     assert!(!content_after.contains("my-test-agent"));
@@ -369,7 +361,6 @@ fn help_no_longer_shows_old_top_level_commands() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // These should NOT appear as visible top-level commands
     // (they're hidden behind `#[command(hide = true)]`)
     // Check that 'agent' is not a primary command name (agent as subtext in other words is ok)
     assert!(

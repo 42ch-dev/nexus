@@ -82,7 +82,6 @@ async fn setup() -> Setup {
     std::fs::write(home.join("config.toml"), "active_creator_id = \"test_creator\"\n[active_workspace_slug_by_creator]\n\"test_creator\" = \"default\"\n").unwrap();
     let core = CoreService::open(CoreOpenOptions {
         user_home: tmp.path().to_path_buf(),
-        // The engine writer mode is the one admitted for `creator_schedules` (the fixture seeds
         // one), and it is admitted for the apply tables too.
         access: CoreAccess::EngineOwner,
         memory: None,
@@ -234,7 +233,6 @@ fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuild
                 "draft",
             ),
         },
-        // Passes the concept refusal (an inner step is a projected kind) and only the exporter
         // refuses it: the id is not `<inner_graph>/<step>`.
         Unbuildable {
             tag: "unprojectable",
@@ -398,7 +396,6 @@ async fn an_unknown_content_hash_is_the_typed_not_found_and_writes_nothing() {
 #[tokio::test]
 async fn an_embedded_preset_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    // Everything else an apply needs is in place: a valid approval of this strategy's own frozen
     // document and a schedule. Only the source is wrong, so without the guard this apply would
     // succeed and record a row the schedule intake never reads.
     let (_, hash, _) = seed_approval(&setup, EMBEDDED_PRESET, 1).await;
@@ -420,7 +417,6 @@ async fn an_embedded_preset_is_the_typed_refusal_and_writes_nothing() {
 async fn another_strategys_approval_is_the_typed_mismatch_and_writes_nothing() {
     let setup = setup().await;
     let (_, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
-    // Both strategies are scheduled, so the mismatch is the only thing this apply trips on.
     seed_schedule(setup.core.pool(), STRATEGY).await;
     seed_schedule(setup.core.pool(), OTHER_STRATEGY).await;
 
@@ -443,7 +439,6 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
     let (approval_id, stored_hash, document) = seed_approval(&setup, STRATEGY, 1).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
-    // Edit the frozen bytes behind the approval's back; the row still passes every CHECK, so the
     // only thing that can catch the move is the recomputation apply performs.
     let edited = with_version(&document, 7);
     let edited_hash = nexus_workflow_ir::content_hash(&edited).unwrap();
@@ -481,7 +476,6 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
 #[tokio::test]
 async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    // The strategy is a user bundle and owns a schedule, so each document's buildability is the
     // only thing its apply can trip on — exactly the applies that used to land and fail at their
     // first run.
     seed_schedule(setup.core.pool(), STRATEGY).await;
@@ -507,7 +501,6 @@ async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_noth
             .unwrap_err();
 
         assert_eq!(reason(&error), "document_unbuildable", "{tag}: {error:?}");
-        // The reason the RUN would have failed with, verbatim: the builder refuses this same
         // document with the same `IrOuterGraphError`, and apply carries its text through.
         let carried = refusal(&error)["builder_reason"]
             .as_str()
@@ -538,7 +531,6 @@ async fn an_unbuildable_document_outranks_the_missing_schedule() {
         .unwrap()
         .document;
     let [Unbuildable { tag, document, .. }, ..] = unbuildable_documents(&base);
-    // No schedule at all: both guards would refuse this apply, and the document is the one that
     // wins. The premise is asserted so a fixture that grows a schedule reddens here instead of
     // silently testing nothing.
     assert_eq!(
@@ -635,7 +627,6 @@ async fn a_superseded_approval_is_not_already_applied() {
         Some(first.apply_id.as_str())
     );
 
-    // Rolling back to the superseded approval is a normal apply, never the conflict.
     let rollback = setup
         .core
         .apply_strategy(&setup.principal, STRATEGY, &first_hash)
@@ -687,7 +678,6 @@ async fn two_concurrent_applies_of_one_approval_leave_exactly_one_current_row() 
 #[tokio::test]
 async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_revision() {
     let setup = setup().await;
-    // Revision 5 is the newer approval even though revision 2 was approved LATER: `approved_at`
     // must not decide newness (compass D11).
     let (older_approval, older_hash) =
         seed_revision_approval(&setup, STRATEGY, 2, "2026-02-01T00:00:00+00:00").await;
@@ -716,7 +706,6 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
     assert_eq!(newest.approval_id, newer_approval);
     assert_eq!(newest.candidate_revision, 5);
 
-    // The rollback target read is the same total order: the first item IS `newest_approval`, and
     // the live (older) approval is still listed — nothing is hidden once it has been applied.
     let approvals = setup
         .core
@@ -742,7 +731,6 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
     let (approval_id, _) =
         seed_revision_approval(&setup, STRATEGY, 1, "2026-01-01T00:00:00+00:00").await;
 
-    // An approval exists, so the newest side is present while nothing is applied yet.
     let approved_only = setup
         .core
         .strategy_applied(&setup.principal, STRATEGY)
@@ -755,13 +743,11 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
             .map(|newest| newest.approval_id),
         Some(approval_id)
     );
-    // Invariant 1: with no current apply both document fields are null — the read attempted no
     // document replay, so "no document" can never be confused with "the document does not
     // replay".
     assert!(approved_only.applied_document.is_none());
     assert!(approved_only.applied_document_refusal.is_none());
 
-    // No approval and no apply: both sides are null, not a refusal.
     let empty = setup
         .core
         .strategy_applied(&setup.principal, "strategy-with-nothing")
@@ -772,7 +758,6 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
     assert!(empty.applied_document.is_none());
     assert!(empty.applied_document_refusal.is_none());
 
-    // The rollback target read answers an empty list for the same strategy, never a refusal.
     let no_approvals = setup
         .core
         .strategy_approvals(&setup.principal, "strategy-with-nothing")
@@ -827,7 +812,6 @@ async fn the_status_read_returns_the_document_the_current_apply_installed() {
         .expect("the approval is applied");
     assert_eq!(current.approval_id, approval_id);
 
-    // Invariant 3: the document is the frozen one the apply installed, so its canonical hash IS
     // the identity the status reports beside it.
     let applied = status
         .applied_document
@@ -841,7 +825,6 @@ async fn the_status_read_returns_the_document_the_current_apply_installed() {
     );
     assert_eq!(current.content_hash, hash);
 
-    // Invariant 2, the readable side: a document present means no refusal, never both.
     assert!(status.applied_document_refusal.is_none());
     setup.core.close().await.unwrap();
 }
@@ -868,7 +851,6 @@ async fn a_current_apply_whose_document_no_longer_verifies_reports_a_refusal_not
         "the apply row is still current; only its document stopped replaying"
     );
 
-    // Invariant 2, the unreadable side: a failed replay is its own field. Folding it into a null
     // document (or into both-null, as if nothing were applied) fails here.
     assert!(
         status.applied_document.is_none(),
@@ -921,7 +903,6 @@ async fn an_apply_naming_an_absent_approval_row_is_an_error_response_not_a_refus
         .unwrap();
     forget_approval_row(&setup, &approval_id).await;
 
-    // Invariant 4: the replay's outer `Err` is a fault, not a status body. Both a body carrying
     // the empty state's fields and a body carrying this as `applied_document_refusal` fail here.
     let error = setup
         .core
@@ -986,7 +967,6 @@ async fn two_successorless_rows_resolve_to_the_same_row_on_every_read() {
     )
     .await;
 
-    // Read 1, the status route the Canvas and the intake share.
     let status = setup
         .core
         .strategy_applied(&setup.principal, STRATEGY)
@@ -1001,7 +981,6 @@ async fn two_successorless_rows_resolve_to_the_same_row_on_every_read() {
         "`applied_at DESC, apply_id DESC` names the winner"
     );
 
-    // Read 2, `refuse_apply`'s probe, reached through a repeat apply of the current approval.
     let repeat = setup
         .core
         .apply_strategy(&setup.principal, STRATEGY, &hash)
@@ -1014,7 +993,6 @@ async fn two_successorless_rows_resolve_to_the_same_row_on_every_read() {
         "the conflict names the row the status read reports"
     );
 
-    // Read 3, the insert's own supersede-link pick.
     let moved = setup
         .core
         .apply_strategy(&setup.principal, STRATEGY, &next_hash)
@@ -1034,7 +1012,6 @@ async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() 
     let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
     let (other_approval, other_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
-    // Two current applies carrying DIFFERENT approvals: the newer one wins every "current apply"
     // read, while the guard refuses on the older one because it is still successor-less.
     insert_successorless_row(
         &setup,
@@ -1069,8 +1046,6 @@ async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() 
     assert_ne!(approval_id, other_approval);
     setup.core.close().await.unwrap();
 }
-
-// ── The frozen pin snapshot re-compared at Apply (P6) ─────────────────────
 
 /// The package the pinned fixtures nest.
 const PINNED_PACKAGE: &str = "pinned-step";
@@ -1231,7 +1206,6 @@ async fn a_pinned_body_edited_under_an_unchanged_version_refuses_apply_naming_bo
     );
     let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
     let base = candidate_document(&setup).await;
-    // The slot node compose writes makes this document unbuildable on its own, so a `pin_changed`
     // refusal also proves the pin check runs BEFORE buildability.
     let document = pinned_document(&base, PINNED_PACKAGE, &recorded, true);
     let pins = serde_json::json!([{
@@ -1242,7 +1216,6 @@ async fn a_pinned_body_edited_under_an_unchanged_version_refuses_apply_naming_bo
     let (_, hash) = seed_pinned_approval(&setup, "pin-changed", &document, &pins.to_string()).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
-    // Same id and version, different bytes: the recorded pin no longer identifies the body.
     write_package(
         &setup.home,
         PINNED_PACKAGE,
@@ -1281,7 +1254,6 @@ async fn an_unchanged_pin_snapshot_with_a_nested_pin_still_applies() {
         &fragment(NESTED_PACKAGE, "nested bytes"),
     );
     let nested = pattern_hashes(&setup.home)[NESTED_PACKAGE].clone();
-    // The pinned package's own fragment nests the second one, so the frozen snapshot carries a pin
     // the applied document never names — the case array equality on the document alone misses.
     let mut outer = fragment(PINNED_PACKAGE, "original bytes");
     outer["nests"] = serde_json::json!([{
@@ -1300,7 +1272,6 @@ async fn an_unchanged_pin_snapshot_with_a_nested_pin_still_applies() {
     let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
     let base = candidate_document(&setup).await;
     let document = pinned_document(&base, PINNED_PACKAGE, &recorded, false);
-    // Deliberately not in the deterministic order Approve writes: the comparison is a set.
     let pins = serde_json::json!([
         {"id": NESTED_PACKAGE, "version": "1.0.0", "content_hash": nested},
         {"id": PINNED_PACKAGE, "version": "1.0.0", "content_hash": recorded},
@@ -1332,7 +1303,6 @@ async fn a_hashless_carrier_over_a_moved_pin_refuses_an_empty_snapshot() {
         &fragment(NESTED_PACKAGE, "nested bytes"),
     );
     let nested = pattern_hashes(&setup.home)[NESTED_PACKAGE].clone();
-    // The carrier pins the second package by hash from INSIDE its own fragment, so nothing in the
     // outer document names a hash to compare.
     let mut outer = fragment(PINNED_PACKAGE, "original bytes");
     outer["nests"] = serde_json::json!([{
@@ -1352,11 +1322,9 @@ async fn a_hashless_carrier_over_a_moved_pin_refuses_an_empty_snapshot() {
     let base = candidate_document(&setup).await;
     let mut document = pinned_document(&base, PINNED_PACKAGE, "", false);
     document.nests[0].child.content_hash = None;
-    // The approval froze no pin at all — the snapshot the shortcut used to read as "pins nothing".
     let (_, hash) = seed_pinned_approval(&setup, "pin-hashless", &document, "[]").await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
-    // The nested body moved under an unchanged id and version, after the freeze.
     write_package(
         &setup.home,
         NESTED_PACKAGE,
@@ -1387,7 +1355,6 @@ async fn a_hashless_carrier_over_a_moved_pin_refuses_an_empty_snapshot() {
 #[tokio::test]
 async fn a_document_with_no_recorded_pin_never_reads_the_patterns_root() {
     let setup = setup().await;
-    // A regular file where the registry lives: any attempt to scan it is an I/O error, so an
     // admitted apply is proof the pin shortcut never touched the root.
     std::fs::write(setup.home.join("patterns"), "not a directory").unwrap();
     let (_, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
@@ -1415,9 +1382,7 @@ async fn an_undecodable_or_document_inconsistent_pin_snapshot_is_unverifiable() 
     let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
     let base = candidate_document(&setup).await;
     let document = pinned_document(&base, PINNED_PACKAGE, &recorded, false);
-    // The approvals are keyed by content hash, so the second snapshot needs its own document.
     let inconsistent_document = with_version(&document, 2);
-    // Two snapshots no comparison can trust: one whose members are not pins at all, and one that
     // records no pin beside a document that pins something.
     let (_, undecodable_hash) = seed_pinned_approval(
         &setup,

@@ -1,5 +1,4 @@
 /**
- * World KB page — route entry for the Canvas World KB surface (V1.73 β).
  *
  * Reads the world id from the URL and renders {@link WorldKbCanvas}. The page
  * is thin so the canvas can be tested in isolation. Reached from the Work

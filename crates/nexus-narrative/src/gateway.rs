@@ -199,7 +199,6 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
 
 #[allow(clippy::future_not_send)]
 #[allow(clippy::significant_drop_tightening)]
-// `unused_async_trait_impl` (new in clippy 1.98): these methods are `async`
 // by trait contract (the trait is async for eventual storage backends, see
 // the trait docs) and perform no real async I/O — toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
@@ -266,7 +265,6 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         &self,
         query: &NarrativeQuery,
     ) -> Result<NarrativeContext, NarrativeError> {
-        // Phase 1: resolve world state (drop lock before continuing)
         let (world_state, timeline_head_id) = {
             let worlds = self.read_worlds()?;
             let world = worlds
@@ -279,7 +277,6 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
             (state, head)
         };
 
-        // Phase 2: resolve timeline position
         let timeline_position = if let Some(ref branch_id) = query.branch_id {
             let (max_seq, current_event_id, is_fork) = {
                 let events = self.read_events()?;
@@ -330,7 +327,6 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
             None
         };
 
-        // Phase 3: resolve event snapshot
         let event_snapshot = if let Some(ref event_id) = query.event_id {
             let events = self.read_events()?;
             events.get(event_id).map(Self::project_event_snapshot)
@@ -364,8 +360,6 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
     }
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,7 +383,6 @@ mod tests {
         TimelineEvent::new(world_id, branch_id, TimelineEventType::StoryAdvance, seq)
     }
 
-    // T1: get_world_state returns projected world state
     #[tokio::test]
     async fn test_get_world_state() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -403,7 +396,6 @@ mod tests {
         assert!(!state.is_fork);
     }
 
-    // T2: get_world_state returns error for missing world
     #[tokio::test]
     async fn test_get_world_state_not_found() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -415,7 +407,6 @@ mod tests {
         ));
     }
 
-    // T3: get_timeline returns events sorted by sequence
     #[tokio::test]
     async fn test_get_timeline_sorted() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -430,7 +421,6 @@ mod tests {
         assert_eq!(timeline[2].sequence_no, 3);
     }
 
-    // T4: get_timeline filters by branch
     #[tokio::test]
     async fn test_get_timeline_branch_filter() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -445,7 +435,6 @@ mod tests {
         assert_eq!(root[0].branch_id, "fbk_root");
     }
 
-    // T5: get_event returns single event
     #[tokio::test]
     async fn test_get_event() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -458,7 +447,6 @@ mod tests {
         assert_eq!(fetched.sequence_no, 1);
     }
 
-    // T6: get_event returns error for missing event
     #[tokio::test]
     async fn test_get_event_not_found() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -466,7 +454,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // T7: list_worlds returns all stored worlds
     #[tokio::test]
     async fn test_list_worlds() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -477,7 +464,6 @@ mod tests {
         assert_eq!(worlds.len(), 2);
     }
 
-    // T8: get_narrative_context assembles world + timeline + event
     #[tokio::test]
     async fn test_get_narrative_context_full() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -501,7 +487,6 @@ mod tests {
         );
     }
 
-    // T9: get_narrative_context with only world_id returns world state
     #[tokio::test]
     async fn test_get_narrative_context_world_only() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -514,15 +499,12 @@ mod tests {
         assert!(ctx.event_snapshot.is_none());
     }
 
-    // T10: get_narrative_context includes fork info when requested
     #[tokio::test]
     async fn test_get_narrative_context_with_fork_info() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
 
-        // Create parent world
         gw.insert_world(make_world("wld_parent", "Parent World"));
 
-        // Create child world via fork
         let parent = {
             let worlds = gw.read_worlds().unwrap();
             worlds.get("wld_parent").unwrap().clone()
@@ -539,7 +521,6 @@ mod tests {
         assert_eq!(ctx.world.parent_world_id.as_deref(), Some("wld_parent"));
     }
 
-    // T11: TimelinePosition correctly identifies fork branches
     #[tokio::test]
     async fn test_timeline_position_fork_detection() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -555,7 +536,6 @@ mod tests {
         gw.insert_world(child);
         gw.insert_fork(fork);
 
-        // Add an event on the fork branch
         let event = make_event(&child_id, &fork_branch_id, 1);
         gw.insert_event(event);
 
@@ -567,7 +547,6 @@ mod tests {
         assert_eq!(pos.branch_id, fork_branch_id);
     }
 
-    // T12: get_narrative_context returns error for missing world
     #[tokio::test]
     async fn test_get_narrative_context_missing_world() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -576,7 +555,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // T13: World state projection preserves key fields
     #[tokio::test]
     async fn test_world_state_projection_fields() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -591,7 +569,6 @@ mod tests {
         assert_eq!(state.title, "Detailed World");
     }
 
-    // T14: Event snapshot projection preserves key fields
     #[tokio::test]
     async fn test_event_snapshot_projection() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());

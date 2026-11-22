@@ -1,4 +1,4 @@
-//! Permission resolution for ACP and native providers.
+//! Permission resolution for ACP and native providers. See docs/specs/agents/agent-host.md.
 //!
 //! For ACP providers, delegates to `nexus_acp_host::PermissionPolicy::evaluate_for_agent()`.
 //! For native CLI providers, uses host-level risk classification only.

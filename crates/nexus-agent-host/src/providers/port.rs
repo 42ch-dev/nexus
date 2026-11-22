@@ -1,4 +1,4 @@
-//! `ProviderPort` adapter over existing `ProviderAdapter` / `HostFacade`.
+//! `ProviderPort` adapter over existing `ProviderAdapter` / `HostFacade`. See docs/specs/agents/agent-host.md.
 //!
 //! Owns the host→wire mappings (`HostEvent` promotion, provider/operation wire
 //! vocabulary) and the one-outstanding-pull admission at the port boundary.
@@ -299,7 +299,6 @@ impl ProviderEventReader {
             });
         }
 
-        // Atomic, non-blocking admission: a concurrent pull is Busy immediately.
         if self
             .pull_in_flight
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -348,7 +347,6 @@ impl ProviderEventReader {
         let mut events: Vec<NexusProviderHostEvent> = Vec::new();
         let mut used_bytes = 0usize;
 
-        // (1) Deliver what a previous pull had to defer, oldest first.
         if let PullStage::Batch(batch) = self
             .drain_pending(
                 operation_id,
@@ -362,7 +360,6 @@ impl ProviderEventReader {
             return Ok(batch);
         }
 
-        // (2) Read further items, deferring rather than dropping what does not fit.
         if let PullStage::Batch(batch) = self
             .pull_stream_events(
                 operation_id,
@@ -400,7 +397,6 @@ impl ProviderEventReader {
     ) -> PullStage {
         let mut state = self.pull_state.lock().await;
         if let Some(reason) = state.gap {
-            // A stopped window keeps reporting its typed gap. Only an overflow
             // may still have the terminal queued behind it; a lost OBSERVATION
             // source reports no more data at all, and never completion.
             let has_more =
@@ -441,7 +437,6 @@ impl ProviderEventReader {
             });
         }
         if state.terminal_pending {
-            // The terminal the stream already produced is still queued: do
             // not read past it, and do not report completion yet.
             return PullStage::Batch(ProviderEventBatch {
                 operation_id: operation_id.to_string(),
@@ -474,7 +469,6 @@ impl ProviderEventReader {
                     let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
                     let terminal = is_terminal(&event);
 
-                    // An item that exceeds the per-event cap — or that could not
                     // fit an *empty* batch under the caller's byte cap — can
                     // never be delivered, so deferring it would spin forever.
                     // That is a typed gap, never a partial or silent drop.
@@ -506,7 +500,6 @@ impl ProviderEventReader {
                         continue;
                     }
 
-                    // Does not fit this batch: defer it for the next pull.
                     let deferred = self.pull_state.lock().await.defer(wire, size, terminal);
                     if !deferred {
                         self.pull_state.lock().await.gap =
@@ -522,7 +515,6 @@ impl ProviderEventReader {
                 }
                 Some(Err(err)) => {
                     if self.observation {
-                        // A broadcast lag reaches the source as an error and the
                         // source is no longer trustworthy for this operation.
                         return Ok(PullStage::Batch(
                             self.lost_source(operation_id, events).await,
@@ -532,7 +524,6 @@ impl ProviderEventReader {
                 }
                 None => {
                     if self.observation {
-                        // The observation source ended (its sender was
                         // dropped) without this operation's terminal: a resync
                         // gap, never an EOF a consumer could read as a
                         // successful completion.
@@ -540,7 +531,6 @@ impl ProviderEventReader {
                             self.lost_source(operation_id, events).await,
                         ));
                     }
-                    // Stream ended. Completion may only be reported once every
                     // deferred item — a terminal above all — has been delivered.
                     let mut state = self.pull_state.lock().await;
                     if !state.pending.is_empty() {
@@ -786,7 +776,6 @@ impl ProviderPortAdapter {
             .exec(session_id.clone(), op)
             .await
             .map_err(|err| host_error_to_core_error(&err))?;
-        // The returned stream has not been polled, so HostManager still owns
         // the active control operation. Publish that same identity for both
         // cancellation and terminal delivery rather than inventing a wire ID.
         let op_id = match op_id {
@@ -801,7 +790,6 @@ impl ProviderPortAdapter {
                 .and_then(|session| session.active_op_id)
                 .ok_or_else(|| internal_error("control operation has no active host identity"))?,
         };
-        // ACP controls generate their own terminal ID after the synchronous
         // RPC. Correlate it after HostManager applies its lifecycle transition.
         let stream = if control {
             let wire_id = op_id.clone();
@@ -838,7 +826,6 @@ impl ProviderPortAdapter {
             .ok_or_else(|| invalid_input("cancel requires operation_id"))?;
         let op_id = Self::parse_operation_id(op_raw)?;
         let op_id_str = op_id.to_string();
-        // Check negotiated capability before HostManager can transition the
         // session to Cancelling. DSH's adapter-level no-op is not cancellation.
         let sessions = self
             .host
@@ -957,7 +944,6 @@ impl ProviderPort for ProviderPortAdapter {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        // Clone the reader handle and release the map guard before any await:
         // the bounded-pull accounting itself lives in the shared
         // [`ProviderEventReader`], so this port and the core Host observation
         // cannot drift on limits, deferral or terminal delivery.
@@ -1075,7 +1061,6 @@ mod tests {
         let err = second.expect_err("second concurrent pull must be rejected");
         assert_eq!(err.code, CoreErrorCode::Busy);
 
-        // Dropping a parked pull must release admission (guard reset path).
         drop(first);
         port.insert_operation(
             "op-2".to_string(),
@@ -1088,7 +1073,6 @@ mod tests {
         assert_eq!(batch.events.len(), 1);
         assert!(!batch.has_more, "terminal batch must report no more events");
 
-        // Terminal truth stays inspectable rather than vanishing into NotFound.
         let after_terminal = port
             .next("op-2".to_string(), 16, 4096)
             .await
@@ -1154,7 +1138,6 @@ mod tests {
             Box::pin(futures_util::stream::iter(vec![Ok(first), Ok(second)])),
         );
 
-        // A cap that fits exactly one event of this size.
         let cap = wire_size(&status_event("second-event-that-does-not-fit"));
 
         let batch = port
@@ -1189,7 +1172,6 @@ mod tests {
             ])),
         );
 
-        // A cap that fits each item on its own but not both together: the
         // filler is delivered and the terminal must be deferred, not dropped.
         let cap = wire_size(&status_event("filler")) + wire_size(&terminal_event()) - 1;
 
@@ -1209,7 +1191,6 @@ mod tests {
         assert_eq!(second.events.len(), 1, "the terminal must be delivered");
         assert!(!second.has_more, "the delivered terminal completes the op");
 
-        // The terminal is delivered once, not replayed.
         let third = port
             .next("op-term".to_string(), 16, cap)
             .await
@@ -1242,7 +1223,6 @@ mod tests {
             .expect("oversized non-first event must report a gap");
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Oversized);
         assert!(gap.resync_required);
-        // The over-budget event is never delivered partially.
         for event in &batch.events {
             assert!(
                 serde_json::to_vec(event).unwrap().len() <= MAX_EVENT_BYTES,
@@ -1287,7 +1267,6 @@ mod tests {
         let mut state = PullState::default();
         let wire = wire_to_batch_event(&host_event_to_wire(&status_event("e")).unwrap()).unwrap();
         let mut deferred = 0usize;
-        // Fill the emitted + pending budget; the first refusal is the trip point.
         while state.defer(wire.clone(), 64 * 1024, false) {
             deferred += 1;
             assert!(
@@ -1350,7 +1329,6 @@ mod tests {
                 CoreErrorCode::Busy,
                 503,
             ),
-            // The 500 class: launch/protocol failures and internal host
             // invariant violations are typed `internal`/500, never reported as
             // a client error and never collapsed into a generic refusal.
             (
@@ -1402,7 +1380,6 @@ mod tests {
             );
         }
 
-        // The admission boundary maps through the same function, so the two can
         // not drift: policy denial stays 403 rather than collapsing to 400.
         let denied = HostError::PolicyDenied {
             provider_id: None,
@@ -1475,7 +1452,6 @@ mod tests {
 
     #[tokio::test]
     async fn observation_source_loss_is_a_typed_resync_gap() {
-        // The SAME bounded reader is used for both consumers; the observation
         // source is not the operation's own stream, so its loss can never be
         // read as a clean completion.
         let items = || {
@@ -1499,7 +1475,6 @@ mod tests {
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Lagging);
         assert!(gap.resync_required);
 
-        // The loss is latched: a later pull keeps reporting the resync gap
         // instead of turning it into completion.
         let second = observed.next("op-obs".to_string(), 16, 4096).await.unwrap();
         assert!(second.events.is_empty());

@@ -26,11 +26,6 @@ use crate::embedded_skills;
 /// Filename for the primary skill document within each skill directory.
 const SKILL_MD_FILENAME: &str = "SKILL.md";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/// Summary of a skill sync operation.
 #[derive(Debug, Default)]
 pub struct SkillSyncResult {
     /// Skill IDs that were newly installed (did not exist on disk).
@@ -73,11 +68,6 @@ pub enum SkillSyncError {
     ReadEmbedded(String),
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Synchronise embedded skills to the user's local filesystem.
 ///
 /// For each skill in the embedded manifest:
 ///
@@ -97,7 +87,6 @@ pub enum SkillSyncError {
 pub fn sync_embedded_skills(nexus_home: &Path) -> Result<SkillSyncResult, SkillSyncError> {
     let skills_dir = nexus_home.join("skills");
 
-    // Ensure the top-level skills directory exists.
     fs::create_dir_all(&skills_dir)?;
 
     let embedded = embedded_skills::list_embedded_skills();
@@ -111,7 +100,6 @@ pub fn sync_embedded_skills(nexus_home: &Path) -> Result<SkillSyncResult, SkillS
         let embedded_bytes = skill.content.as_bytes();
 
         if dest_file.exists() {
-            // Read the on-disk content for comparison.
             let existing_bytes =
                 fs::read(&dest_file).map_err(|error| SkillSyncError::WriteFile {
                     path: dest_file.clone(),
@@ -134,7 +122,6 @@ pub fn sync_embedded_skills(nexus_home: &Path) -> Result<SkillSyncResult, SkillS
                 });
             }
         } else {
-            // New skill — install.
             fs::create_dir_all(&dest_dir)?;
             fs::write(&dest_file, embedded_bytes).map_err(|error| SkillSyncError::WriteFile {
                 path: dest_file.clone(),
@@ -146,17 +133,11 @@ pub fn sync_embedded_skills(nexus_home: &Path) -> Result<SkillSyncResult, SkillS
         }
     }
 
-    // Detect skills on disk that are no longer embedded.
     detect_removed_skills(&skills_dir, &embedded_ids, &mut result);
 
     Ok(result)
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/// Scan `skills_dir` for subdirectories whose names do not appear in
 /// `embedded_ids` and append them to `result.removed_from_embedded`.
 fn detect_removed_skills(
     skills_dir: &Path,
@@ -182,9 +163,6 @@ fn detect_removed_skills(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,15 +181,12 @@ mod tests {
             .join(SKILL_MD_FILENAME)
     }
 
-    // ----- Test 1: sync to empty dir installs all embedded skills -----
-
     #[test]
     fn sync_to_empty_dir_installs_all_embedded_skills() {
         let temp = tempfile::tempdir().expect("tempdir");
 
         let result = sync_ok(&temp);
 
-        // Should have installed at least one skill (novel-writing-assistant).
         assert!(
             !result.installed.is_empty(),
             "expected at least one installed skill"
@@ -223,13 +198,11 @@ mod tests {
             "no removed skills on first run"
         );
 
-        // Verify the novel-writing-assistant skill file exists and has content.
         let path = skill_md_path(&temp, "novel-writing-assistant");
         assert!(path.exists(), "SKILL.md should exist after sync");
         let content = fs::read_to_string(&path).expect("read SKILL.md");
         assert!(!content.is_empty(), "SKILL.md should have content");
 
-        // Verify the embedded content matches what was written.
         let embedded = embedded_skills::list_embedded_skills();
         let nwa = embedded
             .iter()
@@ -238,17 +211,13 @@ mod tests {
         assert_eq!(content, nwa.content, "written content must match embedded");
     }
 
-    // ----- Test 2: idempotent sync — second run produces no changes -----
-
     #[test]
     fn idempotent_sync_no_changes_on_second_run() {
         let temp = tempfile::tempdir().expect("tempdir");
 
-        // First run: installs everything.
         let first = sync_ok(&temp);
         assert_ne!(first.installed, [] as [std::string::String; 0]);
 
-        // Second run: should skip everything.
         let second = sync_ok(&temp);
         assert!(
             second.installed.is_empty(),
@@ -260,7 +229,6 @@ mod tests {
         );
         assert!(second.conflicts.is_empty(), "no conflicts expected");
 
-        // Skipped count should equal first-run installed count.
         assert_eq!(
             second.skipped.len(),
             first.installed.len(),
@@ -268,23 +236,18 @@ mod tests {
         );
     }
 
-    // ----- Test 3: conflict detection preserves user files -----
-
     #[test]
     fn conflict_detection_preserves_user_modified_files() {
         let temp = tempfile::tempdir().expect("tempdir");
 
-        // First run: install all skills.
         let first = sync_ok(&temp);
         assert_ne!(first.installed, [] as [std::string::String; 0]);
 
-        // Pick the first installed skill and modify its file.
         let modified_skill_id = &first.installed[0];
         let path = skill_md_path(&temp, modified_skill_id);
         let user_content = "USER MODIFIED CONTENT\n";
         fs::write(&path, user_content).expect("write user content");
 
-        // Second run: should detect conflict.
         let second = sync_ok(&temp);
 
         assert!(second.installed.is_empty(), "no new installs expected");
@@ -293,7 +256,6 @@ mod tests {
             "modified skill should NOT be in skipped list"
         );
 
-        // The modified skill should appear in conflicts.
         let conflict = second
             .conflicts
             .iter()
@@ -309,23 +271,18 @@ mod tests {
             "conflict reason should mention differing content"
         );
 
-        // Verify the file was NOT overwritten — user content preserved.
         let on_disk = fs::read_to_string(&path).expect("read file");
         assert_eq!(on_disk, user_content, "user content must be preserved");
     }
-
-    // ----- Test 4: removed_from_embedded detection -----
 
     #[test]
     fn detects_skills_on_disk_not_in_embedded() {
         let temp = tempfile::tempdir().expect("tempdir");
 
-        // Create a fake skill directory that doesn't correspond to any embedded skill.
         let fake_dir = temp.path().join("skills").join("fake-removed-skill");
         fs::create_dir_all(&fake_dir).expect("create fake dir");
         fs::write(fake_dir.join(SKILL_MD_FILENAME), "fake content").expect("write fake file");
 
-        // Run sync.
         let result = sync_ok(&temp);
 
         assert!(
@@ -335,24 +292,19 @@ mod tests {
             "fake skill should appear in removed_from_embedded"
         );
 
-        // The fake skill directory should still exist (not deleted).
         assert!(
             fake_dir.exists(),
             "removed skill directory should NOT be deleted"
         );
     }
 
-    // ----- Test 5: error case — read-only destination directory -----
-
     #[test]
     fn read_only_directory_returns_error() {
         let temp = tempfile::tempdir().expect("tempdir");
 
-        // Create the skills dir and then make it read-only.
         let skills_dir = temp.path().join("skills");
         fs::create_dir_all(&skills_dir).expect("create skills dir");
 
-        // On Unix, set the directory to read-only (no write permission).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -362,7 +314,6 @@ mod tests {
         }
 
         // Write a file to make a subdirectory for the skill to "exist".
-        // Actually we need the sync to try to CREATE a subdirectory inside
         // the read-only skills dir.  Since the skills dir is read-only,
         // `create_dir_all` for a new skill subdirectory should fail.
         let result = sync_embedded_skills(temp.path());
@@ -371,17 +322,14 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
 
-            // On Unix, we expect an error because the skills dir is read-only
             // and creating subdirectories inside it will fail.
             assert!(result.is_err(), "sync should fail on read-only directory");
 
-            // Restore permissions so the temp dir can be cleaned up.
             let mut perms = fs::metadata(&skills_dir).expect("metadata").permissions();
             perms.set_mode(0o755);
             let _ = fs::set_permissions(&skills_dir, perms);
         }
 
-        // On non-Unix (Windows), permissions work differently — skip assertion.
         #[cfg(not(unix))]
         {
             let _ = result; // avoid unused variable warning

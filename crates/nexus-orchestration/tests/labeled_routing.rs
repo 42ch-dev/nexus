@@ -16,8 +16,6 @@ fn test_capability_registry() -> CapabilityRegistry {
     CapabilityRegistry::with_builtins()
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
-
 /// Build a minimal preset YAML with N-way labeled next edges.
 fn labeled_preset_yaml(labels: &[(&str, &str)]) -> String {
     let edges: Vec<String> = labels
@@ -116,8 +114,6 @@ states:
 
 /// Build a preset YAML with an orphan label (label referenced in next but not producible).
 fn orphan_label_preset_yaml() -> String {
-    // Deliberate: `missing_target` label does not correspond to any state.
-    // The label "phantom" is valid (references `done`) but the state `missing_target` doesn't exist.
     r#"
 preset:
   id: test-orphan
@@ -143,8 +139,6 @@ states:
 "#
     .to_string()
 }
-
-// ── Tests ──────────────────────────────────────────────────────────────
 
 /// Full preset with 3-way labeled edges loads and passes validation.
 #[test]
@@ -187,7 +181,6 @@ fn hybrid_gonogo_labeled_preset_loads_and_validates() {
 fn orphan_label_detected_at_validation_time() {
     let yaml = orphan_label_preset_yaml();
     let caps = test_capability_registry();
-    // The loader itself should catch unknown state references in `next`.
     let err = nexus_preset::load_preset_from_str(&yaml, &caps).unwrap_err();
     assert!(
         err.problems()
@@ -216,7 +209,6 @@ fn all_embedded_presets_still_parse_regression() {
                     nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
                 for d in &result.diagnostics {
                     if d.severity == nexus_preset::validation::DiagnosticSeverity::Error {
-                        // Known false positive: capability arg drift for creator.inject_prompt.
                         if d.category
                             == nexus_preset::validation::DiagnosticCategory::CapabilityArgDrift
                             && d.message.contains("capability 'creator.inject_prompt'")
@@ -261,7 +253,6 @@ async fn labeled_no_match_does_not_stall_session() {
         .await
         .expect("start_session_with_preset");
 
-    // Set judge context to produce output that won't match any label.
     if let Some(session) = storage.get(&sid.0).await.expect("get session") {
         session
             .context
@@ -271,7 +262,6 @@ async fn labeled_no_match_does_not_stall_session() {
         storage.save(session).await.expect("save session");
     }
 
-    // Run until error or iteration cap.
     let mut errored = false;
     for _ in 0..8 {
         match engine.run_step(&sid).await {

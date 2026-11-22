@@ -1,5 +1,4 @@
 /**
- * World Rules section — V1.166 P2 (DR-64 surfacing half, Task 2) extended by
  * V1.169 P2 T1/T2 with the inline authoring surface (DF-82).
  *
  * Rules section mounted BELOW the findings panel on the world findings page
@@ -67,7 +66,6 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
   }
 
   /**
-   * Close the edit form when the edited rule is Deactivated (qc F-002): the
    * form state is initialized once from the mount-time rule and would keep
    * `status: 'active'` after the list refresh, so a later save could
    * silently reactivate a rule the author just deactivated. Closing here
@@ -173,7 +171,6 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
 }
 
 /**
- * One rule row. Collapsed: status badge (spoke verbatim) + canonical name +
  * kind (open string verbatim) + severity hint badge (T1 token mapping).
  * Expanded: the human `statement`, a definition list with the
  * constraint-carrier summary and the target entry types, plus the T2

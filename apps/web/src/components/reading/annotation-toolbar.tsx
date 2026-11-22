@@ -1,5 +1,4 @@
 /**
- * AnnotationToolbar — V1.89 Deeper Manuscript Reading.
  *
  * Floating toolbar shown when the author selects text in the reading surface.
  * Offers a "Highlight" action that creates a persisted annotation at the

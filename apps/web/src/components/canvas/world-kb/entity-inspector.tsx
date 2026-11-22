@@ -1,5 +1,4 @@
 /**
- * World KB entity inspector — edits a confirmed/rejected/merged KeyBlock entity
  * via `world_kb.patch_entity` (V1.73 P0 A6).
  *
  * Edits title / body / aliases / block_type plus — on holder-capable kinds
@@ -53,7 +52,6 @@ import {
 /** Build the form from a selected node's backing projection. */
 export function formFromEntity(entity: WorldKbEntityProjection): EntityEditForm {
   const mentalRaw = entity.modules?.mental;
-  // Representability gate (preservation discipline rule 1): the structured
   // nine-field editor (plus extras rows) covers plain objects only. A stored
   // NON-object (array, string, number, …) seeds the raw-JSON fallback with
   // the COMPLETE stored value — `mentalRecord` would have read it as '{}',
@@ -85,13 +83,11 @@ export function formFromEntity(entity: WorldKbEntityProjection): EntityEditForm 
     aliasesText: (entity.aliases ?? []).join(', '),
     block_type: entity.block_type,
     mental: mentalForm,
-    // Nonrepresentable stored mental → raw-JSON fallback: the complete
     // stored value seeds the text untouched so an unrelated save is neither
     // dirty nor destructive; structured seeding would read the value as {}
     // and silently discard it on the next edited save.
     mentalRawText: mentalStructured ? null : stringifyJson(mentalRaw),
     mentalExtras,
-    // Nonrepresentable stored belief → raw-JSON fallback (QC1-F001/QC3-001):
     // the complete stored value seeds the text untouched so an unrelated
     // save is neither dirty nor destructive; structured seeding keeps only
     // object rows and would silently shorten the stored array.
@@ -112,7 +108,6 @@ function dirtyFields(
   if (form.block_type !== entity.block_type) fields.push('block_type');
   const canonBody = entity.body ? JSON.stringify(entity.body, null, 2) : '';
   if (form.bodyText !== canonBody) fields.push('body');
-  // Holder-kind gate (QC1-F001/QC3-001): module dirty detection is gated by
   // the same authorization as the rendered editors — a non-holder kind must
   // never author modules (not even a title-only save), and its module
   // content stays read-only.
@@ -218,7 +213,6 @@ function beliefRowsRaw(entity: WorldKbEntityProjection): Array<Record<string, un
 }
 
 /**
- * Stored `modules.belief` as flat editable rows. Known members seed with the
  * exact stored text (absent / null → '', no trimming); every row retains its
  * complete stored content in `original` so untouched members round-trip
  * verbatim.
@@ -235,7 +229,6 @@ function beliefRowsFromEntity(entity: WorldKbEntityProjection): BeliefRowForm[] 
 }
 
 function mentalDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
-  // Raw fallback mode (Greptile P1 fix): text-compared dirty check — an
   // untouched nonrepresentable seed (array, string, …) is NOT dirty, so an
   // unrelated save is never blocked and never rewrites the stored dialect
   // (preservation discipline rule 2, mirror of beliefsDirty).
@@ -256,13 +249,11 @@ function mentalDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boo
 }
 
 /**
- * Exact dirty check: the built whole value must match the stored array
  * verbatim. No normalization on either side — a normalized comparison would
  * hide loss of unknown inner keys or stored whitespace (L2-T2-002).
  */
 function beliefsDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
   const belief = entity.modules?.belief;
-  // Raw fallback mode (QC1-F001/QC3-001): text-compared dirty check — an
   // untouched nonrepresentable seed is NOT dirty, so an unrelated save is
   // never blocked and never rewrites the stored dialect.
   if (form.beliefRawText !== null) {
@@ -273,7 +264,6 @@ function beliefsDirty(form: EntityEditForm, entity: WorldKbEntityProjection): bo
 }
 
 /**
- * Map one daemon 422 entry onto a form field when it carries the frozen
  * prefix grammar; unmatched / whole-dialect entries stay section-level with
  * the original entry text verbatim. The complete editable belief-member set
  * maps 1:1 (holder / proposition / order included, L2-T2-003). A belief
@@ -312,7 +302,6 @@ function mapValidationEntry(
 }
 
 /**
- * Read-only "Mental State" section for non-holder kinds (V1.164 P3 Task 3,
  * AC-V1164-12/15 + PD-16): populated values render label + JSON rows, no
  * input controls, no create affordance. Returns null when nothing populated.
  */
@@ -403,7 +392,6 @@ function MentalStateSection({
       </button>
       {open ? (
         form.mentalRawText !== null ? (
-          /* Raw-JSON fallback (Greptile P1 fix): the stored member is a
              non-object value the structured nine-field editor cannot
              represent (stored array, string, …). The complete stored value
              seeds the textarea untouched (not dirty); the author repairs it
@@ -515,7 +503,6 @@ function BeliefSection({
       </button>
       {open ? (
         rawText !== null ? (
-          /* Raw-JSON fallback (QC1-F001/QC3-001): the stored array has a shape
              the structured row editor cannot represent (non-array, or a
              non-object row). The complete stored value seeds the textarea
              untouched (not dirty); the author repairs it deliberately as
@@ -669,7 +656,6 @@ export interface EntityInspectorProps {
   /** The canonical projection backing the node (for form seed + diff). */
   entity: WorldKbEntityProjection;
   /**
-   * Called when a 409 conflict is detected. The canvas renders the
    * `patch_entity` conflict modal from this payload.
    */
   onConflict: (payload: {
@@ -698,20 +684,17 @@ export function EntityInspector({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Holder-kind gate (V1.164 PD-8/PD-12): the module editors only open on
   // holder-capable kinds; other kinds keep the PD-16 read-only rendering.
   const isHolderKind = HOLDER_BLOCK_TYPES.includes(entity.block_type);
 
-  // PD-16 read-only path: null / undefined / non-object modules.mental skips
   // the read-only section — no empty panel, no placeholder rows.
   const mentalReadOnly = mentalRecord(entity);
 
-  // Reseed when the selection (or an external reseed signal) changes.
   useEffect(() => {
     setForm(formFromEntity(entity));
     setValidationErrors([]);
     setFieldErrors({});
-  }, [entity.key_block_id, reseedSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entity.key_block_id, reseedSignal]);
 
   function update<K extends keyof EntityEditForm>(field: K, value: EntityEditForm[K]) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -724,7 +707,6 @@ export function EntityInspector({
     setValidationErrors([]);
     setFieldErrors({});
 
-    // Wire index → form row map of THIS submit's built belief array (QC1-F003):
     // the daemon enumerates the compacted wire array, so its 422 row
     // addresses must be translated before they are mapped onto form rows.
     let beliefWireToForm: readonly number[] = [];
@@ -746,11 +728,9 @@ export function EntityInspector({
         return;
       }
     }
-    // Holder-kind gate (QC1-F001/QC3-001): `dirty` can only contain
     // 'modules' on holder-capable kinds, and the emission below re-checks the
     // gate — a non-holder save never authors modules.
     if (isHolderKind && dirty.includes('modules')) {
-      // Whole-first-level-value upsert (AR-4/PD-12): each dirty dialect is
       // written complete — an untouched dialect is never included, so a
       // belief-only edit cannot wipe mental and vice versa. `audience` is
       // governance and is never emitted here.
@@ -812,13 +792,11 @@ export function EntityInspector({
             setValidationErrors(mapped.filter((m) => !m.key).map((m) => m.message));
             return;
           }
-          // Conflict (409) — hand off to the canvas to render the modal.
           const details = error as unknown as {
             status: number;
             details?: { current_version?: number; conflicting_path?: string; entity_id?: string };
           };
           if (details.status === 409) {
-            // Retain the exact per-dialect dirty set (L2-T2-001): the reapply
             // must rewrite only the dialects this submit intended — the other
             // dialect may have been populated concurrently while the modal
             // was open, and inferring intent from the captured form is
@@ -837,7 +815,6 @@ export function EntityInspector({
               dirtyDialects,
             });
           }
-          // Any other status (500/403/dropped network) is surfaced as a toast
           // by the hook's global onError (see usePatchWorldKbEntity) — never
           // silently swallowed.
         },

@@ -103,7 +103,6 @@ function isSameOrigin(origin: string, host: string | undefined, protocol: string
   try {
     parsed = new URL(origin);
   } catch {
-    // Opaque origins (`null`, a non-URL value) are never same-origin.
     return false;
   }
   return parsed.protocol === `${protocol}:` && parsed.host.toLowerCase() === host.toLowerCase();

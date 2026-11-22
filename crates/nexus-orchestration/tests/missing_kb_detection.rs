@@ -124,7 +124,6 @@ async fn seed_world(pool: &SqlitePool) {
 
 async fn insert_novel_writing_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
-    // v1.191 P1 T13: the stored production run identity is what the
     // finalize-time detection is admitted under (`current_session_id` FK), so
     // the run row is seeded with it.
     let run_id = format!("run_{schedule_id}");
@@ -153,7 +152,6 @@ async fn insert_novel_writing_schedule(pool: &SqlitePool, schedule_id: &str, wor
     )
     .bind(schedule_id)
     .bind(CREATOR)
-    // v1.191 P1 T13: an empty run identity is a skip, never a fabricated
     // default session, so the fixture seeds the real one.
     .bind(&run_id)
     .bind(format!("missing-{work_id}"))
@@ -198,8 +196,6 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
     (dir, body_rel.to_string())
 }
 
-// ── AC1: finalize-time detection writes advisory log ─────────────────────────
-
 #[tokio::test]
 async fn ac1_finalize_detection_writes_missing_log() {
     let (_dir, pool) = test_pool().await;
@@ -227,7 +223,6 @@ async fn ac1_finalize_detection_writes_missing_log() {
 
     assert!(count >= 2, "expected ≥2 missing candidates, got {count}");
 
-    // Advisory log written under Works/<work_ref>/Logs/kb/missing/.
     let log_dir = ws_dir
         .path()
         .join("Works")
@@ -242,7 +237,6 @@ async fn ac1_finalize_detection_writes_missing_log() {
         .collect();
     assert!(!entries.is_empty(), "expected at least one log file");
 
-    // Log file name contains chapter.
     let log_path = &entries[0].path();
     let name = log_path.file_name().unwrap().to_string_lossy();
     assert!(
@@ -260,8 +254,6 @@ async fn ac1_finalize_detection_writes_missing_log() {
         "log should mention 'Marcus Vale': {body}"
     );
 }
-
-// ── AC4: missing candidates are NOT inserted into kb_extract_jobs ───────────
 
 #[tokio::test]
 async fn ac4_missing_candidates_not_written_to_extract_jobs() {
@@ -294,14 +286,11 @@ async fn ac4_missing_candidates_not_written_to_extract_jobs() {
     );
 }
 
-// ── AC6: existing confirmed KnowledgeEntryRecord filters out known entity ────────────────
-
 #[tokio::test]
 async fn ac6_existing_key_block_filters_known_entity() {
     let (_dir, pool) = test_pool().await;
     seed_world(&pool).await;
 
-    // Confirm a KnowledgeEntryRecord for "Aria Stormblade" before finalize.
     let store = SqliteKbStore::new(pool.clone());
     let mut kb = KnowledgeEntryRecord::new(
         WORLD,
@@ -331,7 +320,6 @@ async fn ac6_existing_key_block_filters_known_entity() {
     .await
     .unwrap();
 
-    // "Bran Vale" should be missing; "Aria Stormblade" should be filtered.
     assert!(count >= 1, "expected ≥1 missing candidate, got {count}");
 
     let log_dir = ws_dir
@@ -357,8 +345,6 @@ async fn ac6_existing_key_block_filters_known_entity() {
         "log should NOT mention confirmed 'Aria Stormblade': {body}"
     );
 }
-
-// ── Non-novel-writing schedules are a no-op ─────────────────────────────────
 
 #[tokio::test]
 async fn non_novel_writing_schedule_is_noop() {
@@ -400,8 +386,6 @@ async fn non_novel_writing_schedule_is_noop() {
     .unwrap();
     assert_eq!(count, 0, "non-novel-writing schedule must be a no-op");
 }
-
-// ── Missing workspace_dir is a safe no-op ────────────────────────────────────
 
 #[tokio::test]
 async fn missing_workspace_dir_is_noop() {

@@ -39,7 +39,6 @@ impl OutboxPool {
         db_path: &Path,
         max_size: usize,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
-        // Checked conversion: `max_size` is usize from the caller; a value
         // beyond the `u32` connection domain is rejected rather than
         // truncated (fail-closed).
         let max_connections = u32::try_from(max_size).map_err(|_| {
@@ -82,7 +81,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
 
-        // Create the file so sqlx can open it
         std::fs::File::create(&db_path).unwrap();
 
         (tmp, db_path)
@@ -91,7 +89,6 @@ mod tests {
     #[tokio::test]
     async fn pool_max_size_beyond_u32_is_rejected_not_truncated() {
         let (_tmp, db_path) = create_test_db();
-        // A max_size above the u32 connection domain must fail closed rather
         // than truncate to a smaller pool.
         let huge = usize::try_from(u64::from(u32::MAX)).unwrap() + 1;
         let err = match OutboxPool::new(&db_path, huge).await {
@@ -110,7 +107,6 @@ mod tests {
         let pool = OutboxPool::new(&db_path, 2)
             .await
             .expect("Pool creation should succeed");
-        // Pool is usable
         let _ = pool.inner();
     }
 
@@ -157,7 +153,6 @@ mod tests {
             .await
             .expect("test table creation failed");
 
-        // Spawn 4 concurrent tasks that each insert and read
         let handles: Vec<_> = (0..4)
             .map(|i| {
                 let pool = pool.clone();

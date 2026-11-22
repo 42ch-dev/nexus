@@ -1,6 +1,5 @@
 /**
  * @nexus/design-tokens — shared token compiler type declarations.
- *
  * Exposes the internal tooling signatures for the Studio Vite plugin and the
  * Node generation/check scripts. This is NOT a package public API surface.
  */

@@ -1,5 +1,4 @@
 /**
- * useSemanticZoom — V1.123 P4 Task 3.
  *
  * Layer change is a discrete semantic swap (projection + feel + default
  * zoom), NOT continuous infinite viewport zoom that slowly morphs layouts
@@ -112,7 +111,6 @@ export function computeSemanticZoomTransition<TLayer extends string>(args: {
   if (!Number.isFinite(currentZoom)) return null;
 
   if (currentLayer === chain.coarseLayer) {
-    // Zooming IN past the upper threshold swaps coarse → fine.
     if (currentZoom > t.zoomInThreshold) {
       return chain.fineLayer;
     }
@@ -120,14 +118,12 @@ export function computeSemanticZoomTransition<TLayer extends string>(args: {
   }
 
   if (currentLayer === chain.fineLayer) {
-    // Zooming OUT past the lower threshold swaps fine → coarse.
     if (currentZoom < t.zoomOutThreshold) {
       return chain.coarseLayer;
     }
     return null;
   }
 
-  // Current layer is outside the chain — no swap.
   return null;
 }
 
@@ -158,7 +154,6 @@ export interface UseSemanticZoomOptions<TLayer extends string> {
   chain: SemanticZoomLayerChain<TLayer>;
   thresholds?: SemanticZoomThresholds;
   /**
-   * Test-only override of the zoom source. Production callers MUST omit
    * this; the hook wires to `useViewport()` from `@xyflow/react`.
    */
   getZoom?: () => number;
@@ -171,14 +166,12 @@ export function useSemanticZoom<TLayer extends string>({
   thresholds,
   getZoom,
 }: UseSemanticZoomOptions<TLayer>): void {
-  // `useViewport()` re-renders the subscriber on every viewport change.
   // Always called (Rules of Hooks); when `getZoom` is provided (tests), the
   // RF read is discarded in favor of the test stub. Production callers omit
   // `getZoom` so the hook reads the live RF zoom.
   const viewport = useViewport();
   const currentZoom = getZoom ? getZoom() : viewport.zoom;
 
-  // Skip the FIRST observation so the hook does not fire on initial mount.
   // React Flow's default viewport zoom is 1.0; on a Brief (coarse) surface
   // entry, 1.0 > 0.70 would immediately swap to Narrative — wrong. The
   // semantic zoom contract is "fire on user-initiated zoom change", not
@@ -197,12 +190,10 @@ export function useSemanticZoom<TLayer extends string>({
 
   useEffect(() => {
     if (previousZoomRef.current === null) {
-      // First observation after mount — record baseline, do not fire.
       previousZoomRef.current = currentZoom;
       return;
     }
     if (previousZoomRef.current === currentZoom) {
-      // No zoom change since last observation (e.g., parent re-rendered
       // for an unrelated reason). Do not fire.
       return;
     }
@@ -220,7 +211,6 @@ export function useSemanticZoom<TLayer extends string>({
   }, [activeLayer, currentZoom, chain, thresholds, onLayerChange]);
 }
 
-// ─── React Flow bridge component ───────────────────────────────────────────
 
 import type { ReactNode } from 'react';
 

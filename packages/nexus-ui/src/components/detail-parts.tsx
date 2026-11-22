@@ -10,7 +10,6 @@ import {
 import { cn } from '../lib/cn';
 
 /**
- * FieldRow — DESIGN.md §Component Primitives/detail-parts family.
  *
  * V1.150 P3 — read-only detail row (label/value pair) behind the app-side
  * work-timeline-inspector / timeline-moment-inspector / modules-page

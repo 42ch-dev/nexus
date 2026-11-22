@@ -40,7 +40,6 @@ export type TransportErrorKind =
   /** TCP refuse, DNS failure, offline, or undifferentiated fetch throw. */
   | 'network'
   /**
-   * Certificate failure (best-effort). Browsers hide the precise reason — when
    * the throw carries no detectable TLS signal, the classifier falls back to
    * `network` rather than over-claiming cert rejection.
    */
@@ -48,7 +47,6 @@ export type TransportErrorKind =
   /** Explicit abort / timeout (AbortError, AbortSignal.timeout). */
   | 'timeout'
   /**
-   * Daemon returned `text/html` with HTTP 200 — release-mode SPA fallback for
    * an unrouted path. Treated as transport-class because the request never
    * reached the API layer.
    */
@@ -73,7 +71,6 @@ export class NexusClientError extends Error {
   readonly code: string;
   readonly details: unknown;
   /**
-   * Transport-failure sub-classification. Present iff `status === 0`
    * (transport unreachable). HTTP errors (`status >= 400`) leave this
    * `undefined`; their recovery UX is driven by `code` / `details` instead.
    */
@@ -95,7 +92,6 @@ export class NexusClientError extends Error {
   }
 
   /**
-   * True when the daemon orchestration engine is not running (503 /
    * `service_unavailable` / message contains "engine not available").
    * List surfaces map this to honest unavailable/empty UX — not the generic
    * `common.error.title` crash framing.
@@ -110,7 +106,6 @@ export class NexusClientError extends Error {
   }
 
   static fromBody(status: number, body: unknown): NexusClientError {
-    // The daemon runtime wraps the canonical ErrorResponse under `error`:
     //   { success: false, error: { code, message, details?, request_id? } }
     // (see `ApiErrorResponse` in
     // crates/nexus-daemon-runtime/src/api/errors.rs). Some orchestration

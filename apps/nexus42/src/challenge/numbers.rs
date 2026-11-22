@@ -8,7 +8,6 @@ use std::collections::HashMap;
 /// Build the static lookup table for number words.
 fn build_number_map() -> HashMap<&'static str, u32> {
     let mut m = HashMap::new();
-    // Units
     m.insert("zero", 0);
     m.insert("one", 1);
     m.insert("two", 2);
@@ -19,7 +18,6 @@ fn build_number_map() -> HashMap<&'static str, u32> {
     m.insert("seven", 7);
     m.insert("eight", 8);
     m.insert("nine", 9);
-    // Teens
     m.insert("ten", 10);
     m.insert("eleven", 11);
     m.insert("twelve", 12);
@@ -30,7 +28,6 @@ fn build_number_map() -> HashMap<&'static str, u32> {
     m.insert("seventeen", 17);
     m.insert("eighteen", 18);
     m.insert("nineteen", 19);
-    // Tens
     m.insert("twenty", 20);
     m.insert("thirty", 30);
     m.insert("forty", 40);
@@ -39,7 +36,6 @@ fn build_number_map() -> HashMap<&'static str, u32> {
     m.insert("seventy", 70);
     m.insert("eighty", 80);
     m.insert("ninety", 90);
-    // Hundred
     m.insert("hundred", 100);
     m
 }
@@ -67,11 +63,9 @@ pub fn convert_number_words(text: &str) -> String {
 
     while i < words.len() {
         if let Some(&val) = map.get(words[i]) {
-            // Check if next word is a units digit that could form a compound number
             if (20..=90).contains(&val) && i + 1 < words.len() {
                 if let Some(&next_val) = map.get(words[i + 1]) {
                     if (1..=9).contains(&next_val) {
-                        // Compound: "thirty five" → 35
                         result.push((val + next_val).to_string());
                         i += 2;
                         continue;

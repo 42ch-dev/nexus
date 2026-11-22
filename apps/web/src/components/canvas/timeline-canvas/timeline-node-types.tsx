@@ -1,5 +1,4 @@
 /**
- * Timeline canvas node types — V1.122 P1 T2 + V1.123 P1 T2 + V1.124 P0 T2 +
  * V1.147 P2 T3.
  *
  * Four node kinds, all projecting onto the Timeline surface:
@@ -68,8 +67,6 @@ export const TimelineBriefEraNode = memo(function TimelineBriefEraNode({
   const { t } = useTranslation('canvas');
   const anchorCount = anchorCountOf(d);
 
-  // Time-span label: prefer `start_hint → end_hint`; fall back to whichever
-  // hint exists; fall back to the temporal-unknown pill when neither is set.
   const span = (() => {
     if (d.startHint && d.endHint) {
       return t('timeline.briefEraNode.span', {
@@ -224,7 +221,6 @@ export const TimelineComputeResultNode = memo(function TimelineComputeResultNode
   const { t } = useTranslation('canvas');
   const payload = d.compute;
 
-  // Defensive: a compute node always carries a payload (the adapter builds
   // them together); render nothing honest otherwise.
   if (!payload) return null;
 

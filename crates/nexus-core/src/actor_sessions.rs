@@ -302,7 +302,6 @@ pub(crate) fn character_terminal_for(
         {
             Some(CharacterTerminal::Fault)
         }
-        // The session this operation runs on stopped before a terminal: the run
         // can no longer complete honestly, so it is a fault.
         HostEvent::SessionStopped(stopped) if &stopped.session_id == session_id => {
             Some(CharacterTerminal::Fault)
@@ -465,7 +464,6 @@ fn settle_terminal_locked(
     maps.terminal_fifo.push_back(operation_id.clone());
     while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
         if let Some(evicted) = maps.terminal_fifo.pop_front() {
-            // Removing the record drops its observation reader with it: an
             // evicted operation has no detailed outcome left to observe.
             maps.character_operations.remove(&evicted);
         }
@@ -854,7 +852,6 @@ impl ActorSessionRegistry {
                 Ok(())
             }
             OperationPhase::CancelRequested => {
-                // A confirmed latch upgrades a provisional one in place.
                 record.cancel_confirmed = true;
                 Ok(())
             }
@@ -1118,7 +1115,6 @@ impl ActorSessionRegistry {
         maps.by_session.clear();
         maps.key_locks.clear();
         maps.indexed_operations.clear();
-        // The observation readers die with the authority's Actor side: a
         // closed registry exposes no stream to pull. The records themselves
         // stay (their terminal outcomes are read owner-scoped until the
         // authority is gone), so the reader slot is what is cleared.
@@ -1159,7 +1155,6 @@ impl ActorSessionRegistry {
         self.live_drains.fetch_add(1, Ordering::AcqRel);
         let live = Arc::clone(&self.live_drains);
         let settled = Arc::clone(&self.drain_settled);
-        // The session entry and its increment are taken under the maps lock, so
         // a joiner observes either this drain or an entry that already counts
         // it — an entry is never removed while an increment is in flight.
         let session = {
@@ -1173,7 +1168,6 @@ impl ActorSessionRegistry {
         let maps_handle = Arc::clone(&self.maps);
         let handle = tokio::spawn(async move {
             drain.await;
-            // Publication order matters: the count drops BEFORE the wakeup, so
             // a joiner that registered and then read a non-zero count is still
             // woken by this settlement.
             //
@@ -1183,7 +1177,6 @@ impl ActorSessionRegistry {
             // would let one joiner recheck zero while a second stayed suspended.
             live.fetch_sub(1, Ordering::AcqRel);
             settled.notify_waiters();
-            // The session's accounting entry dies with its last live unit —
             // which is this drain, or an admission that has not retired yet.
             retire_session_liveness(&maps_handle, &session_id, &session_settled);
         });
@@ -1276,7 +1269,6 @@ impl ActorSessionRegistry {
             let Some(session) = session else {
                 return;
             };
-            // Arm AND enable the notification BEFORE reading the count, exactly
             // like the authority-wide join: the settlement broadcasts without
             // storing a permit, so a waiter that was not registered yet would
             // miss its only wakeup and wait on work that already settled.
@@ -1451,7 +1443,6 @@ impl ActorSessionRegistry {
                 self.reclaim(&key, &lock);
                 return Err(host_err(&err));
             }
-            // Settle the session's own drains before anything about it is
             // retired: the manager released the session, while the drain of the
             // session's original exec stream — and the knowledge leases it
             // holds — is still this authority's to join.
@@ -1459,7 +1450,6 @@ impl ActorSessionRegistry {
             if still_indexed {
                 let mut maps = self.maps();
                 Self::evict_locked(&mut maps, &key, &session_id);
-                // The shutdown removes the session: its indexed-operation
                 // fallback entries go with it (a later cancel must not resolve
                 // a session that no longer exists), and so do the observation
                 // readers of its operations — a released session exposes no

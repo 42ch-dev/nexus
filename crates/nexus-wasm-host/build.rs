@@ -40,7 +40,6 @@ mod build_walk;
 const MODULE_IDS: &[&str] = &["basic-combat"];
 
 fn main() {
-    // Declare the custom cfg flag early so rustc does not warn about
     // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
 
@@ -49,9 +48,6 @@ fn main() {
     );
     let embedded_root = manifest_dir.join("embedded-modules");
 
-    // Detect whether the wasm32-unknown-unknown target is installed before
-    // attempting any WASM compilation. A missing target is the overwhelmingly
-    // common reason `cargo check --all` breaks on developer machines that have
     // not added it — and `cargo check` does not need the compiled blobs, just
     // type-check completion. We emit a cfg flag so the crate's source can
     // switch to empty stubs when the target is absent (R-V1139P0-005).
@@ -62,8 +58,6 @@ fn main() {
              runtime. Install the target with: rustup target add wasm32-unknown-unknown"
         );
         println!("cargo:rustc-cfg=nexus_no_wasm_target");
-        // Still create empty directory so anything that stat-checks the path
-        // does not trip over a missing dir.
         create_dir_all_or_die(&embedded_root);
         return;
     }
@@ -98,7 +92,6 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     let src_cargo = src_dir.join("Cargo.toml");
     let src_code = src_dir.join("src");
 
-    // Tell Cargo to re-run this script when the module's sources change.
     // Per-file directives (not dir-level): `cargo:rerun-if-changed=<dir>` does
     // NOT recurse into subdirectories, so an edit to a nested module source
     // file (e.g. `modules/basic-combat/src/lib.rs`) would otherwise go
@@ -124,12 +117,10 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
 
     create_dir_all_or_die(&dest_dir);
 
-    // Always mirror the manifest (tiny) so the embedded copy tracks the source.
     copy_or_die(&src_manifest, &dest_manifest, "manifest.json");
 
     if !is_fresh(&dest_wasm, &src_cargo, &src_manifest, &src_code) {
         compile_module(id, &src_dir);
-        // cdylib artifact names use underscores (crate name `basic-combat` →
         // `basic_combat.wasm`); the embedded id keeps the dash.
         //
         // The nested module build inherits `CARGO_TARGET_DIR` when the repo's
@@ -155,7 +146,6 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
     }
 
-    // Content-based pairing (Greptile P1): the embedded manifest must declare
     // the SHA-256 of the EXACT bytes it ships with. Recompute on every run
     // (not just on recompile) so a staged pair from an older build — whose
     // manifest predates the field — is upgraded to a self-consistent one.

@@ -1,5 +1,4 @@
 /**
- * Vitest global setup for the Design Studio — jest-dom matchers only.
  *
  * The studio is a read-only gallery with no daemon transport, so we don't
  * wire msw. This setup mirrors apps/web conventions where applicable, but
@@ -12,7 +11,6 @@ import { beforeEach } from 'vitest';
 import { i18n } from '@/lib/i18n/config';
 
 /**
- * jsdom does not implement `window.matchMedia`, and Vitest 4's stricter
  * `vi.spyOn` rejects spying on the undefined property the jsdom environment
  * leaves behind (the gallery fixtures spy on it). Install a no-op polyfill once
  * so those spies work and guarded `window.matchMedia(...)` reads resolve to
@@ -37,7 +35,6 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 }
 
 /**
- * Node 24+ may install an experimental `localStorage` shim that shadows
  * jsdom's implementation. ThemeProvider tests need a working store.
  */
 function ensureLocalStorage() {
@@ -47,7 +44,6 @@ function ensureLocalStorage() {
     window.localStorage.removeItem('__nexus_studio_test__');
     return;
   } catch {
-    // Fall through to a minimal in-memory polyfill.
   }
 
   const store = new Map<string, string>();
@@ -75,7 +71,6 @@ function ensureLocalStorage() {
 ensureLocalStorage();
 
 /**
- * Shared app components imported via @web-setup/* use react-i18next. Reset to
  * English before each test so assertions against the English source catalog are
  * stable regardless of localStorage/system locale state.
  */

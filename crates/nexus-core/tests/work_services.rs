@@ -107,7 +107,6 @@ async fn work_selection_invalidates_foreign_context() {
         "queued"
     );
 
-    // A foreign Creator's row in the same database must not become selectable.
     let guarded = init_guarded_pool(&db, "author").await.unwrap();
     let pool = guarded.clone_pool();
     nexus_local_db::creators::ensure_creator_row(&pool, "other", "Other")
@@ -144,7 +143,6 @@ async fn work_selection_invalidates_foreign_context() {
         vec![&second]
     );
 
-    // Core-owned nullable patch keeps absence / clear / set distinct.
     core.patch_work(
         &principal,
         second.clone(),
@@ -459,7 +457,6 @@ async fn work_selection_invalidates_foreign_context() {
     ));
     switched.close().await.unwrap();
 
-    // A stored workspace switch invalidates every operation on the old opened pool.
     select_creator(home, "other", "default");
     assert!(matches!(
         core.list_works(&principal, query(serde_json::json!({})))
@@ -528,7 +525,6 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
     .unwrap();
     let principal = core.active_principal().await.unwrap();
 
-    // Cursor parity: absent and `v1:0` decode to offset 0.
     assert_eq!(
         core.list_works(&principal, query(serde_json::json!({})))
             .await
@@ -559,7 +555,6 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
         );
     }
 
-    // Sort parity: unknown keys carry the resource-specific code and verbatim message.
     let Err(CoreError::InvalidInput { field, reason }) = core
         .list_works(&principal, query(serde_json::json!({"sort": "bad"})))
         .await
@@ -586,7 +581,6 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
             "unsupported sort key ''; allowed: updated_at, title, status, intake_status"
         )
     );
-    // Empty, whitespace-only, and well-formed multi-key inputs fall back to the
     // default ordering instead of erroring.
     for sort in ["", "   ", ",,status,,-title,,"] {
         assert!(
@@ -634,7 +628,6 @@ async fn internal_database_fault_carries_legacy_code() {
         .unwrap()
         .world_id;
     pool.close().await;
-    // Idempotent migrations only create missing versions — a dropped table stays gone.
     // Drop only `works` while the core is open so the world check passes and the
     // INSERT is what fails, surfacing the legacy DATABASE_ERROR classification.
     let dropper = init_guarded_pool(&db, "author").await.unwrap();
@@ -718,7 +711,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         .unwrap()
         .world_id;
     let work_id = create(&core, &principal, &world, "Locked Work").await;
-    // Reconcile resolves story_ref and the creative root BEFORE its lock
     // phase — seed both so the mutator actually reaches lock acquire.
     core.patch_work(
         &principal,
@@ -737,7 +729,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         serde_json::to_vec(&serde_json::json!({"local_root": home.join("creative")})).unwrap(),
     )
     .unwrap();
-    // First lock attempt wins; a later attempt under a different holder label
     // is refused as a lock conflict naming the holder that already owns the
     // Work. Neither label is asserted — only the conflict class is.
     let lock_seed = init_guarded_pool(&db, "author").await.unwrap();
@@ -821,7 +812,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
     };
     assert_lock_conflict(&resource, &work_id, &holder);
 
-    // Refusals must leave the durable row consistent: the seeded fields
     // survive and the holder is still the one that acquired the lock.
     let unchanged = core.get_work(&principal, work_id.clone()).await.unwrap();
     assert_eq!(unchanged.title, "Locked Work");
@@ -832,7 +822,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         Some(holder.as_str())
     );
 
-    // Releasing the holder restores writability, and the mutator's own holder
     // is gone once it returns.
     assert!(nexus_local_db::release_runtime_lock(
         &lock_pool,
@@ -960,7 +949,6 @@ async fn work_lifecycle_mutators_reject_read_only_core() {
     core.close().await.unwrap();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Migrated from the retired daemon HTTP fixtures (P2-T4): `works_api.rs`,
 // `findings_api.rs`, `selection_pool.rs`, `delete_routes_api.rs`,
 // `multi_work_switch.rs`, `pagination_info_parity.rs`. Only nonduplicated
@@ -1183,7 +1171,6 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
     assert_eq!(details.inspiration_log, [] as [serde_json::Value; 0]);
     assert_eq!(details.schedule_ids, [] as [std::string::String; 0]);
 
-    // A terminal stage_status without an explicit advance is refused.
     let error = core
         .patch_work(
             &principal,
@@ -1201,7 +1188,6 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
         "got {error:?}"
     );
 
-    // `force` overrides the terminal gate.
     let forced = core
         .patch_work(
             &principal,
@@ -1217,7 +1203,6 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
         .unwrap();
     assert_eq!(forced.stage_status, "complete");
 
-    // The stage branch releases its runtime lock, so the next advance lands.
     // The intake gate stays independent of the stage status: it survives a
     // stage advance unchanged.
     let intake = core
@@ -1263,7 +1248,6 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
         "stage PATCH must release the runtime lock"
     );
 
-    // An unknown stage value is refused and leaves the row untouched.
     let error = core
         .patch_work(
             &principal,
@@ -1341,7 +1325,6 @@ async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only()
     };
     let (db, work_id) = db;
 
-    // Read-only access must not promote: the guard is writer-only.
     let reader = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::ReadOnly,
@@ -1465,7 +1448,6 @@ async fn retained_work_foreign_creator_mutations_are_not_found() {
         .unwrap();
     assert_eq!(foreign_title, "Foreign", "foreign row must be untouched");
 
-    // Positive control: the owning creator still mutates its own Work.
     assert!(core.get_work(&principal, own).await.is_ok());
     pool.close().await;
     core.close().await.unwrap();
@@ -1622,7 +1604,6 @@ async fn retained_pool_promotion_exclusivity_idempotence_and_archive() {
         "queued"
     );
 
-    // Promoting the same target again is idempotent — no duplicate row.
     let again = promoted(beta.clone()).await;
     assert_eq!(again.status, "active");
     let listed = core.list_work_pool(&principal, pool_query()).await.unwrap();
@@ -1823,7 +1804,6 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
     .await
     .unwrap();
 
-    // A forged body creator_id is refused and the pool is unchanged.
     let error = core
         .set_work_pool_active(
             &principal,
@@ -1852,7 +1832,6 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
         Some(work_id.as_str())
     );
 
-    // Matching and omitted creator_id are the legitimate callers.
     for creator_id in [Some(principal.creator_id().to_string()), None] {
         let entry = core
             .set_work_pool_active(
@@ -1868,7 +1847,6 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
         assert_eq!(entry.status, "active");
     }
 
-    // Rows owned by another creator are unreachable by ID. `archive_*` surfaces
     // the creator-scoped no-row case through the storage carrier (the daemon
     // mapped the same DAO fault onto its 404 envelope); the security-relevant
     // half is that the foreign row is never mutated.
@@ -1988,7 +1966,6 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         )
         .await
         .unwrap();
-    // The review-stage entry point persists chapter, kind and rule suggestion.
     let from_review = core
         .create_finding_from_review(
             &principal,
@@ -2050,7 +2027,6 @@ async fn retained_findings_crud_filters_and_creator_scope() {
     assert_eq!(blockers.items.len(), 1);
     assert_eq!(blockers.items[0].finding_id, blocker.finding_id);
 
-    // Comma-separated status set: every open row plus the triaged one.
     core.update_finding(&principal, minor.finding_id.clone(), status_set("triaged"))
         .await
         .unwrap();
@@ -2110,7 +2086,6 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         "got {error:?}"
     );
 
-    // Cross-creator scope: another creator's Work is NotFound for list and get.
     let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
     let seed = init_guarded_pool(&db, "author").await.unwrap();
     let pool = seed.clone_pool();
@@ -2142,7 +2117,6 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         .await
         .unwrap();
 
-    // Creator-scoped row ownership: a finding row belonging to another creator
     // is unreachable by ID, and the author's own row still updates.
     let foreign_row = core
         .create_finding(
@@ -2184,7 +2158,6 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         .unwrap();
     pool.close().await;
 
-    // Delete removes the row (no soft delete).
     core.delete_finding(&principal, minor.finding_id.clone())
         .await
         .unwrap();
@@ -2239,7 +2212,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         );
     }
 
-    // Terminal → open and self-loops are illegal transitions, not enum errors.
     for (finding_id, target) in [(&walk.finding_id, "open"), (&walk.finding_id, "resolved")] {
         let error = core
             .update_finding(&principal, finding_id.clone(), status_set(target))
@@ -2259,7 +2231,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "a refused transition must not mutate the row"
     );
 
-    // Unknown status words are membership failures carrying the allowed set.
     let unknown = core
         .create_finding(
             &principal,
@@ -2292,7 +2263,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "open"
     );
 
-    // Batch: partial success collects unknown IDs, illegal transitions conflict.
     let second = core
         .create_finding(
             &principal,
@@ -2330,7 +2300,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "triaged"
     );
 
-    // Unknown IDs are reported, not silently skipped.
     let missing = "fnd_00000000000000000000000000".to_string();
     let collected = batch(
         vec![second.finding_id.clone(), missing.clone()],
@@ -2341,7 +2310,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
     assert_eq!(collected.updated, 1);
     assert_eq!(collected.not_found, vec![missing]);
 
-    // Target-executor assignment rides the same batch surface.
     let assigned = batch(
         vec![second.finding_id.clone()],
         serde_json::json!({"target_executor": "write"}),
@@ -2357,7 +2325,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "write"
     );
 
-    // Empty patch is a no-op, not an error.
     let noop = batch(vec![second.finding_id.clone()], serde_json::json!({}))
         .await
         .unwrap();
@@ -2370,7 +2337,6 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
         "in_review"
     );
 
-    // Cap, emptiness and duplicates are refused before any write.
     let oversized: Vec<String> = (0..101).map(|i| format!("fnd_{i:024}")).collect();
     for (ids, expected_field) in [
         (oversized, "too_many_findings"),
@@ -2437,7 +2403,6 @@ async fn retained_findings_batch_dao_failure_preserves_prior_updates() {
         "got {error:?}"
     );
 
-    // The handler short-circuits on the first internal fault: the first row was
     // already committed, the third was never reached.
     assert_eq!(
         core.get_finding(&principal, ids[0].clone())
@@ -2594,7 +2559,6 @@ async fn retained_work_list_ordering_cursor_walk_and_pagination_shape() {
     assert!(!second_page.pagination.has_more);
     assert!(second_page.pagination.next_cursor.is_none());
 
-    // Wire shape consumed by non-Rust clients: `next_cursor` is absent unless
     // there is another page.
     let truncated = nexus_contracts::PaginationInfo {
         limit: 50,

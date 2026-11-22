@@ -89,14 +89,6 @@ impl CronFireSummary {
     }
 }
 
-// ── Per-Work cron config (minimal serde mirror of spec §2.1) ───────────────
-//
-// The full `WorkSchedule` model + validation core now lives in the shared
-// [`super::work_schedule`] module (V1.171 P2 AR-29 unification). The daemon
-// evaluator still parses through this minimal mirror: `Option` fields make a
-// partial config robust — a missing role simply does not fire, and the
-// evaluator's parse tolerance is intentionally unchanged.
-
 #[derive(Debug, Deserialize)]
 struct CronConfig {
     tz: String,
@@ -121,7 +113,6 @@ struct CronRole {
 }
 
 const fn default_enabled() -> bool {
-    // Spec §2.1: default `enabled = true`.
     true
 }
 
@@ -335,7 +326,6 @@ async fn try_fire_role(
         return;
     }
 
-    // Per-Work gating (spec §4.3).
     if let Some(reason) = gate {
         summary.skipped_gated += 1;
         debug!(
@@ -347,7 +337,6 @@ async fn try_fire_role(
         return;
     }
 
-    // Idempotency guard (spec §4.2) + enqueue.
     let Some(preset_id) = role_preset(role_name) else {
         summary.skipped_no_match += 1;
         return;
@@ -355,7 +344,6 @@ async fn try_fire_role(
     match has_active_role_schedule(pool, &row.work_id, preset_id).await {
         Ok(true) => {
             summary.skipped_idempotent += 1;
-            // R-V150P1CRONBW-04 (qc3 W-002): the per-skip line is redundant
             // with the `sweep complete` summary above and grows linearly with
             // active Works (e.g. ~12k info lines/hour at 100 Works on a 4×/day
             // brainstorm+write cadence). Drop to debug so it stays available
@@ -368,7 +356,6 @@ async fn try_fire_role(
             );
         }
         Ok(false) => {
-            // V1.51 T-B P0: acquire file lock before enqueuing (spec §3.1).
             //
             // Ok(None) → workspace dir missing (test env), skip lock.
             // Err(())  → lock held, skip fire.
@@ -390,7 +377,6 @@ async fn try_fire_role(
             }
             let _file_lock = lock_result.ok().flatten();
 
-            // V1.51 T-B P1: CAS retry-on-conflict for cron-fire enqueue
             // (concurrency.md §7). The retry loop catches VersionMismatch
             // from any versioned-table write within the enqueue chain.
             // Today the retry is dormant (enqueue only touches unversioned
@@ -400,7 +386,6 @@ async fn try_fire_role(
             let backoff_ms: u64 = 100;
 
             let mut enqueue_ok: Option<String> = None;
-            // N-9: derive the complete binding map for the role's preset
             // from the configured default provider. A preset with prompt
             // roles and no provider refuses the fire (never a drive-enabled
             // row with an empty binding map); a preset with no prompt roles
@@ -485,10 +470,8 @@ async fn try_fire_role(
                     "cron-supervisor: enqueued cron-triggered schedule"
                 );
             }
-            // FileLockGuard is dropped here, releasing the flock.
         }
         Err(e) => {
-            // R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1
             // S-001): previously this arm only logged at warn! and did NOT
             // touch the summary, so a Work whose idempotency check errored
             // was silently absent from CronFireSummary::total_evaluated().
@@ -519,21 +502,6 @@ fn gate_reason(row: &nexus_local_db::works::WorkCronRow) -> Option<&'static str>
     None
 }
 
-// ── Per-Work cron `Schedule` memoisation (R-V150P1CRONBW-03 / qc3 W-001) ────
-//
-// `cron::Schedule::from_str` is the hot-path cost flagged by qc3: parsing a
-// 5/6-field expression runs Cuckoo-filter + bitmap construction (~10–50 µs).
-// For 1 000 Works × 3 roles per minute the per-tick re-parse dominated the
-// scan. The cache below keys on `(work_id, role)` and stores the raw cron
-// string alongside the parsed `Schedule`, so:
-//   - a repeat tick with the same raw string is an O(1) lookup (no re-parse);
-//   - a content change (user re-ran `creator works cron set`) is detected by
-//     raw-string drift on the next lookup → re-parse + update (content-based
-//     invalidation);
-//   - explicit [`invalidate_cron_schedule_cache`] clears stale entries after
-//     a CLI `schedule_json` write (e.g. when a role is removed entirely).
-
-/// In-process memoisation cache for parsed cron `Schedule`s. See the section
 /// doc above for the invalidation contract. Process-global because the daemon
 /// calls `evaluate_cron_fires` once per tick with no per-daemon state threaded
 /// in; a `OnceLock<Mutex<..>>` is the idiomatic shape for such a memoisation.
@@ -608,7 +576,6 @@ pub fn invalidate_cron_schedule_cache() {
 /// `(minute, hour, day, month, weekday)` tuple at `now_local` truncated to the
 /// start of the minute.
 fn schedule_fires_at_minute(schedule: &cron::Schedule, tz: Tz, now: DateTime<Utc>) -> bool {
-    // Truncate `now` to the start of the minute in the author's TZ.
     let now_local = match tz.from_utc_datetime(&now.naive_utc()) {
         dt if dt.year() > 0 => dt,
         _ => return false,
@@ -619,7 +586,6 @@ fn schedule_fires_at_minute(schedule: &cron::Schedule, tz: Tz, now: DateTime<Utc
     else {
         return false;
     };
-    // The first fire strictly after (minute_start − 1 minute) must land
     // exactly on minute_start. This is the standard "does cron match this
     // minute" check: any earlier fire would be < minute_start, any later fire
     // would be > minute_start.
@@ -644,7 +610,6 @@ fn cron_fires_at_minute_for_work(
     let normalized = normalize_cron_fields(cron_expr);
     let key = (work_id.to_string(), role.to_string());
 
-    // Resolve the parsed Schedule under the lock and clone it out so the guard
     // is released before the (µs-scale) minute match — keeps the critical
     // section tight and avoids borrowing across the matcher. The clone is far
     // cheaper than the parse it replaces (qc3 W-001 / R-V150P1CRONBW-03):
@@ -653,7 +618,6 @@ fn cron_fires_at_minute_for_work(
         let mut cache = cron_schedule_cache()
             .lock()
             .expect("cron schedule cache mutex poisoned");
-        // (Re)parse only on a miss or when the raw cron string has drifted
         // since the last observation (content-based invalidation).
         let needs_parse = cache
             .get(&key)
@@ -663,7 +627,6 @@ fn cron_fires_at_minute_for_work(
             if let Ok(parsed) = cron::Schedule::from_str(&normalized) {
                 cache.insert(key.clone(), (cron_expr.to_string(), parsed));
             } else {
-                // Drop any stale entry so a later valid rewrite re-parses cleanly.
                 cache.remove(&key);
                 return false;
             }
@@ -737,9 +700,6 @@ mod tests {
         )
     }
 
-    // ── CronFireSummary contract (R-V150-WLA-07) ──────────────────────────
-
-    /// R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1 S-001):
     /// `skipped_idempotency_check_error` must be a separate bucket so
     /// `total_evaluated()` reflects the work the sweep actually performed.
     /// The pre-fix `Err` arm of the `has_active_role_schedule` call only
@@ -760,20 +720,15 @@ mod tests {
             skipped_no_match: 10,
             skipped_idempotency_check_error: 4,
         };
-        // 2 + 1 + 3 + 0 + 10 + 4 = 20 — the new bucket is counted.
         assert_eq!(s.total_evaluated(), 20);
 
-        // Default summary has zero everywhere, including the new field.
         let default = CronFireSummary::default();
         assert_eq!(default.skipped_idempotency_check_error, 0);
         assert_eq!(default.total_evaluated(), 0);
     }
 
-    // ── cron minute matching (production wrapper) ──────────────────────────
-
     #[test]
     fn cron_fires_every_minute_always_matches() {
-        // `* * * * *` matches every minute in UTC.
         assert!(row_fires(
             "every_minute_at_0300",
             "* * * * *",
@@ -790,21 +745,18 @@ mod tests {
 
     #[test]
     fn cron_fires_at_specific_hour_minute_matches() {
-        // `0 3 * * *` fires at 03:00 UTC.
         assert!(row_fires(
             "specific_hour_0300",
             "0 3 * * *",
             Tz::UTC,
             utc(2026, 6, 19, 3, 0)
         ));
-        // Not at 03:01.
         assert!(!row_fires(
             "specific_hour_0301",
             "0 3 * * *",
             Tz::UTC,
             utc(2026, 6, 19, 3, 1)
         ));
-        // Not at 04:00.
         assert!(!row_fires(
             "specific_hour_0400",
             "0 3 * * *",
@@ -815,14 +767,12 @@ mod tests {
 
     #[test]
     fn cron_fires_comma_lists_match_one_slot() {
-        // `0 3,9,15,21 * * *` (brainstorm default) fires at 09:00.
         assert!(row_fires(
             "comma_list_0900",
             DEFAULT_BRAINSTORM_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 9, 0)
         ));
-        // Not at 10:00.
         assert!(!row_fires(
             "comma_list_1000",
             DEFAULT_BRAINSTORM_CRON,
@@ -833,7 +783,6 @@ mod tests {
 
     #[test]
     fn cron_fires_half_hour_pattern() {
-        // `0,30 * * * *` (review default) fires at :00 and :30.
         assert!(row_fires(
             "half_hour_1400",
             DEFAULT_REVIEW_CRON,
@@ -856,7 +805,6 @@ mod tests {
 
     #[test]
     fn cron_fires_in_author_tz() {
-        // `0 3 * * *` in Asia/Shanghai (UTC+8) fires when UTC == 19:00 prev day.
         // 03:00 CST = 2026-06-19 19:00 UTC (2026-06-18).
         assert!(row_fires(
             "author_tz_1900",
@@ -864,7 +812,6 @@ mod tests {
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 0)
         ));
-        // Not at 19:01 UTC.
         assert!(!row_fires(
             "author_tz_1901",
             "0 3 * * *",
@@ -879,7 +826,6 @@ mod tests {
     /// the author authored.
     #[test]
     fn cron_fires_saved_defaults_in_named_author_tz() {
-        // brainstorm `0 3,9,15,21 * * *`: 03:00 CST == 19:00 UTC (previous day).
         assert!(row_fires(
             "saved_brainstorm_fire",
             DEFAULT_BRAINSTORM_CRON,
@@ -892,7 +838,6 @@ mod tests {
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 20, 0)
         ));
-        // write `0 4,10,16,22 * * *`: 04:00 CST == 20:00 UTC (previous day),
         // 22:00 CST == 14:00 UTC (same day).
         assert!(row_fires(
             "saved_write_2000",
@@ -912,7 +857,6 @@ mod tests {
             Tz::Asia__Shanghai,
             utc(2026, 6, 19, 15, 0)
         ));
-        // review `0,30 * * * *`: :00 and :30 every local hour → 03:30 CST is 19:30 UTC.
         assert!(row_fires(
             "saved_review_1930",
             DEFAULT_REVIEW_CRON,
@@ -935,7 +879,6 @@ mod tests {
     /// being lost.
     #[test]
     fn cron_fires_named_tz_dst_spring_forward() {
-        // 2026-03-29 00:00 UTC == 01:00 CET (UTC+1); 00:30 UTC == 01:30 CET.
         assert!(row_fires(
             "spring_review_0000",
             DEFAULT_REVIEW_CRON,
@@ -948,7 +891,6 @@ mod tests {
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 0, 30)
         ));
-        // 01:00 UTC == 03:00 CEST (UTC+2) — the local 02:00 hour was skipped.
         assert!(row_fires(
             "spring_review_0100",
             DEFAULT_REVIEW_CRON,
@@ -967,7 +909,6 @@ mod tests {
             Tz::Europe__Berlin,
             utc(2026, 3, 29, 1, 15)
         ));
-        // brainstorm `0 3,9,15,21 * * *`: 03:00 local is 02:00 UTC the day
         // before the jump and 01:00 UTC on the transition day.
         assert!(row_fires(
             "spring_brainstorm_prev_day",
@@ -997,7 +938,6 @@ mod tests {
     /// behaviour; the 0.17 DST-iteration fix must not add a fire here.
     #[test]
     fn cron_fires_named_tz_dst_fall_back_ambiguous_hour() {
-        // 00:00 / 00:30 EDT (UTC−4): the last unambiguous minutes before the jump.
         assert!(row_fires(
             "fall_review_0400",
             DEFAULT_REVIEW_CRON,
@@ -1010,7 +950,6 @@ mod tests {
             Tz::America__New_York,
             utc(2026, 11, 1, 4, 30)
         ));
-        // Local 01:00 occurs at 05:00 UTC (EDT) and 06:00 UTC (EST); neither fires.
         assert!(!row_fires(
             "fall_review_0500_miss",
             DEFAULT_REVIEW_CRON,
@@ -1023,7 +962,6 @@ mod tests {
             Tz::America__New_York,
             utc(2026, 11, 1, 6, 0)
         ));
-        // Resumes at 02:00 EST (UTC−5).
         assert!(row_fires(
             "fall_review_0700",
             DEFAULT_REVIEW_CRON,
@@ -1036,7 +974,6 @@ mod tests {
             Tz::America__New_York,
             utc(2026, 11, 1, 7, 30)
         ));
-        // write `0 4,10,16,22 * * *`: the author's 04:00 local moves from
         // 08:00 UTC (EDT) to 09:00 UTC (EST) — 04:00 still fires exactly once.
         assert!(!row_fires(
             "fall_write_0800_miss",
@@ -1068,26 +1005,20 @@ mod tests {
         ));
     }
 
-    // ── cron_fires_at_minute_for_work (R-V150P1CRONBW-03 memoisation) ───────
-
-    /// R-V150P1CRONBW-03 (qc3 W-001): the cached path must parse the cron
     /// expression exactly once per `(work_id, role, cron_string)` triple; a
     /// content change on the same key, or a brand-new key, must trigger a
     /// fresh parse. Asserts via the `CRON_PARSE_COUNT` instrumented counter.
     #[test]
     fn cron_fires_at_minute_uses_memoised_schedule() {
-        // Hold the table lock so no concurrent row parse shifts the counts.
         let _guard = CRON_TABLE_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // Start from a known-empty cache + zeroed counter so the assertions
         // are independent of test-execution order within the lib binary.
         invalidate_cron_schedule_cache();
         CRON_PARSE_COUNT.store(0, Ordering::Relaxed);
 
         let now = utc(2026, 6, 19, 9, 0);
 
-        // 100 calls for the same (work, role, cron) → exactly one parse.
         for _ in 0..100 {
             assert!(cron_fires_at_minute_for_work(
                 "wrk_memo_a",
@@ -1103,7 +1034,6 @@ mod tests {
             "100 calls for the same (work, role, cron) must parse exactly once"
         );
 
-        // Repeat calls still hit the cache (counter unchanged).
         for _ in 0..10 {
             assert!(cron_fires_at_minute_for_work(
                 "wrk_memo_a",
@@ -1115,7 +1045,6 @@ mod tests {
         }
         assert_eq!(CRON_PARSE_COUNT.load(Ordering::Relaxed), 1);
 
-        // Content drift on the same (work, role) → re-parse + cache update.
         assert!(cron_fires_at_minute_for_work(
             "wrk_memo_a",
             "brainstorm",
@@ -1125,7 +1054,6 @@ mod tests {
         ));
         assert_eq!(CRON_PARSE_COUNT.load(Ordering::Relaxed), 2);
 
-        // Different (work, role) → separate parse.
         assert!(cron_fires_at_minute_for_work(
             "wrk_memo_b",
             "write",
@@ -1135,7 +1063,6 @@ mod tests {
         ));
         assert_eq!(CRON_PARSE_COUNT.load(Ordering::Relaxed), 3);
 
-        // Cached matcher still respects the minute granularity: a non-match
         // minute for the SAME (work, role, cron) must not re-parse. The entry
         // for ("wrk_memo_a", "brainstorm") currently caches "0 10 * * *"
         // (post-drift above), so 09:00 UTC is a non-match (hour 9 ≠ 10).
@@ -1152,7 +1079,6 @@ mod tests {
             "non-match must not re-parse the cached entry"
         );
 
-        // Explicit invalidation clears the cache → next call re-parses.
         invalidate_cron_schedule_cache();
         assert!(cron_fires_at_minute_for_work(
             "wrk_memo_a",
@@ -1167,7 +1093,6 @@ mod tests {
             "invalidate_cron_schedule_cache must force a re-parse on next call"
         );
 
-        // Cleanup so no entry leaks into sibling tests in the same process.
         invalidate_cron_schedule_cache();
     }
 
@@ -1180,8 +1105,6 @@ mod tests {
     fn normalize_six_field_unchanged() {
         assert_eq!(normalize_cron_fields("0 0 3 * * *"), "0 0 3 * * *");
     }
-
-    // ── gate_reason ─────────────────────────────────────────────────────────
 
     use nexus_local_db::works::WorkCronRow;
 
@@ -1226,14 +1149,11 @@ mod tests {
         );
     }
 
-    // ── role_preset ─────────────────────────────────────────────────────────
-
     #[test]
     fn role_preset_maps_all_three_roles() {
         assert_eq!(role_preset("brainstorm"), Some(NOVEL_BRAINSTORM_PRESET_ID));
         assert_eq!(role_preset("write"), Some(NOVEL_WRITE_PRESET_ID));
         assert_eq!(role_preset("review"), Some(NOVEL_REVIEW_MASTER_PRESET_ID));
-        // Unknown role names are a defensive `None`.
         assert_eq!(role_preset("unknown"), None);
     }
 }

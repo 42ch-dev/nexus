@@ -9,7 +9,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const scriptRoot = join(__dirname, '..', 'scripts');
 
 /**
- * Focused regression for the proof orchestrator's child lifecycle, evidence
  * bookkeeping, and adapter restore gate (`scripts/proof-browser.mjs`). The
  * orchestrator is a dependency-free single-file script, so these tests
  * extract its real helpers verbatim (stable section anchors) into throwaway
@@ -51,7 +50,6 @@ const modulePath = join(workDir, 'child-lifecycle.mjs');
 writeFileSync(modulePath, moduleSource);
 const lifecycle = await import(modulePath);
 
-// The adapter restore gate, extracted the same way: the real
 // `requireRestoredAdapterBuild` / `assertRestoredAdapterBaseline` functions.
 // Their process seams (spawnSync, readiness probes, page evaluate) are
 // injected as controllable fakes so the gate DECISIONS are driven without
@@ -59,7 +57,6 @@ const lifecycle = await import(modulePath);
 const gateWorkDir = mkdtempSync(join(tmpdir(), 'proof-browser-gate-'));
 const gateModulePath = join(gateWorkDir, 'adapter-restore-gate.mjs');
 const gateModuleSource = [
-  // Late-bound seams: these wrappers forward to the CURRENT globalThis fake
   // at call time, so each test can install its own after the module import.
   // A value snapshot (`const spawnSync = globalThis.__rftSpawnSync`) would
   // capture `undefined` at import and every gate call would fail.
@@ -93,7 +90,6 @@ after(() => {
   rmSync(gateWorkDir, { recursive: true, force: true });
 });
 
-// A child that writes, parks a process-group descendant on its inherited
 // stdout (so `close` cannot fire), then exits — the exact exit-before-close
 // window. The descendant appends the trailing bytes after our `exit` and dies.
 const exitBeforeCloseScript = `
@@ -117,7 +113,6 @@ describe('proof-browser exited-child bookkeeping', () => {
       'an exited-but-not-closed child must remain in the set the evidence drain scans',
     );
 
-    // Catch-path order: drain (bounded) first, then evidence assembly.
     await lifecycle.drainExitedChildrenForEvidence({ timeoutMs: 2_000 });
 
     assert.equal(child.__closeSettled, true, 'the drain must await the pending close');
@@ -130,7 +125,6 @@ describe('proof-browser exited-child bookkeeping', () => {
     assert.match(retained, /pre-exit-marker/);
     assert.match(retained, /trailing-after-exit-marker/, 'bytes written after exit must be retained');
 
-    // The failure evidence collector exposes the retained tail, redacted.
     const rows = lifecycle.collectChildOutput('pre-exit-marker');
     assert.equal(rows[child.__evidenceKey], retained.split('pre-exit-marker').join('<fixture-home>'));
   });
@@ -190,7 +184,6 @@ describe('proof-browser bounded child stop and cleanup', () => {
     assert.ok(child.__error, 'the spawn error must be captured on the child');
     assert.ok(!lifecycle.trackedChildren.has(child), 'a spawn-errored child must leave the tracked set');
 
-    // Regression: an ENOENT child never emits `exit`; stop/cleanup used to
     // wait for that exit forever.
     const startedAt = Date.now();
     await lifecycle.stopChild(child);

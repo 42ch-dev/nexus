@@ -88,8 +88,6 @@ impl Pairing {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 impl From<nexus_contracts::Pairing> for Pairing {
     fn from(c: nexus_contracts::Pairing) -> Self {
         Self {

@@ -46,9 +46,6 @@ import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixt
 import { OutlineAuthoringFixtures } from '@/fixtures/outline-authoring-fixtures';
 import { RunObservationViewFixtures } from '@/fixtures/run-observation-view-fixtures';
 
-/* ------------------------------------------------------------------ */
-/*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
-/* ------------------------------------------------------------------ */
 
 const SURFACES_SECTIONS = [
   {
@@ -100,10 +97,6 @@ const SURFACES_SECTIONS = [
     desc: 'Selection submenu fixture — 6 variants (V1.126 P0 T4)',
   },
 ] as const;
-
-/* ------------------------------------------------------------------ */
-/*  Sub-components — shared                                            */
-/* ------------------------------------------------------------------ */
 
 function FixtureBoundary({ children }: { children: ReactNode }) {
   return (
@@ -181,47 +174,47 @@ export function SurfacesLayout() {
         </code>
         ), App presentational extracts (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-layout/*
+          @web-layout/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-setup/*
+          @web-setup/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-settings/*
+          @web-settings/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-canvas/*
+          @web-canvas/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-global-timeline/*
+          @web-global-timeline/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-shell/*
+          @web-shell/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-developer/*
+          @web-developer/{'/*'}
         </code>
         ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
+          @web-ui/{'/*'}
         </code>
         ), and Studio-local fixtures (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @/fixtures/*
+          @/fixtures/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @/components/*
+          @/components/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @/pages/*
+          @/pages/{'/*'}
         </code>
         ). No daemon data, no live routing, and no product-page imports (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -256,10 +249,6 @@ export function SurfacesLayout() {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Fixture — App shell sidebar chrome                                  */
-/* ------------------------------------------------------------------ */
 
 function FixtureFooterProfiles() {
   const [activeId, setActiveId] = useState('local-creator');
@@ -390,10 +379,6 @@ function ShellSidebarFixture() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Fixtures — Footer profiles + header health (V1.107 T15)             */
-/* ------------------------------------------------------------------ */
-
 function FooterProfilesFixture() {
   const states: { label: string; profiles: { id: string; displayName: string; active?: boolean }[] }[] = [
     { label: '0 profiles', profiles: [] },
@@ -462,11 +447,6 @@ function DaemonHealthIndicatorFixture() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Fixture — Daemon status strip (healthy sample)                      */
-/* ------------------------------------------------------------------ */
-
-/** Single-line footer strip — left status + soft Badge; right Restart (V1.102). */
 function DaemonStatusStrip() {
   return (
     <div
@@ -486,10 +466,6 @@ function DaemonStatusStrip() {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Section pages                                                       */
-/* ------------------------------------------------------------------ */
 
 export function SurfacesIndexPage() {
   return (
@@ -532,39 +508,39 @@ export function SurfacesIndexPage() {
         </code>
         ), App presentational extracts (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-layout/*
+          @web-layout/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-setup/*
+          @web-setup/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-settings/*
+          @web-settings/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-canvas/*
+          @web-canvas/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-global-timeline/*
+          @web-global-timeline/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-shell/*
+          @web-shell/{'/*'}
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-developer/*
+          @web-developer/{'/*'}
         </code>
         ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
+          @web-ui/{'/*'}
         </code>
         ), and Studio-local fixtures (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @/fixtures/*
+          @/fixtures/{'/*'}
         </code>
         ). No live product pages, no{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -736,7 +712,6 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}
       <section className="mt-10">
         <SurfaceHeading id="surfaces-settings-shell">Settings — Shell chrome</SurfaceHeading>
         <SurfaceSourceBadges
@@ -1064,14 +1039,14 @@ export function SurfacesCanvasPage() {
           </code>{' '}
           +{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            strategy-canvas/*
+            strategy-canvas/{'/*'}
           </code>
           ), and{' '}
           <strong className="font-medium text-gray-1000">World KB</strong>{' '}
           (entity cards, source-anchor provenance, typed relationship edges, and
           relationship inspector, mirroring{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            world-kb/*
+            world-kb/{'/*'}
           </code>
           ). The shared shell chrome — dot-grid background, zoom controls,
           minimap swatch — and right-click context menu matrices are common to all
@@ -1110,7 +1085,6 @@ export function SurfacesCanvasPage() {
         </FixtureBoundary>
       </section>
 
-      {/* V1.164 P3 T2 — Mental surfacing inspector states (AR-6 studio-first) */}
       <section className="mt-10" data-testid="surfaces-mental-surfacing">
         <SurfaceHeading id="surfaces-mental-surfacing">Mental Surfacing</SurfaceHeading>
         <SurfaceSourceBadges importPaths={["@/fixtures/mental-surfacing-fixtures"]} />
@@ -1176,7 +1150,6 @@ export function SurfacesCanvasPage() {
         <ModuleEditingFixtures />
       </section>
 
-      {/* V1.128 P1 T1 — NLE multi-track Timeline band */}
       <section className="mt-10" data-testid="surfaces-nle-timeline">
         <SurfaceHeading id="surfaces-nle-timeline">NLE Timeline</SurfaceHeading>
         <SurfaceSourceBadges
@@ -1207,7 +1180,6 @@ export function SurfacesCanvasPage() {
         <NleTimelineCanvasFixtures />
       </section>
 
-      {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KnowledgeEntry) */}
       <section className="mt-10" data-testid="surfaces-world-timeline">
         <SurfaceHeading id="surfaces-world-timeline">World Timeline</SurfaceHeading>
         <SurfaceSourceBadges
@@ -1257,7 +1229,6 @@ export function SurfacesCanvasPage() {
         <TimelineCanvasFixtures />
       </section>
 
-      {/* V1.124 P0 T4 — Work Timeline node chrome (Narrative + Moment scene + beat) */}
       <section className="mt-10" data-testid="surfaces-work-timeline">
         <SurfaceHeading id="surfaces-work-timeline">Work Timeline</SurfaceHeading>
         <SurfaceSourceBadges
@@ -1337,7 +1308,6 @@ export function SurfacesCanvasPage() {
         <OutlineAuthoringFixtures />
       </section>
 
-      {/* V1.124 P2 T2 — Global Timeline list chrome */}
       <section className="mt-10" data-testid="surfaces-global-timeline">
         <SurfaceHeading id="surfaces-global-timeline">Global Timeline</SurfaceHeading>
         <SurfaceSourceBadges
@@ -1360,7 +1330,6 @@ export function SurfacesCanvasPage() {
         <GlobalTimelineFixtures />
       </section>
 
-      {/* V1.124 P2 T3a — Layer breadcrumb */}
       <section className="mt-10" data-testid="surfaces-layer-breadcrumb">
         <SurfaceHeading id="surfaces-layer-breadcrumb">Layer Breadcrumb</SurfaceHeading>
         <SurfaceSourceBadges
@@ -1381,7 +1350,6 @@ export function SurfacesCanvasPage() {
         <LayerBreadcrumbFixtures />
       </section>
 
-      {/* V1.124 P2 T3b — Conflict-modal shared chrome */}
       <section className="mt-10" data-testid="surfaces-conflict-modals">
         <SurfaceHeading id="surfaces-conflict-modals">Conflict Modals</SurfaceHeading>
         <SurfaceSourceBadges

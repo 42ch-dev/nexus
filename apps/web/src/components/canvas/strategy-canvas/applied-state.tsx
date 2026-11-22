@@ -1,5 +1,4 @@
 /**
- * The Canvas's non-graph presentations (D16), all resolved from one
  * `getStrategyApplied` read:
  *
  *   (a) never applied, never approved → Compose is the only action;
@@ -36,7 +35,6 @@ export function StrategyAppliedState({
   onRecheck,
 }: StrategyAppliedStateProps) {
   const { t } = useTranslation('canvas');
-  // Literal keys keep the catalogue greppable from the state itself.
   const titles: Record<AppliedStateKind, string> = {
     'never-applied': 'strategy.applied.neverApplied.title',
     'approved-unapplied': 'strategy.applied.approvedUnapplied.title',

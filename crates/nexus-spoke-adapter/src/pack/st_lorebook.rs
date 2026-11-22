@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Clean-room `SillyTavern` lorebook → Knowledge Pack converter (DF-80).
 //!
 //! Converts a documented-format `SillyTavern` lorebook JSON file into the pack
@@ -79,13 +80,11 @@ const DEFAULT_PACK_CREATOR: &str = "nexus42";
 ///   they carry no activation semantics and are not representable in the
 ///   pack shape.
 const DOCUMENTED_ENTRY_FIELDS: &[&str] = &[
-    // Identity / bookkeeping
     "uid",
     "id",
     "display_index",
     "role",
     "extensions",
-    // Keys / activation
     "key",
     "keys",
     "keysecondary",
@@ -100,17 +99,14 @@ const DOCUMENTED_ENTRY_FIELDS: &[&str] = &[
     "probability",
     "useProbability",
     "probabilityRaw",
-    // Content / naming
     "content",
     "original_content",
     "comment",
     "addMemo",
-    // Ordering / placement
     "insertion_order",
     "order",
     "position",
     "depth",
-    // Recursion / timed effects
     "exclude_recursion",
     "prevent_recursion",
     "delay_until_recursion",
@@ -119,17 +115,13 @@ const DOCUMENTED_ENTRY_FIELDS: &[&str] = &[
     "sticky",
     "cooldown",
     "delay",
-    // Inclusion groups
     "group",
     "group_override",
     "group_weight",
     "group_priority",
     "use_group_scoring",
-    // Automation
     "automation_id",
-    // Organization
     "folder",
-    // Alternate-scenario matching
     "exclude_alternate_scenarios",
     "exclude_alternate_scenarios_override",
     "exclude_alternate_scenarios_priority",
@@ -196,7 +188,6 @@ pub enum StLorebookError {
 #[allow(clippy::too_many_lines)]
 pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookError> {
     let root = json.as_object().ok_or(StLorebookError::NotObject)?;
-    // F-1: `entries` is either the array form (older exports / hand-written
     // files) or the native uid-keyed object form (`{"0": {...}, "1": ...}`)
     // documented by the public World Info docs. serde_json's
     // `preserve_order` feature (enabled in this workspace) keeps `Map`
@@ -227,7 +218,6 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
 
         let (name, name_diag) = entry_name(obj, idx);
 
-        // Unknown/undocumented fields → diagnostics; the import continues.
         for key in obj.keys() {
             if !DOCUMENTED_ENTRY_FIELDS.contains(&key.as_str()) {
                 diagnostics.push(ConversionDiagnostic {
@@ -240,17 +230,14 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
             }
         }
 
-        // W-2 / W-3: documented fields whose semantics the locked mapping
         // cannot honor are flagged, never silently dropped.
         diagnostics.extend(documented_field_diagnostics(obj, idx, &name));
 
-        // R10-2: a present-but-non-string `comment` loses the authored
         // title/memo — the fallback name is reported, never silent.
         if let Some(d) = name_diag {
             diagnostics.push(d);
         }
 
-        // Mapped `content` in an unsupported shape warns (see `entry_content`).
         let (content, content_diag) = entry_content(obj, idx, &name);
         if let Some(d) = content_diag {
             diagnostics.push(d);
@@ -277,7 +264,6 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
             diagnostics.push(d);
         }
 
-        // W-4: derive a stable entry id from the lorebook-intrinsic `uid` /
         // `id` fields (see `stable_entry_id`); the positional fallback is
         // reported because it is unstable across lorebook edits.
         let (entry_id, id_diagnostic) = stable_entry_id(obj, idx, &name, &mut seen_entry_ids);
@@ -636,7 +622,6 @@ enum ValueClass {
 /// silent).
 fn classify_value(field: &str, v: &Value) -> ValueClass {
     match field {
-        // Boolean toggles: documented shape boolean, default false.
         "selective"
         | "use_regex"
         | "match_whole_words"
@@ -649,7 +634,6 @@ fn classify_value(field: &str, v: &Value) -> ValueClass {
         | "use_group_scoring"
         | "exclude_alternate_scenarios"
         | "exclude_alternate_scenarios_override" => bool_class(v),
-        // Integer selectors: documented shape non-negative integer, default
         // 0 (AND logic / no depth cap / no count).
         "selectiveLogic"
         | "scan_depth"
@@ -659,26 +643,19 @@ fn classify_value(field: &str, v: &Value) -> ValueClass {
         | "delay"
         | "group_priority"
         | "exclude_alternate_scenarios_priority" => int_class(v, |n| n != 0),
-        // Probability: default 100 (always fire).
         "probability" => int_class(v, |n| n < 100),
         "probabilityRaw" => probability_raw_class(v),
-        // Minimum activations: default 1.
         "min_activations" => int_class(v, |n| n > 1),
-        // Group weight: default 100.
         "group_weight" => int_class(v, |n| n != 100),
-        // Placement: default 100 / "after_char" / 4.
         "insertion_order" | "order" => int_class(v, |n| n != 100),
         "position" => str_class(v, |s| s != "after_char"),
         "depth" => int_class(v, |n| n != 4),
-        // String carriers: default empty.
         "group" | "automation_id" => str_class(v, |s| !s.trim().is_empty()),
-        // Secondary keys: default empty array.
         "keysecondary" => match v {
             Value::Array(a) if !a.is_empty() => ValueClass::NonDefault,
             Value::Array(_) => ValueClass::Default,
             _ => ValueClass::ShapeMismatch,
         },
-        // All `BEHAVIORAL_UNMAPPED_FIELDS` are classified above; a field
         // added to the list without a classification below must not pass as
         // default — report it rather than silently drop its semantics.
         _ => ValueClass::NonDefault,
@@ -729,7 +706,6 @@ fn probability_raw_class(v: &Value) -> ValueClass {
     match v {
         Value::Number(_) => int_class(v, |n| n < 100),
         Value::String(s) => match s.trim().parse::<f64>() {
-            // Exactly the 100% fraction is the default; any other fraction
             // (or an unparseable string, which is certainly not the 100%
             // default) is a non-default probability.
             Ok(1.0) => ValueClass::Default,
@@ -928,7 +904,6 @@ fn stable_entry_id(
     if seen.insert(id.clone()) {
         return (id, None);
     }
-    // Duplicate stable id within one lorebook cannot anchor re-imports —
     // fall back to a uniquely claimed positional id; report the collision
     // instead of letting the import overwrite/skip the wrong entry.
     let fallback = claim_unique_id(format!("kb_st_{idx}"), seen);
@@ -1019,7 +994,6 @@ mod tests {
     fn multi_entry_maps_keys_constant_and_metadata() {
         let outcome =
             parse_st_lorebook(&fixture("multi_entry")).expect("multi-entry lorebook must convert");
-        // F-3/F-4: the fixture's non-default documented-but-unmapped
         // activation/placement fields fire honest diagnostics — no silent
         // drop (the fields are documented, so no unknown-field warning, but
         // the locked mapping cannot honor them).
@@ -1052,7 +1026,6 @@ mod tests {
         );
         let entries = pack["entries"].as_array().expect("entries array");
         assert_eq!(entries.len(), 2);
-        // Entry 0: comma-separated `key` string → keys array; not constant.
         assert_eq!(entries[0]["canonical_name"], json!("Mossford"));
         assert_eq!(
             entries[0]["modules"]["activation"]["keys"],
@@ -1062,7 +1035,6 @@ mod tests {
             entries[0]["modules"]["activation"]["constant"],
             json!(false)
         );
-        // Entry 1: `keys` array + constant true.
         assert_eq!(entries[1]["canonical_name"], json!("Slime"));
         assert_eq!(
             entries[1]["modules"]["activation"]["keys"],
@@ -1109,7 +1081,6 @@ mod tests {
 
     #[test]
     fn entries_not_array_or_object_is_structured_error() {
-        // F-1: the uid-keyed object form is the native ST export shape and
         // must convert; only non-array/non-object `entries` values abort.
         let err = parse_st_lorebook(&json!({ "entries": 42 })).unwrap_err();
         assert!(matches!(err, StLorebookError::EntriesNotArray));
@@ -1139,11 +1110,8 @@ mod tests {
         assert!(d.message.contains("not a JSON object"));
     }
 
-    // ── F-1: uid-keyed `entries` object (native ST export shape) ──
-
     #[test]
     fn object_form_entries_convert_in_file_order() {
-        // F-1: the native SillyTavern World Info export shape is a
         // uid-keyed `entries` object (`{"0": {...}, "1": {...}}`) — the
         // converter must accept it and import every entry in file order.
         let outcome = parse_st_lorebook(&fixture("object_entries"))
@@ -1176,7 +1144,6 @@ mod tests {
 
     #[test]
     fn object_form_non_object_entry_is_diagnostic_and_skipped() {
-        // F-1: non-object values inside the object form are per-entry
         // issues — Warning + skip, never a file-level abort.
         let lorebook = json!({
             "entries": {
@@ -1207,12 +1174,8 @@ mod tests {
         );
     }
 
-    // ── R10-2: a present-but-non-string `comment` must not silently
-    //    fall back — the authored title/memo drop is reported ──
-
     #[test]
     fn non_string_comment_emits_warning_and_falls_back() {
-        // R10-2: a present-but-non-string `comment` (number, bool, object)
         // loses the authored title/memo — the name silently fell back to
         // the activation key without a diagnostic. The fallback must now be
         // reported: a Warning naming the field, the unsupported shape, and
@@ -1248,7 +1211,6 @@ mod tests {
 
     #[test]
     fn non_string_comment_without_key_falls_back_to_positional_with_warning() {
-        // R10-2: without an activation key the fallback is the positional
         // name — still reported, never silent.
         let lorebook = json!({
             "entries": [
@@ -1273,7 +1235,6 @@ mod tests {
 
     #[test]
     fn string_comment_unchanged_without_diagnostic() {
-        // R10-2: a string `comment` keeps the existing behavior — it names
         // the entry and fires no diagnostic.
         let lorebook = json!({
             "entries": [
@@ -1291,11 +1252,8 @@ mod tests {
         );
     }
 
-    // ── W-2: `enabled: false` must not import silently as live content ──
-
     #[test]
     fn disabled_entry_emits_warning_diagnostic() {
-        // W-2: `enabled: false` (documented ST strategy field) is not part
         // of the locked mapping — importing it as live `confirmed` content
         // would silently invert the author's intent. A Warning diagnostic
         // must fire.
@@ -1311,7 +1269,6 @@ mod tests {
         assert_eq!(d.field.as_deref(), Some("enabled"));
         assert_eq!(d.entry_index, Some(0));
         assert!(d.message.contains("enabled=false"));
-        // The entry still imports (content preserved) as confirmed.
         let entry = &outcome.pack_input["entries"][0];
         assert_eq!(entry["status"], json!("confirmed"));
         let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
@@ -1328,9 +1285,6 @@ mod tests {
         let outcome = parse_st_lorebook(&lorebook).expect("must convert");
         assert_eq!(outcome.diagnostics, Vec::<ConversionDiagnostic>::new());
     }
-
-    // ── R2-3: mapped booleans in an unsupported shape must not silently
-    //    default (constant → false / enabled → live confirmed) ──
 
     #[test]
     fn malformed_constant_emits_warning_and_defaults_false() {
@@ -1384,13 +1338,10 @@ mod tests {
         assert_eq!(parsed.entries.len(), 1);
     }
 
-    // ── Mapped `content` in an unsupported shape must not silently
-    //    import as an empty summary (R2-3-style guard for the mapped
     //    string field) ──
 
     #[test]
     fn malformed_content_emits_warning_and_imports_empty_summary() {
-        // A present-but-non-string `content` (number, object, array, bool)
         // loses the author's text — the drop must not be silent. Each
         // unsupported shape fires a Warning naming the shape; the entry
         // still imports with an empty summary.
@@ -1417,7 +1368,6 @@ mod tests {
 
     #[test]
     fn absent_content_imports_empty_summary_without_diagnostic() {
-        // Absent `content` is the documented-optional case: empty summary,
         // no diagnostic.
         let lorebook = json!({
             "entries": [
@@ -1435,11 +1385,8 @@ mod tests {
         assert_eq!(parsed.entries.len(), 1);
     }
 
-    // ── W-3: documented `key` array form must not silently drop ──
-
     #[test]
     fn key_array_form_maps_to_activation_keys() {
-        // W-3: the documented `key` list form (array of strings) must map to
         // `modules.activation.keys` — no silent drop.
         let lorebook = json!({
             "entries": [
@@ -1462,7 +1409,6 @@ mod tests {
 
     #[test]
     fn key_array_form_backfills_canonical_name() {
-        // W-3: `first_key` must also accept the array form (canonical-name
         // backfill for empty comments).
         let lorebook = json!({
             "entries": [
@@ -1478,7 +1424,6 @@ mod tests {
 
     #[test]
     fn unmappable_key_emits_warning_diagnostic() {
-        // W-3: a `key` that is neither a string nor an array of strings is
         // unmappable — a Warning diagnostic must fire instead of a silent
         // drop.
         let lorebook = json!({
@@ -1492,7 +1437,6 @@ mod tests {
         assert_eq!(d.severity, DiagnosticSeverity::Warning);
         assert_eq!(d.field.as_deref(), Some("key"));
         assert!(d.message.contains("key"));
-        // No activation keys are emitted for the unmappable form.
         let entry = &outcome.pack_input["entries"][0];
         assert!(
             entry.get("modules").is_none() || entry["modules"].get("activation").is_none(),
@@ -1502,7 +1446,6 @@ mod tests {
 
     #[test]
     fn mixed_keys_array_emits_warning_and_keeps_string_elements() {
-        // W-3: the documented plural `keys` list must not silently drop
         // non-string elements — a Warning fires; remaining strings still map.
         let lorebook = json!({
             "entries": [
@@ -1550,11 +1493,8 @@ mod tests {
         assert_eq!(entry["modules"]["activation"]["keys"], json!(["wyrm"]));
     }
 
-    // ── G-2: both `key` and `keys` present must merge, not drop `key` ──
-
     #[test]
     fn both_key_and_keys_merge_with_diagnostic() {
-        // G-2: an entry with BOTH a valid `key` and a valid `keys` array
         // must not silently drop the `key` triggers. The two are merged —
         // `key` tokens first, then `keys` entries — deduped
         // case-insensitively (the original text of the first occurrence is
@@ -1589,7 +1529,6 @@ mod tests {
 
     #[test]
     fn both_key_and_keys_merge_keeps_key_order_and_dedupes() {
-        // G-2: merge order is `key` tokens first, then `keys` entries;
         // case-insensitive duplicates are dropped keeping the first
         // occurrence's original text.
         let lorebook = json!({
@@ -1613,12 +1552,8 @@ mod tests {
         );
     }
 
-    // ── F-3/F-4: documented-but-unmapped activation fields must not be
-    //    silently dropped — each non-default value fires a Warning ──
-
     #[test]
     fn unmapped_activation_fields_emit_warning_diagnostics() {
-        // F-3/F-4: `keysecondary`, `probability`, `probabilityRaw`,
         // `use_regex`, `case_sensitive`, `selective`, `selectiveLogic` and
         // the other documented-but-unmapped activation/placement fields are
         // classified documented (no unknown-field warning) but the locked
@@ -1710,14 +1645,12 @@ mod tests {
             assert_eq!(d.severity, DiagnosticSeverity::Warning);
             assert!(d.message.contains(d.field.as_deref().unwrap_or("")));
         }
-        // The entry still imports — diagnostics degrade, never drop.
         let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
         assert_eq!(parsed.entries.len(), 1);
     }
 
     #[test]
     fn default_values_of_unmapped_fields_produce_no_diagnostics() {
-        // F-3/F-4: the documented defaults of the unmapped fields carry no
         // behavioral consequence — no diagnostics fire for them.
         let lorebook = json!({
             "entries": [
@@ -1767,11 +1700,8 @@ mod tests {
         );
     }
 
-    // ── R2-2: type-mismatched values must not be classified as default ──
-
     #[test]
     fn type_mismatched_values_emit_warning_diagnostics() {
-        // R2-2: `"probability": "50"` (string where a number is
         // documented), `"use_regex": 1` (integer where a bool is
         // documented) etc. carry activation-relevant semantics in an
         // unsupported JSON shape — they must fire the field's Warning
@@ -1871,14 +1801,12 @@ mod tests {
             );
             assert!(d.message.contains(d.field.as_deref().unwrap_or("")));
         }
-        // The entry still imports — diagnostics degrade, never drop.
         let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
         assert_eq!(parsed.entries.len(), 1);
     }
 
     #[test]
     fn probability_raw_documented_shapes_and_defaults() {
-        // R2-2: `probabilityRaw` documents the serialized fraction string
         // (default "1.00") and the integer-percent number form (default
         // 100); both documented default shapes stay diagnostic-free, while
         // a non-default fraction ("0.5" → 50%) fires the Warning.
@@ -1924,11 +1852,8 @@ mod tests {
         assert_eq!(d.severity, DiagnosticSeverity::Warning);
     }
 
-    // ── W-4: stable entry ids across lorebook edits ──
-
     #[test]
     fn entry_ids_stable_across_middle_insertion() {
-        // W-4: entry ids derive from the stable `uid` field, not the array
         // position — inserting an entry at the top must not shift the ids of
         // the unchanged entries.
         let original = json!({
@@ -1956,7 +1881,6 @@ mod tests {
         };
         assert_eq!(ids(&original_out), vec!["kb_st_0", "kb_st_1"]);
         assert_eq!(ids(&edited_out), vec!["kb_st_9", "kb_st_0", "kb_st_1"]);
-        // The id set of the unchanged entries is identical across the edit.
         let unchanged: Vec<String> = ids(&edited_out)
             .into_iter()
             .filter(|id| id != "kb_st_9")
@@ -1969,7 +1893,6 @@ mod tests {
 
     #[test]
     fn id_field_used_when_uid_absent() {
-        // W-4: the documented `id` (UUID) field is a stable identity when
         // `uid` is absent.
         let lorebook = json!({
             "entries": [
@@ -1986,7 +1909,6 @@ mod tests {
 
     #[test]
     fn missing_uid_id_falls_back_to_positional_with_diagnostic() {
-        // W-4: without a stable uid/id, the positional id is used and
         // reported — stability cannot be guaranteed.
         let lorebook = json!({
             "entries": [
@@ -2016,7 +1938,6 @@ mod tests {
 
     #[test]
     fn duplicate_uid_falls_back_to_positional_with_diagnostic() {
-        // W-4: duplicate stable ids within one lorebook cannot anchor
         // re-imports — the second entry falls back to a unique positional id
         // and the collision is reported.
         let lorebook = json!({
@@ -2042,11 +1963,8 @@ mod tests {
         );
     }
 
-    // ── W-4a: fallback ids must claim uniquely, never collide ──
-
     #[test]
     fn positional_fallback_colliding_with_stable_id_is_suffixed_unique() {
-        // W-4a: the positional fallback must not collide with an id already
         // claimed by a stable uid — entry0 claims `kb_st_1` via uid 1, so
         // entry1's positional fallback (idx 1) must suffix to a distinct id
         // instead of silently sharing the overwrite anchor.
@@ -2068,7 +1986,6 @@ mod tests {
             vec!["kb_st_1", "kb_st_1_1"],
             "fallback id must be unique"
         );
-        // The collided fallback is reported as a Warning (duplicate-case
         // semantics) and both entries remain importable.
         assert!(
             outcome
@@ -2083,7 +2000,6 @@ mod tests {
 
     #[test]
     fn duplicate_uid_fallback_colliding_with_stable_id_is_suffixed_unique() {
-        // W-4a: the duplicate-stable-id fallback must also claim uniquely —
         // entry0 claims `kb_st_1` via uid 1 and entry1 (duplicate uid 1 at
         // idx 1) would fall back to the same positional id; it must suffix
         // instead of duplicating the anchor.

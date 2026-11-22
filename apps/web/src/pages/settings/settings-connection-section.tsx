@@ -1,5 +1,4 @@
 /**
- * Settings Connection section — V1.103 P2.
  *
  * Hosts ConnectDaemonForm as a Settings section. Legacy `/connect`
  * permanently redirects here (C1).

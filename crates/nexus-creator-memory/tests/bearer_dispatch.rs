@@ -35,8 +35,6 @@ const fn character() -> MemoryBearerRef<'static> {
     }
 }
 
-// ── Path dispatch ────────────────────────────────────────────────────────
-
 #[test]
 fn creator_arm_paths_match_legacy_layout() {
     let home = PathBuf::from("/h");
@@ -85,8 +83,6 @@ fn bearer_id_returns_primary_id() {
     assert_eq!(character().id(), CHR_A);
 }
 
-// ── Validation dispatch ──────────────────────────────────────────────────
-
 #[test]
 fn validate_accepts_well_formed_bearers() {
     assert!(creator().validate().is_ok());
@@ -106,7 +102,6 @@ fn validate_rejects_bad_creator_ids() {
 
 #[test]
 fn validate_rejects_bad_character_and_owner_ids() {
-    // Bad owner.
     for bad_owner in ["usr_x", "../ctr_x", "ctr_a/b"] {
         let bearer = MemoryBearerRef::Character {
             owner_creator_id: bad_owner,
@@ -117,8 +112,6 @@ fn validate_rejects_bad_character_and_owner_ids() {
             "owner {bad_owner:?} must be rejected"
         );
     }
-    // Bad character id: wrong prefix, traversal, separators, uppercase hex,
-    // wrong length, control characters, empty.
     for bad_chr in [
         "",
         "ctr_0123456789abcdef0123456789abcdef",
@@ -140,8 +133,6 @@ fn validate_rejects_bad_character_and_owner_ids() {
     }
 }
 
-// ── Character-arm file I/O ───────────────────────────────────────────────
-
 #[test]
 fn character_soul_roundtrip_isolated_from_creator_tree() {
     let home = tmp("soul");
@@ -150,7 +141,6 @@ fn character_soul_roundtrip_isolated_from_creator_tree() {
     let doc = soul_io::create(&home, character()).unwrap();
     assert_eq!(doc.frontmatter.creator_id.as_deref(), Some(CHR_A));
 
-    // File lives exactly at the Character path …
     let expected = home
         .join(".nexus42")
         .join("creators")
@@ -160,7 +150,6 @@ fn character_soul_roundtrip_isolated_from_creator_tree() {
         .join("SOUL.md");
     assert!(expected.exists(), "SOUL.md must exist at {expected:?}");
 
-    // … and is invisible through the Creator arm of the same owner.
     assert!(!soul_io::exists(&home, creator()));
     assert!(!home
         .join(".nexus42")
@@ -169,7 +158,6 @@ fn character_soul_roundtrip_isolated_from_creator_tree() {
         .join("SOUL.md")
         .exists());
 
-    // Load / save / delete through the Character bearer.
     let mut loaded = soul_io::load(&home, character()).unwrap();
     loaded.set_personality("Cautious and brave.".to_string());
     soul_io::save(&home, character(), &loaded).unwrap();
@@ -193,7 +181,6 @@ fn character_memory_roundtrip_and_scope_isolation() {
     mem.set_body("The character remembers the bridge crossing.");
     memory_io::save_memory(&home, character(), "bridge-crossing", &mem).unwrap();
 
-    // Listed/loaded only through the same Character bearer.
     assert_eq!(
         memory_io::list_memories(&home, character()).unwrap(),
         vec!["bridge-crossing"]
@@ -201,7 +188,6 @@ fn character_memory_roundtrip_and_scope_isolation() {
     let loaded = memory_io::load_memory(&home, character(), "bridge-crossing").unwrap();
     assert!(loaded.body.contains("bridge crossing"));
 
-    // Isolation: the owning Creator, a sibling Character, and a foreign
     // owner all see nothing.
     assert_eq!(
         memory_io::list_memories(&home, creator()).unwrap(),
@@ -281,7 +267,6 @@ fn character_io_rejects_malformed_ids_before_any_fs_write() {
         Err(MemoryError::InvalidIdFormat(_))
     ));
 
-    // No filesystem side effects happened.
     assert!(!home.join(".nexus42").exists());
     let _ = std::fs::remove_dir_all(&home);
 }

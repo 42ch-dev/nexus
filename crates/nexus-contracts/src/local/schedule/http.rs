@@ -18,10 +18,6 @@
 use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// POST /schedules — Add Schedule
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddScheduleRequest {
     pub creator_id: String,
@@ -86,10 +82,6 @@ pub struct AddScheduleResponse {
     pub core_context_version: u32,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules — List Schedules
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ListSchedulesQuery {
@@ -136,20 +128,12 @@ pub struct ScheduleSummary {
     pub updated_at: String,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules/{schedule_id} — Inspect Schedule
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InspectScheduleResponse {
     pub schedule: ScheduleSummary,
     pub depends_on: Vec<String>,
     pub concurrency_kind: String,
 }
-
-// ---------------------------------------------------------------------------
-// PATCH /schedules/{schedule_id}/core-context — Apply EditOp
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditCoreContextRequest {
@@ -171,10 +155,6 @@ pub struct EditCoreContextResponse {
     pub new_version: u32,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules/{schedule_id}/core-context — Current content
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreContextResponse {
     pub version: u32,
@@ -183,10 +163,6 @@ pub struct CoreContextResponse {
     pub derivation_kind: String,
     pub created_at: String,
 }
-
-// ---------------------------------------------------------------------------
-// GET /schedules/{schedule_id}/core-context-history — Version history
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreContextHistoryResponse {
@@ -202,10 +178,6 @@ pub struct CoreContextHistoryEntry {
     pub derivation_kind: String,
     pub created_at: String,
 }
-
-// ---------------------------------------------------------------------------
-// POST /schedules/{schedule_id}/signal — Pause/Resume/Cancel
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalScheduleRequest {
@@ -225,12 +197,8 @@ pub struct SignalScheduleResponse {
     pub current_wait_id: Option<String>,
 }
 
-// The following local-only write DTOs remain solely for isolated serde tests;
 // the retired controls have no production consumer. Generated DeleteScheduleResponse
 // is a separate served wire contract and remains unchanged.
-// ---------------------------------------------------------------------------
-// PATCH /schedules/{schedule_id} — Edit label/metadata (V1.171 P2 AR-29)
-// ---------------------------------------------------------------------------
 
 /// Partial edit of schedule metadata (AR-29). Only `label` is updateable
 /// today; the `creator_schedules` table carries no other metadata columns.
@@ -245,10 +213,6 @@ pub struct EditScheduleRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
-
-// ---------------------------------------------------------------------------
-// GET/PUT /v1/daemon/works/{work_id}/cron — per-Work cron config (V1.171 P2 AR-29)
-// ---------------------------------------------------------------------------
 
 /// One role's cron entry inside the per-Work schedule (spec §2.1 of
 /// `cron-staggering.md`). Mirrors the shared `WorkSchedule` model in
@@ -314,18 +278,10 @@ pub struct UpdateWorkCronRequest {
     pub expected_current_json: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// DELETE /schedules/{schedule_id} — Remove Schedule
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteScheduleResponse {
     pub deleted: bool,
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -409,7 +365,7 @@ mod tests {
             label: None,
             depends_on: None,
             concurrency: None,
-            scheduled_at: Some("253402300799".to_string()), // Unix timestamp
+            scheduled_at: Some("253402300799".to_string()),
             input: None,
             force_gates: false,
             reason: None,
@@ -448,7 +404,6 @@ mod tests {
 
     #[test]
     fn edit_core_context_request_all_ops() {
-        // append
         let req = EditCoreContextRequest {
             op: "append".to_string(),
             body: Some("more".to_string()),
@@ -458,7 +413,6 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"append\""));
 
-        // struct_merge
         let req = EditCoreContextRequest {
             op: "struct_merge".to_string(),
             body: None,
@@ -468,7 +422,6 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"struct_merge\""));
 
-        // struct_remove
         let req = EditCoreContextRequest {
             op: "struct_remove".to_string(),
             body: None,
@@ -496,10 +449,8 @@ mod tests {
         let back: EditScheduleRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.label.as_deref(), Some("edited label"));
 
-        // Absent label deserializes as None (unchanged).
         let absent: EditScheduleRequest = serde_json::from_str("{}").unwrap();
         assert!(absent.label.is_none());
-        // explicit null also None.
         let null_label: EditScheduleRequest = serde_json::from_str(r#"{"label":null}"#).unwrap();
         assert!(null_label.label.is_none());
     }
@@ -534,14 +485,12 @@ mod tests {
             Some(r#"{"tz":"UTC"}"#)
         );
 
-        // expected_current_json is optional.
         let no_cas: UpdateWorkCronRequest = serde_json::from_str(
             r#"{"tz":"UTC","roles":{"brainstorm":{"cron":"0 3,9,15,21 * * *","enabled":true},"write":{"cron":"0 4,10,16,22 * * *","enabled":true},"review":{"cron":"0,30 * * * *","enabled":true}}}"#,
         )
         .unwrap();
         assert!(no_cas.expected_current_json.is_none());
 
-        // GET response carries the is_default marker.
         let resp = WorkCronResponse {
             tz: "UTC".to_string(),
             roles: WorkCronRolesDto {

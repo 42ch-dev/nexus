@@ -321,7 +321,6 @@ pub(crate) fn tool_input_schema() -> &'static str {
                                 the path instead.",
             }),
         );
-        // The tool's own address field is PREPENDED to the committed array: the
         // wire schema keeps owning which request fields are required, and the
         // rendered envelope stays what it was before the move.
         let required = root["required"]
@@ -440,9 +439,7 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
                               more: the candidate still has to be simulated and approved. On lint \
                               exhaustion the result is the `lint_exhausted` payload with one \
                               actionable correction per violation, and nothing was persisted.",
-                // The rendered `GenerateRequest` contract (D8): the tool description IS the schema.
                 input_schema: tool_input_schema(),
-                // Omitted: the success shape is the WorkflowDocument contract, which is authored as
                 // its own `$ref`-addressed schema and cannot be carried here verbatim.
                 output_schema: None,
             },

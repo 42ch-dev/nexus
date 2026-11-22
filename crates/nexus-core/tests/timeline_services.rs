@@ -228,7 +228,6 @@ async fn cursor_pagination() {
     assert!(!page3.has_more);
     assert!(page3.next_cursor.is_none());
 
-    // Deterministic: the same cursor reproduces the same page.
     let again = list(
         &f.core,
         &f.principal,
@@ -305,7 +304,6 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
 
-    // Default status filter is `canon`.
     let canon = list(
         &f.core,
         &f.principal,
@@ -314,7 +312,6 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
     assert_eq!(sequences(&canon), vec![0, 2, 3]);
-    // Explicit provisional filter selects only provisional rows.
     let provisional = list(
         &f.core,
         &f.principal,
@@ -323,7 +320,6 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
     assert_eq!(sequences(&provisional), vec![1, 4]);
-    // `event_type` exact match (with the default canon status).
     let compute = list(
         &f.core,
         &f.principal,
@@ -332,7 +328,6 @@ async fn cursor_pages_preserve_filters() {
     )
     .await;
     assert_eq!(sequences(&compute), vec![2]);
-    // Unknown event type → empty page, not an error.
     let none = list(
         &f.core,
         &f.principal,
@@ -343,7 +338,6 @@ async fn cursor_pages_preserve_filters() {
     assert!(none.items.is_empty());
     assert!(!none.has_more);
 
-    // Filtered paging: canon pages of two walk 0,2 then 3 — no overlap, no
     // unfiltered rows leaking in.
     let page1 = list(
         &f.core,
@@ -370,7 +364,6 @@ async fn cursor_pages_preserve_filters() {
     assert!(!page2.has_more);
     assert!(page2.next_cursor.is_none());
 
-    // Invalid status filter is rejected.
     let err = f
         .core
         .list_timeline_events(
@@ -552,7 +545,6 @@ async fn branch_filter_narrows_and_defaults_to_world_current_branch() {
     assert_eq!(sequences(&other), vec![0]);
     assert_eq!(other.items[0].branch_id, OTHER_BRANCH);
 
-    // A world with no recorded root branch falls back to `fbk_root`.
     seed_world(&f.pool, "wld_tl_noroot", CREATOR, None).await;
     seed_event(
         &f.pool,
@@ -684,7 +676,6 @@ async fn overview_pages_worlds_deterministically() {
     assert!(page2.cursor.is_none(), "page 2 must be final");
     assert_eq!(page2.total_worlds, 26);
 
-    // Deterministic: page 1 repeats identically.
     let again = overview(&f.core, &f.principal, None).await;
     assert_eq!(again.cursor, page1.cursor);
     assert_eq!(again.worlds[0].world_id, "wld_000");
@@ -701,7 +692,6 @@ async fn overview_pages_worlds_deterministically() {
 async fn overview_cursor_serializes_required_nullable() {
     let f = fixture().await;
 
-    // Terminal page (no Worlds at all) — the required field must appear as null.
     let empty = overview(&f.core, &f.principal, None).await;
     let empty_json = serde_json::to_value(&empty).expect("serialize empty overview");
     assert_eq!(
@@ -714,7 +704,6 @@ async fn overview_cursor_serializes_required_nullable() {
         seed_world(&f.pool, &format!("wld_{i:03}"), CREATOR, Some(ROOT)).await;
     }
 
-    // Non-terminal page — the same required field carries a usable string.
     let page1 = overview(&f.core, &f.principal, None).await;
     let page1_json = serde_json::to_value(&page1).expect("serialize page 1");
     let cursor = page1_json
@@ -723,7 +712,6 @@ async fn overview_cursor_serializes_required_nullable() {
         .expect("non-terminal page must serialize a string cursor");
     assert_eq!(page1.cursor.as_deref(), Some(cursor));
 
-    // Continuation page — terminal again, so the cursor is null once more.
     let page2 = overview(&f.core, &f.principal, page1.cursor.clone()).await;
     let page2_json = serde_json::to_value(&page2).expect("serialize page 2");
     assert_eq!(

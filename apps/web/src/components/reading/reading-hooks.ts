@@ -1,5 +1,4 @@
 /**
- * Reading-surface data hooks — V1.79 Author Reflection (Track A / P0).
  *
  * Read-only composition of EXISTING query hooks for the manuscript reading
  * surface. No new write route, no new query key namespace — these hooks only
@@ -30,7 +29,6 @@ export interface ChapterNeighbors {
   /** Distinct volume numbers present in the Work (sorted ascending). */
   volumes: number[];
   /**
-   * True while the chapter list is still being walked (page-1 load or
    * cursor-walking additional pages). While true, `prev`/`next` may be null
    * simply because the relevant page has not loaded yet — callers must NOT
    * degrade to "first/last chapter" placeholders until this is false.
@@ -43,7 +41,6 @@ function matchCurrent(
   chapter: number,
   volume: number | undefined,
 ): boolean {
-  // Chapter number is the primary key; volume disambiguates only when the
   // caller is reading a specific volume context (the route's ?volume= query).
   // `row.volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   if (row.chapter !== chapter) return false;
@@ -76,7 +73,6 @@ export function useChapterNeighbors(
   const chapters = useChapters(workId ?? undefined, { limit: NEIGHBOR_PAGE_LIMIT });
   const rows = useMemo(() => flattenPages(chapters.data), [chapters.data]);
 
-  // Cursor-walk every page when the server paginates. Guarded by `hasNextPage`
   // so normal-sized Works (first page returns `has_more: false`) never fetch a
   // second page. Long Works walk 2-3 pages; chapters are rarely in the 100s.
   useEffect(() => {
@@ -85,7 +81,6 @@ export function useChapterNeighbors(
     }
   }, [chapters.hasNextPage, chapters.isFetchingNextPage, chapters.fetchNextPage]);
 
-  // Still resolving: page-1 fetch in flight, more pages to walk, or a walk
   // fetch in flight. Once all pages land, all three are false.
   const loading = chapters.isLoading || chapters.hasNextPage || chapters.isFetchingNextPage;
 
@@ -95,7 +90,6 @@ export function useChapterNeighbors(
     }
     const idx = rows.findIndex((r) => matchCurrent(r, chapter, volume));
     if (idx === -1) {
-      // Not in the loaded rows yet. If `loading`, the chapter may live on a
       // not-yet-fetched page — keep neighbors null without implying first/last.
       return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows), loading };
     }
@@ -110,7 +104,6 @@ export function useChapterNeighbors(
 }
 
 function deriveVolumes(rows: ChapterSummary[]): number[] {
-  // `volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   const set = new Set<number>();
   for (const r of rows) set.add(r.volume);
   return [...set].sort((a, b) => a - b);

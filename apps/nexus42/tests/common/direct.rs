@@ -51,7 +51,6 @@ impl DirectFixture {
             .expect("register fixture creator");
         let creator_id = creator.creator_id;
 
-        // `select_workspace` initializes only a workspace that exists on disk,
         // so materialize the operational directory first — the same layout the
         // CLI's own home resolution reads.
         std::fs::create_dir_all(operational_workspace_dir(
@@ -68,7 +67,6 @@ impl DirectFixture {
             .await
             .expect("select fixture workspace");
 
-        // The selection above admits a direct writer and retains its OS
         // admission guard in THIS process. A CLI child must not be handed a
         // home some other writer still holds, so release it explicitly.
         release_retained_writer_guards(&workspace_state_db_path(

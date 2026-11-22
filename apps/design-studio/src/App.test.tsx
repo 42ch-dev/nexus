@@ -1,5 +1,4 @@
 /**
- * Design Studio smoke tests — T7 + T4 surface-fixture coverage.
  *
  * Coverage:
  *   1. App renders the landing page (HomePage) with section links.
@@ -19,8 +18,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { StudioEmbedProvider } from '@/components/studio-embed-context';
 import { ThemeProvider } from '@/components/theme-provider';
-
-/* ---- helpers ------------------------------------------------------------ */
 
 function mockMatchMedia(prefersDark: boolean) {
   const media = {
@@ -62,8 +59,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/* ---- landing page ------------------------------------------------------- */
-
 describe('App landing page', () => {
   it('renders the studio heading', async () => {
     mockMatchMedia(false);
@@ -84,7 +79,6 @@ describe('App landing page', () => {
   it('renders navigation links for all five gallery sections', async () => {
     mockMatchMedia(false);
     await renderStudio();
-    // Nav links appear in the header AND as home-page cards — verify at
     // least one of each label exists.
     const expectedLabels = ['Tokens', 'Brand', 'Components', 'Voice', 'Surfaces'];
     for (const label of expectedLabels) {
@@ -92,8 +86,6 @@ describe('App landing page', () => {
     }
   });
 });
-
-/* ---- theme toggle ------------------------------------------------------- */
 
 describe('Theme toggle', () => {
   it('starts in light mode when OS prefers light', async () => {
@@ -124,8 +116,6 @@ describe('Theme toggle', () => {
   });
 });
 
-/* ---- gallery section rendering ------------------------------------------ */
-
 const GALLERY_SECTIONS = [
   { route: '/tokens', heading: 'Tokens' },
   { route: '/brand', heading: 'Brand' },
@@ -140,16 +130,12 @@ describe('Gallery section rendering', () => {
     async ({ route, heading }) => {
       mockMatchMedia(false);
       await renderStudio(route);
-      // Heading text may appear both in the nav link and the page <h2> —
       // verify at least one instance exists.
       expect(screen.getAllByText(heading).length).toBeGreaterThanOrEqual(1);
     },
   );
 });
 
-/* ---- tokens page — V1.121 P0 v0.4 galleries (Task 4) -------------------- */
-
-/** matchMedia mock that distinguishes color-scheme from reduced-motion. */
 function mockMatchMediaFull({
   dark = false,
   reducedMotion = false,
@@ -168,8 +154,6 @@ function mockMatchMediaFull({
       }) as unknown as MediaQueryList,
   );
 }
-
-/* ---- Chronos Light / Dark gallery acceptance (VI logo upgrade T7) ------- */
 
 describe('Chronos gallery acceptance', () => {
   it('tokens page documents dual-role and renders blue-* swatches', async () => {
@@ -197,8 +181,6 @@ describe('Chronos gallery acceptance', () => {
     expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
   });
 });
-
-/* ---- Brand logo gallery lockup (V1.131 P1) ----------------------------- */
 
 describe('Brand logo gallery lockup', () => {
   beforeEach(async () => {
@@ -402,7 +384,6 @@ describe('Tokens page — motion gallery', () => {
   });
 
   it('shows the honesty note when prefers-reduced-motion is active', async () => {
-    // Re-render with reduced-motion active.
     vi.restoreAllMocks();
     mockMatchMediaFull({ reducedMotion: true });
     await renderStudio('/tokens');
@@ -417,8 +398,6 @@ describe('Tokens page — motion gallery', () => {
     );
   });
 });
-
-/* ---- surfaces section menu / deep links (V1.102 P2 Task 1) -------------- */
 
 const SURFACES_SECTION_ROUTES = [
   { route: '/surfaces', testId: 'surfaces-index', linkLabel: 'Overview' },
@@ -475,7 +454,6 @@ describe('Surfaces section menu — deep links', () => {
       expect(
         within(sectionNav).getByRole('link', { name: linkLabel }),
       ).toHaveAttribute('aria-current', 'page');
-      // Top gallery Surfaces link stays active for nested section routes.
       const galleryNav = screen.getByRole('navigation', {
         name: 'Gallery sections',
       });
@@ -596,8 +574,6 @@ describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
     ).toBeInTheDocument();
   });
 });
-
-/* ---- surfaces page fixtures (T4) ---------------------------------------- */
 
 describe('Surfaces page — setup wizard chrome fixtures', () => {
   beforeEach(async () => {
@@ -742,7 +718,6 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders Creator and Orchestrator tabs', () => {
-    // App shell + Settings host fixtures both stub Creator/Orchestrator tabs.
     expect(screen.getAllByText('Creator').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Orchestrator').length).toBeGreaterThanOrEqual(1);
   });
@@ -753,7 +728,6 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
-    // The Settings fixture consumes ShellSidebarChrome — segmented pill
     // tablist, not stale underline tabs. Default tab is Orchestrator so the
     // Workspace profile selector is visible (V1.131 P2).
     const settingsShell = screen.getByTestId('settings-shell-chrome');
@@ -770,7 +744,6 @@ describe('Surfaces page — app shell fixture', () => {
 
   it('renders Settings fixture sidebar with sectioned icon nav (FB-UI-003)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
-    // Orchestrator groups (Memory / Runtime / Strategies) when 工作区 is shown.
     expect(within(settingsShell).getAllByText('Memory').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -780,7 +753,6 @@ describe('Surfaces page — app shell fixture', () => {
       name: 'Workspace',
     });
     expect(toolbar).toBeInTheDocument();
-    // Icon-only — no display name text visible in the settings shell.
     expect(
       within(settingsShell).queryByText('Local Creator'),
     ).not.toBeInTheDocument();
@@ -833,8 +805,6 @@ describe('Surfaces page — app shell fixture', () => {
   });
 });
 
-/* ---- surfaces page — inspiration pool fixture (v1.223 W5) -------------- */
-
 describe('Surfaces page — inspiration pool fixture', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -846,13 +816,11 @@ describe('Surfaces page — inspiration pool fixture', () => {
     const fixtures = within(section).getByTestId('works-inspiration-fixtures');
 
     expect(within(fixtures).getByTestId('works-inspiration-fixture-list')).toBeInTheDocument();
-    // The SurfaceHeading is the section's own h3, identified for the gallery anchor.
     const [surfaceHeading] = within(section).getAllByRole('heading', {
       name: 'Inspiration Pool',
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-inspiration-pool');
-    // The heading is the only holder: a section id of the same value would win
     // the hash lookup as the earlier node.
     expect(document.querySelectorAll('#surfaces-inspiration-pool')).toHaveLength(1);
     expect(
@@ -862,8 +830,6 @@ describe('Surfaces page — inspiration pool fixture', () => {
     ).toEqual(['idea', 'promoted', 'archived']);
   });
 });
-
-/* ---- surfaces page — sessions rail fixture (v1.223 W5) ----------------- */
 
 describe('Surfaces page — sessions rail fixture', () => {
   beforeEach(async () => {
@@ -878,13 +844,10 @@ describe('Surfaces page — sessions rail fixture', () => {
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-sessions-rail');
-    // The heading is the only holder: a section id of the same value would win
     // the hash lookup as the earlier node.
     expect(document.querySelectorAll('#surfaces-sessions-rail')).toHaveLength(1);
   });
 });
-
-/* ---- surfaces page — capabilities rail fixture (v1.223 W5) ------------- */
 
 describe('Surfaces page — capabilities rail fixture', () => {
   beforeEach(async () => {
@@ -899,16 +862,12 @@ describe('Surfaces page — capabilities rail fixture', () => {
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-caps-rail');
-    // The heading is the only holder: a section id of the same value would win
     // the hash lookup as the earlier node.
     expect(document.querySelectorAll('#surfaces-caps-rail')).toHaveLength(1);
   });
 });
 
-/* ---- surfaces page — route-level duplicate ids (v1.224 I-000088) -------- */
-
 /**
- * A duplicate DOM id silently breaks hash deep links: `getElementById` returns
  * the first match, so a section reusing its heading's id steals the gallery
  * anchor. Sweeping every section route augments the three `v1.223` W5 rail
  * pins (pool / sessions / caps): those keep pinning their own pair, and this
@@ -935,7 +894,6 @@ const ARIA_REFERENCE_ATTRS = [
 ] as const;
 
 /**
- * A reference token that resolves to zero nodes dangles, and one that resolves
  * to several lands on whichever node `getElementById` returns first — both are
  * broken for assistive tech, so every token must own exactly one id.
  */
@@ -968,7 +926,6 @@ describe('Surfaces page — route-level id integrity', () => {
     const problems: string[] = [];
     for (const { route, testId } of SURFACES_SECTION_ROUTES) {
       const { unmount } = await renderStudio(route);
-      // A route still on its Suspense fallback renders no ids and would pass
       // silently, so the sweep only counts a route once it has mounted.
       await screen.findByTestId(testId);
       problems.push(...pageIntegrityDiagnostics(route));
@@ -985,7 +942,6 @@ describe('Surfaces page — route-level id integrity', () => {
     mockMatchMedia(false);
     await renderStudio('/surfaces/shell');
     const hostRoot = await screen.findByTestId('settings-host-fixtures');
-    // Section bodies are interaction-gated, so the default-state sweep above
     // never mounts Advanced — which stacks the resident Connection section a
     // second time on the same route.
     fireEvent.click(
@@ -1019,8 +975,6 @@ describe('Surfaces page — daemon status strip', () => {
   });
 });
 
-/* ---- surfaces page — launch splash fixtures (V1.106 P0 Task 3) --------- */
-
 describe('Surfaces page — launch splash fixtures', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -1040,21 +994,16 @@ describe('Surfaces page — launch splash fixtures', () => {
   });
 
   it('covers waiting, error+retry, and reset-local-database variants', () => {
-    // V1.129 P1: error states now render the promoted <TransportErrorBlock>.
     expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
-    // Two error splashes render the primitive — daemon_down + timeout kinds.
     const blocks = screen.getAllByTestId('transport-error-block');
     expect(blocks).toHaveLength(2);
     expect(screen.getByText('Local daemon is not running')).toBeInTheDocument();
     expect(screen.getByText('The daemon took too long to respond')).toBeInTheDocument();
-    // Each primitive renders a Retry CTA; reset-local-DB is composed alongside
     // only on the third splash (timeout).
     expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Reset')).toBeInTheDocument();
   });
 });
-
-/* ---- surfaces page — selection submenu fixtures (V1.126 P0 T4) -------- */
 
 describe('Surfaces page — selection submenu fixtures', () => {
   beforeEach(async () => {
@@ -1145,8 +1094,6 @@ describe('Surfaces page — selection submenu fixtures', () => {
   });
 });
 
-/* ---- components page — Toast matrix (V1.106 P0 Task 3) ---------------- */
-
 describe('Components page — Toast matrix', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -1187,8 +1134,6 @@ describe('Components page — Toast matrix', () => {
   });
 });
 
-/* ---- surfaces page — AgentPicker fixtures (V1.101 P0 Task 2) ------------ */
-
 describe('Surfaces page — AgentPicker fixtures', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -1203,7 +1148,6 @@ describe('Surfaces page — AgentPicker fixtures', () => {
 
   it('covers loading, empty, and error states', () => {
     expect(screen.getAllByText('Scanning for local agents…').length).toBeGreaterThanOrEqual(1);
-    // Multiple empty-status fixtures (Empty + Verify matrix) render this title.
     expect(screen.getAllByText('No agents found on PATH').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Could not scan for agents').length).toBeGreaterThanOrEqual(1);
   });
@@ -1247,34 +1191,27 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 
   it('renders the V1.108 Verify Agent static state matrix (FB-UI-008)', async () => {
-    // idle: Verify button visible and enabled (command non-empty).
     const idleBtns = screen.getAllByTestId('agent-picker-verify');
     expect(idleBtns.length).toBeGreaterThanOrEqual(1);
 
     const idleVerify = idleBtns.find((b) => b.textContent === 'Verify');
     expect(idleVerify).toBeTruthy();
 
-    // loading: Verifying… label + disabled.
     const loadingVerify = idleBtns.find((b) => b.textContent === 'Verifying…');
     expect(loadingVerify).toBeTruthy();
     expect(loadingVerify).toBeDisabled();
 
-    // success helper.
     expect(screen.getByText('Agent responded successfully.')).toBeInTheDocument();
 
-    // failure helper.
     expect(
       screen.getByText('Could not reach this agent. Check the command and try again.'),
     ).toBeInTheDocument();
   });
 });
 
-/* ---- surfaces page — Settings shell chrome (V1.103 P0 Task 2) ----------- */
-
 describe('Surfaces page — Settings shell chrome fixtures', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
-    // Settings shell chrome remains discoverable under Shell (Studio-only).
     await renderStudio('/surfaces/shell');
   });
 
@@ -1335,7 +1272,6 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
         /Manage your local agent, workspace, daemon connection, and setup options/i,
       ).length,
     ).toBeGreaterThanOrEqual(1);
-    // Shell must not include wizard Back/Continue chrome (wizard CTAs live
     // on /surfaces/setup).
     expect(
       within(hostRoot).queryByTestId('wizard-cta-row'),
@@ -1406,7 +1342,6 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       .getAllByTestId('agent-card-select-codex-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
-    // Preselect is Codex, not the first-installed Claude default.
     const claudePressed = within(agentRoot)
       .getAllByTestId('agent-card-select-claude-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
@@ -1558,8 +1493,6 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
   });
 });
 
-/* ---- components page — form-field composition fixture (P2 T3) ----------- */
-
 describe('Components page — form-field composition fixture', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -1588,7 +1521,6 @@ describe('Components page — form-field composition fixture', () => {
   });
 
   it('does not show error message initially', () => {
-    // ErrorState from StatesSection also has role="alert" — check specifically
     // that our form-field error element (ff-name-error) is absent.
     expect(screen.queryByText('Name is required.')).not.toBeInTheDocument();
   });
@@ -1597,7 +1529,6 @@ describe('Components page — form-field composition fixture', () => {
     const btn = screen.getByRole('button', { name: 'Trigger error' });
     act(() => btn.click());
 
-    // There are two role="alert" on the page (ErrorState + our triggered error).
     // Query specifically for our error element by id.
     const error = document.getElementById('ff-name-error');
     expect(error).toBeInTheDocument();
@@ -1606,12 +1537,10 @@ describe('Components page — form-field composition fixture', () => {
   });
 
   it('renders required field indicator (*)', async () => {
-    // Scoped to the email label — other gallery sections (e.g. Run Studio)
     // also render required markers.
     const emailLabel = document.querySelector('label[for="ff-email"]');
     expect(emailLabel).toBeInTheDocument();
     expect(emailLabel).toHaveTextContent('*');
-    // The required input should have the required attribute
     const emailInput = screen.getByPlaceholderText('you@example.com');
     expect(emailInput).toBeRequired();
   });
@@ -1625,8 +1554,6 @@ describe('Components page — form-field composition fixture', () => {
     expect(bio).toBeDisabled();
   });
 });
-
-/* ---- components page — Badge soft/solid matrix (V1.102 P0 Task 3) -------- */
 
 describe('Components page — Badge soft/solid matrix', () => {
   beforeEach(async () => {
@@ -1699,7 +1626,6 @@ describe('Components page — Domain badge matrices', () => {
   });
 
   it('uses finding-status-* / memory-task-kind-* token classes (no color-mix arbitraries)', () => {
-    // Token segment uses dashes (in_review → in-review, wont_fix → wont-fix).
     const findingCases = [
       ['open', 'open'],
       ['triaged', 'triaged'],
@@ -1726,8 +1652,6 @@ describe('Components page — Domain badge matrices', () => {
     }
   });
 });
-
-/* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
 
 describe('Components page — Select fixtures', () => {
   beforeEach(async () => {
@@ -1783,8 +1707,6 @@ describe('Components page — Select fixtures', () => {
   });
 });
 
-/* ---- surfaces page — Canvas shell + context menu chrome (V1.108 P1 T4) -- */
-
 describe('Surfaces page — Canvas surfaces fixtures', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -1821,22 +1743,18 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 
   it('renders outline node samples aligned with P0 (Volume / Chapter / Timeline)', async () => {
     const matrix = screen.getByTestId('canvas-node-matrix');
-    // Volume node
     expect(within(matrix).getByText('Volume II — Journeys')).toBeInTheDocument();
 
-    // Chapter status badges mirror the P0 STATUS_LABEL set.
     const statusBadges = within(matrix).getAllByText('Not started');
     expect(statusBadges.length).toBeGreaterThanOrEqual(1);
     expect(within(matrix).getAllByText('Draft').length).toBeGreaterThanOrEqual(1);
     expect(within(matrix).getAllByText('Finalized').length).toBeGreaterThanOrEqual(1);
 
-    // Timeline event node (unattached)
     expect(within(matrix).getByText('Unattached event')).toBeInTheDocument();
   });
 
   it('marks the selected node with the canvas-node-border-selected class', async () => {
     const matrix = screen.getByTestId('canvas-node-matrix');
-    // The finalized-and-selected chapter node title is unique in the matrix.
     const selectedTitle = within(matrix).getByText('Chapter 6 — Descent');
     const nodeShell = selectedTitle.closest('[class*="rounded-card"]');
     expect(nodeShell).not.toBeNull();
@@ -1848,17 +1766,13 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     const menus = within(matrix).getAllByRole('menu');
     expect(menus.length).toBeGreaterThanOrEqual(3);
 
-    // Entity (World KB) + Canvas future both have Connect to… → use getAllByText.
     expect(within(matrix).getAllByText('Connect to…').length).toBeGreaterThanOrEqual(1);
 
-    // Path (browser + desktop) both have Copy Path.
     expect(within(matrix).getAllByText('Copy Path').length).toBeGreaterThanOrEqual(1);
 
-    // Path (desktop) — Open With… + Reveal in Finder
     expect(within(matrix).getByText('Open With…')).toBeInTheDocument();
     expect(within(matrix).getByText('Reveal in Finder')).toBeInTheDocument();
 
-    // Canvas (future) — Add Chapter
     expect(within(matrix).getByText('Add Chapter')).toBeInTheDocument();
   });
 
@@ -1869,23 +1783,18 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   });
 
   it('does not render light/dark as separate DOM trees (theme toggle drives both)', async () => {
-    // The fixture renders once; the global ThemeToggle applies .dark to <html>.
     // There should be exactly one canvas shell chrome instance.
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
   });
-
-  /* ---- Strategy surface chrome (V1.111 P2 T1) --------------------- */
 
   it('renders the Strategy surface chrome fixture with shell + inspector + validation', async () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
     expect(shell).toBeInTheDocument();
 
-    // Inspector aside mirrors strategy-canvas/inspector-panel ReadOnlyDetails.
     expect(
       within(shell).getByTestId('strategy-inspector-chrome'),
     ).toBeInTheDocument();
 
-    // Validation panel mirrors strategy-canvas/state-machine ValidationPanel.
     expect(
       within(shell).getByTestId('strategy-validation-chrome'),
     ).toBeInTheDocument();
@@ -1894,7 +1803,6 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   it('mirrors strategy node kinds (state / join / terminal) with status + kind tags', async () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
 
-    // "Drafting" appears both as the state-node header (span[title]) and as the
     // inspector aside heading (h3, read-only mirror of the selected node). The
     // accent stripe lives on the state-node shell — target the span[title] copy.
     const stateHeading = shell.querySelector<HTMLSpanElement>(
@@ -1904,16 +1812,12 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     const stateShell = stateHeading!.closest('[class*="border-l-canvas-strategy-accent"]');
     expect(stateShell).not.toBeNull();
 
-    // stateKind mono tag — mirrors StrategyStateNode KindTag.
     expect(within(shell).getAllByText('standard').length).toBeGreaterThanOrEqual(1);
 
-    // Status overlay uses semantic colors — Drafting is the current node.
     expect(within(shell).getByText('Current')).toBeInTheDocument();
 
-    // Join node carries its converge-strategy chip.
     expect(within(shell).getByText('Join · wait_for_all')).toBeInTheDocument();
 
-    // Terminal node shows the End marker.
     expect(within(shell).getByText('End')).toBeInTheDocument();
   });
 
@@ -1922,18 +1826,14 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     const edges = within(shell).getAllByTestId('strategy-edge-sample');
     expect(edges.length).toBeGreaterThanOrEqual(2);
 
-    // Edge labels mirror the RF `label: condition` on strategy-edge.
     expect(within(shell).getByText('draft_ready')).toBeInTheDocument();
     expect(within(shell).getByText('all_done')).toBeInTheDocument();
   });
-
-  /* ---- World KB surface chrome (V1.111 P2 T2) ---------------------- */
 
   it('renders the World KB surface chrome fixture with shell + inspector', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
     expect(shell).toBeInTheDocument();
 
-    // Relationship inspector aside mirrors relationship-inspector.tsx.
     expect(
       within(shell).getByTestId('worldkb-inspector-chrome'),
     ).toBeInTheDocument();
@@ -1942,7 +1842,6 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   it('mirrors entity node cards with lifecycle badges for all four states', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
 
-    // Confirmed (selected) entity — mirrors WorldKbEntityNode selected paint.
     const confirmedTitle = shell.querySelector<HTMLSpanElement>(
       'span[title="Kael Veynor"]',
     );
@@ -1952,7 +1851,6 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     );
     expect(confirmedShell).not.toBeNull();
 
-    // All four lifecycle badge labels render (promotion-* tokens).
     expect(within(shell).getAllByText('Confirmed').length).toBeGreaterThanOrEqual(1);
     expect(within(shell).getAllByText('Merged').length).toBeGreaterThanOrEqual(1);
     expect(within(shell).getAllByText('Pending').length).toBeGreaterThanOrEqual(1);
@@ -1961,19 +1859,15 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 
   it('mirrors the computable chip on computable BlockType entities', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
-    // "Act" is a computable block kind → Computable chip renders.
     expect(within(shell).getAllByText('Computable').length).toBeGreaterThanOrEqual(1);
-    // The Act entity shows its BlockType tag too.
     expect(within(shell).getAllByText('Act').length).toBeGreaterThanOrEqual(1);
   });
 
   it('mirrors source-anchor provenance nodes + read-only provenance edges', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
 
-    // Source-anchor node — mirrors WorldKbSourceAnchorNode (sourceType + reference).
     expect(within(shell).getAllByText('manuscript').length).toBeGreaterThanOrEqual(1);
 
-    // Source-anchor provenance edge — solid connector in source-anchor-edge token.
     expect(
       within(shell).getAllByTestId('worldkb-source-anchor-edge-sample').length,
     ).toBeGreaterThanOrEqual(1);
@@ -1984,12 +1878,10 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     const edges = within(shell).getAllByTestId('worldkb-relationship-edge-sample');
     expect(edges.length).toBeGreaterThanOrEqual(3);
 
-    // Relationship kind labels mirror RELATIONSHIP_KIND_LABELS + custom label.
     expect(within(shell).getAllByText('Allied With').length).toBeGreaterThanOrEqual(1);
     expect(within(shell).getAllByText('Rival Of · suggested').length).toBeGreaterThanOrEqual(1);
     expect(within(shell).getAllByText('Sworn Enemy').length).toBeGreaterThanOrEqual(1);
 
-    // Confidence band labels mirror CONFIDENCE_BAND_LABEL (low / mid / high).
     expect(within(shell).getAllByText('High').length).toBeGreaterThanOrEqual(1);
     expect(within(shell).getAllByText('Medium').length).toBeGreaterThanOrEqual(1);
     expect(within(shell).getAllByText('Low').length).toBeGreaterThanOrEqual(1);
@@ -1998,15 +1890,10 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   it('mirrors the relationship inspector with grounded-badge and confidence', async () => {
     const inspector = screen.getByTestId('worldkb-inspector-chrome');
     expect(inspector).toBeInTheDocument();
-    // Grounded badge mirrors the relationship-grounded-badge token.
     expect(within(inspector).getByText('Grounded')).toBeInTheDocument();
-    // Confidence value renders numerically (formatConfidence).
     expect(within(inspector).getByText('0.82')).toBeInTheDocument();
   });
 });
-
-/* ---- components page — v0.4 states matrix (V1.121 P1 T4) --------------- */
-
 
 describe('Components page — States v0.4 (error surface + display empty headline)', () => {
   beforeEach(async () => {
@@ -2059,7 +1946,6 @@ describe('Components page — Dialog scrim convergence (V1.121)', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog.className).toContain('shadow-elevation-4');
     expect(document.querySelector('.bg-scrim')).not.toBeNull();
-    // Close so Radix aria-hidden does not leak into later tests in this suite.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
   });
 });
@@ -2071,7 +1957,6 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
   });
 
   it('confines the display voice to EmptyState headline opt-in', () => {
-    // CardTitle voice="content" now uses sans display-20; EmptyState,
     // UnavailableState (promoted States family, V1.148 P1), and
     // EmptyCreateCard (V1.148 P1) carry font-display — interface components
     // stay sans. ListStateContainer and ListDetailShell render the promoted
@@ -2101,11 +1986,9 @@ describe('Components page — theme toggle coverage (light/dark)', () => {
     mockMatchMedia(false);
     await renderStudio('/components');
 
-    // Light: the states matrix renders once (no per-theme DOM duplication).
     expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
     expect(document.documentElement.classList.contains('dark')).toBe(false);
 
-    // Toggle to dark — same tree; the token swap is class-driven.
     act(() => screen.getByLabelText(/Switch to dark theme/).click());
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
@@ -2114,8 +1997,6 @@ describe('Components page — theme toggle coverage (light/dark)', () => {
   });
 });
 
-/* ---- V1.121 P3 T4 — canvas surfaces v0.4 fixture updates ----------------- */
-
 describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   beforeEach(async () => {
     mockMatchMedia(false);
@@ -2123,7 +2004,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   });
 
   it('paints the outline accent spine on outline surface nodes (amber-700)', () => {
-    // Outline samples (Volume / Chapter / Scene / Beat) route the accent
     // prop through NodeChromeShell — the spine class targets the amber-700
     // canvas-outline-accent token.
     const matrix = screen.getByTestId('canvas-node-matrix');
@@ -2134,7 +2014,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
 
   it('paints the strategy accent spine on every strategy surface node', () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
-    // All four strategy node kinds (state, join, terminal, plus the
     // selected drafting state) carry the strategy spine class.
     const spines = shell.querySelectorAll('[class*="border-l-canvas-strategy-accent"]');
     expect(spines.length).toBeGreaterThanOrEqual(3);
@@ -2142,7 +2021,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
 
   it('paints the worldkb accent spine on every World KB surface node', () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
-    // Entity cards + source-anchor nodes both carry the worldkb spine.
     const spines = shell.querySelectorAll('[class*="border-l-canvas-worldkb-accent"]');
     expect(spines.length).toBeGreaterThanOrEqual(2);
   });
@@ -2150,7 +2028,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   it('uses min-w-canvas-node-outline-scene-beat for scene + beat samples', () => {
     const matrix = screen.getByTestId('canvas-node-matrix');
     const sceneShells = matrix.querySelectorAll('.min-w-canvas-node-outline-scene-beat');
-    // Scene + Beat + Scene (no status) + Beat (selected) = 4 chips.
     expect(sceneShells.length).toBeGreaterThanOrEqual(4);
   });
 
@@ -2162,7 +2039,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
 
   it('mirrors v0.4 elevation + accent on World KB entity + source-anchor nodes', () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
-    // Entity card carries the v0.4 elevation recipe (rest + hover + dragging)
     // via the transition-shadow + hover:shadow-elevation-2 +
     // data-[dragging=true]:shadow-elevation-4 class chain.
     const entityShells = shell.querySelectorAll(
@@ -2174,7 +2050,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   it('renders the v0.4 elevation state matrix fixture', () => {
     const matrix = screen.getByTestId('canvas-node-v2-elevation-matrix');
     expect(matrix).toBeInTheDocument();
-    // Four pinned chips: rest / selected / dragging / selected+dragging.
     expect(within(matrix).getByText('Rest')).toBeInTheDocument();
     expect(within(matrix).getByText('Selected')).toBeInTheDocument();
     expect(within(matrix).getByText('Dragging')).toBeInTheDocument();
@@ -2184,11 +2059,9 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   it('renders the per-surface accent spine matrix fixture', () => {
     const matrix = screen.getByTestId('canvas-node-v2-accents-matrix');
     expect(matrix).toBeInTheDocument();
-    // Three accent spines side-by-side. The label appears twice per chip
     // (row header + chip title) — assert on the chip title font-heading span.
     expect(matrix.querySelectorAll('.font-heading.text-copy-14').length).toBe(3);
 
-    // Each spine class is unique per chip.
     expect(
       matrix.querySelectorAll('[class*="border-l-canvas-strategy-accent"]').length,
     ).toBeGreaterThanOrEqual(1);
@@ -2203,7 +2076,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   it('renders the node-width utility matrix fixture with all five slots', () => {
     const matrix = screen.getByTestId('canvas-node-v2-widths-matrix');
     expect(matrix).toBeInTheDocument();
-    // All five min-w-canvas-node-* utility chips are present.
     for (const slot of [
       'strategy-root',
       'strategy-primary',
@@ -2215,7 +2087,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
         within(matrix).getByTestId(`canvas-node-width-${slot}`),
       ).toBeInTheDocument();
     }
-    // Each chip uses the named utility class.
     expect(
       matrix.querySelector('.min-w-canvas-node-strategy-root'),
     ).not.toBeNull();
@@ -2224,8 +2095,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
     ).not.toBeNull();
   });
 });
-
-/* ---- V1.121 P3 T4 — Tokens page canvas section -------------------------- */
 
 describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
   beforeEach(async () => {
@@ -2296,11 +2165,8 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
   it('each accent spine swatch uses border-l-[3px] shape mirroring NodeChromeShell', () => {
     const accentsGroup = screen.getByTestId('canvas-token-group-3');
     const swatches = accentsGroup.querySelectorAll('[style*="border-left: 3px"]');
-    // All three spine swatches use the spine shape.
     expect(swatches.length).toBe(3);
   });
-
-  /* ---- V1.124 P1 — Timeline / Layer / Outline pins / Soul Viz axes -------- */
 
   it('renders Canvas — Timeline accent spine token', () => {
     const group = screen.getByTestId('canvas-token-group-4');
@@ -2364,7 +2230,6 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
   });
 
   it('V1.124 P1 - CSS-variable bindings: swatch styles reference the expected var(--color-*) names', () => {
-    // Verify that the rendered swatch elements have style attributes referencing
     // the correct CSS custom properties. jsdom cannot resolve the actual color
     // values, but asserting the var() binding is present confirms the wiring
     // between tokens.tsx entries and the CSS variable names in tokens.css.
@@ -2405,19 +2270,15 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
   });
 });
 
-/* ---- V1.121 P3 T4 — parity sweep (light/dark DOM assertions) ------------ */
-
 describe('V1.121 P3 T4 — parity sweep across all surfaces', () => {
   it('renders all three canvas surfaces + canvas token gallery in a single tree', async () => {
     mockMatchMedia(false);
     await renderStudio('/surfaces/canvas');
 
-    // Three surface chrome fixtures render in the same DOM tree.
     expect(screen.getByTestId('canvas-shell-chrome')).toBeInTheDocument();
     expect(screen.getByTestId('strategy-shell-chrome')).toBeInTheDocument();
     expect(screen.getByTestId('worldkb-shell-chrome')).toBeInTheDocument();
 
-    // The shared token surface is the same — no per-surface token duplication.
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
   });
 
@@ -2430,7 +2291,6 @@ describe('V1.121 P3 T4 — parity sweep across all surfaces', () => {
     expect(screen.getAllByTestId('strategy-shell-chrome')).toHaveLength(1);
     expect(screen.getAllByTestId('worldkb-shell-chrome')).toHaveLength(1);
 
-    // Toggle to dark — same tree, theme swap is class-driven on <html>.
     act(() => screen.getByLabelText(/Switch to dark theme/).click());
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);

@@ -217,11 +217,9 @@ mod tests {
         upsert_operation(&pool, "op-1", "sess-1", "mock-acp", "running")
             .await
             .unwrap();
-        // The predicate is a running operation, never a fabricated terminal.
         let before = get_operation(&pool, "op-1").await.unwrap().unwrap();
         assert_eq!(before.status, "running");
         assert_eq!(before.session_id, "sess-1");
-        // A new process open settles it.
         let affected = settle_orphaned_as_interrupted(&pool).await.unwrap();
         assert_eq!(affected, 1);
         let after = get_operation(&pool, "op-1").await.unwrap().unwrap();
@@ -237,7 +235,6 @@ mod tests {
             .await
             .unwrap();
         settle_orphaned_as_interrupted(&pool).await.unwrap();
-        // A late `running` write must not resurrect a settled operation.
         upsert_operation(&pool, "op-2", "sess-2", "mock-acp", "running")
             .await
             .unwrap();
@@ -264,7 +261,6 @@ mod tests {
         let all = list_operations(&pool, i64::MAX).await.unwrap();
         let retained = i64::try_from(all.len()).expect("journal length within i64");
         assert_eq!(retained, MAX_JOURNAL_ENTRIES, "retention must be bounded");
-        // The newest survive; the oldest are pruned.
         assert!(get_operation(&pool, "op-0").await.unwrap().is_none());
         assert!(
             get_operation(&pool, &format!("op-{}", MAX_JOURNAL_ENTRIES + 9))
@@ -293,7 +289,6 @@ mod tests {
             list_session_operations(&pool, "sess-3").await.unwrap(),
             [] as [crate::js_provider_journal::JournaledOperation; 0]
         );
-        // Another session's row is untouched.
         assert!(get_operation(&pool, "op-5").await.unwrap().is_some());
     }
 
@@ -303,12 +298,10 @@ mod tests {
     #[tokio::test]
     async fn guarded_admission_permits_engine_owner_writes() {
         let (_dir, pool) = fresh_engine_pool().await;
-        // Engine owner write succeeds (the DAO call above already proves this,
         // but assert directly here for the guard contract).
         upsert_operation(&pool, "op-g", "sess-g", "mock-acp", "running")
             .await
             .expect("engine owner must be admitted");
-        // A separate database, Direct-mode pool: the engine-owned journal table
         // must fence it. Using a distinct file avoids the retained engine guard.
         let direct_dir = tempfile::tempdir().unwrap();
         let direct_path = direct_dir.path().join("direct.db");
@@ -340,7 +333,6 @@ mod tests {
         upsert_operation(&pool, "op-cancel", "sess-c", "mock-acp", "cancelled")
             .await
             .unwrap();
-        // A late `running` write (e.g. a stale callback) must not downgrade it.
         upsert_operation(&pool, "op-cancel", "sess-c", "mock-acp", "running")
             .await
             .unwrap();
@@ -353,7 +345,6 @@ mod tests {
             "cancelled",
             "a late running upsert must not downgrade a cancelled operation"
         );
-        // A genuinely running op is still settled (proves the predicate is live).
         upsert_operation(&pool, "op-run", "sess-c", "mock-acp", "running")
             .await
             .unwrap();

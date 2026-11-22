@@ -105,7 +105,6 @@ mod tests {
 
     #[test]
     fn golden_alignment_vector_matches_documented_digest() {
-        // Frozen digest for `golden_alignment_fixture_delta` (serde_json::to_vec on `[delta]`).
         // Updated after typify codegen: `local_timestamp` now serializes as DateTime<Utc>
         // (RFC 3339 UTC with `Z` suffix) instead of plain String.
         const EXPECTED: &str =

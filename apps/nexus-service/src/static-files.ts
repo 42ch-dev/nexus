@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { HttpError } from './errors.js';
 
 /**
- * Repo-root-anchored default build output (`apps/web/dist`). Three levels up
  * lands on the repo root from both `src/` (tsx) and `dist/` (compiled), the
  * same module-relative derivation `routes.ts` uses for its manifest.
  */
@@ -67,7 +66,6 @@ interface StaticHit {
 }
 
 /**
- * Map one request path to the file it may serve, or `null` when the path is a
  * plain miss (ENOENT / directory) and the SPA fallback applies. Traversal
  * refusals throw so the caller's single error envelope reports them.
  */
@@ -83,13 +81,11 @@ async function resolveInsideRoot(
     throw notFound();
   }
   if (decoded.includes('\0') || decoded.includes('\\')) throw notFound();
-  // The request path is rooted at `root`; a decoded `//…` is an absolute path.
   const relPath = decoded.startsWith('/') ? decoded.slice(1) : decoded;
   if (isAbsolute(relPath)) throw notFound();
   const candidate = resolve(root, relPath);
   const rel = relative(root, candidate);
   if (rel.startsWith('..') || isAbsolute(rel)) throw notFound();
-  // The resolve view is the serving authority: a root-clamped `..` in the
   // admission guard (`/../dist/v1/y` folds to `/dist/v1/y` there) lands back
   // on `<root>/v1/y` here. Refuse that class so static content can never
   // shadow the API-key-gated `/v1/` namespace, whatever the guard or layout.
@@ -116,7 +112,6 @@ async function resolveInsideRoot(
     return null;
   }
   if (real !== rootReal && !real.startsWith(rootReal + sep)) throw notFound();
-  // The cache tier follows the normalized root-relative location of the file
   // actually served, not the raw first request segment: `/assets/../index.html`
   // normalizes to the root `index.html` and must not inherit the assets tier.
   return { real, assets: rel.split(sep)[0] === 'assets' };
@@ -129,7 +124,6 @@ export type StaticFileHandler = (
 ) => Promise<void>;
 
 /**
- * Read the first chunk off `stream` and push it back, so a filesystem failure
  * on an already-open file surfaces before any response byte is written.
  * Rejects on a read failure; resolves at EOF.
  */
@@ -142,7 +136,6 @@ function probeFirstChunk(stream: Readable): Promise<void> {
     }
     function onReadable() {
       const chunk = stream.read();
-      // Null below the probe's watermark just means the next read is pending;
       // 'readable' fires again.
       if (chunk === null) return;
       cleanup();
@@ -174,10 +167,8 @@ export function createStaticFileHandler(options: {
 }): StaticFileHandler {
   const root = resolve(options.root);
   const fallback = resolve(options.fallback);
-  // Computed once: symlink containment is judged against the real root, never
   // against a path that is itself a symlink.
   const rootReal = realpathSync(root);
-  // The fallback is containment-checked once here too: a symlinked `index.html`
   // escaping the root must be refused like a direct hit, never served. Its
   // realpath is what gets read (same swap-window shrink as a direct hit).
   let safeFallback: string | null = null;
@@ -187,11 +178,9 @@ export function createStaticFileHandler(options: {
       safeFallback = fallbackReal;
     }
   } catch {
-    // Unresolvable fallback: refuse at request time (404).
   }
 
   return async (res, method, pathname) => {
-    // Set before any throw so the single error envelope carries it too.
     res.setHeader('X-Content-Type-Options', 'nosniff');
     if (method !== 'GET' && method !== 'HEAD') {
       throw new HttpError(405, 'method_not_allowed', 'method not allowed');
@@ -201,7 +190,6 @@ export function createStaticFileHandler(options: {
     if (file === null) throw notFound();
     const cache = hit?.assets ? 'public, max-age=3600' : 'no-store';
     if (!hit) {
-      // The fallback has no request-path probe of its own: a missing or
       // non-file `index.html` is a clean 404 miss, never a served body (§5).
       let stats: Stats;
       try {
@@ -211,24 +199,20 @@ export function createStaticFileHandler(options: {
       }
       if (!stats.isFile()) throw notFound();
     }
-    // Open before committing success headers: a read failure must land on the
     // shared `sendError` envelope without the asset's framing, or a keep-alive
     // socket would inherit a stale `Content-Length` (§6).
     const handle = await open(file, 'r');
     let size: number;
     try {
-      // Frame the body from the opened descriptor, so the advertised
       // `Content-Length` and the streamed bytes describe one file object (§6).
       size = (await handle.stat()).size;
     } catch (error) {
       await handle.close();
       throw error;
     }
-    // A HEAD answers from metadata alone; a GET probes its first read below, so
     // the framing and the body can never come from different file objects.
     const body = method === 'GET' ? handle.createReadStream() : null;
     if (body) {
-      // Probe the first read before committing success headers: a failure on the
       // opened file must reach the shared `sendError` envelope, rather than being
       // swallowed onto an already-destroyed response (§6).
       try {
@@ -250,11 +234,9 @@ export function createStaticFileHandler(options: {
       res.end();
       return;
     }
-    // Streamed, never buffered whole: large assets stay off the shared loop.
     try {
       await pipeline(body, res);
     } catch {
-      // A body that failed after the headers went out cannot be repaired: cut
       // the connection rather than append an envelope to a short, framed body (§6).
       res.destroy();
     }

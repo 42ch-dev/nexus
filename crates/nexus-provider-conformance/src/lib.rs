@@ -23,9 +23,10 @@
 //!   ([`invariants::stop_reason`])
 //! - forbidden-value exclusion: closed `error_category`, 512-byte
 //!   `error_message` cap, closed enum fields ([`invariants::values`])
+//!
+//! see docs/specs/architecture/rust-core-service-boundary.md.
 
 #![deny(clippy::unwrap_used)]
-// Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
 #![cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)

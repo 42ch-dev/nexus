@@ -231,7 +231,6 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: 403,
             message: resource,
         },
-        // World-owner scoping denial. Mirrors the daemon adapter
         // (`errors.rs`): `Forbidden { resource: "world {world_id}", reason }`
         // at status 403 — so the direct-core caller sees the same family the
         // HTTP route emits.
@@ -239,14 +238,12 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: 403,
             message: format!("world {world_id}: {reason}"),
         },
-        // Preset/strategy authoring failures surfaced through the Core
         // authority. Mirrors the daemon adapter's per-variant status and
         // `[code] message` envelope, which is exactly what
         // `DaemonClient::parse_error_response` renders for the `preset`
         // command family over the wire — one preset error must not read
         // differently depending on which transport reached it.
         CoreError::Preset(error) => map_preset_error(error),
-        // The daemon adapter renders this class as `[not_found] Not found:
         // {resource}` at 404 (`NexusApiError::NotFound`), and
         // `DaemonClient::parse_error_response` is what every HTTP caller read.
         // A direct-core caller keeps the same named code and wording, so the
@@ -259,7 +256,6 @@ pub fn map_core_error(err: CoreError) -> CliError {
         CoreError::InvalidInput { field, reason } => {
             CliError::Other(format!("invalid input ({field}): {reason}"))
         }
-        // Compute input validation (V1.147 P3 F2): the core carries the
         // structured per-entry object and the daemon renders it as a 422
         // `invalid_input` envelope, so a direct-core caller reports the same
         // status and code with the object verbatim.
@@ -296,11 +292,9 @@ pub fn map_core_error(err: CoreError) -> CliError {
             holder_name: "workspace writer".to_string(),
             stale: false,
         },
-        // A coded refusal carries the transport-retained lowercase code. The
         // daemon adapter renders it at the status its own table assigns; a
         // direct-core caller sees the same code and family.
         CoreError::Coded { code, message } => map_coded_refusal(&code, &message),
-        // A peer's refusal: the daemon renders it through its own
         // `PeerToolDenied` variant at 400, with the peer's finer wire code in
         // `details.wire_code`. A direct-core caller gets the same public code
         // and status, and the wire code is kept in the message so it is not
@@ -313,7 +307,6 @@ pub fn map_core_error(err: CoreError) -> CliError {
         CoreError::WriterFenced | CoreError::SchemaMismatch => CliError::Config(
             "workspace writer protocol mismatch — upgrade or restart host".to_string(),
         ),
-        // Retained bearer-memory / directive wire shapes (v1.190 P2-T2/T3).
         // Each mirrors the daemon adapter's status and envelope
         // (`api/errors.rs`): a reason-carrying 403, the truthful 503, the
         // narrative-quality 422, the plain 409, and the coded actor
@@ -342,7 +335,6 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: coded_status("invalid_input"),
             message,
         },
-        // A remote memory-provider refusal: the peer's message never reaches
         // the CLI. The whitelisted effective code, the effective retry class
         // and an allowlisted peer wire code are rendered from the typed
         // fields, never re-parsed back out of a formatted string.
@@ -474,7 +466,6 @@ fn map_already_approved(conflict: &nexus_core::StrategyAlreadyApprovedError) -> 
 /// transport.
 fn coded_status(code: &str) -> u16 {
     match code {
-        // `conflict` is the retained family 409. v1.207 P3 (spec §B.1/§B.3/§C)
         // adds the two frozen durable-operation refusal codes to the same
         // family: the first writer's receipt is durable
         // (`operation_id_conflict`) and an `uncertain` answer means the
@@ -497,7 +488,6 @@ fn coded_status(code: &str) -> u16 {
         | "compute_module_trapped"
         | "compute_module_error" => 422,
         "policy_blocked" => 403,
-        // Every other carrier (including `not_supported`) is a client-fault 400.
         _ => 400,
     }
 }
@@ -514,14 +504,12 @@ fn coded_status(code: &str) -> u16 {
 fn map_preset_error(error: nexus_core::PresetError) -> CliError {
     use nexus_core::PresetError;
     match error {
-        // The daemon adapter routes `Rejected` to `BadRequest { code, message }`,
         // whose status and public code are both code-driven. Mirroring the same
         // two tables keeps the outcome identical on either transport.
         PresetError::Rejected { code, message } => CliError::Api {
             status: preset_rejected_status(&code),
             message: format!("[{}] Bad request: {message}", preset_rejected_code(&code)),
         },
-        // `InvalidInput { reason }` displays without the field; the daemon's
         // `details.field` is appended by `parse_error_response`.
         PresetError::InvalidInput { field, reason } => CliError::Api {
             status: 400,
@@ -535,13 +523,11 @@ fn map_preset_error(error: nexus_core::PresetError) -> CliError {
             status: 409,
             message: format!("[conflict] Conflict: {message}"),
         },
-        // `Forbidden { resource, reason }` displays only the reason; `resource`
         // travels in `details` (not rendered by the CLI envelope).
         PresetError::Forbidden { reason, .. } => CliError::Api {
             status: 403,
             message: format!("[forbidden] Forbidden: {reason}"),
         },
-        // `Internal` always reports the public code `internal` — the inner
         // `code` is internal classification, deliberately not leaked.
         PresetError::Internal { message, .. } => CliError::Api {
             status: 500,
@@ -654,14 +640,10 @@ fn resolve_direct<T>(
 ) -> (Result<T>, Option<String>) {
     match (outcome, closed) {
         (Ok(value), Ok(report)) if report.cleanup_confirmed => (Ok(value), None),
-        // Success is refused: the report says the core did not settle.
         (Ok(_), Ok(report)) => (Err(CliError::Other(incomplete_cleanup(&report))), None),
-        // A close that fails IS the command's outcome: it cannot claim success.
         (Ok(_), Err(close_error)) => (Err(close_error), None),
         (Err(primary), Ok(report)) if report.cleanup_confirmed => (Err(primary), None),
-        // The failed operation stays primary; incomplete cleanup is reported.
         (Err(primary), Ok(report)) => (Err(primary), Some(incomplete_cleanup(&report))),
-        // Same precedence for a close that failed outright.
         (Err(primary), Err(close_error)) => (
             Err(primary),
             Some(format!("direct core cleanup failed: {close_error}")),
@@ -908,7 +890,6 @@ mod direct_writer_lifetime {
         let (home, db_path) = selected_home().await;
         let core = open_writer(home.path()).await;
 
-        // Positive control: the probe below observes a live writer, so its
         // later success cannot be vacuous.
         assert!(
             acquire_store_reset_fence(&db_path).is_err(),
@@ -933,7 +914,6 @@ mod direct_writer_lifetime {
             .expect("seed entity");
         assert!(seeded.version > 0, "a created entity settles at a revision");
 
-        // A stale CAS is rejected by the core; the seam must still close.
         let outcome = core
             .patch_world_kb_entity(
                 &principal,
@@ -954,7 +934,6 @@ mod direct_writer_lifetime {
             "the core is closed when finish_direct returns"
         );
 
-        // The observation this module exists for. `close` released the
         // process-local writer, so dropping the closed service leaves no live
         // admission on the store and the exclusive fence is granted. A rejected
         // path that skipped the close would leave the guard retained and keep
@@ -964,7 +943,6 @@ mod direct_writer_lifetime {
             .expect("finish_direct released the direct writer in this process");
         drop(fence);
 
-        // Nothing changed on the rejected path: the next same-process writer
         // commits the revision the seeded one left behind.
         let reopened = open_writer(home.path()).await;
         let principal = reopened.active_principal().await.expect("active principal");

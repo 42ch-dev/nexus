@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Programmatic Surface B adoption test — the test-rig twin of
 //! `examples/baseline_adapter.rs`.
 //!
@@ -13,7 +14,6 @@
 //! fires `STORED_REVISION_STALE` when the store is ahead and
 //! `REVISION_CONFLICT` when the caller claims an impossible future revision.
 
-// The imported example file carries its own `fn main` + `print_reject` (dead
 // in this test crate) plus main-only `use` entries. Silence those lints on
 // the module so the test crate compiles warning-clean.
 #![allow(dead_code)]
@@ -36,8 +36,6 @@ use nexus_spoke_adapter::{
 };
 use serde_json::{json, Value};
 use spoke_operations::spoke_ok;
-
-// ── local fixtures ─────────────────────────────────────────────────────
 
 const SEEDED_ENTRY_ID: &str = "kb_mira";
 const SEEDED_REVISION: u64 = 2;
@@ -81,11 +79,8 @@ fn project_request(entry_id: &str) -> ProjectRequest {
     .expect("valid ProjectRequest fixture")
 }
 
-// ── 1. orchestrate_upsert — happy create path ──────────────────────────
-
 #[tokio::test]
 async fn orchestrate_upsert_happy_create_path() {
-    // Seeded mock holds kb_mira; we upsert a *different* entry so the
     // create path (`expected_base_revision = None`, entry absent) fires.
     let mock = seeded_mock();
     let new_id = "kb_aran";
@@ -102,7 +97,6 @@ async fn orchestrate_upsert_happy_create_path() {
         _ => panic!("expected upsert success, got {result:?}"),
     }
 
-    // Entry is actually in the store.
     let stored = mock
         .get_knowledge_entry(new_id)
         .await
@@ -111,11 +105,8 @@ async fn orchestrate_upsert_happy_create_path() {
     assert_eq!(stored.revision, Some(0));
 }
 
-// ── 2. orchestrate_upsert — CAS reject: create when entry already exists ──
-
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_create_when_exists() {
-    // kb_mira is already seeded. Mask the orchestrator's get so it believes
     // the entry is absent → derives `expected_base_revision = None` and
     // treats this as a create (`validate_create_path` requires revision ≤ 0
     // on create, hence candidate_rev=0). The orchestrator then calls our
@@ -130,11 +121,8 @@ async fn orchestrate_upsert_cas_reject_create_when_exists() {
     expect_reject_with_code(result, SpokeRejectCode::KnowledgeEntryAlreadyExists);
 }
 
-// ── 3. orchestrate_upsert — happy update path ──────────────────────────
-
 #[tokio::test]
 async fn orchestrate_upsert_happy_update_path() {
-    // Upsert is CAS-guarded replace, not an increment: the candidate MUST
     // carry the same revision as stored (the library's
     // `validate_update_path` calls `assert_revision_match(candidate.revision,
     // stored.revision)` before touching our port). The orchestrator then
@@ -175,11 +163,8 @@ async fn orchestrate_upsert_happy_update_path() {
     assert_eq!(stored.canonical_name.as_str(), "Mira Vale (revised)");
 }
 
-// ── 4. orchestrate_upsert — CAS reject: stored > expected (STALE) ───────
-
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_stale_revision() {
-    // Seeded entry is at revision 3. Override the orchestrator's get so it
     // returns revision 1 → orchestrator derives `expected_base_revision =
     // Some(1)` → calls put(candidate, Some(1)). Mock CAS sees stored(3) >
     // expected(1) → `STORED_REVISION_STALE` (caller read a stale base).
@@ -202,7 +187,6 @@ async fn orchestrate_upsert_cas_reject_stale_revision() {
 
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_conflict() {
-    // Seeded entry is at revision 1. Override the orchestrator's get so it
     // returns revision 5 → orchestrator derives `expected_base_revision =
     // Some(5)` → calls put(candidate, Some(5)). Mock CAS sees stored(1) <
     // expected(5) → `REVISION_CONFLICT` (caller expects an impossible
@@ -216,11 +200,8 @@ async fn orchestrate_upsert_cas_reject_conflict() {
     expect_reject_with_code(result, SpokeRejectCode::RevisionConflict);
 }
 
-// ── 6. orchestrate_promote — happy path ────────────────────────────────
-
 #[tokio::test]
 async fn orchestrate_promote_happy_path() {
-    // Candidate claims revision 2, matching the stored provisional entry.
     // The orchestrator's `assert_revision_match(2, 2)` passes, the promote
     // gate validates, and the mock's CAS sees stored(2) == expected(2) →
     // accepts. Persisted entry is `confirmed` at revision 3.
@@ -240,11 +221,8 @@ async fn orchestrate_promote_happy_path() {
     }
 }
 
-// ── 7. orchestrate_promote — CAS reject: stale candidate revision ──────
-
 #[tokio::test]
 async fn orchestrate_promote_cas_reject_stale() {
-    // Candidate claims revision 1; stored is at revision 2. The
     // orchestrator's `assert_revision_match(1, 2)` fires before reaching
     // the mock's put: actual(2) > expected(1) → `STORED_REVISION_STALE`.
     let mock = seeded_mock();
@@ -254,11 +232,8 @@ async fn orchestrate_promote_cas_reject_stale() {
     expect_reject_with_code(result, SpokeRejectCode::StoredRevisionStale);
 }
 
-// ── 8. orchestrate_assemble — happy path ───────────────────────────────
-
 #[tokio::test]
 async fn orchestrate_assemble_happy_path() {
-    // Scope filters the mock's full entry list down to [kb_mira]; spoke's
     // packet builder assembles the scoped entries into an AssemblePacket
     // keyed by `assemble:<scope_id>`.
     let mock = seeded_mock();
@@ -275,11 +250,8 @@ async fn orchestrate_assemble_happy_path() {
     }
 }
 
-// ── 9. orchestrate_check — happy path ──────────────────────────────────
-
 #[tokio::test]
 async fn orchestrate_check_happy_path() {
-    // Loads scoped entries/events, resolves rules (none requested), invokes
     // the product checker callback, persists findings. A trivial callback
     // returning Ok(empty) exercises the full pipeline without product
     // logic.
@@ -303,9 +275,7 @@ async fn orchestrate_check_happy_path() {
     }
 }
 
-// ── 10. (stretch) orchestrate_project — capability-missing reject ──────
 //
-// Constructs a `BaselineOnlyPorts` wrapper around `NexusBaselineMock` that
 // implements the seven baseline port families (delegating to the mock) and
 // manually implements `ComputablePorts` returning `None` — i.e. it claims
 // the computable capability boundary without backing it with a
@@ -401,7 +371,6 @@ impl HostManifestPort for BaselineOnlyPorts {
     }
 }
 
-// Manual `ComputablePorts` returning `None` — overrides the blanket impl
 // (which only fires for `BaselinePorts + ComputablePort`). Because
 // `BaselineOnlyPorts` does NOT impl `ComputablePort`, the blanket does not
 // apply and this manual impl is the one the orchestrator sees.
@@ -415,13 +384,10 @@ impl ComputablePorts for BaselineOnlyPorts {
 async fn capability_missing_reject() {
     let ports = BaselineOnlyPorts(seeded_mock());
 
-    // `require_port_method(as_computable().is_some(), "project")` fires
     // before `validate_project_request`, so the request body is irrelevant.
     let result = orchestrate_project(&ports, project_request(SEEDED_ENTRY_ID)).await;
     expect_reject_with_code(result, SpokeRejectCode::CapabilityPortMissing);
 }
-
-// ── assertion helpers ──────────────────────────────────────────────────
 
 fn expect_reject_with_code<T: std::fmt::Debug>(result: SpokeResult<T>, code: SpokeRejectCode) {
     match result {
@@ -452,6 +418,5 @@ impl ExpectOkEntry for SpokeResult<KnowledgeEntry> {
     }
 }
 
-// Keep `knowledge_entry_wire` reachable — it is part of the example's
 // fixture API re-exported above and may be exercised by future scenarios.
 const _: fn(&str, u64) -> Value = knowledge_entry_wire;

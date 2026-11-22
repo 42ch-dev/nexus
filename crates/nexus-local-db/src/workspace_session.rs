@@ -125,7 +125,6 @@ pub async fn consume_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<ConsumeResult, LocalDbError> {
-    // First, get the session to check its state
     let Some(session) = get_session(pool, session_id).await? else {
         return Ok(ConsumeResult::NotFound);
     };
@@ -134,10 +133,8 @@ pub async fn consume_session(
         return Ok(ConsumeResult::AlreadyConsumed);
     }
 
-    // Check expiry using SQLite datetime comparison with RFC 3339 format.
     // Both expires_at and strftime output are in RFC 3339 format.
     if !is_session_active(pool, session_id).await? {
-        // Re-read to determine the reason
         let Some(session) = get_session(pool, session_id).await? else {
             return Ok(ConsumeResult::NotFound);
         };
@@ -159,7 +156,6 @@ pub async fn consume_session(
     .await?;
 
     if result.rows_affected() == 0 {
-        // Another process consumed it between our read and write, or it expired.
         // Re-read to determine the reason.
         let Some(session) = get_session(pool, session_id).await? else {
             return Ok(ConsumeResult::NotFound);
@@ -170,7 +166,6 @@ pub async fn consume_session(
         return Ok(ConsumeResult::Expired);
     }
 
-    // Re-read to get the updated row
     let consumed_session = get_session(pool, session_id)
         .await?
         .ok_or_else(|| LocalDbError::Sqlx(sqlx::Error::RowNotFound))?;

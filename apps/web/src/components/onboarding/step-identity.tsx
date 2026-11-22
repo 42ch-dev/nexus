@@ -1,5 +1,4 @@
 /**
- * Identity step (plan v1219-onboarding T1; prototype `onboarding-v3.html` S1).
  *
  * Two entrance cards — the choice IS the entrance, which selects the rail
  * registry (`appsForEntrance`) used after the wizard finishes. Copy is

@@ -12,7 +12,6 @@ use std::sync::Arc;
 use nexus_orchestration::OrchestrationEngine;
 
 // ---------------------------------------------------------------------------
-// Helper: load novel-writing preset and run through states
 // ---------------------------------------------------------------------------
 
 /// Build an engine + loaded preset for E2E testing.
@@ -51,9 +50,7 @@ async fn seed_novel_writing_preset_input(
     ctx.set("preset.input.vibe", "literary").unwrap();
     ctx.set("preset.input.work_ref", "e2e-test-novel").unwrap();
     ctx.set("preset.input.work_id", "wrk_e2e_test").unwrap();
-    // V1.38 P0: chapter is now a preset.input template variable
     ctx.set("preset.input.chapter", 1).unwrap();
-    // V1.38 P1: chapter context fields for parameterized paths
     ctx.set("preset.input.chapter_label", "01").unwrap();
     ctx.set(
         "preset.input.outline_path",
@@ -66,14 +63,11 @@ async fn seed_novel_writing_preset_input(
     )
     .unwrap();
     ctx.set("preset.input.slug", "ch01").unwrap();
-    // V1.40 P2 (QC1-C001 fix): seed world_kb_block so strict-mode template
     // rendering does not fail. Worldless e2e tests use empty string.
     ctx.set("preset.input.world_kb_block", "").unwrap();
-    // V1.48 P1: seed open_findings_block so strict-mode template rendering
     // does not fail. e2e tests do not exercise findings; empty string means
     // the `{{#if open_findings_block}}` guard omits the section.
     ctx.set("preset.input.open_findings_block", "").unwrap();
-    // V1.49 P1: seed foreshadowing_summary so strict-mode template rendering
     // does not fail on `{{preset.input.foreshadowing_summary}}`. e2e tests do
     // not populate the foreshadowing index; empty string means the
     // `{{#if foreshadowing_summary}}` guard omits the section.
@@ -119,7 +113,6 @@ async fn run_until_wait_or_terminal(
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: All four outer states traverse
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -128,7 +121,6 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
 
     let session_id = start_novel_writing_session(&engine, &loaded).await;
 
-    // Run until we reach a waiting state or terminal.
     let outcomes = run_until_wait_or_terminal(&engine, &session_id, 64).await;
 
     assert!(
@@ -136,7 +128,6 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
         "should have at least one step outcome"
     );
 
-    // The session should settle into a non-running state.
     let status = engine
         .get_status(&session_id)
         .await
@@ -149,7 +140,6 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: Chapter-scoped pipeline executes states
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -160,7 +150,6 @@ async fn e2e_chapter_scoped_pipeline_executes() {
 
     let outcomes = run_until_wait_or_terminal(&engine, &session_id, 64).await;
 
-    // P3: No inner graphs in the refactored preset; all states are outer states
     // with capability-based enter actions.
     assert!(
         !outcomes.is_empty(),
@@ -172,13 +161,11 @@ async fn e2e_chapter_scoped_pipeline_executes() {
         .await
         .expect("get_context should succeed");
 
-    // Verify that the session ran at least one step (outline_chapter is the initial state).
     assert!(
         !outcomes.is_empty(),
         "should have executed at least one step"
     );
 
-    // Verify session is in a valid non-running state.
     let status = engine
         .get_status(&session_id)
         .await
@@ -190,7 +177,6 @@ async fn e2e_chapter_scoped_pipeline_executes() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: Manual advance past outlining
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -215,7 +201,6 @@ async fn e2e_schedule_advance_past_outlining() {
             .expect("signal should succeed");
 
         let more = run_until_wait_or_terminal(&engine, &session_id, 64).await;
-        // WS3 R2: Assert that advance actually produced new steps.
         assert!(!more.is_empty(), "should have steps after advance");
     }
 
@@ -224,7 +209,6 @@ async fn e2e_schedule_advance_past_outlining() {
         .await
         .expect("get_status should succeed");
 
-    // WS3 R2: Assert that the session is in a valid terminal or waiting state.
     assert!(
         matches!(
             status,
@@ -238,7 +222,6 @@ async fn e2e_schedule_advance_past_outlining() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: Restart durability (context persistence validation)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -249,7 +232,6 @@ async fn e2e_restart_durability_context_persists() {
 
     let _ = run_until_wait_or_terminal(&engine, &session_id, 16).await;
 
-    // Validate that the session state is queryable.
     let status_before = engine
         .get_status(&session_id)
         .await
@@ -260,7 +242,6 @@ async fn e2e_restart_durability_context_persists() {
         "session should have settled into a non-running state"
     );
 
-    // If waiting, signal advance to simulate resume after restart.
     if matches!(
         status_before,
         nexus_session_storage::SessionStatus::WaitingForInput
@@ -286,7 +267,6 @@ async fn e2e_restart_durability_context_persists() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: Session list includes created session
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -311,7 +291,6 @@ async fn e2e_session_list_includes_created() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 6: CoreContext template rendering (DF-11)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -326,7 +305,6 @@ fn core_context_template_is_rendered_into_prompt() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 7: Embedded preset has correct state count
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -335,7 +313,6 @@ fn e2e_novel_writing_has_four_states() {
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
-    // V1.52 T-A P0: 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
     assert_eq!(
         loaded.manifest.states.len(),
         6,
@@ -362,12 +339,10 @@ fn e2e_novel_writing_has_four_states() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 8: R-V113-004 — template syntax error coverage
 // ---------------------------------------------------------------------------
 
 #[test]
 fn template_syntax_error_returns_deterministic_failure() {
-    // Feed malformed Handlebars syntax through the same render path used by
     // the novel-writing preset. The assertion verifies a deterministic error
     // (not a panic) with a message that explains the template syntax failure.
     let result = nexus_orchestration::tasks::render_core_context_template(
@@ -387,7 +362,6 @@ fn template_syntax_error_returns_deterministic_failure() {
 }
 
 // ---------------------------------------------------------------------------
-// P3 T7: llm_judge 五問 quality gate on finalize state
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -396,7 +370,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
-    // Find the finalize state.
     let finalize = loaded
         .manifest
         .states
@@ -404,14 +377,12 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         .find(|s| s.id == "finalize")
         .expect("finalize state should exist");
 
-    // P4 fix wave: finalize has NO enter actions — the chapter_transition
     // capability is deferred to finalize_commit.
     assert!(
         finalize.enter.is_empty(),
         "finalize should have no enter actions (chapter transition deferred to finalize_commit)"
     );
 
-    // Verify it has llm_judge exit_when.
     match &finalize.exit_when {
         Some(nexus_preset::manifest::ExitWhen::LlmJudge {
             template_file,
@@ -437,7 +408,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         other => panic!("finalize should have llm_judge exit_when, got: {other:?}"),
     }
 
-    // Verify finalize's next state is finalize_commit (not done).
     match &finalize.next {
         Some(nexus_preset::manifest::NextTarget::Linear(target)) => {
             assert_eq!(
@@ -448,7 +418,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         other => panic!("finalize next should be Linear(finalize_commit), got: {other:?}"),
     }
 
-    // Verify finalize_commit has the chapter_transition enter action and next is done.
     let finalize_commit = loaded
         .manifest
         .states
@@ -478,7 +447,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
 }
 
 // ---------------------------------------------------------------------------
-// P3 T5: Verify novel.chapter_transition capability is registered
 // ---------------------------------------------------------------------------
 
 #[test]

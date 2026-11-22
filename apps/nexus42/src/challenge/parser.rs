@@ -39,7 +39,6 @@ const OP_MAPPINGS: &[OpMapping] = &[
 /// where N1 and N2 are now digit strings after number conversion.
 #[must_use]
 pub fn extract_math_problem(text: &str) -> Option<MathProblem> {
-    // Extract the two numbers from the text (they are digit strings after conversion)
     let numbers: Vec<u32> = text
         .split_whitespace()
         .filter_map(|w| w.parse::<u32>().ok())
@@ -52,7 +51,6 @@ pub fn extract_math_problem(text: &str) -> Option<MathProblem> {
     let n1 = numbers[0];
     let n2 = numbers[1];
 
-    // Detect the operation from keywords
     let lower = text.to_lowercase();
     let op = detect_operation(&lower)?;
 
@@ -133,14 +131,12 @@ mod tests {
 
     #[test]
     fn returns_none_for_no_operation_keyword() {
-        // Use text without any operation keywords (note: "and" is a keyword, avoid it)
         let text = "a basket has 35 apples with 12 items appearing";
         assert!(extract_math_problem(text).is_none());
     }
 
     #[test]
     fn extracts_from_spec_example_pipeline() {
-        // After noise removal, lowercasing, and number word conversion
         let text = "a basket has 35 apples and someone adds 12 more, how many apples total";
         let problem = extract_math_problem(text).expect("should extract");
         assert_eq!(problem.n1, 35);

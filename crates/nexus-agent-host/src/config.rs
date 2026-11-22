@@ -1,4 +1,4 @@
-//! Configuration loading for the agent host.
+//! Configuration loading for the agent host. See docs/specs/agents/agent-host.md.
 //!
 //! Loads from `{NEXUS_HOME}/agent-host/config.toml` using `nexus-home-layout`
 //! path helpers. Missing config yields safe defaults; invalid config returns
@@ -102,8 +102,6 @@ pub struct ProviderConfig {
     pub enabled: bool,
 }
 
-// ── Default value functions ──────────────────────────────────────────
-
 const fn default_max_sessions() -> usize {
     4
 }
@@ -147,8 +145,6 @@ const fn default_allow_model_fallback() -> bool {
 const fn default_enabled() -> bool {
     true
 }
-
-// ── Default impls ────────────────────────────────────────────────────
 
 impl Default for AgentHostConfig {
     fn default() -> Self {
@@ -254,8 +250,6 @@ impl ProviderConfig {
     }
 }
 
-// ── Path validation helpers ──────────────────────────────────────────
-
 /// Validate that a user-supplied workspace path is absolute and does not
 /// contain directory traversal components (`..`).
 ///
@@ -275,7 +269,6 @@ pub fn validate_workspace_path(workspace_root: &Path) -> HostResult<PathBuf> {
         )));
     }
 
-    // Reject any `..` components — workspace roots should not need traversal.
     if workspace_root
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -286,7 +279,6 @@ pub fn validate_workspace_path(workspace_root: &Path) -> HostResult<PathBuf> {
         )));
     }
 
-    // canonicalize resolves symlinks and validates the path exists
     let canonical = std::path::Path::canonicalize(workspace_root).map_err(|e| {
         HostError::policy_denied(format!(
             "workspace root cannot be resolved: {} ({})",
@@ -455,8 +447,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-// ── Path helpers ─────────────────────────────────────────────────────
-
 /// Get the agent-host config directory under the Nexus home.
 ///
 /// `$HOME/.nexus42/agent-host/`
@@ -554,7 +544,6 @@ pub fn save_config(home: &Path, config: &AgentHostConfig) -> HostResult<()> {
     })?;
 
     std::fs::rename(&tmp_path, &config_path).map_err(|e| {
-        // A failed rename must not leave the temp document behind.
         let _ = std::fs::remove_file(&tmp_path);
         HostError::internal(format!(
             "failed to replace config at {}: {e}",
@@ -709,13 +698,11 @@ enabled = true
             std::fs::create_dir_all(parent).expect("Failed to create config dir");
         }
 
-        // Only override max_sessions; everything else should be defaults
         let toml_content = "max_sessions = 2\n";
         std::fs::write(&config_path, toml_content).expect("Failed to write config");
 
         let config = load_config(home).expect("Should load partial config");
         assert_eq!(config.max_sessions, 2);
-        // Other fields should use defaults
         assert_eq!(config.max_ops_per_session, 1);
         assert_eq!(config.timeouts.launch_ms, 15_000);
         assert_eq!(config.policy.unknown_provider, "deny");
@@ -772,8 +759,6 @@ enabled = true
             PathBuf::from("/fake/home/.nexus42/agent-host/config.toml")
         );
     }
-
-    // ── Path validation tests (D-011) ──────────────────────────────────
 
     #[test]
     fn validate_workspace_path_accepts_absolute() {
@@ -834,7 +819,6 @@ enabled = true
         let config_dir = temp_dir.path().join("config");
         std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
-        // Write a file outside the config dir to try to reference
         let outside_file = temp_dir.path().join("secret.txt");
         std::fs::write(&outside_file, "secret").expect("Failed to write file");
 
@@ -856,8 +840,6 @@ enabled = true
         );
         assert_eq!(normalize_path(Path::new("/a/./b")), PathBuf::from("/a/b"));
     }
-
-    // ── validate_workspace_path_under tests (QC2 F-002) ────────────────
 
     #[test]
     fn validate_workspace_path_under_accepts_child() {
@@ -894,7 +876,6 @@ enabled = true
         let child = temp_dir.path().join("workspace");
         std::fs::create_dir_all(&child).expect("create child dir");
 
-        // Try to use /tmp as cwd when boundary is the temp dir
         let result = validate_workspace_path_under(Path::new("/tmp"), temp_dir.path());
         assert!(result.is_err(), "/tmp should be outside temp dir boundary");
         assert_eq!(result.unwrap_err().category(), "policy_denied");
@@ -935,7 +916,6 @@ enabled = true
         let child = temp_dir.path().join("workspace");
         std::fs::create_dir_all(&child).expect("create child dir");
 
-        // Create a symlink inside the workspace pointing outside
         let link = child.join("escape_link");
         #[cfg(unix)]
         {
@@ -943,11 +923,9 @@ enabled = true
         }
         #[cfg(not(unix))]
         {
-            // Symlink test not applicable on non-unix; skip by passing
             return;
         }
 
-        // The symlink resolves to /tmp which is outside the boundary
         let result = validate_workspace_path_under(&link, &child);
         assert!(
             result.is_err(),
@@ -955,8 +933,6 @@ enabled = true
         );
         assert_eq!(result.unwrap_err().category(), "policy_denied");
     }
-
-    // ── load_config_from_path tests (QC2 F-003) ───────────────────────
 
     #[test]
     fn load_config_from_path_missing_returns_defaults() {
@@ -988,8 +964,6 @@ enabled = true
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().category(), "internal_host_error");
     }
-
-    // ── save_config tests ──────────────────────────────────────────────
 
     #[test]
     fn save_config_round_trips_through_load() {

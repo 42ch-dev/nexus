@@ -227,7 +227,6 @@ pub enum PendingCommand {
 /// - The mapped core refusal (admission, `[not_found]` / `[forbidden]`,
 ///   storage) reaches the leaf
 pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
-    // Selection is home-level: it needs no active creator and opens no core.
     let command = match command {
         MemoryCommand::Provider { command } => return provider(command),
         other => other,
@@ -249,7 +248,6 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
         MemoryCommand::Show { slug } => show(config, creator_id, &slug).await,
         MemoryCommand::Edit { slug } => edit(config, creator_id, &slug).await,
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force).await,
-        // The review and capture family runs on the same direct-core seam.
         direct => run_direct(direct, config, creator_id).await,
     }
 }
@@ -313,7 +311,6 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
                 )
                 .await
             }
-            // `run` routes the E1/E2 leaves and `provider` before this seam is
             // opened.
             MemoryCommand::List
             | MemoryCommand::Create { .. }
@@ -357,7 +354,6 @@ impl MemoryLine {
             .structured
             .as_ref()
             .and_then(|structured| structured.get("nexus_legacy"));
-        // A record with no authored slug has no address on this surface, so it
         // is not listed under one: a blank SLUG column named nothing (fix
         // round 3, F6).
         Some(Self {
@@ -446,7 +442,6 @@ async fn create(
     kind: &str,
     content: Option<String>,
 ) -> Result<()> {
-    // The authored identity is validated before anything is opened.
     if !slug_is_safe(slug) {
         return Err(CliError::Other(format!(
             "Invalid slug '{slug}': must not contain '..', '/', '\\\\', or control characters."
@@ -458,7 +453,6 @@ async fn create(
             MemoryKind::all_as_strings().join(", ")
         )));
     }
-    // The editor runs before the direct core admits the workspace writer, so an
     // open editor never holds the cross-process writer admission.
     let body = match content {
         Some(body) => body,
@@ -533,7 +527,6 @@ fn memory_revision(record: &RetainedRecord) -> Option<MemoryRevision> {
 }
 
 async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
-    // Read, edit with nothing admitted, then write: an editor session never
     // holds the workspace writer. The read's identity and revision ride into the
     // guarded write, so a change another writer made while the editor was open
     // is refused instead of silently overwritten (NXM-6 fix round 1, finding F3).
@@ -569,7 +562,6 @@ async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
 }
 
 async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Result<()> {
-    // The target is read and the confirmation answered with nothing admitted:
     // an interactive prompt must never hold the workspace writer, so an
     // unattended prompt cannot stall a daemon (NXM-6 fix round 1, finding F6).
     let revision = with_read_only_core(config, async |core, principal| {
@@ -585,7 +577,6 @@ async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -
         return Ok(());
     }
     let text = with_direct_core(config, async |core, principal| {
-        // The confirmed target is re-read under the writer: a record deleted or
         // replaced while the prompt was open is not the one the user confirmed.
         let target = core
             .get_creator_memory(principal, slug)
@@ -696,7 +687,6 @@ fn fold_review_response(outcome: &mut DrainOutcome, result: &ReviewResponse, cal
     if !outcome.has_more {
         return false;
     }
-    // Zero-progress guard: a call that inspected no rows but still reports
     // has_more would loop forever on an unprocessable head row.
     if result.processed.unwrap_or(0) == 0 {
         outcome.stopped_zero_progress = true;
@@ -728,7 +718,6 @@ async fn drain_review_queue(
         cap_exhausted: false,
     };
     for call in 0..REVIEW_DRAIN_MAX_CALLS {
-        // The request's `creator_id` is the CLI's active creator, exactly the
         // value the daemon adapter sent; the core re-checks it against the
         // admitted principal and refuses a mismatch.
         let result = core
@@ -871,7 +860,6 @@ async fn pending_list(
     ];
 
     for r in &result.items {
-        // Truncate long IDs for display
         let pending_short = if r.pending_id.len() > 28 {
             format!("{}…", &r.pending_id[..25])
         } else {
@@ -920,7 +908,6 @@ async fn pending_show(
     pending_id: &str,
     json: bool,
 ) -> Result<String> {
-    // The list read is cursor-paginated at [`MEMORY_PAGE_LIMIT`] rows/page; a
     // creator with more pending reviews can bury the requested ID past page 1.
     // Walk `pagination.next_cursor` until the ID is found or the pages are
     // exhausted (bounded loop — same cap convention as the review drain).
@@ -939,7 +926,6 @@ async fn pending_show(
         }
         match result.pagination.next_cursor {
             Some(next) if cursor.as_deref() != Some(next.as_str()) => cursor = Some(next),
-            // No next page, or a cursor that no longer advances — the ID is
             // not on any page.
             _ => {
                 return Err(crate::errors::CliError::Other(format!(
@@ -1049,7 +1035,6 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         uuid::Uuid::new_v4().simple()
     );
 
-    // Use tempfile::NamedTempFile for automatic cleanup on drop (W-004).
     // The file persists long enough for the editor to read it, but is
     // automatically deleted when the NamedTempFile goes out of scope.
     let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
@@ -1068,14 +1053,12 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         })?;
 
     if !status.success() {
-        // NamedTempFile auto-deletes on drop — no manual cleanup needed
         return Err(crate::errors::CliError::Other(format!(
             "Editor {editor} exited with non-zero status."
         )));
     }
 
     let content = std::fs::read_to_string(&temp_path)?;
-    // NamedTempFile auto-deletes on drop — no manual cleanup needed
     Ok(content)
 }
 
@@ -1182,8 +1165,6 @@ mod tests {
         };
     }
 
-    // ── review drain loop (AR-86) ───────────────────────────────────────
-
     fn review_response(promoted: i64, processed: i64, has_more: bool) -> ReviewResponse {
         ReviewResponse {
             promoted,
@@ -1196,7 +1177,6 @@ mod tests {
 
     #[test]
     fn fold_stops_on_zero_progress_with_has_more() {
-        // A call that inspects no rows but still reports `has_more` must
         // stop the loop (an unprocessable head row cannot spin forever)
         // and be reported as a zero-progress stop, not cap exhaustion.
         let mut outcome = DrainOutcome {
@@ -1221,7 +1201,6 @@ mod tests {
 
     #[test]
     fn fold_continues_while_progress_and_has_more() {
-        // A productive call with `has_more` keeps the loop going; the
         // cumulative counters accumulate across folds.
         let mut outcome = DrainOutcome {
             promoted: 0,
@@ -1242,7 +1221,6 @@ mod tests {
         assert!(!outcome.stopped_zero_progress);
         assert!(outcome.has_more);
 
-        // `has_more = false` closes the drain.
         assert!(!fold_review_response(
             &mut outcome,
             &review_response(0, 0, false),
@@ -1255,7 +1233,6 @@ mod tests {
 
     #[test]
     fn fold_stops_at_call_cap() {
-        // The cap check is inside the fold: the final call under the cap
         // must not ask for another iteration (call 99 is the last allowed
         // call — `call + 1 < 100` is false on the 100th call index 99).
         let mut outcome = DrainOutcome {
@@ -1283,7 +1260,6 @@ mod tests {
 
     #[test]
     fn review_json_serializes_stop_reasons_differently() {
-        // qc2 W-1: a scripted `--json` drain retry must be able to tell an
         // unprocessable head row (zero-progress stop) from call-cap
         // exhaustion — the two terminal causes serialize to distinct
         // envelopes.
@@ -1348,7 +1324,6 @@ mod tests {
 
     #[test]
     fn review_human_lines_empty_message_only_when_queue_genuinely_empty() {
-        // Bugbot Medium: `promoted + fragmented + dropped == 0` is not the
         // empty-queue signal — a zero-progress stop must still surface the
         // stuck-queue note + retry guidance instead of "No pending memories".
         let lines = review_human_lines(&drain_outcome(0, 0, false, false));
@@ -1366,7 +1341,6 @@ mod tests {
             "stuck-queue note missing: {lines:?}"
         );
 
-        // Progress with `has_more` (cap-exhaustion stop) keeps the drain
         // summary + continue note.
         let lines = review_human_lines(&drain_outcome(3, 50, true, false));
         assert!(lines[0].contains("promoted=3"), "{lines:?}");
@@ -1416,12 +1390,10 @@ mod tests {
                 "updated_at": "2026-01-01T00:00:00Z",
             })),
         );
-        // No `nexus_legacy` at all: the provider's own record has no slug to
         // address it by, so it is not a list row.
         let slugless = retained("research_material", "Native body.", None);
         assert!(MemoryLine::from_record(&slugless).is_none());
 
-        // A slug with no authored `memory_kind`: the kind fallback normalizes
         // the record's namespaced kind.
         let bare_kind = retained(
             "research_material",
@@ -1444,7 +1416,6 @@ mod tests {
             )),
             "fixed-width row shape drifted: {text}"
         );
-        // The bare-kind row's `updated_at` is the record's own provider
         // timestamp (no authored `updated_at` in its legacy block).
         assert!(
             text.contains(&format!(

@@ -1,5 +1,4 @@
 /**
- * Cross-surface EVENT binding — V1.163 P1 Task 2 (World → Work deep-link).
  *
  * Upgrades the V1.123 P3 surface-level "View in Work Timeline" CTA to an
  * event-level deep link: when the selected World Narrative event
@@ -46,8 +45,6 @@ import type {
   TimelineCanvasAdapterContext,
   TimelineNodeData,
 } from '../timeline-canvas-adapter';
-
-// ─── Fixtures ───────────────────────────────────────────────────────────────
 
 const KB_EVENT_ID = 'kb-evt-1';
 
@@ -125,7 +122,6 @@ function outline(workId: string, timelineEvents: WorkOutline['timeline_events'])
   };
 }
 
-// ─── Inspector-level fixtures (mirrors cross-surface-nav.test.tsx) ──────────
 
 function timelineEventNode(
   overrides: Partial<TimelineNodeData> = {},
@@ -162,7 +158,6 @@ function ctxRefWith(
   };
 }
 
-// ─── Orchestrator-level journey (mocked daemon) ─────────────────────────────
 
 function crossSurfaceJourney(
   over: {
@@ -174,14 +169,7 @@ function crossSurfaceJourney(
     outlineDelayMs?: number;
   } = {},
 ) {
-  // AC-V1163-7 write-path recorder — any patch reaching the World Timeline's
-  // legitimate entity write (`worldKbPatchEntity`) or the Work timeline patch
-  // surface (`patchTimelineEvent`) is recorded. The Task 4 no-write tests
-  // assert this array stays empty after CTA navigation, pinning that the
-  // cross-surface affordance is navigation-only.
   const writes: string[] = [];
-  // QC3 F-1 (fix wave) — outline GET counter. The selection-lazy fan-out
-  // contract: zero outline reads until a Narrative event is selected.
   const outlineGets = { count: 0 };
   const handlers = [
     http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
@@ -222,8 +210,6 @@ function crossSurfaceJourney(
         worlds: [{ world_id: 'world-7', title: 'Test World' }],
       }),
     ),
-    // Write surfaces are expected to stay untouched in every test here —
-    // recording them lets the no-write assertions observe any regression.
     http.post('/v1/daemon/worlds/:worldId/kb/patch-entity', () => {
       writes.push('worldKbPatchEntity');
       return HttpResponse.json({ error: 'unexpected write' }, { status: 409 });
@@ -277,8 +263,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── Inspector-level: CTA slot wiring ───────────────────────────────────────
-
 describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
   it('renders "View in Work Timeline" with the event id when boundWorkEventId is supplied', () => {
     render(
@@ -298,9 +282,6 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
     const cta = screen.queryByTestId('timeline-view-in-work-timeline');
     expect(cta).not.toBeNull();
     expect(cta).toHaveTextContent('View in Work Timeline');
-    // The CTA target carries the event id when an event-level match exists
-    // (PD-5 state 1: deep-link `?layer=narrative&event=…`), and the work id
-    // of the navigation target (QC1 W-001).
     expect(cta).toHaveAttribute('data-event-id', 'evt-work-1');
     expect(cta).toHaveAttribute('data-work-id', 'work-1');
   });
@@ -311,9 +292,7 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
         <TimelineInspector
           node={timelineEventNode()}
           ctxRef={ctxRefWith({
-            // Surface-level fallback (most-recent realizing Work)…
             boundWorkId: 'work-surface',
-            // …vs the event-level navigation target (PD-7 winner).
             boundWorkEventId: 'evt-work-1',
             boundWorkEventWorkId: 'work-event',
             onViewInWorkTimeline: () => undefined,
@@ -328,8 +307,6 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
   });
 
   it('renders the CTA WITHOUT an event id when only the surface bind exists (V1.123 fallback)', () => {
-    // PD-5 state 2: surface bind only → the CTA stays but carries no event id
-    // (the orchestrator falls back to `?layer=narrative`).
     render(
       <MemoryRouter>
         <TimelineInspector
@@ -348,8 +325,6 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
   });
 
   it('hides the CTA when no realizing Work is bound (even with an orphan event id)', () => {
-    // An event id without a bound Work is not a valid bind — never surface a
-    // dead CTA (honest scope cut).
     render(
       <MemoryRouter>
         <TimelineInspector
@@ -414,8 +389,6 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
   });
 });
 
-// ─── Orchestrator-level: reverse resolve + navigation ───────────────────────
-
 describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5/7)', () => {
   it('AC-V1163-2: matching Work outline world_event_id → CTA click URL includes event=<workEventId>', async () => {
     const user = userEvent.setup();
@@ -431,11 +404,7 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
 
     await selectEventRow(user);
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
-    // The reverse fan-out is selection-lazy (QC3 F-1): the outline read
-    // starts on selection, so the event-level bind settles asynchronously —
-    // wait for it (the F-2 reactive inspector upgrades the CTA in place).
     await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-work-1'));
-    // QC1 W-001 — the DOM work id matches the navigation target.
     expect(cta).toHaveAttribute('data-work-id', 'work-1');
 
     fireEvent.click(cta);
@@ -452,8 +421,6 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
     renderCrossSurfaceApp({
       works: [workSummary('work-1', '2026-08-02T00:00:00Z')],
       details: { 'work-1': { world_id: 'world-7' } },
-      // Realizing Work's outline event does NOT reference the selected World
-      // event → event-level match absent, V1.123 surface fallback applies.
       outlines: {
         'work-1': outline('work-1', [
           { event_id: 'evt-work-1', title: 'Coronation beat' },
@@ -476,7 +443,6 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
 
   it('AC-V1163-5: no realizing Work → CTA hidden (honest scope cut)', async () => {
     const user = userEvent.setup();
-    // Zero Works at all.
     renderCrossSurfaceApp({ works: [] });
 
     await selectEventRow(user);
@@ -575,12 +541,9 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
       },
     });
 
-    // Mount + works/detail fan-out settle — the reverse outline fan-out
-    // must NOT fire while nothing is selected (was up to N=20 eager GETs).
     await screen.findByTestId('timeline-canvas');
     expect(outlineGets.count).toBe(0);
 
-    // Selecting the Narrative event flips the gate → the fan-out fetches.
     await selectEventRow(user);
     await waitFor(() => expect(outlineGets.count).toBe(1));
   });
@@ -595,15 +558,12 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
           { event_id: 'evt-work-1', title: 'Coronation beat', world_event_id: KB_EVENT_ID },
         ]),
       },
-      // Outline resolution lands well after the selection is applied.
       outlineDelayMs: 200,
     });
 
     await selectEventRow(user);
-    // The CTA renders surface-level while the outline is in flight…
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
     expect(cta).not.toHaveAttribute('data-event-id');
-    // …and upgrades to the event-level deep-link when the outline settles —
     // WITHOUT the user reselecting (reactive inspector, QC3 F-2).
     await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-work-1'));
     expect(cta).toHaveAttribute('data-work-id', 'work-1');
@@ -613,10 +573,7 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
     const user = userEvent.setup();
     renderCrossSurfaceApp({
       works: [
-        // Most-recent realizing Work → the V1.123 surface-level fallback.
         workSummary('work-new', '2026-08-01T00:00:00Z'),
-        // Less-recent Work whose outline realizes the selected event → PD-7
-        // winner (the ONLY candidate).
         workSummary('work-old', '2026-01-01T00:00:00Z'),
       ],
       details: {
@@ -636,8 +593,6 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
     await selectEventRow(user);
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
     await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-old'));
-    // The DOM contract matches the ACTUAL navigation target (PD-7 winner),
-    // not the surface-level most-recent fallback.
     expect(cta).toHaveAttribute('data-work-id', 'work-old');
 
     fireEvent.click(cta);
@@ -649,7 +604,6 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
   });
 });
 
-// ─── Orchestrator-level: inbound event focus (AC-V1163-3, World side) ───────
 
 describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1163-3)', () => {
   it('selects the React Flow node entity:<id> when the event param matches a projected event', async () => {
@@ -658,9 +612,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
       ['/worlds/world-7/timeline?layer=narrative&event=' + KB_EVENT_ID],
     );
 
-    // Selection drives the inspector (existing shell behavior — no new focus
-    // primitive). The deep-linked event's inspector opening is the observable
-    // proof that `entity:kb-evt-1` got selected.
     await screen.findByTestId('timeline-inspector-title');
     expect(screen.getByTestId('timeline-inspector-title')).toBeInTheDocument();
   });
@@ -671,7 +622,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
       ['/worlds/world-7/timeline?layer=narrative&event=kb-unknown'],
     );
 
-    // Canvas renders normally (no error state).
     await screen.findByTestId('timeline-canvas');
     await waitFor(() =>
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -679,7 +629,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
         'narrative',
       ),
     );
-    // The unknown id must NOT fabricate a selection (no inspector opens).
     expect(screen.queryByTestId('timeline-inspector-title')).toBeNull();
   });
 
@@ -689,13 +638,11 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
       block_type: 'era',
       canonical_name: 'Age of Embers',
     });
-    // No `layer` param — the era entity makes Brief the era-derived default.
     renderCrossSurfaceApp(
       { kbEntities: [KB_EVENT, KB_CONTEXT, eraEntity] },
       ['/worlds/world-7/timeline?event=' + KB_EVENT_ID],
     );
 
-    // The inbound event deep-link coerces the URL to Narrative so the
     // `entity:kb-evt-1` node exists in the projection…
     await waitFor(() =>
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -703,7 +650,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
         'narrative',
       ),
     );
-    // …and the focus effect selects the event (inspector opens).
     await screen.findByTestId('timeline-inspector-title');
     const probe = screen.getByTestId('location-probe').textContent;
     expect(probe).toContain('event=' + KB_EVENT_ID);
@@ -711,9 +657,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
   });
 
   it('QC2 F-001: inbound ?event= targeting a context entity id must NOT select it (event-only focus)', async () => {
-    // KB_CONTEXT is a character entity — its node id shares the `entity:`
-    // prefix (`entity:kb-char-1`) but its layoutHint is 'context', not
-    // 'event'. A crafted deep-link must not fabricate a selection of it.
     renderCrossSurfaceApp(
       {},
       ['/worlds/world-7/timeline?layer=narrative&event=kb-char-1'],
@@ -726,15 +669,12 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
         'narrative',
       ),
     );
-    // No inspector opens — the context entity was NOT selected.
     expect(screen.queryByTestId('timeline-inspector-title')).toBeNull();
   });
 });
 
-// ─── Task 4: PD-5 three-state matrix, table-driven (World → Work) ───────────
 
 /**
- * PD-5 honest scope cut — same CTA chrome, three states. World → Work
  * direction: surface bind = realizing Work (`boundWorkId`), event bind =
  * matching outline `world_event_id` (`boundWorkEventId`). Expected CTA +
  * URL contract per the plan's Task 4 table.
@@ -840,16 +780,12 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, World → Work (table-drive
         await waitFor(() =>
           expect(screen.queryByTestId('timeline-view-in-work-timeline')).toBeNull(),
         );
-        // No navigation happened; no write op fired.
         expect(screen.getByTestId('location-probe').textContent).toBe('/worlds/world-7/timeline');
         expect(writes).toEqual([]);
         return;
       }
 
       const ctaEl = await screen.findByTestId('timeline-view-in-work-timeline');
-      // Selection-lazy fan-out (QC3 F-1): rows expecting an event-level URL
-      // must wait for the outline to settle and the CTA to upgrade (F-2)
-      // before clicking — otherwise the click navigates surface-level.
       if (expectedUrl?.includes('event=')) {
         await waitFor(() => expect(ctaEl).toHaveAttribute('data-event-id'));
       }
@@ -858,13 +794,11 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, World → Work (table-drive
       await waitFor(() =>
         expect(screen.getByTestId('location-probe').textContent).toBe(expectedUrl),
       );
-      // AC-V1163-7: the CTA navigates — it never emits a patch/bind write.
       expect(writes).toEqual([]);
     },
   );
 });
 
-// ─── Task 4: AC-V1163-7 — no write path for world_event_id (World side) ─────
 
 describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (World side)', () => {
   it('inspector exposes no control to edit world_event_id on a fully bound event node', () => {
@@ -882,10 +816,6 @@ describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (World 
       </MemoryRouter>,
     );
 
-    // The editable fields are title + body (the pre-existing entity patch
-    // surface) plus the v1.203 P2 O3 observation drafts (raw observer-id
-    // input + access JSON textarea). Block type renders read-only. No field
-    // — editable or not — references the bind carrier.
     const editable = Array.from(
       container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
         'input:not([readonly]):not([type="hidden"]):not([type="checkbox"]), textarea',
@@ -904,7 +834,6 @@ describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (World 
     }
     expect(screen.queryByLabelText(/world event/i)).toBeNull();
 
-    // The cross-surface affordance is a navigation button, not a form submit.
     expect(screen.getByTestId('timeline-view-in-work-timeline')).toHaveAttribute('type', 'button');
   });
 

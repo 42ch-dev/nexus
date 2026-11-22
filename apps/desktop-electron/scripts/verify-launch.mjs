@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Bounded direct-exec launch probe for one published unsigned Nexus.app.
  *
  * Probe semantics (plan Design decision (b)): it execs
  * `<app>/Contents/MacOS/Nexus` directly — NEVER `open -W`, which returned 0
@@ -102,12 +101,10 @@ function killGroup(pid, signal) {
   try {
     process.kill(-pid, signal);
   } catch {
-    // Best-effort orphan cleanup: the group may already be gone.
   }
 }
 
 /**
- * System-level liveness probe: true while `pid` still names a live OS process.
  * `process.kill(pid, 0)` sends no signal but throws `ESRCH` once the process is
  * gone; any other errno (e.g. `EPERM`) still means the process exists. Used to
  * gate a window-end PASS so a dead app cannot pass on a late `exit` event.
@@ -132,7 +129,6 @@ function requireExecutable(path, label) {
 }
 
 /**
- * Resolve the bundle executable from Info.plist `CFBundleExecutable`, using the
  * same rule as `verify-package.mjs` (fallback `Nexus`) so the two verifiers
  * cannot silently diverge on the probed binary. A missing or unreadable plist
  * falls back to the contract name; the executable must still exist, which
@@ -181,7 +177,6 @@ export function verifyLaunch({
   return new Promise((resolvePromise) => {
     let child;
     try {
-      // detached: own process group so the whole group (and any keep-on-quit
       // handoff children that stayed in it) can be killed at window end.
       child = spawn(command, [], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
@@ -192,14 +187,12 @@ export function verifyLaunch({
 
     let stderr = '';
     let markerSeen = false;
-    // Carry the last `marker.length - 1` decoded characters between chunks so a
     // marker split across a chunk boundary is still latched. Detection is
     // independent of the bounded retention buffer below: the scan runs before
     // any trimming, so a marker straddling the retention cut is not lost.
     let markerCarry = '';
     let settled = false;
 
-    // True while any member of the owned process group is still signalable.
     const groupAlive = () => {
       const pid = child.pid;
       if (typeof pid !== 'number') return false;
@@ -211,7 +204,6 @@ export function verifyLaunch({
       }
     };
 
-    // True while the probed leader is still alive at this instant. The leader
     // may already be gone even when its `exit` event has not yet been delivered
     // (event-loop lag), so the window-end PASS consults the OS, not just the
     // child handle's exit bookkeeping.
@@ -221,7 +213,6 @@ export function verifyLaunch({
       return typeof pid === 'number' && isProcessAlive(pid);
     };
 
-    // Terminate the process group and release the captured pipes on every exit
     // path. The leader may already have exited, so the group is signalled
     // best-effort; a descendant that ignores SIGTERM is escalated to SIGKILL
     // after a bounded grace wait. The escalation is awaited before the probe
@@ -287,7 +278,6 @@ export function verifyLaunch({
           reason: `stderr contains "${BOOTSTRAP_FAILED_MARKER}"`,
         });
       } else if (!childAlive()) {
-        // The app was already gone at the window end even though its `exit`
         // event may still be pending (event-loop lag). Never record a PASS for
         // a dead app: fail with the exit bookkeeping available so far.
         finish({

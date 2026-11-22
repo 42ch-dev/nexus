@@ -20,7 +20,6 @@
 //! and never builds a second engine.
 
 pub mod applied_documents;
-// Capability dispatch and compute (v1.190 P3-T3). The protocol-neutral peer
 // registry it consults is `nexus_connect::peer_tools` (v1.244 extraction);
 // `compute` additionally requires the WASM edge, so it is gated separately.
 pub mod capabilities;
@@ -29,7 +28,6 @@ pub mod compute;
 pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
-// v1.195 P0-T1: the hosted production composition. It builds the selected-root
 // workspace port bundle for the hosted factory, so it needs both the execution
 // layer and that factory's Host edge.
 #[cfg(all(feature = "execution", feature = "provider-host"))]

@@ -128,7 +128,6 @@ impl ExecutionHandle {
             });
         }
 
-        // The bypass reason is validated and the bypass AUDITED before anything
         // else can fail. The daemon writes the audit and schedule rows in one
         // transaction; this seam keeps ONE insertion authority (the supervisor,
         // which owns the row+deps+seed transaction) and instead guarantees the
@@ -145,12 +144,10 @@ impl ExecutionHandle {
             self.write_force_gates_audit(&request, reason).await?;
         }
 
-        // Resolve the preset ONCE: the same resolution supplies both the gate
         // set that must pass and the frozen source identity, so policy and the
         // frozen payload cannot disagree.
         let loaded = self.resolve_preset(&request.preset_id)?;
 
-        // A bypass skips gate evaluation entirely — it IS the audited override.
         // A normal request must pass every gate the preset declares.
         if audit_reason.is_none() {
             let empty_gates: &[nexus_contracts::local::orchestration::preset_gate::Gate] = &[];
@@ -163,7 +160,6 @@ impl ExecutionHandle {
         let supervisor = self.schedule_supervisor()?;
         let schedule_id = new_schedule_id();
         let schedule = build_schedule(&schedule_id, &request);
-        // C-2/I-5: a `driven_v1` row must never be published without its
         // frozen admission payload.
         let descriptor = self.freeze_descriptor(&request, loaded.as_ref())?;
         let seed = request.seed.clone().unwrap_or_default();
@@ -206,10 +202,8 @@ impl ExecutionHandle {
         let limit = list_limit(query.limit);
 
         let pool = self.coordinator().pool();
-        // The page and its count come from ONE read snapshot, so `has_more` and
         // the page cannot disagree under a concurrent add/delete.
         let mut tx = pool.begin().await.map_err(|e| crate::error::db_err(&e))?;
-        // The requested `status` filter is part of the bound value set and the
         // SAME fragment is appended to the page query and its count, so a
         // filtered page can never be paginated against an unfiltered total.
         let status_filter = if query.status.is_some() {
@@ -443,7 +437,6 @@ impl ExecutionHandle {
             resource: format!("workflow session {session_id}"),
         })?;
 
-        // `committed` is the capability's own post-condition: the SQL
         // projection above only matched an output that carries `true`.
         let revision = row.workspace_commit_revision.take();
         Ok(SessionDetailResponse {
@@ -604,7 +597,6 @@ impl ExecutionHandle {
                     .await;
             }
             "cancel" => {
-                // ONE CAS against the admission fence: a row that owns no run
                 // is durably `cancelled` here; a row that owns a run (already,
                 // or claimed by the concurrent admission that won the fence)
                 // supplies that run for the coordinator's cancel.
@@ -620,7 +612,6 @@ impl ExecutionHandle {
                             .cancel_run(&SessionId(run_id))
                             .await
                             .map_err(map_run_control_error)?;
-                        // The durable winner: `cancelled` only when stop is
                         // confirmed, `interrupted` when cleanup is not. A
                         // provider acknowledgement alone never reaches here.
                         return Ok(SignalScheduleResponse {
@@ -629,7 +620,6 @@ impl ExecutionHandle {
                             current_wait_id: result.current_wait_id,
                         });
                     }
-                    // Nothing was written: the row is already terminal (or
                     // otherwise not cancellable). A completed winner is never
                     // relabelled cancelled.
                     ScheduleCancelDisposition::NotCancelled(durable_status) => {
@@ -810,7 +800,6 @@ impl ExecutionHandle {
                 resource: "tool execution requires an admitted principal".into(),
             });
         }
-        // The principal must belong to THIS owner's service, not merely be
         // well-formed: `verify_principal` checks the open generation, creator
         // and workspace against the service that established this handle, so
         // a principal minted by a DIFFERENT core (another creator, or a stale
@@ -840,7 +829,6 @@ impl ExecutionHandle {
     ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_response::RunResponse>
     {
         self.ensure_admitting()?;
-        // Same principal binding as `execute_tool`: the creator this call
         // authorizes against must be the one THIS service was opened for.
         self.linked_core()?.verify_principal(principal)?;
         let context = self.compute_context(principal)?;
@@ -945,7 +933,6 @@ impl ExecutionHandle {
         self.linked_core()?.verify_principal(principal)?;
         let run_id = request.run_id.as_str().to_string();
         self.owned_root_run(principal, &run_id).await?;
-        // Same re-check as the subscription path: the durable check awaits, so
         // a drain that began during it must not be raced by this read either.
         self.ensure_admitting()?;
         let port = self.run_event_port()?;
@@ -980,10 +967,8 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
         let run_id = request.run_id.as_str().to_string();
-        // Authorization FIRST: nothing about the run below this line runs for a
         // caller who does not durably own it.
         self.owned_root_run(principal, &run_id).await?;
-        // The drain fence is re-checked after EVERY await on this path: an
         // owner close that began while the durable check was in flight must not
         // be raced. (The window below this point is closed by the registry's
         // seal, which is atomic with the mint.)
@@ -1001,7 +986,6 @@ impl ExecutionHandle {
         let generation = self.engine_epoch();
         let subscription = match port.subscribe_live(&run_id, cursor.as_deref(), inspect_url) {
             Ok(live) => WorkflowSubscription::live(creator_id, generation, run_id, live),
-            // The ring answered that this history cannot be resumed. That is a
             // stream outcome, not a request failure: the caller gets the one
             // control frame and a closed stream.
             Err(SubscribeError::HistoryUnavailable(wire)) => {
@@ -1022,12 +1006,10 @@ impl ExecutionHandle {
             Err(SubscribeError::TooManySubscribers) => return Err(CoreError::Busy),
         };
         let Some(subscription) = self.workflow_subscriptions.mint(subscription) else {
-            // The owner sealed its table while this call was in flight. The
             // subscription — and with it the ring subscriber permit attached
             // just above — is dropped by the refused mint, so nothing leaks.
             return Err(CoreError::Closing);
         };
-        // The seal covers every mint from here on, but a close that sealed
         // right after this mint already withdrew and released the entry; the
         // caller gets that honest refusal instead of a dead token.
         if self.is_draining() {
@@ -1085,7 +1067,6 @@ impl ExecutionHandle {
             })
             .collect::<CoreResult<Vec<_>>>()?;
         if closed {
-            // A closed stream serves no further pull: withdraw the token so a
             // repeat call refuses like any other released one.
             self.workflow_subscriptions.take(&subscription_id);
         }
@@ -1111,7 +1092,6 @@ impl ExecutionHandle {
         self.linked_core()?.verify_principal(principal)?;
         let subscription = self.owned_subscription(principal, subscription_id)?;
         if self.workflow_subscriptions.take(subscription_id).is_none() {
-            // A concurrent release won the withdrawal: the token is gone, so
             // this call refuses exactly like any other released one.
             return Err(CoreError::NotFound {
                 resource: format!("workflow event subscription {subscription_id}"),
@@ -1293,7 +1273,6 @@ impl ExecutionHandle {
             return Ok(());
         }
 
-        // A gated preset ALWAYS requires work_id for evaluation. Failing closed
         // here is what stops the typed seam enqueuing a gated preset unchecked.
         let work_id = request
             .input
@@ -1317,7 +1296,6 @@ impl ExecutionHandle {
             ));
         };
 
-        // The Work must exist FOR THIS CREATOR: a foreign or unknown Work is a
         // gate failure, never an empty snapshot that silently passes.
         let pool = self.coordinator().pool();
         let row: Option<WorkSnapshotRow> = sqlx::query_as::<_, WorkSnapshotRow>(
@@ -1370,7 +1348,6 @@ impl ExecutionHandle {
         vars.insert("work_id".to_string(), work_id.clone());
         let preset_input = PresetInput { vars };
 
-        // Filesystem-kind gates resolve against the SAME frozen root the engine
         // and commit authority use; without one there is nothing to resolve
         // against, so fall back to the nexus home exactly as the transport does.
         let workspace_root = self
@@ -1419,7 +1396,6 @@ impl ExecutionHandle {
     /// A resolution failure is reported, never swallowed: a preset that cannot
     /// be loaded cannot have its gates evaluated, so it must not be enqueued.
     fn resolve_preset(&self, preset_id: &str) -> CoreResult<Option<nexus_preset::LoadedPreset>> {
-        // `_system.*` presets are never admitted and carry no gates.
         if preset_id.starts_with("_system.") {
             return Ok(None);
         }
@@ -1454,7 +1430,6 @@ impl ExecutionHandle {
         use nexus_session_storage::run_state::{AgentBinding, RunDescriptorV1};
 
         let Some(loaded) = loaded else {
-            // `_system.*`: never admitted, so no descriptor is required.
             return Ok(None);
         };
         let source = loaded
@@ -1473,7 +1448,6 @@ impl ExecutionHandle {
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
 
-        // Explicit request bindings win, but only when they cover the preset's
         // declared prompt roles; a partial map is a refusal, not a silent
         // partial binding.
         let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
@@ -1507,7 +1481,6 @@ impl ExecutionHandle {
         } else if roles.is_empty() {
             std::collections::HashMap::new()
         } else {
-            // Bind the coordinator (and the provider string) before the closure
             // below captures it: `self.coordinator()` returns a temporary `Arc`
             // that would otherwise be dropped at the end of the `let-else`.
             let coordinator = self.coordinator();
@@ -1535,7 +1508,6 @@ impl ExecutionHandle {
                 .collect()
         };
 
-        // work_id resolves from the structured input OR a JSON seed, matching
         // the retained add path: a gated preset whose Work is only named in the
         // seed must still freeze that Work into the row/descriptor.
         let work_id = input
@@ -1558,7 +1530,6 @@ impl ExecutionHandle {
             agent_bindings,
             parent_session_id: None,
             graph_name: None,
-            // Insertion never resolves an apply; admission freezes the apply it
             // admits under on the run's own descriptor.
             applied: None,
             intake_mode: None,
@@ -1595,7 +1566,6 @@ pub fn run_event_page(
     port: &Arc<dyn RunEventPort>,
     request: CoreRunEventsRequest,
 ) -> CoreResult<CoreRunEventsResponse> {
-    // `after_sequence` is a validated decimal-string newtype and `limit` a
     // `NonZeroU64`, so both are already shape-checked by the contract.
     let after = request
         .after_sequence
@@ -1611,7 +1581,6 @@ pub fn run_event_page(
         })
         .transpose()?;
     let limit = usize::try_from(request.limit.get()).unwrap_or(DEFAULT_RUN_EVENT_LIMIT);
-    // Unwrap the request's newtypes once, up front: the ring takes `&str` and
     // the response needs the owned id, so binding it here avoids cloning.
     let run_id = String::from(request.run_id);
     let page = port
@@ -1622,7 +1591,6 @@ pub fn run_event_page(
             },
         })?;
 
-    // `kind` is a minLength-1 newtype. The ring only ever writes non-empty
     // event names, so a conversion failure is a ring bug worth surfacing rather
     // than papering over with a fabricated kind.
     let events =
@@ -1977,7 +1945,6 @@ fn map_context_error(
                 reason,
             }
         }
-        // A lost pointer advance: the append and its version row were rolled
         // back, so this is a state conflict (the caller re-reads and retries),
         // never a successful version.
         E::VersionRace(schedule_id, version) => CoreError::Coded {
@@ -1987,7 +1954,6 @@ fn map_context_error(
                  names version {version}"
             ),
         },
-        // More than one schedule names the run: the ownership the whole
         // core-context contract rests on is ambiguous, so the request is a
         // state conflict rather than a silent pick of one schedule's context.
         E::AmbiguousOwnership(run_id, owners, schedules) => CoreError::Coded {
@@ -1997,7 +1963,6 @@ fn map_context_error(
                  ({schedules}); refusing to choose one"
             ),
         },
-        // A user edit that lost the race with the schedule's settlement: the
         // admission is checked inside the append transaction, so no version
         // row and no pointer advance survived it. Same code as the pre-check
         // above, which is UX-only — this is the authoritative refusal.
@@ -2276,7 +2241,6 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             message: format!("schedule {schedule_id} is not eligible: {reason}"),
         },
         RunControlError::Closing => CoreError::Closing,
-        // Intake refusals keep their stable wire codes: a mistyped config key
         // or a no-apply user bundle under the default mode is an
         // operator-fixable refusal, not an internal fault.
         RunControlError::InvalidIntakeConfig { reason } => CoreError::Coded {
@@ -2291,12 +2255,10 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
                  running it (the 'yaml-only' compatibility arm was removed at v1.244.0)"
             ),
         },
-        // The applied identity's own refusal, already carrying the coded
         // `(code, message)` pair that names the strategy and the apply.
         RunControlError::AppliedIdentityInvalid { code, message } => {
             CoreError::Coded { code, message }
         }
-        // Retryable capacity refusal (never a 500): no drive started and no
         // durable work was touched.
         RunControlError::RunEventCapacity(_) => CoreError::Busy,
         RunControlError::NoWorkspace(reason) => CoreError::ServiceUnavailable(reason),
@@ -2309,7 +2271,6 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
     }
 }
 
-// ── Peer control (v1.190 P4-T3) ───────────────────────────────────────────
 //
 // The lane itself is `nexus_connect::PeerControlLane`; these entry points stay
 // here because Rust cannot write an inherent impl for a foreign type, and they
@@ -2367,7 +2328,6 @@ impl ExecutionHandle {
             .into_iter()
             .map(|item| item.to_string())
             .collect();
-        // A start is a grant surface too: a name no arm dispatches would sit
         // in the lane's allowlist and authorize nothing, so it is refused here
         // rather than stored. An empty allowlist stays legal (admits nothing).
         if let Some(unknown) = allowed
@@ -2379,13 +2339,11 @@ impl ExecutionHandle {
                 reason: format!("the start allowlists an operation nothing dispatches: {unknown}"),
             });
         }
-        // Every start installs a fresh lane: a restart naming a narrower (or
         // empty) allowlist drops the earlier grants instead of unioning them.
         let lane = std::sync::Arc::new(nexus_connect::PeerControlLane::new(
             request.enabled,
             allowed,
         ));
-        // Install and snapshot under one guard: the returned state must
         // describe the lane this start installed, not a later replacement.
         let mut slot = self
             .peer_control
@@ -2430,7 +2388,6 @@ impl ExecutionHandle {
         core.verify_principal(principal)?;
         #[cfg(feature = "test-hooks")]
         nexus_execution::test_hooks::peer_control_gate_wait().await;
-        // One guard spans resolve → gate → mutation → snapshot: a concurrent
         // `start_peer_control` must never swap the lane between the operation
         // reading it and applying its effect, or the grant lands on the
         // discarded lane and the returned state describes that lane.
@@ -2443,7 +2400,6 @@ impl ExecutionHandle {
             reason: "peer control has not been started".into(),
         })?;
         let operation: &str = &request.operation;
-        // Admission is decided here by BOTH halves of the lane, at one point: the allowlist names
         // what this owner may ever be asked to do, and the enablement says whether the lane is
         // currently willing. Keeping them side by side is what stops them from drifting apart.
         //
@@ -2464,7 +2420,6 @@ impl ExecutionHandle {
                 resource: format!("peer_control:{operation}"),
             });
         }
-        // A disabled lane refuses everything else, in a refusal distinct from the allowlist one so
         // an operator can tell "never granted" from "granted but the lane is off".
         if disabled && !recoverable {
             return Err(CoreError::ForbiddenReason {
@@ -2480,7 +2435,6 @@ impl ExecutionHandle {
             "enable" => lane.set_enabled(true),
             "disable" => lane.set_enabled(false),
             "allow" => {
-                // The grant target is the payload's named operation — the
                 // request's own `operation` is just this arm's selector, so
                 // inserting it would grant `allow` itself and nothing else.
                 let granted = request
@@ -2491,7 +2445,6 @@ impl ExecutionHandle {
                         field: "payload.operation".into(),
                         reason: "the allow operation must name the operation it grants".into(),
                     })?;
-                // A grant for a name no arm dispatches is not a permission:
                 // it would sit in the allowlist forever and authorize nothing,
                 // so it is a validation refusal naming the field.
                 if !PEER_CONTROL_OPERATIONS.contains(&granted) {

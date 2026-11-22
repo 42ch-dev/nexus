@@ -3,6 +3,8 @@
 //! `pure < read < write_candidate < external`. A document summary is the join of every reachable
 //! node's declared class — this document's nodes and, through [`document_summary`], every resolved
 //! nest child's — so grouping or nesting never hides a write or external effect.
+//!
+//! see docs/specs/orchestration/strategy-composition.md.
 
 use crate::structure::{NestGraph, PatternBody};
 use crate::{

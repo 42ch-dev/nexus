@@ -1,4 +1,4 @@
-//! Capability negotiation helpers.
+//! Capability negotiation helpers. See docs/specs/agents/agent-host.md.
 //!
 //! Merges provider static descriptor with ACP initialize response,
 //! applies policy deny/allow toggles, and validates against session request.
@@ -134,7 +134,6 @@ pub fn validate_session_request(
         }
     }
 
-    // Check MCP server requirements
     for server in &request.mcp_servers {
         match server {
             crate::capability::model::McpServerConfig::Http { .. } => {

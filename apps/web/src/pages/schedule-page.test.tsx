@@ -13,7 +13,6 @@ const client = () => new BrowserClient();
 
 
 /**
- * Schedule reads are independent of the retained CLI cron declaration editor.
  */
 function renderSchedule() {
   return renderInApp(<SchedulePage />, { client: client() });
@@ -124,7 +123,6 @@ describe('SchedulePage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '日程' })).toBeInTheDocument());
   });
 
-  // ── V1.171 P2 create journey (PL-15/PL-16) ────────────────────────────────
 
   it('disables the create button when no active creator is selected', async () => {
     useHandlers(
@@ -173,7 +171,6 @@ describe('SchedulePage', () => {
       label: 'Daily digest',
       seed: 'seed text',
     }));
-    // Success toast + dialog closes.
     await screen.findByText('Schedule created');
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: 'Create schedule' })).not.toBeInTheDocument(),
@@ -224,7 +221,6 @@ describe('SchedulePage', () => {
     await user.selectOptions(screen.getByLabelText('Preset'), 'user/foo');
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    // Invalidation refetched the list; the new row renders.
     await screen.findByText('Daily digest');
   });
 
@@ -249,9 +245,7 @@ describe('SchedulePage', () => {
     await user.selectOptions(screen.getByLabelText('Preset'), 'user/foo');
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    // Error toast surfaces the daemon message.
     await screen.findByText('input key is reserved');
-    // Inline error keeps the dialog open — never silent.
     expect(
       screen.getByText(/Could not create the schedule\. Check the daemon message above and try again/i),
     ).toBeInTheDocument();
@@ -271,7 +265,6 @@ describe('SchedulePage', () => {
     await user.click(screen.getByRole('button', { name: 'Create schedule' }));
     await screen.findByRole('heading', { name: 'Create schedule' });
 
-    // Submit is disabled until a preset is chosen.
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   });
 
@@ -296,11 +289,9 @@ describe('SchedulePage', () => {
     await user.click(screen.getByRole('button', { name: 'Create schedule' }));
     await screen.findByRole('heading', { name: 'Create schedule' });
 
-    // Fetch failure reads as an error — never as "no presets".
     expect(screen.getByText('Could not load presets.')).toBeInTheDocument();
     expect(screen.queryByText('No presets available.')).not.toBeInTheDocument();
 
-    // Retry after recovery renders the real catalog.
     fail = false;
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await screen.findByRole('option', { name: 'user/foo' });
@@ -309,7 +300,6 @@ describe('SchedulePage', () => {
 
 
 
-  // ── V1.171 P2 T4 honesty sweep (PL-17 / AR-30) ──────────────────────────
 
   it('keeps served schedule rows visible without retired write controls', async () => {
     useHandlers(

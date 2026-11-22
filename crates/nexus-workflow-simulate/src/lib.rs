@@ -27,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 
 /// v0 emits exactly one level: reachability, default branch only.
 const SIMULATION_LEVEL: &str = "reachability";
+
 /// Trajectory contract revision for this shape.
 const SCHEMA_VERSION: i64 = 1;
 
@@ -98,7 +99,6 @@ pub fn simulate_document(
             .as_ref()
             .is_some_and(|exit| exit.kind == WorkflowExitWhenKind::LlmJudge);
         let next: Vec<&str> = if judged {
-            // A default edge to an undeclared node is not a branch the walk can follow, so it
             // does not count: a judge whose only default edge dangles is refused like a
             // judge with no default edge, never reported as successfully stubbed.
             let defaults: Vec<&str> = outgoing
@@ -120,14 +120,12 @@ pub fn simulate_document(
             outgoing.iter().map(|edge| edge.to.as_str()).collect()
         };
         for target in next {
-            // An edge to an undeclared node is not reachable without a node to walk.
             if by_id.contains_key(target) && seen.insert(target) {
                 queue.push_back(target);
             }
         }
     }
 
-    // Signal pauses are document-global: the IR gives them no target node.
     for signal in &document.signals {
         if signal.action == WorkflowSignalBindingAction::Pause {
             waits.push(SimulationPredictedWait {
@@ -139,7 +137,6 @@ pub fn simulate_document(
 
     let mut nodes_visited: Vec<String> = visited.iter().map(|node| node.id.clone()).collect();
     nodes_visited.sort_unstable();
-    // Same prediction can be recorded from two visiting paths; the contract is a set.
     waits.sort_by(|left, right| (left.reason, &left.subject).cmp(&(right.reason, &right.subject)));
     waits.dedup_by(|left, right| left.reason == right.reason && left.subject == right.subject);
     let mut stubbed_judges: Vec<String> = stubbed_judges
@@ -148,8 +145,6 @@ pub fn simulate_document(
         .collect();
     stubbed_judges.sort_unstable();
 
-    // The generated `Ord` is the contract order `pure < read < write_candidate < external`,
-    // so the rollup is one max over visited nodes and their expanded descendants.
     let effect = visited
         .iter()
         .map(|node| node.effect_class)

@@ -18,7 +18,6 @@ function mockBridge(): void {
   const bridge: DesktopBridge = {
     version: 1,
     runtime: { localEndpoint: 'http://localhost:8420' },
-    // The mock is only used for synchronous detection checks — invoke never runs.
     invoke: () => Promise.reject(new Error('not implemented in detection mock')),
     onStatusChanged: () => () => {},
   };
@@ -27,7 +26,6 @@ function mockBridge(): void {
 
 describe('isDesktopBuild (capability detection — §5 #7)', () => {
   afterEach(() => {
-    // jsdom defaults: no bridge, no flag. Restore between cases.
     delete (window as unknown as { NEXUS_DESKTOP?: unknown }).NEXUS_DESKTOP;
     delete (window as unknown as { nexusDesktop?: unknown }).nexusDesktop;
   });
@@ -50,14 +48,12 @@ describe('isDesktopBuild (capability detection — §5 #7)', () => {
   });
 
   it('ignores a legacy NEXUS_DESKTOP flag — selection is bridge-only (§5)', () => {
-    // Test seam: inject the legacy global to prove detection ignores it.
     const legacyWindow = window as unknown as { NEXUS_DESKTOP: boolean };
     legacyWindow.NEXUS_DESKTOP = true;
     expect(isDesktopBuild()).toBe(false);
   });
 
   it('does not flip on unrelated global properties (defends against false positives)', () => {
-    // Test seam: inject an unrelated global to prove detection ignores it.
     (window as unknown as { __UNRELATED_GLOBAL__?: unknown }).__UNRELATED_GLOBAL__ = {};
     expect(isDesktopBuild()).toBe(false);
     delete (window as unknown as { __UNRELATED_GLOBAL__?: unknown }).__UNRELATED_GLOBAL__;

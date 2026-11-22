@@ -64,7 +64,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let chr = seeded.character_id.as_str();
     let binding = seeded.binding_id.as_str();
 
-    // capture (json): returns the generated response DTO.
     let out = cli_ok(
         &actor,
         &[
@@ -89,7 +88,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert_eq!(payload["success"], true);
     assert_eq!(payload["pending_id"], "pend_cli_1");
 
-    // capture (human): deterministic labeled lines, not JSON.
     let out = cli_ok(
         &actor,
         &[
@@ -115,7 +113,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert!(human.contains("pend_cli_2"));
     assert!(!human.trim_start().starts_with('{'));
 
-    // pending-count, both scopes, both output modes.
     let out = cli_ok(
         &actor,
         &[
@@ -157,7 +154,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     );
     assert_eq!(json_out(&out)["count"], 1);
 
-    // pending-list: shared scope shows pend_cli_1 only.
     let out = cli_ok(
         &actor,
         &[
@@ -175,7 +171,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["pending_id"], "pend_cli_1");
 
-    // review (json): the unscoped drain empties the shared scope only; the
     // binding scope is drained explicitly afterwards.
     let out = cli_ok(
         &actor,
@@ -208,7 +203,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     );
     assert!(stdout(&out).contains("fragmented=1"));
 
-    // fragments: the binding-local row carries revision 0 and the marker.
     let out = cli_ok(
         &actor,
         &[
@@ -233,7 +227,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
         .contains(LOCAL_MEMORY_MARKER));
     let fragment_id = fragments[0]["fragment_id"].as_str().unwrap().to_string();
 
-    // promote: stale revision is a stable failure with no mutation.
     let out = actor.cli(&[
         "creator",
         "character",
@@ -253,7 +246,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
         stderr(&out)
     );
 
-    // promote: correct revision clears provenance (shared scope gains it).
     let out = cli_ok(
         &actor,
         &[
@@ -283,7 +275,6 @@ async fn character_memory_fail_closed_no_mutation() {
     let character_a = actor.create_character("Ava", &world_w1).await;
     let character_b = actor.create_character("Ben", &world_w1).await;
 
-    // Foreign (missing) character id: every memory verb fails.
     let missing = "chr_ffffffffffffffffffffffffffffffff";
     for args in [
         vec![
@@ -343,7 +334,6 @@ async fn character_memory_fail_closed_no_mutation() {
         );
     }
 
-    // Cross-character binding: A's memory verbs must not accept B's binding.
     let out = actor.cli(&[
         "creator",
         "character",
@@ -362,7 +352,6 @@ async fn character_memory_fail_closed_no_mutation() {
     ]);
     assert!(!out.status.success(), "cross-character binding accepted");
 
-    // Inactive character: archive B through the core's own lifecycle
     // transition, then its write verbs deny (reads may retain).
     cli_ok(
         &actor,
@@ -391,7 +380,6 @@ async fn character_memory_fail_closed_no_mutation() {
     ]);
     assert!(!out.status.success(), "inactive character write must deny");
 
-    // Zero mutation proof: A's queues stay empty, and no pending row exists.
     let out = cli_ok(
         &actor,
         &[

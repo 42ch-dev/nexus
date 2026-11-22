@@ -80,7 +80,6 @@ mod tests {
 
     #[test]
     fn empty_visible_subset_is_absent() {
-        // The additive default: an empty operator list must not flip the
         // surface to deny-all — it stays byte-identical (all visible).
         let policy = VisibilityPolicy::from_visible(Vec::<String>::new());
         assert_eq!(policy, VisibilityPolicy::absent());

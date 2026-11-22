@@ -1,5 +1,4 @@
 /**
- * World KB canvas orchestrator types (V1.74 A10 split).
  *
  * Shared selection + conflict state types used by the thin orchestrator and
  * the extracted header / inspector / conflict-host modules.
@@ -37,7 +36,6 @@ export interface EntityConflictState {
   reapplyForm: EntityEditForm;
   dirtyFields: EntityField[];
   /**
-   * Exact module dialect set the conflicting submit intended to write. The
    * reapply must rewrite only these dialects — the other dialect may have
    * changed concurrently while the modal was open (L2-T2-001).
    */

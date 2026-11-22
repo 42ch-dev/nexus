@@ -79,7 +79,6 @@ async fn main() {
         .await
         .expect("dialer node starts");
 
-    // Dial the running host.
     let session = match node
         .connect(parse_multiaddr(&addr).expect("host addr parses"))
         .await
@@ -97,7 +96,6 @@ async fn main() {
         session.remote_peer_id()
     );
 
-    // Manifest read (§2.5 — delivered inside the signed hello).
     println!(
         "MANIFEST {}",
         serde_json::to_string(session.remote_manifest()).expect("manifest serializes")
@@ -107,7 +105,6 @@ async fn main() {
         session.negotiated_capabilities()
     );
 
-    // Every core op + a garbage op must be refused `op_unsupported` with the
     // session staying open (N-C0 §3).
     let mut failures = Vec::new();
     for op in CORE_OPS.iter().chain(std::iter::once(&"garbage-op")) {
@@ -127,7 +124,6 @@ async fn main() {
             other => failures.push(format!("{op}: expected op_unsupported, got {other:?}")),
         }
     }
-    // Session must still be usable after refusals.
     match session
         .invoke("check", serde_json::json!({ "extensions": {} }))
         .await
@@ -161,7 +157,6 @@ fn spoke_connect_manifest() -> ConnectHelloManifest {
         namespaces: Vec::new(),
         roles: vec!["input-source".into()],
         schema_version: std::num::NonZeroU64::new(1).expect("non-zero"),
-        // V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
         tools: Vec::new(),
     }
 }

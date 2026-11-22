@@ -8,17 +8,12 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-// =============================================================================
-// R1: local_only anonymous identity end-to-end
-// =============================================================================
-
 /// Regression R1: Anonymous identity works and sync is blocked in `local_only` mode
 #[test]
 fn r1_anonymous_identity_e2e() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create anonymous identity
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -32,12 +27,10 @@ fn r1_anonymous_identity_e2e() {
         .assert()
         .success();
 
-    // Verify the identity was created with a ctr_ prefix (anonymous identity marker)
     output
         .stdout(predicate::str::contains("ctr_"))
         .stdout(predicate::str::contains("Created anonymous identity"));
 
-    // Verify runtime mode is local_only (default)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -48,7 +41,6 @@ fn r1_anonymous_identity_e2e() {
         .success()
         .stdout(predicate::str::contains("local_only"));
 
-    // Verify sync push is blocked in local_only mode (v1.193 P2-T12:
     // `platform sync` is the parser entrance; the top-level alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -67,7 +59,6 @@ fn r1_anonymous_identity_active_session() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create anonymous identity
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -81,7 +72,6 @@ fn r1_anonymous_identity_active_session() {
         .assert()
         .success();
 
-    // In the same session, identity is usable
     // (ephemeral means it won't persist to list in a new session)
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -94,17 +84,12 @@ fn r1_anonymous_identity_active_session() {
         .stdout(predicate::str::contains("local_only"));
 }
 
-// =============================================================================
-// R2: local_only local persistent identity end-to-end
-// =============================================================================
-
 /// Regression R2: Local persistent identity persists across sessions
 #[test]
 fn r2_persistent_identity_e2e() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create persistent local identity
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -118,10 +103,8 @@ fn r2_persistent_identity_e2e() {
         .assert()
         .success();
 
-    // Verify identity was created
     output.stdout(predicate::str::contains("Created persistent identity"));
 
-    // Verify identity can be used in second session (same HOME, new process)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -132,7 +115,6 @@ fn r2_persistent_identity_e2e() {
         .success()
         .stdout(predicate::str::contains("TestWriter"));
 
-    // Verify runtime mode is local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -150,7 +132,6 @@ fn r2_persistent_identity_config_persists() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Create persistent identity
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -164,14 +145,12 @@ fn r2_persistent_identity_config_persists() {
         .assert()
         .success();
 
-    // Verify state.db exists in ~/.nexus42/ (identity storage)
     let db_path = home.join(".nexus42/state.db");
     assert!(
         db_path.exists(),
         "state.db should exist after creating persistent identity"
     );
 
-    // List identities to verify persistence
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -183,10 +162,6 @@ fn r2_persistent_identity_config_persists() {
         .stdout(predicate::str::contains("PersistentUser"));
 }
 
-// =============================================================================
-// R3: Local truth core chain (SOUL/memory/KB/output)
-// =============================================================================
-
 /// Regression R3: Local truth chain - SOUL → memory → context assembly
 #[test]
 fn r3_local_truth_chain() {
@@ -195,7 +170,6 @@ fn r3_local_truth_chain() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Create a persistent identity first (SOUL requires active creator)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -209,7 +183,6 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -223,7 +196,6 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Init SOUL
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -234,7 +206,6 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Verify SOUL was initialized
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -245,7 +216,6 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // Create memory
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -259,7 +229,6 @@ fn r3_local_truth_chain() {
         .assert()
         .success();
 
-    // List memories to verify it was created
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -270,8 +239,6 @@ fn r3_local_truth_chain() {
         .assert()
         .success()
         .stdout(predicate::str::contains("world_building"));
-
-    // R3 verification: SOUL init + memory creation chain works
 }
 
 /// Regression R3: context assemble-moment executes without panic or skip
@@ -285,7 +252,6 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Create a persistent identity (required for workspace operations)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -299,7 +265,6 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // Init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -313,7 +278,6 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // Init SOUL (required by assemble-moment Stage0)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -324,7 +288,6 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // v1.191 P1 T9: the admitted knowledge view is World-scoped — a worldless
     // `assemble-moment` fails closed in `creator_view_scope` ("an admitted
     // knowledge view requires a World: pass `--world-id wld_...`"; re-smoked on
     // the real binary in v1.194 P2-T2), so the R3 chain materializes a World and
@@ -357,7 +320,6 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .expect("created world id")
         .to_string();
 
-    // Run context assemble-moment — must not panic and succeed
     Command::cargo_bin("nexus42")
         .unwrap()
         .args([
@@ -389,7 +351,6 @@ fn r3_context_assemble_moment_worldless_refuses() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // The guard runs once the active Creator resolves, so identity + workspace
     // must be in place for the refusal — not a missing-creator error — to fire.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -421,7 +382,6 @@ fn r3_context_assemble_moment_worldless_refuses() {
         .assert()
         .success();
 
-    // No `--world-id`: exit 1 with the worldless refusal, never a widened read.
     Command::cargo_bin("nexus42")
         .unwrap()
         .args(["platform", "context", "assemble-moment"])
@@ -442,7 +402,6 @@ fn r3_soul_validation() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Create identity and init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -469,7 +428,6 @@ fn r3_soul_validation() {
         .assert()
         .success();
 
-    // Init SOUL
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -480,7 +438,6 @@ fn r3_soul_validation() {
         .assert()
         .success();
 
-    // Validate SOUL structure
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -493,17 +450,12 @@ fn r3_soul_validation() {
         .stdout(predicate::str::contains("valid").or(predicate::str::contains("Valid")));
 }
 
-// =============================================================================
-// R5: No-platform dependency guard for local_only path
-// =============================================================================
-
 /// Regression R5: Platform sync push blocked in `local_only` mode
 #[test]
 fn r5_platform_guard_blocks_sync_push() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -514,7 +466,6 @@ fn r5_platform_guard_blocks_sync_push() {
         .assert()
         .success();
 
-    // Verify sync push blocked (v1.193 P2-T12: `platform sync` is the parser
     // entrance; the hidden top-level `sync` alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -536,7 +487,6 @@ fn r5_platform_guard_explore_is_unknown() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -568,7 +518,6 @@ fn r5_platform_guard_sync_status_works() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -579,7 +528,6 @@ fn r5_platform_guard_sync_status_works() {
         .assert()
         .success();
 
-    // Verify sync status still works (local outbox query, no platform needed)
     // With no active creator configured, it should still respond gracefully.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -598,7 +546,6 @@ fn r5_local_only_mode_persists() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -609,7 +556,6 @@ fn r5_local_only_mode_persists() {
         .assert()
         .success();
 
-    // Verify mode persisted (new process, same HOME)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -620,10 +566,6 @@ fn r5_local_only_mode_persists() {
         .success()
         .stdout(predicate::str::contains("local_only"));
 }
-
-// =============================================================================
-// V1.29 Memory Session Review Loop (Plan A1)
-// =============================================================================
 
 /// Verify `creator memory pending list --help` returns usage without error.
 #[test]

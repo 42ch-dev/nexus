@@ -1,5 +1,4 @@
 /**
- * `useStrategyCanvas` presents the rendered IR document to the flat edit form
  * and owns the active inspector section.
  */
 import { describe, expect, it, vi } from 'vitest';

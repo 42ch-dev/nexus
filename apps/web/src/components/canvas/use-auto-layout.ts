@@ -75,7 +75,6 @@ function computeDagreLayout<TNodeData extends Record<string, unknown>>(
   const absolute = new Map<string, { x: number; y: number; width: number; height: number }>();
   for (const node of nodes) {
     const label = graph.node(node.id) as DagreNodeLabel | undefined;
-    // Defensive: dagre may not assign coordinates to every setNode'd node
     // (compound-graph ranker edge cases). Fall back to the origin and the
     // node's own dimensions so the layout never crashes on a missing or
     // partial label (R-V1114P0QC2-M001).
@@ -143,7 +142,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
       return { nodes, isLayouting: false, relayout };
     }
 
-    // Detect manual drags by comparing incoming positions against the snapshot
     // from the last layout run. Any deviation marks the surface as dirty and
     // suppresses automatic re-layouts. This loop is read-only: refs are updated
     // in the layout effect below so strict-mode double-invocation cannot leak
@@ -163,7 +161,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
 
     const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
     const isFirstLayout = !initialLayoutDoneRef.current;
-    // A surface may signal that it already supplies meaningful positions
     // (hasSuppliedPositions). On first open, respect those positions and skip
     // dagre; the author can still trigger an explicit relayout() (W003).
     const hasSuppliedPositions = options.hasSuppliedPositions === true;
@@ -183,7 +180,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
       return;
     }
 
-    // Apply the manual-override side effects that were intentionally kept out
     // of the memo above.
     for (const node of nodes) {
       if (manualNodeIdsRef.current.has(node.id)) continue;
@@ -202,7 +198,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
     const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
     const firstCheckpoint = !initialLayoutDoneRef.current;
 
-    // When dagre did not run AND we have already passed the first checkpoint,
     // there is nothing to snapshot — manual-drag detection continues to use
     // the existing baseline. On the first checkpoint, snapshot even when dagre
     // was skipped (supplied-positions mode) so subsequent manual drags can be

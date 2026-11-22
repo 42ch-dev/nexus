@@ -17,7 +17,6 @@ export type HubTabBarProps = {
   /** Prefix for tab button `id` (fallback `hub-tab-${useId()}`). */
   tabIdPrefix?: string;
   /**
-   * `aria-controls` target id for the active tab panel (fallback
    * `hub-tabpanel-${useId()}` — the SAME instance uid as the tab fallback,
    * with a distinct prefix; a host overriding one prefix should pass both).
    */
@@ -47,7 +46,6 @@ export function HubTabBar({
   'data-testid': testId = 'hub-tab-bar',
 }: HubTabBarProps) {
   const tabRefs = useRef<Partial<Record<HubTab, HTMLButtonElement | null>>>({});
-  // Instance-unique fallbacks: two bars on one page must never share ids.
   const uid = useId();
   const resolvedTabIdPrefix = tabIdPrefix ?? `hub-tab-${uid}`;
   const resolvedTabPanelId = tabPanelId ?? `hub-tabpanel-${uid}`;

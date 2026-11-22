@@ -1,5 +1,4 @@
 /**
- * Settings Connection section — mount + locked chrome copy.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
@@ -50,7 +49,6 @@ describe('SettingsConnectionSection', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
-    // The section composes ConnectDaemonForm, which now consumes the promoted
     // primitive for transport-classified failures. Verifies the section-level
     // wiring (the primitive is reachable through the Settings → Connection
     // page that a manual tester loads after a stale-URL resume-gate redirect).

@@ -38,7 +38,6 @@ function writeStoredCreatorId(id: string | null): void {
       window.localStorage.setItem(STORAGE_KEY, id);
     }
   } catch {
-    // Storage may be disabled in some environments; persistence is best-effort.
   }
 }
 
@@ -69,7 +68,6 @@ export function ActiveCreatorProvider({
     writeStoredCreatorId(id);
   }, []);
 
-  // Sync across tabs (best-effort).
   useEffect(() => {
     function onStorage(event: StorageEvent) {
       if (event.key === STORAGE_KEY) {
@@ -106,7 +104,6 @@ export function useDefaultProfileAutoSelect(
 
     let cancelled = false;
     void (async () => {
-      // Prefer the daemon's active creator so 工作区 highlight matches config.toml.
       try {
         const active = await client.getActiveCreator();
         if (cancelled) return;
@@ -116,7 +113,6 @@ export function useDefaultProfileAutoSelect(
           return;
         }
       } catch {
-        // No active creator on daemon — fall through to Default / first Profile.
       }
       if (cancelled) return;
       const defaults = items

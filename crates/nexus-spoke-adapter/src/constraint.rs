@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! AR-2 constraint carrier — the nexus product grammar for structured rules.
 //!
 //! V1.166 (DR-64): a rule's machine-evaluated semantics live in
@@ -120,7 +121,6 @@ pub struct CarrierError {
 /// module_presence | module_absence | required_field |
 /// observer_cardinality`), plus the offending `member`.
 #[allow(clippy::too_many_lines)]
-// ^ one monolithic dispatch: the six locked carrier shapes are a single
 // grammar (AR-2); splitting would fragment the shape table it documents.
 pub fn parse_carrier_json_member(value: &Value) -> Result<Constraint, CarrierError> {
     let obj = value.as_object().ok_or_else(|| CarrierError {
@@ -161,7 +161,6 @@ pub fn parse_carrier_json_member(value: &Value) -> Result<Constraint, CarrierErr
             reject_unknown_members(obj, &["family", "module_key", "field"])?;
             let field = require_non_empty_string(obj, "field")?;
             if obj.contains_key("module_key") {
-                // Module-row operand form: module_key + free-form field.
                 let module_key = require_non_empty_string(obj, "module_key")?;
                 if matches!(field.as_str(), "body.summary" | "body.tags") {
                     return Err(CarrierError {
@@ -178,7 +177,6 @@ pub fn parse_carrier_json_member(value: &Value) -> Result<Constraint, CarrierErr
                     target: RequiredFieldTarget::ModuleRow { module_key, field },
                 }
             } else {
-                // Entry-level operand form: field ∈ closed set.
                 let entry = match field.as_str() {
                     "body.summary" => EntryField::BodySummary,
                     "body.tags" => EntryField::BodyTags,
@@ -350,8 +348,6 @@ mod tests {
     use std::collections::HashMap;
     use std::num::NonZeroU64;
 
-    // ── parse_carrier_json: valid six shapes ─────────────────────────
-
     #[test]
     fn parses_module_presence_and_absence() {
         assert_eq!(
@@ -395,7 +391,6 @@ mod tests {
                 }
             })
         );
-        // Free-form module-row field may be any non-empty string — including
         // dotted names other than the two reserved entry-level values.
         assert!(parse_carrier_json(&json!({
             "family": "required_field",
@@ -457,8 +452,6 @@ mod tests {
             "observer_cardinality"
         );
     }
-
-    // ── parse_carrier_json: malformed carriers name the member ───────
 
     #[test]
     fn rejects_non_object_values() {
@@ -602,8 +595,6 @@ mod tests {
         }
     }
 
-    // ── constraint_from_rule: evaluator read path ────────────────────
-
     fn rule_with_extensions(extensions_json: &str) -> Rule {
         let extensions: HashMap<ExtensionKey, Map<String, Value>> =
             serde_json::from_str(extensions_json).unwrap();
@@ -640,25 +631,20 @@ mod tests {
 
     #[test]
     fn constraint_from_rule_absent_or_malformed_is_none() {
-        // Missing constraint key entirely.
         let no_constraint = rule_with_extensions(r#"{"nexus": {"other": 1}}"#);
         assert_eq!(constraint_from_rule(&no_constraint), None);
 
-        // Missing nexus namespace.
         let no_namespace = rule_with_extensions(r#"{"other": {"constraint": {}}}"#);
         assert_eq!(constraint_from_rule(&no_namespace), None);
 
-        // Empty extensions bag.
         let empty = rule_with_extensions(r"{}");
         assert_eq!(constraint_from_rule(&empty), None);
 
-        // Malformed carrier (unknown family) → None (lenient evaluator read).
         let malformed = rule_with_extensions(
             r#"{"nexus": {"constraint": {"family": "tone", "module_key": "x"}}}"#,
         );
         assert_eq!(constraint_from_rule(&malformed), None);
 
-        // Non-object constraint → None.
         let non_object = rule_with_extensions(r#"{"nexus": {"constraint": [1, 2, 3]}}"#);
         assert_eq!(constraint_from_rule(&non_object), None);
     }

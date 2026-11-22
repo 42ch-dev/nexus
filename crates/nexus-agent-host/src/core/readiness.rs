@@ -1,4 +1,4 @@
-//! Provider readiness helpers — candidate identity and catalog merge.
+//! Provider readiness helpers — candidate identity and catalog merge. See docs/specs/agents/agent-host.md.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -255,7 +255,6 @@ pub fn is_launch_class_failure(error: &HostError) -> bool {
         HostError::LaunchFailed { .. }
         | HostError::CleanupUnconfirmed { .. }
         | HostError::ProviderUnavailable { .. } => true,
-        // A timeout only invalidates readiness when it happened at a real
         // launch/initialize boundary. The typed `stage` distinguishes those
         // from an ordinary prompt/content/run timeout, which leaves an
         // already-initialized recipe healthy — blanket-classifying every

@@ -25,8 +25,6 @@ use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-// ── Test fixtures ───────────────────────────────────────────────────────────
-
 const CREATOR: &str = "ctr_review_test";
 
 fn novel_work(work_id: &str, chapter: i32, total: i32) -> WorkRecord {
@@ -110,8 +108,6 @@ async fn count_findings(pool: &SqlitePool, work_id: &str) -> i64 {
     i64::try_from(rows.len()).unwrap_or(0)
 }
 
-// ── AC1: Auto-chain review stage creates ≥1 finding row ─────────────────────
-
 #[tokio::test]
 async fn ac1_auto_chain_review_terminal_persists_finding() {
     let (_dir, pool) = test_pool().await;
@@ -120,12 +116,10 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
             .with_binding_provider("test-provider".to_string()),
     );
 
-    // Work at review stage, chapter 2 of 5 — current_chapter reflects the
     // most recently finalized chapter (chapter 2 done, now reviewing).
     let work = novel_work("wrk_ac1", 2, 5);
     works::create_work(&pool, &work).await.unwrap();
 
-    // The review schedule is the active driver — set it.
     insert_schedule(
         &pool,
         "sch_ac1_review",
@@ -138,10 +132,8 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
         .await
         .unwrap();
 
-    // Pre-state: no findings.
     assert_eq!(count_findings(&pool, "wrk_ac1").await, 0);
 
-    // Mark the review stage complete (as the schedule runner would).
     works::patch_work(
         &pool,
         CREATOR,
@@ -155,19 +147,16 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
     .await
     .unwrap();
 
-    // Terminal transition — supervisor hook fires.
     sup.on_schedule_terminal("sch_ac1_review", ScheduleStatus::Completed)
         .await
         .unwrap();
 
-    // AC1: ≥1 finding row exists for the novel Work.
     let n = count_findings(&pool, "wrk_ac1").await;
     assert!(
         n >= 1,
         "auto-chain review terminal must persist ≥1 finding; got {n}"
     );
 
-    // AC3: the finding has the required V1.47 §8.2 fields.
     let filters = FindingListFilters {
         work_id: Some("wrk_ac1".to_string()),
         ..Default::default()
@@ -178,9 +167,7 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
     let f = &rows[0];
     assert_eq!(f.work_id, "wrk_ac1");
     assert_eq!(f.status, "open");
-    // chapter context derived from work.current_chapter (V1.38 §4.5.2)
     assert_eq!(f.chapter, Some(2));
-    // Required V1.47 fields per spec §8.2
     assert!(
         !f.kind.is_empty(),
         "finding must set `kind` (got empty); per spec §8.2"
@@ -198,7 +185,6 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
         "finding body must be non-empty (got empty)"
     );
 
-    // AC4: the active driver was NOT canceled — auto-chain advanced to persist.
     let updated = works::get_work(&pool, CREATOR, "wrk_ac1")
         .await
         .unwrap()
@@ -215,14 +201,11 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
     );
 }
 
-// ── AC2: On-demand `creator run` reaches the same code path ─────────────────
-
 #[tokio::test]
 async fn ac2_on_demand_review_run_persists_finding_same_path() {
     let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
-    // Work at produce-complete — user manually triggers review via CLI.
     // The schedule created by `creator run novel-chapter-review` does NOT
     // become the work's driver_schedule_id (CLI stage_advance path).
     let mut work = novel_work("wrk_ac2", 1, 3);
@@ -230,7 +213,6 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
     work.stage_status = "complete".to_string();
     works::create_work(&pool, &work).await.unwrap();
 
-    // On-demand schedule (not set as driver).
     insert_schedule(
         &pool,
         "sch_ac2_review_ondemand",
@@ -241,23 +223,19 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
     .await;
     // NOTE: deliberately do NOT call set_driver — this is the on-demand path.
 
-    // Pre-state: no findings.
     assert_eq!(count_findings(&pool, "wrk_ac2").await, 0);
 
-    // Terminal transition — supervisor hook fires on schedule_id +
     // preset_id match, independent of driver status.
     sup.on_schedule_terminal("sch_ac2_review_ondemand", ScheduleStatus::Completed)
         .await
         .unwrap();
 
-    // AC2: ≥1 finding row created via the same code path as AC1.
     let n = count_findings(&pool, "wrk_ac2").await;
     assert!(
         n >= 1,
         "on-demand review terminal must persist ≥1 finding; got {n}"
     );
 
-    // Same required-fields check (AC3) — the finding is well-formed.
     let filters = FindingListFilters {
         work_id: Some("wrk_ac2".to_string()),
         ..Default::default()
@@ -273,7 +251,6 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
     assert_ne!(f.target_executor, "");
     assert_ne!(f.description, "");
 
-    // AC4 invariant: on-demand path does NOT touch driver_schedule_id.
     // The Work's driver remains None (was None at seed; never set).
     let updated = works::get_work(&pool, CREATOR, "wrk_ac2")
         .await
@@ -286,8 +263,6 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
     );
 }
 
-// ── Negative: non-review schedules are no-ops for the hook ──────────────────
-
 #[tokio::test]
 async fn negative_non_review_preset_does_not_persist_finding() {
     let (_dir, pool) = test_pool().await;
@@ -296,7 +271,6 @@ async fn negative_non_review_preset_does_not_persist_finding() {
     let work = novel_work("wrk_neg", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
 
-    // A `novel-writing` (produce) schedule completing must NOT create findings.
     insert_schedule(
         &pool,
         "sch_neg_produce",
@@ -310,7 +284,6 @@ async fn negative_non_review_preset_does_not_persist_finding() {
         .await
         .unwrap();
 
-    // No findings persisted by the review hook (other hooks may create
     // schedules but none of them write findings).
     assert_eq!(
         count_findings(&pool, "wrk_neg").await,
@@ -319,8 +292,6 @@ async fn negative_non_review_preset_does_not_persist_finding() {
     );
 }
 
-// ── AC3: rule_suggestion is stored as metadata on the finding row ───────────
-
 #[tokio::test]
 async fn ac3_rule_suggestion_field_exists_and_round_trips() {
     let (_dir, pool) = test_pool().await;
@@ -328,7 +299,6 @@ async fn ac3_rule_suggestion_field_exists_and_round_trips() {
     let work = novel_work("wrk_ac3", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Use the from-review DAO directly to verify the rule_suggestion field
     // is persisted (mirrors what the supervisor hook does internally).
     let verdict = findings::ReviewVerdictFinding {
         work_id: "wrk_ac3".to_string(),
@@ -359,8 +329,6 @@ async fn ac3_rule_suggestion_field_exists_and_round_trips() {
     );
 }
 
-// ── AC5: Idempotency — repeating the review terminal hook does not duplicate ─
-
 /// V1.47 P0 fix (qc1 W-2 / qc2 W-1 / qc3 W-2): calling the review terminal
 /// hook twice on the same chapter + schedule must produce exactly **one**
 /// finding row. The `source_schedule_id` partial unique index guarantees this
@@ -386,10 +354,8 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         .await
         .unwrap();
 
-    // Pre-state: no findings.
     assert_eq!(count_findings(&pool, "wrk_ac5").await, 0);
 
-    // First terminal transition — creates the finding.
     sup.on_schedule_terminal("sch_ac5_review", ScheduleStatus::Completed)
         .await
         .unwrap();
@@ -399,7 +365,6 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         "first terminal must create exactly 1 finding; got {n1}"
     );
 
-    // Simulate a second terminal transition for the SAME schedule (e.g.
     // supervisor retry or double-fire). The schedule row was already flipped
     // to 'completed' by the first call, so we reset it to 'running' to make
     // the second on_schedule_terminal accept the transition.
@@ -413,16 +378,12 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         .await
         .unwrap();
 
-    // AC5: still exactly 1 finding — the ON CONFLICT DO NOTHING guard
-    // prevented the duplicate.
     let n2 = count_findings(&pool, "wrk_ac5").await;
     assert_eq!(
         n2, 1,
         "second terminal for the same schedule must NOT create a duplicate; got {n2}"
     );
 }
-
-// ── QC1 F-001: duplicate driven terminal callback hooks exactly once ────────
 
 /// P4 QC1 F-001: `settle_and_chain_atomic` must gate post-settlement hooks on
 /// the source UPDATE `rows_affected()`. A duplicate terminal callback for an
@@ -479,7 +440,6 @@ async fn qc1_duplicate_driven_terminal_callback_hooks_exactly_once() {
         .unwrap();
     assert_eq!(count_findings(&pool, "wrk_qc1").await, 1);
 
-    // Duplicate callback: schedule already completed; must not re-run hooks.
     sup.on_schedule_terminal("sch_qc1_review", ScheduleStatus::Completed)
         .await
         .unwrap();

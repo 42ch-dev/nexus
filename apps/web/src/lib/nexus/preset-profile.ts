@@ -1,5 +1,4 @@
 /**
- * App-side TS mirror of the P0 preset-profile DTO (V1.171 P1 — AR-27).
  *
  * Mirrors `crates/nexus-contracts/src/local/orchestration/http.rs`
  * `PresetProfileResponse` + nested structs 1:1 (camelCase on the wire). The

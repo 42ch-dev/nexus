@@ -22,10 +22,8 @@ use std::path::Path;
 /// The workspace root is two levels up; `.sqlx/` lives at the workspace root.
 fn workspace_sqlx_dir() -> std::path::PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    // crates/nexus-local-db → workspace root is ../../
     manifest_dir
         .join("../../.sqlx")
-        // Normalized for cross-platform comparison; if the workspace is
         // relocated this test still resolves correctly via CARGO_MANIFEST_DIR.
         .canonicalize()
         .unwrap_or_else(|_| manifest_dir.join("../../.sqlx"))

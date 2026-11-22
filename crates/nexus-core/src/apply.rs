@@ -425,7 +425,6 @@ impl CoreService {
 
         let current_apply = current_apply(&self.inner.pool, strategy_id).await?;
 
-        // The document half runs the same replay the intake and recovery run, against the apply
         // row this response reports: resolving a second `current_apply` could pair the document
         // with another apply's identity in one body. The outer `Err` propagates as above.
         let (applied_document, applied_document_refusal) = match current_apply.as_ref() {
@@ -537,7 +536,6 @@ impl CoreService {
     ) -> CoreResult<AppliedStrategy> {
         self.verify_principal(principal)?;
 
-        // The intake reads an apply only for a user preset (`is_user_preset`), so an apply
         // naming an embedded or system id records a row nothing ever reads — a successful apply
         // that changes nothing. The source is the LOADER's answer through the resolver the intake
         // shares; a preset that does not resolve at all is equally not a user bundle. Validation
@@ -563,7 +561,6 @@ impl CoreService {
         let apply_id = format!("apl_{}", uuid::Uuid::new_v4());
         let applied_at = chrono::Utc::now().to_rfc3339();
 
-        // One statement owns every guard that depends on the apply table: the supersede link is
         // the current row as this statement sees it, the already-current refusal is the absence of
         // any successor-less row naming this approval, and the schedule precondition rides in the
         // same statement so an apply cannot land for a strategy that lost its schedule. A
@@ -632,7 +629,6 @@ impl CoreService {
         strategy_id: &str,
         approval_content_hash: &str,
     ) -> CoreResult<(String, String)> {
-        // The approval lookup prefers this strategy's own row: two strategies approving the same
         // content is legal, and the request names the strategy it applies to. `approval_id`
         // breaks the tie so a hash only foreign strategies carry names the same strategy on every
         // read: `UNIQUE (strategy_id, content_hash)` already rules out a tie inside one strategy.
@@ -663,7 +659,6 @@ impl CoreService {
             .into_error());
         }
 
-        // The approval identity is recomputed from the frozen bytes, never trusted from the
         // column: an approval whose document moved no longer proves the hash it promises.
         let document: WorkflowDocument = serde_json::from_str(&document_json).map_err(|error| {
             apply_internal(format!(
@@ -681,13 +676,11 @@ impl CoreService {
             .into_error());
         }
 
-        // The hash freezes the document, not the pattern bodies it pins: a body edited under an
         // unchanged `id@version` leaves this hash intact. The frozen pin snapshot is the second,
         // narrower guard, and it runs before buildability so a moved pin is named as the pin it is.
         verify_pins(self.nexus_home(), &document, &pins_json)
             .map_err(|failure| pin_apply_refusal(&approval_id, failure).into_error())?;
 
-        // The applied identity must be one the intake can build. The schedule intake builds this
         // same document with `IrTemplateSource::OwnSource`, so a document the builder refuses
         // would apply, report itself applied, and then fail at its first build (I-000448). Same
         // predicate, same reason, before the row exists.
@@ -757,10 +750,6 @@ impl CoreService {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Load-side replay: which apply is live, and whether it still replays.
-// ---------------------------------------------------------------------------
-
 /// Whether `strategy_id` resolved to a user bundle — the only source the schedule intake reads an
 /// apply from.
 ///
@@ -774,7 +763,6 @@ impl CoreService {
 /// `_system.` id names no strategy.
 #[must_use]
 pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) -> bool {
-    // The decision itself lives in `nexus-home-layout::strategy_intake` so the
     // engine's preset trait entries classify through the same function — one
     // rule for both sides of the intake gate.
     nexus_home_layout::strategy_intake::is_user_strategy_bundle(
@@ -1227,7 +1215,6 @@ mod tests {
     fn a_document_edited_after_apply_is_refused_by_strategy_and_apply() {
         let document: WorkflowDocument = serde_json::from_str(IR).unwrap();
         let hash = content_hash(&document).unwrap();
-        // Edit the frozen bytes behind the apply's back; only the recomputation can catch it.
         let mut edited = document;
         edited.version = 7;
         let edited_hash = content_hash(&edited).unwrap();

@@ -5,8 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { Badge } from './badge';
 
 describe('Badge', () => {
-  // --- soft tone (default) ---
-
   it('defaults to soft tone with strengthened neutral border', () => {
     render(<Badge>Neutral</Badge>);
     const badge = screen.getByText('Neutral');
@@ -18,7 +16,6 @@ describe('Badge', () => {
   it('renders soft running with ~16% fill and ~50% border alpha', () => {
     render(<Badge variant="running">Running</Badge>);
     const badge = screen.getByText('Running');
-    // v1.183 P0 R-V1121P1QC1-S001: soft triples consume the projected
     // nexus-ui-badge-soft-* tokens (16% fill / -1000 text / 50% border).
     expect(badge).toHaveClass('text-nexus-ui-badge-soft-running-text');
     expect(badge).toHaveClass('bg-nexus-ui-badge-soft-running-bg');
@@ -81,8 +78,6 @@ describe('Badge', () => {
     expect(badge).not.toHaveClass('border-transparent');
   });
 
-  // --- solid tone ---
-
   it('renders solid neutral with white text and transparent border', () => {
     render(
       <Badge tone="solid" variant="neutral">
@@ -103,7 +98,6 @@ describe('Badge', () => {
       </Badge>,
     );
     const badge = screen.getByText('Solid Running');
-    // v1.183 P0 R-V1121P1T3-S001 (AR-3): light solid fill sits one step
     // darker (green-800) so white text clears AA; dark pins the bright
     // green-700 fill per the Button Contrast Invariant.
     expect(badge).toHaveClass('bg-green-800');
@@ -134,8 +128,6 @@ describe('Badge', () => {
     expect(badge).toHaveClass('border-transparent');
   });
 
-  // --- base structural classes ---
-
   it('renders with base structural classes', () => {
     render(<Badge>Tag</Badge>);
     const badge = screen.getByText('Tag');
@@ -155,8 +147,6 @@ describe('Badge', () => {
     expect(badge).toHaveClass('ease-standard');
   });
 
-  // --- className merge (cn integration) ---
-
   it('merges custom className with variant classes', () => {
     render(
       <Badge variant="neutral" className="ml-2">
@@ -168,8 +158,6 @@ describe('Badge', () => {
     expect(badge).toHaveClass('bg-gray-alpha-100');
   });
 
-  // --- ref-as-prop ---
-
   it('passes the ref to the underlying span element', () => {
     let ref: HTMLSpanElement | null = null;
     const setRef = (el: HTMLSpanElement | null) => {
@@ -179,8 +167,6 @@ describe('Badge', () => {
     expect(ref).not.toBeNull();
     expect(ref!).toHaveProperty('tagName', 'SPAN');
   });
-
-  // --- renders children as text ---
 
   it('renders its children', () => {
     render(<Badge variant="error">Error Text</Badge>);

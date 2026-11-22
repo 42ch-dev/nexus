@@ -305,7 +305,6 @@ pub async fn append_event(
     summary: Option<&str>,
     modules_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(pool, world_id).await? {
@@ -350,7 +349,6 @@ pub async fn append_event_in_tx(
     title: Option<&str>,
     summary: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(&mut **tx, world_id).await? {
@@ -404,7 +402,6 @@ pub async fn append_event_in_tx(
 ///
 /// Same error variants as [`append_event_in_tx`].
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors append_event_core's INSERT columns; grouping would
 // add indirection for one caller (the Accept path).
 pub async fn append_event_canon_with_extensions_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -417,7 +414,6 @@ pub async fn append_event_canon_with_extensions_in_tx(
     affected_key_block_ids_json: Option<&str>,
     modules_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(&mut **tx, world_id).await? {
@@ -479,7 +475,6 @@ pub async fn append_event_canon_with_extensions(
     summary: Option<&str>,
     extensions_nexus_json: &str,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
     if !world_exists(pool, world_id).await? {
@@ -574,7 +569,6 @@ where
 /// pending/appended events; `canon` for author-committed events such as
 /// accepted direct-lane compute Runs).
 #[allow(clippy::too_many_arguments)]
-// ^ justification: internal helper; all 11 scalar args map 1:1 to INSERT columns.
 // Grouping into a struct would add indirection for zero abstraction gain.
 async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     executor: E,
@@ -624,7 +618,6 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
             created_at,
         }),
         Err(e) => {
-            // Check for UNIQUE constraint violation on (world_id, branch_id, sequence_no)
             if let sqlx::Error::Database(ref db_err) = e {
                 if db_err.code().as_deref() == Some("2067") {
                     return Err(NarrativeWriteError::SequenceConflict {
@@ -638,8 +631,6 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
         }
     }
 }
-
-// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -713,17 +704,14 @@ mod tests {
         .await
         .unwrap();
 
-        // Same creator owns the world.
         assert!(is_world_owned(&pool, "ctr_test", &world.world_id)
             .await
             .unwrap());
 
-        // A different creator does not own it.
         assert!(!is_world_owned(&pool, "ctr_other", &world.world_id)
             .await
             .unwrap());
 
-        // A non-existent world returns false.
         assert!(!is_world_owned(&pool, "ctr_test", "wld_nonexistent")
             .await
             .unwrap());
@@ -873,7 +861,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify via the read gateway
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let worlds = gw.list_worlds().await.unwrap();
         assert_eq!(worlds.len(), 2);
@@ -918,7 +905,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Verify via the read gateway
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let events = gw
             .get_timeline(&world.world_id, Some(&world.root_fork_branch_id), None)
@@ -933,7 +919,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_writes_canon() {
-        // V1.147 P2 dogfood: an accepted direct-lane compute Run must land on
         // the Timeline as a `canon` event — the projection reads canon only.
         // Folds the former `append_event_with_extensions_in_tx` assertions
         // (provenance column + affected_key_block_ids_json) into the canon
@@ -995,7 +980,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_persists_modules_json() {
-        // V1.164 P1 T4 (AC-V1164-4): the l5-mind observation payload written
         // via the canon Accept path must survive the SQLite write→read cycle
         // byte-for-byte — including unknown keys inside the observation object
         // (mirrors Task 3's AC-V1164-3 seam gate).
@@ -1046,7 +1030,6 @@ mod tests {
             "modules_json must persist the observation payload verbatim"
         );
 
-        // Read-path: both TimelineEventRow surfaces (get_timeline list read +
         // get_event single read) deserialize modules back to the same Value.
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
@@ -1072,7 +1055,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_writes_null_modules_json() {
-        // Backward compat: writers without modules data must store NULL (no
         // modules = unrecorded per spoke handbook), and the read path maps
         // NULL → None.
         let (_dir, pool) = fresh_pool().await;
@@ -1124,7 +1106,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_persists_observation_modules_json() {
-        // AR-5 (a): `creator world event-add --observer … [--access …]` builds
         // a `modules.observation` payload; `append_event` must persist it
         // verbatim in `modules_json` and both read paths (get_event +
         // get_timeline) must surface it back — the checker-consumed log
@@ -1173,7 +1154,6 @@ mod tests {
             "append_event must persist the observation payload verbatim"
         );
 
-        // Read-back round-trip through both gateway surfaces.
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
 
@@ -1198,7 +1178,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_provisional_visible_in_check_scope() {
-        // AR-5 (e): appended events are `status='provisional'` and the
         // checker's scope read (`list_timeline_events_scoped`, backing
         // `ScopeQueryPort::list_timeline_events`) filters world/branch/ids
         // only — no status filter — so the provisional observation event must
@@ -1230,7 +1209,6 @@ mod tests {
         .await
         .unwrap();
 
-        // The scope read primitive (world + branch, no status filter).
         let scoped = crate::narrative_gateway::list_timeline_events_scoped(
             &pool,
             &world.world_id,
@@ -1256,7 +1234,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_in_tx_leaves_extensions_null() {
-        // Verify backward compat: the existing `append_event_in_tx` (no
         // extensions param) writes NULL, not a default object.
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;

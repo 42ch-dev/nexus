@@ -1,5 +1,4 @@
 /**
- * Schema localization + dereference layer.
  *
  * Two-stage preparation ported from the sibling spoke repo's codegen orchestrator
  * (spoke tooling/codegen/src/run.mjs): the only adaptation is the base URI

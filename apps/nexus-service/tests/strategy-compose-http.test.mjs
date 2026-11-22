@@ -1,5 +1,4 @@
 /**
- * v1.239 P3-T7/T8: `POST /v1/daemon/strategies/{id}/compose` and the simulate fence over a
  * composed candidate.
  *
  * Every assertion here runs over the real service: a disposable home seeded by the native
@@ -24,7 +23,6 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STRATEGY = 'novel-writing';
 const COMPOSE_PATH = `/v1/daemon/strategies/${STRATEGY}/compose`;
 /**
- * The fence is proven on an embedded preset the static walk already accepts. `novel-writing`
  * (the T7 strategy) imports judged states carrying `linear` edges, so the reachability walk
  * refuses it before compose is involved — a separate, pre-existing import/simulate mismatch.
  */
@@ -40,7 +38,6 @@ const HASH = /^[0-9a-f]{64}$/;
 function writePackage(home, { id, effectClass, slots = [], fragment }) {
   const directory = join(home, '.nexus42', 'patterns', id);
   mkdirSync(directory, { recursive: true });
-  // The manifest requires `slots`; an empty declaration is a top-level key, never absent.
   const declaredSlots =
     slots.length === 0
       ? 'slots = []\n'
@@ -146,7 +143,6 @@ describe('compose route (v1.239 P3-T7)', () => {
   let home;
   let service;
   /**
-   * The candidate revision this suite last committed. Each successful compose advances the
    * shared base and every refusal is asserted to leave it exactly where it was — the revision is
    * the store's own CAS authority, so this is the strongest "nothing was written" evidence the
    * wire exposes.
@@ -221,7 +217,6 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.deepEqual(region.child.content_hash, slot.pattern.content_hash);
     assert.deepEqual(pin(region.child), pin(slot.pattern));
 
-    // A required slot with no binding is a named diagnostic, never a default.
     assert.deepEqual(response.validation_summary, [
       {
         code: 'unbound_required_slot',
@@ -280,7 +275,6 @@ describe('compose route (v1.239 P3-T7)', () => {
       version: '1.0.0',
     });
     assert.equal(node(replaced.document, 'swap-slot').bind.topic, 'keep me');
-    // Only the swapped region moved: the other region is untouched.
     assert.deepEqual(binding(replaced.document, 'source-research'), binding(bound.document, 'source-research'));
     assert.deepEqual(replaced.document.edges, bound.document.edges);
   });
@@ -296,7 +290,6 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.equal(node(response.document, 'swap-slot'), undefined);
     assert.ok(binding(response.document, 'source-research'), 'the untouched region stays');
     assert.ok(node(response.document, 'collect-sources'));
-    // The swapped package's body is a candidate node at this level now, so the slot bindings the
     // collapsed node carried are dropped and named rather than defaulted away.
     assert.equal(
       response.document.nodes.filter((entry) => entry.kind === 'pattern_slot').length,
@@ -337,12 +330,10 @@ describe('compose route (v1.239 P3-T7)', () => {
       recovery_hint: 'Reload the current candidate and explicitly reapply the compose operation.',
     });
 
-    // The refused request consumed no revision: the same stale base still reads the same answer.
     const again = await post(COMPOSE_PATH, stale);
     assert.equal(again.status, 409);
     assert.equal(again.payload.error.details.current_revision, revision);
 
-    // And the candidate still commits from the revision the conflict reported.
     const committed = await compose(nest(revision, {
       nestId: 'after-conflict',
       parentNode: 'after-conflict-slot',
@@ -370,14 +361,12 @@ describe('compose route (v1.239 P3-T7)', () => {
       'cycle-a@1.0.0',
     ]);
 
-    // Same base, same refusal: no revision was consumed.
     const again = await post(COMPOSE_PATH, cyclic);
     assert.equal(again.status, 422);
     assert.equal(again.payload.error.details.reason, 'nest_cycle');
   });
 
   test('a nest past the depth bound is a named 422 that leaves the candidate unchanged', async () => {
-    // chain-b nests chain-c which nests chain-d: exactly three levels, accepted.
     await compose(nest(revision, {
       nestId: 'depth-ok',
       parentNode: 'depth-slot',
@@ -414,7 +403,6 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.equal(refused.payload.error.details.nest_id, 'missing-package');
     assert.equal(refused.payload.error.details.package_id, 'prompt-step');
     assert.equal(refused.payload.error.details.package_version, '9.9.9');
-    // The reader's own reason travels in the refusal message, naming the requested pin.
     assert.match(refused.payload.error.details.message, /prompt-step@9\.9\.9/);
 
     const again = await post(COMPOSE_PATH, missing);
@@ -502,7 +490,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
   });
 
   test('the fence accepts the composed document unchanged', async () => {
-    // The read above created no row, so the first compose still commits from base 0.
     composed = await compose(
       nest(0, {
         nestId: 'source-research',
@@ -519,7 +506,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     assert.equal(first.payload.simulation_level, 'reachability');
     assert.equal(first.payload.schema_version, 1);
 
-    // The hash is recomputed from the body, so the same document yields the same hash and a
     // changed document yields a different one.
     const again = await post(WALKABLE_SIMULATE_PATH, { document });
     assert.equal(again.payload.ir_content_hash, first.payload.ir_content_hash);
@@ -533,7 +519,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     assert.equal(withoutSlot.status, 200);
     assert.notEqual(withoutSlot.payload.ir_content_hash, first.payload.ir_content_hash);
 
-    // Nothing persisted and no revision consumed: the candidate still commits from `revision`.
     // A slot-free package, so the approval test below starts without an unbound slot.
     const stillThere = await compose(nest(revision, {
       nestId: 'fence-check',
@@ -544,7 +529,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
   });
 
   test('a slot the graph wires is named by the trajectory', async () => {
-    // The committed document is what Simulate walks: `nest` wrote the connecting edge from the
     // client's attach target, so no edge is authored on the way to the route.
     const document = composed.document;
     assert.deepEqual(
@@ -565,12 +549,10 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
       trajectory.payload.nodes_visited.includes('collect-sources'),
       `the walk names the pattern slot: ${JSON.stringify(trajectory.payload.nodes_visited)}`,
     );
-    // The slot contributes its resolved pin's declared class, not the fragment body.
     assert.equal(trajectory.payload.effect_summary, 'external');
   });
 
   test('approve is reachable on a wired, bound candidate', async () => {
-    // Compose two patterns into the candidate and wire both slots from the committed entry.
     const nested = await compose(
       nest(revision, {
         nestId: 'approval-nest',
@@ -586,7 +568,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     });
     assert.equal(bound.new_revision, nested.new_revision + 1);
 
-    // The canonical read now serves the stored row at that revision, byte for byte.
     const stored = await get(WALKABLE_CANDIDATE_PATH);
     assert.equal(stored.status, 200, JSON.stringify(stored.payload));
     assert.equal(stored.payload.revision, bound.new_revision);

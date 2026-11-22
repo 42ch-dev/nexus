@@ -15,53 +15,40 @@ export default defineConfig({
   oxc: { target: 'esnext' },
   resolve: {
     alias: {
-      // web components import @/lib/utils — resolve it to apps/web before the
       // general `@` -> design-studio/src alias catches it (matches vite.config.ts).
       '@/lib/utils': path.resolve(import.meta.dirname, '../web/src/lib/utils'),
-      // Matches vite.config.ts — the works chrome's status matcher (v1.223 W1).
       '@/lib/status-variant': path.resolve(
         import.meta.dirname,
         '../web/src/lib/status-variant',
       ),
-      // Studio imports web's English source locale catalogs for its own i18next
       // instance (matches vite.config.ts).
       '@web-locales/en': path.resolve(import.meta.dirname, '../web/src/locales/en'),
-      // Presentational app modules (e.g. daemon-ready-splash) reach into
       // apps/web UI primitives via @/components/ui/*. Mirror that alias so
       // Studio tests can import the presentational module without duplicating it.
       '@/components/ui': path.resolve(import.meta.dirname, '../web/src/components/ui'),
       '@': path.resolve(import.meta.dirname, './src'),
       '@web-ui': path.resolve(import.meta.dirname, '../web/src/components/ui'),
       '@web-setup': path.resolve(import.meta.dirname, '../web/src/components/setup'),
-      // Gallery-only alias for app-shared layout chrome (V1.107 sidebar/footer/header).
       '@web-layout': path.resolve(import.meta.dirname, '../web/src/components/layout/presentational'),
-      // Gallery-only alias for app-shared Settings presentational extracts (V1.107 Connection/Setup).
       '@web-settings': path.resolve(import.meta.dirname, '../web/src/components/settings/presentational'),
-      // Gallery-only alias for app-shared canvas node-chrome extracts (V1.115 NodeChromeShell).
       '@web-canvas': path.resolve(import.meta.dirname, '../web/src/components/canvas/presentational'),
-      // Gallery-only alias for Harness presentational extracts (v1220 Validate
-      // Preset dialog body) — mirrors vite.config.ts.
       '@web-harness': path.resolve(
         import.meta.dirname,
         '../web/src/components/harness/presentational',
       ),
-      // Gallery-only alias for Global Timeline list chrome (V1.124 P2).
       '@web-global-timeline': path.resolve(
         import.meta.dirname,
         '../web/src/components/global-timeline/presentational',
       ),
       '@web-lib/utils': path.resolve(import.meta.dirname, '../web/src/lib/utils'),
-      // Gallery-only alias for selection submenu presentational component (V1.126 P0).
       '@web-shell': path.resolve(
         import.meta.dirname,
         '../web/src/components/selection-submenu',
       ),
-      // Gallery-only alias for developer generation chrome (v221 modules rail).
       '@web-developer': path.resolve(
         import.meta.dirname,
         '../web/src/components/developer/presentational',
       ),
-      // Gallery-only alias for the works Inspiration Pool chrome (v1222 P1).
       '@web-works': path.resolve(
         import.meta.dirname,
         '../web/src/components/works/presentational',

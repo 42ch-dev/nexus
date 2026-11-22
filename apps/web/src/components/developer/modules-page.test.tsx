@@ -1,5 +1,4 @@
 /**
- * ModulesPage render tests.
  *
  * Verifies list + detail read-only UX: the page lists installed compute modules
  * and renders a manifest detail panel when the author selects one.
@@ -98,7 +97,6 @@ describe('ModulesPage', () => {
           max_wall_time_ms: 5000,
         }),
       ),
-      // The detail panel hosts the Run Studio (V1.147 P1): its Worlds list and
       // Runs history queries fire on mount and must be handled.
       http.get('/v1/daemon/narrative/worlds', () =>
         HttpResponse.json({ worlds: [] }),
@@ -217,7 +215,6 @@ describe('ModulesPage', () => {
   });
 });
 
-/* ── Run Studio journey (V1.147 P1 T3) ───────────────────────────────────── */
 
 const WORLD = {
   schema_version: 1,
@@ -298,7 +295,6 @@ const RUN_9: RunSummary = {
 };
 
 /**
- * Full MSW handler set for the module-detail Run Studio journey. Keeps a
  * mutable runs store so Accept/Discard flips the row the table shows after the
  * hooks' invalidation refetches.
  *
@@ -394,7 +390,6 @@ function runStudioJourney(
           has_more: false,
         });
       }
-      // Mirror the daemon filter contract (world_id / status) so the filter
       // chrome tests exercise the real request path.
       const url = new URL(request.url);
       const status = url.searchParams.get('status');
@@ -451,7 +446,6 @@ function runStudioJourney(
       );
       return HttpResponse.json({ run_id: runId, status: 'discarded' });
     }),
-    // V1.147 P3 T2 — Clear history. Mirrors the daemon contract: `world_id`
     // required, terminal states only (`applied|discarded|failed`), returns
     // `{ deleted }`.
     http.delete('/v1/daemon/compute/runs', ({ request }) => {
@@ -479,7 +473,6 @@ function runStudioJourney(
       const stored = state.runsStore.find((r) => r.run_id === runId);
       return HttpResponse.json({
         ...(stored ?? RUN_9),
-        // Failed rows carry the structured error; terminal/succeeded rows the proposals.
         ...(stored?.status === 'failed'
           ? { error: state.failedError }
           : { proposals: SUCCESS_PROPOSALS }),
@@ -499,7 +492,6 @@ async function openRunStudio(user: ReturnType<typeof userEvent.setup>) {
 }
 
 /**
- * Pick the World. msw v3 resolves the Worlds list a turn later than v2, so the
  * picker is awaited to become enabled before selecting (the same convention as
  * run-studio.test.tsx) instead of racing the query.
  */
@@ -511,7 +503,6 @@ async function selectWorld(user: UserEvent) {
 /** Fill the guided form: pick a World, then both character pickers. */
 async function fillBasicCombatForm(user: ReturnType<typeof userEvent.setup>) {
   await selectWorld(user);
-  // The required-mark span (*) joins the label text, so match by regex.
   await screen.findByRole('combobox', { name: /^Attacker/ });
   await user.selectOptions(screen.getByRole('combobox', { name: /^Attacker/ }), 'kb-aria');
   await user.selectOptions(screen.getByRole('combobox', { name: /^Defender/ }), 'kb-brann');
@@ -526,11 +517,9 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await openRunStudio(user);
     await fillBasicCombatForm(user);
 
-    // Run is gated until the required pickers are filled (manifest `required`).
     await waitFor(() => expect(screen.getByTestId('run-studio-run')).toBeEnabled());
     await user.click(screen.getByTestId('run-studio-run'));
 
-    // Inspector renders the four-part proposals from the POST response.
     await screen.findByTestId('proposal-section-report');
     expect(screen.getByText('Aria strikes Brann')).toBeInTheDocument();
     expect(state.lastRunBody).toMatchObject({
@@ -539,14 +528,12 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
       invocation_params: { attacker_id: 'kb-aria', defender_id: 'kb-brann' },
     });
 
-    // Accept → toast + inspector flips to Applied via the refetched run detail.
     await user.click(screen.getByTestId('run-inspector-accept'));
     expect(await screen.findByText('Run applied')).toBeInTheDocument();
     await waitFor(() => expect(state.acceptCalls).toBe(1));
     await screen.findByTestId('run-inspector-applied-note');
     expect(screen.queryByTestId('run-inspector-accept')).not.toBeInTheDocument();
 
-    // Runs history refreshed: the row now shows Applied.
     await waitFor(() =>
       expect(
         within(screen.getByTestId('runs-table-row-run_9')).getByText('Applied'),
@@ -564,14 +551,12 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await user.click(screen.getByTestId('run-studio-run'));
     await screen.findByTestId('proposal-section-report');
 
-    // Cancelling the confirm dialog keeps the run intact.
     await user.click(screen.getByTestId('run-inspector-discard'));
     await screen.findByRole('heading', { name: 'Discard this Run?' });
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(state.discardCalls).toBe(0);
     expect(screen.getByTestId('run-inspector-accept')).toBeInTheDocument();
 
-    // Confirmed discard → toast + inspector flips to Discarded + row flips.
     await user.click(screen.getByTestId('run-inspector-discard'));
     await screen.findByRole('heading', { name: 'Discard this Run?' });
     await user.click(screen.getByRole('button', { name: 'Discard Run' }));
@@ -594,7 +579,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await fillBasicCombatForm(user);
     await user.click(screen.getByTestId('run-studio-run'));
 
-    // Live daemon shape (qc2 W-001): the POST rejects with the error envelope
     // and the daemon-recorded Failed row appears in Runs via the list refetch
     // — the inspector does not auto-open; the author opens the row.
     await waitFor(() =>
@@ -604,7 +588,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     );
     expect(screen.queryByTestId('run-inspector-failed')).not.toBeInTheDocument();
 
-    // Open the Failed run → §6 limit copy + honest error code; no Accept/Discard.
     await user.click(
       within(screen.getByTestId('runs-table-row-run_fail')).getByRole('button', { name: 'Open' }),
     );
@@ -621,7 +604,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
 
     await openRunStudio(user);
 
-    // Page 1 row visible; Load more appears while a next page exists.
     await screen.findByTestId('runs-table-row-run_9');
     await user.click(await screen.findByTestId('run-runs-load-more'));
 
@@ -642,7 +624,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await openRunStudio(user);
     await screen.findByTestId('runs-table-row-run_9');
     await screen.findByTestId('runs-table-row-run_fail');
-    // Filter chrome ships on module detail (spec §4): status + World selects.
     expect(screen.getByTestId('run-runs-status-filter')).toBeInTheDocument();
     expect(screen.getByTestId('run-runs-world-filter')).toBeInTheDocument();
 
@@ -706,7 +687,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await openRunStudio(user);
     await selectWorld(user);
 
-    // §6: no characters to run — the picker renders its caller-owned empty state.
     expect(await screen.findAllByText('No characters to run')).toHaveLength(2);
     expect(screen.queryByRole('combobox', { name: /^Attacker/ })).not.toBeInTheDocument();
   });
@@ -718,7 +698,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
 
     await openRunStudio(user);
 
-    // Catalog uses the typographic apostrophe (U+2019) — match the source copy.
     expect(await screen.findByText('Can’t run this module')).toBeInTheDocument();
   });
 
@@ -736,11 +715,9 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     expect(await screen.findByText('运行工作室')).toBeInTheDocument();
     expect(screen.getByText('运行记录')).toBeInTheDocument();
     expect(screen.getByText('暂无运行')).toBeInTheDocument();
-    // World label appears on the selector and the Runs table column header.
     expect((await screen.findAllByText('世界')).length).toBeGreaterThan(0);
   });
 
-  // ── V1.147 P3 T2 — Clear history (server-backed DELETE) ──────────────────
 
   /** Terminal + needs-review seed rows for the Clear journeys. */
   const CLEAR_SEED_RUNS: RunSummary[] = [
@@ -758,23 +735,19 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await openRunStudio(user);
     await screen.findByTestId('runs-table-row-run_clear_applied');
 
-    // Scope gate: without a World filter the button is disabled (world_id
     // required by the daemon — no silent world-wide purge).
     const clearButton = screen.getByTestId('run-runs-clear');
     expect(clearButton).toBeDisabled();
 
-    // Choose the World scope, then Clear.
     await user.selectOptions(screen.getByTestId('run-runs-world-filter'), 'w1');
     await waitFor(() => expect(screen.getByTestId('run-runs-clear')).toBeEnabled());
     await user.click(screen.getByTestId('run-runs-clear'));
     await screen.findByRole('heading', { name: 'Clear history for this World?' });
 
-    // Cancelling keeps every row.
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(state.deleteCalls).toBe(0);
     expect(screen.getByTestId('runs-table-row-run_clear_applied')).toBeInTheDocument();
 
-    // Confirmed Clear → DELETE with world scope (no status filter), toast,
     // list refresh: terminal rows gone, needs-review row kept.
     await user.click(screen.getByTestId('run-runs-clear'));
     await screen.findByRole('heading', { name: 'Clear history for this World?' });
@@ -805,13 +778,11 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
 
     expect(await screen.findByText('Could not clear runs')).toBeInTheDocument();
     await waitFor(() => expect(state.deleteCalls).toBe(1));
-    // No rows were removed (the mutation failed).
     expect(screen.getByTestId('runs-table-row-run_clear_applied')).toBeInTheDocument();
   });
 });
 
 describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
-  // `?module=basic-combat&run=run_9&world=w1` — the compute node "Open Run"
   // deep link (module + run) and the Timeline Run Module entry (`world`
   // pre-fill) land here from `/modules`.
   function renderDeepLinked(initialUrl = '/modules?module=basic-combat&run=run_9&world=w1') {
@@ -865,15 +836,12 @@ describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
 
     renderDeepLinked();
 
-    // Module detail auto-selected from `?module=` — no list click.
     await screen.findByText('Basic Combat');
-    // Run Studio present with the World pre-filled from `?world=` (the
     // worlds list resolves async; the pre-fill state is set on mount).
     await screen.findByTestId('run-studio');
     await waitFor(() =>
       expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'),
     );
-    // The run inspector opens from `?run=` (deep link).
     await screen.findByTestId('run-inspector');
     expect(screen.getByTestId('run-inspector-applied-note')).toBeInTheDocument();
   });
@@ -897,7 +865,6 @@ describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
 
     renderInApp(<ModulesPageBody />, { client: client() });
 
-    // No module auto-selected, no run inspector.
     expect(screen.queryByTestId('run-studio')).not.toBeInTheDocument();
     await screen.findByText('Basic Combat');
   });
@@ -919,7 +886,6 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
   };
 
   /**
-   * Renders a button that calls `navigate(to)` so a test can drive an
    * in-router search-params navigation while `ModulesPageBody` stays mounted
    * (real `MemoryRouter` — same pattern as `canvas-nav-commands.test.tsx`).
    */
@@ -987,10 +953,8 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
       '/modules?module=scouting-party',
     );
 
-    // Deep link opens the basic-combat detail (author copy is detail-only).
     await screen.findByText('Nexus Team');
 
-    // Same route element, new `?module=` value (compute node B "Open Run" or
     // back/forward) — the detail panel must follow the URL, not stay on the
     // stale module while the Run Studio opens a new run in its context.
     await user.click(screen.getByRole('button', { name: /scouting-party/ }));
@@ -1013,11 +977,9 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
 
     renderWithNav('/modules?module=basic-combat', '/modules');
 
-    // Deep link opens the basic-combat detail.
     await screen.findByText('Nexus Team');
     expect(screen.getByTestId('run-studio')).toBeInTheDocument();
 
-    // `?module=` removed (browser back to the plain list) — the selection
     // must clear and the list placeholder return.
     await user.click(screen.getByRole('button', { name: /go-\/modules$/ }));
 

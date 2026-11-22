@@ -1,5 +1,4 @@
 /**
- * Locale key parity — en ↔ zh-CN (V1.170 P1 — AR-21).
  *
  * Project convention: every namespace ships en + zh-CN with full key parity.
  * The one sanctioned divergence is i18next pluralization: English uses
@@ -111,7 +110,6 @@ function flattenValues(obj: JsonRecord, values: string[] = []): string[] {
 }
 
 /**
- * Entrance keys owned by the `shell` namespace (AR-21 + EL §2/§4/§5): switch
  * control, bounce toast, layout labels, identity page, 操作台 Hub cards
  * (v1220 T1/T2).
  * Membership is namespace-exact — a shell-owned key must exist in `shell`
@@ -119,13 +117,11 @@ function flattenValues(obj: JsonRecord, values: string[] = []): string[] {
  * escape hatch for the entrance pin).
  */
 const SHELL_ENTRANCE_KEYS: readonly string[] = [
-  // shell — switch control + bounce toast + layout labels
   'entrance.switchLabel',
   'entrance.bounceToast',
   'entrance.layout.content-creator',
   'entrance.layout.developer',
   'nav.develop',
-  // shell — identity page (EL §2 locked copy)
   'entrance.page.title',
   'entrance.page.subtitle',
   'entrance.page.optionsLabel',
@@ -135,7 +131,6 @@ const SHELL_ENTRANCE_KEYS: readonly string[] = [
   'entrance.page.option.developer.description',
   'entrance.page.continue',
   'entrance.page.persistFailed',
-  // shell — 操作台 Hub cards (v1220 T1/T2)
   'hub.operating.title',
   'hub.operating.description',
   'hub.operating.loading',
@@ -183,7 +178,6 @@ describe('locale key parity (en ↔ zh-CN)', () => {
   it.each(NAMESPACE_PAIRS)(
     '$name has equal normalized key sets in en and zh-CN',
     ({ en, zh }) => {
-      // Strip i18next plural suffixes — zh-CN collapses English `_one`/`_other`.
       const enKeys = new Set(flattenKeys(en).map((key) => key.replace(/_(one|other)$/, '')));
       const zhKeys = new Set(flattenKeys(zh).map((key) => key.replace(/_(one|other)$/, '')));
       expect(zhKeys).toEqual(enKeys);
@@ -195,7 +189,6 @@ describe('locale key parity (en ↔ zh-CN)', () => {
   });
 
   it('ships no firing-cadence / next-fire promise or CLI-removal claim in the schedule copy, en and zh-CN (AR-30/PL-18)', () => {
-    // PL-17/AR-30: the schedule surface never promises a firing cadence or a
     // fabricated next run; the copy is config-only. PL-18: the in-product
     // surface does not claim the CLI was removed (CLI stays a power tool).
     const enValues = Object.values(flattenValues(enSchedule)).join(' ');

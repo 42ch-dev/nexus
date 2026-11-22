@@ -1,5 +1,4 @@
 /**
- * Quit gate for the desktop host (v1.192 P0-T6).
  *
  * One serialized decision per quit — the plan's "actual quit goes through this
  * single-flight dialog" — over the three frozen choices (parity row 21):
@@ -36,9 +35,6 @@ import type { DaemonStatus } from './desktop-contract.js';
 import { sanitizeInheritedEnv } from './env.js';
 import { utilityError, utilityMessageText, type DetachedServiceHandoff } from './service-controller.js';
 
-// ---------------------------------------------------------------------------
-// Quit gate (Stop Service & Quit / Keep Service & Quit / Cancel)
-// ---------------------------------------------------------------------------
 
 /** The three frozen choices (parity row 21). */
 export type QuitChoice = 'stop' | 'keep' | 'cancel';
@@ -81,7 +77,6 @@ export interface QuitServiceController {
 export interface DesktopQuitControllerOptions {
   controller: QuitServiceController;
   /**
-   * Main-owned dialog for the three frozen choices. A dismissed dialog resolves
    * `null` and counts as Cancel.
    */
   chooseQuitChoice(status: DaemonStatus): Promise<QuitChoice | null>;
@@ -114,7 +109,6 @@ export class DesktopQuitController {
 
   private async decide(): Promise<boolean> {
     const status = this.controller.getStatus();
-    // Shipped semantics (retired native-host quit prompt): with
     // nothing this app runs or is attached to, there is no service to stop or
     // keep, so the quit is not gated by a dialog.
     if (status.state === 'stopped') return true;
@@ -157,18 +151,13 @@ export class DesktopQuitController {
   }
 
   private report(allowed: boolean, choice: QuitChoice | null, detail: string): void {
-    // The decision is already made; a broken reporter must not change it.
     try {
       this.reportQuitOutcome({ allowed, choice, detail });
     } catch {
-      // ignored
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Detached handoff (the D-21 Keep transfer target)
-// ---------------------------------------------------------------------------
 
 /** Minimum standalone Node for the detached service (`package.json` `engines`). */
 export const DETACHED_SERVICE_NODE_VERSION = '22.22.0';
@@ -220,7 +209,6 @@ export function findNodeOnPath(env: NodeJS.ProcessEnv = process.env): string | n
   if (!path) return null;
   for (const dir of path.split(delimiter)) {
     if (dir === '') continue;
-    // `stat`, not `lstat`: a Node installed by a package manager is legitimately
     // a symlink. The strict no-symlink posture applies to user-home records.
     const candidate = join(dir, 'node');
     try {
@@ -257,11 +245,9 @@ function probeNodeVersion(
 
 function assertServiceEntry(serviceEntry: string): void {
   try {
-    // Bundle-resolved path (main-owned), so a symlink is followed rather than
     // refused; only the packaged regular file counts as available.
     if (statSync(serviceEntry).isFile()) return;
   } catch {
-    // falls through to the actionable error
   }
   throw utilityError('unavailable', `the packaged service entry is not a readable file: ${serviceEntry}`);
 }
@@ -322,7 +308,6 @@ export function createDetachedServiceHandoff(options: DetachedHandoffOptions): D
       assertServiceEntry(serviceEntry);
       let child: ChildProcess;
       try {
-        // `detached` + `unref` + `stdio:'ignore'`: the child holds no pipe and no
         // process group of the exiting parent, so it is the one owner left.
         child = spawn(
           node,

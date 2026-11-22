@@ -1,5 +1,4 @@
 /**
- * World KB non-spatial entity table (V1.73 P0 A6/A8).
  *
  * Accessible equivalent to the entity graph: sortable columns, keyboard-focusable
  * rows, and Enter/Space activation to open the inspector.

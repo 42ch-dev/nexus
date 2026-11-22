@@ -1,5 +1,4 @@
 /**
- * World Findings panel + page tests — V1.166 P2 T1 (DR-64 surfacing half).
  *
  * Covers the three panel states (populated / empty / truncated) plus the
  * spoke-vocabulary contract (PD-2 locked):
@@ -95,20 +94,16 @@ describe('WorldFindingsPanel — populated', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByText('Info item')).toBeInTheDocument());
 
-    // Severity strings render verbatim — never coerced to work vocabulary.
     expect(screen.getByText('info')).toBeInTheDocument();
     expect(screen.getByText('warning')).toBeInTheDocument();
     expect(screen.getByText('error')).toBeInTheDocument();
     expect(screen.getByText('urgent')).toBeInTheDocument();
     expect(screen.queryByText(/minor|major|blocker/i)).not.toBeInTheDocument();
 
-    // Open-string `kind` renders verbatim too.
     expect(screen.getByText('custom-check')).toBeInTheDocument();
 
-    // Count reflects the returned rows.
     expect(screen.getByTestId('world-findings-count')).toHaveTextContent('4');
 
-    // Structural-note copy (PD-1) renders under the header in en.
     expect(screen.getByTestId('world-findings-structural-note')).toHaveTextContent(
       'Check evaluates structural constraints — modules, required fields, observer counts — not narrative quality.',
     );
@@ -141,7 +136,6 @@ describe('WorldFindingsPanel — populated', () => {
     expect(screen.getByTestId('world-finding-detail')).toHaveTextContent(
       'entry ent_abc has no populated body.summary',
     );
-    // Expand toggles back.
     fireEvent.click(row);
     await waitFor(() => expect(screen.queryByTestId('world-finding-detail')).not.toBeInTheDocument());
   });
@@ -161,12 +155,10 @@ describe('WorldFindingsPanel — populated', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByText('Read-only item')).toBeInTheDocument());
 
-    // No remediation affordances (DR-28 is a separate roadmap item).
     expect(
       screen.queryByRole('button', { name: /accept|resolve|remediate|dismiss/i }),
     ).not.toBeInTheDocument();
 
-    // Every button is a read-only expand/collapse toggle.
     const buttons = screen.getAllByRole('button');
     expect(buttons.length).toBeGreaterThanOrEqual(2);
     for (const button of buttons) {
@@ -226,7 +218,6 @@ describe('WorldFindingsPanel — truncated honesty', () => {
 
 describe('WorldFindingsPanel — loading', () => {
   it('renders LoadingState while the findings request is in flight', async () => {
-    // Hold the MSW response open until the assertion has observed the
     // in-flight state (deferred-promise resolver, deterministic — no timing).
     let resolveFindings!: (value: WorldFindingsListResponse) => void;
     useHandlers(
@@ -241,11 +232,9 @@ describe('WorldFindingsPanel — loading', () => {
     );
 
     renderPanel();
-    // In-flight request → LoadingState; neither the count nor the rows flash.
     expect(screen.getByText('Loading findings…')).toBeInTheDocument();
     expect(screen.queryByTestId('world-findings-count')).not.toBeInTheDocument();
 
-    // Wait until the request has reached the handler, then resolve it — the
     // deferred promise only exists once MSW invokes the resolver.
     await waitFor(() => expect(resolveFindings).toBeTypeOf('function'));
     resolveFindings(findingsResponse([makeFinding({ finding_id: 'fnd_load', title: 'Loaded item' })]));
@@ -272,12 +261,10 @@ describe('WorldFindingsPanel — error + retry', () => {
     );
 
     renderPanel();
-    // 500 → ErrorState with the retry affordance; no rows/count render.
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load findings');
     expect(screen.queryByTestId('world-findings-count')).not.toBeInTheDocument();
 
-    // Retry re-queries → the second attempt resolves → the list renders.
     fireEvent.click(within(alert).getByRole('button'));
     await waitFor(() => expect(screen.getByText('Retried item')).toBeInTheDocument());
     expect(screen.getByTestId('world-findings-count')).toHaveTextContent('1');

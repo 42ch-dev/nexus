@@ -287,7 +287,6 @@ mod tests {
                 Err(err) => assert_eq!(err.code, ERR_INVALID_CRON, "{expr} code"),
             }
         }
-        // Minutes run 0-59, so a step of 59 is the last in-range step.
         validate_cron_expr("*/59 * * * *").unwrap();
     }
 

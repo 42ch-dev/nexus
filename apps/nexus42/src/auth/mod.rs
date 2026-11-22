@@ -166,15 +166,12 @@ impl AuthStore {
     /// Returns I/O errors (other than `NotFound`) when reloading from disk.
     #[allow(dead_code)]
     pub fn get_creator_api_key(&self, creator_id: &str) -> Result<Option<String>> {
-        // Check in-memory state
         if let Some(creators) = &self.creators {
             if let Some(state) = creators.get(creator_id) {
-                // Entry exists in memory — return whatever is there (may be None)
                 return Ok(state.creator_api_key.clone());
             }
         }
 
-        // Entry not in memory — fall back to disk.
         // Only treat NotFound as "key not found"; propagate other errors.
         match Self::load() {
             Ok(store) => Ok(store
@@ -223,7 +220,6 @@ impl AuthStore {
             if t.access_token.is_empty() {
                 return false;
             }
-            // Parse ISO 8601 expiry; treat unparseable dates as expired.
             DateTime::parse_from_rfc3339(&t.expires_at).is_ok_and(|expiry| expiry > Utc::now())
         })
     }
@@ -272,7 +268,6 @@ mod tests {
             .store_creator_api_key("crt_test", "nexus_live_test_key")
             .expect("store");
 
-        // In-memory retrieval
         let key = store.get_creator_api_key("crt_test").expect("get");
         assert_eq!(key, Some("nexus_live_test_key".to_string()));
     }
@@ -322,7 +317,6 @@ mod tests {
         let creators = store.creators.as_ref().expect("creators map");
         let state = creators.get("crt_existing").expect("entry exists");
         assert_eq!(state.creator_api_key, Some("new_key".to_string()));
-        // Other fields should be preserved
         assert_eq!(state.access_token, "old_token");
         assert_eq!(state.expires_at, "2026-01-01T00:00:00Z");
     }
@@ -366,18 +360,14 @@ mod tests {
     #[test]
     fn store_and_get_roundtrip_with_file() {
         let _home = crate::testutil::isolated_home();
-        // store_creator_api_key calls self.save() which persists to disk.
         // We verify the in-memory portion works regardless of whether
         // file persistence succeeds (depends on test environment).
         let mut store = AuthStore::default();
         let _ = store.store_creator_api_key("crt_file_test", "nexus_live_file_key");
 
-        // In-memory retrieval should always work after store
         let key = store.get_creator_api_key("crt_file_test").expect("get");
         assert_eq!(key, Some("nexus_live_file_key".to_string()));
     }
-
-    // ── User token tests (T2) ───────────────────────────────────────
 
     #[test]
     fn user_token_serialization_roundtrip() {
@@ -455,7 +445,6 @@ mod tests {
 
     #[test]
     fn auth_store_backward_compat_without_user_token() {
-        // Existing auth.json without user_token field must parse correctly
         let json = r#"{
             "creators": {
                 "crt_123": {
@@ -485,11 +474,8 @@ mod tests {
         assert!(!store.is_user_authenticated());
     }
 
-    // ── Refresh token backward compat tests (T1) ──────────────────────
-
     #[test]
     fn user_token_backward_compat_without_refresh_fields() {
-        // Pre-V1.11 auth.json without refresh_token fields must deserialize
         let json = r#"{
             "access_token": "old_tok",
             "token_type": "Bearer",

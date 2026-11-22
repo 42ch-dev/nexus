@@ -6,6 +6,8 @@
 //! resolved fragment is not a leaf — it is held to its own node-graph checks, and its own nests
 //! join the same walk, which is what makes pattern-to-pattern cycles and combined pattern/workflow
 //! depth reachable.
+//!
+//! see docs/specs/orchestration/strategy-composition.md.
 
 use crate::{
     WorkflowDocument, WorkflowNestBinding, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
@@ -238,7 +240,6 @@ pub fn validate(
     if let Some(path) = find_cycle(graph.edges(), &roots) {
         violations.push(Violation::NestCycle { path });
     } else {
-        // A reference cycle has no finite depth, so depth is skipped for the whole set when
         // any cycle exists.
         let mut memo = HashMap::new();
         for root in &roots {
@@ -419,7 +420,6 @@ impl<'a> NestGraph<'a> {
                 .entry(document.id.to_string())
                 .or_insert(document);
         }
-        // A pin listed twice keeps its first body; a declared body never shadows a fragment.
         for pattern in patterns {
             match pattern.body {
                 PatternBodyKind::Fragment(fragment) => {
@@ -478,7 +478,6 @@ fn nest_depth(
     if let Some(&depth) = memo.get(label) {
         return depth;
     }
-    // A placeholder keeps the walk total if a caller ever reaches this with a cycle present.
     memo.insert(label.to_owned(), 0);
     let mut depth = 0;
     for child in edges.get(label).map_or(&[][..], Vec::as_slice) {
@@ -784,8 +783,6 @@ mod tests {
 
     #[test]
     fn rejects_a_pattern_pin_with_an_empty_half() {
-        // An empty half names no package: the child omits its pin instead of pinning one, so a
-        // document carrying it never reaches the walks that only follow resolved pins.
         let doc = slot_document(
             "root",
             &json!([
@@ -904,7 +901,6 @@ mod tests {
 
     #[test]
     fn rejects_a_pattern_reference_cycle() {
-        // Two published patterns that nest each other: only a resolved fragment makes this
         // reachable, because the document itself nests a leaf pattern pin.
         let a = slot_document("a", &json!([nest("n1", "slot", &pattern("b", "1.0.0"))]));
         let b = slot_document("b", &json!([nest("n2", "slot", &pattern("a", "1.0.0"))]));

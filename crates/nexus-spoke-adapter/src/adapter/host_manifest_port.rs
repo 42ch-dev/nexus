@@ -40,7 +40,6 @@ use nexus_home_layout::device_id::get_or_create_device_id;
 #[async_trait]
 impl HostManifestPort for NexusAdapter<'_> {
     async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        // Single builder SSOT (product draft §4.1): the Connect Host's
         // `local_manifest` (P3 T3) calls the same function with the same
         // device-id host_id — one capability list, one extensions.nexus block.
         let host_id = match &self.host_id {
@@ -171,7 +170,6 @@ fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
             "cannot resolve home directory for device-id".into(),
         ));
     };
-    // `get_or_create_device_id` takes the RAW home and joins `.nexus42`
     // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
     match get_or_create_device_id(&home) {
         Ok(id) => SpokeResult::Ok(id),
@@ -274,8 +272,6 @@ const fn reject_internal(message: String) -> crate::SpokeReject {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,7 +282,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn self_manifest_reports_injected_host_id_and_n_c1_contract() {
-        // HostManifestPort is storage-free; the pool is only needed to
         // satisfy the adapter struct shape. Use an in-memory pool with
         // migrations so the adapter construction path mirrors the other
         // ports. The host id is injected so the test stays hermetic — no
@@ -303,7 +298,6 @@ mod tests {
         };
 
         assert_eq!(manifest.host_id.as_str(), "test-host-uuid-0000");
-        // v1.191 P1 T14: the same feature filter the shared builder applies —
         // the compute role is advertised only when the `compute` feature owns
         // the engine (the honesty rule the builder enforces).
         assert_eq!(
@@ -314,7 +308,6 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
-        // V1.173 T1: the shared builder now serves the user-locked tool set
         // S — capabilities = baseline 3 ++ LOCAL_TOOL_OPS (the serving
         // host negotiates the tool ids; AR-48).
         assert_eq!(
@@ -333,7 +326,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        // Same builder as the Connect Host → the extensions.nexus N-C2
         // read-half block is present on the port surface too (product draft
         // §4.3 item 9).
         let nexus_ext = manifest
@@ -542,7 +534,6 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new_host(pool);
-        // `HostCapabilityManifestHostId` only enforces minLength 1 at parse —
         // an oversized id is constructible, so the adapter's own gate is the
         // fail-closed boundary (mirrors the storage cap).
         let huge = "h".repeat(nexus_local_db::MAX_HOST_ID_CHARS + 1);
@@ -624,14 +615,12 @@ mod tests {
             Some(TEST_PEER_ID),
             "last_peer_id round-trips through the adapter read (R-V1155P0-001)"
         );
-        // `last_seen` is the RFC 3339 UTC observation timestamp the adapter
         // recorded (chrono::Utc::now().to_rfc3339() — repo convention).
         assert!(
             chrono::DateTime::parse_from_rfc3339(&observed[0].last_seen).is_ok(),
             "last_seen is an RFC 3339 timestamp: {}",
             observed[0].last_seen
         );
-        // Ordering contract preserved: the observed list is last_seen DESC.
         let rows = nexus_local_db::list_peer_manifests(&pool)
             .await
             .expect("storage list is Ok");
@@ -650,7 +639,6 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        // Corrupt a row directly at the storage layer (the storage
         // primitives validate JSON on insert, so only raw SQL can plant a
         // corrupt row — exactly the storage-corruption scenario the
         // InternalError contract exists for).

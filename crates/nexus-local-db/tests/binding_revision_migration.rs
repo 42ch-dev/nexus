@@ -131,7 +131,6 @@ async fn binding_revision_migration_upgrades_populated_v21_db() {
         .unwrap();
     assert_eq!(pre_count, 1);
 
-    // The pre-revision fixture was built by a raw pool (a pre-protocol
     // writer). Applying the remaining migrations through the protocol-admitted
     // factory is what a real upgrade does; the raw pool itself must not write
     // guarded tables afterwards (asserted in `writer_protocol.rs`).

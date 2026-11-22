@@ -164,7 +164,6 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, McpError> {
         let rows = self.backend.list_tools().await?;
-        // V1.180 P1 (RN-OGA-2): the visibility seam filters the catalog
         // rows BEFORE the row→Tool mapping. Absent policy ⇒ identity
         // (byte-identical current behavior).
         let tools: Vec<Tool> = rows
@@ -361,12 +360,9 @@ mod tests {
 
     #[test]
     fn unroutable_classification_is_typed_not_textual() {
-        // Unroutable: not_supported + NO wire code.
         assert!(is_unroutable("not_supported", None));
-        // Peer deny: not_supported + typed wire code — executed failure,
         // even when the message text contains the unroutable substring.
         assert!(!is_unroutable("not_supported", Some("op_unsupported")));
-        // Other codes never classify unroutable regardless of wire code.
         assert!(!is_unroutable("invalid_input", None));
         assert!(!is_unroutable("internal", None));
     }
@@ -526,7 +522,6 @@ mod tests {
 
     #[tokio::test]
     async fn absent_policy_list_tools_is_byte_identical_to_unfiltered() {
-        // V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must be
         // byte-identical to the pre-seam behavior — every catalog row
         // listed, in order, schemas verbatim. The golden JSON pins the
         // exact wire shape (camelCase keys; absent `_meta`/`nextCursor`).
@@ -574,7 +569,6 @@ mod tests {
 
     #[tokio::test]
     async fn absent_policy_call_tool_dispatches_to_backend_unchanged() {
-        // V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must
         // dispatch every call to the backend exactly as before — the
         // backend is invoked with the caller's name + arguments and the
         // outcome maps identically (success → structured content).
@@ -608,7 +602,6 @@ mod tests {
 
     #[tokio::test]
     async fn present_policy_list_tools_filters_to_visible_subset() {
-        // V1.180 P1 (RN-OGA-2): a present policy narrows `tools/list` to
         // the operator-configured subset — unlisted rows are dropped
         // BEFORE the row→Tool mapping, listed rows keep their verbatim
         // schemas.
@@ -650,7 +643,6 @@ mod tests {
 
     #[tokio::test]
     async fn present_policy_hidden_tool_call_short_circuits_before_backend() {
-        // V1.180 P1 (RN-OGA-2): a hidden-tool `tools/call` is refused at
         // the visibility seam BEFORE the backend — the backend is never
         // invoked, and the refusal is a distinct `tool_not_authorized` protocol
         // error (not success, not a silent no-op, not unroutable).
@@ -685,7 +677,6 @@ mod tests {
 
     #[test]
     fn map_outcome_visible_but_denied_is_typed_refusal() {
-        // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
         // the authz spine (admission_pipeline Forbidden / peer deny wire
         // code) maps to an executed-but-failed `CallToolResult::error`
         // naming the spine code — never a silent drop, never a 500.
@@ -779,7 +770,6 @@ mod tests {
             async move {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 entered.notify_one();
-                // Consume the permit (never return it): the fixture hands out
                 // exactly one release per in-flight call.
                 releases
                     .acquire()
@@ -900,7 +890,6 @@ mod tests {
         let mut lines = tokio::io::BufReader::new(read_half).lines();
         initialize_probe_session(&mut write, &mut lines).await;
 
-        // (1) A real call, held in flight by the gate.
         write_wire_line(
             &mut write,
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":1}}}"#,
@@ -913,7 +902,6 @@ mod tests {
             "the first call reached the backend"
         );
 
-        // (2) Cancel it; the barrier ping proves the serve loop applied the
         // cancellation before anything below is released.
         write_wire_line(
             &mut write,
@@ -922,19 +910,16 @@ mod tests {
         .await;
         ping_barrier(&mut write, &mut lines, 9).await;
 
-        // (3) Release the cancelled call and wait for the handler itself to
         // finish — the backend signals from inside the handler future.
         backend.release_one();
         backend.exited.notified().await;
 
-        // (4) Second barrier: the cancelled response has been enqueued into the
         // single FIFO sink before this ping is even written, so reading the
         // ping's answer proves the sink proxy has already handled it. If the
         // cancelled response were delivered instead of dropped, it would be the
         // line read here and the id assertion fails.
         ping_barrier(&mut write, &mut lines, 10).await;
 
-        // (5) The session still serves calls, with exactly one response each.
         write_wire_line(
             &mut write,
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":2}}}"#,
@@ -991,7 +976,6 @@ mod tests {
         let (read_half, mut write_half) = tokio::io::split(client_io);
         let mut lines = tokio::io::BufReader::new(read_half).lines();
 
-        // 1. initialize at the legacy version.
         write_half
             .write_all(
                 br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"legacy-probe","version":"0"}}}"#,
@@ -1019,7 +1003,6 @@ mod tests {
             "initialize result must not carry resultType: {init_line}"
         );
 
-        // 2. initialized notification, then a tools/call.
         write_half
             .write_all(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
             .await

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Actor/Character/ActorWorldBinding closed-schema fixtures (v1.184 P0 Task 1).
  *
  * Validates rejection of unknown discriminants, dual ids, extra properties,
  * malformed id prefixes/length, display-name bounds, and invalid metadata.

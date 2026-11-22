@@ -23,8 +23,6 @@ pub fn check(events: &[HostEvent]) -> Vec<ConformanceFinding> {
     for (index, event) in events.iter().enumerate() {
         match event {
             HostEvent::OpFinished(finished) => {
-                // Closed contract set; the wildcard arm is the drift gate —
-                // a new FinishReason variant fails conformance.
                 #[allow(unreachable_patterns)] // drift gate: new variant must trip conformance
                 match finished.reason {
                     FinishReason::EndTurn

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Release SemVer helpers for the Nexus release flow.
  *
  * A release version is clean `X.Y.Z` or carries an `-alpha.N` / `-rc.N`
  * prerelease suffix: `alpha` marks an explicitly unstable daily/iteration
@@ -36,7 +35,6 @@ export function isReleaseSemVer(version) {
 }
 
 /**
- * Numeric components as their canonical digit strings. Because the pattern
  * forbids leading zeros, string length then lexicographic order is a lossless
  * numeric ordering: arbitrarily long components (beyond `Number.MAX_SAFE_INTEGER`)
  * stay distinct and correctly ordered. The same rule orders the suffix `N`.
