@@ -7,40 +7,42 @@
 //! V1.42 P1: PK migrated from `(work_id, chapter)` to `(work_id, volume, chapter)`.
 //! Existing rows backfilled with `volume = 1`. Single-volume Works (V1.41 and earlier)
 //! behave identically — all queries default to volume 1 when not specified.
+// invariant: `work_chapters` is the queryable status SSOT; reconcile rewrites
+// file frontmatter from the row, never the other way round.
 
 use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
-/// Work chapter record — mirrors DB row.
+/// note: Work chapter record — mirrors DB row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkChapterRecord {
-    /// Owning Work ID.
+    /// note: Owning Work ID.
     pub work_id: String,
-    /// Chapter number (`1..total_planned_chapters` within the volume).
+    /// note: Chapter number (`1..total_planned_chapters` within the volume).
     pub chapter: i32,
-    /// Volume number (`NOT NULL DEFAULT 1` in DB; backfilled for pre-V1.42 rows).
+    /// note: Volume number (`NOT NULL DEFAULT 1` in DB; backfilled for pre-V1.42 rows).
     /// V1.42: always `Some(1)` for single-volume Works; `Some(N)` for multi-volume.
     pub volume: Option<i32>,
-    /// Filename slug (e.g. "the-third-layer").
+    /// note: Filename slug (e.g. "the-third-layer").
     pub slug: Option<String>,
-    /// Planned word count (default 4000).
+    /// note: Planned word count (default 4000).
     pub planned_word_count: i32,
-    /// Actual word count (set on transition to finalized).
+    /// note: Actual word count (set on transition to finalized).
     pub actual_word_count: Option<i32>,
-    /// Chapter status.
+    /// note: Chapter status.
     pub status: String,
-    /// Relative path to outline file.
+    /// note: Relative path to outline file.
     pub outline_path: Option<String>,
-    /// Relative path to chapter body file.
+    /// note: Relative path to chapter body file.
     pub body_path: Option<String>,
-    /// Creation timestamp (ISO 8601).
+    /// note: Creation timestamp (ISO 8601).
     pub created_at: String,
-    /// Last update timestamp (ISO 8601).
+    /// note: Last update timestamp (ISO 8601).
     pub updated_at: String,
 }
 
-/// Seed N chapter rows for a Work (idempotent; preserves existing).
+/// note: Seed N chapter rows for a Work (idempotent; preserves existing).
 ///
 /// For `chapter IN 1..total`, inserts one row per chapter. On PK conflict
 /// `(work_id, chapter)`, existing rows are **not** overwritten (idempotency
@@ -92,7 +94,7 @@ pub async fn seed_chapters(
     Ok(())
 }
 
-/// Seed chapter rows inside an existing transaction (V1.37 R-V136P1-02).
+/// note: Seed chapter rows inside an existing transaction (V1.37 R-V136P1-02).
 ///
 /// Same logic as [`seed_chapters`] but uses a caller-provided transaction
 /// so the seed can be atomic with a subsequent `patch_work_tx` call.
@@ -136,7 +138,7 @@ pub async fn seed_chapters_tx(
     Ok(())
 }
 
-/// List all chapter rows for a Work, ordered by volume then chapter number.
+/// note: List all chapter rows for a Work, ordered by volume then chapter number.
 ///
 /// # Errors
 ///
@@ -175,7 +177,7 @@ pub async fn list_chapters(
         .collect())
 }
 
-/// Count chapter rows for a Work.
+/// note: Count chapter rows for a Work.
 ///
 /// # Errors
 ///
@@ -190,28 +192,28 @@ pub async fn count_chapters(pool: &SqlitePool, work_id: &str) -> Result<u32, Loc
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
-/// Parameters for inserting a single chapter row.
+/// note: Parameters for inserting a single chapter row.
 #[derive(Debug)]
 pub struct InsertChapterParams<'a> {
-    /// Owning Work ID.
+    /// note: Owning Work ID.
     pub work_id: &'a str,
-    /// Chapter number.
+    /// note: Chapter number.
     pub chapter: i32,
-    /// Volume number (V1.42: `NOT NULL DEFAULT 1`; pass `Some(1)` for single-volume).
+    /// note: Volume number (V1.42: `NOT NULL DEFAULT 1`; pass `Some(1)` for single-volume).
     pub volume: Option<i32>,
-    /// Filename slug.
+    /// note: Filename slug.
     pub slug: Option<&'a str>,
-    /// Planned word count (default 4000).
+    /// note: Planned word count (default 4000).
     pub planned_word_count: i32,
-    /// Relative path to outline file.
+    /// note: Relative path to outline file.
     pub outline_path: Option<&'a str>,
-    /// Relative path to chapter body file.
+    /// note: Relative path to chapter body file.
     pub body_path: Option<&'a str>,
-    /// ISO 8601 timestamp.
+    /// note: ISO 8601 timestamp.
     pub now: &'a str,
 }
 
-/// Insert a single chapter row.
+/// note: Insert a single chapter row.
 ///
 /// # Errors
 ///
@@ -241,20 +243,20 @@ pub async fn insert_chapter(
     Ok(())
 }
 
-/// Parameters for patching a chapter row.
+/// note: Parameters for patching a chapter row.
 #[derive(Debug, Default)]
 pub struct PatchChapterParams {
-    /// New slug.
+    /// note: New slug.
     pub slug: Option<String>,
-    /// New planned word count.
+    /// note: New planned word count.
     pub planned_word_count: Option<i32>,
-    /// New volume.
+    /// note: New volume.
     pub volume: Option<i32>,
-    /// New status.
+    /// note: New status.
     pub status: Option<String>,
 }
 
-/// Map a sqlite row to a [`WorkChapterRecord`].
+/// note: Map a sqlite row to a [`WorkChapterRecord`].
 #[must_use]
 fn map_row_to_record(r: &sqlx::sqlite::SqliteRow) -> WorkChapterRecord {
     WorkChapterRecord {
@@ -272,7 +274,7 @@ fn map_row_to_record(r: &sqlx::sqlite::SqliteRow) -> WorkChapterRecord {
     }
 }
 
-/// List chapter rows for a Work with optional status filter and keyset
+/// note: List chapter rows for a Work with optional status filter and keyset
 /// pagination.
 ///
 /// Returns rows ordered by `volume ASC, chapter ASC`. `cursor_volume` and
@@ -316,7 +318,7 @@ pub async fn list_chapters_paginated(
     Ok(rows.iter().map(map_row_to_record).collect())
 }
 
-/// Update a chapter's `outline_path` and `updated_at`.
+/// note: Update a chapter's `outline_path` and `updated_at`.
 ///
 /// # Errors
 ///
@@ -344,7 +346,7 @@ pub async fn update_outline_path(
     Ok(())
 }
 
-/// Apply a partial patch to a chapter row.
+/// note: Apply a partial patch to a chapter row.
 ///
 /// Only fields present in `patch` are updated. `updated_at` is refreshed
 /// if any field changes. Returns `Ok(true)` if a row was updated.
@@ -375,7 +377,7 @@ pub async fn patch_chapter(
     }
 
     if set_clauses.is_empty() {
-        // Still verify the row exists so the caller can distinguish not-found.
+        // why: Still verify the row exists so the caller can distinguish not-found.
         let existing = get_chapter(pool, work_id, chapter, volume).await?;
         return Ok(existing.is_some());
     }
@@ -408,7 +410,7 @@ pub async fn patch_chapter(
     Ok(result.rows_affected() > 0)
 }
 
-/// Get a single chapter row by `work_id`, `volume`, and chapter number.
+/// note: Get a single chapter row by `work_id`, `volume`, and chapter number.
 ///
 /// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for
 /// single-volume Works (backward-compatible default).
@@ -449,7 +451,7 @@ pub async fn get_chapter(
     }))
 }
 
-/// Update a chapter's status and optionally its actual word count.
+/// note: Update a chapter's status and optionally its actual word count.
 ///
 /// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for
 /// single-volume Works.
@@ -482,7 +484,7 @@ pub async fn update_status(
     Ok(())
 }
 
-/// Update a chapter's `outline_path` and `body_path`.
+/// note: Update a chapter's `outline_path` and `body_path`.
 ///
 /// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for
 /// single-volume Works.
@@ -515,24 +517,24 @@ pub async fn update_paths(
     Ok(())
 }
 
-/// Report from reconciling `work_chapters` with the filesystem.
+/// note: Report from reconciling `work_chapters` with the filesystem.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReconcileReport {
-    /// Number of new chapter rows created.
+    /// note: Number of new chapter rows created.
     pub created: u32,
-    /// Number of existing chapter rows updated.
+    /// note: Number of existing chapter rows updated.
     pub updated: u32,
-    /// Number of chapter files re-synced to the DB status (DB-as-SSOT).
+    /// note: Number of chapter files re-synced to the DB status (DB-as-SSOT).
     ///
     /// These bytes are committed by the caller's Work byte-write port, never by
     /// [`apply_reconcile_diff`] — this counter is a file count, not a DB row
     /// count.
     pub resynced: u32,
-    /// Number of chapter rows preserved unchanged.
+    /// note: Number of chapter rows preserved unchanged.
     pub preserved: u32,
 }
 
-/// A single write decision produced by [`compute_reconcile_diff`] (V1.49 P3,
+/// note: A single write decision produced by [`compute_reconcile_diff`] (V1.49 P3,
 /// R-V148P4-W3).
 ///
 /// Each variant names exactly one intended mutation. Every variant but
@@ -546,21 +548,21 @@ pub struct ReconcileReport {
 /// so the dry-run preview and the mutating path produce identical counters.
 #[derive(Debug, Clone)]
 pub enum ReconcileOp {
-    /// Insert a new chapter row, optionally applying a non-default status
+    /// note: Insert a new chapter row, optionally applying a non-default status
     /// and/or word count mirrored from the file frontmatter.
     CreateChapter {
-        /// Chapter number parsed from the filename.
+        /// note: Chapter number parsed from the filename.
         chapter: i32,
-        /// Volume parsed from frontmatter (default 1).
+        /// note: Volume parsed from frontmatter (default 1).
         volume: i32,
-        /// `Works/<work_ref>/Stories/<filename>` body path.
+        /// note: `Works/<work_ref>/Stories/<filename>` body path.
         body_path: String,
-        /// Frontmatter `status` if present and not the `not_started` default.
+        /// note: Frontmatter `status` if present and not the `not_started` default.
         status: Option<String>,
-        /// Frontmatter `word_count` if present (already converted to `u32`).
+        /// note: Frontmatter `word_count` if present (already converted to `u32`).
         word_count: Option<u32>,
     },
-    /// Resync the chapter file's frontmatter `status` to the DB source of
+    /// note: Resync the chapter file's frontmatter `status` to the DB source of
     /// truth (DB-as-SSOT; the file was ahead/conflicting).
     ///
     /// **Index-only in [`apply_reconcile_diff`]**: that function treats this
@@ -568,37 +570,37 @@ pub enum ReconcileOp {
     /// [`render_frontmatter_status`] and committed by the caller's Work
     /// byte-write port, so `resynced` counts file resyncs, never DB rows.
     ResyncFileStatus {
-        /// Chapter `.md` path below `Works/<work_ref>/` (`Stories/<file>.md`).
+        /// note: Chapter `.md` path below `Works/<work_ref>/` (`Stories/<file>.md`).
         rel_child: std::path::PathBuf,
-        /// DB status to write into the file frontmatter.
+        /// note: DB status to write into the file frontmatter.
         db_status: String,
     },
-    /// Mirror the file's `word_count` into the DB row (status unchanged).
+    /// note: Mirror the file's `word_count` into the DB row (status unchanged).
     UpdateWordCount {
         chapter: i32,
         volume: i32,
-        /// Current DB status (preserved on the word-count-only update).
+        /// note: Current DB status (preserved on the word-count-only update).
         db_status: String,
         word_count: u32,
     },
 }
 
-/// The read-only result of [`compute_reconcile_diff`]: an ordered list of
+/// note: The read-only result of [`compute_reconcile_diff`]: an ordered list of
 /// [`ReconcileOp`]s plus the count of existing rows that need no write.
 ///
 /// Carrying the decisions (not the raw file/DB state) keeps [`apply_reconcile_diff`]
 /// cheap and free of re-reads, which is what makes the lock window short.
 #[derive(Debug, Clone, Default)]
 pub struct ReconcileDiff {
-    /// Ordered write decisions; applying them in order reproduces the legacy
+    /// note: Ordered write decisions; applying them in order reproduces the legacy
     /// single-pass behavior.
     pub ops: Vec<ReconcileOp>,
-    /// Existing rows whose status and `word_count` already agree (no write).
+    /// note: Existing rows whose status and `word_count` already agree (no write).
     pub preserved: u32,
 }
 
 impl ReconcileDiff {
-    /// Derive the [`ReconcileReport`] counters from this diff without touching
+    /// note: Derive the [`ReconcileReport`] counters from this diff without touching
     /// the DB or filesystem. Used by both the dry-run preview path and the
     /// post-apply summary so the two paths can never disagree.
     #[must_use]
@@ -622,7 +624,7 @@ impl ReconcileDiff {
     }
 }
 
-/// Verify that `stories_dir` does not escape the expected
+/// note: Verify that `stories_dir` does not escape the expected
 /// `Works/<work_ref>/` subtree via path traversal. Returns `Ok(())` if the
 /// path is safe, `Err(LocalDbError::PathEscape)` otherwise.
 #[allow(clippy::missing_errors_doc)]
@@ -645,7 +647,7 @@ fn verify_stories_dir_in_workspace(
         .unwrap_or_else(|_| workspace_root.to_path_buf())
         .join("Works")
         .join(work_ref);
-    // Check the parent (Stories → Work root) so symlinks under Stories/ are
+    // why: Check the parent (Stories → Work root) so symlinks under Stories/ are
     // still allowed but the Stories dir itself must live inside the Work root.
     let stories_parent = canonical.parent().unwrap_or(&canonical);
     let prefix_str = expected_prefix.to_string_lossy();
@@ -659,7 +661,7 @@ fn verify_stories_dir_in_workspace(
     Ok(())
 }
 
-/// Render `content`'s YAML frontmatter with `status` as its `status` value,
+/// note: Render `content`'s YAML frontmatter with `status` as its `status` value,
 /// preserving every other line including the body.
 ///
 /// Returns `None` when the file has no well-formed frontmatter block (no
@@ -670,7 +672,7 @@ fn verify_stories_dir_in_workspace(
 /// chapter file itself.
 #[must_use]
 pub fn render_frontmatter_status(content: &str, status: &str) -> Option<String> {
-    // Only process files that start with a frontmatter delimiter.
+    // note: Only process files that start with a frontmatter delimiter.
     if !content.trim_start().starts_with("---") {
         return None;
     }
@@ -689,7 +691,7 @@ pub fn render_frontmatter_status(content: &str, status: &str) -> Option<String> 
                 output.push(line.to_string());
                 continue;
             }
-            // Closing delimiter: ensure DB status is written before body starts.
+            // why: Closing delimiter: ensure DB status is written before body starts.
             if !status_set {
                 output.push(format!("status: {status}"));
                 status_set = true;
@@ -712,7 +714,7 @@ pub fn render_frontmatter_status(content: &str, status: &str) -> Option<String> 
         }
     }
 
-    // If frontmatter was never closed or never opened, leave the file alone.
+    // note: If frontmatter was never closed or never opened, leave the file alone.
     if !found_first || in_frontmatter {
         return None;
     }
@@ -724,7 +726,7 @@ pub fn render_frontmatter_status(content: &str, status: &str) -> Option<String> 
     Some(new_content)
 }
 
-/// Refuse chapter reconcile for an explicitly non-novel Work profile.
+/// note: Refuse chapter reconcile for an explicitly non-novel Work profile.
 ///
 /// Chapter reconciliation reads `Works/<work_ref>/Stories/`, which only novel
 /// Works have. `work_profile IS NULL` is a legacy Work and stays admitted for
@@ -765,7 +767,7 @@ pub async fn ensure_novel_profile(pool: &SqlitePool, work_id: &str) -> Result<()
     Ok(())
 }
 
-/// Read-only phase of reconcile (V1.49 P3, R-V148P4-W3).
+/// note: Read-only phase of reconcile (V1.49 P3, R-V148P4-W3).
 ///
 /// Walks `Works/<work_ref>/Stories/`, reads each `.md` file's frontmatter and
 /// the matching `work_chapters` row, and produces a [`ReconcileDiff`] — the
@@ -794,7 +796,7 @@ pub async fn compute_reconcile_diff(
 ) -> Result<ReconcileDiff, LocalDbError> {
     let stories_dir = workspace_root.join("Works").join(work_ref).join("Stories");
 
-    // Defense in depth: canonicalize and verify the resolved path stays
+    // safety: Defense in depth: canonicalize and verify the resolved path stays
     // within the expected Works/<work_ref>/ subtree.  This prevents path
     // traversal even if a caller forgets to validate `work_ref`.
     verify_stories_dir_in_workspace(&stories_dir, workspace_root, work_ref)?;
@@ -824,12 +826,10 @@ pub async fn compute_reconcile_diff(
             continue;
         }
 
-        // Parse chapter number from filename
         let Some(ch_num) = parse_chapter_from_filename(&fname) else {
             continue;
         };
 
-        // Parse frontmatter for status, word_count, and volume.
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -837,7 +837,7 @@ pub async fn compute_reconcile_diff(
         let fm_status = fm.get("status").cloned();
         let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
         let fm_word_count_u32: Option<u32> = fm_word_count.map(|v| u32::try_from(v).unwrap_or(0));
-        // R-V142P1-F-003: parse volume from frontmatter; default to 1 for
+        // why: R-V142P1-F-003: parse volume from frontmatter; default to 1 for
         // single-volume works or files without the field.
         // R-V143P0-fix: reject negative/zero volume — default to 1 with a warn.
         let raw_volume: i32 = fm.get("volume").and_then(|v| v.parse().ok()).unwrap_or(1);
@@ -852,12 +852,11 @@ pub async fn compute_reconcile_diff(
             1
         };
 
-        // Check if row exists (volume-aware: use frontmatter volume).
+        // note: Check if row exists (volume-aware: use frontmatter volume).
         let existing = get_chapter(pool, work_id, ch_num, fm_volume).await?;
 
         match existing {
             None => {
-                // New chapter — record a CreateChapter op.
                 let body_path = format!("Works/{work_ref}/Stories/{fname}");
                 diff.ops.push(ReconcileOp::CreateChapter {
                     chapter: ch_num,
@@ -870,7 +869,7 @@ pub async fn compute_reconcile_diff(
             Some(row) => {
                 let db_status = row.status.clone();
 
-                // §4.5.3: `work_chapters` is the queryable SSOT for status. If
+                // why: §4.5.3: `work_chapters` is the queryable SSOT for status. If
                 // the file frontmatter disagrees, the file is re-synced so
                 // prompt-visible state catches up without inventing an extra
                 // chapter transition.
@@ -882,7 +881,7 @@ pub async fn compute_reconcile_diff(
                     });
                 }
 
-                // Mirror word_count from file to DB when present and different.
+                // why: Mirror word_count from file to DB when present and different.
                 // This is not a status transition; it only updates the cached
                 // actual_word_count.
                 let needs_word_count_update =
@@ -907,7 +906,7 @@ pub async fn compute_reconcile_diff(
     Ok(diff)
 }
 
-/// Write phase of reconcile (V1.49 P3, R-V148P4-W3).
+/// note: Write phase of reconcile (V1.49 P3, R-V148P4-W3).
 ///
 /// Executes the DB index mutations of `diff` in order, reproducing the legacy
 /// single-pass behavior. This is the only phase that mutates the database, so
@@ -938,7 +937,7 @@ pub async fn apply_reconcile_diff(
                 status,
                 word_count,
             } => {
-                // insert_chapter defaults to 'not_started'.
+                // note: insert_chapter defaults to 'not_started'.
                 insert_chapter(
                     pool,
                     &InsertChapterParams {
@@ -953,7 +952,6 @@ pub async fn apply_reconcile_diff(
                     },
                 )
                 .await?;
-                // Apply frontmatter status + word_count if present.
                 if status.as_deref() != Some("not_started") || word_count.is_some() {
                     update_status(
                         pool,
@@ -967,7 +965,7 @@ pub async fn apply_reconcile_diff(
                     .await?;
                 }
             }
-            // Committed through the caller's Work byte-write port before this
+            // why: Committed through the caller's Work byte-write port before this
             // call; the DB index has nothing to mutate for a file resync.
             ReconcileOp::ResyncFileStatus { .. } => {}
             ReconcileOp::UpdateWordCount {
@@ -993,7 +991,7 @@ pub async fn apply_reconcile_diff(
     Ok(diff.to_report())
 }
 
-/// Select the next chapter to work on per novel-workflow-profile §4.5.2.
+/// note: Select the next chapter to work on per novel-workflow-profile §4.5.2.
 ///
 /// Returns the **lowest chapter number** whose status is in the active set
 /// `{not_started, outlined, draft}`. This preserves serial chapter order:
@@ -1042,7 +1040,7 @@ pub async fn next_chapter(pool: &SqlitePool, work_id: &str) -> Result<Option<i32
     )
 }
 
-/// Volume-aware next chapter selection per novel-workflow-profile §4.5.2 + §4.5.4.
+/// note: Volume-aware next chapter selection per novel-workflow-profile §4.5.2 + §4.5.4.
 ///
 /// Returns the **lowest (volume, chapter) pair** whose status is in the active set
 /// `{not_started, outlined, draft}`. For single-volume Works this is equivalent
@@ -1079,9 +1077,7 @@ pub async fn next_chapter_volume_aware(
     )
 }
 
-// ── V1.50 T-A P3: auto-chronology finish-detection DAOs ──────────────────
-
-/// The highest volume number currently seeded for a Work (V1.50 §3 step 1).
+/// note: The highest volume number currently seeded for a Work (V1.50 §3 step 1).
 ///
 /// Auto-chronology treats `max(volume)` over `work_chapters` as the "current
 /// volume" (there is no `current_volume` column on `works`). Returns `Ok(None)`
@@ -1101,7 +1097,7 @@ pub async fn current_volume(pool: &SqlitePool, work_id: &str) -> Result<Option<i
     Ok(row.flatten())
 }
 
-/// Check whether every chapter in a given volume is `finalized` (V1.50 §3
+/// note: Check whether every chapter in a given volume is `finalized` (V1.50 §3
 /// step 2 — finish detection).
 ///
 /// Returns `false` if the volume has no chapter rows or any row is not in
@@ -1132,7 +1128,7 @@ pub async fn is_volume_fully_finalized(
     Ok(total > 0 && total == finalized)
 }
 
-/// Seed chapter rows for a single volume inside an existing transaction
+/// note: Seed chapter rows for a single volume inside an existing transaction
 /// (V1.50 §4.2 — auto-chronology advance).
 ///
 /// Inserts one `work_chapters` row per chapter (`1..=chapter_count`) for the
@@ -1182,7 +1178,7 @@ pub async fn seed_volume_chapters_tx(
     Ok(())
 }
 
-/// Seed chapter rows for a multi-volume Work (V1.42 §4.5.4).
+/// note: Seed chapter rows for a multi-volume Work (V1.42 §4.5.4).
 ///
 /// For each volume in `volumes`, inserts `chapters_per_volume` rows. On PK
 /// conflict `(work_id, volume, chapter)`, existing rows are not overwritten
@@ -1233,7 +1229,7 @@ pub async fn seed_chapters_multi_volume(
     Ok(())
 }
 
-/// Seed multi-volume chapter rows inside an existing transaction (V1.42 T3).
+/// note: Seed multi-volume chapter rows inside an existing transaction (V1.42 T3).
 ///
 /// Same logic as [`seed_chapters_multi_volume`] but uses a caller-provided
 /// transaction so the seed can be atomic with `patch_work_tx`.
@@ -1280,7 +1276,7 @@ pub async fn seed_chapters_multi_volume_tx(
     Ok(())
 }
 
-/// Check whether a Work is completed per novel-workflow-profile §6.1.
+/// note: Check whether a Work is completed per novel-workflow-profile §6.1.
 ///
 /// For **novel-profile** Works (`work_profile == 'novel'`): runs the volume-aware
 /// §6.1 check — all chapter rows across **all volumes** must be `finalized`,
@@ -1337,7 +1333,7 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
             "game-bible profile: bypassing novel chapter-completion; \
              design-section evaluation handled by is_game_bible_design_complete"
         );
-        // V1.55 P2: game-bible completion is now evaluated by the caller
+        // why: V1.55 P2: game-bible completion is now evaluated by the caller
         // (e.g., get_work handler) via is_game_bible_design_complete,
         // which inspects Design/*.md frontmatter.
         return Ok(false);
@@ -1371,7 +1367,7 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
         return Ok(false);
     }
 
-    // Non-novel Works: keep the legacy early exit (V1.36 backwards compat).
+    // why: Non-novel Works: keep the legacy early exit (V1.36 backwards compat).
     // Novel-profile Works: always fall through to the full §6.1 check.
     if status == "completed" && !crate::is_novel_profile(work_profile.as_deref()) {
         return Ok(true);
@@ -1383,7 +1379,7 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
         _ => return Ok(false),
     };
 
-    // §6.1: intake_status must be 'complete'.
+    // note: §6.1: intake_status must be 'complete'.
     let intake: String = row.get("intake_status");
     if intake != "complete" {
         return Ok(false);
@@ -1407,12 +1403,12 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
     let total_rows: i64 = count_row.get("total_rows");
     let finalized_rows: i64 = count_row.get("finalized_rows");
 
-    // §6.1: row count must match total_planned_chapters and ALL must be finalized.
+    // note: §6.1: row count must match total_planned_chapters and ALL must be finalized.
     let expected = i64::from(total);
     Ok(total_rows == expected && finalized_rows == expected)
 }
 
-/// V1.55 P2 — Game-bible design section completion check.
+/// note: V1.55 P2 — Game-bible design section completion check.
 ///
 /// Evaluates `section_status` frontmatter across all critical `Design/*.md` files
 /// in `Works/<work_ref>/Design/`. A game-bible Work is design-complete when:
@@ -1448,7 +1444,7 @@ pub async fn is_game_bible_design_complete(
     work_id: &str,
     workspace_dir: &std::path::Path,
 ) -> Result<bool, LocalDbError> {
-    // Critical Design sections per game-bible-profile.md §8.
+    // note: Critical Design sections per game-bible-profile.md §8.
     const CRITICAL_SECTIONS: &[(&str, &str)] = &[
         ("overview.md", "overview"),
         ("pillars.md", "pillars"),
@@ -1497,7 +1493,7 @@ pub async fn is_game_bible_design_complete(
         return Ok(false);
     }
 
-    // V1.55 P2 fix-wave W-2: use tokio::fs for async file I/O on the
+    // why: V1.55 P2 fix-wave W-2: use tokio::fs for async file I/O on the
     // get_work hot path (previously std::fs::read_to_string).
     for (filename, label) in CRITICAL_SECTIONS {
         let path = design_dir.join(filename);
@@ -1517,7 +1513,7 @@ pub async fn is_game_bible_design_complete(
         };
         let fm = parse_frontmatter(&content);
         let status = fm.get("section_status").map_or("draft", String::as_str);
-        // Per-section evaluation at debug level (not info — hot path).
+        // note: Per-section evaluation at debug level (not info — hot path).
         tracing::debug!(
             target = "completion",
             work_id,
@@ -1527,7 +1523,7 @@ pub async fn is_game_bible_design_complete(
             "game-bible: critical section evaluated"
         );
         if status != "accepted" {
-            // First non-accepted section is a meaningful gate: keep at info.
+            // note: First non-accepted section is a meaningful gate: keep at info.
             tracing::info!(
                 target = "completion",
                 work_id,
@@ -1549,7 +1545,7 @@ pub async fn is_game_bible_design_complete(
     Ok(true)
 }
 
-/// V1.67 P2 (R-V160P1-QC2-W001): validate `work_ref` and resolve the
+/// note: V1.67 P2 (R-V160P1-QC2-W001): validate `work_ref` and resolve the
 /// canonical script work directory, enforcing that it stays inside
 /// `workspace_dir/Works/`.
 async fn resolve_script_work_dir(
@@ -1600,7 +1596,7 @@ async fn resolve_script_work_dir(
     Ok(Some(canonical_work_dir))
 }
 
-/// V1.60 P1 — Script section completion check.
+/// note: V1.60 P1 — Script section completion check.
 ///
 /// Evaluates `section_status` frontmatter across all critical script files
 /// in `Works/<work_ref>/Scripts/` and `Works/<work_ref>/Beats/`. A script
@@ -1629,7 +1625,7 @@ pub async fn is_script_complete(
     work_id: &str,
     workspace_dir: &std::path::Path,
 ) -> Result<bool, LocalDbError> {
-    // Critical script sections per script-profile.md §8.
+    // note: Critical script sections per script-profile.md §8.
     const CRITICAL_SECTIONS: &[(&str, &str, &str)] = &[
         ("Scripts/script.md", "script", "Scripts/"),
         ("Beats/beat-sheet.md", "beat-sheet", "Beats/"),
@@ -1664,7 +1660,7 @@ pub async fn is_script_complete(
         return Ok(false);
     };
 
-    // V1.67 P2 (R-V160P1-QC2-W001): canonicalize workspace boundary and validate
+    // safety: V1.67 P2 (R-V160P1-QC2-W001): canonicalize workspace boundary and validate
     // work_ref so section reads cannot escape Works/<work_ref>/.
     let Some(canonical_work_dir) =
         resolve_script_work_dir(workspace_dir, work_ref, work_id).await?
@@ -1673,7 +1669,7 @@ pub async fn is_script_complete(
     };
 
     for (rel_path, label, _parent_dir) in CRITICAL_SECTIONS {
-        // Defensive: the constants are safe, but reject any parent-dir escapes.
+        // safety: Defensive: the constants are safe, but reject any parent-dir escapes.
         if std::path::Path::new(rel_path)
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -1704,7 +1700,7 @@ pub async fn is_script_complete(
         };
         let fm = parse_frontmatter(&content);
         let status = fm.get("section_status").map_or("draft", String::as_str);
-        // Per-section evaluation at debug level (not info — hot path).
+        // note: Per-section evaluation at debug level (not info — hot path).
         tracing::debug!(
             target = "completion",
             work_id,
@@ -1714,7 +1710,7 @@ pub async fn is_script_complete(
             "script: critical section evaluated"
         );
         if status != "accepted" {
-            // First non-accepted section is a meaningful gate: keep at info.
+            // note: First non-accepted section is a meaningful gate: keep at info.
             tracing::info!(
                 target = "completion",
                 work_id,
@@ -1736,7 +1732,7 @@ pub async fn is_script_complete(
     Ok(true)
 }
 
-/// V1.63 P0 — Essay completion check.
+/// note: V1.63 P0 — Essay completion check.
 ///
 /// An essay Work is complete when:
 /// 1. `works.intake_status == 'complete'`
@@ -1794,7 +1790,6 @@ pub async fn is_essay_complete(
         return Ok(false);
     };
 
-    // Read Drafts/draft.md and check frontmatter status.
     let draft_path = workspace_dir
         .join("Works")
         .join(work_ref)
@@ -1845,7 +1840,7 @@ pub async fn is_essay_complete(
     Ok(true)
 }
 
-/// Parse chapter number from a filename like `ch01-introduction.md`.
+/// note: Parse chapter number from a filename like `ch01-introduction.md`.
 fn parse_chapter_from_filename(filename: &str) -> Option<i32> {
     let name = filename.strip_suffix(".md")?;
     let digits = name.strip_prefix("ch")?;
@@ -1853,7 +1848,7 @@ fn parse_chapter_from_filename(filename: &str) -> Option<i32> {
     num_str.parse().ok()
 }
 
-/// Minimal YAML frontmatter parser (key: value pairs only).
+/// note: Minimal YAML frontmatter parser (key: value pairs only).
 /// Returns a `HashMap` of key-value pairs from between `---` delimiters.
 fn parse_frontmatter(content: &str) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
@@ -1868,7 +1863,6 @@ fn parse_frontmatter(content: &str) -> std::collections::HashMap<String, String>
                 in_frontmatter = true;
                 continue;
             }
-            // Second --- ends frontmatter
             break;
         }
         if in_frontmatter {
@@ -1910,7 +1904,7 @@ mod tests {
         .unwrap();
     }
 
-    /// Test composition of the reconcile phases: read-only diff, file resync
+    /// note: Test composition of the reconcile phases: read-only diff, file resync
     /// through the pure renderer, then the DB index apply. Production commits
     /// the resync bytes through the core Work byte-write port instead.
     async fn reconcile_for_test(
@@ -1971,7 +1965,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Re-seed — should not duplicate
         seed_chapters(&pool, "wrk_seed_002", "my-novel", 3, "2026-06-07T11:00:00Z")
             .await
             .unwrap();
@@ -2019,9 +2012,7 @@ mod tests {
         assert_eq!(count, 0);
     }
 
-    // -----------------------------------------------------------------------
-    // CRUD: insert_chapter + get_chapter round-trip
-    // -----------------------------------------------------------------------
+    // note: CRUD: insert_chapter + get_chapter round-trip
     #[tokio::test]
     async fn test_insert_and_get_chapter() {
         let (_dir, pool) = fresh_pool().await;
@@ -2055,9 +2046,7 @@ mod tests {
         assert!(row.actual_word_count.is_none());
     }
 
-    // -----------------------------------------------------------------------
-    // CRUD: update_status flips state
-    // -----------------------------------------------------------------------
+    // note: CRUD: update_status flips state
     #[tokio::test]
     async fn test_update_status() {
         let (_dir, pool) = fresh_pool().await;
@@ -2086,7 +2075,6 @@ mod tests {
         assert_eq!(row.status, "draft");
         assert!(row.actual_word_count.is_none());
 
-        // Update to finalized with word count
         update_status(
             &pool,
             "wrk_crud_002",
@@ -2107,9 +2095,7 @@ mod tests {
         assert_eq!(row.actual_word_count, Some(4200));
     }
 
-    // -----------------------------------------------------------------------
-    // is_work_completed: true when all chapters finalized, current_chapter >= total, intake complete
-    // -----------------------------------------------------------------------
+    // note: is_work_completed: true when all chapters finalized, current_chapter >= total, intake complete
     #[tokio::test]
     async fn test_is_work_completed_all_finalized() {
         let (_dir, pool) = fresh_pool().await;
@@ -2131,7 +2117,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Finalize all 3 chapters
         for ch in 1..=3 {
             update_status(
                 &pool,
@@ -2152,9 +2137,7 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // is_work_completed: false when 1 chapter still draft
-    // -----------------------------------------------------------------------
+    // note: is_work_completed: false when 1 chapter still draft
     #[tokio::test]
     async fn test_is_work_completed_one_draft() {
         let (_dir, pool) = fresh_pool().await;
@@ -2171,7 +2154,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Finalize ch1, ch2; leave ch3 as draft
         for ch in 1..=2 {
             update_status(
                 &pool,
@@ -2203,18 +2185,16 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // V1.39 P5 (R-V138P0-05): is_work_completed must return false when
+    // note: V1.39 P5 (R-V138P0-05): is_work_completed must return false when
     // total_planned_chapters is NULL (Works that never seeded a plan, e.g.
     // intake_status='pending'). Explicit defense-in-depth test — previously
     // covered only by §6.1 control flow, not by a dedicated assertion.
-    // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_is_work_completed_false_when_total_planned_chapters_null() {
         let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_comp_null").await;
 
-        // insert_test_work leaves total_planned_chapters as NULL by default
+        // note: insert_test_work leaves total_planned_chapters as NULL by default
         // (intake_status='pending', no chapter plan seeded). §6.1 requires
         // total > 0 — NULL must NOT be treated as "complete".
         assert!(
@@ -2240,10 +2220,8 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // V1.39 P5 (R-V138P0-05 companion): total_planned_chapters = 0 must also
+    // note: V1.39 P5 (R-V138P0-05 companion): total_planned_chapters = 0 must also
     // gate to false (degenerate value — no chapter plan).
-    // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_is_work_completed_false_when_total_planned_chapters_zero() {
         let (_dir, pool) = fresh_pool().await;
@@ -2265,15 +2243,12 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Reconcile: 3-chapter workspace
-    // -----------------------------------------------------------------------
+    // note: Reconcile: 3-chapter workspace
     #[tokio::test]
     async fn test_reconcile_creates_rows_from_filesystem() {
         let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_001").await;
 
-        // Create 3-chapter workspace
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
         std::fs::create_dir_all(&stories_dir).unwrap();
 
@@ -2307,7 +2282,6 @@ mod tests {
         assert_eq!(report.updated, 0);
         assert_eq!(report.preserved, 0);
 
-        // Verify rows
         let chapters = list_chapters(&pool, "wrk_recon_001").await.unwrap();
         assert_eq!(chapters.len(), 3);
         assert_eq!(chapters[0].chapter, 1);
@@ -2315,11 +2289,9 @@ mod tests {
         assert_eq!(chapters[2].chapter, 3);
     }
 
-    // -----------------------------------------------------------------------
-    // V1.49 P3 (R-V148P4-W3): compute phase is read-only; apply is the only
+    // note: V1.49 P3 (R-V148P4-W3): compute phase is read-only; apply is the only
     // phase that mutates. This is the DAO-layer evidence that the runtime-lock
     // window can safely exclude the slow filesystem walk.
-    // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_compute_is_read_only_then_apply_writes() {
         let (dir, pool) = fresh_pool().await;
@@ -2334,7 +2306,7 @@ mod tests {
         )
         .unwrap();
 
-        // 1. Compute (read-only): produces a CreateChapter op but writes nothing.
+        // note: 1. Compute (read-only): produces a CreateChapter op but writes nothing.
         let diff = compute_reconcile_diff(&pool, "wrk_recon_split", "my-novel", dir.path())
             .await
             .unwrap();
@@ -2357,7 +2329,7 @@ mod tests {
             "compute_reconcile_diff must not rewrite chapter files: {after_compute}"
         );
 
-        // 2. Apply (write): the diff now materializes the row.
+        // note: 2. Apply (write): the diff now materializes the row.
         let report = apply_reconcile_diff(&pool, "wrk_recon_split", "2026-06-17T00:00:00Z", &diff)
             .await
             .unwrap();
@@ -2369,15 +2341,12 @@ mod tests {
         assert_eq!(rows[0].actual_word_count, Some(1500));
     }
 
-    // -----------------------------------------------------------------------
-    // Reconcile: existing row + file status conflict — DB status wins (§4.5.3)
-    // -----------------------------------------------------------------------
+    // note: Reconcile: existing row + file status conflict — DB status wins (§4.5.3)
     #[tokio::test]
     async fn test_reconcile_update_and_idempotent() {
         let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_002").await;
 
-        // Pre-seed 3 chapters
         seed_chapters(
             &pool,
             "wrk_recon_002",
@@ -2388,7 +2357,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Create workspace with a file whose frontmatter claims a different
+        // note: Create workspace with a file whose frontmatter claims a different
         // status than the DB row. Per §4.5.3 the DB status must win; the file
         // frontmatter is re-synced to the DB status.
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
@@ -2421,7 +2390,7 @@ mod tests {
         .await
         .unwrap();
 
-        // ch01: DB status stays `not_started` (SSOT), but word_count is mirrored
+        // note: ch01: DB status stays `not_started` (SSOT), but word_count is mirrored
         // and the file frontmatter is re-synced.
         assert_eq!(
             report.updated, 1,
@@ -2434,7 +2403,6 @@ mod tests {
         assert_eq!(report.preserved, 2, "ch02 and ch03 are unchanged");
         assert_eq!(report.created, 0);
 
-        // Verify ch01 DB status is preserved
         let ch1 = get_chapter(&pool, "wrk_recon_002", 1, 1)
             .await
             .unwrap()
@@ -2449,7 +2417,6 @@ mod tests {
             "word_count should be mirrored"
         );
 
-        // Verify file frontmatter was re-synced to DB status.
         let ch1_file = std::fs::read_to_string(&ch1_path).unwrap();
         assert!(
             ch1_file.contains("status: not_started"),
@@ -2460,7 +2427,6 @@ mod tests {
             "reconcile must preserve chapter body content"
         );
 
-        // Re-run reconcile — should be fully idempotent now that file matches DB.
         let report2 = reconcile_for_test(
             &pool,
             "wrk_recon_002",
@@ -2475,11 +2441,9 @@ mod tests {
         assert_eq!(report2.preserved, 3);
     }
 
-    // -----------------------------------------------------------------------
-    // Frontmatter re-sync rendering is pure (V1.48 P4-fix1 W-1 qc2). The atomic
+    // note: Frontmatter re-sync rendering is pure (V1.48 P4-fix1 W-1 qc2). The atomic
     // byte write itself is the Work port's `fsync_write_atomic`, covered by
     // nexus-core's `work_artifact` tests.
-    // -----------------------------------------------------------------------
     #[test]
     fn test_render_frontmatter_status_resyncs_and_preserves_body() {
         let rendered = render_frontmatter_status(
@@ -2498,31 +2462,26 @@ mod tests {
             "body content must be preserved: {rendered}"
         );
 
-        // No frontmatter block, or one that never closes: leave the file alone.
+        // note: No frontmatter block, or one that never closes: leave the file alone.
         assert!(render_frontmatter_status("Body only\n", "draft").is_none());
         assert!(render_frontmatter_status("---\nstatus: draft\nBody only\n", "draft").is_none());
     }
 
-    // -----------------------------------------------------------------------
-    // R-V142P1-F-003: Volume-aware reconcile
-    // -----------------------------------------------------------------------
+    // note: R-V142P1-F-003: Volume-aware reconcile
     #[tokio::test]
     async fn test_reconcile_volume_aware_from_frontmatter() {
         let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_recon_vol").await;
 
-        // Create workspace with multi-volume chapter files.
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
         std::fs::create_dir_all(&stories_dir).unwrap();
 
-        // Volume 1 chapter (no volume field → defaults to 1)
         std::fs::write(
             stories_dir.join("ch01-intro.md"),
             "---\ntitle: Intro\nchapter: 1\nstatus: draft\n---\nContent",
         )
         .unwrap();
 
-        // Volume 2 chapter (explicit volume: 2 in frontmatter)
         std::fs::write(
             stories_dir.join("ch01-v2-opening.md"),
             "---\ntitle: Opening\nchapter: 1\nvolume: 2\nstatus: not_started\n---\nContent V2",
@@ -2541,7 +2500,6 @@ mod tests {
 
         assert_eq!(report.created, 2);
 
-        // Verify volume 1 chapter 1
         let ch_v1 = get_chapter(&pool, "wrk_recon_vol", 1, 1)
             .await
             .unwrap()
@@ -2549,7 +2507,6 @@ mod tests {
         assert_eq!(ch_v1.status, "draft");
         assert_eq!(ch_v1.volume, Some(1));
 
-        // Verify volume 2 chapter 1
         let ch_v2 = get_chapter(&pool, "wrk_recon_vol", 1, 2)
             .await
             .unwrap()
@@ -2558,11 +2515,9 @@ mod tests {
         assert_eq!(ch_v2.volume, Some(2));
     }
 
-    // =======================================================================
-    // V1.38 P0 (T10): Multi-chapter selection and completion hermetic tests
-    // =======================================================================
+    // note: V1.38 P0 (T10): Multi-chapter selection and completion hermetic tests
 
-    /// Helper: set up a work with `total_planned_chapters` and `intake_status`.
+    /// note: Helper: set up a work with `total_planned_chapters` and `intake_status`.
     async fn setup_work_for_selection(pool: &SqlitePool, work_id: &str, total: i32) {
         // SAFETY: UPDATE against works — runtime query.
         sqlx::query(
@@ -2576,7 +2531,7 @@ mod tests {
         .unwrap();
     }
 
-    // T10.1: next_chapter selection order (3-chapter Work with mixed statuses)
+    // note: T10.1: next_chapter selection order (3-chapter Work with mixed statuses)
     #[tokio::test]
     async fn test_next_chapter_selects_lowest_not_started() {
         let (_dir, pool) = fresh_pool().await;
@@ -2586,7 +2541,6 @@ mod tests {
             .await
             .unwrap();
 
-        // ch1=finalized, ch2=not_started, ch3=not_started
         update_status(
             &pool,
             "wrk_sel_001",
@@ -2603,7 +2557,7 @@ mod tests {
         assert_eq!(next, Some(2), "should select ch2 (lowest not_started)");
     }
 
-    // T10.2: next_chapter resumes lowest active chapter (draft beats later not_started)
+    // note: T10.2: next_chapter resumes lowest active chapter (draft beats later not_started)
     #[tokio::test]
     async fn test_next_chapter_resumes_draft() {
         let (_dir, pool) = fresh_pool().await;
@@ -2613,7 +2567,6 @@ mod tests {
             .await
             .unwrap();
 
-        // ch1=finalized, ch2=draft, ch3=not_started
         update_status(
             &pool,
             "wrk_sel_002",
@@ -2637,7 +2590,6 @@ mod tests {
         .await
         .unwrap();
 
-        // ch2 is draft (lower chapter) — must resume it, not skip to ch3
         let next = next_chapter(&pool, "wrk_sel_002").await.unwrap();
         assert_eq!(
             next,
@@ -2645,7 +2597,6 @@ mod tests {
             "should resume ch2 (draft, lowest active chapter) over ch3 (not_started)"
         );
 
-        // Now finalize ch2 too — ch3 (not_started) is the only active chapter left
         update_status(
             &pool,
             "wrk_sel_002",
@@ -2666,7 +2617,7 @@ mod tests {
         );
     }
 
-    // T10.3: Outlined chapter is not skipped in favor of later chapters
+    // note: T10.3: Outlined chapter is not skipped in favor of later chapters
     #[tokio::test]
     async fn test_next_chapter_outlined_not_skipped() {
         let (_dir, pool) = fresh_pool().await;
@@ -2676,7 +2627,6 @@ mod tests {
             .await
             .unwrap();
 
-        // ch1=outlined, ch2=not_started — lowest active chapter wins (ch1)
         update_status(
             &pool,
             "wrk_sel_003",
@@ -2696,7 +2646,6 @@ mod tests {
             "ch1 (outlined) should be selected over ch2 (not_started) — lowest active chapter wins"
         );
 
-        // Now finalize ch1 — ch2 (not_started) becomes the next active chapter
         update_status(
             &pool,
             "wrk_sel_003",
@@ -2717,7 +2666,7 @@ mod tests {
         );
     }
 
-    // T10.8: Finalized chapters are excluded from selection
+    // note: T10.8: Finalized chapters are excluded from selection
     #[tokio::test]
     async fn test_next_chapter_skips_finalized() {
         let (_dir, pool) = fresh_pool().await;
@@ -2727,7 +2676,6 @@ mod tests {
             .await
             .unwrap();
 
-        // ch1=finalized, ch2=outlined, ch3=draft
         update_status(
             &pool,
             "wrk_sel_004",
@@ -2770,7 +2718,7 @@ mod tests {
         );
     }
 
-    // T10.4: Completion stops when all rows finalized + intake complete + current_chapter OK
+    // note: T10.4: Completion stops when all rows finalized + intake complete + current_chapter OK
     #[tokio::test]
     async fn test_completion_all_finalized() {
         let (_dir, pool) = fresh_pool().await;
@@ -2807,12 +2755,11 @@ mod tests {
             "all finalized + current_chapter=2 + intake=complete → completed"
         );
 
-        // next_chapter should return None (no eligible chapters)
         let next = next_chapter(&pool, "wrk_comp_010").await.unwrap();
         assert_eq!(next, None, "no next chapter when all finalized");
     }
 
-    // T10.5: Completion does NOT fire when one row is still draft
+    // note: T10.5: Completion does NOT fire when one row is still draft
     #[tokio::test]
     async fn test_completion_blocked_by_draft() {
         let (_dir, pool) = fresh_pool().await;
@@ -2830,7 +2777,6 @@ mod tests {
             .await
             .unwrap();
 
-        // ch1, ch2 finalized; ch3 draft
         for ch in 1..=2 {
             update_status(
                 &pool,
@@ -2862,7 +2808,7 @@ mod tests {
         );
     }
 
-    // T10.6: Completion blocked when intake_status != 'complete'
+    // note: T10.6: Completion blocked when intake_status != 'complete'
     #[tokio::test]
     async fn test_completion_blocked_by_intake() {
         let (_dir, pool) = fresh_pool().await;
@@ -2899,7 +2845,7 @@ mod tests {
         );
     }
 
-    // F-002: is_work_completed novel-profile early-exit narrowing
+    // note: F-002: is_work_completed novel-profile early-exit narrowing
     #[tokio::test]
     async fn test_completion_novel_profile_needs_full_check() {
         let (_dir, pool) = fresh_pool().await;
@@ -2926,7 +2872,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Finalize all chapters
         for ch in 1..=2 {
             update_status(
                 &pool,
@@ -2941,7 +2886,6 @@ mod tests {
             .unwrap();
         }
 
-        // works.status is still 'draft' but §6.1 conditions are met → completed
         assert!(
             is_work_completed(&pool, "wrk_comp_novel_001").await.unwrap(),
             "novel-profile Work: all §6.1 conditions met → completed even when works.status='draft'"
@@ -2962,7 +2906,6 @@ mod tests {
             "novel-profile Work: completed status + all §6.1 met → still completed"
         );
 
-        // Now introduce an unfinalized row — should return false despite works.status='completed'
         update_status(
             &pool,
             "wrk_comp_novel_001",
@@ -2981,7 +2924,7 @@ mod tests {
         );
     }
 
-    // T10.7: One-chapter compatibility (V1.36 path still works)
+    // note: T10.7: One-chapter compatibility (V1.36 path still works)
     #[tokio::test]
     async fn test_one_chapter_v136_compatible() {
         let (_dir, pool) = fresh_pool().await;
@@ -3007,11 +2950,9 @@ mod tests {
         .await
         .unwrap();
 
-        // Before finalizing: next_chapter should return ch1
         let next = next_chapter(&pool, "wrk_compat_001").await.unwrap();
         assert_eq!(next, Some(1), "single-chapter Work should select ch1");
 
-        // Finalize ch1 with current_chapter=1
         update_status(
             &pool,
             "wrk_compat_001",
@@ -3042,7 +2983,7 @@ mod tests {
         );
     }
 
-    // F-003: game_bible profile completion gate (V1.54 P1 T8).
+    // note: F-003: game_bible profile completion gate (V1.54 P1 T8).
     // is_work_completed must return Ok(false) for game-bible Works
     // regardless of works.status — completion detection is deferred to V1.55+.
     #[tokio::test]
@@ -3062,7 +3003,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Even with status='completed', game-bible Works should return false —
+        // note: Even with status='completed', game-bible Works should return false —
         // the game-bible profile gate prevents the novel completion logic from
         // applying to game-bible Works.
         assert!(
@@ -3074,7 +3015,7 @@ mod tests {
         );
     }
 
-    // V1.55 P2: is_game_bible_design_complete tests
+    // note: V1.55 P2: is_game_bible_design_complete tests
     #[tokio::test]
     async fn test_is_game_bible_design_complete_all_accepted() {
         let (dir, pool) = fresh_pool().await;
@@ -3160,7 +3101,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Design dir empty — no critical files
         let design_dir = dir.path().join("Works").join("my-game-3").join("Design");
         std::fs::create_dir_all(&design_dir).unwrap();
 
@@ -3177,7 +3117,6 @@ mod tests {
         let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_gb_comp_004").await;
 
-        // intake_status is pending
         sqlx::query(
             "UPDATE works SET work_profile = 'game_bible', work_ref = 'my-game-4', \
              intake_status = 'pending' WHERE work_id = ?",
@@ -3205,7 +3144,7 @@ mod tests {
         );
     }
 
-    // V1.60 P1: is_script_complete tests
+    // note: V1.60 P1: is_script_complete tests
 
     #[tokio::test]
     async fn test_is_script_complete_all_accepted() {
@@ -3298,10 +3237,8 @@ mod tests {
         .await
         .unwrap();
 
-        // Scripts/ dir exists but no script.md
         let scripts_dir = dir.path().join("Works").join("my-script-3").join("Scripts");
         std::fs::create_dir_all(&scripts_dir).unwrap();
-        // Beats/ dir empty — no beat-sheet.md
         let beats_dir = dir.path().join("Works").join("my-script-3").join("Beats");
         std::fs::create_dir_all(&beats_dir).unwrap();
 
@@ -3318,7 +3255,6 @@ mod tests {
         let (dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_scr_comp_004").await;
 
-        // intake_status is pending
         sqlx::query(
             "UPDATE works SET work_profile = 'script', work_ref = 'my-script-4', \
              intake_status = 'pending' WHERE work_id = ?",
@@ -3352,7 +3288,7 @@ mod tests {
         );
     }
 
-    // V1.67 P2 (R-V160P1-QC2-W001): regression test for path validation.
+    // note: V1.67 P2 (R-V160P1-QC2-W001): regression test for path validation.
     #[tokio::test]
     async fn test_is_script_complete_rejects_path_traversal_in_work_ref() {
         let (dir, pool) = fresh_pool().await;
@@ -3368,7 +3304,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Even if a file exists outside the intended boundary, the traversal
+        // note: Even if a file exists outside the intended boundary, the traversal
         // attempt must be rejected and return false.
         let escape_dir = dir
             .path()
@@ -3390,7 +3326,7 @@ mod tests {
         );
     }
 
-    // V1.60 P1: script profile gate in is_work_completed
+    // note: V1.60 P1: script profile gate in is_work_completed
     #[tokio::test]
     async fn test_is_work_completed_script_returns_false() {
         let (_dir, pool) = fresh_pool().await;
@@ -3408,7 +3344,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Even with status='completed', script Works should return false —
+        // note: Even with status='completed', script Works should return false —
         // the script profile gate prevents the novel completion logic from
         // applying to script Works.
         assert!(
@@ -3418,7 +3354,7 @@ mod tests {
         );
     }
 
-    // V1.60 P1: is_script_profile helper test
+    // note: V1.60 P1: is_script_profile helper test
     #[test]
     fn test_is_script_profile() {
         assert!(crate::is_script_profile(Some("script")));
@@ -3428,7 +3364,7 @@ mod tests {
         assert!(!crate::is_script_profile(None));
     }
 
-    // R-V143P0-fix: negative/zero volume frontmatter must default to 1.
+    // note: R-V143P0-fix: negative/zero volume frontmatter must default to 1.
     #[tokio::test]
     async fn test_reconcile_volume_rejects_negative() {
         let (dir, pool) = fresh_pool().await;
@@ -3437,7 +3373,6 @@ mod tests {
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
         std::fs::create_dir_all(&stories_dir).unwrap();
 
-        // Chapter with volume: -1 in frontmatter.
         std::fs::write(
             stories_dir.join("ch01-negative.md"),
             "---\ntitle: Bad Vol\nchapter: 1\nvolume: -1\nstatus: draft\n---\nContent",
@@ -3454,7 +3389,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Row should be created with volume=1 (defaulted), not -1.
         assert_eq!(report.created, 1);
         let chapters = list_chapters(&pool, "wrk_neg_vol").await.unwrap();
         assert_eq!(chapters.len(), 1);
@@ -3465,11 +3399,9 @@ mod tests {
         );
     }
 
-    // =======================================================================
-    // V1.44 P2 (F-002): Multi-volume completion regression tests
-    // =======================================================================
+    // note: V1.44 P2 (F-002): Multi-volume completion regression tests
 
-    /// AC1: 2-volume Work (2×3 = 6 chapters) completes only when ALL volume
+    /// note: AC1: 2-volume Work (2×3 = 6 chapters) completes only when ALL volume
     /// rows are finalized. Previously, the flat `current_chapter >= total`
     /// check would fail because `current_chapter` resets per volume.
     #[tokio::test]
@@ -3488,7 +3420,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Seed 2 volumes × 3 chapters using multi-volume seeder
         seed_chapters_multi_volume(
             &pool,
             "wrk_mv_comp_001",
@@ -3500,7 +3431,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Finalize ALL 6 chapters across both volumes
         for vol in 1..=2 {
             for ch in 1..=3 {
                 update_status(
@@ -3523,7 +3453,7 @@ mod tests {
         );
     }
 
-    /// AC1 negative: 2-volume Work where vol 1 is finalized but vol 2 has a
+    /// note: AC1 negative: 2-volume Work where vol 1 is finalized but vol 2 has a
     /// draft chapter — must NOT be completed.
     #[tokio::test]
     async fn test_is_work_completed_multi_volume_partial_vol2() {
@@ -3551,7 +3481,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Finalize all vol 1 chapters
         for ch in 1..=3 {
             update_status(
                 &pool,
@@ -3566,7 +3495,6 @@ mod tests {
             .unwrap();
         }
 
-        // Vol 2: finalize ch1+ch2 but leave ch3 as draft
         for ch in 1..=2 {
             update_status(
                 &pool,
@@ -3598,7 +3526,7 @@ mod tests {
         );
     }
 
-    /// F-002 edge: row count mismatch (only vol 1 seeded, total says 6).
+    /// note: F-002 edge: row count mismatch (only vol 1 seeded, total says 6).
     #[tokio::test]
     async fn test_is_work_completed_multi_volume_missing_vol2_rows() {
         let (_dir, pool) = fresh_pool().await;
@@ -3614,7 +3542,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Only seed vol 1 (3 rows, total says 6)
         seed_chapters_multi_volume(
             &pool,
             "wrk_mv_comp_003",
@@ -3626,7 +3553,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Finalize all vol 1 chapters
         for ch in 1..=3 {
             update_status(
                 &pool,
@@ -3670,7 +3596,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Step 1: all not_started → ch1 (lowest)
         let next = next_chapter(&pool, "wrk_457_001").await.unwrap();
         assert_eq!(
             next,
@@ -3678,7 +3603,6 @@ mod tests {
             "all not_started → ch1 (lowest not_started per §4.5.2)"
         );
 
-        // Step 2: ch1=outlined, ch2=draft → ch1 (outlined is active, lowest)
         update_status(
             &pool,
             "wrk_457_001",
@@ -3708,7 +3632,6 @@ mod tests {
             "ch1=outlined beats ch2=draft (lowest active chapter per §4.5.2)"
         );
 
-        // Step 3: ch1 finalized → ch2 (draft, now lowest active)
         update_status(
             &pool,
             "wrk_457_001",
@@ -3727,7 +3650,6 @@ mod tests {
             "after ch1 finalized → ch2 (draft, lowest active)"
         );
 
-        // Step 4: ch2 finalized → ch3 (not_started, only remaining)
         update_status(
             &pool,
             "wrk_457_001",
@@ -3746,7 +3668,6 @@ mod tests {
             "after ch1+ch2 finalized → ch3 (not_started, only remaining)"
         );
 
-        // Step 5: ch3 finalized → None (novel-completion per §4.5.2)
         update_status(
             &pool,
             "wrk_457_001",
@@ -3776,19 +3697,18 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         insert_test_work(&pool, "wrk_457_002").await;
         setup_work_for_selection(&pool, "wrk_457_002", 2).await;
-        // setup_work_for_selection sets intake_status='complete',
+        // note: setup_work_for_selection sets intake_status='complete',
         // total_planned_chapters=2, current_chapter=0.
         seed_chapters(&pool, "wrk_457_002", "my-novel", 2, "2026-06-15T10:00:00Z")
             .await
             .unwrap();
 
-        // --- Condition: all rows finalized (initially false — ch1+ch2 not_started)
+        // note: --- Condition: all rows finalized (initially false — ch1+ch2 not_started)
         assert!(
             !is_work_completed(&pool, "wrk_457_002").await.unwrap(),
             "§6.1: not all finalized → NOT complete"
         );
 
-        // Finalize ch1 only
         update_status(
             &pool,
             "wrk_457_002",
@@ -3805,7 +3725,6 @@ mod tests {
             "§6.1: ch2 still not_started → NOT complete"
         );
 
-        // Finalize ch2 — now all rows finalized
         update_status(
             &pool,
             "wrk_457_002",
@@ -3831,7 +3750,7 @@ mod tests {
             .await
             .unwrap();
 
-        // --- All §6.1 conditions met → complete
+        // note: --- All §6.1 conditions met → complete
         assert!(
             is_work_completed(&pool, "wrk_457_002").await.unwrap(),
             "§6.1: all finalized + current_chapter=2 + intake=complete → complete"
@@ -3857,7 +3776,7 @@ mod tests {
             .await
             .unwrap();
 
-        // --- Violate condition: one row unfinalized
+        // note: --- Violate condition: one row unfinalized
         update_status(
             &pool,
             "wrk_457_002",

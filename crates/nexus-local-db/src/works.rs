@@ -3,12 +3,13 @@
 //! Manages the `works` table — long-term creative effort containers
 //! with structured briefs, inspiration logs, and schedule linkage.
 //! Idempotency via separate `works_idempotency` table.
+// note: `WORKS_COLUMNS` is the single column list every SELECT in this module uses.
 
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
-/// Column list for all SELECT queries on works.
+/// note: Column list for all SELECT queries on works.
 pub const WORKS_COLUMNS: &str = "\
     work_id, creator_id, workspace_slug, status, title, long_term_goal, \
     initial_idea, creative_brief, intake_status, world_id, story_ref, \
@@ -18,9 +19,7 @@ pub const WORKS_COLUMNS: &str = "\
     runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at, \
     novel_completion_status, lineage_from_work_id";
 
-// ── Profile detection helpers (V1.54 P1) ──────────────────────────────────
-
-/// Returns `true` if `profile` indicates a novel Work.
+/// note: Returns `true` if `profile` indicates a novel Work.
 ///
 /// V1.54 P1: extracted to avoid string-literal fragility across profile-gate
 /// sites. Use this instead of comparing `work_profile == "novel"` directly.
@@ -29,7 +28,7 @@ pub fn is_novel_profile(profile: Option<&str>) -> bool {
     profile == Some("novel")
 }
 
-/// Returns `true` if `profile` indicates a game-bible Work.
+/// note: Returns `true` if `profile` indicates a game-bible Work.
 ///
 /// V1.54 P1: game-bible Works do not use `work_chapters`, `Stories/`,
 /// or novel completion logic. All novel-specific code paths should gate
@@ -39,7 +38,7 @@ pub fn is_game_bible_profile(profile: Option<&str>) -> bool {
     profile == Some("game_bible")
 }
 
-/// Returns `true` if `profile` indicates a script Work.
+/// note: Returns `true` if `profile` indicates a script Work.
 ///
 /// V1.60 P1: script Works do not use `work_chapters`, `Stories/`,
 /// or novel completion logic. All novel-specific code paths should gate
@@ -49,7 +48,7 @@ pub fn is_script_profile(profile: Option<&str>) -> bool {
     profile == Some("script")
 }
 
-/// Returns `true` if `profile` indicates an essay Work.
+/// note: Returns `true` if `profile` indicates an essay Work.
 ///
 /// V1.63 P0: essay Works do not use `work_chapters`, `Stories/`,
 /// or novel completion logic. Essay completion is evaluated via
@@ -60,7 +59,7 @@ pub fn is_essay_profile(profile: Option<&str>) -> bool {
     profile == Some("essay")
 }
 
-/// Map a sqlx row to [`WorkRecord`].
+/// note: Map a sqlx row to [`WorkRecord`].
 #[must_use]
 pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
     WorkRecord {
@@ -98,154 +97,154 @@ pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
     }
 }
 
-/// Work record — mirrors DB row.
+/// note: Work record — mirrors DB row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkRecord {
-    /// Unique identifier (e.g. `wrk_<uuid>`).
+    /// note: Unique identifier (e.g. `wrk_<uuid>`).
     pub work_id: String,
-    /// Owning creator.
+    /// note: Owning creator.
     pub creator_id: String,
-    /// Workspace slug when created.
+    /// note: Workspace slug when created.
     pub workspace_slug: String,
-    /// Work status.
+    /// note: Work status.
     pub status: String,
-    /// Human label.
+    /// note: Human label.
     pub title: String,
-    /// What "done" means.
+    /// note: What "done" means.
     pub long_term_goal: String,
-    /// Raw user input at start.
+    /// note: Raw user input at start.
     pub initial_idea: String,
-    /// Structured brief JSON (nullable until intake complete).
+    /// note: Structured brief JSON (nullable until intake complete).
     pub creative_brief: Option<String>,
-    /// Intake status.
+    /// note: Intake status.
     pub intake_status: String,
-    /// Bound narrative world.
+    /// note: Bound narrative world.
     pub world_id: Option<String>,
-    /// Preset/manuscript ref.
+    /// note: Preset/manuscript ref.
     pub story_ref: Option<String>,
-    /// Append-only inspiration log (JSON text).
+    /// note: Append-only inspiration log (JSON text).
     pub inspiration_log: String,
-    /// Main production preset.
+    /// note: Main production preset.
     pub primary_preset_id: String,
-    /// Linked schedule IDs (JSON text).
+    /// note: Linked schedule IDs (JSON text).
     pub schedule_ids: String,
-    /// Creation timestamp (ISO 8601).
+    /// note: Creation timestamp (ISO 8601).
     pub created_at: String,
-    /// Last update timestamp (ISO 8601).
+    /// note: Last update timestamp (ISO 8601).
     pub updated_at: String,
-    /// Current FL-E stage (V1.34 creator-workflow §3.1).
+    /// note: Current FL-E stage (V1.34 creator-workflow §3.1).
     pub current_stage: String,
-    /// Current stage status (V1.34 creator-workflow §3.2).
+    /// note: Current stage status (V1.34 creator-workflow §3.2).
     pub stage_status: String,
-    /// Work profile (V1.36 novel-workflow-profile §2.1).
+    /// note: Work profile (V1.36 novel-workflow-profile §2.1).
     pub work_profile: Option<String>,
-    /// Human slug for Works/ directory (V1.36 §2.1).
+    /// note: Human slug for Works/ directory (V1.36 §2.1).
     pub work_ref: Option<String>,
-    /// Total planned chapters (V1.36 §2.1).
+    /// note: Total planned chapters (V1.36 §2.1).
     pub total_planned_chapters: Option<i32>,
-    /// Current chapter index (V1.36 §2.1).
+    /// note: Current chapter index (V1.36 §2.1).
     pub current_chapter: i32,
-    /// Auto-chain enabled flag (V1.39 §5.4, default true).
+    /// note: Auto-chain enabled flag (V1.39 §5.4, default true).
     pub auto_chain_enabled: bool,
-    /// Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
+    /// note: Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
     pub driver_schedule_id: Option<String>,
-    /// Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
+    /// note: Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
     pub auto_chain_interrupted: bool,
-    /// Opt-in: when true the stale-findings watcher auto-enqueues
+    /// note: Opt-in: when true the stale-findings watcher auto-enqueues
     /// `novel-review-master` for this Work after the timeout threshold
     /// (V1.39 P4 T4, default false).
     pub auto_review_master_on_timeout: bool,
-    /// Runtime lock holder (V1.41 DF-60 §4): `cli:<pid>:<uuid>` or `daemon:schedule:<id>`.
+    /// note: Runtime lock holder (V1.41 DF-60 §4): `cli:<pid>:<uuid>` or `daemon:schedule:<id>`.
     pub runtime_lock_holder: Option<String>,
-    /// When the runtime lock was acquired (V1.41 DF-60 §4, ISO-8601, nullable).
+    /// note: When the runtime lock was acquired (V1.41 DF-60 §4, ISO-8601, nullable).
     pub runtime_lock_acquired_at: Option<String>,
-    /// When completion-lock was applied (V1.41 DF-60 §3, ISO-8601, nullable).
+    /// note: When completion-lock was applied (V1.41 DF-60 §3, ISO-8601, nullable).
     pub completion_locked_at: Option<String>,
-    /// Novel completion status (V1.41 DF-60 §2): `finalize_complete` | `reopened` | NULL.
+    /// note: Novel completion status (V1.41 DF-60 §2): `finalize_complete` | `reopened` | NULL.
     pub novel_completion_status: Option<String>,
-    /// Parent Work ID when created via `run start --from-work` (V1.41 DF-60 §5.2, nullable).
+    /// note: Parent Work ID when created via `run start --from-work` (V1.41 DF-60 §5.2, nullable).
     pub lineage_from_work_id: Option<String>,
 }
 
-/// Inspiration log entry — `{at, note}`.
+/// note: Inspiration log entry — `{at, note}`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InspirationLogEntry {
-    /// ISO 8601 timestamp.
+    /// note: ISO 8601 timestamp.
     pub at: String,
-    /// Free-text direction / inspiration.
+    /// note: Free-text direction / inspiration.
     pub note: String,
 }
 
-/// Filters for listing works.
+/// note: Filters for listing works.
 #[derive(Debug, Clone, Default)]
 pub struct WorkListFilters {
-    /// Filter by status.
+    /// note: Filter by status.
     pub status: Option<String>,
-    /// Filter by `intake_status`.
+    /// note: Filter by `intake_status`.
     pub intake_status: Option<String>,
-    /// Maximum number of results.
+    /// note: Maximum number of results.
     pub limit: Option<u32>,
-    /// Pagination offset.
+    /// note: Pagination offset.
     pub offset: Option<u32>,
-    /// F-F1 (V1.67): ordered sort terms `(column, ascending)`.
+    /// note: F-F1 (V1.67): ordered sort terms `(column, ascending)`.
     /// Only whitelisted column names are emitted into SQL.
     pub order_by: Vec<(String, bool)>,
 }
 
-/// Fields that can be patched on a Work.
+/// note: Fields that can be patched on a Work.
 #[derive(Debug, Clone, Default)]
 pub struct WorkPatch {
-    /// New title.
+    /// note: New title.
     pub title: Option<String>,
-    /// New `long_term_goal`.
+    /// note: New `long_term_goal`.
     pub long_term_goal: Option<String>,
-    /// New creative brief JSON.
+    /// note: New creative brief JSON.
     pub creative_brief: Option<Option<String>>,
-    /// New `intake_status`.
+    /// note: New `intake_status`.
     pub intake_status: Option<String>,
-    /// New status.
+    /// note: New status.
     pub status: Option<String>,
-    /// New `world_id`.
+    /// note: New `world_id`.
     pub world_id: Option<Option<String>>,
-    /// New `story_ref`.
+    /// note: New `story_ref`.
     pub story_ref: Option<Option<String>>,
-    /// New `primary_preset_id`.
+    /// note: New `primary_preset_id`.
     pub primary_preset_id: Option<String>,
-    /// New `schedule_ids` JSON.
+    /// note: New `schedule_ids` JSON.
     pub schedule_ids: Option<String>,
-    /// New `current_stage` (V1.34 FL-E).
+    /// note: New `current_stage` (V1.34 FL-E).
     pub current_stage: Option<String>,
-    /// New `stage_status` (V1.34 FL-E).
+    /// note: New `stage_status` (V1.34 FL-E).
     pub stage_status: Option<String>,
-    /// New `work_profile` (V1.36 novel-workflow-profile §2.1).
+    /// note: New `work_profile` (V1.36 novel-workflow-profile §2.1).
     pub work_profile: Option<Option<String>>,
-    /// New `work_ref` (V1.36 §2.1).
+    /// note: New `work_ref` (V1.36 §2.1).
     pub work_ref: Option<Option<String>>,
-    /// New `total_planned_chapters` (V1.36 §2.1).
+    /// note: New `total_planned_chapters` (V1.36 §2.1).
     pub total_planned_chapters: Option<Option<i32>>,
-    /// New `current_chapter` (V1.36 §2.1).
+    /// note: New `current_chapter` (V1.36 §2.1).
     pub current_chapter: Option<i32>,
-    /// New `auto_chain_enabled` (V1.39 §5.4).
+    /// note: New `auto_chain_enabled` (V1.39 §5.4).
     pub auto_chain_enabled: Option<bool>,
-    /// New `driver_schedule_id` (V1.39 §5.4, nullable).
+    /// note: New `driver_schedule_id` (V1.39 §5.4, nullable).
     pub driver_schedule_id: Option<Option<String>>,
-    /// New `auto_chain_interrupted` (V1.39 §5.4).
+    /// note: New `auto_chain_interrupted` (V1.39 §5.4).
     pub auto_chain_interrupted: Option<bool>,
-    /// New `auto_review_master_on_timeout` opt-in flag (V1.39 P4 T4).
+    /// note: New `auto_review_master_on_timeout` opt-in flag (V1.39 P4 T4).
     pub auto_review_master_on_timeout: Option<bool>,
-    /// New `runtime_lock_holder` (V1.41 DF-60 §4, nullable).
+    /// note: New `runtime_lock_holder` (V1.41 DF-60 §4, nullable).
     pub runtime_lock_holder: Option<Option<String>>,
-    /// New `runtime_lock_acquired_at` (V1.41 DF-60 §4, nullable).
+    /// note: New `runtime_lock_acquired_at` (V1.41 DF-60 §4, nullable).
     pub runtime_lock_acquired_at: Option<Option<String>>,
-    /// New `completion_locked_at` (V1.41 DF-60 §3, nullable).
+    /// note: New `completion_locked_at` (V1.41 DF-60 §3, nullable).
     pub completion_locked_at: Option<Option<String>>,
-    /// New `novel_completion_status` (V1.41 DF-60 §2, nullable).
+    /// note: New `novel_completion_status` (V1.41 DF-60 §2, nullable).
     pub novel_completion_status: Option<Option<String>>,
-    /// New `lineage_from_work_id` (V1.41 DF-60 §5.2, nullable).
+    /// note: New `lineage_from_work_id` (V1.41 DF-60 §5.2, nullable).
     pub lineage_from_work_id: Option<Option<String>>,
 }
 
-/// Create a new Work (simple, non-transactional).
+/// note: Create a new Work (simple, non-transactional).
 ///
 /// Prefer [`create_work_tx`] when idempotency is required (single tx
 /// wrapping check + create + idempotency record).
@@ -298,7 +297,7 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     Ok(())
 }
 
-/// Insert a Work row inside an existing transaction.
+/// note: Insert a Work row inside an existing transaction.
 async fn insert_work_tx(
     tx: &mut Transaction<'_, Sqlite>,
     record: &WorkRecord,
@@ -348,7 +347,7 @@ async fn insert_work_tx(
     Ok(())
 }
 
-/// Record an idempotency mapping after creating a Work.
+/// note: Record an idempotency mapping after creating a Work.
 ///
 /// # Errors
 ///
@@ -375,7 +374,7 @@ pub async fn record_idempotency(
     Ok(())
 }
 
-/// Record idempotency mapping inside an existing transaction.
+/// note: Record idempotency mapping inside an existing transaction.
 async fn record_idempotency_tx(
     tx: &mut Transaction<'_, Sqlite>,
     creator_id: &str,
@@ -397,7 +396,7 @@ async fn record_idempotency_tx(
     Ok(())
 }
 
-/// Look up idempotency key inside an existing transaction.
+/// note: Look up idempotency key inside an existing transaction.
 /// Returns the `work_id` if found, `None` otherwise.
 async fn find_idempotency_key_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -415,7 +414,7 @@ async fn find_idempotency_key_tx(
     Ok(row.map(|(wid,)| wid))
 }
 
-/// Atomically create a Work with idempotency check and recording in a single transaction.
+/// note: Atomically create a Work with idempotency check and recording in a single transaction.
 ///
 /// Returns `Ok(Ok(existing_record))` if the `(creator_id, client_request_id)` mapping
 /// already exists (idempotent replay), or `Ok(Ok(new_record))` for fresh creation.
@@ -432,18 +431,15 @@ pub async fn create_work_atomic(
     let mut tx = pool.begin().await?;
 
     if let Some(crid) = client_request_id {
-        // Check idempotency table inside tx
         if let Some(existing_wid) =
             find_idempotency_key_tx(&mut tx, &record.creator_id, crid).await?
         {
-            // Idempotent replay — fetch the existing work and return it
             let existing = get_work(pool, &record.creator_id, &existing_wid).await?;
-            // We don't need the tx anymore (read-only path found existing)
+            // why: the replay path only reads, so the tx is dropped, not committed.
             tx.rollback().await?;
             return Ok(Ok(existing.unwrap_or_else(|| record.clone())));
         }
 
-        // Not found — create + record atomically
         insert_work_tx(&mut tx, record).await?;
         record_idempotency_tx(
             &mut tx,
@@ -454,14 +450,13 @@ pub async fn create_work_atomic(
         )
         .await?;
     } else {
-        // No idempotency key — just create
         insert_work_tx(&mut tx, record).await?;
     }
     tx.commit().await?;
     Ok(Err(record.clone()))
 }
 
-/// Find a Work by its idempotency key.
+/// note: Find a Work by its idempotency key.
 ///
 /// Returns `None` if no mapping exists for the given `(creator_id, client_request_id)`.
 ///
@@ -490,7 +485,7 @@ pub async fn find_work_by_client_request_id(
     get_work(pool, creator_id, &work_id).await
 }
 
-/// Get a single Work by ID.
+/// note: Get a single Work by ID.
 ///
 /// Returns `None` if the record doesn't exist or belongs to a different creator.
 ///
@@ -515,7 +510,7 @@ pub async fn get_work(
     Ok(row.as_ref().map(row_to_work_record))
 }
 
-/// List Works for a creator with optional filters.
+/// note: List Works for a creator with optional filters.
 ///
 /// Returns records ordered by `updated_at` descending (most recent first).
 ///
@@ -531,7 +526,7 @@ pub async fn list_works(
     list_works_inner(pool, creator_id, workspace_slug, filters).await
 }
 
-/// Count total Works matching the given filters (ignores limit/offset).
+/// note: Count total Works matching the given filters (ignores limit/offset).
 ///
 /// Used by the list handler to return the true total row count for
 /// pagination, independent of the page size.
@@ -548,7 +543,7 @@ pub async fn count_works(
     count_works_inner(pool, creator_id, workspace_slug, filters).await
 }
 
-/// List and count Works in a shared transaction for consistent pagination metadata.
+/// note: List and count Works in a shared transaction for consistent pagination metadata.
 ///
 /// Runs both `SELECT ... FROM works` and `SELECT COUNT(*) FROM works` inside a
 /// single `BEGIN IMMEDIATE` / `COMMIT` so that concurrent writes cannot cause the
@@ -576,8 +571,8 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     workspace_slug: &str,
     filters: &WorkListFilters,
 ) -> Result<Vec<WorkRecord>, LocalDbError> {
-    // F-F1 (V1.67): push validated sort terms into SQL. Keys are caller-
-    // validated column names; the whitelist below is defense-in-depth.
+    // why: sort keys are caller-validated column names; the whitelist below is
+    // defense-in-depth against a caller that skips that check.
     const ALLOWED_ORDER_COLUMNS: &[&str] =
         &["updated_at", "title", "status", "intake_status", "work_id"];
 
@@ -605,7 +600,7 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
             order_clauses.push(format!("{key} {dir}"));
         }
     }
-    // Deterministic tie-breaker when the query supplies no sort or equal keys.
+    // why: Deterministic tie-breaker when the query supplies no sort or equal keys.
     if order_clauses.is_empty() {
         order_clauses.push("updated_at DESC".to_string());
     }
@@ -677,7 +672,7 @@ async fn count_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     }
 
     let row = query.fetch_one(executor).await?;
-    // COUNT(*) returns non-negative; u32::try_from is safe for all practical row counts.
+    // why: COUNT(*) returns non-negative; u32::try_from is safe for all practical row counts.
     let count: i64 = row.get("cnt");
     Ok(u32::try_from(count).unwrap_or(0))
 }
@@ -776,7 +771,6 @@ pub async fn patch_work(
     }
 
     if set_clauses.is_empty() {
-        // Nothing to update — just return current record.
         return get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
             LocalDbError::MissingVersionKey {
                 key: format!("works/{work_id}"),
@@ -1025,7 +1019,7 @@ pub async fn patch_work_tx(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
 
-    // Bind parameters in the same order as set_clauses
+    // invariant: bind order matches the `set_clauses` order built above.
     if let Some(ref v) = patch.title {
         query = query.bind(v);
     }
@@ -1141,7 +1135,7 @@ pub async fn patch_work_tx(
     Ok(true)
 }
 
-/// Append an inspiration entry to a Work (atomic via transaction).
+/// note: Append an inspiration entry to a Work (atomic via transaction).
 ///
 /// Reads the current `inspiration_log`, appends the new entry in Rust,
 /// and writes back the full array inside a single transaction. This is
@@ -1179,7 +1173,6 @@ pub async fn append_inspiration(
                 key: format!("works/{work_id}"),
             })?;
 
-    // Append new entry in Rust
     let mut log: Vec<serde_json::Value> =
         serde_json::from_str(&current.inspiration_log).unwrap_or_default();
     let entry: serde_json::Value =
@@ -1201,16 +1194,13 @@ pub async fn append_inspiration(
 
     tx.commit().await?;
 
-    // Return updated record (derive from current + new log)
     let mut updated = current;
     updated.inspiration_log = new_log;
     updated.updated_at = now.to_string();
     Ok(updated)
 }
 
-// ── V1.34 FL-E stage functions ──────────────────────────────────────────────
-
-/// Update the FL-E stage and status on a Work (V1.34).
+/// note: Update the FL-E stage and status on a Work (V1.34).
 ///
 /// Returns the updated `WorkRecord`.
 ///
@@ -1245,7 +1235,7 @@ pub async fn update_work_stage(
         })
 }
 
-/// Get the FL-E stage info for a Work (V1.34).
+/// note: Get the FL-E stage info for a Work (V1.34).
 ///
 /// Returns `(current_stage, stage_status)` or `None` if the work doesn't exist.
 ///
@@ -1337,7 +1327,8 @@ pub async fn advance_work_stage_atomic(
         key: format!("works/{work_id}"),
     })?;
 
-    // Step 2: Check no active FL-E schedule exists (TOCTOU-safe)
+    // note: step 2 rejects a second active FL-E stage inside the transaction,
+    // which keeps the check TOCTOU-safe.
     if current.stage_status == "active" && target_status == "active" {
         return Err(LocalDbError::ConstraintViolation {
             table: "works".to_string(),
@@ -1363,10 +1354,8 @@ pub async fn advance_work_stage_atomic(
     .execute(&mut *tx)
     .await?;
 
-    // Step 4: COMMIT
     tx.commit().await?;
 
-    // Fetch the updated record for return
     get_work(pool, creator_id, work_id)
         .await?
         .ok_or_else(|| LocalDbError::MissingVersionKey {
@@ -1374,24 +1363,22 @@ pub async fn advance_work_stage_atomic(
         })
 }
 
-// ── V1.50 T-A P0 (T1): per-Work cron schedule_json DAO ────────────────────
-
-/// Row for the cron `list` surface — (`work_ref`, `work_id`, `schedule_json`).
+/// note: Row for the cron `list` surface — (`work_ref`, `work_id`, `schedule_json`).
 ///
 /// `work_ref` is `None` when the Work has no human slug set (V1.36 §2.1);
 /// callers fall back to `work_id` for display. `schedule_json` is `None`
 /// when the column is NULL or empty (= use defaults; spec §2.3).
 #[derive(Debug, Clone)]
 pub struct WorkScheduleRow {
-    /// Human slug for the Work (`Works/<work_ref>/`).
+    /// note: Human slug for the Work (`Works/<work_ref>/`).
     pub work_ref: Option<String>,
-    /// Primary key (`wrk_...`).
+    /// note: Primary key (`wrk_...`).
     pub work_id: String,
-    /// Raw `schedule_json` text (NULL or empty = use defaults).
+    /// note: Raw `schedule_json` text (NULL or empty = use defaults).
     pub schedule_json: Option<String>,
 }
 
-/// Persist the per-Work cron configuration JSON (V1.50 §2.1).
+/// note: Persist the per-Work cron configuration JSON (V1.50 §2.1).
 ///
 /// Writes the full `schedule_json` blob for a Work. Pass an empty string to
 /// reset to defaults (spec §2.3). Keys by `work_id` (primary key) so callers
@@ -1426,7 +1413,7 @@ pub async fn set_schedule_json(
     Ok(())
 }
 
-/// Read the per-Work cron configuration JSON (V1.50 §2.1).
+/// note: Read the per-Work cron configuration JSON (V1.50 §2.1).
 ///
 /// Returns `None` when the Work does not exist OR the column is NULL/empty
 /// (both mean "use defaults"; spec §2.3). Returns `Some(json)` only when a
@@ -1447,11 +1434,11 @@ pub async fn get_schedule_json(
             .fetch_optional(pool)
             .await?;
 
-    // None → work missing OR column NULL/empty → use defaults.
+    // note: None → work missing OR column NULL/empty → use defaults.
     Ok(row.and_then(|(opt,)| opt).filter(|s| !s.is_empty()))
 }
 
-/// Resolve a `<work_ref>` OR `<work_id>` positional to a concrete `work_id`.
+/// note: Resolve a `<work_ref>` OR `<work_id>` positional to a concrete `work_id`.
 ///
 /// The cron CLI surface accepts either the human slug (`work_ref`) or the
 /// primary key (`wrk_...`). This helper matches `work_ref` first, then
@@ -1495,7 +1482,7 @@ pub async fn resolve_work_id_by_ref_or_id(
     Ok(row.map(|(wid,)| wid))
 }
 
-/// List all Works in the active workspace with their cron config (V1.50 §3.3).
+/// note: List all Works in the active workspace with their cron config (V1.50 §3.3).
 ///
 /// Used by `creator works cron list`. Returns one [`WorkScheduleRow`] per Work,
 /// ordered by `updated_at` descending (consistent with [`list_works`]).
@@ -1538,9 +1525,7 @@ pub async fn list_works_schedule(
         .collect())
 }
 
-// ── V1.50 T-A P1: daemon-side cron evaluator DAOs ─────────────────────────
-
-/// Row for the daemon cron evaluator scan ([`list_works_with_schedule_json`]).
+/// note: Row for the daemon cron evaluator scan ([`list_works_with_schedule_json`]).
 ///
 /// Minimal column set needed to (a) read the per-Work cron config and (b)
 /// apply the per-Work gating rules (spec `cron-staggering.md` §4.3).
@@ -1549,23 +1534,23 @@ pub async fn list_works_schedule(
 /// evaluator can enqueue schedules scoped to the right creator.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct WorkCronRow {
-    /// Primary key (`wrk_...`).
+    /// note: Primary key (`wrk_...`).
     pub work_id: String,
-    /// Owning creator — the enqueued schedule's `creator_id`.
+    /// note: Owning creator — the enqueued schedule's `creator_id`.
     pub creator_id: String,
-    /// Human slug (`Works/<work_ref>/`); `None` when unset.
+    /// note: Human slug (`Works/<work_ref>/`); `None` when unset.
     pub work_ref: Option<String>,
-    /// Raw `schedule_json` blob (always non-empty for returned rows).
+    /// note: Raw `schedule_json` blob (always non-empty for returned rows).
     pub schedule_json: String,
-    /// `works.intake_status` — gate: cron fires only when `== "complete"`.
+    /// note: `works.intake_status` — gate: cron fires only when `== "complete"`.
     pub intake_status: String,
-    /// `works.runtime_lock_holder` — gate: cron skips when `Some`.
+    /// note: `works.runtime_lock_holder` — gate: cron skips when `Some`.
     pub runtime_lock_holder: Option<String>,
-    /// `works.completion_locked_at` — gate: cron skips when `Some`.
+    /// note: `works.completion_locked_at` — gate: cron skips when `Some`.
     pub completion_locked_at: Option<String>,
 }
 
-/// Scan all Works with a non-empty `schedule_json` (V1.50 §4.1).
+/// note: Scan all Works with a non-empty `schedule_json` (V1.50 §4.1).
 ///
 /// This is the daemon cron evaluator's read path. It runs on a 1-min tick, so
 /// the query is backed by the partial index
@@ -1593,7 +1578,7 @@ pub async fn list_works_with_schedule_json(
     Ok(rows)
 }
 
-/// Transactional compare-and-swap write for `works.schedule_json`
+/// note: Transactional compare-and-swap write for `works.schedule_json`
 /// (R-V150P0-W5 — TOCTOU-safe variant).
 ///
 /// Updates `schedule_json` to `new_json` **only if** the current stored value
@@ -1628,7 +1613,7 @@ pub async fn set_schedule_json_tx(
     new_json: &str,
     now: &str,
 ) -> Result<bool, LocalDbError> {
-    // Normalize the expected value: NULL and "" are both "unset" (spec §2.3),
+    // why: Normalize the expected value: NULL and "" are both "unset" (spec §2.3),
     // so the CAS treats them as equal. COALESCE collapses NULL → '' for the
     // comparison. The bound `expected` is also normalized to '' by the caller.
     let expected_normalized = expected_current_json.unwrap_or("");
@@ -1650,7 +1635,7 @@ pub async fn set_schedule_json_tx(
 
     let rows_affected = result.rows_affected();
     if rows_affected == 0 {
-        // Distinguish "Work missing" from "CAS mismatch" so callers can retry
+        // why: Distinguish "Work missing" from "CAS mismatch" so callers can retry
         // vs. surface a not-found error. A missing Work row matches neither the
         // PK nor the CAS; a CAS mismatch matches the PK but not the expected
         // value. Re-read to disambiguate.
@@ -1669,9 +1654,7 @@ pub async fn set_schedule_json_tx(
     Ok(true)
 }
 
-// ── V1.50 T-A P3 (T1): per-Work auto-chronology opt-in DAOs ──────────────
-
-/// Persist the per-Work auto-chronology opt-in flag (V1.50 §2.1).
+/// note: Persist the per-Work auto-chronology opt-in flag (V1.50 §2.1).
 ///
 /// Keys by `work_id` (primary key) so callers must resolve `work_ref` →
 /// `work_id` first via [`resolve_work_id_by_ref_or_id`]. When `enabled` is
@@ -1705,7 +1688,7 @@ pub async fn set_auto_chronology(
     Ok(())
 }
 
-/// Read the per-Work auto-chronology opt-in flag (V1.50 §2.1).
+/// note: Read the per-Work auto-chronology opt-in flag (V1.50 §2.1).
 ///
 /// Returns `false` when the Work does not exist OR the column is unset (both
 /// mean "not opted in"; the column default is `0`/false).
@@ -1723,7 +1706,7 @@ pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<boo
     Ok(row.unwrap_or(false))
 }
 
-/// Row for the daemon auto-chronology scan
+/// note: Row for the daemon auto-chronology scan
 /// ([`list_works_with_auto_chronology`]).
 ///
 /// Minimal column set needed to run finish detection (spec §3), locate the
@@ -1732,31 +1715,31 @@ pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<boo
 /// lean-scan precedent of [`WorkCronRow`] (V1.50 T-A P1).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct WorkAutoChronologyRow {
-    /// Primary key (`wrk_...`).
+    /// note: Primary key (`wrk_...`).
     pub work_id: String,
-    /// Owning creator — informational; the advance operates per `work_id`.
+    /// note: Owning creator — informational; the advance operates per `work_id`.
     pub creator_id: String,
-    /// Human slug (`Works/<work_ref>/`); `None` when unset.
+    /// note: Human slug (`Works/<work_ref>/`); `None` when unset.
     pub work_ref: Option<String>,
-    /// `works.intake_status` — gate: advance only when `== "complete"`.
+    /// note: `works.intake_status` — gate: advance only when `== "complete"`.
     pub intake_status: String,
-    /// `works.runtime_lock_holder` — gate: skip when `Some`.
+    /// note: `works.runtime_lock_holder` — gate: skip when `Some`.
     pub runtime_lock_holder: Option<String>,
-    /// `works.completion_locked_at` — gate: skip when `Some` (Work fully
+    /// note: `works.completion_locked_at` — gate: skip when `Some` (Work fully
     /// complete). This also serves as the "last planned volume" terminal guard
     /// (spec §3.1): there is no `total_planned_volumes` column, so a Work with
     /// no further volumes is expected to be completion-locked by the author.
     pub completion_locked_at: Option<String>,
-    /// `works.title` — substituted into the outline template header (spec §4.1
+    /// note: `works.title` — substituted into the outline template header (spec §4.1
     /// step 3). Always non-NULL (`title` is a required column on `works`).
     pub title: String,
-    /// `works.total_planned_chapters` — substituted into the outline template
+    /// note: `works.total_planned_chapters` — substituted into the outline template
     /// (spec §4.1 step 3). `None` when the author has not set it (renders as
     /// `(unset)`).
     pub total_planned_chapters: Option<i32>,
 }
 
-/// Scan all Works with `auto_chronology = true` (V1.50 §4.1).
+/// note: Scan all Works with `auto_chronology = true` (V1.50 §4.1).
 ///
 /// This is the daemon auto-chronology tick's read path. Returns only the
 /// gating + locator columns the evaluator needs — not the full
@@ -1788,13 +1771,13 @@ pub async fn list_works_with_auto_chronology(
     Ok(rows)
 }
 
-/// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
+/// note: Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 
-/// Returns the index of a stage in the FL-E linear order — re-exported from `nexus_contracts`.
+/// note: Returns the index of a stage in the FL-E linear order — re-exported from `nexus_contracts`.
 pub use nexus_contracts::local::orchestration::stage_index;
 
-/// Shared test helper — creates a minimal [`WorkRecord`] for unit tests.
+/// note: Shared test helper — creates a minimal [`WorkRecord`] for unit tests.
 #[cfg(test)]
 #[must_use]
 pub(crate) fn sample_work_for_test(work_id: &str) -> WorkRecord {
@@ -1887,7 +1870,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(list.len(), 2);
-        // Ordered by updated_at DESC
         assert_eq!(list[0].work_id, "wrk_003");
         assert_eq!(list[1].work_id, "wrk_001");
     }
@@ -2050,8 +2032,6 @@ mod tests {
         assert!(updated.world_id.is_none());
     }
 
-    // ── V1.34 FL-E stage tests ──────────────────────────────────────────
-
     #[tokio::test]
     async fn test_new_work_has_default_stage() {
         let (_dir, pool) = fresh_engine_pool().await;
@@ -2141,23 +2121,21 @@ mod tests {
 
     #[test]
     fn test_strict_linear_advance_no_skip_without_force() {
-        // R-FL-E-03: validate that stage_index enforces linear order.
+        // note: R-FL-E-03: validate that stage_index enforces linear order.
         // intake (0) → research (1) is valid; intake → produce (2) is a skip.
         let intake_idx = stage_index("intake").unwrap();
         let research_idx = stage_index("research").unwrap();
         let produce_idx = stage_index("produce").unwrap();
 
-        // Valid advance: intake → research (adjacent)
         assert_eq!(research_idx, intake_idx + 1);
 
-        // Invalid skip: intake → produce (not adjacent)
         assert_ne!(produce_idx, intake_idx + 1);
         assert!(produce_idx > intake_idx + 1);
     }
 
     #[tokio::test]
     async fn test_has_active_fl_e_schedule_false_for_new_work() {
-        // R-FL-E-01: new work has stage_status='pending', not active
+        // note: R-FL-E-01: new work has stage_status='pending', not active
         let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_active_001");
         create_work(&pool, &record).await.unwrap();
@@ -2170,12 +2148,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_active_fl_e_schedule_true_after_advance() {
-        // R-FL-E-01: after stage advance (stage_status='active'), should report active
+        // note: R-FL-E-01: after stage advance (stage_status='active'), should report active
         let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_active_002");
         create_work(&pool, &record).await.unwrap();
 
-        // Simulate advance: set stage_status='active'
         update_work_stage(
             &pool,
             "ctr_test",
@@ -2198,14 +2175,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_reject_double_active_schedule() {
-        // R-FL-E-01 regression: advancing from an active stage to another should
+        // why: R-FL-E-01 regression: advancing from an active stage to another should
         // fail at the CLI level. This test validates the DB helper returns the
         // correct state for the CLI to check.
         let (_dir, pool) = fresh_engine_pool().await;
         let record = sample_work("wrk_active_003");
         create_work(&pool, &record).await.unwrap();
 
-        // Advance to research (active)
         update_work_stage(
             &pool,
             "ctr_test",
@@ -2217,14 +2193,12 @@ mod tests {
         .await
         .unwrap();
 
-        // The DB helper should report active — CLI would check this before
-        // allowing another advance
+        // why: the CLI checks the active flag before allowing another advance.
         let has_active = has_active_fl_e_schedule(&pool, "ctr_test", "wrk_active_003")
             .await
             .unwrap();
         assert!(has_active, "should detect existing active schedule");
 
-        // Complete the stage
         update_work_stage(
             &pool,
             "ctr_test",
@@ -2270,14 +2244,13 @@ mod tests {
         assert_eq!(updated.stage_status, "active");
     }
 
-    /// Fix E (W-E): Verify the partial index for auto-chain boot resume exists
+    /// note: Fix E (W-E): Verify the partial index for auto-chain boot resume exists
     /// after migration. The index covers (`auto_chain_enabled`, `auto_chain_interrupted`,
     /// status) with a partial WHERE clause for `auto_chain_enabled` = 1.
     #[tokio::test]
     async fn test_auto_chain_resume_index_exists() {
         let (_dir, pool) = fresh_engine_pool().await;
 
-        // Query sqlite_master to verify the index was created by the migration.
         let index_sql: Option<String> = sqlx::query_scalar(
             "SELECT sql FROM sqlite_master \
              WHERE type = 'index' AND name = 'works_auto_chain_resume'",
@@ -2304,8 +2277,6 @@ mod tests {
         assert!(sql.contains("status"), "index should cover status: {sql}");
     }
 
-    // ── Profile detection helpers (V1.54 P1) ───────────────────────
-
     #[test]
     fn is_novel_profile_true_for_novel() {
         assert!(super::is_novel_profile(Some("novel")));
@@ -2324,7 +2295,7 @@ mod tests {
 
     #[test]
     fn profile_helpers_are_mutually_exclusive() {
-        // No profile string should match both helpers simultaneously.
+        // invariant: No profile string should match both helpers simultaneously.
         let profiles = [
             Some("novel"),
             Some("essay"),

@@ -6,12 +6,14 @@
 //! optionally a chapter), carries a `kind`, severity, status lifecycle,
 //! optional `rule_suggestion`, and a routing hint (`target_executor`)
 //! indicating which preset should address it.
+// note: status strings are gated by `is_valid_status`/`is_valid_transition`;
+// enum fields by `validate_finding_enums` before any DB call.
 
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
-/// Finding record — mirrors DB row.
+/// note: Finding record — mirrors DB row.
 ///
 /// V1.48 P1: derives `Deserialize` so the CLI can round-trip finding rows
 /// fetched from the Daemon API (`GET /v1/daemon/works/{id}/findings`)
@@ -20,52 +22,52 @@ use crate::error::LocalDbError;
 /// without a parallel DTO struct.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Finding {
-    /// Unique identifier (ULID).
+    /// note: Unique identifier (ULID).
     pub finding_id: String,
-    /// Owning Work.
+    /// note: Owning Work.
     pub work_id: String,
-    /// Optional chapter binding (NULL = Work-level).
+    /// note: Optional chapter binding (NULL = Work-level).
     pub chapter: Option<i64>,
-    /// Severity: `info`, `minor`, `major`, `blocker`.
+    /// note: Severity: `info`, `minor`, `major`, `blocker`.
     pub severity: String,
-    /// Status: `open`, `resolved`, `wont_fix`.
+    /// note: Status: `open`, `resolved`, `wont_fix`.
     pub status: String,
-    /// Short human-readable label.
+    /// note: Short human-readable label.
     pub title: String,
-    /// Detailed finding body.
+    /// note: Detailed finding body.
     pub description: String,
-    /// Routing hint: `write`, `brainstorm`, `none`, `master`.
+    /// note: Routing hint: `write`, `brainstorm`, `none`, `master`.
     pub target_executor: String,
-    /// Owning creator (isolation).
+    /// note: Owning creator (isolation).
     pub creator_id: String,
-    /// V1.47: finding category (`continuity`, `craft`, `plot_hole`,
+    /// note: V1.47: finding category (`continuity`, `craft`, `plot_hole`,
     /// `world_inconsistency`, …). NOT NULL with default `'craft'`.
     pub kind: String,
-    /// V1.47: optional prose suggestion for Layer 2 rules; persisted on the
+    /// note: V1.47: optional prose suggestion for Layer 2 rules; persisted on the
     /// finding row only (no `AGENTS.md` write in P0).
     pub rule_suggestion: Option<String>,
-    /// Creation timestamp (Unix epoch).
+    /// note: Creation timestamp (Unix epoch).
     pub created_at: i64,
-    /// Last update timestamp (Unix epoch).
+    /// note: Last update timestamp (Unix epoch).
     pub updated_at: i64,
 }
 
-/// Fields that can be patched on a Finding.
+/// note: Fields that can be patched on a Finding.
 #[derive(Debug, Clone, Default)]
 pub struct FindingPatch {
-    /// New severity.
+    /// note: New severity.
     pub severity: Option<String>,
-    /// New status.
+    /// note: New status.
     pub status: Option<String>,
-    /// New title.
+    /// note: New title.
     pub title: Option<String>,
-    /// New description.
+    /// note: New description.
     pub description: Option<String>,
-    /// New routing hint.
+    /// note: New routing hint.
     pub target_executor: Option<String>,
-    /// V1.47: new `kind` (optional).
+    /// note: V1.47: new `kind` (optional).
     pub kind: Option<String>,
-    /// V1.48 P3 T3 — tri-state `rule_suggestion` patch.
+    /// note: V1.48 P3 T3 — tri-state `rule_suggestion` patch.
     ///
     /// - `None` → omit (do not touch the column).
     /// - `Some(Some(value))` → set `rule_suggestion` to `value`.
@@ -77,14 +79,14 @@ pub struct FindingPatch {
     pub rule_suggestion: Option<Option<String>>,
 }
 
-/// Filters for listing findings.
+/// note: Filters for listing findings.
 #[derive(Debug, Clone, Default)]
 pub struct FindingListFilters {
-    /// Filter by `work_id`.
+    /// note: Filter by `work_id`.
     pub work_id: Option<String>,
-    /// Filter by `chapter`.
+    /// note: Filter by `chapter`.
     pub chapter: Option<i64>,
-    /// Filter by `status`. Accepts either a single status (e.g. `"open"`)
+    /// note: Filter by `status`. Accepts either a single status (e.g. `"open"`)
     /// or a comma-separated list (e.g. `"open,triaged"`) — V1.50
     /// (R-V149P0-01): the produce-prompt consumer asks for the V1.49
     /// **actionable set** `{ open, triaged }`; the Daemon API surfaces this
@@ -92,18 +94,18 @@ pub struct FindingListFilters {
     /// member of [`VALID_STATUSES`]; unknown tokens surface as
     /// [`LocalDbError::InvalidEnum`].
     pub status: Option<String>,
-    /// Filter by `severity`.
+    /// note: Filter by `severity`.
     pub severity: Option<String>,
-    /// Maximum number of results.
+    /// note: Maximum number of results.
     pub limit: Option<u32>,
-    /// Pagination offset.
+    /// note: Pagination offset.
     pub offset: Option<u32>,
 }
 
-/// Valid severity values (R-V139P1-W-1).
+/// note: Valid severity values (R-V139P1-W-1).
 pub const VALID_SEVERITIES: &[&str] = &["info", "minor", "major", "blocker"];
 
-/// Valid status values.
+/// note: Valid status values.
 ///
 /// V1.39 (R-V139P1-W-1): original three-state minimum (`open`, `resolved`,
 /// `wont_fix`).
@@ -122,7 +124,7 @@ pub const VALID_STATUSES: &[&str] = &[
     "duplicate",
 ];
 
-/// V1.49 F6 — status strings considered **actionable** for the prompt
+/// note: V1.49 F6 — status strings considered **actionable** for the prompt
 /// consumer ([`list_open_findings_for_chapter`] / `open_findings_block`).
 ///
 /// Implements `findings-lifecycle.md` §2.2: findings with status in
@@ -143,7 +145,7 @@ pub fn is_valid_status(status: &str) -> bool {
     VALID_STATUSES.contains(&status)
 }
 
-/// V1.49 F6 — Returns `true` when transitioning `from` → `to` is permitted
+/// note: V1.49 F6 — Returns `true` when transitioning `from` → `to` is permitted
 /// by the lifecycle diagram in `findings-lifecycle.md` §2.1.
 ///
 /// ```text
@@ -180,7 +182,7 @@ pub fn is_valid_transition(from: &str, to: &str) -> bool {
         ),
         "triaged" => matches!(to, "in_review" | "resolved" | "wont_fix" | "duplicate"),
         "in_review" => matches!(to, "resolved" | "wont_fix" | "duplicate"),
-        // Terminal states and (unreachable) unknowns both reject every
+        // why: Terminal states and (unreachable) unknowns both reject every
         // outbound transition. `is_valid_status` already filtered the
         // unknown `from` case above, so this arm is only reached for the
         // three terminal statuses.
@@ -188,10 +190,10 @@ pub fn is_valid_transition(from: &str, to: &str) -> bool {
     }
 }
 
-/// Valid `target_executor` values (R-V139P1-W-1).
+/// note: Valid `target_executor` values (R-V139P1-W-1).
 pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
 
-/// V1.48 P3 T0 — default retention window for resolved findings (days).
+/// note: V1.48 P3 T0 — default retention window for resolved findings (days).
 ///
 /// Findings with `status = 'resolved'` whose `updated_at` is older than this
 /// many days are eligible for pruning by [`prune_resolved_findings_older_than`].
@@ -210,7 +212,7 @@ pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "ma
 /// P-last merge.
 pub const RETENTION_DEFAULT_DAYS: i64 = 90;
 
-/// V1.47 §2.1 / §8.2: suggested minimum `kind` vocabulary for findings.
+/// note: V1.47 §2.1 / §8.2: suggested minimum `kind` vocabulary for findings.
 ///
 /// Open vocabulary — callers MAY use other kind strings; this list is the
 /// suggested minimum enumerated in the spec. Validation does **not** reject
@@ -232,26 +234,26 @@ pub const SUGGESTED_FINDING_KINDS: &[&str] =
 /// `review-report.md` parser emits them and the DB layer must accept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingKind {
-    /// Craft-level writing issue (prose, dialogue, imagery).
+    /// note: Craft-level writing issue (prose, dialogue, imagery).
     Craft,
-    /// Continuity / consistency across chapters or scenes.
+    /// note: Continuity / consistency across chapters or scenes.
     Continuity,
-    /// Pacing or structural rhythm issue.
+    /// note: Pacing or structural rhythm issue.
     Pacing,
-    /// Internal consistency within a chapter or passage.
+    /// note: Internal consistency within a chapter or passage.
     Consistency,
-    /// Catch-all for review findings that don't fit the above.
+    /// note: Catch-all for review findings that don't fit the above.
     Other,
-    /// Plot-level issue (introduced-then-dropped thread, contradiction).
+    /// note: Plot-level issue (introduced-then-dropped thread, contradiction).
     /// V1.48 P0: added per `novel-writing/quality-loop.md` §2.1.
     PlotHole,
-    /// World-building inconsistency (timeline, geography, lore).
+    /// note: World-building inconsistency (timeline, geography, lore).
     /// V1.48 P0: added per `novel-writing/quality-loop.md` §2.1.
     WorldInconsistency,
 }
 
 impl FindingKind {
-    /// All valid string representations, in canonical order.
+    /// note: All valid string representations, in canonical order.
     pub const ALL_STRS: &'static [&'static str] = &[
         "craft",
         "continuity",
@@ -262,7 +264,7 @@ impl FindingKind {
         "world_inconsistency",
     ];
 
-    /// Returns the canonical string for this variant.
+    /// note: Returns the canonical string for this variant.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -276,7 +278,7 @@ impl FindingKind {
         }
     }
 
-    /// Validate a `kind` string against the closed set.
+    /// note: Validate a `kind` string against the closed set.
     ///
     /// Returns the validated string on success, or
     /// [`LocalDbError::ConstraintViolation`] if the value is not in
@@ -300,7 +302,7 @@ impl FindingKind {
     }
 }
 
-/// R-V139P1-W-2: Single source of truth for finding ID generation.
+/// note: R-V139P1-W-2: Single source of truth for finding ID generation.
 ///
 /// All callers (handler direct-create, from-review hook) must use this
 /// function instead of inline `format!("fnd_{}", ...)`.
@@ -309,7 +311,7 @@ pub fn mint_finding_id() -> String {
     format!("fnd_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// V1.47 P0 fix (qc2 W-2): validate and normalize `rule_suggestion` text.
+/// note: V1.47 P0 fix (qc2 W-2): validate and normalize `rule_suggestion` text.
 ///
 /// - `None` → `Ok(None)` (no patch).
 /// - `Some(s)` → trim leading/trailing whitespace, then:
@@ -354,13 +356,13 @@ pub fn normalize_rule_suggestion(s: Option<&str>) -> Result<Option<String>, Loca
     Ok(Some(trimmed.to_string()))
 }
 
-/// V1.47 P0 fix (qc2 W-2): maximum accepted byte length for `rule_suggestion` text (4 KiB).
+/// note: V1.47 P0 fix (qc2 W-2): maximum accepted byte length for `rule_suggestion` text (4 KiB).
 ///
 /// Longer inputs are **rejected** (not truncated) by [`normalize_rule_suggestion`]
 /// to surface upstream bugs rather than silently dropping content.
 pub const RULE_SUGGESTION_MAX_BYTES: usize = 4096;
 
-/// Validate finding enum fields. Returns [`LocalDbError::ConstraintViolation`] on invalid values.
+/// note: Validate finding enum fields. Returns [`LocalDbError::ConstraintViolation`] on invalid values.
 ///
 /// R-V139P1-W-1: Runtime validation is the **sole enforcement mechanism** for
 /// finding enum fields. `SQLite` does not support `ALTER TABLE ADD CONSTRAINT`
@@ -414,7 +416,7 @@ pub fn validate_finding_enums(
     Ok(())
 }
 
-/// Create a new finding.
+/// note: Create a new finding.
 ///
 /// # Errors
 ///
@@ -443,7 +445,7 @@ pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalD
     Ok(())
 }
 
-/// List findings with optional filters, scoped to a creator.
+/// note: List findings with optional filters, scoped to a creator.
 ///
 /// R-V139P1-W-4: EXPLAIN QUERY PLAN audit result for the primary query:
 ///   `SEARCH` findings USING INDEX `idx_findings_creator_status` (`creator_id`=? AND `status`=?)
@@ -471,7 +473,7 @@ pub async fn list_findings(
     let limit = filters.limit.unwrap_or(100);
     let offset = filters.offset.unwrap_or(0);
 
-    // R-V149P0-01: dispatch on the comma-separated status shape. Use a
+    // why: R-V149P0-01: dispatch on the comma-separated status shape. Use a
     // match-guard rather than `if let … && …` so we hand the matched
     // status string straight to the helper without a follow-up `.expect`.
     match filters.status.as_ref() {
@@ -532,7 +534,7 @@ pub async fn list_findings(
         .collect())
 }
 
-/// R-V149P0-01 companion: list findings filtered by a comma-separated set
+/// note: R-V149P0-01 companion: list findings filtered by a comma-separated set
 /// of statuses (e.g. `"open,triaged"`).
 ///
 /// Each token is validated against [`VALID_STATUSES`]; an unknown token
@@ -562,7 +564,7 @@ async fn list_findings_with_status_set(
         statuses.push(trimmed.to_string());
     }
     if statuses.is_empty() {
-        // Edge case: `?status=,` or `?status=,,` — treat as no filter so
+        // note: Edge case: `?status=,` or `?status=,,` — treat as no filter so
         // the caller gets the unfiltered list rather than a confusing
         // empty page. The other filters (work_id / chapter / severity)
         // still apply via the no-status branch below.
@@ -612,7 +614,7 @@ async fn list_findings_with_status_set(
     Ok(rows.into_iter().map(Finding::from).collect())
 }
 
-/// R-V149P0-01 helper: unfiltered-by-status fallback for the
+/// note: R-V149P0-01 helper: unfiltered-by-status fallback for the
 /// `?status=,` edge case (no usable tokens after trim). Mirrors the
 /// single-status branch minus the status predicate.
 async fn list_findings_unfiltered(
@@ -662,7 +664,7 @@ fn offset_u32(v: Option<u32>) -> u32 {
     v.unwrap_or(0)
 }
 
-/// Internal row shape mirroring the `findings` SELECT projection; used by
+/// note: Internal row shape mirroring the `findings` SELECT projection; used by
 /// the runtime-SQL paths (`list_findings_with_status_set`,
 /// `list_findings_unfiltered`) so the `From` impl below stays the single
 /// mapping site.
@@ -703,7 +705,7 @@ impl From<FindingRow> for Finding {
     }
 }
 
-/// V1.48 P1 — chapter-scoped **actionable** findings query for
+/// note: V1.48 P1 — chapter-scoped **actionable** findings query for
 /// `novel-writing` prompt injection (`findings-lifecycle.md` §2 Consumer).
 ///
 /// V1.49 F6: the actionable set expanded from `status = 'open'` to
@@ -791,7 +793,7 @@ pub async fn list_open_findings_for_chapter(
         .collect())
 }
 
-/// Get a single finding by ID, scoped to a creator.
+/// note: Get a single finding by ID, scoped to a creator.
 ///
 /// # Errors
 ///
@@ -834,7 +836,7 @@ pub async fn get_finding(
     }))
 }
 
-/// V1.49 F6 — read the current status and reject illegal transitions
+/// note: V1.49 F6 — read the current status and reject illegal transitions
 /// before the caller writes the new value.
 ///
 /// Returns:
@@ -877,7 +879,7 @@ async fn enforce_status_transition(
             .await?;
 
     let Some(from) = current_status else {
-        // Row not found — fall through to the UPDATE, which will report
+        // why: Row not found — fall through to the UPDATE, which will report
         // `rows_affected = 0` and the caller surfaces NotFound.
         return Ok(());
     };
@@ -885,7 +887,7 @@ async fn enforce_status_transition(
     if is_valid_transition(&from, new_status) {
         Ok(())
     } else {
-        // V1.49 P0 W-1: typed variant so the PATCH handler maps this to
+        // why: V1.49 P0 W-1: typed variant so the PATCH handler maps this to
         // `INVALID_TRANSITION` without string-prefix sniffing.
         Err(LocalDbError::IllegalTransition {
             from,
@@ -894,7 +896,7 @@ async fn enforce_status_transition(
     }
 }
 
-/// Update (patch) a finding, scoped to a creator.
+/// note: Update (patch) a finding, scoped to a creator.
 ///
 /// Only non-`None` fields in `patch` are applied. `updated_at` is always
 /// set to `now_epoch`.
@@ -931,7 +933,7 @@ pub async fn update_finding(
     patch: &FindingPatch,
     now_epoch: i64,
 ) -> Result<bool, LocalDbError> {
-    // R-V139P1-W-1: validate patch enum fields if provided.
+    // why: R-V139P1-W-1: validate patch enum fields if provided.
     // V1.49 P0 W-1: PATCH-path enum failures emit the typed `InvalidEnum`
     // variant (mapped to `INVALID_INPUT` by the handler) so they are
     // distinguishable from illegal transitions (`INVALID_TRANSITION`). The
@@ -965,7 +967,7 @@ pub async fn update_finding(
         }
     }
 
-    // V1.49 F6: enforce the lifecycle transition table. When the caller
+    // why: V1.49 F6: enforce the lifecycle transition table. When the caller
     // patches `status`, fetch the row's current status and reject illegal
     // transitions (e.g. resolved → open, terminal → anything) before any
     // write. The DAO already validates that the target string is a known
@@ -975,7 +977,7 @@ pub async fn update_finding(
         enforce_status_transition(pool, creator_id, finding_id, new_status).await?;
     }
 
-    // Build the SET clause dynamically so `rule_suggestion = ?` is only
+    // why: Build the SET clause dynamically so `rule_suggestion = ?` is only
     // included when the caller explicitly wants to touch the column.
     // This lets `Some(None)` bind SQL NULL (clear) rather than COALESCE
     // back to the existing value.
@@ -1029,7 +1031,7 @@ pub async fn update_finding(
     if let Some(ref v) = patch.kind {
         q = q.bind(v);
     }
-    // rule_suggestion is Option<Option<String>> — the if-guard unwraps the
+    // why: rule_suggestion is Option<Option<String>> — the if-guard unwraps the
     // outer Option; the inner &Option<String> binds directly (None → NULL).
     if let Some(ref v) = patch.rule_suggestion {
         q = q.bind(v);
@@ -1041,7 +1043,7 @@ pub async fn update_finding(
     Ok(result.rows_affected() > 0)
 }
 
-/// Delete a finding, scoped to a creator.
+/// note: Delete a finding, scoped to a creator.
 ///
 /// # Errors
 ///
@@ -1061,7 +1063,7 @@ pub async fn delete_finding(
     Ok(result.rows_affected() > 0)
 }
 
-/// V1.48 P3 T2 — purge resolved findings older than the retention window.
+/// note: V1.48 P3 T2 — purge resolved findings older than the retention window.
 ///
 /// Deletes every finding row with `status = 'resolved'` AND
 /// `updated_at < (now_epoch - retention_seconds)`. Returns the number of
@@ -1106,7 +1108,7 @@ pub async fn prune_resolved_findings_older_than(
     Ok(u32::try_from(result.rows_affected()).unwrap_or(u32::MAX))
 }
 
-/// Count `resolved` findings older than `retention_seconds` without deleting.
+/// note: Count `resolved` findings older than `retention_seconds` without deleting.
 ///
 /// The read-only counterpart of [`prune_resolved_findings_older_than`], used
 /// by the `creator works findings prune --dry-run` preview (V1.49 P3,
@@ -1140,23 +1142,23 @@ pub async fn count_resolved_findings_older_than(
     Ok(count)
 }
 
-/// Severity count row — used by `count_open_findings_by_severity`.
+/// note: Severity count row — used by `count_open_findings_by_severity`.
 #[derive(Debug, Clone)]
 pub struct SeverityCount {
-    /// Severity level.
+    /// note: Severity level.
     pub severity: String,
-    /// Number of open findings with this severity.
+    /// note: Number of open findings with this severity.
     pub count: i64,
 }
 
-/// R-V139P1-W-5: internal row for compile-time `query_as!`.
+/// note: R-V139P1-W-5: internal row for compile-time `query_as!`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SeverityCountRow {
     severity: String,
     count: i64,
 }
 
-/// Summary of a single stale finding — used by the master-decision timeout
+/// note: Summary of a single stale finding — used by the master-decision timeout
 /// daemon task (V1.39 P4, novel-quality-loop §6).
 ///
 /// "Stale" means `status = 'open'` and `created_at < now - threshold_seconds`,
@@ -1165,21 +1167,21 @@ struct SeverityCountRow {
 /// daemon task allocation light.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StaleFindingSummary {
-    /// Finding identifier.
+    /// note: Finding identifier.
     pub finding_id: String,
-    /// Owning Work.
+    /// note: Owning Work.
     pub work_id: String,
-    /// Owning creator (used to scope the banner and optional auto-schedule).
+    /// note: Owning creator (used to scope the banner and optional auto-schedule).
     pub creator_id: String,
-    /// Finding severity at the time of detection.
+    /// note: Finding severity at the time of detection.
     pub severity: String,
-    /// Original creation epoch (seconds).
+    /// note: Original creation epoch (seconds).
     pub created_at: i64,
-    /// Age in seconds at the time of the query (>= threshold).
+    /// note: Age in seconds at the time of the query (>= threshold).
     pub age_seconds: i64,
 }
 
-/// List open findings that are older than `threshold_seconds`, **scoped to
+/// note: List open findings that are older than `threshold_seconds`, **scoped to
 /// a single creator** so the banner respects per-creator isolation.
 ///
 /// "Stale" condition: `status = 'open'` AND `created_at < now_epoch -
@@ -1232,7 +1234,7 @@ pub async fn list_stale_open_findings(
         .collect())
 }
 
-/// List **all** open stale findings across creators, used by the daemon
+/// note: List **all** open stale findings across creators, used by the daemon
 /// scheduled task to surface a workspace-wide structured log (V1.39 P4 T2).
 ///
 /// The CLI banner uses `list_stale_open_findings` (per-creator scope);
@@ -1273,7 +1275,7 @@ pub async fn list_all_stale_open_findings(
         .collect())
 }
 
-/// Count open findings for a Work, grouped by severity.
+/// note: Count open findings for a Work, grouped by severity.
 ///
 /// Returns a list of (severity, count) pairs for all open findings.
 ///
@@ -1317,7 +1319,7 @@ pub async fn count_open_findings_by_severity(
         .collect())
 }
 
-/// Parameters for creating a finding from a review-stage result (T3 hook).
+/// note: Parameters for creating a finding from a review-stage result (T3 hook).
 ///
 /// This is the **minimal path** signal source: the supervisor (or daemon
 /// API handler) extracts a structured verdict from the review stage's
@@ -1335,21 +1337,21 @@ pub async fn count_open_findings_by_severity(
 /// free of LLM output parsing.
 #[derive(Debug, Clone)]
 pub struct ReviewVerdictFinding {
-    /// Owning Work.
+    /// note: Owning Work.
     pub work_id: String,
-    /// Optional chapter (from review context).
+    /// note: Optional chapter (from review context).
     pub chapter: Option<i64>,
-    /// Severity from LLM-judge verdict.
+    /// note: Severity from LLM-judge verdict.
     pub severity: String,
-    /// Short title from LLM-judge verdict.
+    /// note: Short title from LLM-judge verdict.
     pub title: String,
-    /// Detailed description from LLM-judge verdict.
+    /// note: Detailed description from LLM-judge verdict.
     pub description: String,
-    /// Routing hint from LLM-judge verdict.
+    /// note: Routing hint from LLM-judge verdict.
     pub target_executor: String,
-    /// Owning creator.
+    /// note: Owning creator.
     pub creator_id: String,
-    /// V1.47 §2.1 / §8.2: finding category. Callers SHOULD pick from
+    /// note: V1.47 §2.1 / §8.2: finding category. Callers SHOULD pick from
     /// [`SUGGESTED_FINDING_KINDS`] (or the closed set
     /// [`FindingKind::ALL_STRS`]). Defaults to `"craft"` when empty.
     ///
@@ -1360,10 +1362,10 @@ pub struct ReviewVerdictFinding {
     /// remains `String`); the handler can normalize wire values into the
     /// closed set if it needs to surface a different error shape.
     pub kind: String,
-    /// V1.47 §8.2: optional prose suggestion for Layer 2 rules.
+    /// note: V1.47 §8.2: optional prose suggestion for Layer 2 rules.
     /// Persisted on the finding row only; V1.47 P0 does not write `AGENTS.md`.
     pub rule_suggestion: Option<String>,
-    /// V1.47 P0 fix (qc1 W-2): the originating `creator_schedules.schedule_id`
+    /// note: V1.47 P0 fix (qc1 W-2): the originating `creator_schedules.schedule_id`
     /// when the finding was synthesized by the review terminal hook.
     /// When `Some`, the INSERT is idempotent — a second call with the same
     /// `(work_id, chapter, source_schedule_id)` triple is a no-op that returns
@@ -1373,7 +1375,7 @@ pub struct ReviewVerdictFinding {
     pub source_schedule_id: Option<String>,
 }
 
-/// Create a finding from a review-stage verdict (T3 minimal path).
+/// note: Create a finding from a review-stage verdict (T3 minimal path).
 ///
 /// Generates a ULID `finding_id` and inserts the finding row. Errors are
 /// logged by the caller; findings creation must not fork or block the
@@ -1411,7 +1413,7 @@ pub async fn create_finding_from_review(
     Ok(finding_id)
 }
 
-/// Transaction-scoped variant of [`create_finding_from_review`].
+/// note: Transaction-scoped variant of [`create_finding_from_review`].
 ///
 /// V1.48 P0-fix1 (qc3 W-2): introduced so the parsed-report persistence loop
 /// in `nexus-orchestration::auto_chain::persist_parsed_findings` can insert
@@ -1432,7 +1434,7 @@ pub async fn create_finding_from_review_tx(
 ) -> Result<String, LocalDbError> {
     validate_finding_enums(&verdict.severity, "open", &verdict.target_executor)?;
 
-    // V1.47 §8.2: `kind` defaults to `"craft"` when empty (defensive — callers
+    // why: V1.47 §8.2: `kind` defaults to `"craft"` when empty (defensive — callers
     // should set it explicitly, but the spec lists `craft` as a safe default).
     // V1.47 P0 fix (qc2 W-2): once non-empty, `kind` is validated against the
     // closed set [`FindingKind::ALL_STRS`]; unknown values are rejected with
@@ -1444,7 +1446,7 @@ pub async fn create_finding_from_review_tx(
     };
     let now = chrono::Utc::now().timestamp();
 
-    // V1.47 P0 fix (qc2 W-2): reject empty-after-trim and oversized
+    // why: V1.47 P0 fix (qc2 W-2): reject empty-after-trim and oversized
     // `rule_suggestion` payloads before any DB call.
     let rule_suggestion = normalize_rule_suggestion(verdict.rule_suggestion.as_deref())?;
 
@@ -1547,9 +1549,7 @@ mod tests {
     use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
 
-    // ── V1.47 P0 (qc2 W-2): closed `kind` set + `rule_suggestion` cap ───────
-
-    /// All enum variants in [`FindingKind::ALL_STRS`] validate successfully
+    /// note: All enum variants in [`FindingKind::ALL_STRS`] validate successfully
     /// and return the input string unchanged.
     #[test]
     fn finding_kind_validate_accepts_known_values() {
@@ -1558,7 +1558,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("known kind '{known}' should validate: {e}"));
             assert_eq!(validated, known);
         }
-        // sanity: the enum variant count matches the const ALL_STRS slice
+        // note: the enum variant count matches the const ALL_STRS slice
         // length. V1.48 P0 T4: expanded from 5 → 7 to include `plot_hole`
         // and `world_inconsistency` per `novel-writing/quality-loop.md` §2.1.
         assert_eq!(
@@ -1569,7 +1569,7 @@ mod tests {
         );
     }
 
-    /// Unknown `kind` strings are rejected with `ConstraintViolation`.
+    /// note: Unknown `kind` strings are rejected with `ConstraintViolation`.
     #[test]
     fn finding_kind_validate_rejects_unknown() {
         let err = FindingKind::validate("foo").expect_err("unknown kind should be rejected");
@@ -1593,7 +1593,7 @@ mod tests {
         }
     }
 
-    /// `rule_suggestion` at exactly the byte cap (4 KiB) is accepted.
+    /// note: `rule_suggestion` at exactly the byte cap (4 KiB) is accepted.
     #[test]
     fn rule_suggestion_length_cap_accepts_within_limit() {
         let within = "a".repeat(RULE_SUGGESTION_MAX_BYTES);
@@ -1603,7 +1603,7 @@ mod tests {
         assert_eq!(normalized.as_deref(), Some(within.as_str()));
     }
 
-    /// `rule_suggestion` one byte over the cap (4 KiB + 1) is rejected.
+    /// note: `rule_suggestion` one byte over the cap (4 KiB + 1) is rejected.
     #[test]
     fn rule_suggestion_length_cap_rejects_too_long() {
         let too_long = "a".repeat(RULE_SUGGESTION_MAX_BYTES + 1);
@@ -1626,7 +1626,7 @@ mod tests {
         }
     }
 
-    /// `rule_suggestion = Some("   ")` (whitespace-only) is rejected — callers
+    /// note: `rule_suggestion = Some("   ")` (whitespace-only) is rejected — callers
     /// that intend "no suggestion" must pass `None` explicitly.
     #[test]
     fn rule_suggestion_trimmed_empty_rejected() {
@@ -1636,7 +1636,7 @@ mod tests {
             matches!(err, LocalDbError::ConstraintViolation { ref table, .. } if table == "findings"),
             "expected ConstraintViolation on findings, got {err:?}"
         );
-        // None stays None — no rejection, no normalization.
+        // note: None stays None — no rejection, no normalization.
         assert!(
             normalize_rule_suggestion(None)
                 .expect("None should pass through")
@@ -1645,9 +1645,7 @@ mod tests {
         );
     }
 
-    // ── C-1 fix: index presence (existing) ──────────────────────────────────
-
-    /// C-1 fix: Verify the spec-required composite index on
+    /// note: C-1 fix: Verify the spec-required composite index on
     /// (`work_id`, chapter, status) exists after migration.
     /// Per novel-writing/quality-loop.md §2.1: chapter-scoped finding lookups
     /// (the review-stage hook's hot path) must use this index.
@@ -1676,9 +1674,7 @@ mod tests {
         );
     }
 
-    // ── V1.48 P1 (T4): chapter-scoped open-findings query ────────────────────
-
-    /// Build a minimal `Finding` row for insertion in tests.
+    /// note: Build a minimal `Finding` row for insertion in tests.
     fn row(
         id: &str,
         work_id: &str,
@@ -1705,7 +1701,7 @@ mod tests {
         }
     }
 
-    /// V1.48 P1 T4 — `list_open_findings_for_chapter` filters by chapter AND
+    /// note: V1.48 P1 T4 — `list_open_findings_for_chapter` filters by chapter AND
     /// work-level (chapter IS NULL) and orders per overlay §2.1
     /// (severity DESC, then `created_at` ASC). Closed/resolved rows and
     /// other-chapter rows are excluded.
@@ -1717,7 +1713,7 @@ mod tests {
         seed_minimal_work(&pool, WORK, CREATOR).await;
         seed_minimal_work(&pool, "wrk_other", CREATOR).await;
 
-        // Seed:
+        // note: Seed:
         //  - chapter=1 open (minor)
         //  - chapter=2 open (blocker)         ← must NOT appear for chapter=1
         //  - chapter=NULL open (major)        ← Work-level, must appear
@@ -1789,12 +1785,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Expect: f3 (work-level major), f1 (ch1 minor) in severity-desc order.
         let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
         assert_eq!(ids, vec!["f3", "f1"],
             "expected [work-level-major (severity major), ch1-minor (severity minor)] in that order; got {ids:?}");
 
-        // Verify chapter predicate explicitly.
         for f in &got {
             assert!(
                 f.chapter == Some(1) || f.chapter.is_none(),
@@ -1804,7 +1798,7 @@ mod tests {
         }
     }
 
-    /// V1.48 P1 T4 — ordering check: when multiple findings share a severity,
+    /// note: V1.48 P1 T4 — ordering check: when multiple findings share a severity,
     /// the tiebreaker is `created_at` ASC (oldest first within the bucket).
     #[tokio::test]
     async fn list_open_findings_for_chapter_orders_by_created_at_asc_within_severity() {
@@ -1812,7 +1806,7 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, "ctr_test").await;
 
-        // Three minors on chapter 1, inserted with decreasing created_at.
+        // note: Three minors on chapter 1, inserted with decreasing created_at.
         super::create_finding(
             &pool,
             &row("g1", WORK, Some(1), "minor", "newest", 5000, "open"),
@@ -1843,20 +1837,17 @@ mod tests {
         );
     }
 
-    /// V1.48 P1 T4 — empty result when no open findings match.
+    /// note: V1.48 P1 T4 — empty result when no open findings match.
     #[tokio::test]
     async fn list_open_findings_for_chapter_returns_empty_when_no_matches() {
         let (_dir, pool) = fresh_pool().await;
-        // No seed — table is empty.
         let got = list_open_findings_for_chapter(&pool, "ctr_test", "wrk_c", 1)
             .await
             .unwrap();
         assert!(got.is_empty(), "expected empty result on unseeded table");
     }
 
-    // ── V1.48 P3 T2: resolved-finding retention pruning ─────────────────────
-
-    /// V1.48 P3 T2 — old `resolved` rows past the retention window are purged;
+    /// note: V1.48 P3 T2 — old `resolved` rows past the retention window are purged;
     /// `open` and `wont_fix` rows are never touched.
     ///
     /// Seeds:
@@ -1872,8 +1863,8 @@ mod tests {
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 10_000_000;
-        let retention_seconds: i64 = 90 * 24 * 3_600; // 90 days
-        let old_ts = now - retention_seconds - 1; // 1s past the cutoff
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+        let old_ts = now - retention_seconds - 1; // note: 1s past the cutoff
 
         super::create_finding(
             &pool,
@@ -1929,7 +1920,6 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, 1, "exactly one old resolved row should be pruned");
 
-        // Verify: pr1 gone; pr2, pr3, pr4 still present.
         let remaining: Vec<String> = sqlx::query_scalar(
             "SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id",
         )
@@ -1944,7 +1934,7 @@ mod tests {
         );
     }
 
-    /// V1.49 P3 — `count_resolved_findings_older_than` previews the prune
+    /// note: V1.49 P3 — `count_resolved_findings_older_than` previews the prune
     /// count without deleting, and the count matches what
     /// [`prune_resolved_findings_older_than`] actually deletes (§9.4).
     #[tokio::test]
@@ -1958,7 +1948,7 @@ mod tests {
         let retention_seconds: i64 = 90 * 24 * 3_600;
         let old_ts = now - retention_seconds - 100_000;
 
-        // cp1: old resolved (eligible). cp2: old open (skipped).
+        // note: cp1: old resolved (eligible). cp2: old open (skipped).
         // cp3: old wont_fix (skipped). cp4: recent resolved (skipped).
         super::create_finding(
             &pool,
@@ -2009,13 +1999,11 @@ mod tests {
         .await
         .unwrap();
 
-        // Preview must report exactly the old resolved count (1)...
         let preview = super::count_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
         assert_eq!(preview, 1, "count preview should report 1 old resolved row");
 
-        // ...and nothing was deleted yet.
         let total_before: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
                 .bind(WORK)
@@ -2024,14 +2012,13 @@ mod tests {
                 .unwrap();
         assert_eq!(total_before, 4, "count preview must not delete any rows");
 
-        // The actual prune deletes the same count the preview reported.
         let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
         assert_eq!(deleted, 1);
     }
 
-    /// V1.48 P3 T2 — `open` rows are never purged even when their
+    /// note: V1.48 P3 T2 — `open` rows are never purged even when their
     /// `updated_at` is far past the retention window.
     #[tokio::test]
     async fn findings_retention_skips_open_rows() {
@@ -2044,7 +2031,6 @@ mod tests {
         let retention_seconds: i64 = 90 * 24 * 3_600;
         let old_ts = now - retention_seconds - 100_000;
 
-        // Only open rows — all old.
         super::create_finding(
             &pool,
             &row(
@@ -2079,7 +2065,7 @@ mod tests {
         assert_eq!(remaining, 2, "both open rows must survive");
     }
 
-    /// V1.48 P3 T2 — `resolved` rows whose `updated_at` falls inside the
+    /// note: V1.48 P3 T2 — `resolved` rows whose `updated_at` falls inside the
     /// retention window are kept.
     #[tokio::test]
     async fn findings_retention_skips_recent_resolved_rows() {
@@ -2091,9 +2077,7 @@ mod tests {
         let now: i64 = 30_000_000;
         let retention_seconds: i64 = 90 * 24 * 3_600;
 
-        // A resolved row exactly at the cutoff boundary (not older).
         let boundary_ts = now - retention_seconds;
-        // A resolved row 1 second inside the window.
         let inside_ts = now - retention_seconds + 1;
 
         super::create_finding(
@@ -2128,8 +2112,6 @@ mod tests {
         let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
-        // boundary_ts == cutoff → NOT < cutoff → kept.
-        // inside_ts  > cutoff   → kept.
         assert_eq!(deleted, 0, "boundary and inside-window rows must survive");
 
         let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
@@ -2140,9 +2122,7 @@ mod tests {
         assert_eq!(remaining, 2, "both recent resolved rows must survive");
     }
 
-    // ── V1.48 P3 T3: FindingPatch tri-state rule_suggestion (R-V147P0-03) ───
-
-    /// Helper: build a `FindingPatch` with only `rule_suggestion` set.
+    /// note: Helper: build a `FindingPatch` with only `rule_suggestion` set.
     // `Some(None)` deliberately clears the column to SQL NULL — the double
     // Option is the tri-state contract, not an accident.
     #[allow(clippy::option_option)]
@@ -2153,7 +2133,7 @@ mod tests {
         }
     }
 
-    /// V1.48 P3 T3 — `Some(None)` clears `rule_suggestion` to SQL NULL.
+    /// note: V1.48 P3 T3 — `Some(None)` clears `rule_suggestion` to SQL NULL.
     ///
     /// Seeds a finding with `rule_suggestion = Some("...")`, patches with
     /// `Some(None)`, then verifies the column is NULL after the update.
@@ -2164,12 +2144,10 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed with a non-empty rule_suggestion.
         let mut f = row("cl1", WORK, Some(1), "major", "clear-test", 1000, "open");
         f.rule_suggestion = Some("original suggestion".to_string());
         super::create_finding(&pool, &f).await.unwrap();
 
-        // Verify seed.
         let before = super::get_finding(&pool, CREATOR, "cl1")
             .await
             .unwrap()
@@ -2179,7 +2157,6 @@ mod tests {
             Some("original suggestion")
         );
 
-        // Patch: Some(None) → clear to NULL.
         let updated = update_finding(
             &pool,
             CREATOR,
@@ -2202,7 +2179,7 @@ mod tests {
         );
     }
 
-    /// V1.48 P3 T3 — `Some(Some(value))` sets `rule_suggestion` to the value.
+    /// note: V1.48 P3 T3 — `Some(Some(value))` sets `rule_suggestion` to the value.
     #[tokio::test]
     async fn update_finding_can_set_rule_suggestion() {
         const CREATOR: &str = "ctr_test";
@@ -2210,7 +2187,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed with no rule_suggestion (NULL).
         super::create_finding(
             &pool,
             &row("st1", WORK, Some(1), "major", "set-test", 1000, "open"),
@@ -2218,7 +2194,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Patch: Some(Some("new value")) → set.
         let updated = update_finding(
             &pool,
             CREATOR,
@@ -2241,7 +2216,7 @@ mod tests {
         );
     }
 
-    /// V1.48 P3 T3 — `None` (outer) leaves `rule_suggestion` unchanged.
+    /// note: V1.48 P3 T3 — `None` (outer) leaves `rule_suggestion` unchanged.
     #[tokio::test]
     async fn update_finding_can_omit_rule_suggestion_to_keep_unchanged() {
         const CREATOR: &str = "ctr_test";
@@ -2249,18 +2224,15 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed with a non-empty rule_suggestion.
         let mut f = row("om1", WORK, Some(1), "major", "omit-test", 1000, "open");
         f.rule_suggestion = Some("keep me".to_string());
         super::create_finding(&pool, &f).await.unwrap();
 
-        // Patch a DIFFERENT field (severity) while omitting rule_suggestion
-        // (None outer). The rule_suggestion must survive unchanged.
         let mut patch = FindingPatch {
             severity: Some("minor".to_string()),
             ..Default::default()
         };
-        patch.rule_suggestion = None; // omit
+        patch.rule_suggestion = None; // note: omit the field so the patch leaves the column untouched
         let updated = update_finding(&pool, CREATOR, "om1", &patch, 2000)
             .await
             .unwrap();
@@ -2278,9 +2250,7 @@ mod tests {
         );
     }
 
-    // ── V1.49 F6: status enum + lifecycle transitions ───────────────────────
-
-    /// V1.49 F6 — `VALID_STATUSES` carries the six-state lifecycle enum
+    /// note: V1.49 F6 — `VALID_STATUSES` carries the six-state lifecycle enum
     /// per `findings-lifecycle.md` §2.
     #[test]
     fn valid_statuses_carries_six_state_lifecycle() {
@@ -2303,7 +2273,7 @@ mod tests {
         );
     }
 
-    /// V1.49 F6 — `is_valid_status` accepts every lifecycle member and
+    /// note: V1.49 F6 — `is_valid_status` accepts every lifecycle member and
     /// rejects unknown strings (including plausible-but-wrong variants
     /// like `closed`, `pending`, `triage`).
     #[test]
@@ -2330,34 +2300,30 @@ mod tests {
         }
     }
 
-    /// V1.49 F6 — `is_valid_transition` implements the lifecycle diagram
+    /// note: V1.49 F6 — `is_valid_transition` implements the lifecycle diagram
     /// in `findings-lifecycle.md` §2.1. Every documented edge accepts; the
     /// three terminal states reject every outbound transition; `from == to`
     /// is rejected (no-op refresh must omit the patch field).
     #[test]
     fn is_valid_transition_matches_lifecycle_diagram() {
-        // open → triaged | in_review | resolved | wont_fix | duplicate
         for to in ["triaged", "in_review", "resolved", "wont_fix", "duplicate"] {
             assert!(
                 is_valid_transition("open", to),
                 "open → {to} should be a valid transition"
             );
         }
-        // triaged → in_review | resolved | wont_fix | duplicate
         for to in ["in_review", "resolved", "wont_fix", "duplicate"] {
             assert!(
                 is_valid_transition("triaged", to),
                 "triaged → {to} should be a valid transition"
             );
         }
-        // in_review → resolved | wont_fix | duplicate
         for to in ["resolved", "wont_fix", "duplicate"] {
             assert!(
                 is_valid_transition("in_review", to),
                 "in_review → {to} should be a valid transition"
             );
         }
-        // Forbidden regressions: open/triaged are not reachable from in_review.
         assert!(
             !is_valid_transition("in_review", "open"),
             "in_review → open should be rejected"
@@ -2366,7 +2332,6 @@ mod tests {
             !is_valid_transition("in_review", "triaged"),
             "in_review → triaged should be rejected"
         );
-        // Terminal states: no outbound transitions.
         for terminal in ["resolved", "wont_fix", "duplicate"] {
             for target in [
                 "open",
@@ -2382,15 +2347,12 @@ mod tests {
                 );
             }
         }
-        // `from == to` is rejected (callers omit the patch field to refresh).
         for &s in VALID_STATUSES {
             assert!(
                 !is_valid_transition(s, s),
                 "self-transition {s} → {s} should be rejected; omit the patch field to refresh"
             );
         }
-        // Unknown endpoints are rejected even on the otherwise-permissive
-        // `open` source.
         assert!(
             !is_valid_transition("open", "closed"),
             "unknown target 'closed' should be rejected"
@@ -2401,7 +2363,7 @@ mod tests {
         );
     }
 
-    /// V1.49 F6 — `update_finding` accepts the canonical happy path
+    /// note: V1.49 F6 — `update_finding` accepts the canonical happy path
     /// `open → triaged → in_review → resolved` and stamps `updated_at`.
     #[tokio::test]
     async fn update_finding_accepts_canonical_lifecycle_path() {
@@ -2454,7 +2416,7 @@ mod tests {
         assert_eq!(after_resolved.status, "resolved");
     }
 
-    /// V1.49 F6 — `update_finding` accepts the direct terminal transitions
+    /// note: V1.49 F6 — `update_finding` accepts the direct terminal transitions
     /// `open → wont_fix` and `open → duplicate` (no intermediate triage).
     #[tokio::test]
     async fn update_finding_accepts_open_to_terminal_transitions() {
@@ -2508,7 +2470,7 @@ mod tests {
         );
     }
 
-    /// V1.49 F6 — `update_finding` rejects illegal transitions with
+    /// note: V1.49 F6 — `update_finding` rejects illegal transitions with
     /// `IllegalTransition`. Three representative rejections cover the
     /// terminal-locked, self-loop, and reverse-edge classes.
     #[tokio::test]
@@ -2518,7 +2480,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed a resolved row (terminal — no outbound transitions).
         super::create_finding(
             &pool,
             &row(
@@ -2534,7 +2495,6 @@ mod tests {
         .await
         .unwrap();
 
-        // (a) resolved → open: rejected (terminal state).
         let err = update_finding(
             &pool,
             CREATOR,
@@ -2555,8 +2515,6 @@ mod tests {
             other => panic!("expected IllegalTransition, got {other:?}"),
         }
 
-        // (b) self-loop resolved → resolved: rejected (callers must omit
-        // the patch field to refresh `updated_at`).
         let err = update_finding(
             &pool,
             CREATOR,
@@ -2574,8 +2532,6 @@ mod tests {
             "self-loop should surface as IllegalTransition, got {err:?}"
         );
 
-        // (c) reverse-edge in_review → open: rejected (in_review may only
-        // advance to terminal states per §2.1).
         super::create_finding(
             &pool,
             &row(
@@ -2607,7 +2563,6 @@ mod tests {
             "reverse-edge should surface as IllegalTransition, got {err:?}"
         );
 
-        // The rejected rows must be unchanged.
         assert_eq!(
             super::get_finding(&pool, CREATOR, "rj1")
                 .await
@@ -2619,7 +2574,7 @@ mod tests {
         );
     }
 
-    /// V1.49 F6 — `update_finding` still rejects unknown status values
+    /// note: V1.49 F6 — `update_finding` still rejects unknown status values
     /// (the membership check precedes the transition check).
     ///
     /// V1.49 P0 W-1: the PATCH-path membership failure now surfaces as the
@@ -2666,7 +2621,7 @@ mod tests {
         );
     }
 
-    /// V1.49 F6 — `list_open_findings_for_chapter` includes `open` AND
+    /// note: V1.49 F6 — `list_open_findings_for_chapter` includes `open` AND
     /// `triaged` rows (actionable set per §2.2) and excludes `in_review`
     /// and the terminal statuses by default.
     #[tokio::test]
@@ -2676,7 +2631,7 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // Seed one finding per status, all on chapter 1, all the same
+        // note: Seed one finding per status, all on chapter 1, all the same
         // severity so the ordering is by created_at ASC within the bucket.
         // Insert in lifecycle-enum order so created_at is monotonic.
         let statuses = [
@@ -2724,14 +2679,14 @@ mod tests {
             "actionable set must include only open + triaged; got {returned_statuses:?}"
         );
 
-        // Severity ordering within the actionable bucket is preserved
+        // note: Severity ordering within the actionable bucket is preserved
         // (severity DESC, then created_at ASC) — both seeds share `major`,
         // so created_at ASC wins; open (ts=1000) precedes triaged (ts=2000).
         let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
         assert_eq!(ids, vec!["ac0", "ac1"], "expected created_at ASC ordering");
     }
 
-    /// V1.49 F6 — `list_open_findings_for_chapter` keeps the work-level
+    /// note: V1.49 F6 — `list_open_findings_for_chapter` keeps the work-level
     /// (`chapter IS NULL`) inclusion for the new `triaged` status: a
     /// work-level triaged finding must reach every chapter's prompt.
     #[tokio::test]
@@ -2765,7 +2720,7 @@ mod tests {
         assert_eq!(got[0].status, "triaged");
     }
 
-    /// Insert a minimal works row to satisfy the `findings.work_id` FK.
+    /// note: Insert a minimal works row to satisfy the `findings.work_id` FK.
     async fn seed_minimal_work(pool: &SqlitePool, work_id: &str, creator_id: &str) {
         // SAFETY: test-only — minimal works row for FK satisfaction.
         sqlx::query(
