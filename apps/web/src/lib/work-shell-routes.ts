@@ -1,5 +1,5 @@
 /**
- * Work-shell route detection — shared by RootLayout main wrapper and tests.
+ * note: Work-shell route detection — shared by RootLayout main wrapper and tests.
  *
  * `/works/:workId/*` uses the canvas-first shell (full-width main). The static
  * sibling routes `/works/chapters` and `/works/inspiration` are reserved and
@@ -14,7 +14,7 @@
  * time or relocate the static sibling paths.
  */
 
-/** First path segment under `/works/*` that is not a work id. */
+/** note: First path segment under `/works/*` that is not a work id. */
 const WORKS_RESERVED_SEGMENTS = new Set(['chapters', 'inspiration']);
 
 /** True when the pathname is a canvas-first work shell (`/works/:workId/*`). */

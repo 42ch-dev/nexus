@@ -1,5 +1,5 @@
 /**
- * Per-preset profile drill-down (V1.171 P1 — PL-13, AR-27).
+ * note: Per-preset profile drill-down (V1.171 P1 — PL-13, AR-27).
  *
  * Selecting a preset from the strategy catalog opens this view at
  * `/strategies/:presetId/profile`. It renders the P0 preset profile
@@ -37,7 +37,7 @@ import type {
   PresetProfileNext,
 } from '@/lib/nexus';
 
-/** Human-readable exit-when summary for a state (locked vocabulary, PL-3). */
+/** note: Human-readable exit-when summary for a state (locked vocabulary, PL-3). */
 function exitWhenSummary(exitWhen: PresetProfileExitWhen): string {
   if (exitWhen.kind === 'llm_judge') {
     const parts = ['llm_judge'];
@@ -53,7 +53,7 @@ function exitWhenSummary(exitWhen: PresetProfileExitWhen): string {
 }
 
 /**
- * Trigger-lane classification row (PL-3 locked vocabulary; PL-11/PL-12).
+ * note: Trigger-lane classification row (PL-3 locked vocabulary; PL-11/PL-12).
  *
  * Renders the lane's presence honestly (Yes/No from the profile flags) with
  * the locked vocabulary detail. The profile carries no next-fire value, so
@@ -90,7 +90,7 @@ function LaneRow({
   );
 }
 
-/** Human-readable next-transition summary for a state (never a fabricated
+/** note: Human-readable next-transition summary for a state (never a fabricated
  * next-fire time — PL-12: only the declared transition form is shown). */
 function nextSummary(next: PresetProfileNext): string {
   switch (next.kind) {
@@ -119,7 +119,7 @@ export function PresetProfilePage() {
   const { presetId } = useParams<{ presetId: string }>();
   const navigate = useNavigate();
   const profile = usePresetProfile(presetId);
-  // List facts (id + source) for the graceful missing-profile summary
+  // note: List facts (id + source) for the graceful missing-profile summary
   // (PL-13) — the list already showed the preset, so the summary must not
   // imply it is gone. Same query key as the catalog page: cached.
   const presets = usePresets();
@@ -152,7 +152,7 @@ export function PresetProfilePage() {
       );
     }
 
-    // Graceful summary: id + list facts (source) + honest copy. The preset
+    // note: Graceful summary: id + list facts (source) + honest copy. The preset
     // may still exist in the list — never a hard "not found" error (PL-13).
     const all = presets.data
       ? [...presets.data.user, ...presets.data.system, ...presets.data.embedded]
@@ -182,7 +182,7 @@ export function PresetProfilePage() {
           <CardHeader>
             <CardTitle>{t('profile.unavailableTitle')}</CardTitle>
             <CardDescription>
-              {/* The "still listed" sentence is only true when the preset was
+              {/* note: The "still listed" sentence is only true when the preset was
                * actually found in the list lookup — deep links to ids absent
                * from the list must not claim it (QC3 S-1 / F-4). */}
               {t('profile.unavailableDescription', { name: presetId ?? '' })}
@@ -390,7 +390,7 @@ export function PresetProfilePage() {
             <ul className="flex flex-col gap-1">
               {requiredCapabilities.map((name) => (
                 <li key={name}>
-                  {/* Deep-link to the capability-schema browser (PL-13); the
+                  {/* note: Deep-link to the capability-schema browser (PL-13); the
                       browser seeds its filter from `?filter=` so the linked
                       schema is visible on arrival. */}
                   <Link

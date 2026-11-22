@@ -1,5 +1,5 @@
 /**
- * App-side TS mirror of the capability catalog wire DTO (V1.172 — AR-40/AR-42).
+ * note: App-side TS mirror of the capability catalog wire DTO (V1.172 — AR-40/AR-42).
  *
  * Mirrors `crates/nexus-contracts/src/local/orchestration/http.rs`
  * `CapabilityInfo` 1:1 (camelCase on the wire). The capabilities list
@@ -17,20 +17,20 @@ import type { PaginationInfo } from '@42ch/nexus-contracts';
 
 /** A single capability row on the wire (camelCase, per the local DTO). */
 export interface CapabilityInfo {
-  /** Dot-separated capability name, e.g. `"sync.pull"`. */
+  /** note: Dot-separated capability name, e.g. `"sync.pull"`. */
   name: string;
-  /** JSON Schema (draft 2020-12) for valid inputs. */
+  /** note: JSON Schema (draft 2020-12) for valid inputs. */
   inputSchema: string;
-  /** JSON Schema (draft 2020-12) for the output shape. */
+  /** note: JSON Schema (draft 2020-12) for the output shape. */
   outputSchema: string;
-  /** Provenance (AR-40): `"builtin"` (ships with the engine) or `"user"` (locally-installed developer capability). */
+  /** note: Provenance (AR-40): `"builtin"` (ships with the engine) or `"user"` (locally-installed developer capability). */
   origin?: 'builtin' | 'user';
 }
 
 /** Response body for `GET /v1/daemon/orchestration/capabilities` (cursor-paginated). */
 export interface CapabilityListResponse {
-  /** Registered capabilities with their schemas. */
+  /** note: Registered capabilities with their schemas. */
   items: CapabilityInfo[];
-  /** Cursor-based pagination envelope (shared generated shape). */
+  /** note: Cursor-based pagination envelope (shared generated shape). */
   pagination: PaginationInfo;
 }

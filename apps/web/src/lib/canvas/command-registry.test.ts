@@ -1,5 +1,5 @@
 /**
- * `command-registry` — action registry + types for the shared command palette
+ * note: `command-registry` — action registry + types for the shared command palette
  * (FB-CP-001, FB-CP-003, V1.111 P0 T1).
  *
  * Coverage mirrors the task brief: register / lookup / unregister / filter /
@@ -19,7 +19,7 @@ import {
   type Command,
 } from './command-registry';
 
-/** Factory for a minimal command; overrides only what each test cares about. */
+/** note: Factory for a minimal command; overrides only what each test cares about. */
 function makeCommand(
   overrides: Partial<Command> & Pick<Command, 'id'>,
 ): Command {
@@ -31,7 +31,7 @@ function makeCommand(
   };
 }
 
-/** Resolve a Command's key fields into the strings `filterCommands` ranks on. */
+/** note: Resolve a Command's key fields into the strings `filterCommands` ranks on. */
 function resolve(command: Command, label?: string, keywords?: string[]) {
   return {
     ...command,
@@ -120,7 +120,7 @@ describe('command store — register / lookup / unregister', () => {
   it('unregister is a no-op for an unknown id (no snapshot change, no throw)', () => {
     registerCommand(ADD_CHAPTER);
     const before = getCommands();
-    // Unknown unregister should not throw or change the snapshot reference.
+    // note: Unknown unregister should not throw or change the snapshot reference.
     expect(() => unregisterCommand('does.not.exist')).not.toThrow();
     expect(getCommands()).toBe(before);
     expect(getCommands()).toEqual([ADD_CHAPTER]);
@@ -223,7 +223,7 @@ describe('useRegisterCommand — lifetime binding', () => {
   });
 
   it('survives React StrictMode double-mount (register → cleanup → register)', () => {
-    // StrictMode double-invokes effects in dev: mount, unmount, mount. The
+    // note: StrictMode double-invokes effects in dev: mount, unmount, mount. The
     // id-keyed Map makes this a net register.
     const { unmount, rerender } = renderHook(() => useRegisterCommand(ADD_CHAPTER));
     rerender();
@@ -233,7 +233,7 @@ describe('useRegisterCommand — lifetime binding', () => {
   });
 
   it('does not churn the registry when re-rendered with an equivalent-id command (captures once on mount)', () => {
-    // The caller passes an inline literal each render with the same id but a
+    // note: The caller passes an inline literal each render with the same id but a
     // different handler. The hook must register once (mount-only semantics),
     // not on every render — otherwise the store thrashes.
     const handlerA = vi.fn();
@@ -245,7 +245,7 @@ describe('useRegisterCommand — lifetime binding', () => {
     expect(getCommands()).toEqual([{ ...ADD_CHAPTER, handler: handlerA }]);
 
     rerender({ handler: handlerB });
-    // Still the mount-captured handler — field changes after mount are ignored
+    // note: Still the mount-captured handler — field changes after mount are ignored
     // by design (documented simplify note in command-registry.ts).
     expect(getCommands()).toEqual([{ ...ADD_CHAPTER, handler: handlerA }]);
   });
@@ -294,7 +294,7 @@ describe('filterCommands — query matching', () => {
         available: () => false,
       }),
     );
-    // filterCommands is query-only; available() is the consumer's concern.
+    // note: filterCommands is query-only; available() is the consumer's concern.
     expect(filterCommands([hidden], 'hidden')).toEqual([hidden]);
     expect(filterCommands([hidden], '')).toEqual([hidden]);
   });
@@ -306,7 +306,7 @@ describe('filterCommands — ranking', () => {
     const chapter = resolve(makeCommand({ id: 'add-chapter', labelKey: 'Add Chapter' }));
     const additive = resolve(makeCommand({ id: 'additive', labelKey: 'Additive' }));
     const out = filterCommands([chapter, exact, additive], 'add');
-    // exact label → first, then the two startswith/contains, in input order.
+    // note: exact label → first, then the two startswith/contains, in input order.
     expect(out[0]).toBe(exact);
     expect(out).toHaveLength(3);
   });
@@ -350,7 +350,7 @@ describe('filterCommands — ranking', () => {
         keywordKeys: ['node-like'],
       }),
     );
-    // Deliberately shuffled input to prove ordering is rank-driven, not input.
+    // note: Deliberately shuffled input to prove ordering is rank-driven, not input.
     const out = filterCommands([keyword, contains, starts, exact], 'node');
     expect(out.map((c) => c.id)).toEqual(['ex', 'st', 'co', 'kw']);
   });

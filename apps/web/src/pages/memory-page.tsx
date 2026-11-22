@@ -34,7 +34,7 @@ import { useActiveCreatorId } from '@/api/queries';
 export function MemoryPage() {
   const { t } = useTranslation('memory');
   const creatorId = useActiveCreatorId();
-  // Lifted so the SOUL viz click-to-filter can drive the fragments browser
+  // note: Lifted so the SOUL viz click-to-filter can drive the fragments browser
   // (V1.79 P1 §D integration). FragmentsSection is now controlled.
   const [fragmentKeyword, setFragmentKeyword] = useState('');
 

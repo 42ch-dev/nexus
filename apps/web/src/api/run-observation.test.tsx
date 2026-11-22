@@ -1,5 +1,5 @@
 /**
- * `useRunObservation` (v1.201 P1-T2) — subscription lifecycle, the
+ * note: `useRunObservation` (v1.201 P1-T2) — subscription lifecycle, the
  * replay/live/gap/terminal state machine and the bounded reconnect policy.
  *
  * Every case drives a stubbed `AsyncIterable` client injected through
@@ -32,7 +32,7 @@ interface StubClient {
   calls: SubscribeOptions[];
 }
 
-/** A client whose Nth subscription runs the Nth script (the last one repeats). */
+/** note: A client whose Nth subscription runs the Nth script (the last one repeats). */
 function stubClientFor(scripts: Script[]): StubClient {
   const calls: SubscribeOptions[] = [];
   const client = {
@@ -59,7 +59,7 @@ function wrapperFor(client: NexusClient) {
 
 interface Probe {
   result: { current: RunObservationResult };
-  /** Distinct phases in render order — timing-proof view of the transitions. */
+  /** note: Distinct phases in render order — timing-proof view of the transitions. */
   phases: RunObservationPhase[];
   unmount: () => void;
 }
@@ -80,7 +80,7 @@ function observeRun(client: NexusClient, runId: string | null): Probe {
 const GAP: WorkflowObservationFrame = { kind: 'gap' };
 const HISTORY_UNAVAILABLE: WorkflowObservationFrame = { kind: 'history_unavailable' };
 
-/** The durable run statuses the core projects into a `run_state` frame. */
+/** note: The durable run statuses the core projects into a `run_state` frame. */
 function runState(id: string, status = 'running'): WorkflowObservationFrame {
   const sequence = Number(id.slice(id.indexOf(':') + 1));
   return {
@@ -106,22 +106,22 @@ function hostEvent(id: string): WorkflowObservationFrame {
   };
 }
 
-/** A stream that yields `seed`, then ends. */
+/** note: A stream that yields `seed`, then ends. */
 async function* frames(...seed: WorkflowObservationFrame[]) {
   for (const frame of seed) yield frame;
 }
 
-/** A stream that yields `seed`, then stays open until its signal aborts. */
+/** note: A stream that yields `seed`, then stays open until its signal aborts. */
 async function* openStream(options: SubscribeOptions, ...seed: WorkflowObservationFrame[]) {
   for (const frame of seed) yield frame;
   if (options.signal.aborted) return;
-  // `Promise.withResolvers` is ES2024; this app compiles against the ES2022 lib.
+  // note: `Promise.withResolvers` is ES2024; this app compiles against the ES2022 lib.
   await new Promise<void>((resolve) => {
     options.signal.addEventListener('abort', () => resolve(), { once: true });
   });
 }
 
-/** Cursor of a frame: its `<epoch>:<sequence>` id, or the control kind. */
+/** note: Cursor of a frame: its `<epoch>:<sequence>` id, or the control kind. */
 function cursorOf(frame: WorkflowObservationFrame): string {
   return frame.kind === 'run_state' || frame.kind === 'host_event' ? frame.id : frame.kind;
 }
@@ -133,7 +133,7 @@ async function wait(ms: number): Promise<void> {
 }
 
 /**
- * A wait that reads `events` must also assert a published field: the retained
+ * note: A wait that reads `events` must also assert a published field: the retained
  * buffer is mutated in place ahead of React's commit, so a wait on the buffer
  * alone can pass while `result.current` is still the previous snapshot.
  */
@@ -149,7 +149,7 @@ async function waitForCursor(
 }
 
 /**
- * Frames a COMMITTED render showed. A render React discards never commits, so
+ * note: Frames a COMMITTED render showed. A render React discards never commits, so
  * the layout effect that records here never runs for it: an entry with a stale
  * identity's frames is therefore a frame that reached the UI.
  */
@@ -159,7 +159,7 @@ describe('useRunObservation — replay/live handoff', () => {
   it('replays the retained history on re-entry and resumes the live tail without duplicating an id', async () => {
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
-      // The re-entry replay re-delivers the last id the client already holds.
+      // note: The re-entry replay re-delivers the last id the client already holds.
       (options) => openStream(options, hostEvent('e1:2'), runState('e1:3')),
     ]);
 
@@ -171,7 +171,7 @@ describe('useRunObservation — replay/live handoff', () => {
     first.unmount();
 
     const reentry = observeRun(client, 'run-replay');
-    // The already-emitted history is on screen immediately — never a blank view.
+    // note: The already-emitted history is on screen immediately — never a blank view.
     expect(reentry.result.current.events.map(cursorOf)).toEqual(['e1:1', 'e1:2']);
     expect(reentry.result.current.phase).toBe('replaying');
 
@@ -192,7 +192,7 @@ describe('useRunObservation — replay/live handoff', () => {
     expect(calls[0].lastEventId).toBeUndefined();
     expect(probe.phases).toContain('connecting');
     expect(probe.phases).not.toContain('replaying');
-    // No retained history to catch up: every frame of this view is the live tail.
+    // note: No retained history to catch up: every frame of this view is the live tail.
     expect(probe.result.current.liveFrom).toBe(0);
   });
 
@@ -200,10 +200,10 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
       async function* reentry(options: SubscribeOptions) {
-        // Missed while the view was closed: the server's strictly-after replay.
+        // note: Missed while the view was closed: the server's strictly-after replay.
         yield runState('e1:3');
         yield hostEvent('e1:4');
-        // The catch-up settles, then the run appends for real.
+        // note: The catch-up settles, then the run appends for real.
         await wait(300);
         yield hostEvent('e1:5');
         if (options.signal.aborted) return;
@@ -230,7 +230,7 @@ describe('useRunObservation — replay/live handoff', () => {
       'e1:4',
       'e1:5',
     ]);
-    // The two replayed frames are history; only the append after the settle is live.
+    // note: The two replayed frames are history; only the append after the settle is live.
     expect(reentry.result.current.liveFrom).toBe(4);
     expect(reentry.result.current.phase).toBe('live');
     expect(reentry.phases.indexOf('replaying')).toBeLessThan(reentry.phases.indexOf('live'));
@@ -248,7 +248,7 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => fullWindow(options),
       async function* reentry(options: SubscribeOptions) {
-        // The re-attached stream's first frame anchors the catch-up burst (a
+        // note: The re-attached stream's first frame anchors the catch-up burst (a
         // replay-side frame), then the run appends for real past the handoff.
         yield hostEvent('e1:301');
         await wait(300);
@@ -267,7 +267,7 @@ describe('useRunObservation — replay/live handoff', () => {
 
     const reentry = observeRun(client, 'run-window-boundary');
     expect(reentry.result.current.phase).toBe('replaying');
-    // Everything the full window holds is catch-up until the handoff.
+    // note: Everything the full window holds is catch-up until the handoff.
     expect(reentry.result.current.liveFrom).toBe(256);
 
     await waitFor(() => expect(reentry.result.current.phase).toBe('live'));
@@ -277,7 +277,7 @@ describe('useRunObservation — replay/live handoff', () => {
       ).toEqual(['e1:302']),
     );
 
-    // The window is still full (256). The boundary must slide with it, or the
+    // note: The window is still full (256). The boundary must slide with it, or the
     // frame appended after the handoff would sit outside the live tail.
     const { events, liveFrom } = reentry.result.current;
     expect(calls[1].lastEventId).toBe('e1:300');
@@ -292,7 +292,7 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
       async function* delayedReplay(options: SubscribeOptions) {
-        // Connect and replay delivery are both slower than the settle window: a
+        // note: Connect and replay delivery are both slower than the settle window: a
         // timer armed before the stream connects would already have declared the
         // view live here, mislabeling this whole replay burst as the live tail.
         await wait(300);
@@ -312,7 +312,7 @@ describe('useRunObservation — replay/live handoff', () => {
     first.unmount();
 
     const reentry = observeRun(client, 'run-delayed-replay');
-    // Nothing has arrived yet: the view is waiting on the stream, not live.
+    // note: Nothing has arrived yet: the view is waiting on the stream, not live.
     await wait(200);
     expect(reentry.result.current.phase).toBe('replaying');
 
@@ -321,7 +321,7 @@ describe('useRunObservation — replay/live handoff', () => {
     );
 
     expect(calls[1].lastEventId).toBe('e1:2');
-    // The delayed replay burst stays replayed; only the post-settle frame is live.
+    // note: The delayed replay burst stays replayed; only the post-settle frame is live.
     expect(reentry.result.current.events.map(cursorOf)).toEqual([
       'e1:1',
       'e1:2',
@@ -337,7 +337,7 @@ describe('useRunObservation — replay/live handoff', () => {
   });
 
   it('hands a busy re-entry burst off at the catch-up frame total while frames keep arriving', async () => {
-    // A re-entry replay that outruns the observer: frames keep arriving faster
+    // note: A re-entry replay that outruns the observer: frames keep arriving faster
     // than the settle window, so neither the quiet gap nor the 1 s total can end
     // the catch-up. Only the hard frame total can, and it must still hand off —
     // the 64th catch-up frame is the first live-tail frame (QC3-002).
@@ -364,7 +364,7 @@ describe('useRunObservation — replay/live handoff', () => {
       expect(reentry.result.current.events).toHaveLength(72),
     );
 
-    // 70 catch-up frames (e1:3…e1:72): the 64th, `e1:66`, is the first live one,
+    // note: 70 catch-up frames (e1:3…e1:72): the 64th, `e1:66`, is the first live one,
     // and the six frames after it keep arriving live rather than replaying.
     expect(calls[1].lastEventId).toBe('e1:2');
     expect(reentry.result.current.liveFrom).toBe(65);
@@ -376,7 +376,7 @@ describe('useRunObservation — replay/live handoff', () => {
 
 describe('useRunObservation — gap recovery', () => {
   it('keeps consuming the same stream after a gap instead of reconnecting into the hole it reported', async () => {
-    // The server writes the gap and then the frames its ring still holds, on the
+    // note: The server writes the gap and then the frames its ring still holds, on the
     // same stream (workflow-observation.ts forwards the ring in order and then
     // blocks for the next batch). Aborting at the gap would discard that
     // retained span and reconnect into the range whose gap was just reported.
@@ -399,21 +399,21 @@ describe('useRunObservation — gap recovery', () => {
       expect(probe.result.current.events.map(cursorOf)).toContain('e1:3'),
     );
 
-    // One subscription, never aborted: the frames after the gap arrived on the
+    // note: One subscription, never aborted: the frames after the gap arrived on the
     // stream that reported it.
     expect(calls).toHaveLength(1);
     expect(calls[0].signal.aborted).toBe(false);
     expect(probe.phases).toContain('gapped');
-    // The hole stays inline at its exact position; the tail continues past it.
+    // note: The hole stays inline at its exact position; the tail continues past it.
     expect(probe.result.current.events.map(cursorOf)).toEqual(['e1:1', 'e1:2', 'gap', 'e1:3']);
     expect(probe.result.current.lastEventId).toBe('e1:3');
-    // Frames arrived again, so the subscription is live once more.
+    // note: Frames arrived again, so the subscription is live once more.
     await waitFor(() => expect(probe.result.current.phase).toBe('live'));
   });
 
   it('reconnects from the cursor a gapped stream advanced to, never from the gap itself', async () => {
     const { client, calls } = stubClientFor([
-      // The stream gaps, then carries the retained frames past the hole, then
+      // note: The stream gaps, then carries the retained frames past the hole, then
       // ends: the cursor it moved to is what a reconnect must ask from.
       () => frames(GAP, hostEvent('e1:1'), hostEvent('e1:2')),
       (options) => openStream(options, hostEvent('e1:3')),
@@ -424,12 +424,12 @@ describe('useRunObservation — gap recovery', () => {
 
     expect(calls).toHaveLength(2);
     expect(calls[1].lastEventId).toBe('e1:2');
-    // The hole is still on screen; only the recovery cursor moved past it.
+    // note: The hole is still on screen; only the recovery cursor moved past it.
     expect(probe.result.current.events.map(cursorOf)).toEqual(['gap', 'e1:1', 'e1:2', 'e1:3']);
   });
 
   it('rests honestly gapped when a gapped stream THROWS at the gap, charging no attempt', async () => {
-    // A pull fault can terminate the stream after the SSE headers, and a network
+    // note: A pull fault can terminate the stream after the SSE headers, and a network
     // reader can throw. The attempt still ended with its last DATA cursor at the
     // gap it reported, so a resubscribe would ask the ring for exactly the range
     // whose gap was just reported. The no-advance guard must cover any ended
@@ -453,14 +453,14 @@ describe('useRunObservation — gap recovery', () => {
     expect(probe.result.current.lastEventId).toBe('e1:1');
     expect(probe.result.current.phase).toBe('gapped');
 
-    // The affordance is still the only way out, from the retained cursor.
+    // note: The affordance is still the only way out, from the retained cursor.
     act(() => probe.result.current.retry());
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1].lastEventId).toBe('e1:1');
   });
 
   it('stays honestly gapped when the stream ends at the gap, and retry() re-arms', async () => {
-    // The stream never moved past its gap, so `Last-Event-ID` still names the
+    // note: The stream never moved past its gap, so `Last-Event-ID` still names the
     // gapped range: reconnecting would re-report the same gap. The hook reports
     // it once and rests — no attempt is spent on a reconnect that cannot help.
     const { client, calls } = stubClientFor([() => frames(runState('e1:1'), GAP)]);
@@ -473,7 +473,7 @@ describe('useRunObservation — gap recovery', () => {
     expect(probe.result.current.error).toBeNull();
     expect(probe.result.current.events.map(cursorOf)).toEqual(['e1:1', 'gap']);
 
-    // The affordance is the only way out, and it re-arms from the retained cursor.
+    // note: The affordance is the only way out, and it re-arms from the retained cursor.
     act(() => probe.result.current.retry());
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1].lastEventId).toBe('e1:1');
@@ -482,7 +482,7 @@ describe('useRunObservation — gap recovery', () => {
 
 describe('useRunObservation — bounded reconnect episodes', () => {
   it('exhausts the retry budget on a repeated gap-then-advance episode instead of reconnecting forever', async () => {
-    // Every attempt gaps, then carries a frame past the gap and dies: each
+    // note: Every attempt gaps, then carries a frame past the gap and dies: each
     // reconnect is individually productive, so only the monotonic budget can end
     // the episode — and it must, rather than resetting on each productive-looking
     // attempt (QC3-001).
@@ -519,7 +519,7 @@ describe('useRunObservation — bounded reconnect episodes', () => {
   });
 
   it('never resets the reconnect budget for a long productive attempt — only retry() re-arms it', async () => {
-    // Every attempt streams real data for far longer than a "stable" attempt
+    // note: Every attempt streams real data for far longer than a "stable" attempt
     // would need, and only then dies. No outcome buys extra attempts: the budget
     // is strictly monotonic, so the episode still exhausts at the fixed total and
     // the hook rests in `error` — only the user's explicit retry() re-arms it
@@ -622,7 +622,7 @@ describe('useRunObservation — failure and unmount', () => {
 
   it('surfaces a typed refusal as error without retrying', async () => {
     const { client, calls } = stubClientFor([
-      // A transport refusal is thrown before the first frame is yielded.
+      // note: A transport refusal is thrown before the first frame is yielded.
       () => ({
         [Symbol.asyncIterator]: () => ({
           next: () => Promise.reject(new NexusClientError(404, 'not_found', 'no such run')),
@@ -664,7 +664,7 @@ describe('useRunObservation — retention bounds', () => {
     await waitFor(() => expect(first.result.current.phase).toBe('terminal'));
     first.unmount();
 
-    // A closed run is re-observed from the server's own ring, not from the SPA.
+    // note: A closed run is re-observed from the server's own ring, not from the SPA.
     const again = observeRun(client, 'run-evicted');
     expect(again.result.current.phase).toBe('connecting');
     expect(again.result.current.events).toEqual([]);
@@ -695,7 +695,7 @@ describe('useRunObservation — retention bounds', () => {
   });
 
   it('advances the publish revision when an inline gap lands on a full window', async () => {
-    // A control frame has no cursor and, on a full window, does not change the
+    // note: A control frame has no cursor and, on a full window, does not change the
     // retained length either — so length/lastEventId are unsafe memoization
     // keys. The revision must still move (QC3-003).
     async function* full(options: SubscribeOptions) {
@@ -711,7 +711,7 @@ describe('useRunObservation — retention bounds', () => {
     const probe = observeRun(client, 'run-revision');
     await waitFor(() => expect(probe.result.current.phase).toBe('gapped'));
 
-    // The gap is consumed in place: the stream stays open, so nothing reconnects.
+    // note: The gap is consumed in place: the stream stays open, so nothing reconnects.
     expect(calls).toHaveLength(1);
     expect(probe.result.current.events).toHaveLength(256);
     expect(probe.result.current.lastEventId).toBe('e1:256');
@@ -730,12 +730,12 @@ describe('useRunObservation — retention bounds', () => {
     expect(first.result.current.events.map(cursorOf)).toEqual(['e1:1']);
     first.unmount();
 
-    // The run never reaches a terminal state; the user just never comes back.
+    // note: The run never reaches a terminal state; the user just never comes back.
     const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60 * 60_000);
     const reentry = observeRun(client, 'run-idle');
     clock.mockRestore();
 
-    // The idle entry was evicted, so re-entry is a cold subscription — no
+    // note: The idle entry was evicted, so re-entry is a cold subscription — no
     // restored history and no cursor (an honest re-fetch, not a stale window).
     expect(reentry.result.current.phase).toBe('connecting');
     expect(reentry.result.current.events).toEqual([]);
@@ -750,7 +750,7 @@ describe('useRunObservation — retention bounds', () => {
 
 describe('useRunObservation — connection-scoped retention', () => {
   it('starts cold when the same run is re-observed over a different connection', async () => {
-    // A rebuilt client — a daemon reconnect, a changed endpoint or key — is a
+    // note: A rebuilt client — a daemon reconnect, a changed endpoint or key — is a
     // different connection. The frames a previous connection retained must not
     // be shown under it before its own subscription has been authorized, so a
     // new connection re-subscribes cursorless with no restored history.
@@ -766,20 +766,20 @@ describe('useRunObservation — connection-scoped retention', () => {
     const second = stubClientFor([(options) => openStream(options, runState('e1:9'))]);
     const reconnected = observeRun(second.client, 'run-connection');
 
-    // Nothing of the old connection's history leaks through: cold start, no cursor.
+    // note: Nothing of the old connection's history leaks through: cold start, no cursor.
     expect(reconnected.result.current.phase).toBe('connecting');
     expect(reconnected.result.current.events).toEqual([]);
     expect(reconnected.result.current.lastEventId).toBeNull();
 
     await waitFor(() => expect(second.calls).toHaveLength(1));
     expect(second.calls[0].lastEventId).toBeUndefined();
-    // The first connection observed nothing new — no shared subscription state.
+    // note: The first connection observed nothing new — no shared subscription state.
     expect(first.calls).toHaveLength(1);
     expect(reconnected.result.current.events.map(cursorOf)).toEqual(['e1:9']);
   });
 
   it('renders cold on an in-place client replacement — never a frame of the old connection', async () => {
-    // `ClientProvider` can replace its client without remounting children, so the
+    // note: `ClientProvider` can replace its client without remounting children, so the
     // hook's own state survives the identity change and the subscription effect
     // only runs after the render that saw the new client. The snapshot must be
     // discarded synchronously with that change: the first commit under the new
@@ -790,7 +790,7 @@ describe('useRunObservation — connection-scoped retention', () => {
     ]);
     const sent: { client: NexusClient } = { client: oldConnection.client };
 
-    // Gate the new connection's stream so its cold render is observable before
+    // note: Gate the new connection's stream so its cold render is observable before
     // anything publishes: nothing is delivered until this test releases it.
     let releaseNew: (() => void) | undefined;
     const newStreamReady = new Promise<void>((resolve) => {
@@ -832,7 +832,7 @@ describe('useRunObservation — connection-scoped retention', () => {
       expect(committedFrames[committedFrames.length - 1]?.cursors).toEqual(['e1:1', 'e1:2']),
     );
 
-    // Swap the connection in place: the provider does not remount the view.
+    // note: Swap the connection in place: the provider does not remount the view.
     sent.client = newConnection.client;
     committedFrames.length = 0;
     act(() => hook.rerender());
@@ -844,7 +844,7 @@ describe('useRunObservation — connection-scoped retention', () => {
     releaseNew?.();
     await waitFor(() => expect(newConnection.calls).toHaveLength(1));
     expect(newConnection.calls[0].lastEventId).toBeUndefined();
-    // The old connection observed nothing new — its subscription was dropped.
+    // note: The old connection observed nothing new — its subscription was dropped.
     expect(oldConnection.calls).toHaveLength(1);
     await waitFor(() =>
       expect(committedFrames[committedFrames.length - 1]?.cursors).toEqual(['e1:9']),
@@ -852,7 +852,7 @@ describe('useRunObservation — connection-scoped retention', () => {
   });
 
   it('renders cold when the observed run changes — never a frame of the previous run', async () => {
-    // The same identity rule covers the run half of the pair: a view switching
+    // note: The same identity rule covers the run half of the pair: a view switching
     // runs on one live connection must not commit the previous run's frames
     // under the new run id before that run's own subscription publishes.
     const { client, calls } = stubClientFor([

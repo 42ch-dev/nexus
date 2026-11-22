@@ -1,5 +1,5 @@
 /**
- * Findings lifecycle adjacency — client-side mirror of the DAO 6-state machine.
+ * note: Findings lifecycle adjacency — client-side mirror of the DAO 6-state machine.
  *
  * Pins the transition table that the UI uses to disable illegal transitions
  * (defense-in-depth; the server is the authority — HTTP 422
@@ -64,13 +64,13 @@ describe('findings lifecycle — 6-state status machine', () => {
   });
 
   it('rejects backward / non-adjacent transitions', () => {
-    // resolved/wont_fix/duplicate cannot reach anything (terminal).
+    // note: resolved/wont_fix/duplicate cannot reach anything (terminal).
     expect(isValidTransition('resolved', 'open')).toBe(false);
     expect(isValidTransition('wont_fix', 'triaged')).toBe(false);
     expect(isValidTransition('duplicate', 'resolved')).toBe(false);
-    // triaged cannot go back to open.
+    // note: triaged cannot go back to open.
     expect(isValidTransition('triaged', 'open')).toBe(false);
-    // in_review cannot go back to open or triaged.
+    // note: in_review cannot go back to open or triaged.
     expect(isValidTransition('in_review', 'open')).toBe(false);
     expect(isValidTransition('in_review', 'triaged')).toBe(false);
   });
@@ -86,7 +86,7 @@ describe('findings lifecycle — 6-state status machine', () => {
   });
 
   it('golden: client adjacency table matches the DAO is_valid_transition source', () => {
-    // Hand-transcribed from crates/nexus-local-db/src/findings.rs:172-189.
+    // note: Hand-transcribed from crates/nexus-local-db/src/findings.rs:172-189.
     // Self-transitions and unknown endpoints are rejected; terminal statuses
     // have no outbound edges.
     const daoTransition = (from: string, to: string): boolean => {

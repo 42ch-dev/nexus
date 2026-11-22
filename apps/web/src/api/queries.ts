@@ -1,5 +1,5 @@
 /**
- * TanStack Query hooks for the Control Room + Setup screens.
+ * note: TanStack Query hooks for the Control Room + Setup screens.
  *
  * Each hook reads via the `NexusClient` interface (transport-agnostic). List
  * endpoints now return the canonical `{ items, pagination }` shape (F-P3) and
@@ -92,12 +92,12 @@ interface CursorPage<T> {
   pagination: PaginationInfo;
 }
 
-/** Cursor token type for infinite queries (undefined on the first page). */
+/** note: Cursor token type for infinite queries (undefined on the first page). */
 type Cursor = string | undefined;
 
 const FIRST_PAGE: Cursor = undefined;
 
-// ── Works (cursor-paginated dashboard) ───────────────────────────────────────
+// note: Works (cursor-paginated dashboard)
 
 /** Cursor-paginated Works list (F-P1/F-P3/F-F1). */
 export function useWorks(query?: ListWorksQuery) {
@@ -127,7 +127,7 @@ export function useWork(workId: string | undefined) {
   });
 }
 
-// ── Sessions (cursor-paginated) ──────────────────────────────────────────────
+// note: Sessions (cursor-paginated)
 
 /**
  * AD-P0-2c (V1.120 P2 / F3): Sessions is an active-work monitor. The daemon
@@ -150,7 +150,7 @@ export function useSessions(query?: ListSessionsQuery) {
   });
 }
 
-// ── Schedules (cursor-paginated) ─────────────────────────────────────────────
+// note: Schedules (cursor-paginated)
 
 export function useSchedules(query?: ListSchedulesQuery) {
   const client = useNexusClient();
@@ -164,7 +164,7 @@ export function useSchedules(query?: ListSchedulesQuery) {
 }
 
 
-// ── Capabilities (cursor-paginated; default server order is by name) ─────────
+// note: Capabilities (cursor-paginated; default server order is by name)
 
 export function useCapabilities(query?: ListCapabilitiesQuery) {
   const client = useNexusClient();
@@ -177,7 +177,7 @@ export function useCapabilities(query?: ListCapabilitiesQuery) {
   });
 }
 
-// ── Findings (cursor-paginated per Work) ─────────────────────────────────────
+// note: Findings (cursor-paginated per Work)
 
 export function useFindings(workId: string | undefined, query?: ListFindingsQuery) {
   const client = useNexusClient();
@@ -204,7 +204,7 @@ export function flattenPages<T>(data: { pages: CursorPage<T>[] } | undefined): T
   return data.pages.flatMap((p) => p.items);
 }
 
-// ── World check findings (V1.165 route, DR-64 surfacing half) ───────────────
+// note: World check findings (V1.165 route, DR-64 surfacing half)
 
 /**
  * World-scoped check findings — `GET /v1/daemon/worlds/{world_id}/findings`
@@ -224,7 +224,7 @@ export function useWorldFindings(worldId: string | undefined) {
   });
 }
 
-// ── World rules (V1.166 P1 route, DR-64 surfacing half) ─────────────────────
+// note: World rules (V1.166 P1 route, DR-64 surfacing half)
 
 /**
  * World-scoped rules — `GET /v1/daemon/worlds/{world_id}/rules` (V1.166
@@ -329,7 +329,7 @@ export function useUpdateWorldRule(worldId: string) {
   });
 }
 
-// Forward-staging closure: a `useFinding(workId, findingId)` detail hook was
+// note: Forward-staging closure: a `useFinding(workId, findingId)` detail hook was
 // considered for the V1.77 remediation surface but is intentionally absent
 // here. The FindingDetailPanel reads the selected row from the work-scoped
 // list cache, which is sufficient while the UI is a list+inspector hybrid. A
@@ -337,7 +337,7 @@ export function useUpdateWorldRule(worldId: string) {
 // standalone finding-detail route or inspector needs it as the source of truth
 // (qc1 S-001).
 
-// ── Presets (grouped by source) ──────────────────────────────────────────────
+// note: Presets (grouped by source)
 
 export interface PresetGroups {
   embedded: PresetSummary[];
@@ -370,7 +370,7 @@ export function usePresets() {
 }
 
 /**
- * `GET /v1/daemon/orchestration/presets/{id}/profile` (V1.171 P1 — AR-27).
+ * note: `GET /v1/daemon/orchestration/presets/{id}/profile` (V1.171 P1 — AR-27).
  *
  * Manifest-derived profile for any resolvable preset (lanes, states, roles,
  * capabilities, declared signals). Missing/unknown ids resolve to a query
@@ -415,7 +415,7 @@ export function usePresetProfile(presetId: string | undefined) {
   return useQuery(presetProfileQueryOptions(presetId, client));
 }
 
-// ── Timeline (V1.126 P2; V1.127 P0 T2 infinite pagination) ────────────────────
+// note: Timeline (V1.126 P2; V1.127 P0 T2 infinite pagination)
 
 /**
  * Cursor-paginated global Timeline overview across all Worlds.
@@ -451,7 +451,7 @@ export function flattenOverviewWorlds(
   return data.pages.flatMap((p) => p.worlds);
 }
 
-// ── Mutations (Setup writes) ─────────────────────────────────────────────────
+// note: Mutations (Setup writes)
 
 /**
  * Surface a NexusClientError as a toast; callers may still read the result.
@@ -511,7 +511,7 @@ export function useCreateWorld() {
     mutationFn: (request: CreateWorldRequest) => client.createWorld(request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
-      // Mirror useDeleteWorld: Timeline overview is World-centric (era/event
+      // note: Mirror useDeleteWorld: Timeline overview is World-centric (era/event
       // counts per World). A newly created World must appear in overview
       // caches, not only the narrative worlds list.
       void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
@@ -600,12 +600,12 @@ export function useDeleteWork() {
   });
 }
 
-// ── Works inspiration pool (v1.222 P1 T1) ───────────────────────────────────
+// note: Works inspiration pool (v1.222 P1 T1)
 
 /**
  * One page of the creator's inspiration pool.
  *
- * shortcut: first page only (`offset` is never advanced) — upgrade to
+ * shortcut: first page only (`offset` is never advanced). upgrade: use
  * `useInfiniteQuery` over `offset` when a pool can exceed one page.
  */
 export function useWorkInspiration(query?: WorkInspirationListQuery) {
@@ -679,7 +679,7 @@ export function useDeleteWorld() {
     mutationFn: (worldId: string) => client.deleteWorld(worldId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
-      // V1.129 P5 (Greptile P1): the Global Timeline overview is World-centric
+      // note: V1.129 P5 (Greptile P1): the Global Timeline overview is World-centric
       // — `TimelineOverviewResponse.worlds` lists each World with its era/event
       // counts, so a deleted World must be evicted from the overview cache or
       // it keeps rendering until the next manual refetch. Invalidating
@@ -715,17 +715,17 @@ export function useUpdateFinding() {
     mutationFn: (vars: { workId: string; findingId: string; patch: UpdateFindingRequest }) =>
       client.updateFinding(vars.workId, vars.findingId, vars.patch),
     onMutate: async (vars) => {
-      // Cancel outgoing refetches for this Work so they don't overwrite the
+      // note: Cancel outgoing refetches for this Work so they don't overwrite the
       // optimistic update. Scope to vars.workId — cancelling other Works'
       // lists is unnecessary and contradicts the work-scoped invalidation
       // (qc3 W-QC3-P0-001).
       await qc.cancelQueries({ queryKey: queryKeys.findings.list(vars.workId) });
-      // Snapshot every matched list cache for this work (across query filters)
+      // note: Snapshot every matched list cache for this work (across query filters)
       // so onError can restore the pre-mutation state.
       const previousLists = qc.getQueriesData<FindingsListData>({
         queryKey: queryKeys.findings.list(vars.workId),
       });
-      // Only apply defined patch fields — undefined means "no-op" on the wire
+      // note: Only apply defined patch fields — undefined means "no-op" on the wire
       // and must not clobber the cached value during the optimistic merge.
       const optimistic = Object.fromEntries(
         Object.entries(vars.patch).filter(([, v]) => v !== undefined),
@@ -745,7 +745,7 @@ export function useUpdateFinding() {
           };
         },
       );
-      // Asymmetry note: `getQueriesData` snapshots every matched list under the
+      // note: Asymmetry note: `getQueriesData` snapshots every matched list under the
       // work-scoped prefix (all filter views), while `setQueryData` restores
       // each snapshot by its exact query key. This is correct because TanStack's
       // `setQueryData` ignores filters that are not part of the exact key tuple;
@@ -766,7 +766,7 @@ export function useUpdateFinding() {
       toast({ variant: 'success', title: t('toast.findingUpdated'), description: shortId(vars.findingId) });
     },
     onSettled: (_data, _error, vars) => {
-      // Narrow to the mutated Work's list scope (all filter views of that Work
+      // note: Narrow to the mutated Work's list scope (all filter views of that Work
       // only), not the global findings-list prefix — so a status change /
       // assignment / inline edit in one Work doesn't mark every other Work's
       // findings lists stale and refetch them (qc3 W-QC3-P0-001). The scoped
@@ -833,7 +833,7 @@ export function useScaffoldPreset() {
   return useMutation({
     mutationFn: (request: ScaffoldPresetRequest) => client.scaffoldPreset(request),
     onSuccess: () => {
-      // Invalidate the whole `['presets']` key set (list + every profile) so
+      // note: Invalidate the whole `['presets']` key set (list + every profile) so
       // newly scaffolded manifests surface in the catalog immediately.
       void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
@@ -847,7 +847,7 @@ export function useValidatePreset() {
   return useMutation({
     mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
     onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
-    // On success the caller surfaces structured errors/warnings inline; a toast
+    // note: On success the caller surfaces structured errors/warnings inline; a toast
     // is not added here so the validate dialog stays the single source of truth.
   });
 }
@@ -863,7 +863,7 @@ export function useReloadPreset() {
     mutationFn: (presetId: string) => client.reloadPreset(presetId),
     onSuccess: (_data, presetId) => {
       toast({ variant: 'success', title: t('toast.presetReloaded'), description: presetId });
-      // Reload re-reads the manifest — lanes/roles/capabilities can change.
+      // note: Reload re-reads the manifest — lanes/roles/capabilities can change.
       // `presets.all` (prefix `['presets']`) invalidates the list AND every
       // `['presets','profile',<id>]` key so mounted rows refresh in place.
       void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
@@ -890,7 +890,7 @@ export function useDeletePreset() {
   });
 }
 
-// ── Chapters (V1.65 Content-Authoring) ───────────────────────────────────────
+// note: Chapters (V1.65 Content-Authoring)
 
 /** Cursor-paginated chapter list for a Work (F-P3 `items` key). */
 export function useChapters(workId: string | undefined, query?: ListChaptersQuery) {
@@ -974,7 +974,7 @@ export function useActiveCreatorId(): string | undefined {
   return useActiveCreatorIdFromContext() ?? undefined;
 }
 
-// ── Creators (V1.94 P1) ──────────────────────────────────────────────────────
+// note: Creators (V1.94 P1)
 
 export function useCreators(query?: ListCreatorsQuery) {
   const client = useNexusClient();
@@ -1010,7 +1010,7 @@ export function useSetActiveCreator() {
   });
 }
 
-// ── Agent host (V1.94 P1) ────────────────────────────────────────────────────
+// note: Agent host (V1.94 P1)
 
 export function useScanAgents(request?: ScanRequest) {
   const client = useNexusClient();
@@ -1023,7 +1023,7 @@ export function useScanAgents(request?: ScanRequest) {
 /** Saved agent profile snapshot shape (desktop `getAgentProfile` payload). */
 export type AgentProfileSnapshot = { name: string; launchCommand?: string };
 
-/** Browser-snapshot storage key prefix owned by onboarding (T3). */
+/** note: Browser-snapshot storage key prefix owned by onboarding (T3). */
 const BROWSER_AGENT_PROFILE_PREFIX = 'nexus-agent-profile:';
 
 /**
@@ -1042,7 +1042,7 @@ export function readBrowserAgentProfile(
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== 'object') return null;
-    // Trust boundary: localStorage can hold anything, so both fields are
+    // note: Trust boundary: localStorage can hold anything, so both fields are
     // validated at runtime — a polluted `launchCommand` is dropped rather than
     // reaching `?.trim()` callers as a non-string.
     const { name, launchCommand } = parsed as { name?: unknown; launchCommand?: unknown };
@@ -1068,7 +1068,7 @@ export function wireFromSnapshot(profile: AgentProfileSnapshot): AgentProfile {
 }
 
 /**
- * Browser profile read (I-000064): the service is authoritative.
+ * note: Browser profile read (I-000064): the service is authoritative.
  *
  * Read order: service GET → a `null` profile falls back ONCE to the legacy
  * per-creator localStorage snapshot, which is best-effort PUT to the service
@@ -1095,12 +1095,12 @@ async function readServiceAgentProfile(
 
 /** Saved-profile resolution state — the one seam the topnav and Hub share. */
 export interface SavedAgentProfileState {
-  /** The daemon-global profile from the service (desktop: the IPC profile). */
+  /** note: The daemon-global profile from the service (desktop: the IPC profile). */
   profile: AgentProfileSnapshot | null;
-  /** True only while the profile read is fetching. */
+  /** note: True only while the profile read is fetching. */
   isLoading: boolean;
   /**
-   * True once the profile read has settled (success or error). Consumers gate
+   * note: True once the profile read has settled (success or error). Consumers gate
    * writes on this so a default is never committed as the persisted choice.
    */
   isFetched: boolean;
@@ -1167,7 +1167,7 @@ export function useAgentProfile() {
  */
 export function useVerifyAgent() {
   const client = useNexusClient();
-  // R-V1108P1QC3-W002: cancel the in-flight probe on unmount so a stale scan
+  // note: R-V1108P1QC3-W002: cancel the in-flight probe on unmount so a stale scan
   // result does not settle a mutation whose component tree is already gone.
   const abortRef = useRef<AbortController | null>(null);
 
@@ -1185,7 +1185,7 @@ export function useVerifyAgent() {
       const trimmed = command.trim();
       if (!trimmed) return false;
       const res = await client.scanAgents({ filter: 'installed' });
-      // If the component unmounted while the scan was in flight, discard the
+      // note: If the component unmounted while the scan was in flight, discard the
       // result rather than settling a mutation on a gone tree.
       if (controller.signal.aborted) {
         throw new DOMException('useVerifyAgent aborted on unmount', 'AbortError');
@@ -1234,9 +1234,9 @@ export function launchCommandMatches(
   return basename(custom) !== '' && basename(custom) === basename(scan);
 }
 
-// ── Creator Memory review-loop (V1.78) ───────────────────────────────────────
+// note: Creator Memory review-loop (V1.78)
 
-/** Pending-review count badge refresh cadence (live count indicator). */
+/** note: Pending-review count badge refresh cadence (live count indicator). */
 const MEMORY_COUNT_POLL_MS = 10_000;
 
 /** Cursor-paginated pending-review list for the active creator. */
@@ -1267,7 +1267,7 @@ export function usePendingReviewCount(creatorId: string | undefined) {
     queryFn: (): Promise<CountPendingReviewsResponse> => client.countPendingReviews(creatorId!),
     enabled: Boolean(creatorId),
     refetchInterval: MEMORY_COUNT_POLL_MS,
-    // Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
+    // note: Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
     // `refetchInterval` when the tab/window is hidden by default, which keeps
     // this 10s poll from draining battery/CPU on the desktop shell and
     // backgrounded browser tabs. Do not add `refetchIntervalInBackground` here
@@ -1287,7 +1287,7 @@ export function useMemoryFragments(
     queryFn: () => client.listMemoryFragments(creatorId!, query),
     enabled: Boolean(creatorId),
     refetchInterval: options?.refetchInterval,
-    // Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
+    // note: Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
     // `refetchInterval` when the tab/window is hidden by default, which keeps a
     // SOUL auto-refresh poll from draining battery/CPU on the desktop shell and
     // backgrounded browser tabs (matches usePendingReviewCount).
@@ -1318,7 +1318,7 @@ export function useDeletePendingReview() {
       const previousCount = qc.getQueryData<CountPendingReviewsResponse>(
         queryKeys.memory.count(vars.creatorId),
       );
-      // Drop the row from every cached list view for this creator.
+      // note: Drop the row from every cached list view for this creator.
       qc.setQueriesData<PendingListData>(
         { queryKey: queryKeys.memory.pendingList(vars.creatorId) },
         (old) => {
@@ -1332,7 +1332,7 @@ export function useDeletePendingReview() {
           };
         },
       );
-      // Optimistically decrement the count badge (floor at 0).
+      // note: Optimistically decrement the count badge (floor at 0).
       if (previousCount && previousCount.count > 0) {
         qc.setQueryData<CountPendingReviewsResponse>(queryKeys.memory.count(vars.creatorId), {
           count: previousCount.count - 1,
@@ -1363,7 +1363,7 @@ export function useDeletePendingReview() {
 }
 
 /**
- * Maximum client-side drain calls per user action (V1.80 REL-01). The daemon
+ * note: Maximum client-side drain calls per user action (V1.80 REL-01). The daemon
  * processes up to REVIEW_BATCH_LIMIT (50) rows per call; 20 calls × 50 rows =
  * 1,000 rows per user action before the drain stops with a still-draining
  * toast. Guards against pathological queues hanging the UI.
@@ -1409,9 +1409,9 @@ export function useReviewMemory() {
         dropped += res.dropped;
         processed += res.processed ?? 0;
         hasMore = res.has_more ?? false;
-        // Queue fully drained by the server.
+        // note: Queue fully drained by the server.
         if (!hasMore) break;
-        // Zero-progress guard: a call that inspected no rows but still reports
+        // note: Zero-progress guard: a call that inspected no rows but still reports
         // has_more would loop forever on an unprocessable head row.
         if ((res.processed ?? 0) === 0) break;
       }
@@ -1419,7 +1419,7 @@ export function useReviewMemory() {
     },
     onSuccess: (data: ReviewResponse) => {
       if (data.has_more) {
-        // Cap or zero-progress guard tripped: the queue is still draining but
+        // note: Cap or zero-progress guard tripped: the queue is still draining but
         // the client stopped re-requesting. Non-error informational message.
         toast({
           variant: 'info',
@@ -1444,7 +1444,7 @@ export function useReviewMemory() {
       }
     },
     onError: (error) => errorToast(error, 'error.couldNotCompleteReview'),
-    // Invalidate on settle (not just success): if the network fails AFTER the
+    // note: Invalidate on settle (not just success): if the network fails AFTER the
     // server already processed/deleted the pending queue, the client would
     // otherwise keep showing rows that no longer exist until a manual refresh.
     // Matches the useDeletePendingReview onSettled pattern.
@@ -1452,7 +1452,7 @@ export function useReviewMemory() {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.count(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(creatorId) });
-      // V1.82 auto-refresh: a review produces new fragments, which may flip
+      // note: V1.82 auto-refresh: a review produces new fragments, which may flip
       // any narrative scope (Creator-level or per-World) from `current` →
       // `stale` (or lift it over the insufficient-data threshold). Invalidate
       // the whole narrative cache prefix for this creator so every scope
@@ -1462,7 +1462,7 @@ export function useReviewMemory() {
   });
 }
 
-// ── Creator SOUL Narrative (V1.81 SP-1 → V1.82 per-World) ────────────────────
+// note: Creator SOUL Narrative (V1.81 SP-1 → V1.82 per-World)
 
 /**
  * Auto-refresh cadence for the SOUL surface (V1.81 SP-4). Polled so new
@@ -1558,7 +1558,7 @@ export function useReflectSoulNarrative() {
   });
 }
 
-// ── Reading progress + annotations (V1.89 Deeper Manuscript Reading) ─────────
+// note: Reading progress + annotations (V1.89 Deeper Manuscript Reading)
 
 const SCROLL_PROGRESS_UNIT = 10_000;
 
@@ -1665,7 +1665,7 @@ export function useDeleteAnnotation() {
   });
 }
 
-// ── Compute modules (V1.114 P2) ───────────────────────────────────────────────
+// note: Compute modules (V1.114 P2)
 
 /** List installed compute modules surfaced by the registry. */
 export function useComputeModules() {
@@ -1689,7 +1689,7 @@ export function useComputeModule(moduleId: string) {
   });
 }
 
-// ── Compute runs (V1.147 P1 — Run Studio) ────────────────────────────────────
+// note: Compute runs (V1.147 P1 — Run Studio)
 
 /** Filter for the runs history list (cursor + page size are hook-managed). */
 export type ComputeRunsFilter = Omit<ListRunsQuery, 'cursor' | 'limit'>;
@@ -1742,12 +1742,12 @@ export function useRunCompute() {
     mutationFn: (request: RunRequest) => client.runCompute(request),
     onSuccess: (_data, request) => {
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
-      // Keep the module screen fresh — it hosts the Run Studio entry for this
+      // note: Keep the module screen fresh — it hosts the Run Studio entry for this
       // module (brief: runs-list + module-detail invalidation).
       void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
     },
     onError: (error, request) => {
-      // The daemon persists a Failed run row even when the POST surfaces an
+      // note: The daemon persists a Failed run row even when the POST surfaces an
       // error envelope — refetch the Runs lists so the row shows immediately
       // (dogfood finding, V1.147 P1 T4). Unknown world / not-owner rejections
       // create no row; an extra refetch is harmless there.
@@ -1833,7 +1833,7 @@ export function useClearRuns() {
   });
 }
 
-// ── World timeline events (V1.147 P2 — compute_result merge) ────────────────
+// note: World timeline events (V1.147 P2 — compute_result merge)
 
 /**
  * Read-slice query for the canvas compute-event timeline.
@@ -1906,7 +1906,7 @@ export function useWorldTimelineEvents(
   });
 }
 
-// ── World timeline forks (V1.162 P1 T2 + P2 T1/T2) ─────────────────────────
+// note: World timeline forks (V1.162 P1 T2 + P2 T1/T2)
 
 /**
  * Branch-level fork lineage (V1.162 P2 T2 — carrier B, spec §6.6.3).
@@ -1928,7 +1928,7 @@ export interface ForkLineage {
 }
 
 /**
- * Narrow the marker's `extensions.fork_lineage` namespace. Mirrors the
+ * note: Narrow the marker's `extensions.fork_lineage` namespace. Mirrors the
  * adapter's `computeProvenanceOf` leniency: unknown / malformed shapes
  * degrade to absent fields, never a fabricated lineage. `is_fork` is the
  * marker's presence (the caller has already selected the `fork_created`
@@ -1992,7 +1992,7 @@ export function useForkLineage(
         status: 'canon',
         limit: 1,
       });
-      // `is_fork` = a `fork_created` MARKER row present. The query is
+      // note: `is_fork` = a `fork_created` MARKER row present. The query is
       // hard-filtered to `event_type=fork_created`, and the DTO's
       // `event_type` is re-checked so a stray non-marker row can never be
       // misread as a fork (the derivation stays honest about "marker").
@@ -2051,7 +2051,7 @@ export function useCreateFork() {
   });
 }
 
-// ── Assembly Inspector (V1.151 P1 — DF-76) ──────────────────────────────────
+// note: Assembly Inspector (V1.151 P1 — DF-76)
 
 /**
  * Read-only moment inspection for the Assembly Inspector panel.
@@ -2094,7 +2094,7 @@ export function useMomentDirective() {
   });
 }
 
-// ── Narrative Knowledge Pack (V1.152 P1 — DF-77) ───────────────────────────
+// note: Narrative Knowledge Pack (V1.152 P1 — DF-77)
 
 /**
  * Export one World's lore as a Narrative Knowledge Pack and trigger a browser
@@ -2128,7 +2128,7 @@ export function useExportPack() {
   });
 }
 
-/** Read `modules.pack.title` from an opaque pack envelope (defensively). */
+/** note: Read `modules.pack.title` from an opaque pack envelope (defensively). */
 function packTitleFromEnvelope(modules: PackExportResponse['modules']): string | undefined {
   const pack = modules.pack;
   if (typeof pack === 'object' && pack !== null && 'title' in pack && typeof pack.title === 'string') {
@@ -2191,7 +2191,7 @@ export function useReadingProgressSync(
   const enabled = options?.enabled ?? true;
   const restoredRef = useRef(false);
 
-  // Reset the restore guard whenever the chapter changes so navigation to a
+  // note: Reset the restore guard whenever the chapter changes so navigation to a
   // different chapter restores its own position.
   useEffect(() => {
     restoredRef.current = false;
@@ -2207,7 +2207,7 @@ export function useReadingProgressSync(
     saveMutate({ workId, chapter, volume, scrollProgress: ratioToScrollProgress(ratio) });
   }, [workId, chapter, volume, saveMutate]);
 
-  // Restore once when the persisted value first resolves. The guard prevents
+  // note: Restore once when the persisted value first resolves. The guard prevents
   // re-scrolling when the save mutation updates the cached scroll_progress.
   useEffect(() => {
     if (!enabled || !progress.isSuccess || restoredRef.current) return;
@@ -2225,7 +2225,7 @@ export function useReadingProgressSync(
     restoredRef.current = true;
   }, [enabled, progress.isSuccess, progress.data, workId, chapter, volume]);
 
-  // Debounced scroll save.
+  // note: Debounced scroll save.
   useEffect(() => {
     if (!enabled) return;
     const scrollContainer = document.querySelector('main');
@@ -2242,7 +2242,7 @@ export function useReadingProgressSync(
     };
   }, [enabled, flushSave]);
 
-  // Flush on page hide / beforeunload so the last position survives navigation.
+  // note: Flush on page hide / beforeunload so the last position survives navigation.
   useEffect(() => {
     if (!enabled) return;
     function onBeforeUnload() {

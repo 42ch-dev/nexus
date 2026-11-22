@@ -1,5 +1,5 @@
 /**
- * Settings Agent section — V1.103 P1 (G1 preselect).
+ * note: Settings Agent section — V1.103 P1 (G1 preselect).
  *
  * Mounts app-shared AgentPicker as a Settings section body. The saved profile
  * comes from the shared `useSavedAgentProfile` seam (desktop IPC / browser
@@ -38,7 +38,7 @@ import {
 } from '@/lib/agent-catalog';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
-/** Map a catalog item → picker view-model. */
+/** note: Map a catalog item → picker view-model. */
 function catalogItemToPickerItem(item: AgentCatalogItem): AgentPickerItem {
   return {
     // Selection id is the collision-safe picker id (PR#148 Greptile P1), not
@@ -67,7 +67,7 @@ function resolvePickerStatus(
 }
 
 /**
- * Apply a saved profile onto scan results: prefer launch-command match among
+ * note: Apply a saved profile onto scan results: prefer launch-command match among
  * installed agents, then catalog-key match; otherwise use launchCommand as the
  * custom path. Returns whether a selection was applied.
  */
@@ -139,7 +139,7 @@ export function SettingsAgentSection() {
   const [customLaunchCommand, setCustomLaunchCommand] = useState('');
   const [didInitDefault, setDidInitDefault] = useState(false);
   const [verifyStatus, setVerifyStatus] = useState<AgentVerifyStatus>('idle');
-  /** Author touched picker before async preselect finished — skip late apply. */
+  /** note: Author touched picker before async preselect finished — skip late apply. */
   const userTouchedRef = useRef(false);
   const qc = useQueryClient();
 
@@ -149,7 +149,7 @@ export function SettingsAgentSection() {
       const launchCommand =
         (agent?.launch_command ?? customCommand.trim()) ?? undefined;
       try {
-        // Transport-coherent with the read seam: desktop keeps the IPC store,
+        // note: Transport-coherent with the read seam: desktop keeps the IPC store,
         // the browser writes the service the same seam reads.
         if (desktop) {
           await desktop.setAgentProfile(name, launchCommand);
@@ -177,13 +177,13 @@ export function SettingsAgentSection() {
     [client, commonT, desktop, qc, toast],
   );
 
-  // G1: once both the scan and the shared profile read settle, preselect the
+  // note: G1: once both the scan and the shared profile read settle, preselect the
   // saved profile (match by command / catalog key); null/unreadable falls back
   // to the first installed agent. Works in the browser too — the seam reads the
   // service there.
   useEffect(() => {
     if (didInitDefault) return;
-    // A failed profile read must not silently fall back to "first installed":
+    // note: A failed profile read must not silently fall back to "first installed":
     // the error surface holds preselect until a refetch succeeds.
     if (scan.isLoading || scan.isError || saved.isLoading || saved.error) return;
     const scannedMaybe = scan.data?.agents;

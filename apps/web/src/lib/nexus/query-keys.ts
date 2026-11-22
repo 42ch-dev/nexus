@@ -14,7 +14,7 @@ export const queryKeys = {
     details: () => [...queryKeys.works.all, 'detail'] as const,
     detail: (workId: string) => [...queryKeys.works.details(), workId] as const,
   },
-  // v1.222 P1 (T1) — inspiration pool. Top-level on purpose: the pool is
+  // note: v1.222 P1 (T1) — inspiration pool. Top-level on purpose: the pool is
   // creator-scoped (none of the four payloads carries a `work_id`), so a
   // `works.lists()` invalidation must not blank the pool cache. No `detail`:
   // there is no single-item GET route.
@@ -47,7 +47,7 @@ export const queryKeys = {
   presets: {
     all: ['presets'] as const,
     list: () => [...queryKeys.presets.all, 'list'] as const,
-    // Detail keys staged for the V1.70 canvas Strategy surface
+    // note: Detail keys staged for the V1.70 canvas Strategy surface
     // (R-V167P1-QC3-S2): getPreset/updatePreset/deletePreset operate on a
     // single preset by id. Invalidation follows the existing inline mutation
     // pattern — `qc.invalidateQueries({ queryKey: queryKeys.presets.all })`
@@ -55,19 +55,19 @@ export const queryKeys = {
     // targets one.
     details: () => [...queryKeys.presets.all, 'detail'] as const,
     detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
-    // V1.171 P1 — per-preset profile (AR-27). Under `presets.all` so the
+    // note: V1.171 P1 — per-preset profile (AR-27). Under `presets.all` so the
     // scaffold/reload/delete mutations invalidate the whole `['presets']`
     // key set and refresh catalog lanes after a manifest change — see the
     // staleness contract on `usePresetProfile`.
     profile: (presetId: string) => [...queryKeys.presets.all, 'profile', presetId] as const,
   },
-  // V1.94 — Creator profile switcher + agent scan.
+  // note: V1.94 — Creator profile switcher + agent scan.
   creators: {
     all: ['creators'] as const,
     list: (query?: object) => [...queryKeys.creators.all, 'list', query ?? {}] as const,
     active: () => [...queryKeys.creators.all, 'active'] as const,
   },
-  // v1219 T3 — workspace chips over the frozen workspace family. Workspace
+  // note: v1219 T3 — workspace chips over the frozen workspace family. Workspace
   // switch invalidates `workspaces.all`; content families are invalidated
   // separately by the workspace context on switch.
   workspaces: {
@@ -80,14 +80,14 @@ export const queryKeys = {
     scan: (request?: { filter?: string; registry_refresh?: boolean }) =>
       [...queryKeys.agentHost.all, 'scan', request?.filter ?? 'all', request?.registry_refresh ?? false] as const,
   },
-  // V1.120 P1 (T1) — desktop-only saved agent profile. Cached so the Settings
+  // note: V1.120 P1 (T1) — desktop-only saved agent profile. Cached so the Settings
   // Agent Save handler can invalidate it and the DaemonStatusBar badge refreshes
   // immediately after a save (AD-P1-1) instead of waiting for the 10s poll.
   agentProfile: {
     all: ['agentProfile'] as const,
     detail: () => [...queryKeys.agentProfile.all, 'detail'] as const,
   },
-  // v1220 T2 — 操作台 Hub aggregation keys. Section-scoped so a card's retry
+  // note: v1220 T2 — 操作台 Hub aggregation keys. Section-scoped so a card's retry
   // refetches only its own sources (per-card error isolation).
   hub: {
     all: ['hub'] as const,
@@ -116,13 +116,13 @@ export const queryKeys = {
     all: ['outline'] as const,
     detail: (workId: string) => [...queryKeys.outline.all, 'detail', workId] as const,
   },
-  // v1.241 P3.5 — the strategy's applied identity: the status read (current
+  // note: v1.241 P3.5 — the strategy's applied identity: the status read (current
   // apply + newest approval). A successful apply or approve invalidates it.
   strategies: {
     all: ['strategies'] as const,
     applied: (strategyId: string) =>
       [...queryKeys.strategies.all, 'applied', strategyId] as const,
-    // Every approval of one strategy, newest first. Separate from `applied` because
+    // note: Every approval of one strategy, newest first. Separate from `applied` because
     // an apply refreshes the live identity while the approval rows do not move; an
     // approve moves both.
     approvals: (strategyId: string) =>
@@ -133,24 +133,24 @@ export const queryKeys = {
     graph: (worldId: string) => [...queryKeys.worldKb.all, 'graph', worldId] as const,
     candidates: (worldId: string, query?: object) =>
       [...queryKeys.worldKb.all, 'candidates', worldId, query ?? {}] as const,
-    // P4-T3 — durable change-outbox watermark poll for the migrated Core slice.
+    // note: P4-T3 — durable change-outbox watermark poll for the migrated Core slice.
     // Keyed by world so the proof slice can watch exactly its world; never
     // mounted by the default product UI (the route is development-only).
     changes: (worldId: string) => [...queryKeys.worldKb.all, 'changes', worldId] as const,
   },
-  // V1.166 P2 — world-scoped check findings (DR-64 surfacing half). Read-only:
+  // note: V1.166 P2 — world-scoped check findings (DR-64 surfacing half). Read-only:
   // no mutation ever invalidates this key (the panel observes the route).
   worldFindings: {
     all: ['worldFindings'] as const,
     list: (worldId: string) => [...queryKeys.worldFindings.all, 'list', worldId] as const,
   },
-  // V1.166 P2 — world-scoped rules (DR-64 surfacing half). Read-only: rules
+  // note: V1.166 P2 — world-scoped rules (DR-64 surfacing half). Read-only: rules
   // are CLI-authored (PD-1) and no mutation ever invalidates this key.
   worldRules: {
     all: ['worldRules'] as const,
     list: (worldId: string) => [...queryKeys.worldRules.all, 'list', worldId] as const,
   },
-  // v240 T4 (I-000126/127/128) — character-scoped families. Every key carries
+  // note: v240 T4 (I-000126/127/128) — character-scoped families. Every key carries
   // the character id before any query object so two Characters never share a
   // cache entry, and the families live under `characters` rather than the
   // creator-scoped `memory` branch: a creator-scoped invalidation must not
@@ -169,7 +169,7 @@ export const queryKeys = {
       detail: (characterId: string, bindingId: string) =>
         [...queryKeys.characters.bindings.details(), characterId, bindingId] as const,
     },
-    // Per-character memory mirrors the creator `memory` family names; the
+    // note: Per-character memory mirrors the creator `memory` family names; the
     // `characters`-first prefix keeps the two caches disjoint.
     memory: {
       pendingLists: () => [...queryKeys.characters.all, 'memory', 'pending', 'list'] as const,
@@ -206,15 +206,15 @@ export const queryKeys = {
     count: (creatorId: string) => [...queryKeys.memory.all, 'pending', 'count', creatorId] as const,
     fragments: (creatorId: string, query?: object) =>
       [...queryKeys.memory.all, 'fragments', creatorId, query ?? {}] as const,
-    // V1.82 — workspace-scoped world list for the SOUL selector.
+    // note: V1.82 — workspace-scoped world list for the SOUL selector.
     worlds: () => [...queryKeys.memory.all, 'worlds'] as const,
-    // V1.81 → V1.82: whole-Creator or per-World SOUL narrative cache. The query
+    // note: V1.81 → V1.82: whole-Creator or per-World SOUL narrative cache. The query
     // key includes the selected `world_id` so switching scopes creates exactly
     // one active observer per active scope and never leaves a stale narrative visible.
     soulNarrative: (creatorId: string, worldId?: string | null) =>
       [...queryKeys.memory.all, 'soul-narrative', creatorId, worldId ?? 'creator'] as const,
   },
-  // V1.89 — Deeper Manuscript Reading (BL-11 MVP slice).
+  // note: V1.89 — Deeper Manuscript Reading (BL-11 MVP slice).
   reading: {
     all: ['reading'] as const,
     progress: (workId: string, chapter: number, volume: number) =>
@@ -222,7 +222,7 @@ export const queryKeys = {
     annotations: (workId: string, chapter: number, volume: number) =>
       [...queryKeys.reading.all, 'annotations', workId, volume, chapter] as const,
   },
-  // V1.114 — Compute modules registry visibility.
+  // note: V1.114 — Compute modules registry visibility.
   compute: {
     all: ['compute'] as const,
     modules: {
@@ -231,7 +231,7 @@ export const queryKeys = {
       detail: (moduleId: string) =>
         [...queryKeys.compute.modules.all(), 'detail', moduleId] as const,
     },
-    // V1.147 P1 — Run Studio history. `lists()` covers every filter variant so
+    // note: V1.147 P1 — Run Studio history. `lists()` covers every filter variant so
     // run/accept/discard mutations invalidate all visible runs lists at once.
     runs: {
       all: () => [...queryKeys.compute.all, 'runs'] as const,
@@ -241,7 +241,7 @@ export const queryKeys = {
       detail: (runId: string) => [...queryKeys.compute.runs.details(), runId] as const,
     },
   },
-  // V1.151 P1 — Assembly Inspector (DF-76). The moment packet is read-only
+  // note: V1.151 P1 — Assembly Inspector (DF-76). The moment packet is read-only
   // (the UI observes the route, AC-I6), but the directive set/clear mutation
   // invalidates `inspector.all` so the packet's directive-status section
   // refreshes after a write (AC-I5).
@@ -252,11 +252,11 @@ export const queryKeys = {
   },
   timeline: {
     all: ['timeline'] as const,
-    // No per-page key by design: `useInfiniteQuery` stores every cursor page
+    // note: No per-page key by design: `useInfiniteQuery` stores every cursor page
     // under this single key (pageParam is not part of it), so `timeline.all`
     // prefix-invalidation covers all pages. Do not re-add a cursor parameter.
     overview: () => [...queryKeys.timeline.all, 'overview'] as const,
-    // V1.147 P2 — per-World timeline log events (machine-written families,
+    // note: V1.147 P2 — per-World timeline log events (machine-written families,
     // e.g. compute_result). `all()` prefix-covers every world + filter so
     // accept/discard invalidation via `timeline.all` refetches the mounted
     // canvas events query.

@@ -1,5 +1,5 @@
 /**
- * Entrance identity page (V1.170 P1 — AR-16/AR-20, product EL §2).
+ * note: Entrance identity page (V1.170 P1 — AR-16/AR-20, product EL §2).
  *
  * Pins the locked copy, the default content-creator highlight, the `?entrance=`
  * pre-highlight (session-only), and the persist-ONLY-on-Continue contract:

@@ -15,7 +15,7 @@ import {
   DesktopClient,
 } from '@/lib/nexus/desktop-client';
 
-/** Install a fake typed preload bridge with the given trusted runtime metadata. */
+/** note: Install a fake typed preload bridge with the given trusted runtime metadata. */
 function mockBridge(localEndpoint: string): void {
   (window as unknown as { nexusDesktop?: DesktopBridge }).nexusDesktop = {
     version: 1,
@@ -29,7 +29,7 @@ function restoreBridge(): void {
   delete (window as unknown as { nexusDesktop?: unknown }).nexusDesktop;
 }
 
-/** Pin `window.location` for origin-sensitive desktop base URL resolution. */
+/** note: Pin `window.location` for origin-sensitive desktop base URL resolution. */
 function stubLocation(partial: { hostname?: string; port?: string; protocol?: string }) {
   const current = window.location;
   Object.defineProperty(window, 'location', {
@@ -118,7 +118,7 @@ describe('DesktopClient', () => {
 
   beforeEach(() => {
     restoreBridge();
-    // Packaged / non-Vite origin — absolute localhost loopback.
+    // note: Packaged / non-Vite origin — absolute localhost loopback.
     stubLocation({ hostname: 'localhost', port: '', protocol: 'http:' });
   });
 

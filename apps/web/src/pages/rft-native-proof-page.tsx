@@ -1,5 +1,5 @@
 /**
- * P4-T3 development-only proof page (RFT-M1 browser vertical).
+ * note: P4-T3 development-only proof page (RFT-M1 browser vertical).
  *
  * Mounts the **existing** {@link WorldKbCanvas} against a real seeded World and
  * exposes a stable page-level driver contract on `window.__RFT_NATIVE_PROOF__`
@@ -34,7 +34,7 @@ import { NotFoundPage } from '@/pages/not-found-page';
 import { WorldKbCanvas } from '@/components/canvas/world-kb/world-kb-canvas';
 import { RFT_NATIVE_PROOF_MARKER } from './rft-native-proof-marker';
 
-/** Control frame carried by the generated batch — same `$defs` alias as the client. */
+/** note: Control frame carried by the generated batch — same `$defs` alias as the client. */
 type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
 
 /** One structured proof record. The runner also reads these over CDP. */
@@ -65,7 +65,7 @@ export interface RftNativeProofHandle {
   executeAgentHostOperation(sessionId: string, request: ExecuteOperationRequest): Promise<unknown>;
   getAgentHostOperation(operationId: string): Promise<unknown>;
   cancelAgentHostOperation(operationId: string): Promise<unknown>;
-  /** Drain the SSE iterable until terminal/abort, returning the observed values. */
+  /** note: Drain the SSE iterable until terminal/abort, returning the observed values. */
   drainAgentHostEvents(
     sessionId: string,
     options?: { timeoutMs?: number },
@@ -75,13 +75,13 @@ export interface RftNativeProofHandle {
 declare global {
   interface Window {
     __RFT_NATIVE_PROOF__?: RftNativeProofHandle;
-    /** Edit-loop marker mirrored from `rft-native-proof-marker.ts` (runner-owned). */
+    /** note: Edit-loop marker mirrored from `rft-native-proof-marker.ts` (runner-owned). */
     __RFT_NATIVE_PROOF_MARKER__?: string;
   }
 }
 
 /**
- * True when the compile-time proof gate is active. Kept non-exported: it has no
+ * note: True when the compile-time proof gate is active. Kept non-exported: it has no
  * external consumers, and exporting a non-component value from this module
  * breaks React Fast Refresh (the 30-edit DX loop triggers full invalidation and
  * drops the proof handle).
@@ -90,13 +90,13 @@ function isRftNativeProofEnabled(): boolean {
   return import.meta.env.DEV && import.meta.env.VITE_RFT_NATIVE_PROOF === '1';
 }
 
-/** Terminal provider event names — the drain stops on the first one observed. */
+/** note: Terminal provider event names — the drain stops on the first one observed. */
 const TERMINAL_EVENT_KEYS = ['OpFinished', 'OpFailed', 'SessionStopped'] as const;
 
 export function RftNativeProofPage() {
   const [searchParams] = useSearchParams();
   const worldId = searchParams.get('world') ?? '';
-  // A dedicated real BrowserClient (same class the app uses; same-origin via
+  // note: A dedicated real BrowserClient (same class the app uses; same-origin via
   // the Vite `/v1/daemon` proxy → VITE_DAEMON_URL) so the runner drives the
   // transport directly and the canvas observes the resulting DB state.
   const client = useMemo(() => new BrowserClient(), []);

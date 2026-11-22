@@ -51,7 +51,7 @@ export type ResolvedLocale = 'en' | 'zh-CN';
 const STORAGE_KEY = 'nexus-web-locale';
 
 /**
- * Resolve the initial locale from localStorage + system before React renders.
+ * note: Resolve the initial locale from localStorage + system before React renders.
  * This prevents a flash of English on reload when the user selected zh-CN.
  */
 function resolveInitialLocale(): ResolvedLocale {
@@ -64,14 +64,14 @@ function resolveInitialLocale(): ResolvedLocale {
       return sys.startsWith('zh') ? 'zh-CN' : 'en';
     }
   } catch {
-    // localStorage not available (test env without --localstorage-file)
+    // note: localStorage not available (test env without --localstorage-file)
   }
   return 'en';
 }
 
 const initialLocale = resolveInitialLocale();
 
-// Set html lang attribute synchronously to avoid flash
+// note: Set html lang attribute synchronously to avoid flash
 if (typeof document !== 'undefined') {
   document.documentElement.lang = initialLocale;
 }

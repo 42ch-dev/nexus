@@ -1,5 +1,5 @@
 /**
- * Entrance provider resolution semantics (V1.170 P1 — AR-16 / AR-20).
+ * note: Entrance provider resolution semantics (V1.170 P1 — AR-16 / AR-20).
  *
  * Precedence: URL override > stored > default; invalid values ignored; no
  * write on unset; provider never rewrites the URL. The desktop IPC pair is a
@@ -25,7 +25,7 @@ interface ProbeValue {
   isFirstRun: boolean;
 }
 
-/** Renders the current context value + a setEntrance('developer') affordance. */
+/** note: Renders the current context value + a setEntrance('developer') affordance. */
 function EntranceProbe({ onChange }: { onChange: (value: ProbeValue) => void }) {
   const { entrance, isLoading, isFirstRun, setEntrance } = useEntrance();
   onChange({ entrance, isLoading, isFirstRun });
@@ -56,7 +56,7 @@ function ipcDesktop(overrides: {
   getEntrance?: () => Promise<EntranceId>;
   setEntrance?: (value: EntranceId) => Promise<void>;
 } = {}) {
-  // renderInApp always mounts SetupCompletedProvider, which reads
+  // note: renderInApp always mounts SetupCompletedProvider, which reads
   // `getSetupCompleted` on mount when a desktop is injected.
   return {
     getSetupCompleted: async () => true,
@@ -154,7 +154,7 @@ describe('EntranceProvider resolution (AR-16/AR-20)', () => {
     });
     await waitFor(() => expect(probe.get()?.entrance).toBe('developer'));
     expect(probe.get()?.isLoading).toBe(false);
-    // Desktop first-run is the wizard (AR-17) — never the identity page.
+    // note: Desktop first-run is the wizard (AR-17) — never the identity page.
     expect(probe.get()?.isFirstRun).toBe(false);
   });
 
@@ -192,7 +192,7 @@ describe('EntranceProvider resolution (AR-16/AR-20)', () => {
   });
 });
 
-/** Captures the router URL so tests can assert the provider never rewrites it. */
+/** note: Captures the router URL so tests can assert the provider never rewrites it. */
 function UrlProbe({ onPathname }: { onPathname: (url: string) => void }) {
   const { pathname, search, hash } = useLocation();
   onPathname(`${pathname}${search}${hash}`);

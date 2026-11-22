@@ -1,5 +1,5 @@
 /**
- * `strategy_canvas_compose` flag resolution (v239-p3-canvas-compose-ui T7).
+ * note: `strategy_canvas_compose` flag resolution (v239-p3-canvas-compose-ui T7).
  *
  * Compass D14: default on for the developer entrance, off for the
  * content-creator entrance; an explicit selection overrides either default.
@@ -36,7 +36,7 @@ describe('strategy_canvas_compose flag resolution', () => {
       return <span data-testid="flag">{useStrategyCanvasComposeFlag() ? 'on' : 'off'}</span>;
     }
     const { unmount } = renderInApp(<Probe />);
-    // Test wrapper entrance default is the content-creator entrance.
+    // note: Test wrapper entrance default is the content-creator entrance.
     expect(screen.getByTestId('flag')).toHaveTextContent('off');
     unmount();
 

@@ -1,5 +1,5 @@
 /**
- * Settings Appearance section — V1.112 P0 i18n foundation.
+ * note: Settings Appearance section — V1.112 P0 i18n foundation.
  *
  * Language control bound to the locale preference. Theme remains in the header
  * this iteration (spec lock).

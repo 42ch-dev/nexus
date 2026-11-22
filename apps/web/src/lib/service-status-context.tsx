@@ -1,5 +1,5 @@
 /**
- * Global service-health state for the service-unavailable surface
+ * note: Global service-health state for the service-unavailable surface
  * (plan v1219-onboarding T4).
  *
  * Probe: the unguarded `GET /v1/daemon/daemon/status`. A rejected probe means
@@ -49,11 +49,11 @@ export type ServiceDegradedReason =
   | { kind: 'provider_unselected' };
 
 interface ServiceStatusValue {
-  /** Set while the service is unreachable or degraded; `null` when healthy. */
+  /** note: Set while the service is unreachable or degraded; `null` when healthy. */
   reason: ServiceDegradedReason | null;
-  /** True while a probe (initial or retry) is in flight. */
+  /** note: True while a probe (initial or retry) is in flight. */
   checking: boolean;
-  /** Re-probe; a successful probe also re-reads the first-run gate. */
+  /** note: Re-probe; a successful probe also re-reads the first-run gate. */
   retry: () => Promise<void>;
 }
 
@@ -65,12 +65,12 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
   const [reason, setReason] = useState<ServiceDegradedReason | null>(null);
   const [checking, setChecking] = useState(false);
   const mounted = useRef(false);
-  // Monotonic probe generation: an in-flight probe whose generation is no
+  // note: Monotonic probe generation: an in-flight probe whose generation is no
   // longer the latest (a newer probe started, or the component unmounted)
   // must not overwrite the newer outcome.
   const generation = useRef(0);
 
-  /** @returns whether the service answered and this probe is still the latest. */
+  /** note: Whether the service answered and this probe is still the latest. */
   const probe = useCallback(async (): Promise<boolean> => {
     const mine = ++generation.current;
     const isLatest = () => mine === generation.current && mounted.current;
@@ -79,11 +79,11 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
       const status = await client.daemonStatus();
       if (!isLatest()) return false;
       const subsystems = completed ? status.degraded.subsystems : [];
-      // Publish the failure surface first: a lazy selection read must never
+      // note: Publish the failure surface first: a lazy selection read must never
       // flash setup guidance while it is still in flight.
       setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       if (subsystems.length === 1 && subsystems[0] === 'engine') {
-        // A ready workspace whose only degraded subsystem is the engine has
+        // note: A ready workspace whose only degraded subsystem is the engine has
         // either no provider selected (setup guidance) or a selected provider
         // whose readiness probe failed (a real failure — keep the surface).
         const runtime = await client.runtimeStatus().catch(() => null);
@@ -93,7 +93,7 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
             .getAgentProfile()
             .then(
               (response) => response.profile,
-              // An unreadable profile proves nothing about selection.
+              // note: An unreadable profile proves nothing about selection.
               () => undefined,
             );
           if (!isLatest()) return false;
@@ -122,7 +122,7 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
   }, [probe]);
 
   const retry = useCallback(async () => {
-    // Re-reading the first-run gate only after a successful probe keeps a
+    // note: Re-reading the first-run gate only after a successful probe keeps a
     // recovered, initialized service from leaving the app on the wizard route.
     if (await probe()) await refresh();
   }, [probe, refresh]);

@@ -1,5 +1,5 @@
 /**
- * useSimulationTrajectory — the hook calls the real simulate route, and a
+ * note: useSimulationTrajectory — the hook calls the real simulate route, and a
  * candidate that changes after the run turns the trajectory stale. A refused
  * simulate is its own `failed` state, never `idle`.
  */
@@ -33,7 +33,7 @@ function Harness({ entry = 'draft' }: { entry?: string }) {
   );
 }
 
-/** A document held across renders so a test can mutate it mid-request. */
+/** note: A document held across renders so a test can mutate it mid-request. */
 function MutableHarness({ doc }: { doc: WorkflowDocument }) {
   const simulation = useSimulationTrajectory(doc);
   return (
@@ -65,7 +65,7 @@ describe('useSimulationTrajectory', () => {
     let walks = 0;
     const posts = vi.fn(async () => {
       walks += 1;
-      // Hold the re-walk in flight so the stale surface is observable.
+      // note: Hold the re-walk in flight so the stale surface is observable.
       if (walks === 2) await delay(100);
       return HttpResponse.json(simulationTrajectory());
     });
@@ -78,20 +78,20 @@ describe('useSimulationTrajectory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
 
-    // The route serves `revision: 0` and no hash both times; the content is
+    // note: The route serves `revision: 0` and no hash both times; the content is
     // equal, so the trajectory in hand still describes the preset.
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
     expect(posts).toHaveBeenCalledTimes(1);
 
-    // Same revision, different content: only the document can say it moved.
+    // note: Same revision, different content: only the document can say it moved.
     doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
 
-    // The replacement walk reports progress rather than the held snapshot's
+    // note: The replacement walk reports progress rather than the held snapshot's
     // readiness; the stale banner comes from `isStale`, not from `status`.
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('running'));
-    // Await the second POST before reading the settled total: a bare `ready`
+    // note: Await the second POST before reading the settled total: a bare `ready`
     // wait can resolve before the re-walk has been issued at all.
     await waitFor(() => expect(posts).toHaveBeenCalledTimes(2));
     expect(posts).toHaveBeenCalledTimes(2);
@@ -118,13 +118,13 @@ describe('useSimulationTrajectory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
 
-    // The preset moved on, and the walk that would replace the trajectory
+    // note: The preset moved on, and the walk that would replace the trajectory
     // fails: the moved-on mark outlives the refused walk.
     doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('failed'));
 
-    // The content is back to what the held trajectory walked: nothing is
+    // note: The content is back to what the held trajectory walked: nothing is
     // walked and the trajectory is fresh again, not pinned at stale.
     doc = servedIrDocument({ id: 'novel-writing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
@@ -216,16 +216,16 @@ describe('useSimulationTrajectory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
 
-    // The preset moved on and the re-read that would replace the trajectory fails.
+    // note: The preset moved on and the re-read that would replace the trajectory fails.
     doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
     irFails = true;
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
 
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('failed'));
-    // The good trajectory survives the failed re-read instead of being wiped.
+    // note: The good trajectory survives the failed re-read instead of being wiped.
     expect(screen.getByTestId('preset-level')).toHaveTextContent('reachability');
 
-    // The next open re-reads and succeeds.
+    // note: The next open re-reads and succeeds.
     irFails = false;
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
@@ -236,7 +236,7 @@ describe('useSimulationTrajectory', () => {
     const doc = candidateDocument();
     useHandlers(
       http.post(SIMULATE_PATH, async () => {
-        // A mutation while the walk is in flight is not what the server walked.
+        // note: A mutation while the walk is in flight is not what the server walked.
         doc.entry = 'routing';
         return HttpResponse.json(simulationTrajectory());
       }),

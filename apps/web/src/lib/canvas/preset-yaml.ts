@@ -1,5 +1,5 @@
 /**
- * Preset YAML parser — client-side projection of a preset bundle manifest.
+ * note: Preset YAML parser — client-side projection of a preset bundle manifest.
  *
  * `GET /v1/daemon/presets/{id}` returns `GetPresetResponse { yaml: string }`
  * (A5 verdict — option a: existing endpoint suffices, no new read route). The
@@ -43,11 +43,11 @@ export interface PresetState {
   description?: string;
   enter?: PresetEnterTask[];
   exit_when?: { kind?: string };
-  /** Linear target (string) or conditional form (object). */
+  /** note: Linear target (string) or conditional form (object). */
   next?: string | PresetConditionalNext;
   converge?: { strategy?: ConvergeStrategy };
   terminal?: boolean;
-  /** Optional context-update hook (may carry a prompt `template_file`). */
+  /** note: Optional context-update hook (may carry a prompt `template_file`). */
   context_update?: PresetContextUpdate;
 }
 
@@ -81,9 +81,9 @@ export interface PresetManifest {
 
 export interface ParsedPreset {
   manifest: PresetManifest;
-  /** Bundle revision from the YAML `revision:` header (used for patch consistency). */
+  /** note: Bundle revision from the YAML `revision:` header (used for patch consistency). */
   revision?: number;
-  /** Non-fatal parse/validation problems (empty when clean). */
+  /** note: Non-fatal parse/validation problems (empty when clean). */
   problems: string[];
 }
 

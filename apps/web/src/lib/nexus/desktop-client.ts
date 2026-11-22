@@ -52,7 +52,7 @@ export function resolveDesktopPort(explicit?: number | string): number {
       const n = Number(new URL(localEndpoint).port);
       if (Number.isInteger(n) && n > 0 && n < 65536) return n;
     } catch {
-      // Malformed trusted metadata falls through to the env/default chain.
+      // note: Malformed trusted metadata falls through to the env/default chain.
     }
   }
   const fromEnv =
@@ -103,13 +103,13 @@ export interface DesktopClientOptions {
    */
   baseUrl?: string;
   /**
-   * API key for remote daemon access. Ignored for loopback connections unless
+   * note: API key for remote daemon access. Ignored for loopback connections unless
    * an explicit `baseUrl` is provided.
    */
   apiKey?: string;
   /** Override the daemon port (defaults to resolved port per §5 #3). */
   port?: number;
-  /** Optional fetch implementation (testing injection, mirroring BrowserClient). */
+  /** note: Optional fetch implementation (testing injection, mirroring BrowserClient). */
   fetchImpl?: typeof fetch;
 }
 

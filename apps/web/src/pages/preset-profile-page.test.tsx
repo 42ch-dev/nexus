@@ -1,5 +1,5 @@
 /**
- * V1.171 P1 — per-preset profile drill-down tests (PL-13, AR-27).
+ * note: V1.171 P1 — per-preset profile drill-down tests (PL-13, AR-27).
  *
  * The profile view renders states (enter / exit-when / next), roles +
  * recommended skills, and required capabilities deep-linked to the
@@ -44,7 +44,7 @@ function listHandler() {
   return http.get('/v1/daemon/presets', () => HttpResponse.json(LIST));
 }
 
-/** Rich profile exercising every PL-13 field: states (enter/exit-when/next),
+/** note: Rich profile exercising every PL-13 field: states (enter/exit-when/next),
  * roles + recommended skills, required capabilities, declared signals. */
 const RICH_PROFILE: PresetProfileResponse = {
   id: 'game-narrative',
@@ -99,7 +99,7 @@ const RICH_PROFILE: PresetProfileResponse = {
   ],
 };
 
-/** Minimal profile exercising the empty/absent-field states. */
+/** note: Minimal profile exercising the empty/absent-field states. */
 const MINIMAL_PROFILE: PresetProfileResponse = {
   id: 'user/foo',
   version: 1,
@@ -125,12 +125,12 @@ describe('PresetProfilePage', () => {
 
     renderProfile('game-narrative');
 
-    // Header identity comes from the profile response (AR-27).
+    // note: Header identity comes from the profile response (AR-27).
     await screen.findByTestId('profile-id');
     expect(screen.getByTestId('profile-id')).toHaveTextContent('game-narrative');
     expect(screen.getByTestId('profile-version')).toHaveTextContent('v3');
 
-    // opening: enter capability + llm_judge exit + goNogo next.
+    // note: opening: enter capability + llm_judge exit + goNogo next.
     const opening = screen.getByTestId('profile-state-opening');
     expect(opening).toHaveTextContent('Enter');
     expect(opening).toHaveTextContent('capability: nexus.world.describe');
@@ -142,7 +142,7 @@ describe('PresetProfilePage', () => {
       'goNogo → go: develop / nogo: opening',
     );
 
-    // develop: inner_graph + host_tool enter kinds, labeled next form.
+    // note: develop: inner_graph + host_tool enter kinds, labeled next form.
     const develop = screen.getByTestId('profile-state-develop');
     expect(develop).toHaveTextContent('inner_graph: plot-weave');
     expect(develop).toHaveTextContent('host_tool: fs.write');
@@ -151,7 +151,7 @@ describe('PresetProfilePage', () => {
       'labeled → complete → ending',
     );
 
-    // ending: terminal state — no next form rendered.
+    // note: ending: terminal state — no next form rendered.
     const ending = screen.getByTestId('profile-state-ending');
     expect(ending).toHaveTextContent('Terminal');
     expect(ending).toHaveTextContent('manual');
@@ -170,7 +170,7 @@ describe('PresetProfilePage', () => {
     expect(screen.getByTestId('profile-skill-narrator-worldbuilding')).toHaveTextContent('worldbuilding');
     expect(screen.getByTestId('profile-skill-narrator-prose')).toHaveTextContent('prose');
 
-    // Role without recommendedSkills shows the honest "None declared" line.
+    // note: Role without recommendedSkills shows the honest "None declared" line.
     const editor = screen.getByTestId('profile-role-editor');
     expect(editor).toHaveTextContent('None declared');
   });
@@ -193,11 +193,11 @@ describe('PresetProfilePage', () => {
 
     renderProfile('game-narrative');
 
-    // Honesty badge — locked vocabulary (AR-25 parity with `preset show`).
+    // note: Honesty badge — locked vocabulary (AR-25 parity with `preset show`).
     const badge = await screen.findByTestId('profile-signals-not-delivered');
     expect(badge).toHaveTextContent('Declared, not delivered');
 
-    // Card copy: declared ≠ delivered; nothing fires them at runtime; not
+    // note: Card copy: declared ≠ delivered; nothing fires them at runtime; not
     // bindable webhooks; lifecycle runs through the signal actions.
     const card = screen.getByTestId('profile-signals');
     expect(card).toHaveTextContent(
@@ -207,7 +207,7 @@ describe('PresetProfilePage', () => {
       'Lifecycle control runs through the signal actions: start / pause / resume / cancel / advance.',
     );
 
-    // Declared metadata still renders (name / action / target).
+    // note: Declared metadata still renders (name / action / target).
     const pause = screen.getByTestId('profile-signal-pause');
     expect(pause).toHaveTextContent('pause');
     expect(pause).toHaveTextContent('Action: pause');
@@ -215,7 +215,7 @@ describe('PresetProfilePage', () => {
     expect(stop).toHaveTextContent('Action: force_transition');
     expect(stop).toHaveTextContent('Target: ending');
 
-    // No delivery/bind UI exists in the card — no buttons or links that
+    // note: No delivery/bind UI exists in the card — no buttons or links that
     // could offer webhook binding / "deliver this signal".
     expect(within(card).queryByRole('button')).not.toBeInTheDocument();
     expect(within(card).queryByRole('link')).not.toBeInTheDocument();
@@ -229,14 +229,14 @@ describe('PresetProfilePage', () => {
     const lanesCard = await screen.findByTestId('profile-lanes');
     expect(lanesCard).toHaveTextContent('Trigger lanes');
 
-    // Classification is read from the profile flags — session/direct
+    // note: Classification is read from the profile flags — session/direct
     // (trigger), wall-clock schedule, Work-role cron — with yes/no presence.
     expect(screen.getByTestId('profile-lane-cron-no')).toHaveTextContent('No');
     expect(screen.getByTestId('profile-lane-wallclock-yes')).toHaveTextContent('Yes');
     expect(screen.getByTestId('profile-lane-session-yes')).toHaveTextContent('Yes');
     expect(screen.getByTestId('profile-lane-direct-yes')).toHaveTextContent('Yes');
 
-    // Locked vocabulary: cron is per-Work roles (and timezone), not the
+    // note: Locked vocabulary: cron is per-Work roles (and timezone), not the
     // wall-clock poller; `scheduled_at` is a schedule field, not a
     // fabricated next-fire clock.
     expect(screen.getByTestId('profile-lane-cron')).toHaveTextContent(
@@ -246,14 +246,14 @@ describe('PresetProfilePage', () => {
       '`scheduled_at` is a schedule field, not a next-fire clock.',
     );
 
-    // PL-12: no fabricated next-run clock anywhere on the profile page.
+    // note: PL-12: no fabricated next-run clock anywhere on the profile page.
     expect(screen.queryByText(/next run at/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/next fire at/i)).not.toBeInTheDocument();
   });
 
   it('degrades gracefully when the profile is missing — id + list facts, not a "preset gone" error (PL-13)', async () => {
     useHandlers(
-      // The list still shows the preset — the profile failure must not
+      // note: The list still shows the preset — the profile failure must not
       // imply it is gone (PL-13 premise).
       http.get('/v1/daemon/presets', () =>
         HttpResponse.json({
@@ -273,20 +273,20 @@ describe('PresetProfilePage', () => {
     renderProfile('user/ghost');
 
     const summary = await screen.findByTestId('preset-profile-unavailable');
-    // Id + list fact (source) — the list still shows the preset.
+    // note: Id + list fact (source) — the list still shows the preset.
     expect(summary).toHaveTextContent('user/ghost');
     expect(screen.getByTestId('profile-unavailable-source')).toHaveTextContent('User');
-    // Honest copy: profile failed to load, the preset is still listed.
+    // note: Honest copy: profile failed to load, the preset is still listed.
     expect(summary).toHaveTextContent('The profile for user/ghost could not be loaded.');
     expect(summary).toHaveTextContent('The preset is still listed in the catalog.');
-    // Never a hard error implying the preset is gone.
+    // note: Never a hard error implying the preset is gone.
     expect(screen.queryByText('Preset not found')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('omits the "still listed in the catalog" sentence when the preset is absent from the list (F-4 / QC3 S-1)', async () => {
     useHandlers(
-      // The deep-linked id is NOT in any list group — the copy must not
+      // note: The deep-linked id is NOT in any list group — the copy must not
       // claim it is still listed.
       listHandler(),
       http.get('/v1/daemon/orchestration/presets/unknown%2Fpreset/profile', () =>
@@ -300,9 +300,9 @@ describe('PresetProfilePage', () => {
     renderProfile('unknown/preset');
 
     const summary = await screen.findByTestId('preset-profile-unavailable');
-    // Base honest copy still renders…
+    // note: Base honest copy still renders…
     expect(summary).toHaveTextContent('The profile for unknown/preset could not be loaded.');
-    // …but "still listed in the catalog" is absent (list lookup found
+    // note: …but "still listed in the catalog" is absent (list lookup found
     // nothing) and no source badge is shown (no list facts for the id).
     expect(summary).not.toHaveTextContent('The preset is still listed in the catalog.');
     expect(screen.queryByTestId('profile-unavailable-source')).not.toBeInTheDocument();
@@ -337,7 +337,7 @@ describe('PresetProfilePage', () => {
     renderProfile('user/foo');
 
     expect(await screen.findByTestId('profile-id')).toHaveTextContent('user/foo');
-    // No-lane preset: every classification renders honestly as "No".
+    // note: No-lane preset: every classification renders honestly as "No".
     expect(screen.getByTestId('profile-lane-cron-no')).toHaveTextContent('No');
     expect(screen.getByTestId('profile-lane-wallclock-no')).toHaveTextContent('No');
     expect(screen.getByTestId('profile-lane-session-no')).toHaveTextContent('No');

@@ -55,15 +55,15 @@ const SetConnectionConfigContext = createContext<
 const FingerprintGateContext = createContext<ResumeFingerprintGateState | null>(null);
 
 export interface ClientProviderProps {
-  /** Override the NexusClient (tests). If omitted, the factory selects. */
+  /** note: Override the NexusClient (tests). If omitted, the factory selects. */
   client?: NexusClient;
-  /** Override desktop capabilities (tests). `null` hides desktop affordances. */
+  /** note: Override desktop capabilities (tests). `null` hides desktop affordances. */
   desktop?: DesktopCapabilities | null;
-  /** Override the connection config (tests). */
+  /** note: Override the connection config (tests). */
   connectionConfig?: ConnectionConfig | null;
-  /** Override the config setter (tests). */
+  /** note: Override the config setter (tests). */
   onConnectionConfigChange?: (config: ConnectionConfig | null) => Promise<void>;
-  /** Override fetch for the fingerprint gate (tests). */
+  /** note: Override fetch for the fingerprint gate (tests). */
   fetchImpl?: typeof fetch;
   children: ReactNode;
 }
@@ -92,7 +92,7 @@ export function storeApiKey(key: string): void {
   try {
     window.localStorage.setItem(API_KEY_STORAGE, key);
   } catch {
-    // Storage unavailable: the accepted key cannot outlive this document.
+    // note: Storage unavailable: the accepted key cannot outlive this document.
   }
 }
 
@@ -105,7 +105,7 @@ export function clearStoredApiKey(): void {
   try {
     window.localStorage.removeItem(API_KEY_STORAGE);
   } catch {
-    // Storage unavailable: there is no stored key to drop.
+    // note: Storage unavailable: there is no stored key to drop.
   }
 }
 
@@ -140,7 +140,7 @@ export function selectClients(): ResolvedClients {
 }
 
 /**
- * Resume-time TOFU gate shell (daemon-runtime.md §16.2 Phases 2–3).
+ * note: Resume-time TOFU gate shell (daemon-runtime.md §16.2 Phases 2–3).
  *
  * Blocks the app from mounting any screen that may issue authenticated daemon
  * requests until a pinned remote fingerprint is re-verified. Local mode and
@@ -161,7 +161,7 @@ function FingerprintGate({
   const { t: shellT } = useTranslation('shell');
   const { t: commonT } = useTranslation('common');
 
-  // Connection re-pin lives under Settings (V1.106). Allow the recovery path
+  // note: Connection re-pin lives under Settings (V1.106). Allow the recovery path
   // (and legacy `/connect` / `/settings/connection` while they redirect) to
   // mount on fingerprint mismatch so the author is not hard-locked out of
   // re-pinning. The Advanced page also hosts the Setup section, so only the
@@ -195,15 +195,15 @@ function FingerprintGate({
           {state.kind ? (
             <TransportErrorBlock
               kind={state.kind}
-              // QC1-F-001: pass caller-owned localized copy so zh-CN users
+              // note: QC1-F-001: pass caller-owned localized copy so zh-CN users
               // see fully localized transport-failure UX (the primitive's
               // built-in copy is an English fallback for Studio).
               {...transportErrorCopyFor(state.kind, shellT, commonT)}
-              // The gate owns retry (re-run verification) and the deep-link
+              // note: The gate owns retry (re-run verification) and the deep-link
               // to Connection settings (re-pin / re-enter endpoint).
               onRetry={() => void verify()}
               onOpenSettings={() => navigate('/settings/advanced#connection')}
-              // `state.message` carries the classifier's diagnostic message
+              // note: `state.message` carries the classifier's diagnostic message
               // (e.g., the long-form "Cannot reach the daemon at this
               // address…" string). Surfaced as the block's detail line so
               // the primitive owns headline+body+CTAs (single voice) and the
@@ -247,7 +247,7 @@ export function ClientProvider({
 }: ClientProviderProps) {
   const [storedConfig, setStoredConfig] = useState<ConnectionConfig | null>(null);
   const [loaded, setLoaded] = useState(false);
-  // Bumped when the 401 recovery surface accepts an API key, so the memo below
+  // note: Bumped when the 401 recovery surface accepts an API key, so the memo below
   // rebuilds the local client with `readStoredApiKey()`.
   const [authEpoch, setAuthEpoch] = useState(0);
   useEffect(() => {
@@ -257,7 +257,7 @@ export function ClientProvider({
   }, []);
   const storage = useMemo(() => createConnectionStorage(), []);
   const isDesktop = useMemo(() => isDesktopBuild(), []);
-  // Keep a live ref so setConfig can roll back optimistic updates without a stale closure.
+  // note: Keep a live ref so setConfig can roll back optimistic updates without a stale closure.
   const storedConfigRef = useRef<ConnectionConfig | null>(null);
 
   useEffect(() => {
@@ -297,7 +297,7 @@ export function ClientProvider({
           } else {
             await storage.save(next);
           }
-          // Reload the persisted projection after save: the desktop store
+          // note: Reload the persisted projection after save: the desktop store
           // returns the redacted public config (never the entered key — D-18),
           // so the ephemeral API key is dropped from memory immediately.
           const persisted = await storage.load();

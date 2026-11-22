@@ -13,7 +13,7 @@ import { errorMessage } from '@/lib/error-message';
 import { cn } from '@/lib/utils';
 
 /**
- * Entrance identity page (V1.170 P1 — AR-16/AR-20, product EL §2).
+ * note: Entrance identity page (V1.170 P1 — AR-16/AR-20, product EL §2).
  *
  * First-class User-layer choice — NOT a sidebar tab rename. Shown once on the
  * first SPA land when no entrance is stored (browser first-run; the desktop
@@ -42,7 +42,7 @@ export function EntrancePage() {
   const { entrance, setEntrance } = useEntrance();
   const navigate = useNavigate();
   const { toast } = useToast();
-  // The provider already applies the URL override (precedence URL > stored >
+  // note: The provider already applies the URL override (precedence URL > stored >
   // default), so the initial highlight follows it (AR-20).
   const [selected, setSelected] = useState<EntranceId>(entrance);
   const [saving, setSaving] = useState(false);

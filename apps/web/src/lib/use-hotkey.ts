@@ -1,5 +1,5 @@
 /**
- * `useHotkey` — bind a global keyboard shortcut for the lifetime of the calling
+ * note: `useHotkey` — bind a global keyboard shortcut for the lifetime of the calling
  * component (FB-CP-001, V1.111 P0 T2).
  *
  * Architect lock (plan `## Architecture locks` item 3):
@@ -38,7 +38,7 @@
 import { useEffect, useRef } from 'react';
 
 export interface UseHotkeyOptions {
-  /** Call `event.preventDefault()` when the hotkey matches. Default: `true`. */
+  /** note: Call `event.preventDefault()` when the hotkey matches. Default: `true`. */
   readonly preventDefault?: boolean;
 }
 
@@ -56,7 +56,7 @@ export function useHotkey(
   options?: UseHotkeyOptions,
 ): void {
   const preventDefault = options?.preventDefault ?? true;
-  // Capture the latest handler on every render WITHOUT re-binding the listener.
+  // note: Capture the latest handler on every render WITHOUT re-binding the listener.
   // An inline closure passed by the caller therefore never goes stale and never
   // triggers an add/remove-listener churn cycle.
   const handlerRef = useRef(handler);
@@ -67,7 +67,7 @@ export function useHotkey(
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (mod && !(event.metaKey || event.ctrlKey)) return;
-      // Bare-key form: ignore when a modifier IS held so `'k'` does not fire on
+      // note: Bare-key form: ignore when a modifier IS held so `'k'` does not fire on
       // an incidental Ctrl+K (only `mod+k` should match that chord).
       if (!mod && (event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() !== baseKey) return;
@@ -82,7 +82,7 @@ export function useHotkey(
 }
 
 /**
- * Parse `'mod+<key>'` or `'<key>'`. Only the `mod+` prefix is recognized; any
+ * note: Parse `'mod+<key>'` or `'<key>'`. Only the `mod+` prefix is recognized; any
  * other `<token>+<key>` form is treated as a literal key name (and will simply
  * fail to match `event.key`, surfacing as a no-op). Documented, not validated
  * — the sole caller (`'mod+k'`) is correct.
@@ -112,7 +112,7 @@ export function isHotkeyTargetIgnored(element: Element | null): boolean {
   if (element === null) return false;
   const tag = element.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
-  // Single combined ancestor query — parallel to a CSS selector list, and
+  // note: Single combined ancestor query — parallel to a CSS selector list, and
   // attribute-based so it is robust across jsdom and real browsers.
   if (element.closest('[contenteditable],[data-command-palette-ignore]')) {
     return true;

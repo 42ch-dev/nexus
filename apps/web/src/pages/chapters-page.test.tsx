@@ -1,5 +1,5 @@
 /**
- * ChaptersPage render tests — structure table, inline edit, status progression,
+ * note: ChaptersPage render tests — structure table, inline edit, status progression,
  * and protected-chapter confirmation.
  */
 import { http, HttpResponse } from 'msw';
@@ -291,7 +291,7 @@ describe('ChaptersPage', () => {
   });
 });
 
-// V1.121 v0.4 — banner/tint convergence (DESIGN.md §Design Concept + AC-P2-4).
+// note: V1.121 v0.4 — banner/tint convergence (DESIGN.md §Design Concept + AC-P2-4).
 //
 // The protected-chapter row tint previously used a raw `color-mix` arbitrary
 // class (`bg-[color-mix(in_srgb,var(--color-purple-700)_6%,transparent)]`).
@@ -324,7 +324,7 @@ describe('ChaptersPage banner/tint convergence (V1.121 v0.4)', () => {
 
     renderChapters();
     const row = await screen.findByTestId('chapter-row-1');
-    // Registered token class — converges onto the
+    // note: Registered token class — converges onto the
     // components.data-table.row-protected token; no raw color-mix arbitrary
     // class remains.
     expect(row.className).toMatch(/\bbg-data-table-row-protected\b/);

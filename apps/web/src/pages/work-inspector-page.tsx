@@ -1,5 +1,5 @@
 /**
- * Assembly Inspector page — P1 T3 (DF-76). Read-only debug surface.
+ * note: Assembly Inspector page — P1 T3 (DF-76). Read-only debug surface.
  *
  * IA placement (plan Q1): a moment/assembly **debug surface in the creator
  * area** — a Control-Room-style sibling of `outline` / `timeline` / `chapters`
@@ -55,7 +55,7 @@ export function WorkInspectorPage() {
   >(undefined);
 
   const worldId = workQuery.data?.world_id?.trim() ?? undefined;
-  // `generation_stage` is optional on the wire; the default (unspecified)
+  // note: `generation_stage` is optional on the wire; the default (unspecified)
   // stage is omitted so the daemon applies its own default.
   const request: MomentInspectRequest | undefined = worldId
     ? { world_id: worldId, work_id: workId, ...(generationStage ? { generation_stage: generationStage } : {}) }

@@ -1,5 +1,5 @@
 /**
- * Inspiration Pool page — `/works/inspiration` (v1.222 P1 T2).
+ * note: Inspiration Pool page — `/works/inspiration` (v1.222 P1 T2).
  *
  * Owns every hook, mutation, navigation and toast. The presentational chrome
  * under `components/works/presentational` only renders props, so mutation
@@ -53,7 +53,7 @@ export function WorksInspirationPage() {
 
   const [title, setTitle] = useState('');
   /**
-   * The pool's one in-flight promote. The mutation hook's own `variables` only
+   * note: The pool's one in-flight promote. The mutation hook's own `variables` only
    * tracks the LATEST call, so two overlapping promotes re-enabled row A while
    * B was pending and the server (which checks status once) could mint two
    * Works from one idea. Own the lock here instead: the first promote holds it
@@ -74,7 +74,7 @@ export function WorksInspirationPage() {
       itemId: item.item_id,
       title: item.title,
       status: item.status,
-      // An unexpected status renders verbatim rather than failing the row.
+      // note: An unexpected status renders verbatim rather than failing the row.
       statusLabel: statusKey ? t(statusKey) : item.status,
       addedLabel: t('inspiration.addedAria', { date: formatDate(item.created_at) }),
       workId: item.promoted_work_id,
@@ -123,7 +123,7 @@ export function WorksInspirationPage() {
   }
 
   function handlePromote(row: InspirationPoolRow) {
-    // Disabled buttons cannot fire, but the guard is the invariant: one
+    // note: Disabled buttons cannot fire, but the guard is the invariant: one
     // promote at a time, whichever row asked.
     if (promotingItemId !== null) return;
     setPromotingItemId(row.itemId);

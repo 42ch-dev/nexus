@@ -22,7 +22,7 @@ export function ScaffoldPresetDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called with the created preset id (Harness navigates to its canvas). */
+  /** note: Called with the created preset id (Harness navigates to its canvas). */
   onCreated?: (id: string) => void;
 }) {
   const scaffold = useScaffoldPreset();
@@ -54,7 +54,7 @@ export function ScaffoldPresetDialog({
       onOpenChange(false);
       onCreated?.(res.id);
     } catch {
-      // Error toast already fired by the mutation's onError callback.
+      // note: Error toast already fired by the mutation's onError callback.
     }
   }
 

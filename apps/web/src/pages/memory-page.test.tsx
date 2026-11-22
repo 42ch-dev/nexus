@@ -18,7 +18,7 @@ import { useHandlers } from '@/test/msw-server';
 
 const CREATOR = 'creator-active';
 
-/** Wire the SOUL section handlers so MemoryPage fully renders (V1.82). */
+/** note: Wire the SOUL section handlers so MemoryPage fully renders (V1.82). */
 function soulHandlers(creatorId = CREATOR) {
   return [
     http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
@@ -60,14 +60,14 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
 
     renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
-    // Count badge renders the live count (memory-pending-count token).
+    // note: Count badge renders the live count (memory-pending-count token).
     await waitFor(() =>
       expect(screen.getByTestId('memory-pending-count')).toHaveTextContent('1'),
     );
-    // The pending row's raw digest + humanized task_kind render.
+    // note: The pending row's raw digest + humanized task_kind render.
     expect(await screen.findByText('A captured thought.')).toBeInTheDocument();
     expect(screen.getByText('Brainstorm')).toBeInTheDocument();
-    // Fragments empty state renders (read-only browser).
+    // note: Fragments empty state renders (read-only browser).
     expect(await screen.findByText('No fragments')).toBeInTheDocument();
   });
 
@@ -100,11 +100,11 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
 
     renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
-    // Fragment row renders fragment_id (monospace) + summary.
+    // note: Fragment row renders fragment_id (monospace) + summary.
     expect(await screen.findByText('A long-term memory fragment.')).toBeInTheDocument();
     expect(screen.getByText('f1')).toBeInTheDocument();
 
-    // Open the inspector by selecting the pending row.
+    // note: Open the inspector by selecting the pending row.
     fireEvent.click(screen.getByText('digest-2'));
     // open item #3: absent world_id reads as "(none)".
     expect(await screen.findByTestId('memory-world-id')).toHaveTextContent('(none)');
@@ -113,7 +113,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
 
   it('deletes a pending review via the row action and removes it from the list', async () => {
     const deleteSpy = vi.fn(() => HttpResponse.json({ success: true, pending_id: 'p1' }));
-    // Stateful list: returns the row until the DELETE lands, then empty —
+    // note: Stateful list: returns the row until the DELETE lands, then empty —
     // mirroring a real server that honors the deletion before the refetch.
     let deleted = false;
     useHandlers(
@@ -148,12 +148,12 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
     expect(await screen.findByText('to be deleted')).toBeInTheDocument();
 
-    // window.confirm is the web-friendly confirmation (D-UX LOCKED).
+    // note: window.confirm is the web-friendly confirmation (D-UX LOCKED).
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: /delete pending review p1/i }));
 
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
-    // Optimistic update removes the row; the refetch confirms the empty list.
+    // note: Optimistic update removes the row; the refetch confirms the empty list.
     await waitFor(() => expect(screen.queryByText('to be deleted')).not.toBeInTheDocument());
     confirmSpy.mockRestore();
   });
@@ -185,14 +185,14 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     );
 
     renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
-    // CTA is enabled once pending count resolves (> 0).
+    // note: CTA is enabled once pending count resolves (> 0).
     const cta = await screen.findByRole('button', { name: /review and summarize/i });
     await waitFor(() => expect(cta).not.toBeDisabled());
 
     fireEvent.click(cta);
 
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(1));
-    // Result-counters confirmation toast (ReviewResponse promoted/fragmented/dropped).
+    // note: Result-counters confirmation toast (ReviewResponse promoted/fragmented/dropped).
     expect(await screen.findByText(/3 promoted to long-term memory/)).toBeInTheDocument();
     expect(screen.getByText(/5 saved as fragments/)).toBeInTheDocument();
     expect(screen.getByText(/2 dropped/)).toBeInTheDocument();

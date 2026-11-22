@@ -1,5 +1,5 @@
 /**
- * Workspace context (plan v1219 § Shared interfaces 2).
+ * note: Workspace context (plan v1219 § Shared interfaces 2).
  *
  * Wraps the additive workspace client methods (`listWorkspaces` /
  * `getActiveWorkspace` / `setActiveWorkspace` over the frozen workspace
@@ -20,13 +20,13 @@ import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
 interface WorkspaceContextValue {
-  /** The active creator's workspaces from `GET /v1/daemon/workspaces`. */
+  /** note: The active creator's workspaces from `GET /v1/daemon/workspaces`. */
   workspaces: WorkspaceSummary[];
-  /** The workspace whose creator_id + slug match the daemon's active workspace; null while unknown. */
+  /** note: The workspace whose creator_id + slug match the daemon's active workspace; null while unknown. */
   activeWorkspace: WorkspaceSummary | null;
-  /** Switch the daemon's active workspace; refetches workspace-scoped content. */
+  /** note: Switch the daemon's active workspace; refetches workspace-scoped content. */
   switchWorkspace: (workspaceSlug: string) => void;
-  /** True while a set-active mutation is in flight. */
+  /** note: True while a set-active mutation is in flight. */
   isSwitching: boolean;
 }
 
@@ -63,7 +63,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const creatorId = useActiveCreatorId();
 
   const listQuery = useQuery({
-    // Creator-scoped cache + fetch: two creators can both own a `default`
+    // note: Creator-scoped cache + fetch: two creators can both own a `default`
     // workspace, so the creator id is part of the key and the query param.
     queryKey: queryKeys.workspaces.list({ creator_id: creatorId }),
     queryFn: async () =>
@@ -78,7 +78,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         creator_id: creatorId ?? undefined,
       }),
     onSuccess: (_data, workspaceSlug) => {
-      // A workspace switch changes the content domain: every cached list/detail
+      // note: A workspace switch changes the content domain: every cached list/detail
       // is workspace-scoped now, so drop all of it rather than tracking which
       // families happen to be mounted.
       void qc.invalidateQueries();
@@ -94,7 +94,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const active = activeQuery.data ?? null;
     return {
       workspaces,
-      // Match creator_id AND slug: the `default` slug exists per creator, so
+      // note: Match creator_id AND slug: the `default` slug exists per creator, so
       // a slug-only match would light the wrong creator's chip (QC W).
       activeWorkspace:
         workspaces.find(

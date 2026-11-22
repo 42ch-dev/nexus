@@ -1,5 +1,5 @@
 /**
- * Strategy detail — route entry for the Canvas Strategy Surface (α).
+ * note: Strategy detail — route entry for the Canvas Strategy Surface (α).
  *
  * Renders the selected preset as a state-machine graph via {@link StrategyCanvas}.
  * UI label is "Harness" (V1.156 PD-4); persisted identifiers remain "preset" (Draft §4.2).

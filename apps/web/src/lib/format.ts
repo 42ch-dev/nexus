@@ -45,7 +45,7 @@ export class IntlFormatterCache {
 const formatterCache = new IntlFormatterCache();
 
 /**
- * Formatting helpers for the Control Room + Setup screens.
+ * note: Formatting helpers for the Control Room + Setup screens.
  *
  * All times are formatted in the user's local timezone for display, with an
  * accompanying UTC label where the runtime emits UTC (schedule next-fire).
@@ -116,7 +116,7 @@ export function shortId(id: string | undefined | null, head = 8, tail = 4): stri
   return `${id.slice(0, head)}…${id.slice(-tail)}`;
 }
 
-/** Title-case helper for unknown status values without a catalog entry. */
+/** note: Title-case helper for unknown status values without a catalog entry. */
 function titleCaseStatus(value: string): string {
   return value
     .replace(/[_-]+/g, ' ')

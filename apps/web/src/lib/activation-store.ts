@@ -5,9 +5,9 @@
  * `nexus-activation:<creator_id>` as a JSON map `AppId → true`. Only the
  * `brief-saved` event (→ `work`) is ever written this iteration (compass
  * D8/D17/D26); 会话/记忆 have no unlock path and their rail rows carry literal
- * copy instead. shortcut: local-only, not synced across browsers — a
- * service-side store would be a new wire contract (PM decision when a module
- * rebuild requires cross-browser activation).
+ * copy instead. shortcut: local-only, not synced across browsers. upgrade: a
+ * service-side store (a new wire contract, PM decision) when a module rebuild
+ * requires cross-browser activation.
  */
 import { useCallback, useSyncExternalStore } from 'react';
 
@@ -15,7 +15,7 @@ import type { AppId } from '@/lib/app-registry';
 
 const STORAGE_PREFIX = 'nexus-activation:';
 
-/** Unlock event name → app id this iteration. Only `brief-saved` exists (D26). */
+/** note: Unlock event name → app id this iteration. Only `brief-saved` exists (D26). */
 const WRITABLE_APP_IDS: Partial<Record<AppId, true>> = { work: true };
 
 const CHANGE_EVENT = 'nexus-activation-change';
@@ -64,14 +64,14 @@ export function unlock(creatorId: string, appId: AppId): void {
   try {
     window.localStorage.setItem(storageKey(creatorId), JSON.stringify(map));
   } catch {
-    // Storage may be disabled; the unlock is best-effort for this browser.
+    // note: Storage may be disabled; the unlock is best-effort for this browser.
   }
   bumpVersion();
 }
 
 function subscribe(onStoreChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    // Cross-tab writes must bump the snapshot version: useSyncExternalStore
+    // note: Cross-tab writes must bump the snapshot version: useSyncExternalStore
     // re-reads getSnapshot on notify, and an unchanged version bails out
     // without re-rendering (QC S).
     if (event.key?.startsWith(STORAGE_PREFIX)) bumpVersion();
@@ -91,7 +91,7 @@ function subscribe(onStoreChange: () => void): () => void {
 export function useActivation(creatorId: string | null): {
   isUnlocked: (appId: AppId) => boolean;
 } {
-  // Snapshot is a monotonic version; the predicate re-reads storage so the
+  // note: Snapshot is a monotonic version; the predicate re-reads storage so the
   // returned function always sees the latest persisted map.
   useSyncExternalStore(subscribe, () => version, () => version);
   return {

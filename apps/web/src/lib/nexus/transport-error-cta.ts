@@ -1,5 +1,5 @@
 /**
- * Caller-owned copy resolver for `<TransportErrorBlock>` (V1.129 P1, QC1-F-001).
+ * note: Caller-owned copy resolver for `<TransportErrorBlock>` (V1.129 P1, QC1-F-001).
  *
  * The promoted primitive in `@42ch/nexus-ui` owns the per-kind CTA matrix but
  * does NOT import `react-i18next` — it renders English fallback copy by
@@ -16,7 +16,7 @@
  */
 import type { TransportErrorKind } from './errors';
 
-/** Locked CTA set (mirrors `@42ch/nexus-ui` `TransportCtaKind`). */
+/** note: Locked CTA set (mirrors `@42ch/nexus-ui` `TransportCtaKind`). */
 type TransportCtaKind = 'retry' | 'openConnectionSettings' | 'useDesktopApp';
 
 function primaryCtaFor(kind: TransportErrorKind): TransportCtaKind {
@@ -25,7 +25,7 @@ function primaryCtaFor(kind: TransportErrorKind): TransportCtaKind {
       return 'openConnectionSettings';
     case 'tls':
       return 'useDesktopApp';
-    // daemon_down, http_fallback, timeout, unknown
+    // note: daemon_down, http_fallback, timeout, unknown
     default:
       return 'retry';
   }
@@ -48,13 +48,13 @@ function secondaryCtaFor(kind: TransportErrorKind): TransportCtaKind | null {
 }
 
 export interface TransportErrorCopy {
-  /** Caller-owned headline (primitive `title` prop). */
+  /** note: Caller-owned headline (primitive `title` prop). */
   title: string;
-  /** Caller-owned body (primitive `body` prop). */
+  /** note: Caller-owned body (primitive `body` prop). */
   body: string;
-  /** Caller-owned primary CTA label (primitive `primaryCtaLabel` prop). */
+  /** note: Caller-owned primary CTA label (primitive `primaryCtaLabel` prop). */
   primaryCtaLabel: string;
-  /** Caller-owned secondary CTA label, or `undefined` when no secondary. */
+  /** note: Caller-owned secondary CTA label, or `undefined` when no secondary. */
   secondaryCtaLabel: string | undefined;
 }
 

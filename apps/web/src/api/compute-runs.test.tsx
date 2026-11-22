@@ -1,5 +1,5 @@
 /**
- * Compute run hooks (V1.147 P1) — query + mutation invalidation contract.
+ * note: Compute run hooks (V1.147 P1) — query + mutation invalidation contract.
  *
  * Against a real BrowserClient + msw:
  * - `useComputeRuns` cursor-paginates `GET /compute/runs` (fetchNextPage
@@ -231,7 +231,7 @@ describe('useRunCompute — runs-list invalidation', () => {
     expect(listSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
-    // Mutation rejects (error envelope) but the runs lists are invalidated so
+    // note: Mutation rejects (error envelope) but the runs lists are invalidated so
     // the server-recorded Failed row surfaces without a manual refresh.
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
   });
@@ -239,7 +239,7 @@ describe('useRunCompute — runs-list invalidation', () => {
 
 describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation', () => {
   /**
-   * Harness for the accept/discard invalidation contract. Mounts the runs
+   * note: Harness for the accept/discard invalidation contract. Mounts the runs
    * list + run detail (the mutation's direct targets) AND the Timeline
    * overview + World-KB graph consumers that must also refetch after an
    * Accept (qc1 W-001 / qc3 W-1: Accept mutates World + Timeline + KB
@@ -249,7 +249,7 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
   function renderRunInspector(
     button: 'accept' | 'discard',
     crossCache: {
-      // Only the call is needed here; Vitest 4's bare `vi.fn()` overload types
+      // note: Only the call is needed here; Vitest 4's bare `vi.fn()` overload types
       // as `Mock<Constructable | Procedure>`, which is not callable.
       timelineSpy: () => unknown;
       worldKbSpy: () => unknown;
@@ -317,7 +317,7 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
     fireEvent.click(screen.getByRole('button', { name: /accept/i }));
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
-    // Cross-cache fan-out: the post-Accept World state must be fresh on the
+    // note: Cross-cache fan-out: the post-Accept World state must be fresh on the
     // Timeline and the KB graph without a manual reload.
     await waitFor(() => expect(timelineSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(worldKbSpy).toHaveBeenCalledTimes(2));
@@ -355,7 +355,7 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
 
 describe('useClearRuns — cleared rows leave every cached view', () => {
   /**
-   * The Runs table and the open Run inspector are the two views Clear history
+   * note: The Runs table and the open Run inspector are the two views Clear history
    * must empty. The mutation is called with a per-call `onSuccess` exactly like
    * `run-studio.tsx` does (the toast copy), so this also pins that the
    * hook-level invalidation ordering keeps working at that call site.
@@ -368,7 +368,7 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
       return (
         <div>
           <span data-testid="runs">{flattenPages(runs.data).length}</span>
-          {/* The cleared Run's detail read fails (404). React Query keeps the
+          {/* note: The cleared Run's detail read fails (404). React Query keeps the
               last successful `data` through an error, so the honest consumer
               signal — and what the real studio renders from — is `isError`. */}
           <span data-testid="run">{run.isError ? 'error' : (run.data?.status ?? 'none')}</span>
@@ -390,7 +390,7 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
   }
 
   it('drops the cleared row from the mounted runs list and run detail', async () => {
-    // Server-side state the DELETE flips: the post-clear reads must disagree
+    // note: Server-side state the DELETE flips: the post-clear reads must disagree
     // with the pre-clear ones, so only a real refetch can move the mounted
     // consumers (call counting would pass on a spy echo).
     let cleared = false;
@@ -422,11 +422,11 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /clear/i }));
 
-    // Without the invalidation the mounted views keep rendering the row the
+    // note: Without the invalidation the mounted views keep rendering the row the
     // server just deleted (observed against the real service: DOM kept both
     // rows while `GET /compute/runs` already returned `items: []`).
     await waitFor(() => expect(screen.getByTestId('runs')).toHaveTextContent('0'));
-    // The refetched detail is a 404 now: the open Run's read is in its error
+    // note: The refetched detail is a 404 now: the open Run's read is in its error
     // state (the real studio renders "Could not load this Run" from it).
     await waitFor(() => expect(screen.getByTestId('run')).toHaveTextContent('error'));
   });

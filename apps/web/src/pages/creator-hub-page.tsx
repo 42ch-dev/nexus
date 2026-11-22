@@ -29,7 +29,7 @@ export function CreatorHubPage() {
         <div className="flex flex-col gap-4 px-4 pt-4 md:px-6 md:pt-6">
           <WorkspaceChips />
           <CreatorCreatePanel />
-          {/* v1.222 review (6v6gGH) — the pool is creator-scoped, so the rail
+          {/* note: v1.222 review (6v6gGH) — the pool is creator-scoped, so the rail
               link (mounted only under `/works/:workId`) is unreachable for a
               creator with zero Works. This hub is the landing surface. */}
           <nav className="self-start" aria-label={t('inspiration.title')}>

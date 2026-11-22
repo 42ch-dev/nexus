@@ -8,7 +8,7 @@ import {
 } from '@/lib/nexus/connection-storage';
 import type { DesktopBridge } from '@/lib/nexus/desktop-bridge';
 
-/** Test seam: a structurally valid version-1 bridge with a plain invoke stub. */
+/** note: Test seam: a structurally valid version-1 bridge with a plain invoke stub. */
 function mockBridge(invoke: (operation: string, payload?: unknown) => Promise<unknown>): void {
   const bridge = {
     version: 1,
@@ -113,7 +113,7 @@ describe('WebConnectionStorage', () => {
   });
 
   it('clears an active remote entry with a missing API key (never loads keyless remote mode)', async () => {
-    // Regression: the desktop redacted shape makes apiKey optional, but the
+    // note: Regression: the desktop redacted shape makes apiKey optional, but the
     // web backend must never load an active remote record without the actual
     // key — that would build an unauthenticated BrowserClient.
     window.localStorage.setItem(

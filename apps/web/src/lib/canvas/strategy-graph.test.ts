@@ -1,5 +1,5 @@
 /**
- * Strategy graph — YAML projection tests (V1.115 P0 T2 / W001).
+ * note: Strategy graph — YAML projection tests (V1.115 P0 T2 / W001).
  *
  * The Canvas no longer runs this projection (P6 condition 2: it renders the
  * applied IR document through `buildStrategyGraphFromIr`); `buildStrategyGraph`
@@ -17,7 +17,7 @@ import { parsePresetYaml } from './preset-yaml';
 import { buildStrategyGraph } from './strategy-graph';
 import { applyTrajectoryOverlay } from '@/components/canvas/strategy-canvas/simulation-overlay';
 
-/** A representative preset exercising outer states, inner graph, and converge. */
+/** note: A representative preset exercising outer states, inner graph, and converge. */
 const SAMPLE_YAML = `
 preset:
   id: novel-writing
@@ -81,9 +81,6 @@ inner_graphs:
     output_binding: select.text
 `;
 
-// ---------------------------------------------------------------------------
-// Projection helper
-// ---------------------------------------------------------------------------
 
 function project(yaml: string, trajectory: SimulationTrajectory | null = null) {
   const parsed = parsePresetYaml(yaml);
@@ -94,7 +91,6 @@ function project(yaml: string, trajectory: SimulationTrajectory | null = null) {
   };
 }
 
-// ---------------------------------------------------------------------------
 
 describe('parsePresetYaml', () => {
   it('parses a well-formed preset manifest', () => {
@@ -225,7 +221,7 @@ describe('buildStrategyGraph — YAML projection contract', () => {
 
 describe('buildStrategyGraph — validation tolerance', () => {
   it('does not crash on a dangling `next` target and surfaces it via danglingTargets', () => {
-    // Typo'd target — `outlinig` does not exist. The BFS should skip the
+    // note: Typo'd target — `outlinig` does not exist. The BFS should skip the
     // dangling id at dequeue time and the projection surfaces the warning via
     // danglingTargets for the ValidationPanel.
     const yaml = `
@@ -244,7 +240,7 @@ states:
     expect(result.nodes.find((n) => n.id === 'gathering')).toBeDefined();
     expect(result.danglingTargets.length).toBeGreaterThan(0);
     expect(result.danglingTargets[0]).toContain('outlinig');
-    // The dangling edge is NOT pushed (pushOuterEdge drops missing targets),
+    // note: The dangling edge is NOT pushed (pushOuterEdge drops missing targets),
     // so the edges array has no synthetic edge for the dangling next.
     expect(result.edges.length).toBe(0);
   });

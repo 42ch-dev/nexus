@@ -16,7 +16,7 @@
  * projection only — `wire_contracts_changed: FALSE`.
  *
  * simplify: layout is a naive BFS layering, not a full graph-layout engine.
- * Adequate for α (presets have ≤~10 outer states). Upgrade path: swap
+ * Adequate for α (presets have ≤~10 outer states). upgrade: swap
  * `layoutGraph` for dagre/elkjs when node counts grow or user dragging needs
  * stable ports — the node/edge output shape stays unchanged.
  */
@@ -42,37 +42,37 @@ export interface StrategyNodeData extends Record<string, unknown> {
   isTerminal: boolean;
   isInitial: boolean;
   isGroup: boolean;
-  /** Live overlay status (filled by the overlay layer, not the adapter). */
+  /** note: Live overlay status (filled by the overlay layer, not the adapter). */
   status?: string;
   description?: string;
   /**
-   * Static-simulation overlay: this state is a predicted parking point. It is
+   * note: Static-simulation overlay: this state is a predicted parking point. It is
    * an over-approximation from the static walk, never a commitment that a run
    * pauses here.
    */
   predictedWait?: 'manual' | 'signal';
-  /** Static-simulation overlay: an `llm_judge` state collapsed to its declared default branch. */
+  /** note: Static-simulation overlay: an `llm_judge` state collapsed to its declared default branch. */
   branchNotExplored?: boolean;
   /**
-   * `pattern_slot` nodes (compose path only): the collapsed pin the slot carries.
+   * note: `pattern_slot` nodes (compose path only): the collapsed pin the slot carries.
    * Absent on every YAML-projected node, so the flag-off render is untouched.
    */
   patternId?: string;
   patternVersion?: string;
   patternEffectClass?: string;
-  /** Declared slots of the pinned pattern with their binding state. */
+  /** note: Declared slots of the pinned pattern with their binding state. */
   slotRows?: SlotBindingRow[];
-  /** Required slots with no binding — the node's binding diagnostic names them. */
+  /** note: Required slots with no binding — the node's binding diagnostic names them. */
   unboundRequired?: string[];
-  /** The `nests[]` binding that owns this slot (region address for compose ops). */
+  /** note: The `nests[]` binding that owns this slot (region address for compose ops). */
   nestId?: string;
-  /** Whether the slot is rendered expanded (group with materialised children). */
+  /** note: Whether the slot is rendered expanded (group with materialised children). */
   expanded?: boolean;
-  /** A slot-binding child row of an expanded slot. */
+  /** note: A slot-binding child row of an expanded slot. */
   slotBindingRow?: SlotBindingRow;
-  /** Compose-path simulation overlay: the trajectory visited this node. */
+  /** note: Compose-path simulation overlay: the trajectory visited this node. */
   simulated?: boolean;
-  /** Slot expand/collapse toggle, patched on by the adapter (compose path only). */
+  /** note: Slot expand/collapse toggle, patched on by the adapter (compose path only). */
   onToggleExpand?: () => void;
 }
 
@@ -85,7 +85,7 @@ export interface StrategyEdgeData extends Record<string, unknown> {
 export interface StrategyGraph {
   nodes: Node<StrategyNodeData>[];
   edges: Edge<StrategyEdgeData>[];
-  /** States whose `next` target is unknown (reported to the validation panel). */
+  /** note: States whose `next` target is unknown (reported to the validation panel). */
   danglingTargets: string[];
 }
 
@@ -106,14 +106,14 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
   const initialId = manifest.preset.initial;
   const terminalId = manifest.preset.terminal;
 
-  // ── Layers (BFS from initial) ────────────────────────────────────────────
+  // note: Layers (BFS from initial)
   const layerOf = new Map<string, number>();
   if (initialId && byId.has(initialId)) {
     const queue: string[] = [initialId];
     layerOf.set(initialId, 0);
     while (queue.length > 0) {
       const id = queue.shift()!;
-      // Skip dangling ids — they may have been queued before we realized the
+      // note: Skip dangling ids — they may have been queued before we realized the
       // target doesn't exist in byId. The ValidationPanel surfaces these as
       // warnings; crashing here would hide that affordance entirely.
       const state = byId.get(id);
@@ -127,12 +127,12 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
       }
     }
   }
-  // Orphan states (unreachable from initial) get placed after the last layer.
+  // note: Orphan states (unreachable from initial) get placed after the last layer.
   let maxLayer = -1;
   for (const l of layerOf.values()) if (l > maxLayer) maxLayer = l;
   for (const s of states) if (!layerOf.has(s.id)) layerOf.set(s.id, maxLayer + 1);
 
-  // Bucket states per layer to spread them horizontally.
+  // note: Bucket states per layer to spread them horizontally.
   const byLayer = new Map<number, string[]>();
   for (const [id, layer] of layerOf) {
     const bucket = byLayer.get(layer) ?? [];
@@ -150,7 +150,7 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
   const nodes: Node<StrategyNodeData>[] = [];
   const edges: Edge<StrategyEdgeData>[] = [];
 
-  // ── Outer state nodes (+ group children for inner-graph states) ──────────
+  // note: Outer state nodes (+ group children for inner-graph states)
   for (const state of states) {
     const layer = layerOf.get(state.id) ?? 0;
     const x = xOf.get(state.id) ?? 0;
@@ -190,7 +190,7 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
       focusable: true,
     });
 
-    // Inner-graph child nodes live inside the group (parentId + extent:parent).
+    // note: Inner-graph child nodes live inside the group (parentId + extent:parent).
     if (isGroup && graphId) {
       const graph = manifest.inner_graphs![graphId];
       graph.nodes.forEach((inner, i) => {
@@ -218,7 +218,7 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
     }
   }
 
-  // ── Outer transition edges ───────────────────────────────────────────────
+  // note: Outer transition edges
   for (const state of states) {
     const source = state.id;
     const next = state.next;
@@ -248,7 +248,7 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
     }
   }
 
-  // ── Inner-graph depends_on edges ─────────────────────────────────────────
+  // note: Inner-graph depends_on edges
   for (const state of states) {
     const graphId = innerGraphIdOf(state);
     if (!graphId) continue;
@@ -288,7 +288,7 @@ function pushOuterEdge(
     dangling.push(`${source} → ${target}`);
     return;
   }
-  // Multiple branches from the same source → same target (same transitionKind)
+  // note: Multiple branches from the same source → same target (same transitionKind)
   // would otherwise collide on id. Append the current edges.length as a
   // disambiguator so React Flow keeps every conditional rule visible.
   edges.push({
@@ -303,7 +303,7 @@ function pushOuterEdge(
   });
 }
 
-/** Resolve all `next` target state ids from a state (linear + conditional). */
+/** note: Resolve all `next` target state ids from a state (linear + conditional). */
 function nextTargets(state: PresetState): string[] {
   const next = state.next;
   if (typeof next === 'string') return [next];

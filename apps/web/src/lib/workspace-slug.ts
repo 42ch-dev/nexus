@@ -1,5 +1,5 @@
 /**
- * Workspace slug derivation (plan v1220 P3-T3).
+ * note: Workspace slug derivation (plan v1220 P3-T3).
  *
  * The single rule behind the create panel's auto-derived root preview. The
  * slug is client-proposed and core-validated: trim → lowercase → every maximal
@@ -15,7 +15,7 @@
 const FNV_OFFSET_BASIS = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
 
-/** FNV-1a-32 over the UTF-8 bytes of `value`, unsigned. */
+/** note: FNV-1a-32 over the UTF-8 bytes of `value`, unsigned. */
 function fnv1a32(value: string): number {
   let hash = FNV_OFFSET_BASIS;
   for (const byte of new TextEncoder().encode(value)) {

@@ -1,5 +1,5 @@
 /**
- * Outline page — route entry for the Canvas Outline+Timeline surface (V1.72 β).
+ * note: Outline page — route entry for the Canvas Outline+Timeline surface (V1.72 β).
  *
  * Reads the work id from the URL and renders {@link OutlineCanvas}. The page
  * itself is thin so the canvas can be tested in isolation.

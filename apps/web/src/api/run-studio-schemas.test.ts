@@ -1,5 +1,5 @@
 /**
- * toInvocationSchema structural guard (V1.147 P1, qc1 W-003 fix).
+ * note: toInvocationSchema structural guard (V1.147 P1, qc1 W-003 fix).
  *
  * The adapter narrows the generated `ModuleDetail.schemas.invocation` open
  * index signature onto the `@42ch/nexus-ui` structural InvocationSchema; it

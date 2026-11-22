@@ -1,5 +1,5 @@
 /**
- * Reading-chrome profile mapping.
+ * note: Reading-chrome profile mapping.
  *
  * The backend `Work.work_profile` stores `game_bible` with an underscore, but
  * the V1.91 DESIGN.md reading-chrome tokens use hyphenated profile keys. This

@@ -1,5 +1,5 @@
 /**
- * OutlinePage route tests — V1.75 chapter preselect (F-QC3-001).
+ * note: OutlinePage route tests — V1.75 chapter preselect (F-QC3-001).
  *
  * The chapter-page "Edit outline → Canvas" CTA links to
  * `/works/{workId}/outline?chapter={n}`. The outline page MUST consume the
@@ -27,7 +27,7 @@ import { OutlinePage } from '@/pages/outline-page';
 
 const client = () => new BrowserClient();
 
-/** `GET /v1/daemon/works/:workId/outline` → minimal canonical `WorkOutline`. */
+/** note: `GET /v1/daemon/works/:workId/outline` → minimal canonical `WorkOutline`. */
 function workOutlineHandler(chapterIds: number[]) {
   return http.get('/v1/daemon/works/:workId/outline', () =>
     HttpResponse.json({
@@ -67,17 +67,16 @@ describe('OutlinePage chapter preselect (V1.75 F-QC3-001)', () => {
 
     renderOutline('/works/w-123/outline?chapter=2');
 
-    // The "Chapter Inspector" card title only renders when a chapter is
+    // note: The "Chapter Inspector" card title only renders when a chapter is
     // selected (the empty state returns a bare card without this title).
     expect(await screen.findByText('Chapter Inspector')).toBeInTheDocument();
     const inspectorCard = screen.getByText('Chapter Inspector').closest('[class*="card"]') as HTMLElement;
-    // The inspector description is unique: "Metadata for chapter #N exposed on
+    // note: The inspector description is unique: "Metadata for chapter #N exposed on
     // the outline canvas." Scoping to the card avoids matching the structure
     // panel helper text that also mentions the outline canvas.
     expect(
       within(inspectorCard).getByText('Metadata for chapter #2 exposed on the outline canvas.'),
     ).toHaveTextContent('#2');
-    // Empty state is gone.
     expect(
       screen.queryByText(/Select a chapter to inspect its outline metadata/i),
     ).not.toBeInTheDocument();

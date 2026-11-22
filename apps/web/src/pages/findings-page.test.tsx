@@ -1,5 +1,5 @@
 /**
- * FindingsPage render + interaction tests — V1.91 P1 batch triage coverage.
+ * note: FindingsPage render + interaction tests — V1.91 P1 batch triage coverage.
  *
  * Exercises multi-select, bulk status transition, bulk target_executor
  * assignment, and client-side CSV export against the real BrowserClient + msw.
@@ -87,7 +87,7 @@ describe('FindingsPage', () => {
     await selectWork();
 
     const rowChecks = screen.getAllByRole('checkbox');
-    // Header checkbox + two row checkboxes.
+    // note: Header checkbox + two row checkboxes.
     expect(rowChecks.length).toBeGreaterThanOrEqual(3);
     fireEvent.click(rowChecks[1]);
 
@@ -193,7 +193,7 @@ describe('FindingsPage', () => {
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
 
-    // Capture the created anchor to inspect download attributes.
+    // note: Capture the created anchor to inspect download attributes.
     const originalCreateElement = document.createElement.bind(document);
     let capturedAnchor: HTMLAnchorElement | null = null;
     document.createElement = ((tagName: string, options?: ElementCreationOptions) => {
@@ -235,7 +235,7 @@ describe('FindingsPage', () => {
       });
       const lines = csv.split('\n');
       expect(lines[0]).toBe('id,title,status,kind,severity,target_executor,created_at,rule_suggestion');
-      expect(lines.length).toBe(3); // header + 2 rows
+      expect(lines.length).toBe(3); // note: header + 2 rows
       expect(lines[1]).toContain('f1');
       expect(lines[1]).toContain('Pacing');
       expect(lines[2]).toContain('f2');

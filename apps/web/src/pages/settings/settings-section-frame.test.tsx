@@ -1,5 +1,5 @@
 /**
- * SettingsSectionFrame — entrance-filtered rail (V1.170 P1 — plan QC W-2).
+ * note: SettingsSectionFrame — entrance-filtered rail (V1.170 P1 — plan QC W-2).
  *
  * The frame is presentational: the host supplies `hiddenSettingsSections`
  * from the entrance registry (Create hides agent/advanced). This

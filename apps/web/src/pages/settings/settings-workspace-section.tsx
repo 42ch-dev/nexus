@@ -1,5 +1,5 @@
 /**
- * Settings Profiles section — V1.117 P0 workspace path change (W2).
+ * note: Settings Profiles section — V1.117 P0 workspace path change (W2).
  *
  * View/change the workspace folder for the active Profile via desktop capabilities. Browser build
  * shows honest desktop-only copy and disables the picker.
@@ -20,7 +20,7 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 
-/** Fallback shown when the desktop workspace-root read fails (v1.94 default). */
+/** note: Fallback shown when the desktop workspace-root read fails (v1.94 default). */
 const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
 
 export function SettingsWorkspaceSection() {

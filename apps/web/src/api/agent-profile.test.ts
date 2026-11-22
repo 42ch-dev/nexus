@@ -1,5 +1,5 @@
 /**
- * Browser agent-profile snapshot reader (v1220 T2 seam) — the localStorage
+ * note: Browser agent-profile snapshot reader (v1220 T2 seam) — the localStorage
  * trust boundary. A polluted/foreign value must never reach callers as a
  * malformed snapshot or throw inside `launchCommand?.trim()`.
  */

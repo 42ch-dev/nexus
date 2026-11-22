@@ -32,7 +32,7 @@ describe('resolveInstallUrl', () => {
   });
 });
 
-// P2 (F2): claude-acp / codex-acp are hard-excluded from both the default grid
+// note: P2 (F2): claude-acp / codex-acp are hard-excluded from both the default grid
 // and the More list via `excludeFromPicker`.
 describe('isExcludedFromPicker', () => {
   it('returns true for ACP wrappers', () => {
@@ -70,7 +70,7 @@ describe('resolveAgentKey', () => {
   });
 
   it('maps full-path launch_command via basename (production daemon shape) — QC1 C1', () => {
-    // The daemon PATH-scan emits the full resolved binary path.
+    // note: The daemon PATH-scan emits the full resolved binary path.
     expect(
       resolveAgentKey(
         makeAgent({
@@ -138,7 +138,7 @@ describe('resolveCatalogItem', () => {
   });
 
   it('uses whitelist installUrl when override has no installUrl (PM minor fix)', () => {
-    // claude-native override has displayName+priority but no installUrl.
+    // note: claude-native override has displayName+priority but no installUrl.
     // The fix clarified: override.installUrl must be a whitelisted VALUE to
     // render; with no override.installUrl, the key's whitelist URL applies.
     const item = resolveCatalogItem(
@@ -218,13 +218,13 @@ describe('moreAgentsEntries', () => {
     ]);
     const ids = entries.map((e) => e.id);
     expect(ids).not.toContain('claude-native');
-    // P2 (F2): claude-acp is hard-excluded from both the default grid and More.
+    // note: P2 (F2): claude-acp is hard-excluded from both the default grid and More.
     expect(ids).not.toContain('claude-acp');
     expect(ids).toContain('other-agent');
   });
 
   it('sorts More agents by name (P2: installed agents always land in the default grid)', () => {
-    // P2: every installed agent enters the default grid (curated tier 1 or
+    // note: P2: every installed agent enters the default grid (curated tier 1 or
     // not-curated tier 3), so the More list only ever holds uninstalled
     // non-curated agents — sorted by name. The installed-first comparator
     // branch in `moreAgentsEntries` is defensive and not reachable through
@@ -250,7 +250,7 @@ describe('prioritizeInstalled', () => {
 });
 
 describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () => {
-  // Two real installs of `claude` resolve to the same native key but carry
+  // note: Two real installs of `claude` resolve to the same native key but carry
   // different launch commands — the bug is that a catalog-key map collapses
   // them, so selecting one card could save the other's launch command.
   const twoClaudeInstalls = (): AgentScanEntry[] => [
@@ -271,10 +271,10 @@ describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () =>
   it('assigns distinct collision-safe pickerIds while id stays the catalog key', () => {
     const items = resolveCatalogItems(twoClaudeInstalls());
     expect(items.map((i) => i.pickerId)).toEqual(['claude-native', 'claude-native__2']);
-    // Catalog key is shared (override/whitelist lookup is by key).
+    // note: Catalog key is shared (override/whitelist lookup is by key).
     expect(items[0]!.id).toBe('claude-native');
     expect(items[1]!.id).toBe('claude-native');
-    // Each item preserves its OWN launch command — the card shows the right one.
+    // note: Each item preserves its OWN launch command — the card shows the right one.
     expect(items[0]!.launchCommand).toBe('/usr/local/bin/claude');
     expect(items[1]!.launchCommand).toBe('/opt/homebrew/bin/claude');
   });
@@ -297,7 +297,7 @@ describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () =>
   it('buildPickerSelection maps each pickerId back to the exact scan row', () => {
     const [a, b] = twoClaudeInstalls();
     const { byPickerId, byEntry } = buildPickerSelection([a, b]);
-    // Selecting either card resolves to its own launch command, not the other's.
+    // note: Selecting either card resolves to its own launch command, not the other's.
     expect(byPickerId.get('claude-native')).toBe(a);
     expect(byPickerId.get('claude-native__2')).toBe(b);
     expect(byEntry.get(a)).toBe('claude-native');
@@ -305,10 +305,8 @@ describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () =>
   });
 });
 
-// ---------------------------------------------------------------------------
-// P2 acceptance criteria (catalog layer)
+// note: P2 acceptance criteria (catalog layer)
 // Spec: the v1.119 `setup-agent-picker-catalog` record (local).
-// ---------------------------------------------------------------------------
 
 describe('P2 acceptance criteria (catalog layer)', () => {
   it('AC-P2-1: native Claude/Codex carry pinned ACP iconUrls', () => {
@@ -343,17 +341,17 @@ describe('P2 acceptance criteria (catalog layer)', () => {
 
   it('AC-P2-5: default grid order is installed-curated, curated-uninstalled, installed-not-curated', () => {
     const scan: AgentScanEntry[] = [
-      // uninstalled curated
-      makeAgent({ registry_agent_id: 'cursor', name: 'Cursor', installed: false }), // priority 2
-      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex', installed: false }), // priority 0
-      // installed curated
-      makeAgent({ registry_agent_id: 'claude-native', name: 'Claude', installed: true }), // priority 1
-      // installed not curated (no priority)
+      // note: uninstalled curated
+      makeAgent({ registry_agent_id: 'cursor', name: 'Cursor', installed: false }), // note: priority 2
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex', installed: false }), // note: priority 0
+      // note: installed curated
+      makeAgent({ registry_agent_id: 'claude-native', name: 'Claude', installed: true }), // note: priority 1
+      // note: installed not curated (no priority)
       makeAgent({ name: 'zzz-custom', installed: true }),
       makeAgent({ name: 'aaa-custom', installed: true }),
     ];
     const ids = defaultGridEntries(scan).map((e) => e.id);
-    // Tier 1 (installed curated, priority asc): claude-native
+    // note: Tier 1 (installed curated, priority asc): claude-native
     // Tier 2 (curated uninstalled, priority asc): codex-native(0), cursor(2)
     // Tier 3 (installed not curated, displayName asc): aaa-custom, zzz-custom
     expect(ids).toEqual([
@@ -366,12 +364,12 @@ describe('P2 acceptance criteria (catalog layer)', () => {
   });
 
   it('AC-P2-7: forward-compat curated agents appear when scan includes their registry id', () => {
-    // Hermes/Grok/Kilo slots are forward-compat: they appear at their curated
+    // note: Hermes/Grok/Kilo slots are forward-compat: they appear at their curated
     // priority the moment the scan surfaces their registry id.
     const scan: AgentScanEntry[] = [
-      makeAgent({ registry_agent_id: 'hermes', name: 'Hermes', installed: false }), // priority 5
-      makeAgent({ registry_agent_id: 'grok-build', name: 'Grok Build', installed: false }), // priority 7
-      makeAgent({ registry_agent_id: 'kilo', name: 'Kilo', installed: false }), // priority 8
+      makeAgent({ registry_agent_id: 'hermes', name: 'Hermes', installed: false }), // note: priority 5
+      makeAgent({ registry_agent_id: 'grok-build', name: 'Grok Build', installed: false }), // note: priority 7
+      makeAgent({ registry_agent_id: 'kilo', name: 'Kilo', installed: false }), // note: priority 8
     ];
     const ids = defaultGridEntries(scan).map((e) => e.id);
     expect(ids).toEqual(['hermes', 'grok-build', 'kilo']);

@@ -1,5 +1,5 @@
 /**
- * Adapter boundary — the `NexusClient` interface.
+ * note: Adapter boundary — the `NexusClient` interface.
  *
  * Spec: `.agents/adr/archived/feature/2026-10-22-web-ui-retired-historical-notes.md` §5. All daemon access from the UI
  * goes through this interface; core screen logic never calls `fetch`/`invoke`
@@ -168,7 +168,7 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
-  // Actor family — Character identity + bindings (plan v240; `schemas/daemon-api/characters/…`).
+  // note: Actor family — Character identity + bindings (plan v240; `schemas/daemon-api/characters/…`).
   AddCharacterBindingRequest,
   AddCharacterBindingResponse,
   CharacterBindingDetail,
@@ -182,7 +182,7 @@ import type {
   ListCharactersResponse,
   UpdateCharacterBindingRequest,
   UpdateCharacterRequest,
-  // Actor family — per-character memory / SOUL / ToM (plan v240; I-000127).
+  // note: Actor family — per-character memory / SOUL / ToM (plan v240; I-000127).
   CaptureCharacterPendingReviewRequest,
   CaptureCharacterPendingReviewResponse,
   CharacterSoulNarrativeRequest,
@@ -202,7 +202,7 @@ import type {
   RecordCharacterTomResponse,
   ReviewCharacterMemoryRequest,
   ReviewCharacterMemoryResponse,
-  // Actor family — actor knowledge (plan v240; I-000128; `schemas/daemon-api/actor-knowledge/…`).
+  // note: Actor family — actor knowledge (plan v240; I-000128; `schemas/daemon-api/actor-knowledge/…`).
   AddKnowledgeEntryRequest,
   AddKnowledgeEntryResponse,
   DeleteKnowledgeEntryQuery,
@@ -220,9 +220,9 @@ import type { CapabilityInfo, CapabilityListResponse } from './capability-info';
 
 /** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
 export interface DaemonHealth {
-  /** `ok` when the daemon is reachable and healthy. */
+  /** note: `ok` when the daemon is reachable and healthy. */
   status: string;
-  /** Daemon (`nexus42`) package version. */
+  /** note: Daemon (`nexus42`) package version. */
   version: string;
 }
 
@@ -231,7 +231,7 @@ export interface DaemonHealth {
  * App-side type: only the browser first-run gate consumes it.
  */
 export interface RuntimeStatus {
-  /** `false` until a workspace is active/initialized (compass D21 first-run gate). */
+  /** note: `false` until a workspace is active/initialized (compass D21 first-run gate). */
   workspace_initialized: boolean;
 }
 
@@ -241,9 +241,9 @@ export interface RuntimeStatus {
  */
 export interface DaemonRuntimeStatus {
   degraded: {
-    /** Degraded subsystem names (`db`, `engine`). */
+    /** note: Degraded subsystem names (`db`, `engine`). */
     subsystems: string[];
-    /** Human-readable reason per subsystem. */
+    /** note: Human-readable reason per subsystem. */
     reasons: string[];
   };
 }
@@ -257,15 +257,15 @@ export interface DaemonRuntimeStatus {
  * current branch (root fallback).
  */
 export interface ListTimelineEventsQuery {
-  /** Fork branch id; omitted → the World's current branch (root fallback). */
+  /** note: Fork branch id; omitted → the World's current branch (root fallback). */
   branch_id?: string;
-  /** `canon` (default) | `provisional` | `rejected`. */
+  /** note: `canon` (default) | `provisional` | `rejected`. */
   status?: 'canon' | 'provisional' | 'rejected';
-  /** Exact event_type match (e.g. `compute_result`). */
+  /** note: Exact event_type match (e.g. `compute_result`). */
   event_type?: string;
-  /** Page size (daemon default 20, max 100). */
+  /** note: Page size (daemon default 20, max 100). */
   limit?: number;
-  /** Opaque cursor from a previous page's `next_cursor`. */
+  /** note: Opaque cursor from a previous page's `next_cursor`. */
   cursor?: string;
 }
 
@@ -279,17 +279,17 @@ export interface ListTimelineEventsQuery {
  * core's `HostEventWire` (`crates/nexus-core/src/execution/run_events.rs`).
  */
 export interface WorkflowHostEventPayload {
-  /** Root run id the frame belongs to. */
+  /** note: Root run id the frame belongs to. */
   run_id: string;
-  /** Ring epoch (`<epoch>:<sequence>` cursor half); never consumed to renumber. */
+  /** note: Ring epoch (`<epoch>:<sequence>` cursor half); never consumed to renumber. */
   epoch: string;
-  /** Monotonic per-run sequence (the cursor's trailing segment). */
+  /** note: Monotonic per-run sequence (the cursor's trailing segment). */
   sequence: number;
-  /** Step that produced the host event. */
+  /** note: Step that produced the host event. */
   step_id: string;
-  /** Prompt attempt that produced the host event. */
+  /** note: Prompt attempt that produced the host event. */
   attempt_id: string;
-  /** The normalized provider host event, verbatim. */
+  /** note: The normalized provider host event, verbatim. */
   host_event: ProviderHostEvent;
 }
 
@@ -298,17 +298,17 @@ export interface WorkflowHostEventPayload {
  * (mirrors the core's `RunStateWire`).
  */
 export interface WorkflowRunStatePayload {
-  /** Root run id the frame belongs to. */
+  /** note: Root run id the frame belongs to. */
   run_id: string;
-  /** Ring epoch (`<epoch>:<sequence>` cursor half). */
+  /** note: Ring epoch (`<epoch>:<sequence>` cursor half). */
   epoch: string;
-  /** Monotonic per-run sequence (the cursor's trailing segment). */
+  /** note: Monotonic per-run sequence (the cursor's trailing segment). */
   sequence: number;
-  /** Durable state revision this projection was written at. */
+  /** note: Durable state revision this projection was written at. */
   state_revision: number;
-  /** Durable run status. */
+  /** note: Durable run status. */
   status: string;
-  /** Optional failure/cancel reason for the status. */
+  /** note: Optional failure/cancel reason for the status. */
   reason?: string;
 }
 
@@ -362,97 +362,97 @@ export interface AgentHostProvidersResponse {
  * unported product surfaces.
  */
 export interface NexusClient extends CoreSliceClient {
-  // ── Daemon ───────────────────────────────────────────────────────────────
-  /** `GET /v1/daemon/runtime/health` — liveness + version for the shell header. */
+  // note: Daemon
+  /** note: `GET /v1/daemon/runtime/health` — liveness + version for the shell header. */
   health(): Promise<DaemonHealth>;
   /**
-   * `GET /v1/daemon/runtime/cert-fingerprint` — TOFU certificate fingerprint.
+   * note: `GET /v1/daemon/runtime/cert-fingerprint` — TOFU certificate fingerprint.
    * Intentionally unauthenticated so clients can verify the daemon before
    * sending an API key. Empty `fingerprint` means loopback-only / no remote
    * access (V1.92 P1).
    */
   certFingerprint(): Promise<CertFingerprintResponse>;
   /**
-   * `GET /v1/daemon/runtime/status` — unguarded runtime status. Its
+   * note: `GET /v1/daemon/runtime/status` — unguarded runtime status. Its
    * `workspace_initialized` is the browser first-run gate (compass D21).
    */
   runtimeStatus(): Promise<RuntimeStatus>;
   /**
-   * `GET /v1/daemon/daemon/status` — unguarded daemon status. Its
+   * note: `GET /v1/daemon/daemon/status` — unguarded daemon status. Its
    * `degraded.subsystems` drives the global service-unavailable surface
    * (v1219-onboarding T4).
    */
   daemonStatus(): Promise<DaemonRuntimeStatus>;
-  // ── Creators (V1.94 P1) ────────────────────────────────────────────────────
-  /** `GET /v1/daemon/creators` — cursor list of local creators. */
+  // note: Creators (V1.94 P1)
+  /** note: `GET /v1/daemon/creators` — cursor list of local creators. */
   listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse>;
   /**
-   * `POST /v1/daemon/creators` — create a new local creator.
+   * note: `POST /v1/daemon/creators` — create a new local creator.
    * V1.94: the generated request type is not yet available; the wire shape is
    * `{ display_name: string }` and the response is {@link CreatorDetail}.
    */
   createCreator(request: { display_name: string }): Promise<CreatorDetail>;
   /**
-   * `PATCH /v1/daemon/creators/{creator_id}` — update the local creator's
+   * note: `PATCH /v1/daemon/creators/{creator_id}` — update the local creator's
    * display name. V1.117: wire shape is `{ display_name: string }`; response is
    * {@link CreatorDetail}. No new generated request type.
    */
   updateCreator(creatorId: string, request: { display_name: string }): Promise<CreatorDetail>;
-  /** `GET /v1/daemon/creators/active` — daemon's active creator (config.toml). */
+  /** note: `GET /v1/daemon/creators/active` — daemon's active creator (config.toml). */
   getActiveCreator(): Promise<ActiveCreatorResponse>;
-  /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
+  /** note: `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
 
-  // ── Character identity + bindings (plan v240; I-000126) ────────────────────
+  // note: Character identity + bindings (plan v240; I-000126)
   // Characters are addressed by `character_id` and belong to the active Creator;
   // the daemon rejects a foreign Character with 404. These are the management
   // surface (lifecycle + World bindings), distinct from the creator-scoped
   // memory/soul methods further down and from the per-character memory family.
   /**
-   * `GET /v1/daemon/characters` — cursor list of the active Creator's
+   * note: `GET /v1/daemon/characters` — cursor list of the active Creator's
    * Characters (daemon default 50, max 100).
    */
   listCharacters(query?: ListCharactersQuery): Promise<ListCharactersResponse>;
   /**
-   * `POST /v1/daemon/characters` — 201. Creates the Character plus its initial
+   * note: `POST /v1/daemon/characters` — 201. Creates the Character plus its initial
    * active ActorWorldBinding; `world_id` must be an owned World.
    */
   createCharacter(request: CreateCharacterRequest): Promise<CreateCharacterResponse>;
-  /** `GET /v1/daemon/characters/{character_id}` — one Character. */
+  /** note: `GET /v1/daemon/characters/{character_id}` — one Character. */
   getCharacter(characterId: string): Promise<CharacterDetail>;
   /**
-   * `PATCH /v1/daemon/characters/{character_id}` — tri-state patch, native
+   * note: `PATCH /v1/daemon/characters/{character_id}` — tri-state patch, native
    * semantics: `undefined` keeps, `null` clears (`image_uri` / `persona`),
    * a value replaces. `expected_revision` mismatch is the native 409.
    */
   patchCharacter(characterId: string, request: UpdateCharacterRequest): Promise<CharacterDetail>;
-  /** `POST /v1/daemon/characters/{character_id}/archive` — CAS on `expected_revision`. */
+  /** note: `POST /v1/daemon/characters/{character_id}/archive` — CAS on `expected_revision`. */
   archiveCharacter(
     characterId: string,
     request: CharacterLifecycleRequest,
   ): Promise<CharacterDetail>;
-  /** `POST /v1/daemon/characters/{character_id}/restore` — CAS on `expected_revision`. */
+  /** note: `POST /v1/daemon/characters/{character_id}/restore` — CAS on `expected_revision`. */
   restoreCharacter(
     characterId: string,
     request: CharacterLifecycleRequest,
   ): Promise<CharacterDetail>;
   /**
-   * `POST /v1/daemon/characters/{character_id}/bindings` — 201. Binds the
+   * note: `POST /v1/daemon/characters/{character_id}/bindings` — 201. Binds the
    * Character to a World; `owner_creator_id` is never sent.
    */
   addCharacterBinding(
     characterId: string,
     request: AddCharacterBindingRequest,
   ): Promise<AddCharacterBindingResponse>;
-  /** `GET /v1/daemon/characters/{character_id}/bindings` — cursor list. */
+  /** note: `GET /v1/daemon/characters/{character_id}/bindings` — cursor list. */
   listCharacterBindings(
     characterId: string,
     query?: ListCharacterBindingsQuery,
   ): Promise<ListCharacterBindingsResponse>;
-  /** `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`. */
+  /** note: `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`. */
   getCharacterBinding(characterId: string, bindingId: string): Promise<CharacterBindingDetail>;
   /**
-   * `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}` — only
+   * note: `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}` — only
    * `world_sheet_entry_id` is mutable (`null` unlinks, omission keeps); a stale
    * `expected_revision` is the native 409.
    */
@@ -461,17 +461,17 @@ export interface NexusClient extends CoreSliceClient {
     bindingId: string,
     request: UpdateCharacterBindingRequest,
   ): Promise<CharacterBindingDetail>;
-  /** `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` — 204. */
+  /** note: `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}` — 204. */
   removeCharacterBinding(characterId: string, bindingId: string): Promise<void>;
 
-  // ── Per-character memory / SOUL / ToM (plan v240; I-000127) ────────────────
+  // note: Per-character memory / SOUL / ToM (plan v240; I-000127)
   // The same artifact kinds exist creator-scoped (`/v1/daemon/memory/…`, further
   // down) and per-character (here). They stay separate methods on purpose: the
   // call site states which actor it means, so no method silently picks a scope.
   // ToM is GET + POST (no PUT); pending review is capture/list/count/delete
   // (no get/accept/reject).
   /**
-   * `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
+   * note: `POST /v1/daemon/characters/{character_id}/memory/pending-review` — 201.
    * Captures one session-end digest into the Character review queue;
    * `binding_id` marks binding-local provenance, omitted means shared scope.
    */
@@ -479,26 +479,26 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     request: CaptureCharacterPendingReviewRequest,
   ): Promise<CaptureCharacterPendingReviewResponse>;
-  /** `GET /v1/daemon/characters/{character_id}/memory/pending-review` — cursor list. */
+  /** note: `GET /v1/daemon/characters/{character_id}/memory/pending-review` — cursor list. */
   listCharacterPendingReviews(
     characterId: string,
     query?: ListCharacterPendingReviewsQuery,
   ): Promise<ListCharacterPendingReviewsResponse>;
   /**
-   * `GET /v1/daemon/characters/{character_id}/memory/pending-review/count` —
+   * note: `GET /v1/daemon/characters/{character_id}/memory/pending-review/count` —
    * `binding_id` scopes the count to one binding-local queue.
    */
   countCharacterPendingReviews(
     characterId: string,
     query?: CountCharacterPendingReviewsQuery,
   ): Promise<CountCharacterPendingReviewsResponse>;
-  /** `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`. */
+  /** note: `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`. */
   deleteCharacterPendingReview(
     characterId: string,
     pendingId: string,
   ): Promise<DeleteCharacterPendingReviewResponse>;
   /**
-   * `POST /v1/daemon/characters/{character_id}/memory/review` — drains one
+   * note: `POST /v1/daemon/characters/{character_id}/memory/review` — drains one
    * bounded batch (≤ 50 rows) through the shared review pipeline; `has_more`
    * means re-issue to drain the remainder.
    */
@@ -506,13 +506,13 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     request: ReviewCharacterMemoryRequest,
   ): Promise<ReviewCharacterMemoryResponse>;
-  /** `GET /v1/daemon/characters/{character_id}/memory/fragments` — cursor list. */
+  /** note: `GET /v1/daemon/characters/{character_id}/memory/fragments` — cursor list. */
   listCharacterMemoryFragments(
     characterId: string,
     query?: ListCharacterMemoryFragmentsQuery,
   ): Promise<ListCharacterMemoryFragmentsResponse>;
   /**
-   * `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`
+   * note: `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`
    * — explicit, revision-checked promotion of one binding-local fragment to
    * shared Character memory (stale `expected_revision` → 409).
    */
@@ -522,7 +522,7 @@ export interface NexusClient extends CoreSliceClient {
     request: PromoteCharacterFragmentRequest,
   ): Promise<PromoteCharacterFragmentResponse>;
   /**
-   * `POST /v1/daemon/characters/{character_id}/soul/reflect` — reads or
+   * note: `POST /v1/daemon/characters/{character_id}/soul/reflect` — reads or
    * regenerates the cached whole-Character SOUL narrative. Synthesis is
    * explicit: it runs only with `force_regenerate: true` and a passing
    * insufficient-data gate.
@@ -532,7 +532,7 @@ export interface NexusClient extends CoreSliceClient {
     request: CharacterSoulNarrativeRequest,
   ): Promise<CharacterSoulNarrativeResponse>;
   /**
-   * `GET /v1/daemon/characters/{character_id}/tom` — keyset page of the
+   * note: `GET /v1/daemon/characters/{character_id}/tom` — keyset page of the
    * Character's ToM belief rows. `binding_id` and `world_id` are required wire
    * members; rows are read only through authorized carriers.
    */
@@ -541,7 +541,7 @@ export interface NexusClient extends CoreSliceClient {
     query: ListCharacterTomQuery,
   ): Promise<ListCharacterTomResponse>;
   /**
-   * `POST /v1/daemon/characters/{character_id}/tom` — records one belief into
+   * note: `POST /v1/daemon/characters/{character_id}/tom` — records one belief into
    * a carrier entry under that carrier's OCC revision. Scope is admitted from
    * stored rows, never from the payload.
    */
@@ -550,21 +550,21 @@ export interface NexusClient extends CoreSliceClient {
     request: RecordCharacterTomRequest,
   ): Promise<RecordCharacterTomResponse>;
 
-  // ── Actor knowledge (plan v240; I-000128) ──────────────────────────────────
+  // note: Actor knowledge (plan v240; I-000128)
   // Knowledge is addressed two ways and the method names say which: by
   // character (list/get/patch/delete under `…/characters/{character_id}/knowledge`)
   // and by admitted principal (`/v1/daemon/actor-knowledge/{view,entries}`).
   // Creation exists only on the admitted-principal route — the character path
   // has no create.
-  /** `GET /v1/daemon/characters/{character_id}/knowledge` — character-scoped cursor list. */
+  /** note: `GET /v1/daemon/characters/{character_id}/knowledge` — character-scoped cursor list. */
   listCharacterKnowledge(
     characterId: string,
     query?: ListCharacterKnowledgeQuery,
   ): Promise<ListCharacterKnowledgeResponse>;
-  /** `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — character-scoped read. */
+  /** note: `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — character-scoped read. */
   getCharacterKnowledge(characterId: string, entryId: string): Promise<KnowledgeEntryDetail>;
   /**
-   * `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}` —
+   * note: `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}` —
    * character-scoped update of `canonical_name`/`summary`/`audience` under an
    * `expected_revision` CAS.
    */
@@ -574,7 +574,7 @@ export interface NexusClient extends CoreSliceClient {
     request: UpdateKnowledgeEntryRequest,
   ): Promise<KnowledgeEntryDetail>;
   /**
-   * `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — 204.
+   * note: `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — 204.
    * `expected_revision` travels as a query member, not a body.
    */
   deleteCharacterKnowledge(
@@ -583,13 +583,13 @@ export interface NexusClient extends CoreSliceClient {
     query: DeleteKnowledgeEntryQuery,
   ): Promise<void>;
   /**
-   * `POST /v1/daemon/actor-knowledge/view` — admitted-principal page. The read
+   * note: `POST /v1/daemon/actor-knowledge/view` — admitted-principal page. The read
    * policy is server-chosen from the admitted context; the payload carries no
    * policy, holder or viewpoint.
    */
   viewActorKnowledge(request: ViewRequest): Promise<ViewResponse>;
   /**
-   * `POST /v1/daemon/actor-knowledge/entries` — 201. Admitted-principal
+   * note: `POST /v1/daemon/actor-knowledge/entries` — 201. Admitted-principal
    * creation is the only create: the owner is resolved from stored rows and
    * `audience` is the sole governance input.
    */
@@ -597,76 +597,76 @@ export interface NexusClient extends CoreSliceClient {
     request: AddKnowledgeEntryRequest,
   ): Promise<AddKnowledgeEntryResponse>;
 
-  // ── Workspaces (plan v1219 T3 + v1220 T3 create) ──────────────────────────
-  /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */
+  // note: Workspaces (plan v1219 T3 + v1220 T3 create)
+  /** note: `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */
   listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse>;
-  /** `GET /v1/daemon/workspace` — the daemon's active workspace. */
+  /** note: `GET /v1/daemon/workspace` — the daemon's active workspace. */
   getActiveWorkspace(): Promise<ActiveWorkspaceResponse>;
-  /** `POST /v1/daemon/workspace/active` — switch the daemon's active workspace. */
+  /** note: `POST /v1/daemon/workspace/active` — switch the daemon's active workspace. */
   setActiveWorkspace(
     request: SetActiveWorkspaceRequest,
   ): Promise<SetActiveWorkspaceResponse>;
   /**
-   * `POST /v1/daemon/workspaces` — create a workspace for the active creator
+   * note: `POST /v1/daemon/workspaces` — create a workspace for the active creator
    * (I-000063). The core owns slug validation, root exclusivity and atomicity;
    * success does not activate the workspace.
    */
   createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse>;
 
-  // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
-  /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
+  // note: Agent host (V1.94 P1)
+  /** note: `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
   scanAgents(request?: ScanRequest): Promise<ScanResponse>;
   /**
-   * `GET /v1/daemon/agent-host/providers` — the registered provider catalog
+   * note: `GET /v1/daemon/agent-host/providers` — the registered provider catalog
    * (authoritative `provider_id` + `protocol_kind`). The scan response adds
    * install state and launch commands on top of these ids.
    */
   listAgentHostProviders(): Promise<AgentHostProvidersResponse>;
   /**
-   * `GET /v1/daemon/agent-host/profile` — the daemon-global saved agent
+   * note: `GET /v1/daemon/agent-host/profile` — the daemon-global saved agent
    * profile (I-000064). `profile: null` means none was saved yet.
    */
   getAgentProfile(): Promise<AgentProfileResponse>;
   /**
-   * `PUT /v1/daemon/agent-host/profile` — persist the daemon-global agent
+   * note: `PUT /v1/daemon/agent-host/profile` — persist the daemon-global agent
    * profile on the service (browser path; the desktop IPC path is unchanged).
    */
   saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse>;
   /**
-   * `GET /v1/daemon/agent-host/config` — the provider configuration document
+   * note: `GET /v1/daemon/agent-host/config` — the provider configuration document
    * (native defaults when the file does not exist yet).
    */
   getAgentHostConfig(): Promise<AgentHostConfig>;
   /**
-   * `PUT /v1/daemon/agent-host/config` — replace the provider configuration
+   * note: `PUT /v1/daemon/agent-host/config` — replace the provider configuration
    * document; the daemon validates it and returns the persisted document.
    */
   saveAgentHostConfig(config: AgentHostConfig): Promise<AgentHostConfig>;
 
-  /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
+  /** note: `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
-  /** `GET /v1/daemon/works/{work_id}` — full detail. */
+  /** note: `GET /v1/daemon/works/{work_id}` — full detail. */
   getWork(workId: string): Promise<WorkDetailResponse>;
-  /** `POST /v1/daemon/works`. */
+  /** note: `POST /v1/daemon/works`. */
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse>;
-  /** `POST /v1/daemon/worlds`. */
+  /** note: `POST /v1/daemon/worlds`. */
   createWorld(request: CreateWorldRequest): Promise<CreateWorldResponse>;
-  /** `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
+  /** note: `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
   /**
-   * `DELETE /v1/daemon/works/{work_id}` — hard-delete a Work and cascade its
+   * note: `DELETE /v1/daemon/works/{work_id}` — hard-delete a Work and cascade its
    * children (chapters, findings, pool entries, etc.). V1.129 P2
    * (R-V1126P0-T2-001). Returns 204 No Content on success.
    */
   deleteWork(workId: string): Promise<void>;
 
-  // ── Orchestration sessions ────────────────────────────────────────────────
-  /** `GET /v1/daemon/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */
+  // note: Orchestration sessions
+  /** note: `GET /v1/daemon/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse>;
-  /** `GET /v1/daemon/orchestration/sessions/{session_id}`. */
+  /** note: `GET /v1/daemon/orchestration/sessions/{session_id}`. */
   getSession(sessionId: string): Promise<SessionDetailResponse>;
   /**
-   * `GET /v1/daemon/orchestration/sessions/{run_id}/events` — one root run's
+   * note: `GET /v1/daemon/orchestration/sessions/{run_id}/events` — one root run's
    * retained/live observation frames as an `AsyncIterable`.
    *
    * SSE fetch-stream reader (never browser `EventSource` — it cannot carry
@@ -685,20 +685,20 @@ export interface NexusClient extends CoreSliceClient {
     options: { lastEventId?: string; signal: AbortSignal },
   ): AsyncIterable<WorkflowObservationFrame>;
 
-  // ── Schedules / cron ──────────────────────────────────────────────────────
-  /** `GET /v1/daemon/orchestration/schedules` — cursor list (F-P3/F-F1; canonical `items` key). */
+  // note: Schedules / cron
+  /** note: `GET /v1/daemon/orchestration/schedules` — cursor list (F-P3/F-F1; canonical `items` key). */
   listSchedules(query?: ListSchedulesQuery): Promise<ListSchedulesResponse>;
-  /** `GET /v1/daemon/orchestration/schedules/{schedule_id}`. */
+  /** note: `GET /v1/daemon/orchestration/schedules/{schedule_id}`. */
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse>;
   /**
-   * `POST /v1/daemon/orchestration/schedules` — create a new schedule (run a
+   * note: `POST /v1/daemon/orchestration/schedules` — create a new schedule (run a
    * Strategy). V1.70 canvas Idea→Run promotion: the generated TS type + daemon
    * route already existed (V1.67 G2 pattern); only the TS client surface was
    * missing. No schema/codegen change (`wire_contracts_changed: FALSE`).
    */
   addSchedule(request: AddScheduleRequest): Promise<AddScheduleResponse>;
   /**
-   * `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal` — send a
+   * note: `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal` — send a
    * lifecycle signal (resume / advance / pause). V1.70 canvas Idea→Resume
    * steering promotion.
    */
@@ -707,7 +707,7 @@ export interface NexusClient extends CoreSliceClient {
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
   /**
-   * `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context` —
+   * note: `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context` —
    * append/merge steering context (an Idea) into a running schedule's core
    * context. V1.70 canvas Idea→Steer promotion.
    */
@@ -715,22 +715,21 @@ export interface NexusClient extends CoreSliceClient {
     scheduleId: string,
     request: EditCoreContextRequest,
   ): Promise<EditCoreContextResponse>;
-  /**
 
-  // ── Capabilities ──────────────────────────────────────────────────────────
+  // note: Capabilities
   /**
-   * `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1;
+   * note: `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1;
    * canonical `items` key). Typed against the app-side camelCase mirror of the
    * local DTO (`capability-info.ts`): the daemon serves `inputSchema` /
    * `outputSchema` (AR-40), NOT the generated snake_case schema types.
    */
   listCapabilities(query?: ListCapabilitiesQuery): Promise<CapabilityListResponse>;
 
-  // ── Findings ───────────────────────────────────────────────────────────────
-  /** `GET /v1/daemon/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
+  // note: Findings
+  /** note: `GET /v1/daemon/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
   listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse>;
   /**
-   * `GET /v1/daemon/works/{work_id}/findings/{finding_id}` — full finding detail.
+   * note: `GET /v1/daemon/works/{work_id}/findings/{finding_id}` — full finding detail.
    * V1.77 findings-remediation promotion: the daemon route + generated TS type
    * already existed (V1.67 G2 pattern); only the TS client surface was missing.
    * Renamed from `getFinding` (v1.190 P5-T1): the bare name now belongs to the
@@ -739,7 +738,7 @@ export interface NexusClient extends CoreSliceClient {
    */
   getWorkFinding(workId: string, findingId: string): Promise<FindingDetailResponse>;
   /**
-   * `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — remediation patch
+   * note: `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — remediation patch
    * (status transition / target_executor / inline edit). Server enforces the
    * 6-state lifecycle adjacency (HTTP 422 `INVALID_TRANSITION` on illegal
    * transitions); last-writer-wins, no OCC (D1b). V1.77 promotion.
@@ -751,70 +750,70 @@ export interface NexusClient extends CoreSliceClient {
   ): Promise<FindingDetailResponse>;
 
   /**
-   * `PATCH /v1/daemon/findings/batch` — bulk update status and/or
+   * note: `PATCH /v1/daemon/findings/batch` — bulk update status and/or
    * `target_executor` for up to 100 findings. Creator-scoped; partial success
    * model with `not_found`/`conflict` arrays in the HTTP 200 response. V1.91 P1.
    */
   batchUpdateFindings(request: BatchUpdateFindingsRequest): Promise<BatchUpdateFindingsResponse>;
 
-  // ── Preset management ─────────────────────────────────────────────────────
-  /** `GET /v1/daemon/presets` — grouped by source. */
+  // note: Preset management
+  /** note: `GET /v1/daemon/presets` — grouped by source. */
   listPresets(): Promise<ListPresetsResponse>;
-  /** `POST /v1/daemon/presets` — scaffold a user preset. */
+  /** note: `POST /v1/daemon/presets` — scaffold a user preset. */
   scaffoldPreset(request: ScaffoldPresetRequest): Promise<ScaffoldPresetResponse>;
   /** `POST /v1/daemon/presets:validate` — dry-run validation (product-priority #1). */
   validatePreset(request: ValidatePresetRequest): Promise<ValidatePresetResponse>;
-  /** `POST /v1/daemon/presets/{id}:reload`. */
+  /** note: `POST /v1/daemon/presets/{id}:reload`. */
   reloadPreset(presetId: string): Promise<ReloadPresetResponse>;
-  /** `GET /v1/daemon/presets/{id}` — fetch preset manifest YAML (V1.67 G2 promotion). */
+  /** note: `GET /v1/daemon/presets/{id}` — fetch preset manifest YAML (V1.67 G2 promotion). */
   getPreset(presetId: string): Promise<GetPresetResponse>;
-  /** `PATCH /v1/daemon/presets/{id}` — update user preset YAML after validation (V1.67 G2 promotion). */
+  /** note: `PATCH /v1/daemon/presets/{id}` — update user preset YAML after validation (V1.67 G2 promotion). */
   updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse>;
-  /** `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
+  /** note: `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
   deletePreset(presetId: string): Promise<void>;
 
-  // ── Preset profiles (V1.171 P1 — AR-27) ───────────────────────────────────
+  // note: Preset profiles (V1.171 P1 — AR-27)
   /**
-   * `GET /v1/daemon/orchestration/presets/{id}/profile` — manifest-derived
+   * note: `GET /v1/daemon/orchestration/presets/{id}/profile` — manifest-derived
    * profile (trigger lanes, states, roles, capabilities, declared signals)
    * for any resolvable preset. The app-side type mirrors the hand-coded Rust
    * DTO 1:1 (camelCase); unknown ids resolve to 404 (PL-2).
    */
   getPresetProfile(presetId: string): Promise<PresetProfileResponse>;
 
-  // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
-  /** `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */
+  // note: Strategy canvas (V1.71 Track A)
+  /** note: `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */
   strategyPatchState(
     strategyId: string,
     stateId: string,
     request: StrategyPatchStateRequest,
   ): Promise<StrategyPatchResponse>;
-  /** `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` — rewire a transition. */
+  /** note: `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` — rewire a transition. */
   strategyPatchTransition(
     strategyId: string,
     request: StrategyPatchTransitionRequest,
   ): Promise<StrategyPatchResponse>;
-  /** `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch a prompt template. */
+  /** note: `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch a prompt template. */
   strategyPatchPromptTemplate(
     strategyId: string,
     stateId: string,
     request: StrategyPatchPromptTemplateRequest,
   ): Promise<StrategyPatchResponse>;
-  /** `POST /v1/daemon/strategies/{strategy_id}/simulate` — static trajectory of the candidate IR (non-mutating). */
+  /** note: `POST /v1/daemon/strategies/{strategy_id}/simulate` — static trajectory of the candidate IR (non-mutating). */
   simulateStrategy(
     strategyId: string,
     request: StrategySimulationRequest,
   ): Promise<SimulationTrajectory>;
-  /** `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
+  /** note: `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
   getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument>;
   /**
-   * `GET /v1/daemon/strategies/{strategy_id}/candidate` — the canonical candidate: the stored
+   * note: `GET /v1/daemon/strategies/{strategy_id}/candidate` — the canonical candidate: the stored
    * compose row, else the revision-`0` import projection. Its `revision` is the CAS base to
    * reload and re-apply against; the read never writes.
    */
   getStrategyCandidate(strategyId: string): Promise<WorkflowDocument>;
   /**
-   * `POST /v1/daemon/strategies/{strategy_id}/compose` — one guarded composition op
+   * note: `POST /v1/daemon/strategies/{strategy_id}/compose` — one guarded composition op
    * (`nest` / `unnest` / `replace_subtree` / `bind_slot`). The response document is
    * the committed candidate at `new_revision` and replaces the client's copy.
    */
@@ -823,7 +822,7 @@ export interface NexusClient extends CoreSliceClient {
     request: StrategyComposeRequest,
   ): Promise<StrategyComposeResponse>;
   /**
-   * `POST /v1/daemon/strategies/{strategy_id}/approve` — freeze the simulated candidate
+   * note: `POST /v1/daemon/strategies/{strategy_id}/approve` — freeze the simulated candidate
    * into an immutable snapshot, or refuse with a named reason. Approve does not apply,
    * schedule or execute.
    */
@@ -832,7 +831,7 @@ export interface NexusClient extends CoreSliceClient {
     request: StrategyApproveRequest,
   ): Promise<ApprovedStrategySnapshot>;
   /**
-   * `POST /v1/daemon/strategies/{strategy_id}/apply` — install one already-approved
+   * note: `POST /v1/daemon/strategies/{strategy_id}/apply` — install one already-approved
    * snapshot as the strategy's running identity. The body names the approval by its
    * content hash only; the response is the appended apply row. A repeat of the current
    * approval and an approval whose bytes moved are 409 conflicts.
@@ -842,87 +841,87 @@ export interface NexusClient extends CoreSliceClient {
     request: StrategyApplyRequest,
   ): Promise<NonNullable<StrategyAppliedStatus['current_apply']>>;
   /**
-   * `GET /v1/daemon/strategies/{strategy_id}/applied` — the current apply and the
+   * note: `GET /v1/daemon/strategies/{strategy_id}/applied` — the current apply and the
    * strategy's newest approval, each null when absent. Newness is `candidate_revision`,
    * never either timestamp.
    */
   getStrategyApplied(strategyId: string): Promise<StrategyAppliedStatus>;
   /**
-   * `GET /v1/daemon/strategies/{strategy_id}/approvals` — every approval in the status
+   * note: `GET /v1/daemon/strategies/{strategy_id}/approvals` — every approval in the status
    * read's total order (`items[0]` is its `newest_approval`). This is the read that makes
    * rollback reachable: Apply can name any listed approval's content hash, not only the
    * newest.
    */
   listStrategyApprovals(strategyId: string): Promise<StrategyApprovals>;
   /**
-   * `GET /v1/daemon/patterns` — one page of the read-only pattern registry listing.
+   * note: `GET /v1/daemon/patterns` — one page of the read-only pattern registry listing.
    * `cursor`/`limit` select the page; a caller that needs every package follows
    * `pagination.next_cursor`.
    */
   listPatterns(query?: ListPatternsQuery): Promise<ListPatternsResponse>;
 
-  // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
-  /** `GET /v1/daemon/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */
+  // note: Chapters (V1.65 Content-Authoring)
+  /** note: `GET /v1/daemon/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */
   listChapters(workId: string, query?: ListChaptersQuery): Promise<ListChaptersResponse>;
-  /** `GET /v1/daemon/works/{work_id}/chapters/{n}` — detail + protection metadata. */
+  /** note: `GET /v1/daemon/works/{work_id}/chapters/{n}` — detail + protection metadata. */
   getChapter(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterDetail>;
-  /** `GET /v1/daemon/works/{work_id}/chapters/{n}/outline` — read outline markdown. */
+  /** note: `GET /v1/daemon/works/{work_id}/chapters/{n}/outline` — read outline markdown. */
   getChapterOutline(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterOutline>;
-  /** `PATCH /v1/daemon/works/{work_id}/chapters/{n}` — structure/status update. */
+  /** note: `PATCH /v1/daemon/works/{work_id}/chapters/{n}` — structure/status update. */
   patchChapter(workId: string, chapter: number, request: PatchChapterRequest, query?: ChapterContentQuery): Promise<ChapterDetail>;
-  /** `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
+  /** note: `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
   getChapterBody(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterBody>;
 
-  // ── Outline+Timeline canvas (V1.72 Track A) ────────────────────────────────
-  /** `GET /v1/daemon/works/{work_id}/outline` — work-level outline + timeline. */
+  // note: Outline+Timeline canvas (V1.72 Track A)
+  /** note: `GET /v1/daemon/works/{work_id}/outline` — work-level outline + timeline. */
   getWorkOutline(workId: string): Promise<WorkOutline>;
-  /** `POST /v1/daemon/works/{work_id}/outline/patch` — structure/volume patch. */
+  /** note: `POST /v1/daemon/works/{work_id}/outline/patch` — structure/volume patch. */
   patchOutlineStructure(
     workId: string,
     request: OutlinePatchStructureRequest,
   ): Promise<OutlinePatchResponse>;
-  /** `POST /v1/daemon/works/{work_id}/chapters/{n}/patch` — outline chapter patch. */
+  /** note: `POST /v1/daemon/works/{work_id}/chapters/{n}/patch` — outline chapter patch. */
   patchOutlineChapter(
     workId: string,
     chapter: number,
     request: OutlinePatchChapterRequest,
   ): Promise<OutlinePatchResponse>;
-  /** `POST /v1/daemon/works/{work_id}/timeline/patch` — structured timeline patch. */
+  /** note: `POST /v1/daemon/works/{work_id}/timeline/patch` — structured timeline patch. */
   patchTimelineEvent(
     workId: string,
     request: TimelinePatchEventRequest,
   ): Promise<OutlinePatchResponse>;
 
-  // ── World KB canvas (V1.73 Track A) ───────────────────────────────────────
-  /** `GET /v1/daemon/worlds/{world_id}/kb/graph` — entity graph projection. */
+  // note: World KB canvas (V1.73 Track A)
+  /** note: `GET /v1/daemon/worlds/{world_id}/kb/graph` — entity graph projection. */
   getWorldKbGraph(
     worldId: string,
     query?: { includeSuggested?: boolean },
   ): Promise<WorldKbGraphResponse>;
-  /** `GET /v1/daemon/worlds/{world_id}/kb/candidates` — pending candidates. */
+  /** note: `GET /v1/daemon/worlds/{world_id}/kb/candidates` — pending candidates. */
   getWorldKbCandidates(
     worldId: string,
     query?: { limit?: number; cursor?: string },
   ): Promise<WorldKbCandidatesResponse>;
-  /** `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` — entity-level patch (per-row OCC). */
+  /** note: `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` — entity-level patch (per-row OCC). */
   worldKbPatchEntity(
     worldId: string,
     request: WorldKbPatchEntityRequest,
   ): Promise<WorldKbPatchEntityResponse>;
-  /** `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge. */
+  /** note: `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge. */
   worldKbPromoteCandidate(
     worldId: string,
     request: WorldKbPromoteCandidateRequest,
   ): Promise<WorldKbPromoteCandidateResponse>;
-  /** `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` — relationship add/update/remove (V1.74). */
+  /** note: `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` — relationship add/update/remove (V1.74). */
   worldKbPatchRelationship(
     worldId: string,
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse>;
 
-  // ── World check findings (V1.165 / DR-64 surfacing) ──────────────────────
+  // note: World check findings (V1.165 / DR-64 surfacing)
   /**
-   * `GET /v1/daemon/worlds/{world_id}/findings` — world-scoped check findings
+   * note: `GET /v1/daemon/worlds/{world_id}/findings` — world-scoped check findings
    * (mental pair + rule-derived). Newest-first, 500-cap with an honest
    * `truncated` flag. Spoke vocabulary verbatim (`info|warning|error` severity,
    * `open|resolved|dismissed` status — no nexus remap). Read-only surface
@@ -930,9 +929,9 @@ export interface NexusClient extends CoreSliceClient {
    */
   listWorldFindings(worldId: string): Promise<WorldFindingsListResponse>;
 
-  // ── World rules (V1.166 P1 route / DR-64 surfacing half; V1.169 P1 authoring) ─
+  // note: World rules (V1.166 P1 route / DR-64 surfacing half; V1.169 P1 authoring) ─
   /**
-   * `GET /v1/daemon/worlds/{world_id}/rules` — world-scoped structured rules
+   * note: `GET /v1/daemon/worlds/{world_id}/rules` — world-scoped structured rules
    * (V1.166 AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC`
    * order, 500-cap with an honest `truncated` flag; each item projects the
    * spoke Rule vocabulary verbatim plus the AR-2 constraint carrier
@@ -941,7 +940,7 @@ export interface NexusClient extends CoreSliceClient {
    */
   listWorldRules(worldId: string, includeArchived?: boolean): Promise<WorldRulesListResponse>;
   /**
-   * `POST /v1/daemon/worlds/{world_id}/rules` — create a structured rule
+   * note: `POST /v1/daemon/worlds/{world_id}/rules` — create a structured rule
    * (V1.169 P1, AR-5). The request is the AR-2 constraint carrier plus
    * author metadata; the daemon mints `rule_id` server-side and applies the
    * AR-3 create defaults (`status` → `active`, `kind` → `rule`,
@@ -952,7 +951,7 @@ export interface NexusClient extends CoreSliceClient {
    */
   createWorldRule(worldId: string, body: WorldRuleCreateRequest): Promise<WorldRuleResponse>;
   /**
-   * `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}` — per-field edit
+   * note: `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}` — per-field edit
    * (V1.169 P1, AR-3/AR-5): `constraint` is whole-carrier replacement,
    * absent fields stay unchanged, no null-clearing. `status: "deprecated"`
    * is the Deactivate recovery (product lock — no DELETE route).
@@ -963,46 +962,46 @@ export interface NexusClient extends CoreSliceClient {
     body: WorldRuleUpdateRequest,
   ): Promise<WorldRuleResponse>;
 
-  // ── Compute modules (V1.114 P2) ─────────────────────────────────────────
-  /** `GET /v1/daemon/compute/modules` — cursor list of registered compute modules. */
+  // note: Compute modules (V1.114 P2)
+  /** note: `GET /v1/daemon/compute/modules` — cursor list of registered compute modules. */
   getComputeModules(): Promise<ListModulesResponse>;
-  /** `GET /v1/daemon/compute/modules/{module_id}` — full module manifest. */
+  /** note: `GET /v1/daemon/compute/modules/{module_id}` — full module manifest. */
   getComputeModule(moduleId: string): Promise<ModuleDetail>;
   /**
-   * `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
+   * note: `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
    * mutable runtime state of a computable KeyBlock plus computability flag + OCC version.
    */
   getKeyBlockState(worldId: string, keyBlockId: string): Promise<WorldKbKeyBlockStateResponse>;
 
-  // ── Compute runs (V1.147 P1) ──────────────────────────────────────────────
+  // note: Compute runs (V1.147 P1)
   /**
-   * `POST /v1/daemon/compute/run` — invoke a module against an owned World.
+   * note: `POST /v1/daemon/compute/run` — invoke a module against an owned World.
    * The World is not mutated; `status: "succeeded"` carries proposals for
    * review-then-accept, `status: "failed"` carries an honest error.
    */
   runCompute(request: RunRequest): Promise<RunResponse>;
   /**
-   * `POST /v1/daemon/compute/runs/{run_id}/accept` — atomically commit a
+   * note: `POST /v1/daemon/compute/runs/{run_id}/accept` — atomically commit a
    * succeeded Run's proposals. `request` omitted/`null` accepts everything;
    * the client still sends a `{}` JSON body (axum `Json` extractor).
    */
   acceptRun(runId: string, request?: RunAcceptRequest | null): Promise<RunAcceptResponse>;
-  /** `POST /v1/daemon/compute/runs/{run_id}/discard` — drop a succeeded Run's proposals. */
+  /** note: `POST /v1/daemon/compute/runs/{run_id}/discard` — drop a succeeded Run's proposals. */
   discardRun(runId: string): Promise<DiscardRunResponse>;
-  /** `GET /v1/daemon/compute/runs` — cursor-paginated run history (newest-first). */
+  /** note: `GET /v1/daemon/compute/runs` — cursor-paginated run history (newest-first). */
   listRuns(query?: ListRunsQuery): Promise<RunListResponse>;
-  /** `GET /v1/daemon/compute/runs/{run_id}` — full detail incl. proposals/error. */
+  /** note: `GET /v1/daemon/compute/runs/{run_id}` — full detail incl. proposals/error. */
   getRun(runId: string): Promise<RunDetail>;
   /**
-   * `DELETE /v1/daemon/compute/runs` — Clear history (V1.147 P3 T2): deletes
+   * note: `DELETE /v1/daemon/compute/runs` — Clear history (V1.147 P3 T2): deletes
    * terminal runs (`applied|discarded|failed`) for an owned World. Running and
    * succeeded (needs-review) rows are never deleted.
    */
   clearRuns(query: ClearRunsQuery): Promise<ClearRunsResponse>;
 
-  // ── World timeline events (V1.147 P2) ───────────────────────────────────
+  // note: World timeline events (V1.147 P2)
   /**
-   * `GET /v1/daemon/worlds/:world_id/timeline/events` — cursor-paginated
+   * note: `GET /v1/daemon/worlds/:world_id/timeline/events` — cursor-paginated
    * per-World timeline log events (production `narrative_timeline_events`
    * storage; machine-written families like `compute_result` carry compute
    * provenance in `extensions`). Omitted filters take the daemon defaults:
@@ -1013,7 +1012,7 @@ export interface NexusClient extends CoreSliceClient {
     query?: ListTimelineEventsQuery,
   ): Promise<ListTimelineEventsResponse>;
   /**
-   * `POST /v1/daemon/worlds/:world_id/forks` — create a local timeline fork
+   * note: `POST /v1/daemon/worlds/:world_id/forks` — create a local timeline fork
    * (V1.162 P1 T2 route, thin delegate to the `fork.create` capability): a
    * new `branch_id` within the owned World diverging from the picked
    * fork-point event on the stated parent branch. The response carries the
@@ -1024,27 +1023,27 @@ export interface NexusClient extends CoreSliceClient {
    */
   createFork(worldId: string, request: CreateForkRequest): Promise<CreateForkResponse>;
 
-  // ── Creator Memory review-loop (V1.78; producer retired V1.186) ─────────────
+  // note: Creator Memory review-loop (V1.78; producer retired V1.186)
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`
   // that does not match the active creator in config.toml with 403. The UI is
   // consume-only. V1.186 removed the obsolete session-capture producer and its
   // POST route; retained GET/count/DELETE methods expose compatible stored rows.
   /**
-   * `DELETE /v1/daemon/worlds/{world_id}` — hard-delete a World and cascade its
+   * note: `DELETE /v1/daemon/worlds/{world_id}` — hard-delete a World and cascade its
    * KB + timelines (FK `ON DELETE CASCADE`). Works that referenced the World
    * are preserved with `world_id = NULL` (architect lock — V1.129 P2).
    * Returns 204 No Content on success.
    */
   deleteWorld(worldId: string): Promise<void>;
   /**
-   * `GET /v1/daemon/timeline/overview` — cursor-paginated overview of visible
+   * note: `GET /v1/daemon/timeline/overview` — cursor-paginated overview of visible
    * Worlds with per-World era/event counts and last activity timestamp.
    * V1.126 P2: replaces the N=5–10 parallel `kb/graph` fan-out in the global
    * Timeline view with one composite call.
    */
   getTimelineOverview(cursor?: string): Promise<TimelineOverviewResponse>;
   /**
-   * `GET /v1/daemon/memory/pending-review?creator_id={id}` — cursor-paginated
+   * note: `GET /v1/daemon/memory/pending-review?creator_id={id}` — cursor-paginated
    * pending-review list for the active creator (default 50, max 250; cursor is
    * the opaque `next_cursor` from a previous page).
    */
@@ -1053,12 +1052,12 @@ export interface NexusClient extends CoreSliceClient {
     query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
   ): Promise<ListPendingReviewsResponse>;
   /**
-   * `GET /v1/daemon/memory/pending-review/count?creator_id={id}` — live pending
+   * note: `GET /v1/daemon/memory/pending-review/count?creator_id={id}` — live pending
    * count for the active creator, surfaced as a badge on the Memory page header.
    */
   countPendingReviews(creatorId: string): Promise<CountPendingReviewsResponse>;
   /**
-   * `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id={id}` —
+   * note: `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id={id}` —
    * delete one pending-review row; echoes the path `pending_id`. A missing or
    * non-owned row surfaces as an error envelope, not `success: false`.
    */
@@ -1067,14 +1066,14 @@ export interface NexusClient extends CoreSliceClient {
     creatorId: string,
   ): Promise<DeletePendingReviewResponse>;
   /**
-   * `POST /v1/daemon/memory/review` — trigger the review/summarization pipeline
+   * note: `POST /v1/daemon/memory/review` — trigger the review/summarization pipeline
    * for the active creator's entire pending queue. Shipped behavior: the
    * passthrough classifier promotes/fragments/drops each pending row and returns
    * `{ promoted, fragmented, dropped }` (no LLM-backed summarizer).
    */
   reviewMemory(request: ReviewRequest): Promise<ReviewResponse>;
   /**
-   * `GET /v1/daemon/memory/fragments?creator_id={id}` — read-only long-term
+   * note: `GET /v1/daemon/memory/fragments?creator_id={id}` — read-only long-term
    * memory fragments for the active creator (NOT paginated; optional
    * case-insensitive `keyword` LIKE filter, default 50, max 250). Fragments are
    * produced only by the `reviewMemory` route — no manual CRUD on this surface.
@@ -1084,7 +1083,7 @@ export interface NexusClient extends CoreSliceClient {
     query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
   ): Promise<ListMemoryFragmentsResponse>;
   /**
-   * `POST /v1/daemon/memory/soul/reflect` — read or regenerate the cached
+   * note: `POST /v1/daemon/memory/soul/reflect` — read or regenerate the cached
    * whole-Creator SOUL narrative (V1.81). With `force_regenerate` absent/false
    * the endpoint returns the current cache state (`ungenerated` / `current` /
    * `stale` / `insufficient_data`); with `force_regenerate: true` it
@@ -1093,42 +1092,42 @@ export interface NexusClient extends CoreSliceClient {
    */
   reflectSoulNarrative(request: SoulNarrativeRequest): Promise<SoulNarrativeResponse>;
 
-  // ── Reading depth (V1.89) ──────────────────────────────────────────────────
+  // note: Reading depth (V1.89)
   /**
-   * `GET /v1/daemon/reading/progress?work_id=&chapter=` — persisted scroll
+   * note: `GET /v1/daemon/reading/progress?work_id=&chapter=` — persisted scroll
    * progress for the current creator on a chapter. Returns `scroll_progress=0`
    * with a server-generated `updated_at` when no progress has been saved.
    */
   getReadingProgress(workId: string, chapter: number, volume?: number): Promise<ReadingProgressResponse>;
-  /** `PUT /v1/daemon/reading/progress` — upsert scroll progress. */
+  /** note: `PUT /v1/daemon/reading/progress` — upsert scroll progress. */
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse>;
-  /** `DELETE /v1/daemon/reading/progress?work_id=&chapter=` — delete progress. */
+  /** note: `DELETE /v1/daemon/reading/progress?work_id=&chapter=` — delete progress. */
   deleteReadingProgress(workId: string, chapter: number, volume?: number): Promise<void>;
   /**
-   * `GET /v1/daemon/reading/annotations?work_id=&chapter=` — list annotations for
+   * note: `GET /v1/daemon/reading/annotations?work_id=&chapter=` — list annotations for
    * a chapter. No pagination; per-chapter counts are expected to stay small.
    */
   listReadingAnnotations(workId: string, chapter: number, volume?: number): Promise<ReadingAnnotationListResponse>;
-  /** `POST /v1/daemon/reading/annotations` — create a highlight annotation. */
+  /** note: `POST /v1/daemon/reading/annotations` — create a highlight annotation. */
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation>;
-  /** `PATCH /v1/daemon/reading/annotations/{annotation_id}` — edit color/note. */
+  /** note: `PATCH /v1/daemon/reading/annotations/{annotation_id}` — edit color/note. */
   patchReadingAnnotation(
     annotationId: string,
     request: ReadingAnnotationPatchRequest,
   ): Promise<ReadingAnnotation>;
-  /** `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete annotation. */
+  /** note: `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete annotation. */
   deleteReadingAnnotation(annotationId: string): Promise<void>;
 
-  // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────
+  // note: Assembly Inspector (V1.151 P1 — DF-76)
   /**
-   * `POST /v1/daemon/inspector/moment` — assemble and return the enriched
+   * note: `POST /v1/daemon/inspector/moment` — assemble and return the enriched
    * inspector packet for one moment (activation trace + slot map + budget +
    * directive status). Read-only observation: the assembled prompt bytes are
    * never modified (AC-I6).
    */
   inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse>;
   /**
-   * `POST /v1/daemon/moment-directive` — set/show/clear the active Moment
+   * note: `POST /v1/daemon/moment-directive` — set/show/clear the active Moment
    * Directive for an owned scope (the author write surface; DF-76). A `set`
    * without `replace` when a directive is already active in the scope
    * surfaces as a 409 conflict (no silent overwrite, CLI `--replace`
@@ -1137,16 +1136,16 @@ export interface NexusClient extends CoreSliceClient {
    */
   momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse>;
 
-  // ── Narrative Knowledge Pack (V1.152 P1 — DF-77) ─────────────────────────
+  // note: Narrative Knowledge Pack (V1.152 P1 — DF-77)
   /**
-   * `POST /v1/daemon/worlds/:world_id/kb/pack/export` — export one World's
+   * note: `POST /v1/daemon/worlds/:world_id/kb/pack/export` — export one World's
    * lore as a Narrative Knowledge Pack (opaque spoke envelope; entries and
    * relations are opaque objects). The response round-trips through
    * `importPack`.
    */
   exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse>;
   /**
-   * `POST /v1/daemon/worlds/:world_id/kb/pack/import` — import a Narrative
+   * note: `POST /v1/daemon/worlds/:world_id/kb/pack/import` — import a Narrative
    * Knowledge Pack into a World under a collision policy (skip / rename /
    * overwrite). Returns per-atom-type counts plus a details list.
    */

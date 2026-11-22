@@ -85,7 +85,7 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     ).not.toBeInTheDocument();
   });
 
-  // plan-1 regression fix: after the shell cutover the create column is
+  // note: plan-1 regression fix: after the shell cutover the create column is
   // hosted by the creator hub itself (CreatorCreatePanel, unchanged from the
   // sidebar era) — exactly one inline-create panel, and the legacy Sidebar
   // shell panel is no longer mounted on this route.
@@ -103,7 +103,7 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
   });
 
   it('reaches the Inspiration Pool from the /works landing surface', async () => {
-    // v1.222 review (6v6gGH): the pool entry used to be WorkRail-only, which
+    // note: v1.222 review (6v6gGH): the pool entry used to be WorkRail-only, which
     // mounts under `/works/:workId` — a creator with zero Works could never
     // reach `/works/inspiration`.
     renderCreatorHubFlow({ works: [], worlds: [] });
@@ -311,7 +311,7 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
   });
 
-  // v1219-world-module T2 (T1 review follow-up): world cards open the new
+  // note: v1219-world-module T2 (T1 review follow-up): world cards open the new
   // world app surface at the index (Brief default), not the Timeline.
   it('navigates to the world app surface index when a world card is clicked', async () => {
     renderCreatorHubFlow({

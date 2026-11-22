@@ -1,5 +1,5 @@
 /**
- * Settings Setup section — browser-available re-run entry
+ * note: Settings Setup section — browser-available re-run entry
  * (v1219-onboarding T4, access spec §6.3).
  */
 import { describe, expect, it } from 'vitest';

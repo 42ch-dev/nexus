@@ -1,5 +1,5 @@
 /**
- * Settings Advanced section — V1.106 P2.
+ * note: Settings Advanced section — V1.106 P2.
  *
  * Stacks Connection and Setup sections on a single page. Hash anchors
  * enable deep links from legacy `/settings/connection`, `/settings/setup`,

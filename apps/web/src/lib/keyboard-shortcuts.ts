@@ -64,7 +64,7 @@ const CHORD_RESET_MS = 1000;
  *                listener on every render (mirrors `useHotkey`).
  */
 export function useTimelineShortcut(handler: () => void): void {
-  // Capture the latest handler on every render WITHOUT re-binding the
+  // note: Capture the latest handler on every render WITHOUT re-binding the
   // listener. An inline closure passed by the caller therefore never goes
   // stale and never triggers an add/remove-listener churn cycle.
   const handlerRef = useRef(handler);
@@ -83,17 +83,17 @@ export function useTimelineShortcut(handler: () => void): void {
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-      // Suppression contract shared with `useHotkey` — never steal keys from
+      // note: Suppression contract shared with `useHotkey` — never steal keys from
       // text entry / contenteditable / canvas opt-out regions.
       if (isHotkeyTargetIgnored(document.activeElement)) {
-        // If the user was mid-chord and then focused a text field, cancel
+        // note: If the user was mid-chord and then focused a text field, cancel
         // the chord so a subsequent `t` typing in the field does not fire
         // the shortcut on refocus.
         reset();
         return;
       }
 
-      // Any modifier held → chord cancelled. Bare-key only so the shortcut
+      // note: Any modifier held → chord cancelled. Bare-key only so the shortcut
       // never collides with `mod+k` (palette), Cmd/Ctrl+T (new tab), or any
       // browser-reserved chord.
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
@@ -103,12 +103,12 @@ export function useTimelineShortcut(handler: () => void): void {
 
       const key = event.key.toLowerCase();
       if (key === 'g') {
-        // Start the chord (or restart if pressed twice in a row — `g g t`
+        // note: Start the chord (or restart if pressed twice in a row — `g g t`
         // does not fire; only the most-recent `g` carries forward).
         reset();
         pending = true;
         resetTimer = setTimeout(reset, CHORD_RESET_MS);
-        // preventDefault keeps the browser from typing `g` into the page
+        // note: preventDefault keeps the browser from typing `g` into the page
         // background while the chord waits for the confirm key. The chord
         // owns the keystroke.
         event.preventDefault();
@@ -122,7 +122,7 @@ export function useTimelineShortcut(handler: () => void): void {
         return;
       }
 
-      // Any other key after `g` cancels the chord.
+      // note: Any other key after `g` cancels the chord.
       reset();
     }
 

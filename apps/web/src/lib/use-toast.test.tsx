@@ -1,5 +1,5 @@
 /**
- * Toast / notification hook coverage (R-V164-QC1-S1-P1 T3).
+ * note: Toast / notification hook coverage (R-V164-QC1-S1-P1 T3).
  *
  * The notification surface is the second half of the W-1 fix: the daemon's
  * `ErrorResponse` envelope is unwrapped by `NexusClientError.fromBody` (covered
@@ -22,7 +22,7 @@ import { NexusClientError, type TransportErrorKind } from '@/lib/nexus';
 import { ToastProvider, Toaster, useToast } from '@/lib/use-toast';
 import { useErrorToast } from '@/api/queries';
 
-/** Drive the toast API from inside the provider tree. */
+/** note: Drive the toast API from inside the provider tree. */
 function ToastControls({
   onReady,
 }: {
@@ -125,11 +125,11 @@ describe('toast queue + Toaster rendering', () => {
 
     const button = screen.getByRole('button', { name: 'Dismiss notification' });
     act(() => button.click());
-    // Two-phase dismissal: the toast stays mounted while the exit motion
+    // note: Two-phase dismissal: the toast stays mounted while the exit motion
     // plays, then unmounts after TOAST_EXIT_MS (mirrors --duration-exit).
     expect(screen.getByText('Click me away')).toBeInTheDocument();
     act(() => {
-      vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
+      vi.advanceTimersByTime(140); // note: mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
     });
     expect(screen.queryByText('Click me away')).not.toBeInTheDocument();
   });
@@ -146,10 +146,10 @@ describe('toast auto-dismiss', () => {
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
-    // Duration elapsed → exit motion starts; unmount happens after TOAST_EXIT_MS.
+    // note: Duration elapsed → exit motion starts; unmount happens after TOAST_EXIT_MS.
     expect(screen.getByText('Ephemeral')).toBeInTheDocument();
     act(() => {
-      vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
+      vi.advanceTimersByTime(140); // note: mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
     });
     expect(screen.queryByText('Ephemeral')).not.toBeInTheDocument();
   });
@@ -201,14 +201,14 @@ describe('error-envelope → toast path (W-1 end-to-end)', () => {
     let toast!: ReturnType<typeof useToast>['toast'];
     renderToaster(<ToastControls onReady={(api) => (toast = api.toast)} />);
 
-    // The exact shape the daemon emits and BrowserClient unwraps (F-E1).
+    // note: The exact shape the daemon emits and BrowserClient unwraps (F-E1).
     const envelope = {
       success: false,
       error: { code: 'validation_failed', message: 'Title is required.' },
     };
     const error = NexusClientError.fromBody(400, envelope);
 
-    // Mirror the queries.ts useErrorToast bridge: NexusClientError.message
+    // note: Mirror the queries.ts useErrorToast bridge: NexusClientError.message
     // becomes the description so the actionable text reaches the user.
     act(() =>
       toast({
@@ -245,7 +245,7 @@ describe('error-envelope → toast path (W-1 end-to-end)', () => {
 
 describe('useErrorToast classified transport body (V1.129 P1)', () => {
   /**
-   * Drive `useErrorToast` from inside the toast provider tree so the rendered
+   * note: Drive `useErrorToast` from inside the toast provider tree so the rendered
    * toast queue reflects the bridge's actual output.
    */
   function ErrorToastProbe({
@@ -286,15 +286,15 @@ describe('useErrorToast classified transport body (V1.129 P1)', () => {
 
       act(() => fire(error, 'error.couldNotCreateWork'));
 
-      // Title stays the caller-supplied action context (common namespace).
+      // note: Title stays the caller-supplied action context (common namespace).
       expect(screen.getByText('Could not create Work')).toBeInTheDocument();
-      // Description comes from the shared single-source body catalog.
+      // note: Description comes from the shared single-source body catalog.
       expect(screen.getByText(expectedBody)).toBeInTheDocument();
     },
   );
 
   it('falls back to error.message for non-transport NexusClientError (no kind)', () => {
-    // HTTP 4xx/5xx — status !== 0, no `kind`. Legacy bridge behavior.
+    // note: HTTP 4xx/5xx — status !== 0, no `kind`. Legacy bridge behavior.
     const error = NexusClientError.fromBody(400, {
       success: false,
       error: { code: 'validation_failed', message: 'Title is required.' },

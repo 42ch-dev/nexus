@@ -1,5 +1,5 @@
 /**
- * Settings Advanced section — Connection + Setup stacking and fingerprint
+ * note: Settings Advanced section — Connection + Setup stacking and fingerprint
  * gate recovery view.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';

@@ -13,7 +13,7 @@ export type ResumeFingerprintGateState =
       status: 'fetch-failed';
       message: string;
       /**
-       * Transport-failure sub-classification (V1.129 P1). Present when the
+       * note: Transport-failure sub-classification (V1.129 P1). Present when the
        * throw was a {@link NexusClientError} produced by the browser-client
        * classifier; absent for unexpected non-transport errors. Drives the
        * gate's per-kind recovery UX via `<TransportErrorBlock>`.
@@ -27,10 +27,10 @@ export interface UseResumeFingerprintGateOptions {
 
 function shouldVerify(config: ConnectionConfig | null): boolean {
   if (!config) return false;
-  // Must match `buildClient`: only explicit `active: true` is remote mode.
+  // note: Must match `buildClient`: only explicit `active: true` is remote mode.
   if (config.active !== true) return false;
   if (!config.endpointUrl) return false;
-  // Local same-origin default has no baseUrl and no pin — skip.
+  // note: Local same-origin default has no baseUrl and no pin — skip.
   // Remote configs without a pinned fingerprint should not happen post-setup,
   // but be defensive and skip the gate rather than block indefinitely.
   return Boolean(config.pinnedFingerprint);
@@ -62,10 +62,11 @@ export function useResumeFingerprintGate(
       return;
     }
 
-    // TypeScript cannot narrow `config` across the shouldVerify helper boundary;
+    // note: TypeScript cannot narrow `config` across the shouldVerify helper boundary;
     // we have already confirmed it is a non-null remote config with a pin.
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const activeConfig = config!;
+    // invariant: the pin is present (checked by shouldVerify above).
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const pinned = activeConfig.pinnedFingerprint!;
 
@@ -80,7 +81,7 @@ export function useResumeFingerprintGate(
       const served = response.fingerprint;
 
       if (served === '' || served === null || served === undefined) {
-        // The daemon reports no TLS cert. A pinned remote config should not be
+        // note: The daemon reports no TLS cert. A pinned remote config should not be
         // paired with a loopback-only daemon — treat this as a mismatch so the
         // user must re-pin or revert to local.
         setState({ status: 'mismatch', served: served ?? null });

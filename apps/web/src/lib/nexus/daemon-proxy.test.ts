@@ -1,4 +1,5 @@
 // @vitest-environment node
+// note: this suite drives node's http/stream APIs through the dev proxy.
 import { once } from 'node:events';
 import {
   createServer,
@@ -93,7 +94,7 @@ interface HttpObservation {
   body: string;
 }
 
-/** Run `handler` inside a real loopback HTTP server and observe the wire result. */
+/** note: Run `handler` inside a real loopback HTTP server and observe the wire result. */
 async function withHttpServer(
   handler: (req: IncomingMessage, res: ServerResponse) => void,
 ): Promise<HttpObservation> {
@@ -124,7 +125,7 @@ async function withHttpServer(
   }
 }
 
-/** Run `handler` against a real loopback socket and observe stream completion. */
+/** note: Run `handler` against a real loopback socket and observe stream completion. */
 async function withSocketServer(
   handler: (socket: Socket) => void,
 ): Promise<{ data: string; closed: boolean }> {

@@ -1,5 +1,5 @@
 /**
- * ChapterPage — V1.79 Author Reflection (Track A / P0) + V1.89 Deeper
+ * note: ChapterPage — V1.79 Author Reflection (Track A / P0) + V1.89 Deeper
  * Manuscript Reading (BL-11 MVP slice).
  *
  * Promotes the post-V1.75-pivot residual (bare read-only body render) into a
@@ -45,7 +45,7 @@ import {
 } from '@/api/queries';
 import { formatRelative } from '@/lib/format';
 
-// V1.138 codegen inlines the color enum; derive it from the canonical type.
+// note: V1.138 codegen inlines the color enum; derive it from the canonical type.
 type ReadingAnnotationColor = ReadingAnnotation['color'];
 
 export function ChapterPage() {
@@ -68,12 +68,12 @@ export function ChapterPage() {
   const neighbors = useChapterNeighbors(workId || undefined, chapterNumber || undefined, currentVolume);
   const resolvedVolume = chapter.data?.volume;
 
-  // V1.89 — persisted reading progress sync.
+  // note: V1.89 — persisted reading progress sync.
   useReadingProgressSync(workId || undefined, chapterNumber || undefined, resolvedVolume, {
     enabled: !chapter.isLoading && Boolean(chapter.data) && !body.isLoading && Boolean(body.data),
   });
 
-  // V1.89 — annotation surface.
+  // note: V1.89 — annotation surface.
   const annotations = useAnnotations(workId || undefined, chapterNumber || undefined, resolvedVolume);
   const createAnnotation = useCreateAnnotation();
   const updateAnnotation = useUpdateAnnotation();
@@ -122,7 +122,7 @@ export function ChapterPage() {
 
   const ch = chapter.data;
   const canvasHref = `/works/${encodeURIComponent(workId)}/outline?chapter=${ch.chapter}`;
-  // Key the progress bar on chapter so it resets when the reader navigates.
+  // note: Key the progress bar on chapter so it resets when the reader navigates.
   // `ch.volume` is contract-guaranteed (ChapterDetail.volume: number, >= 1).
   const progressKey = `${workId}:${ch.chapter}:${ch.volume}`;
 

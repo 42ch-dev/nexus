@@ -1,5 +1,5 @@
 /**
- * The document the Canvas renders, presented to its editing surface
+ * note: The document the Canvas renders, presented to its editing surface
  * (`PresetState`/`ParsedPreset`) without any YAML.
  */
 import { describe, expect, it } from 'vitest';
@@ -22,9 +22,9 @@ describe('parsedPresetFromIr', () => {
       'pause',
       'done',
     ]);
-    // One outgoing edge is a linear target.
+    // note: One outgoing edge is a linear target.
     expect(parsed.manifest.states[0].next).toBe('routing');
-    // Several become the conditional form, with the `default` edge as fallback.
+    // note: Several become the conditional form, with the `default` edge as fallback.
     expect(parsed.manifest.states[1].next).toEqual({
       kind: 'conditional',
       rules: [{ when: undefined, to: 'pause' }],
@@ -42,7 +42,7 @@ describe('parsedPresetFromIr', () => {
       }),
     );
 
-    // The linear form would drop the guard, so the projection keeps the conditional form.
+    // note: The linear form would drop the guard, so the projection keeps the conditional form.
     expect(parsed.manifest.states[0].next).toEqual({
       kind: 'conditional',
       rules: [{ when: 'quality >= 3', to: 'done' }],

@@ -1,5 +1,5 @@
 /**
- * WorksInspirationPage — closed-loop coverage for the Inspiration Pool
+ * note: WorksInspirationPage — closed-loop coverage for the Inspiration Pool
  * (v1.222 P1 T2) against the real `BrowserClient` + msw.
  *
  * Pins the four service calls the page drives: list, add (`{title}` only),
@@ -101,13 +101,13 @@ describe('WorksInspirationPage', () => {
     expect(within(archived).queryAllByRole('button')).toHaveLength(0);
     expect(within(archived).queryAllByRole('link')).toHaveLength(0);
 
-    // An unexpected status renders verbatim and offers no transition.
+    // note: An unexpected status renders verbatim and offers no transition.
     expect(within(unexpected).getByText('quarantined')).toBeInTheDocument();
     expect(within(unexpected).queryAllByRole('button')).toHaveLength(0);
     expect(within(unexpected).queryAllByRole('link')).toHaveLength(0);
 
     expect(screen.getByTestId('inspiration-back-link')).toHaveAttribute('href', '/works');
-    // Count and added label render as interpolated strings, not joined fragments.
+    // note: Count and added label render as interpolated strings, not joined fragments.
     expect(screen.getByTestId('inspiration-pool-count')).toHaveTextContent(
       /^Inspiration Pool: 4 \/ 4$/,
     );
@@ -157,17 +157,17 @@ describe('WorksInspirationPage', () => {
     const [row] = await screen.findAllByTestId('inspiration-pool-row');
     fireEvent.click(within(row).getByTestId('inspiration-pool-row-promote'));
 
-    // `set_default` must never be sent — it is inert server-side.
+    // note: `set_default` must never be sent — it is inert server-side.
     await waitFor(() => expect(promoteBodies).toEqual([{ item_id: 'insp-1' }]));
     expect(await screen.findByTestId('outline-probe')).toHaveTextContent('work-created');
   });
 
   it('keeps one promote in flight, so a second row cannot create a second Work', async () => {
-    // v1.222 review (6v6gGJ): the server checks the item status once, so two
+    // note: v1.222 review (6v6gGJ): the server checks the item status once, so two
     // overlapping promotes of the same pool can mint two Works. The page holds
     // the lock; the second row must neither fire nor look actionable.
     const promoteBodies: unknown[] = [];
-    // `lib` stops below ES2024 here, so `Promise.withResolvers` is unavailable;
+    // note: `lib` stops below ES2024 here, so `Promise.withResolvers` is unavailable;
     // the neighboring suite uses the same deferred resolver.
     let releaseFirst: (() => void) | undefined;
     const firstGate = new Promise<void>((resolve) => {
@@ -240,12 +240,12 @@ describe('WorksInspirationPage', () => {
     fireEvent.click(within(row).getByTestId('inspiration-pool-row-archive'));
 
     expect(await screen.findByText('Request failed')).toBeInTheDocument();
-    // The row stays on screen mid-failure; no navigation, no silent drop.
+    // note: The row stays on screen mid-failure; no navigation, no silent drop.
     expect(row).toHaveAttribute('data-status', 'idea');
   });
 
   it('surfaces a read failure as page error chrome and recovers on retry', async () => {
-    // W5.1: the page owns the error frame and `onRetry`; the query client has
+    // note: W5.1: the page owns the error frame and `onRetry`; the query client has
     // retry disabled, so the first 500 lands on screen as-is.
     let calls = 0;
     useHandlers(
@@ -268,7 +268,7 @@ describe('WorksInspirationPage', () => {
         'The daemon did not return the inspiration pool. Check that the local daemon is running.',
       ),
     ).toBeInTheDocument();
-    // The error frame must not degrade to the empty frame.
+    // note: The error frame must not degrade to the empty frame.
     expect(screen.queryByText('No inspiration yet')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));

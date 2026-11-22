@@ -1,5 +1,5 @@
 /**
- * useUpdateFinding — optimistic update + invalidation contract.
+ * note: useUpdateFinding — optimistic update + invalidation contract.
  *
  * Against a real BrowserClient + msw: the mutation optimistically patches the
  * finding in the cached findings list before the server responds, then
@@ -35,7 +35,7 @@ function makeFinding(over: Partial<FindingDetailResponse> = {}): FindingDetailRe
   };
 }
 
-/** Harness exposing the first finding's status + a mutate trigger. */
+/** note: Harness exposing the first finding's status + a mutate trigger. */
 function Harness({ onMutate }: { onMutate: () => void }) {
   const findings = useFindings('w1');
   const updateFinding = useUpdateFinding();
@@ -64,7 +64,7 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
         pagination: { limit: 20, has_more: false },
       }),
     );
-    // Deferred gate: the PATCH stays in-flight until we release it, so the
+    // note: Deferred gate: the PATCH stays in-flight until we release it, so the
     // optimistic window is observable (not racy).
     let releasePatch!: () => void;
     const patchGate = new Promise<void>((resolve) => {
@@ -83,20 +83,19 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     const client = new BrowserClient();
     renderInApp(<Harness onMutate={() => {}} />, { client });
 
-    // Initial load shows the open finding (findByText waits for the query).
+    // note: Initial load shows the open finding (findByText waits for the query).
     expect(await screen.findByText('open')).toBeInTheDocument();
     expect(listSpy).toHaveBeenCalledTimes(1);
 
-    // Trigger the mutation. onMutate applies the optimistic patch to the cached
+    // note: Trigger the mutation. onMutate applies the optimistic patch to the cached
     // list (after its cancelQueries await), so the status flips while the PATCH
     // is still in-flight (patchInFlight holds the response open).
     fireEvent.click(screen.getByRole('button', { name: /triage/i }));
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('triaged'));
 
-    // The PATCH carried the status transition payload.
     expect(patchBody).toEqual({ status: 'triaged' });
 
-    // Now release the server response. onSettled invalidates the findings list,
+    // note: Now release the server response. onSettled invalidates the findings list,
     // triggering a refetch.
     releasePatch();
     await waitFor(() => {
@@ -105,7 +104,7 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
   });
 
   it('rolls back the optimistic patch when the server rejects the transition', async () => {
-    // Initial list: open finding. The PATCH is rejected with 422
+    // note: Initial list: open finding. The PATCH is rejected with 422
     // INVALID_TRANSITION (an illegal transition bypassed the UI guards).
     let listCount = 0;
     useHandlers(
@@ -131,15 +130,15 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /triage/i }));
 
-    // The optimistic patch flips to triaged, then onError rolls back to the
+    // note: The optimistic patch flips to triaged, then onError rolls back to the
     // snapshotted open state once the 422 lands.
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('open'));
-    // onSettled also invalidates → refetch.
+    // note: onSettled also invalidates → refetch.
     await waitFor(() => expect(listCount).toBeGreaterThanOrEqual(2));
   });
 
   it('does not invalidate other Works findings lists on settle (qc3 W-QC3-P0-001)', async () => {
-    // A mutation on w1 must refetch w1's list (a status transition can move a
+    // note: A mutation on w1 must refetch w1's list (a status transition can move a
     // finding between filter views of w1) but must NOT touch w2's list. The
     // global findings-list prefix is no longer invalidated.
     // Vitest 4's bare `vi.fn()` overload types as `Mock<Constructable | Procedure>`
@@ -154,7 +153,7 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
       );
       return listSpies[workId];
     };
-    // Deferred gate (same pattern as the first test): the PATCH stays in-flight
+    // note: Deferred gate (same pattern as the first test): the PATCH stays in-flight
     // until we release it, so the optimistic window is observable — not racy
     // against the settle → invalidate → refetch chain under React 19's
     // synchronous store batching.
@@ -202,19 +201,18 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     const client = new BrowserClient();
     renderInApp(<TwoWorkHarness />, { client });
 
-    // Both lists load exactly once.
     await waitFor(() => expect(screen.getByTestId('w1-status')).toHaveTextContent('open'));
     await waitFor(() => expect(screen.getByTestId('w2-status')).toHaveTextContent('open'));
     expect(listSpies['w1']).toHaveBeenCalledTimes(1);
     expect(listSpies['w2']).toHaveBeenCalledTimes(1);
 
-    // Mutate a finding in w1. The optimistic patch flips w1's status while the
+    // note: Mutate a finding in w1. The optimistic patch flips w1's status while the
     // PATCH is held in-flight; w2's list is untouched.
     fireEvent.click(screen.getByRole('button', { name: /triage w1/i }));
     await waitFor(() => expect(screen.getByTestId('w1-status')).toHaveTextContent('triaged'));
     expect(listSpies['w2']).toHaveBeenCalledTimes(1);
 
-    // Release the PATCH. On settle, w1's list is invalidated → refetched.
+    // note: Release the PATCH. On settle, w1's list is invalidated → refetched.
     // TanStack processes every query invalidated by the same invalidation call
     // in one batch, so by the time w1 has been called a second time, w2's fate
     // is sealed too.

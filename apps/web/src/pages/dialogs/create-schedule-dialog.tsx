@@ -34,7 +34,7 @@ export function CreateScheduleDialog({
   const [seed, setSeed] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // Reset the form whenever the dialog opens.
+  // note: Reset the form whenever the dialog opens.
   useEffect(() => {
     if (open) {
       setPresetId('');
@@ -44,7 +44,7 @@ export function CreateScheduleDialog({
     }
   }, [open]);
 
-  // PL-8: the create catalog offers USER + embedded presets only. The
+  // note: PL-8: the create catalog offers USER + embedded presets only. The
   // `system` group is intentionally excluded — system presets are the
   // operator's boot sessions, not authorable schedule targets (F-012).
   const presetOptions = [
@@ -68,7 +68,7 @@ export function CreateScheduleDialog({
       });
       onOpenChange(false);
     } catch {
-      // Error toast already fired by the mutation's onError callback; the
+      // note: Error toast already fired by the mutation's onError callback; the
       // inline message below keeps the dialog from closing silently.
       setError(t('create.genericError'));
     }
@@ -83,7 +83,7 @@ export function CreateScheduleDialog({
             {presets.isLoading ? (
               <p className="text-copy-13 text-gray-700">{t('create.presetLoading')}</p>
             ) : presets.isError ? (
-              // F-010: a failed preset fetch must read as an error (with
+              // note: F-010: a failed preset fetch must read as an error (with
               // retry), not as "no presets available".
               <div className="flex flex-col gap-2">
                 <p className="text-copy-13 text-red-1000">{t('create.presetError')}</p>

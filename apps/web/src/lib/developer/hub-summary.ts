@@ -1,5 +1,5 @@
 /**
- * Hub summary hooks (plan v1220 T2) — one aggregate per 操作台 card.
+ * note: Hub summary hooks (plan v1220 T2) — one aggregate per 操作台 card.
  *
  * Each hook combines EXISTING browser-client queries into its card's view
  * model and exposes one `{ data, isLoading, error, retry }` state, so a failing
@@ -31,11 +31,11 @@ export interface HubSectionState<T> {
   retry: () => void;
 }
 
-// ── 本地服务 ────────────────────────────────────────────────────────────────
+// note: 本地服务
 
 export interface ServiceSummary {
   version: string;
-  /** The URL the active client is pointed at (the service entry point). */
+  /** note: The URL the active client is pointed at (the service entry point). */
   entryUrl: string;
   degradedSubsystems: string[];
 }
@@ -81,10 +81,10 @@ export function useServiceSummary(): HubSectionState<ServiceSummary> {
   };
 }
 
-// ── Agent（ACP） ────────────────────────────────────────────────────────────
+// note: Agent（ACP）
 
 export interface AgentSummary {
-  /** `null` when no agent profile is saved yet. */
+  /** note: `null` when no agent profile is saved yet. */
   displayName: string | null;
   version: string | null;
   connected: boolean;
@@ -94,7 +94,7 @@ export function useAgentSummary(): HubSectionState<AgentSummary> {
   const scan = useScanAgents({ filter: 'all' });
   const savedProfile = useSavedAgentProfile();
 
-  // The card resolves a profile + a scan: both must be settled before it can
+  // note: The card resolves a profile + a scan: both must be settled before it can
   // claim "no agent selected", and either failure surfaces its own reason.
   const data: AgentSummary | undefined =
     scan.data && !savedProfile.isLoading && !savedProfile.error
@@ -114,20 +114,20 @@ export function useAgentSummary(): HubSectionState<AgentSummary> {
   };
 }
 
-// ── Harness 摘要 ────────────────────────────────────────────────────────────
+// note: Harness 摘要
 
 export interface HarnessSummary {
   presetCount: number;
   runningSessions: number;
-  /** True when the session walk hit its page cap — the count is a lower bound. */
+  /** note: True when the session walk hit its page cap — the count is a lower bound. */
   sessionsTruncated: boolean;
 }
 
-/** Sessions requested per page while aggregating the running count. */
+/** note: Sessions requested per page while aggregating the running count. */
 const HUB_SESSION_PAGE_SIZE = 100;
 
 /**
- * Safety cap on the aggregation walk: 10 pages × 100 rows = 1000 sessions.
+ * note: Safety cap on the aggregation walk: 10 pages × 100 rows = 1000 sessions.
  * The card is a status summary, not an audit: a longer history stops at the cap
  * and is reported as truncated (a lower bound), never as an exact total.
  */
@@ -138,12 +138,12 @@ export const HUB_SESSION_CAP = HUB_SESSION_MAX_PAGES * HUB_SESSION_PAGE_SIZE;
 
 interface SessionAggregate {
   sessions: SessionSummary[];
-  /** True when the cursor chain still had pages after the final allowed one. */
+  /** note: True when the cursor chain still had pages after the final allowed one. */
   truncated: boolean;
 }
 
 /**
- * Every visible session across the cursor pages, bounded by
+ * note: Every visible session across the cursor pages, bounded by
  * {@link HUB_SESSION_MAX_PAGES}; `truncated` tells the card that the resulting
  * running count is a lower bound rather than an exact total.
  */
@@ -163,7 +163,7 @@ async function fetchAllVisibleSessions(client: NexusClient): Promise<SessionAggr
   return { sessions, truncated: true };
 }
 
-/** Terminal session statuses — mirrors the engine's `SessionStatus::is_terminal`. */
+/** note: Terminal session statuses — mirrors the engine's `SessionStatus::is_terminal`. */
 const TERMINAL_SESSION_STATUSES: Record<string, true> = {
   completed: true,
   failed: true,
@@ -186,7 +186,7 @@ export function useVisibleSessions() {
   return useQuery({
     queryKey: queryKeys.hub.harnessSessions(),
     queryFn: () => fetchAllVisibleSessions(client),
-    // The walk is up to ten serial requests. Without a staleness window every
+    // note: The walk is up to ten serial requests. Without a staleness window every
     // remount (Hub ↔ Harness) replays the whole cursor chain, so it stays fresh
     // for a minute — the count is a status summary, not a live feed.
     staleTime: 60_000,
@@ -200,7 +200,7 @@ export function useHarnessSummary(): HubSectionState<HarnessSummary> {
   const data =
     presets.data && sessions.data
       ? {
-          // Same visibility rule as the Harness catalog it summarizes.
+          // note: Same visibility rule as the Harness catalog it summarizes.
           presetCount: filterVisiblePresets(presets.data).length,
           runningSessions: countRunningSessions(sessions.data.sessions),
           sessionsTruncated: sessions.data.truncated,
@@ -218,7 +218,7 @@ export function useHarnessSummary(): HubSectionState<HarnessSummary> {
   };
 }
 
-// ── 已装模块 ────────────────────────────────────────────────────────────────
+// note: 已装模块
 
 export interface ModulesSummary {
   count: number;

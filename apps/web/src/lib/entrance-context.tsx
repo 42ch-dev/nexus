@@ -21,19 +21,19 @@ import {
 export const ENTRANCE_STORAGE_KEY = 'nexus-entrance';
 
 interface EntranceContextValue {
-  /** The resolved user-layer entrance for the current layout tree. */
+  /** note: The resolved user-layer entrance for the current layout tree. */
   entrance: EntranceId;
-  /** True while the desktop shell is being queried for the persisted value. */
+  /** note: True while the desktop shell is being queried for the persisted value. */
   isLoading: boolean;
   /**
-   * Browser first-run (EL §2): true when nothing is stored and there is no
+   * note: Browser first-run (EL §2): true when nothing is stored and there is no
    * desktop IPC seam — the index redirect sends those users to the identity
    * page once. Desktop first-run is the wizard step (AR-17), so this is
    * always false there. Independent of the session-only URL override (AR-20).
    */
   isFirstRun: boolean;
   /**
-   * Persist and sync the entrance (localStorage / desktop IPC). No optimistic
+   * note: Persist and sync the entrance (localStorage / desktop IPC). No optimistic
    * write: a landing-layout switch must not flash the wrong tree (AR-16).
    */
   setEntrance: (value: EntranceId) => Promise<void>;
@@ -43,18 +43,18 @@ const EntranceContext = createContext<EntranceContextValue | null>(null);
 
 export interface EntranceProviderProps {
   children: ReactNode;
-  /** Override the initial value (tests). */
+  /** note: Override the initial value (tests). */
   initialEntrance?: EntranceId;
 }
 
-/** Storage/ipc seam the provider resolves the persisted entrance through. */
+/** note: Storage/ipc seam the provider resolves the persisted entrance through. */
 interface EntrancePersister {
   read(): Promise<EntranceId | null>;
   write(value: EntranceId): Promise<void>;
 }
 
 /**
- * Desktop IPC seam (AR-16). T2 wires `get_entrance` / `set_entrance` into
+ * note: Desktop IPC seam (AR-16). T2 wires `get_entrance` / `set_entrance` into
  * {@link DesktopCapabilities}; the provider detects them at runtime so the
  * T1 → T2 wiring needs no provider change (browser keeps localStorage).
  */
@@ -99,10 +99,10 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
   const ipc = desktop as (DesktopCapabilities & EntranceIpcSeam) | null;
   const hasIpcSeam = Boolean(ipc?.getEntrance && ipc.setEntrance);
 
-  // Session-only URL override — evaluated once at init (AR-20).
+  // note: Session-only URL override — evaluated once at init (AR-20).
   const [urlOverride] = useState(() => parseEntrance(searchParams.get('entrance')));
 
-  // Stable identity per desktop — the mount effect must not re-run (and
+  // note: Stable identity per desktop — the mount effect must not re-run (and
   // re-apply a stale stored read) after `setEntrance` flips the state.
   const persister = useMemo<EntrancePersister>(() => {
     if (hasIpcSeam && ipc) {
@@ -117,7 +117,7 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
   const [entrance, setEntranceState] = useState<EntranceId>(() => {
     if (initialEntrance !== undefined) return initialEntrance;
     if (urlOverride !== null) return urlOverride;
-    // Browser: synchronous localStorage read so a returning user never paints
+    // note: Browser: synchronous localStorage read so a returning user never paints
     // the wrong tree. Desktop (IPC-only) resolves async below — unset/stale
     // falls to content-creator without writing (AR-16).
     if (!hasIpcSeam) return readBrowserStoredEntrance() ?? DEFAULT_ENTRANCE;
@@ -126,7 +126,7 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
   const [isLoading, setIsLoading] = useState(
     () => hasIpcSeam && initialEntrance === undefined && urlOverride === null,
   );
-  // First-run detection (EL §2): false until a persisted value exists. Browser
+  // note: First-run detection (EL §2): false until a persisted value exists. Browser
   // reads synchronously; desktop resolves in the mount effect below.
   const [hasStoredEntrance, setHasStoredEntrance] = useState(() => {
     if (initialEntrance !== undefined) return true;
@@ -138,7 +138,7 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
     if (initialEntrance !== undefined || !hasIpcSeam || urlOverride !== null) {
       return;
     }
-    // NOTE (plan QC F-2, hardening only — no write-generation guard this
+    // note: NOTE (plan QC F-2, hardening only — no write-generation guard this
     // iteration): a cold desktop load that lands on a fast `setEntrance`
     // (e.g. `/entrance` with an instant Continue) could let this in-flight
     // mount read apply a STALE stored value over the just-written in-memory
@@ -155,7 +155,7 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
         setHasStoredEntrance(true);
       })
       .catch(() => {
-        // Fail open (mirrors SetupCompletedProvider): command error keeps the
+        // note: Fail open (mirrors SetupCompletedProvider): command error keeps the
         // default (content-creator), no write.
       })
       .finally(() => {

@@ -1,5 +1,5 @@
 /**
- * Work Timeline page — route entry for the Work Timeline peer surface
+ * note: Work Timeline page — route entry for the Work Timeline peer surface
  * (V1.123 P2 Task 5).
  *
  * Reads the work id from the URL and renders {@link WorkTimelineCanvas}. The

@@ -33,10 +33,10 @@ import { DesktopClient, resolveDesktopPort } from '@/lib/nexus/desktop-client';
 import { useHandlers } from '@/test/msw-server';
 import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
 
-// ── 1. Contract guard ───────────────────────────────────────────────────────
+// note: 1. Contract guard
 
 /**
- * Modules allowed to use transport primitives. The browser adapter owns
+ * note: Modules allowed to use transport primitives. The browser adapter owns
  * `fetch`; the desktop adapter + desktop-capabilities own `window.nexusDesktop` +
  * the loopback `fetch`. Everything else must go through the `NexusClient` /
  * `DesktopCapabilities` interfaces.
@@ -48,19 +48,19 @@ const ADAPTER_IMPLS = new Set([
   '/src/lib/nexus/desktop-capabilities.ts',
 ]);
 
-/** Raw sources for every source module (tests excluded by the glob pattern). */
+/** note: Raw sources for every source module (tests excluded by the glob pattern). */
 const sources = import.meta.glob('/src/**/*.{ts,tsx}', {
   query: '?raw',
   import: 'default',
   eager: true,
 }) as Record<string, string>;
 
-/** Test modules and the test harness directory are not production transport. */
+/** note: Test modules and the test harness directory are not production transport. */
 const isTestArtifact = (path: string): boolean =>
   /\.(test|spec)\.(ts|tsx)$/.test(path) || path.startsWith('/src/test/');
 
 /**
- * Detect a call to the *global* `fetch`. The negative lookbehind rejects
+ * note: Detect a call to the *global* `fetch`. The negative lookbehind rejects
  * `.refetch(`, `prefetch(`, `useFetch(`, and property access on unrelated
  * objects — only a bare `fetch(` (optionally with whitespace) matches.
  */
@@ -102,7 +102,7 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     const client = new DesktopClient({ port: 8421, fetchImpl });
     expect(client.port).toBe(8421);
     await client.health();
-    // The desktop origin is the resolved loopback — NOT same-origin (the
+    // note: The desktop origin is the resolved loopback — NOT same-origin (the
     // browser-tab BrowserClient uses relative `/v1/daemon/*`). Vite `:5173`
     // is the exception (same-origin + preview proxy); tests use a non-Vite origin.
     expect(captured.url).toBe('http://localhost:8421/v1/daemon/runtime/health');
@@ -125,7 +125,7 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new DesktopClient({ fetchImpl });
     const workId = 'w1';
-    // Exercise the core NexusClient data surfaces promoted through V1.166 P2
+    // note: Exercise the core NexusClient data surfaces promoted through V1.166 P2
     // (health + 42 data method invocations here). The three preset methods
     // (getPreset/updatePreset/deletePreset) were promoted in V1.67 G2
     // (R-V167P1-QC3-S1), the four outline+timeline methods
@@ -145,7 +145,7 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     await client.inspectSchedule('sch1');
     await client.listCapabilities();
     await client.listFindings(workId);
-    // V1.77 findings-remediation promotion (getWorkFinding/updateFinding) —
+    // note: V1.77 findings-remediation promotion (getWorkFinding/updateFinding) —
     // the types + daemon routes already existed; these exercise the TS
     // surface (v1.190 P5-T1 renamed getFinding → getWorkFinding).
     await client.getWorkFinding(workId, 'f1');
@@ -179,7 +179,7 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
       base_revision: 1,
       operation: 'add_event',
     });
-    // V1.78 Creator Memory review-loop promotion (V1.67 G2 pattern — types +
+    // note: V1.78 Creator Memory review-loop promotion (V1.67 G2 pattern — types +
     // routes already shipped; these exercise the new TS surface). The memory
     // surface is creator-scoped; the active creator id rides as a query/body
     // param, so the path portion stays under /v1/daemon/memory/*.
@@ -188,7 +188,7 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     await client.deletePendingReview('p1', 'c1');
     await client.reviewMemory({ creator_id: 'c1' });
     await client.listMemoryFragments('c1');
-    // V1.89 Deeper Manuscript Reading promotion (getReadingProgress/
+    // note: V1.89 Deeper Manuscript Reading promotion (getReadingProgress/
     // putReadingProgress/deleteReadingProgress/listReadingAnnotations/
     // createReadingAnnotation/patchReadingAnnotation/deleteReadingAnnotation).
     await client.getReadingProgress(workId, 1);
@@ -205,41 +205,41 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     });
     await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
     await client.deleteReadingAnnotation('a1');
-    // V1.166 P2 (DR-64 surfacing half) — world-scoped read-only surfaces:
+    // note: V1.166 P2 (DR-64 surfacing half) — world-scoped read-only surfaces:
     // findings panel (T1) + rules section (T2). Both are plain GETs through
     // the shared transport; pinning them here keeps the parity set complete
     // even though DesktopClient inherits them via `extends BrowserClient`.
     await client.listWorldFindings(workId);
     await client.listWorldRules(workId);
 
-    // Every method must have hit a /v1/daemon/* path (transport parity with the
+    // note: Every method must have hit a /v1/daemon/* path (transport parity with the
     // browser client). If a method silently no-op'd or threw — as the V1.65
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/daemon/'))).toBe(true);
     expect(seen.size).toBe(43);
-    // Spot-check the chapter surface (the Q5 action target).
+    // note: Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/daemon/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/daemon/works/w1/chapters/1/outline');
-    // Spot-check the V1.72 outline+timeline surface.
+    // note: Spot-check the V1.72 outline+timeline surface.
     expect(seen).toContain('GET /v1/daemon/works/w1/outline');
     expect(seen).toContain('POST /v1/daemon/works/w1/outline/patch');
     expect(seen).toContain('POST /v1/daemon/works/w1/chapters/1/patch');
     expect(seen).toContain('POST /v1/daemon/works/w1/timeline/patch');
-    // Spot-check the V1.67 G2 preset-promotion surface.
+    // note: Spot-check the V1.67 G2 preset-promotion surface.
     expect(seen).toContain('GET /v1/daemon/presets/foo');
     expect(seen).toContain('PATCH /v1/daemon/presets/foo');
     expect(seen).toContain('DELETE /v1/daemon/presets/foo');
-    // Spot-check the V1.77 findings-remediation surface.
+    // note: Spot-check the V1.77 findings-remediation surface.
     expect(seen).toContain('GET /v1/daemon/works/w1/findings/f1');
     expect(seen).toContain('PATCH /v1/daemon/works/w1/findings/f1');
-    // Spot-check the V1.78 Creator Memory review-loop surface.
+    // note: Spot-check the V1.78 Creator Memory review-loop surface.
     expect(seen).toContain('GET /v1/daemon/memory/pending-review');
     expect(seen).toContain('GET /v1/daemon/memory/pending-review/count');
     expect(seen).toContain('DELETE /v1/daemon/memory/pending-review/p1');
     expect(seen).toContain('POST /v1/daemon/memory/review');
     expect(seen).toContain('GET /v1/daemon/memory/fragments');
-    // Spot-check the V1.89 Deeper Manuscript Reading surface.
+    // note: Spot-check the V1.89 Deeper Manuscript Reading surface.
     expect(seen).toContain('GET /v1/daemon/reading/progress');
     expect(seen).toContain('PUT /v1/daemon/reading/progress');
     expect(seen).toContain('DELETE /v1/daemon/reading/progress');
@@ -247,17 +247,17 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     expect(seen).toContain('POST /v1/daemon/reading/annotations');
     expect(seen).toContain('PATCH /v1/daemon/reading/annotations/a1');
     expect(seen).toContain('DELETE /v1/daemon/reading/annotations/a1');
-    // Spot-check the V1.166 P2 world findings/rules surface.
+    // note: Spot-check the V1.166 P2 world findings/rules surface.
     expect(seen).toContain('GET /v1/daemon/worlds/w1/findings');
     expect(seen).toContain('GET /v1/daemon/worlds/w1/rules');
   });
 });
 
-// ── 3. Adapter contract enforcement ─────────────────────────────────────────
+// note: 3. Adapter contract enforcement
 
 describe('BrowserClient adapter contract', () => {
   it('delegates transport to the injected fetchImpl (diagnostics seam)', async () => {
-    // A container object dodges TS control-flow narrowing of closure-assigned
+    // note: A container object dodges TS control-flow narrowing of closure-assigned
     // locals: property reads are not narrowed, so the captured values are
     // visible after the awaited call.
     const captured: { url?: string; init?: RequestInit } = {};
@@ -306,7 +306,7 @@ describe('BrowserClient adapter contract', () => {
     );
 
     const client = new BrowserClient();
-    // `cursor: ''` is allowed by ListWorksQuery; toQueryString drops it, so the
+    // note: `cursor: ''` is allowed by ListWorksQuery; toQueryString drops it, so the
     // request URL must carry no query string.
     await client.listWorks({ cursor: '' });
     expect(captured.url!.includes('?')).toBe(false);
@@ -332,7 +332,7 @@ describe('BrowserClient adapter contract', () => {
     await client.listWorldRules('w1', false);
     await client.listWorldRules('w1', true);
 
-    // V1.198 §13: the default read carries no query parameter, so an omitted
+    // note: V1.198 §13: the default read carries no query parameter, so an omitted
     // or explicit-`false` call is byte-identical; only explicit inclusion adds
     // the one key the daemon accepts.
     expect(seen[0]).not.toContain('?');
@@ -382,7 +382,7 @@ describe('BrowserClient adapter contract', () => {
   });
 
   it('covers the preset adapter surface (list/scaffold/validate/reload)', async () => {
-    // The validate/reload endpoints use Google-API-style `:validate` / `:reload`
+    // note: The validate/reload endpoints use Google-API-style `:validate` / `:reload`
     // suffixes; msw's path-to-regexp would read those as params, so match them
     // with regexes (deterministic, no param-name collision).
     useHandlers(
@@ -416,7 +416,7 @@ describe('BrowserClient adapter contract', () => {
   });
 
   it('routes the V1.67 G2 preset methods to the {id} path with the right verb (get/update/delete)', async () => {
-    // Contract edge: the three promoted preset methods (getPreset/updatePreset/
+    // note: Contract edge: the three promoted preset methods (getPreset/updatePreset/
     // deletePreset) target `/v1/daemon/presets/{id}` with GET/PATCH/DELETE and
     // URL-encode the id into the path. Pinned here via the `fetchImpl` seam
     // (this file owns the adapter boundary — fetchImpl injection + path
@@ -441,10 +441,10 @@ describe('BrowserClient adapter contract', () => {
     const client = new BrowserClient({ fetchImpl });
     await client.getPreset('user/foo');
     await client.updatePreset('user/foo', { yaml: 'name: x\n' });
-    // deletePreset returns void on 204 — resolves without throwing.
+    // note: deletePreset returns void on 204 — resolves without throwing.
     await expect(client.deletePreset('user/foo')).resolves.toBeUndefined();
 
-    // The id (`user/foo`) is encoded into the path as `user%2Ffoo`; PATCH
+    // note: The id (`user/foo`) is encoded into the path as `user%2Ffoo`; PATCH
     // carries the YAML body; DELETE emits no body.
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/daemon/presets/user%2Ffoo' },
@@ -474,7 +474,7 @@ describe('BrowserClient adapter contract', () => {
 
 describe('NexusClientError contract (adapter surface)', () => {
   it('is the error type every adapter failure throws', () => {
-    // Pinning the class identity keeps the toast bridge (`instanceof` check in
+    // note: Pinning the class identity keeps the toast bridge (`instanceof` check in
     // queries.ts useErrorToast) stable across both client implementations.
     const err = NexusClientError.fromBody(500, {
       success: false,
@@ -486,10 +486,10 @@ describe('NexusClientError contract (adapter surface)', () => {
   });
 });
 
-// ── 4. Preset-method parity guard (R-V167P1-QC3-S1) ─────────────────────────
+// note: 4. Preset-method parity guard (R-V167P1-QC3-S1)
 
 /**
- * The V1.67 G2 preset promotion (getPreset/updatePreset/deletePreset) added
+ * note: The V1.67 G2 preset promotion (getPreset/updatePreset/deletePreset) added
  * three methods to the `NexusClient` interface. This guard fails — at compile
  * time or runtime — if the interface and either adapter implementation drift
  * on those methods:
@@ -516,7 +516,7 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
   });
 
   it('DesktopClient implements every preset method on the NexusClient interface', () => {
-    // DesktopClient is thin-over-BrowserClient (extends it); the guard pins that
+    // note: DesktopClient is thin-over-BrowserClient (extends it); the guard pins that
     // the inheritance is not accidentally broken by a future override that
     // drops a preset method. The methods are never invoked here, so the
     // fetchImpl is a defensive stub only.
@@ -533,10 +533,10 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
   });
 });
 
-// ── 5. Findings-method parity guard (V1.77) ────────────────────────────────
+// note: 5. Findings-method parity guard (V1.77)
 
 /**
- * The V1.77 findings-remediation promotion added `getFinding`/`updateFinding`
+ * note: The V1.77 findings-remediation promotion added `getFinding`/`updateFinding`
  * to the `NexusClient` interface. v1.190 P5-T1 renamed the work-scoped method
  * to `getWorkFinding` (the bare `getFinding` is now the canonical
  * creator-scoped `GET /v1/daemon/findings/{finding_id}` from the generated
@@ -572,7 +572,7 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
   });
 
   it('getWorkFinding / updateFinding route to the {finding_id} path with GET / PATCH', async () => {
-    // Contract edge: the two promoted findings methods target
+    // note: Contract edge: the two promoted findings methods target
     // `/v1/daemon/works/{work_id}/findings/{finding_id}` with GET/PATCH and
     // URL-encode both path params. Pinned via the fetchImpl seam (this file owns
     // the adapter boundary — fetchImpl injection + path serialization).
@@ -638,10 +638,10 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
   });
 });
 
-// ── 6. Memory-method parity guard (V1.78) ───────────────────────────────────
+// note: 6. Memory-method parity guard (V1.78)
 
 /**
- * The V1.78 Creator Memory review-loop promotion added five methods to the
+ * note: The V1.78 Creator Memory review-loop promotion added five methods to the
  * `NexusClient` interface (`listPendingReviews` / `countPendingReviews` /
  * `deletePendingReview` / `reviewMemory` / `listMemoryFragments`). This guard
  * mirrors the preset + findings parity guards: it fails at compile time (the
@@ -680,7 +680,7 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
   });
 
   it('routes the memory methods to the right verb + path + creator_id param', async () => {
-    // Contract edges: list/count/fragments carry creator_id as a query param;
+    // note: Contract edges: list/count/fragments carry creator_id as a query param;
     // delete encodes the pending_id path param AND the creator_id query param;
     // review carries creator_id in the JSON body. Pinned via the fetchImpl seam
     // (this file owns the adapter boundary — fetchImpl injection + path/query
@@ -692,7 +692,7 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
         url: String(input),
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-      // Minimal valid payloads per route; shape is what matters here.
+      // note: Minimal valid payloads per route; shape is what matters here.
       if ((init?.method ?? 'GET') === 'DELETE') {
         return new Response(JSON.stringify({ success: true, pending_id: 'p1' }), {
           status: 200,
@@ -713,7 +713,7 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
     await client.listMemoryFragments('c1', { keyword: 'kw', limit: 10 });
     await client.reflectSoulNarrative({ creator_id: 'c1', force_regenerate: true });
 
-    // list/count/fragments serialize creator_id (+optional params) into the
+    // note: list/count/fragments serialize creator_id (+optional params) into the
     // query string; delete encodes the pending_id path segment and adds the
     // creator_id query param; review sends creator_id in the JSON body.
     // reflect sends creator_id (+optional force_regenerate) in the JSON body.
@@ -732,10 +732,10 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
   });
 });
 
-// ── 7. Reading-depth-method parity guard (V1.89) ────────────────────────────
+// note: 7. Reading-depth-method parity guard (V1.89)
 
 /**
- * The V1.89 Deeper Manuscript Reading promotion added seven methods to the
+ * note: The V1.89 Deeper Manuscript Reading promotion added seven methods to the
  * `NexusClient` interface (`getReadingProgress` / `putReadingProgress` /
  * `deleteReadingProgress` / `listReadingAnnotations` / `createReadingAnnotation` /
  * `patchReadingAnnotation` / `deleteReadingAnnotation`). This guard mirrors the
@@ -832,10 +832,10 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
   });
 });
 
-// ── 8. Compute-run-method parity guard (V1.147 P1) ──────────────────────────
+// note: 8. Compute-run-method parity guard (V1.147 P1)
 
 /**
- * The V1.147 P1 Run Studio promotion added five methods to the `NexusClient`
+ * note: The V1.147 P1 Run Studio promotion added five methods to the `NexusClient`
  * interface (`runCompute` / `acceptRun` / `discardRun` / `listRuns` /
  * `getRun`); the V1.147 P2 clear-runs promotion added `clearRuns`. This guard
  * mirrors the preset + findings + memory + reading parity guards: it fails at
@@ -900,14 +900,14 @@ describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {
         url: '/v1/daemon/compute/run',
         body: { world_id: 'w1', module_id: 'basic-combat' },
       },
-      // Accept with no request still sends a `{}` JSON body (axum Json extractor).
+      // note: Accept with no request still sends a `{}` JSON body (axum Json extractor).
       { method: 'POST', url: '/v1/daemon/compute/runs/run_1/accept', body: {} },
       {
         method: 'POST',
         url: '/v1/daemon/compute/runs/run_1/accept',
         body: { timeline_event_ids_to_accept: ['evt_0'] },
       },
-      // Discard carries no body (handler has no Json extractor).
+      // note: Discard carries no body (handler has no Json extractor).
       { method: 'POST', url: '/v1/daemon/compute/runs/run_2/discard', body: undefined },
       {
         method: 'GET',

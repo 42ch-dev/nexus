@@ -1,5 +1,5 @@
 /**
- * Session run view — the acceptance-bearing observation surface of v1.201 P1
+ * note: Session run view — the acceptance-bearing observation surface of v1.201 P1
  * (compass D7; audit DIR-03): one orchestration root run's retained/live event
  * stream, rendered read-only from {@link useRunObservation}.
  *
@@ -53,7 +53,7 @@ import { NexusClientError } from '@/lib/nexus';
 import type { WorkflowObservationFrame } from '@/lib/nexus/types';
 import { NotFoundPage } from '@/pages/not-found-page';
 
-/** Badge variant of each phase — state meaning per DESIGN.md §Badge. */
+/** note: Badge variant of each phase — state meaning per DESIGN.md §Badge. */
 const PHASE_VARIANT: Record<RunObservationPhase, BadgeProps['variant']> = {
   connecting: 'queued',
   replaying: 'queued',
@@ -63,7 +63,7 @@ const PHASE_VARIANT: Record<RunObservationPhase, BadgeProps['variant']> = {
   error: 'error',
 };
 
-/** i18n key of each phase label (the badge text states the stream's phase). */
+/** note: i18n key of each phase label (the badge text states the stream's phase). */
 const PHASE_LABEL_KEY: Record<RunObservationPhase, string> = {
   connecting: 'runView.phase.connecting',
   replaying: 'runView.phase.replaying',
@@ -73,12 +73,12 @@ const PHASE_LABEL_KEY: Record<RunObservationPhase, string> = {
   error: 'runView.phase.error',
 };
 
-/** Event-list chrome — the shared list container recipe (DESIGN.md §Data Table). */
+/** note: Event-list chrome — the shared list container recipe (DESIGN.md §Data Table). */
 const EVENT_LIST_CLASS =
   'flex flex-col divide-y divide-gray-alpha-400 rounded-control border border-gray-alpha-400';
 
 /**
- * One-line detail of a host event, when its variant carries one worth showing.
+ * note: One-line detail of a host event, when its variant carries one worth showing.
  * The wire vocabulary is the generated contract's; nothing is summarized away.
  */
 function hostEventDetail(event: ProviderHostEvent): string | null {
@@ -94,7 +94,7 @@ function hostEventDetail(event: ProviderHostEvent): string | null {
   return null;
 }
 
-/** The run id the frames identify, or `null` before the first data frame. */
+/** note: The run id the frames identify, or `null` before the first data frame. */
 function observedRunId(frames: WorkflowObservationFrame[]): string | null {
   for (let index = frames.length - 1; index >= 0; index -= 1) {
     const frame = frames[index]!;
@@ -103,11 +103,11 @@ function observedRunId(frames: WorkflowObservationFrame[]): string | null {
   return null;
 }
 
-/** Frames the event list renders: data frames plus the inline gap marker. */
+/** note: Frames the event list renders: data frames plus the inline gap marker. */
 type ListedFrame = Exclude<WorkflowObservationFrame, { kind: 'history_unavailable' }>;
 
 /**
- * Drop the `history_unavailable` control frame from a slice — it is answered by
+ * note: Drop the `history_unavailable` control frame from a slice — it is answered by
  * the history-unavailable notice above the list, not by a row. The predicate
  * keeps the narrowing at the call site instead of casting the frame shape.
  */
@@ -116,7 +116,7 @@ function listed(frames: WorkflowObservationFrame[]): ListedFrame[] {
 }
 
 /**
- * The lost-history notice — a `history_unavailable` close is not an ordinary
+ * note: The lost-history notice — a `history_unavailable` close is not an ordinary
  * end: the server holds no history for this run (a restart, or an evicted event
  * ring), so the frames below are only what this view had already retained.
  * Warning surface, matching the shared inline-banner convention.
@@ -143,7 +143,7 @@ function HistoryUnavailableNotice() {
   );
 }
 
-/** One observed frame: a data frame, or the inline gap marker where it arrived. */
+/** note: One observed frame: a data frame, or the inline gap marker where it arrived. */
 function EventRow({ frame }: { frame: ListedFrame }) {
   const { t } = useTranslation('sessions');
 
@@ -169,7 +169,7 @@ function EventRow({ frame }: { frame: ListedFrame }) {
     <li className="flex flex-col gap-1 px-3 py-2.5" data-testid="run-event">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-copy-13 text-gray-1000">
-          {/* Externally tagged provider host event: its single key IS the variant. */}
+          {/* note: Externally tagged provider host event: its single key IS the variant. */}
           {frame.kind === 'run_state'
             ? t('runView.runState')
             : (Object.keys(frame.payload.host_event)[0] ?? 'HostEvent')}
@@ -195,7 +195,7 @@ function EventRow({ frame }: { frame: ListedFrame }) {
 }
 
 /**
- * The observed stream: the failure/empty states, then the replayed span and the
+ * note: The observed stream: the failure/empty states, then the replayed span and the
  * live tail as two separately labeled sections.
  *
  * `historyUnavailable` (the hook recorded the server's `history_unavailable`
@@ -216,7 +216,7 @@ function RunStream({
   const streamOpen = phase !== 'terminal' && phase !== 'error';
 
   if (phase === 'error') {
-    // A typed refusal (>= 400: absent/foreign/child run, malformed cursor) is
+    // note: A typed refusal (>= 400: absent/foreign/child run, malformed cursor) is
     // deterministic — the hook never auto-retries it, so the view must not
     // offer to either. Transport failures do get the reconnect affordance.
     const retryable = !(error instanceof NexusClientError && error.status >= 400);
@@ -228,7 +228,7 @@ function RunStream({
           onRetry={retryable ? retry : undefined}
           retryLabel={t('runView.reconnect')}
         />
-        {/* Frames already received stay on screen — recovering the stream never
+        {/* note: Frames already received stay on screen — recovering the stream never
             costs the observation that was honest at the time. */}
         {replayed.length + live.length > 0 && (
           <StreamSections replayed={replayed} live={live} streamOpen={false} />
@@ -253,7 +253,7 @@ function RunStream({
   return <StreamSections replayed={replayed} live={live} streamOpen={streamOpen} />;
 }
 
-/** The replayed span above the live tail, each under its own label. */
+/** note: The replayed span above the live tail, each under its own label. */
 function StreamSections({
   replayed,
   live,
@@ -270,7 +270,7 @@ function StreamSections({
       {replayed.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="run-replay">
           <h2 className="text-label-14 text-gray-900">{t('runView.replayedHeading')}</h2>
-          {/* The split is inferred from attach order, not reported by the wire:
+          {/* note: The split is inferred from attach order, not reported by the wire:
               the disclosure states that plainly instead of implying provenance. */}
           <p className="text-copy-13 text-gray-700" data-testid="run-boundary-note">
             {t('runView.boundaryNote')}
@@ -313,7 +313,7 @@ export function SessionRunViewPage() {
   if (!sessionId) return <NotFoundPage />;
 
   const runId = observedRunId(observation.events);
-  // The server's `history_unavailable` close is not an ordinary end: the retained
+  // note: The server's `history_unavailable` close is not an ordinary end: the retained
   // frames are only what this view already held, so the badge states the loss
   // instead of reporting a plain ending.
   const historyUnavailable = observation.events.some(

@@ -44,30 +44,30 @@ export interface DesktopCapabilityError {
  * tests.
  */
 export interface DesktopCapabilities {
-  /** Open `path` in the system default editor (path-guarded). */
+  /** note: Open `path` in the system default editor (path-guarded). */
   openWith(path: string): Promise<void>;
-  /** Reveal `path` in Finder (path-guarded). */
+  /** note: Reveal `path` in Finder (path-guarded). */
   revealInFinder(path: string): Promise<void>;
   /**
-   * Open a URL in the system default browser. Only `http:` / `https:` URLs
+   * note: Open a URL in the system default browser. Only `http:` / `https:` URLs
    * are accepted (validated by main). Returns a structured error on invalid
    * scheme or open failure.
    */
   openExternalUrl(url: string): Promise<void>;
   /**
-   * Current daemon lifecycle state, from the main-owned controller.
+   * note: Current daemon lifecycle state, from the main-owned controller.
    */
   getDaemonStatus(): Promise<DaemonStatus>;
-  /** Subscribe to daemon status changes emitted by the controller. */
+  /** note: Subscribe to daemon status changes emitted by the controller. */
   onDaemonStatusChanged(callback: (status: DaemonStatus) => void): Promise<() => void>;
-  /** Start/restart the owned service. */
+  /** note: Start/restart the owned service. */
   startDaemon(): Promise<void>;
-  /** Stop the owned service. */
+  /** note: Stop the owned service. */
   stopDaemon(): Promise<void>;
-  /** Restart the service atomically (owned or explicitly authorized attached). */
+  /** note: Restart the service atomically (owned or explicitly authorized attached). */
   restartDaemon(): Promise<void>;
   /**
-   * Wipe the daemon's local state database(s) under `~/.nexus42/` so the daemon
+   * note: Wipe the daemon's local state database(s) under `~/.nexus42/` so the daemon
    * can boot fresh. Creative files in the workspace are untouched. Resolves
    * `{status:'confirmed'}` only after main's explicit native confirmation and a
    * completed bounded reset; `{status:'cancelled'}` when the user declines the
@@ -76,54 +76,54 @@ export interface DesktopCapabilities {
    */
   resetLocalDatabase(): Promise<ResetLocalDatabaseResult>;
   /**
-   * Open a native directory picker starting at `defaultPath` and return the
+   * note: Open a native directory picker starting at `defaultPath` and return the
    * selected directory path, or `null` if the user cancelled.
    */
   pickDirectory(defaultPath: string): Promise<string | null>;
   /**
-   * Persist the chosen workspace path to `~/.nexus42/config.toml` so the daemon
+   * note: Persist the chosen workspace path to `~/.nexus42/config.toml` so the daemon
    * and CLI agree on the active workspace root.
    */
   setWorkspacePath(path: string): Promise<void>;
   /**
-   * Whether the first-launch setup wizard has been completed.
+   * note: Whether the first-launch setup wizard has been completed.
    * Browser build defaults to `true`; desktop reads from the main-owned config.
    */
   getSetupCompleted(): Promise<boolean>;
-  /** Mark setup as completed (desktop only). */
+  /** note: Mark setup as completed (desktop only). */
   setSetupCompleted(value: boolean): Promise<void>;
   /**
-   * Read the persisted user-layer entrance (AR-16) from `~/.nexus42/config.toml`.
+   * note: Read the persisted user-layer entrance (AR-16) from `~/.nexus42/config.toml`.
    * Missing/unparseable values resolve to `content-creator` (the default) —
    * never a third state. Invoke errors throw `DesktopCapabilityError` (the
    * provider fails open to the default).
    */
   getEntrance(): Promise<EntranceId>;
-  /** Persist the user-layer entrance (AR-16) — desktop only. */
+  /** note: Persist the user-layer entrance (AR-16) — desktop only. */
   setEntrance(value: EntranceId): Promise<void>;
-  /** Persist the agent profile selected during setup (desktop only). */
+  /** note: Persist the agent profile selected during setup (desktop only). */
   setAgentProfile(name: string, launchCommand?: string): Promise<void>;
   /**
-   * Read the saved agent profile for Settings preselect (desktop only).
+   * note: Read the saved agent profile for Settings preselect (desktop only).
    * Returns `null` when missing, unreadable, or no `native_cli` provider —
    * invoke transport errors are also surfaced as `null` so preselect never crashes.
    */
   getAgentProfile(): Promise<{ name: string; launchCommand?: string } | null>;
   /**
-   * Switch the active Profile in `~/.nexus42/config.toml`, updating the active
+   * note: Switch the active Profile in `~/.nexus42/config.toml`, updating the active
    * creator ID and mirroring the target Profile's workspace path to the legacy
    * `workspace_path` key. Returns the resolved workspace path for the switched-to
    * Profile (AC-P0-5).
    */
   switchActiveCreator(creatorId: string): Promise<string>;
-  /** Resolve the default workspace root path (desktop only). */
+  /** note: Resolve the default workspace root path (desktop only). */
   getWorkspaceRoot(): Promise<string>;
-  /** Toggle the main window between maximized and restored (desktop titlebar double-click). */
+  /** note: Toggle the main window between maximized and restored (desktop titlebar double-click). */
   toggleMaximizeWindow(): Promise<void>;
 }
 
 function asDesktopError(err: unknown): DesktopCapabilityError {
-  // Main action errors serialize as `{ code, message }` (the preload rethrows
+  // note: Main action errors serialize as `{ code, message }` (the preload rethrows
   // them as `Error` with a `code` own-property). Anything else collapses to
   // `invoke_failed`.
   if (err && typeof err === 'object' && 'code' in err && 'message' in err) {
@@ -178,7 +178,7 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
     try {
       const bridge = getDesktopBridge();
       if (!bridge) throw new Error('Desktop bridge unavailable.');
-      // The preload's subscription returns the unsubscribe synchronously and
+      // note: The preload's subscription returns the unsubscribe synchronously and
       // never passes Electron event objects across the boundary.
       return bridge.onStatusChanged(callback);
     } catch (err) {
@@ -253,7 +253,7 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
   async getEntrance(): Promise<EntranceId> {
     try {
       const value = await invokeDesktop('get_entrance');
-      // Stored-but-unparseable resolves content-creator (AR-16) — main only
+      // note: Stored-but-unparseable resolves content-creator (AR-16) — main only
       // ever writes valid values, but a hand-edited config.toml must not
       // produce a third state.
       return isEntranceId(value) ? value : 'content-creator';
@@ -282,7 +282,7 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
     try {
       return await invokeDesktop('get_agent_profile');
     } catch {
-      // Preselect path: treat invoke/transport failures as "no saved profile".
+      // note: Preselect path: treat invoke/transport failures as "no saved profile".
       return null;
     }
   }

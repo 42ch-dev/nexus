@@ -1,5 +1,5 @@
 /**
- * `SessionRunViewPage` (v1.201 P1-T3) — the acceptance-bearing observation
+ * note: `SessionRunViewPage` (v1.201 P1-T3) — the acceptance-bearing observation
  * surface (compass D7): the three author-visible states plus the view-identity
  * and refusal behaviour.
  *
@@ -37,7 +37,7 @@ interface SubscribeOptions {
 
 type Script = (options: SubscribeOptions) => AsyncIterable<WorkflowObservationFrame>;
 
-/** A `BrowserClient` (so msw keeps serving the list) with a scripted stream. */
+/** note: A `BrowserClient` (so msw keeps serving the list) with a scripted stream. */
 function stubClientFor(scripts: Script[]): { client: NexusClient; calls: SubscribeOptions[] } {
   const calls: SubscribeOptions[] = [];
   const client = Object.assign(new BrowserClient(), {
@@ -53,7 +53,7 @@ function stubClientFor(scripts: Script[]): { client: NexusClient; calls: Subscri
 const GAP: WorkflowObservationFrame = { kind: 'gap' };
 const HISTORY_UNAVAILABLE: WorkflowObservationFrame = { kind: 'history_unavailable' };
 
-/** A `run_state` frame carrying the durable status projection. */
+/** note: A `run_state` frame carrying the durable status projection. */
 function runState(id: string, status = 'running'): WorkflowObservationFrame {
   const sequence = Number(id.slice(id.indexOf(':') + 1));
   return {
@@ -63,7 +63,7 @@ function runState(id: string, status = 'running'): WorkflowObservationFrame {
   };
 }
 
-/** A `host_event` frame carrying the run/step/attempt identity. */
+/** note: A `host_event` frame carrying the run/step/attempt identity. */
 function hostEvent(id: string): WorkflowObservationFrame {
   const sequence = Number(id.slice(id.indexOf(':') + 1));
   return {
@@ -80,16 +80,16 @@ function hostEvent(id: string): WorkflowObservationFrame {
   };
 }
 
-/** A stream that yields `seed`, then ends (a closed batch). */
+/** note: A stream that yields `seed`, then ends (a closed batch). */
 async function* frames(...seed: WorkflowObservationFrame[]) {
   for (const frame of seed) yield frame;
 }
 
-/** A stream that yields `seed`, then stays open until its signal aborts. */
+/** note: A stream that yields `seed`, then stays open until its signal aborts. */
 async function* openStream(options: SubscribeOptions, ...seed: WorkflowObservationFrame[]) {
   for (const frame of seed) yield frame;
   if (options.signal.aborted) return;
-  // `Promise.withResolvers` is ES2024; this app compiles against the ES2022 lib.
+  // note: `Promise.withResolvers` is ES2024; this app compiles against the ES2022 lib.
   await new Promise<void>((resolve) => {
     options.signal.addEventListener('abort', () => resolve(), { once: true });
   });
@@ -100,7 +100,7 @@ interface Pushable {
   push: (frame: WorkflowObservationFrame) => void;
 }
 
-/** A subscription the test feeds frame by frame — arrival order, no timers. */
+/** note: A subscription the test feeds frame by frame — arrival order, no timers. */
 function pushable(): Pushable {
   const pending: WorkflowObservationFrame[] = [];
   let wake: (() => void) | null = null;
@@ -139,7 +139,7 @@ async function wait(ms: number): Promise<void> {
   });
 }
 
-/** Minimal route tree mirroring the `App.tsx` `sessions` nesting. */
+/** note: Minimal route tree mirroring the `App.tsx` `sessions` nesting. */
 function SessionsRouteTree() {
   return (
     <Routes>
@@ -151,7 +151,7 @@ function SessionsRouteTree() {
   );
 }
 
-/** Mount the run view at its own route, as the row affordance reaches it. */
+/** note: Mount the run view at its own route, as the row affordance reaches it. */
 function renderRunView(client: NexusClient, sessionId: string) {
   return renderInApp(
     <Routes>
@@ -191,13 +191,13 @@ describe('SessionRunViewPage — running', () => {
     const { client, calls } = stubClientFor([feed.stream]);
     renderInApp(<SessionsRouteTree />, { client, initialRouterEntries: ['/sessions'] });
 
-    // Shipped SPA navigation only: the row's own link carries the session id.
+    // note: Shipped SPA navigation only: the row's own link carries the session id.
     fireEvent.click(
       await screen.findByRole('link', { name: 'Open run view for session run-live' }),
     );
 
     expect(await screen.findByTestId('session-run-view')).toBeInTheDocument();
-    // One events-stream subscription, cursorless first view — no polling hook.
+    // note: One events-stream subscription, cursorless first view — no polling hook.
     expect(calls).toHaveLength(1);
     expect(calls[0].lastEventId).toBeUndefined();
     expect(screen.getByTestId('run-identity')).toHaveTextContent('Session run-live');
@@ -207,7 +207,7 @@ describe('SessionRunViewPage — running', () => {
       feed.push(runState('e1:1'));
     });
 
-    // Rendered on arrival, with no refresh affordance touched.
+    // note: Rendered on arrival, with no refresh affordance touched.
     expect(await screen.findByText('e1:1')).toBeInTheDocument();
     expect(screen.getByText('Run state')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
@@ -227,7 +227,7 @@ describe('SessionRunViewPage — running', () => {
     renderRunView(client, 'run-observe-only');
 
     expect(await screen.findByText('e1:1')).toBeInTheDocument();
-    // Observation only (plan Non-Goal): the live view has no button at all, and
+    // note: Observation only (plan Non-Goal): the live view has no button at all, and
     // nothing names a run control.
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryByText(/drive|cancel|restart|resume/i)).toBeNull();
@@ -251,7 +251,7 @@ describe('SessionRunViewPage — gap', () => {
     expect(gap).toHaveTextContent('Events were missed');
     expect(screen.getByTestId('run-phase')).toHaveTextContent('Gap');
 
-    // The server writes the frames its ring still holds after the gap on the
+    // note: The server writes the frames its ring still holds after the gap on the
     // same stream, so the view consumes them in place — it never reconnects
     // into the range whose gap was just reported.
     await act(async () => {
@@ -269,7 +269,7 @@ describe('SessionRunViewPage — gap', () => {
     const { client, calls } = stubClientFor([() => frames(GAP)]);
     renderRunView(client, 'run-gap-exhausted');
 
-    // The stream never moved past its gap, so a reconnect would re-report the
+    // note: The stream never moved past its gap, so a reconnect would re-report the
     // same gap: the view stays honestly gapped rather than looping.
     expect(await screen.findByTestId('run-event-gap')).toHaveTextContent('Events were missed');
     await wait(300);
@@ -297,24 +297,24 @@ describe('SessionRunViewPage — replay', () => {
 
     renderRunView(client, 'run-replay');
 
-    // The already-emitted history is on screen at once — never a blank view.
+    // note: The already-emitted history is on screen at once — never a blank view.
     const replay = await screen.findByTestId('run-replay');
     expect(within(replay).getByText('e1:1')).toBeInTheDocument();
     expect(within(replay).getByText('e1:2')).toBeInTheDocument();
     expect(calls[1].lastEventId).toBe('e1:2');
-    // The wire carries no replay/live marker: the split is disclosed as inferred
+    // note: The wire carries no replay/live marker: the split is disclosed as inferred
     // from attach order rather than presented as server-reported provenance.
     expect(replay).toHaveTextContent('split by attach order');
     expect(screen.getByTestId('run-live')).toHaveTextContent('Waiting for the next event…');
 
-    // The catch-up is anchored at the first frame the re-attached stream
+    // note: The catch-up is anchored at the first frame the re-attached stream
     // delivers: this one is still on the replay side of the boundary.
     await act(async () => {
       feed.push(hostEvent('e1:3'));
     });
     expect(await within(replay).findByText('e1:3')).toBeInTheDocument();
 
-    // Past the settle handoff, an appended frame is the live tail — not replay.
+    // note: Past the settle handoff, an appended frame is the live tail — not replay.
     await act(async () => {
       await wait(400);
       feed.push(hostEvent('e1:4'));
@@ -333,13 +333,13 @@ describe('SessionRunViewPage — replay', () => {
     expect(await screen.findByTestId('run-history-unavailable')).toHaveTextContent(
       'Server history unavailable',
     );
-    // The badge states what was lost — a `history_unavailable` close is not "Ended".
+    // note: The badge states what was lost — a `history_unavailable` close is not "Ended".
     expect(screen.getByTestId('run-phase')).toHaveTextContent('History unavailable');
     expect(screen.queryAllByTestId('run-event')).toHaveLength(0);
   });
 
   it('keeps the retained frames under the history-unavailable notice rather than presenting them as an ordinary end', async () => {
-    // The first view receives frames and leaves; the server then answers this
+    // note: The first view receives frames and leaves; the server then answers this
     // view's re-entry subscription with `history_unavailable` alone (the saved
     // cursor names a prior epoch or an evicted ring), so the frames still on
     // screen are only what this view had already retained.
@@ -357,9 +357,9 @@ describe('SessionRunViewPage — replay', () => {
     expect(await screen.findByTestId('run-history-unavailable')).toHaveTextContent(
       /no longer holds this run's history/i,
     );
-    // The re-entry asked from the last received cursor, and was told no.
+    // note: The re-entry asked from the last received cursor, and was told no.
     expect(calls[1].lastEventId).toBe('e1:2');
-    // The retained frames stay visible — the loss is disclosed, not papered over.
+    // note: The retained frames stay visible — the loss is disclosed, not papered over.
     expect(screen.getByTestId('run-replay')).toBeInTheDocument();
     expect(screen.getByText('e1:1')).toBeInTheDocument();
     expect(screen.getByText('e1:2')).toBeInTheDocument();
@@ -382,7 +382,7 @@ describe('SessionRunViewPage — failure', () => {
     );
     await waitFor(() => expect(calls).toHaveLength(4), { timeout: 5_000 });
 
-    // A transport failure is not a verdict: the view offers the reconnect.
+    // note: A transport failure is not a verdict: the view offers the reconnect.
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
 
     await waitFor(() => expect(calls).toHaveLength(5));
@@ -403,10 +403,10 @@ describe('SessionRunViewPage — failure', () => {
     renderRunView(client, 'run-child');
 
     expect(await screen.findByRole('alert')).toHaveTextContent('run run-child is not a root run');
-    // Identity stays honest about what was asked for.
+    // note: Identity stays honest about what was asked for.
     expect(screen.getByTestId('run-identity')).toHaveTextContent('Session run-child');
     expect(screen.getByTestId('run-phase')).toHaveTextContent('Error');
-    // A refusal is deterministic: one attempt, never a retry loop — and the
+    // note: A refusal is deterministic: one attempt, never a retry loop — and the
     // view offers no reconnect to a run it cannot observe.
     expect(calls).toHaveLength(1);
     expect(screen.queryByRole('button')).toBeNull();

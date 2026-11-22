@@ -18,7 +18,7 @@ function LocationDisplay() {
   return <div data-testid="location">{location.pathname}</div>;
 }
 
-// V1.120 P0 T2: a shared toggle lets the load-error test simulate the canvas
+// note: V1.120 P0 T2: a shared toggle lets the load-error test simulate the canvas
 // returning its internal `ErrorState` while the page-level Back stays visible.
 // `vi.hoisted` keeps the object reference stable inside the hoisted mock
 // factory.
@@ -69,7 +69,7 @@ describe('StrategyPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Preset' })).toBeInTheDocument());
     expect(screen.getByTestId('strategy-canvas')).toHaveTextContent('user/foo');
     expect(screen.getByTestId('location')).toHaveTextContent('/strategies/user%2Ffoo');
-    // AC-P0-2: a Back control to /strategies is rendered on the detail header.
+    // note: AC-P0-2: a Back control to /strategies is rendered on the detail header.
     expect(screen.getByRole('button', { name: /Back/i })).toBeInTheDocument();
   });
 
@@ -118,7 +118,7 @@ describe('StrategyPage', () => {
       initialRouterEntries: ['/strategies/user%2Ffoo'],
     });
 
-    // The canvas is in its error shell, but the page header Back still renders.
+    // note: The canvas is in its error shell, but the page header Back still renders.
     await waitFor(() =>
       expect(screen.getByTestId('strategy-canvas-error')).toBeInTheDocument(),
     );

@@ -1,5 +1,5 @@
 /**
- * Entrance-scoped app registry (plan v1219 Task 2 — Interfaces).
+ * note: Entrance-scoped app registry (plan v1219 Task 2 — Interfaces).
  *
  * One rail item = one app = one route-level lazy chunk. `load` factories are
  * dynamic imports resolved through `React.lazy` at the route boundary
@@ -39,15 +39,15 @@ export type AppId =
 
 export interface AppDef {
   id: AppId;
-  /** `shell` namespace i18n key for the rail label. */
+  /** note: `shell` namespace i18n key for the rail label. */
   label: string;
   icon: ComponentType<{ className?: string }>;
   route: string;
-  /** Route-level chunk; invoked only when the app is unlocked and rendered. */
+  /** note: Route-level chunk; invoked only when the app is unlocked and rendered. */
   load: () => Promise<{ default: ComponentType }>;
-  /** 作品 only — mapped to the activation store's `brief-saved` event (D26). */
+  /** note: 作品 only — mapped to the activation store's `brief-saved` event (D26). */
   lockedUntil?: 'brief-saved';
-  /** Locked reason, verbatim from the plan § Copy table. Absent = never locked. */
+  /** note: Locked reason, verbatim from the plan § Copy table. Absent = never locked. */
   lockReason?: string;
 }
 

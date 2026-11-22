@@ -1,5 +1,5 @@
 /**
- * Validate Preset dialog — the dry-run body over the real service route shape.
+ * note: Validate Preset dialog — the dry-run body over the real service route shape.
  *
  * The core derives `valid` from errors alone and reports warnings separately,
  * so a valid verdict with warnings must render BOTH; the earlier body returned
@@ -39,7 +39,7 @@ describe('ValidatePresetDialog', () => {
 
     renderDialog();
     const dialog = await screen.findByRole('dialog');
-    // The field is reachable through its own label (id derived per instance).
+    // note: The field is reachable through its own label (id derived per instance).
     expect(within(dialog).getByLabelText('Preset path')).toHaveValue(
       '/home/a/.nexus42/presets/p/preset.yaml',
     );

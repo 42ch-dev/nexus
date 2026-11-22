@@ -1,5 +1,5 @@
 /**
- * Free-string status → Badge variant (the app-wide keyword matcher).
+ * note: Free-string status → Badge variant (the app-wide keyword matcher).
  *
  * Kept as a pure, import-free module so the i18n-free, contract-free Design
  * Studio chrome extracts can share it; `components/status-badge.tsx`

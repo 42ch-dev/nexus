@@ -1,5 +1,5 @@
 /**
- * Saved-agent-profile seam (v1220 T2, service-backed in T1) — transport-aware
+ * note: Saved-agent-profile seam (v1220 T2, service-backed in T1) — transport-aware
  * reads for the shared profile seam.
  *
  * Browser: the daemon-global service profile is authoritative; a null service
@@ -91,10 +91,10 @@ describe('useSavedAgentProfile', () => {
     renderProbe();
 
     expect(await screen.findByText('snapshot-agent')).toBeInTheDocument();
-    // The legacy snapshot is not written back; it is migrated to the service.
+    // note: The legacy snapshot is not written back; it is migrated to the service.
     expect(puts).toEqual([{ name: 'snapshot-agent' }]);
 
-    // A later read is answered by the service, so a changed legacy value is
+    // note: A later read is answered by the service, so a changed legacy value is
     // neither consulted nor re-written.
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'stale-agent' }));
     await userEvent.click(screen.getByRole('button', { name: 'retry-profile' }));
@@ -119,7 +119,7 @@ describe('useSavedAgentProfile', () => {
     renderProbe();
 
     expect(await screen.findByText('snapshot-agent')).toBeInTheDocument();
-    // Best-effort migration: the snapshot stays for the next load.
+    // note: Best-effort migration: the snapshot stays for the next load.
     expect(window.localStorage.getItem(STORAGE_KEY)).not.toBeNull();
   });
 
