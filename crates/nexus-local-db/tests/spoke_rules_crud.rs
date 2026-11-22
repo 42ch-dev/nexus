@@ -15,6 +15,8 @@
 //! opaque whole-bag carrier replacement, unknown id / foreign world →
 //! `Ok(false)`, `updated_at` refreshed on every matched update incl.
 //! value-identical ones, `created_at` untouched, JSON columns stored verbatim).
+// why: storage holds raw column values behind world guards without imposing
+// spoke vocabulary, so the contract is pinned at that boundary.
 
 #![allow(clippy::unwrap_used)]
 
@@ -31,7 +33,7 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Full row exercising every column, including the opaque JSON carriers and
+/// note: Full row exercising every column, including the opaque JSON carriers and
 /// epoch timestamps.
 fn full_row(rule_id: &str, world_id: &str, canonical_name: &str) -> SpokeRuleRow {
     SpokeRuleRow {
@@ -71,7 +73,7 @@ async fn insert_rule_round_trips_full_row_verbatim() {
     assert_eq!(got.kind, "prohibition");
     assert_eq!(got.statement.as_deref(), Some("full row statement"));
     assert_eq!(got.description.as_deref(), Some("full row description"));
-    // Opaque JSON columns round-trip byte-for-byte (no nexus-side parsing).
+    // note: opaque JSON columns round-trip byte-for-byte (no nexus-side parsing).
     assert_eq!(got.target_entry_types_json, r#"["character","event"]"#);
     assert_eq!(got.severity_hint.as_deref(), Some("error"));
     assert_eq!(got.status.as_deref(), Some("draft"));
@@ -140,19 +142,19 @@ async fn set_rule_status_unknown_id_and_foreign_world_return_false() {
         .await
         .unwrap();
 
-    // Unknown rule_id in an otherwise valid world.
+    // note: unknown rule_id in an otherwise valid world.
     let updated = set_rule_status(&pool, "wld_1", "rul_missing", "deprecated")
         .await
         .unwrap();
     assert!(!updated, "unknown rule_id must not match");
 
-    // Known rule_id, foreign world_id — the world guard must hold it back.
+    // note: known rule_id, foreign world_id — the world guard must hold it back.
     let updated = set_rule_status(&pool, "wld_2", "rul_w1", "deprecated")
         .await
         .unwrap();
     assert!(!updated, "foreign world_id must not match");
 
-    // The guarded attempt must not have mutated the row.
+    // invariant: the guarded attempt must not have mutated the row.
     let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
     assert_eq!(listed[0].rule_id, "rul_w1");
     assert_eq!(
@@ -162,7 +164,7 @@ async fn set_rule_status_unknown_id_and_foreign_world_return_false() {
     );
     assert_eq!(listed[0].updated_at, Some(1_700_000_042));
 
-    // The other world's own transition still works (isolation, not a lock).
+    // note: the other world's own transition still works (isolation, not a lock).
     let updated = set_rule_status(&pool, "wld_2", "rul_w2", "active")
         .await
         .unwrap();
@@ -175,7 +177,7 @@ async fn set_rule_status_unknown_id_and_foreign_world_return_false() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_by_world_orders_and_isolates() {
     let (pool, _dir) = setup_db().await;
-    // Insert in shuffled order; names chosen to exercise the
+    // note: insert in shuffled order; names chosen to exercise the
     // `canonical_name ASC, rule_id ASC` tie-break (two "beta" rows).
     insert_rule(&pool, &full_row("rul_beta2", "wld_1", "beta"))
         .await
@@ -201,7 +203,7 @@ async fn list_rules_by_world_orders_and_isolates() {
         "canonical_name ASC with rule_id ASC tie-break; other worlds absent"
     );
 
-    // AR-3: the store returns ALL statuses — no status filter at this
+    // note: AR-3 — the store returns ALL statuses; no status filter at this
     // layer (the adapter boundary owns the active-only auto-include).
     // Transition two rows off the default `draft` seed so one world holds
     // all three spoke statuses at once.
@@ -228,7 +230,7 @@ async fn list_rules_by_world_orders_and_isolates() {
          no status filter (AR-3)"
     );
 
-    // Unknown world → empty vec, not an error.
+    // note: unknown world → empty vec, not an error.
     let none = list_rules_by_world(&pool, "wld_nope").await.unwrap();
     assert!(none.is_empty(), "unknown world must return an empty vec");
 }
@@ -274,7 +276,7 @@ async fn update_rule_replaces_every_mutable_field() {
         got.extensions_json,
         r#"{"nexus":{"constraint":{"family":"module_presence","module_key":"karma"}}}"#
     );
-    // Non-mutable columns are untouched.
+    // note: non-mutable columns are untouched.
     assert_eq!(
         got.description.as_deref(),
         Some("before description"),
@@ -320,7 +322,7 @@ async fn update_rule_none_fields_keep_stored_values() {
     assert_eq!(listed.len(), 1);
     let got = &listed[0];
     assert_eq!(got.canonical_name, "renamed");
-    // COALESCE pass-through: every `None` field keeps its stored value.
+    // note: COALESCE pass-through — every `None` field keeps its stored value.
     assert_eq!(got.statement.as_deref(), Some("keep me statement"));
     assert_eq!(got.severity_hint.as_deref(), Some("error"));
     assert_eq!(got.status.as_deref(), Some("draft"));
@@ -411,7 +413,7 @@ async fn update_rule_foreign_world_rule_id_returns_false() {
         .await
         .unwrap();
 
-    // Known rule_id, foreign world_id — the world guard must hold it back.
+    // note: known rule_id, foreign world_id — the world guard must hold it back.
     let updated = update_rule(
         &pool,
         "wld_2",
@@ -430,13 +432,13 @@ async fn update_rule_foreign_world_rule_id_returns_false() {
     .unwrap();
     assert!(!updated, "foreign world_id must not match");
 
-    // The guarded attempt must not have mutated the row.
+    // invariant: the guarded attempt must not have mutated the row.
     let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
     assert_eq!(listed[0].rule_id, "rul_w1");
     assert_eq!(listed[0].canonical_name, "world one");
     assert_eq!(listed[0].updated_at, Some(1_700_000_042));
 
-    // The other world's own update still works (isolation, not a lock).
+    // note: the other world's own update still works (isolation, not a lock).
     let updated = update_rule(
         &pool,
         "wld_2",
@@ -465,7 +467,7 @@ async fn update_rule_refreshes_updated_at_keeps_created_at() {
         .await
         .unwrap();
 
-    // Value-changing update: `updated_at` must move past the seeded value,
+    // note: value-changing update — `updated_at` must move past the seeded value,
     // `created_at` must stay untouched.
     let updated = update_rule(
         &pool,
@@ -494,7 +496,7 @@ async fn update_rule_refreshes_updated_at_keeps_created_at() {
     );
     assert_eq!(first.created_at, Some(1_700_000_000));
 
-    // Value-identical update (the row matched): still `Ok(true)` and
+    // note: value-identical update (the row matched) — still `Ok(true)` and
     // `updated_at` is refreshed again (AR-4 — matched write wins, no OCC);
     // `created_at` still untouched.
     let updated = update_rule(
@@ -533,7 +535,7 @@ async fn update_rule_stores_pre_serialized_json_verbatim() {
         .await
         .unwrap();
 
-    // Non-canonical JSON text (extra whitespace) — storage must not parse or
+    // note: non-canonical JSON text (extra whitespace) — storage must not parse or
     // re-serialize; the bytes given must be the bytes stored (no JSON
     // assembly happens here; the daemon pre-serializes).
     let target_json = r#"[ "character" ,  "event" ]"#.to_string();

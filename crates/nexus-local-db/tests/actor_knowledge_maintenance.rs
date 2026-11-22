@@ -1,4 +1,6 @@
 //! P2 Task 2 — stored-owner summary CAS and referent-guarded delete.
+// why: both paths must refuse without writing, so the transaction outcomes are
+// proved against the real guard and revision columns.
 
 #![allow(clippy::unwrap_used)]
 
@@ -68,7 +70,7 @@ async fn seed_character(pool: &SqlitePool) -> (String, String) {
     (created.character.character_id, created.binding.binding_id)
 }
 
-/// Another Character owned by `OWNER`, created with its initial binding in
+/// note: Another Character owned by `OWNER`, created with its initial binding in
 /// `world_id` (the same World unless the test seeds a second one).
 async fn seed_character_in(pool: &SqlitePool, world_id: &str, display_name: &str) -> String {
     create_character_with_initial_binding(
@@ -99,7 +101,7 @@ async fn insert_character_ke(
     if let Some(raw) = body_json {
         kb.body = serde_json::from_str::<KnowledgeEntryBody>(raw).ok();
         if kb.body.is_none() {
-            // raw object stored via manual insert path below for malformed tests
+            // note: raw object stored via manual insert path below for malformed tests
             let entry_id = kb.entry_id.clone();
             sqlx::query(
                 "INSERT INTO kb_key_blocks (key_block_id, owner_kind, character_id, block_type, canonical_name, status, body_json, created_at) \
@@ -136,7 +138,7 @@ async fn foreign_path_returns_none_without_leaking() {
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
-    // v1.191 P1 T6 (C1): the stored-owner read resolves the requested
+    // note: v1.191 P1 T6 (C1) — the stored-owner read resolves the requested
     // Character's registry holder, so a foreign requested owner is refused
     // with the same `ActorNotFound` a missing Character yields — the refused
     // class still reveals no row and no holder fact. This assertion was left
@@ -146,7 +148,7 @@ async fn foreign_path_returns_none_without_leaking() {
         .await
         .unwrap_err();
     assert!(matches!(refused, LocalDbError::ActorNotFound { .. }));
-    // Positive control: the owning Creator still sees the row.
+    // note: positive control — the owning Creator still sees the row.
     assert!(get_actor_knowledge_entry(&pool, OWNER, &chr, &entry)
         .await
         .unwrap()
@@ -899,9 +901,9 @@ async fn delete_refused_when_target_modules_reference_own_id() {
     assert_conflict(err, ActorContractConflict::KnowledgeEntryInUse);
 }
 
-// ── v1.191 P1 T7: admitted audience authoring (durable §3/§4.3) ──────────
+// note: v1.191 P1 T7 — admitted audience authoring (durable §3/§4.3).
 
-/// Stored native governance pair + per-row OCC revision of one KE.
+/// note: Stored native governance pair + per-row OCC revision of one KE.
 async fn stored_pair(pool: &SqlitePool, entry_id: &str) -> (Option<String>, Option<String>, i64) {
     sqlx::query_as(
         "SELECT holder_entry_id, disclosure, COALESCE(revision, 0) \
@@ -913,7 +915,7 @@ async fn stored_pair(pool: &SqlitePool, entry_id: &str) -> (Option<String>, Opti
     .unwrap()
 }
 
-/// Whole-row snapshot used to prove a refusal wrote nothing.
+/// note: Whole-row snapshot used to prove a refusal wrote nothing.
 async fn row_snapshot(pool: &SqlitePool, entry_id: &str) -> String {
     sqlx::query_scalar::<_, String>(
         "SELECT COALESCE(holder_entry_id, '') || '|' || COALESCE(disclosure, '') || '|' || \
@@ -1036,7 +1038,7 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
     );
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 1);
 
-    // Explicit `shared` clears both columns and is material.
+    // note: explicit `shared` clears both columns and is material.
     author_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1051,7 +1053,7 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
     assert_eq!(stored_pair(&pool, &entry).await, (None, None, 2));
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 2);
 
-    // Re-authoring the same (shared) pair with unchanged content is a no-op:
+    // invariant: re-authoring the same (shared) pair with unchanged content is a no-op —
     // neither revision may move.
     let before = row_snapshot(&pool, &entry).await;
     let unchanged = author_actor_knowledge_entry(
@@ -1095,7 +1097,7 @@ async fn v1191_audience_cas_no_op_preserves_both_revisions() {
     let before = row_snapshot(&pool, &entry).await;
     let knowledge_revision = character_knowledge_revision(&pool, &chr).await;
 
-    // Identical content (same summary) + identical audience.
+    // note: identical content (same summary) + identical audience.
     let no_op = author_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1119,7 +1121,7 @@ async fn v1191_audience_cas_no_op_preserves_both_revisions() {
     );
 }
 
-/// Regression (L2 C1): an explicit content field that re-states the stored
+/// note: Regression (L2 C1) — an explicit content field that re-states the stored
 /// value may not mask a governance change — the no-op decision covers content
 /// **and** governance, in both directions.
 #[tokio::test]
@@ -1129,7 +1131,7 @@ async fn v1191_audience_cas_content_restating_the_stored_value_still_applies_gov
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
 
-    // shared → private while re-stating the stored summary.
+    // note: shared → private while re-stating the stored summary.
     let authored = author_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1160,7 +1162,7 @@ async fn v1191_audience_cas_content_restating_the_stored_value_still_applies_gov
     );
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 1);
 
-    // private → shared while re-stating the stored summary (the C1 example).
+    // note: private → shared while re-stating the stored summary (the C1 example).
     let cleared = author_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1215,7 +1217,7 @@ async fn v1191_audience_cas_unregistered_holder_refuses_with_zero_mutation() {
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
     let before = row_snapshot(&pool, &entry).await;
-    // Remove the subject's registry row: the in-transaction resolution must
+    // note: remove the subject's registry row — the in-transaction resolution must
     // fail closed instead of admitting a silently derived holder id.
     sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
         .bind(&chr)
@@ -1246,7 +1248,7 @@ async fn v1191_audience_cas_unregistered_holder_refuses_with_zero_mutation() {
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 0);
 }
 
-/// Regression (L2 C3/I1): the permitted-identity rules are re-resolved from
+/// note: Regression (L2 C3/I1) — the permitted-identity rules are re-resolved from
 /// stored state inside the authoring transaction.
 #[tokio::test]
 async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() {
@@ -1257,7 +1259,7 @@ async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() 
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
     let before = row_snapshot(&pool, &entry).await;
 
-    // A Character row may only target its own owning Character.
+    // note: a Character row may only target its own owning Character.
     let err = author_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1278,7 +1280,7 @@ async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() 
     assert_eq!(row_snapshot(&pool, &entry).await, before);
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 0);
 
-    // A foreign Creator's holder is likewise refused (no leak).
+    // note: a foreign Creator's holder is likewise refused (no leak).
     let err = author_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1294,7 +1296,7 @@ async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() 
     assert_eq!(row_snapshot(&pool, &entry).await, before);
 }
 
-/// Regression (L2 C3): a World container's `character-private` audience is
+/// note: Regression (L2 C3) — a World container's `character-private` audience is
 /// resolved in-transaction against ownership, activity and an **active
 /// binding** to that World.
 const fn world_container() -> nexus_local_db::kb_store::AudienceContainer<'static> {
@@ -1310,7 +1312,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
     let (pool, _dir) = fresh_pool().await;
     seed(&pool).await;
     let (chr, binding) = seed_character(&pool).await;
-    // A second owned World, so this Character holds no binding to `WORLD`.
+    // note: a second owned World, so this Character holds no binding to `WORLD`.
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -1323,7 +1325,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
     .await
     .unwrap();
     let unbound = seed_character_in(&pool, "wld_worldB", "Unbound").await;
-    // The bound Character resolves to its own registry holder.
+    // note: the bound Character resolves to its own registry holder.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let resolved = nexus_local_db::kb_store::resolve_authored_audience_tx(
         &mut tx,
@@ -1343,7 +1345,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
         Some(DISCLOSURE_OWNER_PRIVATE)
     );
 
-    // An owned Character without a binding to that World is refused.
+    // invariant: an owned Character without a binding to that World is refused.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let err = nexus_local_db::kb_store::resolve_authored_audience_tx(
         &mut tx,
@@ -1360,7 +1362,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
         "an unbound Character is not a permitted World-row audience, got {err:?}"
     );
 
-    // Archiving the bound Character removes it from the permitted set even
+    // note: archiving the bound Character removes it from the permitted set even
     // though its binding row is untouched — the refusal is decided in-tx.
     transition_character(&pool, OWNER, &chr, 0, CharacterStatus::Archived)
         .await
@@ -1376,7 +1378,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
     tx.rollback().await.unwrap();
     assert_conflict(err, ActorContractConflict::CharacterInactive);
 
-    // The binding itself still exists (the archive did not unlink it).
+    // note: the binding itself still exists (the archive did not unlink it).
     let stored: String =
         sqlx::query_scalar("SELECT status FROM actor_world_bindings WHERE binding_id = ?")
             .bind(&binding)
@@ -1405,7 +1407,7 @@ async fn v1191_audience_cas_ordinary_content_patch_preserves_governance() {
     .await
     .unwrap();
 
-    // The ordinary content lane cannot transfer or clear governance, and a
+    // invariant: the ordinary content lane cannot transfer or clear governance, and a
     // material content edit still bumps the owning Character's revision.
     let updated = update_actor_knowledge_entry(
         &pool,
@@ -1463,7 +1465,7 @@ async fn v1191_audience_cas_binding_owned_governance_bumps_the_owning_character(
     );
 }
 
-// ── v1.233 P1 T4: the two kb_store primitives own the statements ──────────
+// note: v1.233 P1 T4 — the two kb_store primitives own the statements.
 // The assertions below call the primitives directly so a loosened predicate
 // (revision CAS, terminal-status exclusion, ownership conjunct, governance
 // guard) or a statement that escaped the caller's transaction fails here
@@ -1514,7 +1516,7 @@ async fn t4_primitive_ownership_drift_misses() {
     let (chr, binding) = seed_character(&pool).await;
     let other_chr = seed_character_in(&pool, WORLD, "Rival").await;
 
-    // A Character-owned row written under another Character's id.
+    // note: a Character-owned row written under another Character's id.
     let owned = insert_character_ke(&pool, &chr, "mine", None).await;
     let before = row_snapshot(&pool, &owned).await;
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
@@ -1533,7 +1535,7 @@ async fn t4_primitive_ownership_drift_misses() {
     assert_eq!(cross, 0, "a cross-owner patch matches no row");
     assert_eq!(row_snapshot(&pool, &owned).await, before);
 
-    // A binding-owned row whose binding is no longer active.
+    // note: a binding-owned row whose binding is no longer active.
     let bound = create_binding_owned_ke(&pool, &chr, &binding, "bound-fact").await;
     sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
         .bind(&binding)
@@ -1637,7 +1639,7 @@ async fn t4_primitive_delete_honours_caller_transaction() {
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
 
-    // A protected referent refuses through the guard and leaves the row.
+    // invariant: a protected referent refuses through the guard and leaves the row.
     let guarded = insert_character_ke(&pool, &chr, "guarded", None).await;
     sqlx::query(
         "INSERT INTO kb_source_anchors (key_block_id, anchor_ordinal, source_anchor_json) VALUES (?, 0, '{}')",
@@ -1656,7 +1658,7 @@ async fn t4_primitive_delete_honours_caller_transaction() {
         "refusal removed nothing"
     );
 
-    // An unguarded row is deleted inside the caller's transaction: the caller
+    // note: an unguarded row is deleted inside the caller's transaction — the caller
     // rolls it back and the row survives.
     let entry = insert_character_ke(&pool, &chr, "doomed", None).await;
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
@@ -1695,7 +1697,7 @@ async fn t4_primitive_patch_row_count_is_one_or_zero() {
     tx.commit().await.unwrap();
     let applied = row_snapshot(&pool, &entry).await;
 
-    // Replaying the applied revision is a miss, never a second silent write.
+    // invariant: replaying the applied revision is a miss, never a second silent write.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let replay = cas_patch_actor_knowledge_in_tx(
         &mut tx,
@@ -1712,7 +1714,7 @@ async fn t4_primitive_patch_row_count_is_one_or_zero() {
     tx.commit().await.unwrap();
     assert_eq!(row_snapshot(&pool, &entry).await, applied);
 
-    // The public surface turns that zero into the revision conflict.
+    // note: the public surface turns that zero into the revision conflict.
     let err = update_actor_knowledge_entry(
         &pool,
         OWNER,

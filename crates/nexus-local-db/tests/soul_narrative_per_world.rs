@@ -5,12 +5,14 @@
 //!   as `world_id = NULL`.
 //! - The partial UNIQUE index blocks duplicate Creator-level rows.
 //! - Per-World stats are distinct from the Creator-level whole.
+// why: the composite key rewrote rows created by an earlier schema, so the
+// upgrade path is proved on a real pre-V1.81 database.
 
 #![allow(clippy::unwrap_used)]
 
 use nexus_local_db::{init_pool, memory_fragment, soul_narrative_fragment_stats};
 
-/// Create the pre-V1.81 `memory_soul_narratives` table (as created by migration
+/// note: Create the pre-V1.81 `memory_soul_narratives` table (as created by migration
 /// 20260701) and seed one Creator-level narrative row. Running the full
 /// migration chain from this state exercises the 20260702 stats-cache add,
 /// the 20260703 nullable-narrative recreation, and the 20260704 composite-key
@@ -61,7 +63,7 @@ async fn seed_v181_schema(pool: &sqlx::SqlitePool) {
 async fn v181_creator_narrative_survives_as_null_world_id() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    // A pre-V1.81 binary had no writer protocol, so the legacy schema is built
+    // note: a pre-V1.81 binary had no writer protocol, so the legacy schema is built
     // by a raw pool; the upgrade itself then runs through the production
     // admitted factory (which is what a real upgrade does).
     seed_v181_schema_raw(&db_path).await;
@@ -88,13 +90,13 @@ async fn v181_creator_narrative_survives_as_null_world_id() {
 async fn partial_unique_index_blocks_duplicate_creator_level_row() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    // A pre-V1.81 binary had no writer protocol, so the legacy schema is built
+    // note: a pre-V1.81 binary had no writer protocol, so the legacy schema is built
     // by a raw pool; the upgrade itself then runs through the production
     // admitted factory (which is what a real upgrade does).
     seed_v181_schema_raw(&db_path).await;
     let pool = init_pool(&db_path).await.unwrap();
 
-    // A second NULL-world_id row for the same creator must fail.
+    // invariant: a second NULL-world_id row for the same creator must fail.
     let result = sqlx::query(
         "INSERT INTO memory_soul_narratives
          (creator_id, world_id, narrative, generated_at, fragment_count_at_generation,
@@ -114,7 +116,7 @@ async fn partial_unique_index_blocks_duplicate_creator_level_row() {
         "partial UNIQUE index must reject duplicate Creator-level row"
     );
 
-    // A world-bearing row for the same creator is allowed.
+    // note: a world-bearing row for the same creator is allowed.
     let result = sqlx::query(
         "INSERT INTO memory_soul_narratives
          (creator_id, world_id, narrative, generated_at, fragment_count_at_generation,
@@ -169,39 +171,39 @@ async fn per_world_stats_are_distinct_from_creator_whole() {
     let world_a = "wld_a";
     let world_b = "wld_b";
 
-    // World A: 12 fragments, 12 distinct keywords.
+    // note: World A — 12 fragments, 12 distinct keywords.
     for i in 0..12 {
         let kw = format!("a_kw_{i}");
         insert_fragment(&pool, creator_id, Some(world_a), &[&kw], i).await;
     }
 
-    // World B: 8 fragments, 8 distinct keywords.
+    // note: World B — 8 fragments, 8 distinct keywords.
     for i in 0..8 {
         let kw = format!("b_kw_{i}");
         insert_fragment(&pool, creator_id, Some(world_b), &[&kw], i + 100).await;
     }
 
-    // 5 Creator-core fragments (no world_id), 5 distinct keywords.
+    // note: 5 Creator-core fragments (no world_id), 5 distinct keywords.
     for i in 0..5 {
         let kw = format!("core_kw_{i}");
         insert_fragment(&pool, creator_id, None, &[&kw], i + 200).await;
     }
 
-    // Creator whole: 25 fragments, threshold-saturated count (20).
+    // note: Creator whole — 25 fragments, threshold-saturated count (20).
     let (whole_stats, _) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
     assert_eq!(whole_stats.fragment_count, 25);
     assert_eq!(whole_stats.distinct_keyword_count, 20);
 
-    // World A subset: 12 fragments, 12 distinct keywords (below threshold → exact).
+    // note: World A subset — 12 fragments, 12 distinct keywords (below threshold → exact).
     let (a_stats, _) = soul_narrative_fragment_stats(&pool, creator_id, Some(world_a))
         .await
         .unwrap();
     assert_eq!(a_stats.fragment_count, 12);
     assert_eq!(a_stats.distinct_keyword_count, 12);
 
-    // World B subset: 8 fragments, 8 distinct keywords (below threshold → exact).
+    // note: World B subset — 8 fragments, 8 distinct keywords (below threshold → exact).
     let (b_stats, _) = soul_narrative_fragment_stats(&pool, creator_id, Some(world_b))
         .await
         .unwrap();

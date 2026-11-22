@@ -45,7 +45,7 @@ fn payload(summary: &str, name: &str) -> String {
     .to_string()
 }
 
-// ── AC1: idempotent re-run produces no diff ──────────────────────────────
+// note: AC1 — idempotent re-run produces no diff.
 
 #[tokio::test]
 async fn upsert_inserts_then_is_unchanged_on_identical_recall() {
@@ -67,7 +67,7 @@ async fn upsert_inserts_then_is_unchanged_on_identical_recall() {
     .unwrap();
     assert!(matches!(first, UpsertOutcome::Inserted(_)));
 
-    // Identical re-call → Unchanged (no diff).
+    // note: identical re-call → Unchanged (no diff).
     let second = upsert_pending_candidate(
         &pool,
         CREATOR,
@@ -117,20 +117,20 @@ async fn upsert_reports_updated_when_payload_changes() {
     .unwrap();
     assert!(matches!(outcome, UpsertOutcome::Updated(_)));
 
-    // The pending row now carries the refreshed payload.
+    // note: the pending row now carries the refreshed payload.
     let expected = payload("v2-edited", "Lin Xia");
     let rows = list_for_chapter(&pool, WORK, 1).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].proposed_payload.as_deref(), Some(expected.as_str()));
 }
 
-// ── Composite key: one row per (creator, world, name) ────────────────────
+// note: composite key — one row per (creator, world, name).
 
 #[tokio::test]
 async fn upsert_never_duplicates_across_chapters_for_same_name() {
     let (pool, _dir) = fresh_pool().await;
 
-    // Chapter 3 extraction of "Lin Xia".
+    // note: chapter 3 extraction of "Lin Xia".
     upsert_pending_candidate(
         &pool,
         CREATOR,
@@ -145,7 +145,7 @@ async fn upsert_never_duplicates_across_chapters_for_same_name() {
     .await
     .unwrap();
 
-    // Chapter 5 extraction of the SAME name reuses the existing row (DB
+    // note: chapter 5 extraction of the SAME name reuses the existing row (DB
     // uniqueness on (creator, work_entry_id=name, world)) and refreshes its
     // source_chapter_id + payload instead of duplicating.
     let outcome = upsert_pending_candidate(
@@ -166,7 +166,7 @@ async fn upsert_never_duplicates_across_chapters_for_same_name() {
         "cross-chapter same-name must reuse row (Updated), got {outcome:?}"
     );
 
-    // Exactly one row exists for this name — no duplicate.
+    // note: exactly one row exists for this name — no duplicate.
     let pending = nexus_local_db::kb_extract_job::list_pending_for_world(&pool, WORLD, None)
         .await
         .unwrap();
@@ -180,7 +180,7 @@ async fn upsert_never_duplicates_across_chapters_for_same_name() {
         "no duplicate rows for same name across chapters"
     );
 
-    // source_chapter_id was refreshed to the latest rescan (5).
+    // note: source_chapter_id was refreshed to the latest rescan (5).
     assert_eq!(lin_xia[0].source_chapter_id, Some(5));
 }
 
@@ -218,12 +218,12 @@ async fn upsert_distinct_names_get_distinct_rows() {
     assert_eq!(rows.len(), 2);
 }
 
-// ── Confirmed is terminal ─────────────────────────────────────────────────
+// note: confirmed is terminal.
 
 #[tokio::test]
 async fn upsert_leaves_confirmed_row_unchanged() {
     let (pool, _dir) = fresh_pool().await;
-    // Seed a pending candidate via insert_pending, then confirm it.
+    // note: seed a pending candidate via insert_pending, then confirm it.
     let candidate = insert_pending(
         &pool,
         CREATOR,
@@ -239,7 +239,7 @@ async fn upsert_leaves_confirmed_row_unchanged() {
     .unwrap();
     mark_confirmed(&pool, &candidate.job_id).await.unwrap();
 
-    // Rescan attempts to upsert a CHANGED payload for the now-confirmed name.
+    // note: rescan attempts to upsert a CHANGED payload for the now-confirmed name.
     let outcome = upsert_pending_candidate(
         &pool,
         CREATOR,
@@ -258,7 +258,7 @@ async fn upsert_leaves_confirmed_row_unchanged() {
         "confirmed rows are terminal — upsert must not mutate them"
     );
 
-    // The confirmed row retains its original payload.
+    // note: the confirmed row retains its original payload.
     let expected_orig = payload("orig", "Aria");
     let row = nexus_local_db::kb_extract_job::get_promotion(&pool, &candidate.job_id)
         .await
@@ -271,13 +271,13 @@ async fn upsert_leaves_confirmed_row_unchanged() {
     );
 }
 
-// ── Stale cleanup ─────────────────────────────────────────────────────────
+// note: stale cleanup.
 
 #[tokio::test]
 async fn delete_pending_for_chapter_removes_only_pending() {
     let (pool, _dir) = fresh_pool().await;
 
-    // Two pending candidates sourced from chapter 1.
+    // note: two pending candidates sourced from chapter 1.
     let a = insert_pending(
         &pool,
         CREATOR,
@@ -304,16 +304,16 @@ async fn delete_pending_for_chapter_removes_only_pending() {
     )
     .await
     .unwrap();
-    // Confirm "Keep" so it becomes terminal.
+    // note: confirm "Keep" so it becomes terminal.
     mark_confirmed(&pool, &a.job_id).await.unwrap();
 
-    // Stale cleanup targets "Gone" (pending) and "Keep" (confirmed) for chapter 1.
+    // note: stale cleanup targets "Gone" (pending) and "Keep" (confirmed) for chapter 1.
     let deleted_gone = delete_pending_for_chapter(&pool, WORK, 1, "Gone")
         .await
         .unwrap();
     assert!(deleted_gone, "pending 'Gone' should be deleted");
 
-    // Confirmed "Keep" is NOT deleted by the pending-only cleanup.
+    // invariant: confirmed "Keep" is NOT deleted by the pending-only cleanup.
     let deleted_keep = delete_pending_for_chapter(&pool, WORK, 1, "Keep")
         .await
         .unwrap();
@@ -322,7 +322,7 @@ async fn delete_pending_for_chapter_removes_only_pending() {
         "confirmed 'Keep' must NOT be deleted by stale cleanup"
     );
 
-    // "Gone" is gone; "Keep" is retained as confirmed.
+    // note: "Gone" is gone; "Keep" is retained as confirmed.
     let gone = nexus_local_db::kb_extract_job::get_promotion(&pool, &b.job_id)
         .await
         .unwrap();
@@ -335,15 +335,13 @@ async fn delete_pending_for_chapter_removes_only_pending() {
     assert_eq!(keep.promotion_status, "confirmed");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// v1.191 P1 T13 — the atomic job result the extraction callers depend on
-// ═══════════════════════════════════════════════════════════════════════════
+// note: v1.191 P1 T13 — the atomic job result the extraction callers depend on.
 
-/// A rescan of the same extraction run reuses the candidate row and the
+/// note: A rescan of the same extraction run reuses the candidate row and the
 /// relationship suggestion: both ids are retained, and neither is duplicated.
 /// This is the job-result identity the review-time caller persists into.
 #[tokio::test]
-#[allow(clippy::too_many_lines)] // one rescan journey; splitting the fixtures would obscure the id-stability sequence
+#[allow(clippy::too_many_lines)] // why: one rescan journey; splitting the fixtures would obscure the id-stability sequence
 async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     let (pool, _dir) = fresh_pool().await;
     nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")
@@ -361,7 +359,7 @@ async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     }
     let body = payload("A warrior", "Lin Xia");
 
-    // ── First extraction pass ───────────────────────────────────────────────
+    // note: first extraction pass.
     let first = upsert_pending_candidate(
         &pool,
         CREATOR,
@@ -404,7 +402,7 @@ async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     assert_eq!(before.len(), 1);
     let relationship_id = before[0].relationship_id.clone();
 
-    // ── Rescan of the same run ──────────────────────────────────────────────
+    // note: rescan of the same run.
     let second = upsert_pending_candidate(
         &pool,
         CREATOR,
@@ -455,7 +453,7 @@ async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     );
 }
 
-/// A failed relationship write persists nothing: an unresolved endpoint cannot
+/// note: A failed relationship write persists nothing — an unresolved endpoint cannot
 /// leave a half-written suggestion behind, which is why the caller resolves both
 /// endpoints before it writes anything.
 #[tokio::test]
@@ -473,7 +471,7 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
     )
     .await;
 
-    // The endpoint resolution the caller performs: an unknown name resolves to
+    // note: the endpoint resolution the caller performs — an unknown name resolves to
     // nothing, so the caller skips instead of writing a foreign endpoint.
     let unknown = nexus_local_db::kb_relationships::resolve_entity_by_canonical_name(
         &pool,
@@ -494,7 +492,7 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
     .unwrap();
     assert_eq!(known.as_deref(), Some("kb_t13_aria"));
 
-    // Skipping is what keeps the write honest: a forced write with a
+    // note: skipping is what keeps the write honest — a forced write with a
     // non-existent endpoint is refused by the FK and leaves zero rows.
     let mut conn = pool.acquire().await.unwrap();
     let forced = nexus_local_db::kb_relationships::upsert_extraction_relationship(
@@ -521,7 +519,7 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
     assert!(pending.is_empty(), "zero candidate rows after the failure");
 }
 
-/// The finalize transaction is the cancellable unit: when the job is no longer
+/// note: The finalize transaction is the cancellable unit — when the job is no longer
 /// claimable (another actor cancelled/finished it) the terminal claim refuses,
 /// the caller rolls back, and the candidate rows in that transaction leave no
 /// trace and no `done` status (v1.191 P1 T13 review C1).
@@ -531,7 +529,7 @@ async fn v1191_extract_cancelled_job_rolls_back_the_candidate_transaction() {
     nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")
         .await;
 
-    // A queued job that another actor cancels (marks failed) while the
+    // note: a queued job that another actor cancels (marks failed) while the
     // extraction run is in flight.
     let job = nexus_local_db::enqueue_extract_job_with_artifact(
         &pool,
@@ -550,7 +548,7 @@ async fn v1191_extract_cancelled_job_rolls_back_the_candidate_transaction() {
         .await
         .unwrap();
 
-    // The finalize's transaction: candidate row + terminal claim, both in the
+    // note: the finalize's transaction — candidate row + terminal claim, both in the
     // caller's transaction (the repair the queue capability now performs).
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query(
@@ -570,7 +568,7 @@ async fn v1191_extract_cancelled_job_rolls_back_the_candidate_transaction() {
     assert!(!claimed, "a cancelled job is no longer claimable");
     tx.rollback().await.unwrap();
 
-    // Zero candidate writes, no successful terminal.
+    // note: zero candidate writes, no successful terminal.
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
         .bind(WORLD)
         .fetch_one(&pool)

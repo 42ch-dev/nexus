@@ -31,10 +31,10 @@ use nexus_local_db::work_chapters::{
 };
 use nexus_local_db::works::WorkPatch;
 
-/// Timestamp helper (ISO 8601, matches seed/update signatures).
+/// note: Timestamp helper (ISO 8601, matches seed/update signatures).
 const NOW: &str = "2026-08-28T00:00:00Z";
 
-/// Insert a minimal works row (v142 fixture style) with configurable
+/// note: Insert a minimal works row (v142 fixture style) with configurable
 /// `total_planned_chapters` / `current_chapter` / `intake_status`.
 #[allow(clippy::too_many_arguments)]
 async fn insert_work(
@@ -64,7 +64,7 @@ async fn insert_work(
     .unwrap();
 }
 
-/// Insert one chapter row at a given status.
+/// note: Insert one chapter row at a given status.
 async fn insert_chapter_row(pool: &sqlx::SqlitePool, work_id: &str, chapter: i32, status: &str) {
     let slug = format!("ch{chapter:02}");
     sqlx::query!(
@@ -83,7 +83,7 @@ async fn insert_chapter_row(pool: &sqlx::SqlitePool, work_id: &str, chapter: i32
     .unwrap();
 }
 
-/// Read `works.current_chapter` back.
+/// note: Read `works.current_chapter` back.
 async fn read_current_chapter(pool: &sqlx::SqlitePool, work_id: &str) -> i32 {
     sqlx::query_scalar!(
         r#"SELECT current_chapter as "current_chapter: i32" FROM works WHERE work_id = ?"#,
@@ -94,7 +94,7 @@ async fn read_current_chapter(pool: &sqlx::SqlitePool, work_id: &str) -> i32 {
     .unwrap()
 }
 
-/// Read one chapter's status back.
+/// note: Read one chapter's status back.
 async fn read_chapter_status(pool: &sqlx::SqlitePool, work_id: &str, chapter: i32) -> String {
     sqlx::query_scalar!(
         "SELECT status FROM work_chapters WHERE work_id = ? AND volume = 1 AND chapter = ?",
@@ -114,7 +114,7 @@ async fn w179_dr67_01_next_chapter_selects_lowest_eligible() {
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Work A: ch1 finalized, ch2 draft, ch3 not_started.
+    // note: Work A — ch1 finalized, ch2 draft, ch3 not_started.
     // Lowest eligible is the ch2 draft (resume rule: no EARLIER not_started
     // row exists), not the later not_started ch3.
     insert_work(&pool, "dr67_sel_a", 3, 1, "complete").await;
@@ -127,7 +127,7 @@ async fn w179_dr67_01_next_chapter_selects_lowest_eligible() {
         "§4.5.2: draft with no earlier not_started row is selected"
     );
 
-    // Work B: ch1/ch2 finalized, ch3 not_started → selects ch3.
+    // note: Work B — ch1/ch2 finalized, ch3 not_started → selects ch3.
     insert_work(&pool, "dr67_sel_b", 3, 2, "complete").await;
     insert_chapter_row(&pool, "dr67_sel_b", 1, "finalized").await;
     insert_chapter_row(&pool, "dr67_sel_b", 2, "finalized").await;
@@ -138,7 +138,7 @@ async fn w179_dr67_01_next_chapter_selects_lowest_eligible() {
         "§4.5.2: lowest not_started row is selected"
     );
 
-    // Work C: all finalized → None (novel-completion signal, §4.5.2 step 3).
+    // note: Work C — all finalized → None (novel-completion signal, §4.5.2 step 3).
     insert_work(&pool, "dr67_sel_c", 3, 3, "complete").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_sel_c", ch, "finalized").await;
@@ -159,14 +159,14 @@ async fn w179_dr67_02_current_chapter_advances_only_on_finalize() {
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Work starts at ch1 finalized (current_chapter = 1); ch2 in progress.
+    // note: Work starts at ch1 finalized (current_chapter = 1); ch2 in progress.
     insert_work(&pool, "dr67_cc", 3, 1, "complete").await;
     insert_chapter_row(&pool, "dr67_cc", 1, "finalized").await;
     insert_chapter_row(&pool, "dr67_cc", 2, "not_started").await;
     insert_chapter_row(&pool, "dr67_cc", 3, "not_started").await;
     assert_eq!(read_current_chapter(&pool, "dr67_cc").await, 1);
 
-    // Non-finalize transitions must NOT move current_chapter.
+    // invariant: non-finalize transitions must NOT move current_chapter.
     update_status(&pool, "dr67_cc", 2, 1, "outlined", None, NOW)
         .await
         .unwrap();
@@ -180,7 +180,7 @@ async fn w179_dr67_02_current_chapter_advances_only_on_finalize() {
     );
     assert_eq!(read_chapter_status(&pool, "dr67_cc", 2).await, "draft");
 
-    // Finalize ch2: the transition lands, then the finalize advance
+    // note: finalize ch2 — the transition lands, then the finalize advance
     // (patch_work(current_chapter) performed by novel.chapter_transition)
     // sets it to the just-finalized number.
     update_status(&pool, "dr67_cc", 2, 1, "finalized", Some(4321), NOW)
@@ -199,7 +199,7 @@ async fn w179_dr67_02_current_chapter_advances_only_on_finalize() {
         "§4.5.2: current_chapter becomes the just-finalized chapter number"
     );
 
-    // The latest-finalized pointer wins: finalizing ch3 moves it to 3.
+    // note: the latest-finalized pointer wins — finalizing ch3 moves it to 3.
     update_status(&pool, "dr67_cc", 3, 1, "finalized", None, NOW)
         .await
         .unwrap();
@@ -228,7 +228,7 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Complete: 3 rows exist == total_planned_chapters 3, all finalized,
+    // note: complete — 3 rows exist == total_planned_chapters 3, all finalized,
     // intake complete → complete.
     insert_work(&pool, "dr67_done", 3, 3, "complete").await;
     for ch in 1..=3 {
@@ -240,7 +240,7 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
          complete → complete"
     );
 
-    // Missing intake: identical row set except intake_status pending → NOT
+    // note: missing intake — identical row set except intake_status pending → NOT
     // complete.
     insert_work(&pool, "dr67_intake", 3, 3, "pending").await;
     for ch in 1..=3 {
@@ -251,7 +251,7 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
         "intake_status != complete blocks completion"
     );
 
-    // Un-finalized row: ch3 still draft → NOT complete.
+    // note: un-finalized row — ch3 still draft → NOT complete.
     insert_work(&pool, "dr67_draft", 3, 2, "complete").await;
     insert_chapter_row(&pool, "dr67_draft", 1, "finalized").await;
     insert_chapter_row(&pool, "dr67_draft", 2, "finalized").await;
@@ -261,7 +261,7 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
         "a non-finalized row blocks completion"
     );
 
-    // Under-seeded: total_planned_chapters = 4 but only 3 rows exist (count
+    // note: under-seeded — total_planned_chapters = 4 but only 3 rows exist (count
     // mismatch) → NOT complete.
     insert_work(&pool, "dr67_under", 4, 3, "complete").await;
     for ch in 1..=3 {
@@ -286,7 +286,7 @@ async fn w179_dr67_04_resume_reuses_draft_row_without_creating_new() {
     seed_chapters(&pool, "dr67_resume", "wrk_dr67", 3, NOW)
         .await
         .unwrap();
-    // First run finalized ch1 and left ch2 as a draft.
+    // note: first run finalized ch1 and left ch2 as a draft.
     update_status(&pool, "dr67_resume", 1, 1, "finalized", None, NOW)
         .await
         .unwrap();
@@ -294,14 +294,14 @@ async fn w179_dr67_04_resume_reuses_draft_row_without_creating_new() {
         .await
         .unwrap();
 
-    // A new run selects the existing draft row.
+    // note: a new run selects the existing draft row.
     assert_eq!(
         next_chapter(&pool, "dr67_resume").await.unwrap(),
         Some(2),
         "§4.5.2: the draft row is resumed"
     );
 
-    // Re-running the seeding path (init idempotency, §5.4.5) must not create
+    // invariant: re-running the seeding path (init idempotency, §5.4.5) must not create
     // a new row nor reset the draft.
     seed_chapters(&pool, "dr67_resume", "wrk_dr67", 3, NOW)
         .await
@@ -337,14 +337,14 @@ async fn w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot() {
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
     insert_work(&pool, work_id, 2, 1, "complete").await;
-    // ch1 exists in DB as finalized (the DB is the status SSOT).
+    // note: ch1 exists in DB as finalized (the DB is the status SSOT).
     insert_chapter_row(&pool, work_id, 1, "finalized").await;
-    // ch2 has a file but NO DB row (missing row to rebuild).
+    // note: ch2 has a file but NO DB row (missing row to rebuild).
 
     let stories = workspace_root.join("Works").join(work_ref).join("Stories");
     std::fs::create_dir_all(&stories).unwrap();
 
-    // ch1 file frontmatter DISAGREES with the DB (draft vs finalized):
+    // note: ch1 file frontmatter DISAGREES with the DB (draft vs finalized) —
     // §4.5.3 — the DB wins and the file is re-synced to the DB status.
     std::fs::write(
         stories.join("ch01-first.md"),
@@ -352,7 +352,7 @@ async fn w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot() {
     )
     .unwrap();
 
-    // ch2 file exists with frontmatter but no DB row → rebuild path.
+    // note: ch2 file exists with frontmatter but no DB row → rebuild path.
     std::fs::write(
         stories.join("ch02-second.md"),
         "---\nstatus: draft\nword_count: 2500\n---\n\nChapter two body.\n",
@@ -384,7 +384,7 @@ async fn w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot() {
         "conflicting ch1 frontmatter is re-synced"
     );
 
-    // Rebuilt row: chapter number from the filename, frontmatter status
+    // note: rebuilt row — chapter number from the filename, frontmatter status
     // mirrored (no DB row existed to disagree with).
     assert_eq!(
         read_chapter_status(&pool, work_id, 2).await,
@@ -392,19 +392,19 @@ async fn w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot() {
         "rebuild applies the file frontmatter status when no DB row exists"
     );
 
-    // DB-as-SSOT: ch1's DB row is untouched by reconcile...
+    // note: DB-as-SSOT — ch1's DB row is untouched by reconcile...
     assert_eq!(
         read_chapter_status(&pool, work_id, 1).await,
         "finalized",
         "§4.5.3: DB row wins — reconcile must not change DB status"
     );
-    // ...and the file frontmatter was re-synced to the DB status.
+    // note: ...and the file frontmatter was re-synced to the DB status.
     let ch1 = std::fs::read_to_string(stories.join("ch01-first.md")).unwrap();
     assert!(
         ch1.contains("status: finalized"),
         "§4.5.3: frontmatter re-synced to the DB status; got: {ch1}"
     );
 
-    // Selection after reconcile sees the rebuilt row (2 = the draft).
+    // note: selection after reconcile sees the rebuilt row (2 = the draft).
     assert_eq!(next_chapter(&pool, work_id).await.unwrap(), Some(2));
 }
