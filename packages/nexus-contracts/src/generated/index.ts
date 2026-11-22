@@ -1,5 +1,5 @@
 /**
- * AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
+ * @generated AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
  * Source: schemas/ (JSON Schema wire contracts)
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
@@ -45,7 +45,6 @@ export * from './domain';
 export * from './platform/http-bff';
 export * from './platform/sync';
 
-// Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
   VersionRef: 1,
   CoreActorAdmissionRequest: 1,
@@ -443,5 +442,4 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SyncPullResponse: 1,
 };
 
-// Highest schema_version among emitted contract schemas
 export const LATEST_SCHEMA_VERSION = 2;

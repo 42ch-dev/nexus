@@ -51,7 +51,7 @@ import { generateCoreSliceClient } from './client-gen';
 type JsonSchema = Parameters<typeof compile>[0];
 
 const BANNER = `/**
- * AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
+ * @generated AUTO-GENERATED FROM JSON SCHEMA — DO NOT MODIFY MANUALLY
  * Source: schemas/ (JSON Schema wire contracts)
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */`;
@@ -714,14 +714,12 @@ function writeRootIndex(
     lines.push(`export * from './${relDir}';`);
   }
   lines.push('');
-  lines.push('// Schema version constants');
   lines.push('export const SCHEMA_VERSIONS: Record<string, number> = {');
   for (const { typeName, version } of sortedRows) {
     lines.push(`  ${typeName}: ${version},`);
   }
   lines.push('};');
   lines.push('');
-  lines.push('// Highest schema_version among emitted contract schemas');
   lines.push(`export const LATEST_SCHEMA_VERSION = ${maxSchemaVersion(sortedRows.map(r => r.version))};`);
 
   writeFile(path.join(outDir, 'index.ts'), lines.join('\n') + '\n');
