@@ -95,15 +95,11 @@ impl PartialApplyResult {
                 applied_entity_revision,
             };
 
+            // why: every non-applied status is failed here; retryability is
+            // decided below from `apply_status` and `error_code`.
             match apply_status.as_str() {
                 "applied" => succeeded_deltas.push(info),
-                "rejected" => failed_deltas.push(info),
-                "skipped_dependency" => {
-                    failed_deltas.push(info);
-                }
-                _ => {
-                    failed_deltas.push(info);
-                }
+                _ => failed_deltas.push(info),
             }
         }
 
