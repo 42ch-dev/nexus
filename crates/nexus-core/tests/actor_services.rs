@@ -1073,7 +1073,8 @@ fn container_ids(scope: &KnowledgeReadScope) -> Vec<(String, String)> {
     ids
 }
 
-#[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // why: one fixture asserted across both policies; the admitted contexts are held across the assertions
+#[allow(clippy::too_many_lines, clippy::significant_drop_tightening)]
+// why: one fixture asserted across both policies; the admitted contexts are held across the assertions
 #[tokio::test]
 async fn v1191_knowledge_admission_management_visible_actor_hidden() {
     let env = seed_env().await;
